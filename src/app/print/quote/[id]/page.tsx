@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Zap } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { COMPANY } from "@/lib/company";
 import { PrintButton } from "@/components/print-button";
+import { Letterhead, companyFromOrg } from "@/components/doc-letterhead";
 import { formatCurrency, formatDate } from "@/lib/utils";
-import type { Quote, QuoteLineItem } from "@/lib/types";
+import type { Organization, Quote, QuoteLineItem } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +32,12 @@ export default async function QuotePrintPage({
     .eq("quote_id", id)
     .order("sort_order");
 
+  const { data: org } = await supabase
+    .from("organizations")
+    .select("*")
+    .maybeSingle();
+  const co = companyFromOrg(org as Organization | null);
+
   const lineItems = (items ?? []) as QuoteLineItem[];
   const c = q.customers;
 
@@ -49,22 +55,11 @@ export default async function QuotePrintPage({
 
       <div className="print-page mx-auto max-w-3xl bg-white p-10 shadow-sm">
         {/* Letterhead */}
-        <div className="flex items-start justify-between border-b-2 border-brand pb-5">
-          <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-brand text-white">
-              <Zap className="h-6 w-6" />
-            </div>
-            <div>
-              <div className="text-xl font-bold text-slate-900">{COMPANY.name}</div>
-              <div className="text-xs text-slate-500">{COMPANY.tagline}</div>
-              <div className="mt-1 text-xs text-slate-500">
-                {[COMPANY.addressLine1, COMPANY.addressLine2].filter(Boolean).join(", ")}
-                {COMPANY.phone ? ` · ${COMPANY.phone}` : ""}
-                {COMPANY.email ? ` · ${COMPANY.email}` : ""}
-                {COMPANY.license ? ` · ${COMPANY.license}` : ""}
-              </div>
-            </div>
-          </div>
+        <div
+          className="flex items-start justify-between border-b-2 pb-5"
+          style={{ borderColor: co.brand }}
+        >
+          <Letterhead co={co} />
           <div className="text-right">
             <div className="text-2xl font-bold uppercase tracking-wide text-slate-900">
               Quote

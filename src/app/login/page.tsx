@@ -7,9 +7,14 @@ import { Input, Label } from "@/components/ui/input";
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; message?: string; mode?: string }>;
+  searchParams: Promise<{
+    error?: string;
+    message?: string;
+    mode?: string;
+    email?: string;
+  }>;
 }) {
-  const { error, message, mode } = await searchParams;
+  const { error, message, mode, email } = await searchParams;
   const isSignup = mode === "signup";
 
   return (
@@ -55,7 +60,7 @@ export default async function LoginPage({
             )}
             <div>
               <Label htmlFor="email">Email</Label>
-              <Input id="email" name="email" type="email" placeholder="you@company.com" required />
+              <Input id="email" name="email" type="email" placeholder="you@company.com" defaultValue={email ?? ""} required />
             </div>
             <div>
               <Label htmlFor="password">Password</Label>

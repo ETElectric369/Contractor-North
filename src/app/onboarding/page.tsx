@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
-import { Zap } from "lucide-react";
+import { Zap, Building2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { createOrganization } from "./actions";
+import { createOrganization, acceptInvitation } from "./actions";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 
@@ -27,6 +27,14 @@ export default async function OnboardingPage({
     .maybeSingle();
   if (profile?.org_id) redirect("/dashboard");
 
+  // Was this user invited to an existing company?
+  const { data: inviteRow } = await supabase
+    .rpc("pending_invite")
+    .maybeSingle();
+  const invite = inviteRow as
+    | { org_id: string; org_name: string; role: string }
+    | null;
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-brand to-brand-dark px-4">
       <div className="w-full max-w-md">
@@ -51,6 +59,30 @@ export default async function OnboardingPage({
             <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
               {error}
             </div>
+          )}
+
+          {invite && (
+            <>
+              <form
+                action={acceptInvitation}
+                className="mb-5 rounded-xl border border-brand/30 bg-brand-light/50 p-4"
+              >
+                <div className="mb-1 flex items-center gap-2 text-sm font-semibold text-slate-900">
+                  <Building2 className="h-4 w-4 text-brand" /> You've been invited
+                </div>
+                <p className="text-sm text-slate-600">
+                  Join <span className="font-semibold">{invite.org_name}</span> as{" "}
+                  <span className="font-semibold capitalize">{invite.role}</span>.
+                </p>
+                <Button type="submit" className="mt-3 w-full">
+                  Join {invite.org_name}
+                </Button>
+              </form>
+              <div className="mb-4 flex items-center gap-3 text-xs uppercase tracking-wide text-slate-400">
+                <span className="h-px flex-1 bg-slate-200" /> or create your own
+                <span className="h-px flex-1 bg-slate-200" />
+              </div>
+            </>
           )}
 
           <form action={createOrganization} className="space-y-4">

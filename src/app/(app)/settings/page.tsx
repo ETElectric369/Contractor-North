@@ -3,7 +3,9 @@ import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { initials } from "@/lib/utils";
-import type { Profile } from "@/lib/types";
+import { OrgSettingsForm } from "./org-settings-form";
+import { InviteManager } from "./invite-manager";
+import type { Organization, Profile } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -20,23 +22,50 @@ export default async function SettingsPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const [{ data: me }, { data: team }] = await Promise.all([
-    supabase.from("profiles").select("*").eq("id", user?.id ?? "").single(),
+  const { data: me } = await supabase
+    .from("profiles")
+    .select("*")
+    .eq("id", user?.id ?? "")
+    .single();
+  const profile = me as Profile | null;
+  const isAdmin = profile?.role === "owner" || profile?.role === "admin";
+
+  const [{ data: org }, { data: team }, { data: invites }] = await Promise.all([
+    profile?.org_id
+      ? supabase.from("organizations").select("*").eq("id", profile.org_id).maybeSingle()
+      : Promise.resolve({ data: null }),
     supabase.from("profiles").select("*").order("full_name"),
+    isAdmin
+      ? supabase
+          .from("invitations")
+          .select("*")
+          .order("created_at", { ascending: false })
+      : Promise.resolve({ data: [] }),
   ]);
 
-  const profile = me as Profile | null;
   const members = (team ?? []) as Profile[];
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "";
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
-      <PageHeader title="Settings" description="Your profile and team." />
+      <PageHeader title="Settings" description="Company, profile, and team." />
 
+      {/* Company settings (owner/admin) */}
+      {isAdmin && org && (
+        <Card>
+          <CardContent className="py-5">
+            <h3 className="mb-4 text-sm font-semibold text-slate-900">
+              Company
+            </h3>
+            <OrgSettingsForm org={org as Organization} />
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Your profile */}
       <Card>
         <CardContent className="py-5">
-          <h3 className="mb-4 text-sm font-semibold text-slate-900">
-            Your profile
-          </h3>
+          <h3 className="mb-4 text-sm font-semibold text-slate-900">Your profile</h3>
           <div className="flex items-center gap-4">
             <div className="flex h-14 w-14 items-center justify-center rounded-full bg-brand text-lg font-semibold text-white">
               {initials(profile?.full_name)}
@@ -54,6 +83,19 @@ export default async function SettingsPage() {
         </CardContent>
       </Card>
 
+      {/* Team invites (owner/admin) */}
+      {isAdmin && (
+        <Card>
+          <CardContent className="py-5">
+            <h3 className="mb-4 text-sm font-semibold text-slate-900">
+              Invite team members
+            </h3>
+            <InviteManager invites={(invites as any) ?? []} siteUrl={siteUrl} />
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Team directory */}
       <Card>
         <div className="border-b border-slate-100 px-5 py-3">
           <h3 className="text-sm font-semibold text-slate-900">
@@ -77,18 +119,6 @@ export default async function SettingsPage() {
             </li>
           ))}
         </ul>
-      </Card>
-
-      <Card className="border-amber-200 bg-amber-50">
-        <CardContent className="py-4 text-sm text-amber-800">
-          <strong>Tip:</strong> The first account you create is just a{" "}
-          <em>tech</em> by default. To make yourself the owner, open the Supabase
-          SQL editor and run:
-          <pre className="mt-2 overflow-x-auto rounded-lg bg-white/70 p-3 text-xs text-slate-700">
-            {`update public.profiles set role = 'owner'
-where email = 'you@example.com';`}
-          </pre>
-        </CardContent>
       </Card>
     </div>
   );

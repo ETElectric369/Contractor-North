@@ -2,11 +2,15 @@
 
 /* ── Contractor North theme ───────────────────────────────────────────────
    Brand color echoes the CED blue from the letterhead.                      */
-@theme inline {
+/* Plain @theme so brand utilities reference var(--color-brand) and can be
+   overridden per-organization at runtime (see the app layout). */
+@theme {
   --color-brand: #0b57c4;
   --color-brand-dark: #084298;
   --color-brand-light: #e8f0fc;
+}
 
+@theme inline {
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
 }
 

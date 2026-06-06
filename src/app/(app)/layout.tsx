@@ -25,8 +25,25 @@ export default async function AppLayout({
   // No organization yet → finish onboarding before entering the app.
   if (!profile?.org_id) redirect("/onboarding");
 
+  // Apply the org's brand color across the app shell (white-label).
+  const { data: org } = await supabase
+    .from("organizations")
+    .select("brand_color")
+    .eq("id", profile.org_id)
+    .maybeSingle();
+  const brand = org?.brand_color || "#0b57c4";
+
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div
+      className="flex h-screen overflow-hidden"
+      style={
+        {
+          "--color-brand": brand,
+          "--color-brand-dark": brand,
+        } as React.CSSProperties
+      }
+    >
+
       <div className="hidden lg:block">
         <Sidebar />
       </div>
