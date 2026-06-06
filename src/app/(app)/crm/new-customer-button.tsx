@@ -1,0 +1,111 @@
+"use client";
+
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { Plus } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Modal } from "@/components/ui/modal";
+import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { createCustomer } from "./actions";
+
+export function NewCustomerButton() {
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+  const router = useRouter();
+
+  function onSubmit(formData: FormData) {
+    setError(null);
+    startTransition(async () => {
+      const res = await createCustomer(formData);
+      if (!res.ok) {
+        setError(res.error ?? "Something went wrong.");
+        return;
+      }
+      setOpen(false);
+      if (res.id) router.push(`/crm/${res.id}`);
+    });
+  }
+
+  return (
+    <>
+      <Button onClick={() => setOpen(true)}>
+        <Plus className="h-4 w-4" /> New customer
+      </Button>
+
+      <Modal open={open} onClose={() => setOpen(false)} title="New customer">
+        <form action={onSubmit} className="space-y-4">
+          {error && (
+            <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+              {error}
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="col-span-2">
+              <Label htmlFor="name">Name *</Label>
+              <Input id="name" name="name" required placeholder="Customer or contact name" />
+            </div>
+            <div className="col-span-2">
+              <Label htmlFor="company_name">Company</Label>
+              <Input id="company_name" name="company_name" placeholder="(optional)" />
+            </div>
+            <div>
+              <Label htmlFor="type">Type</Label>
+              <Select id="type" name="type" defaultValue="residential">
+                <option value="residential">Residential</option>
+                <option value="commercial">Commercial</option>
+                <option value="industrial">Industrial</option>
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="status">Status</Label>
+              <Select id="status" name="status" defaultValue="lead">
+                <option value="lead">Lead</option>
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="email">Email</Label>
+              <Input id="email" name="email" type="email" />
+            </div>
+            <div>
+              <Label htmlFor="phone">Phone</Label>
+              <Input id="phone" name="phone" type="tel" />
+            </div>
+            <div className="col-span-2">
+              <Label htmlFor="address">Address</Label>
+              <Input id="address" name="address" />
+            </div>
+            <div>
+              <Label htmlFor="city">City</Label>
+              <Input id="city" name="city" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="state">State</Label>
+                <Input id="state" name="state" maxLength={2} />
+              </div>
+              <div>
+                <Label htmlFor="zip">Zip</Label>
+                <Input id="zip" name="zip" />
+              </div>
+            </div>
+            <div className="col-span-2">
+              <Label htmlFor="notes">Notes</Label>
+              <Textarea id="notes" name="notes" rows={2} />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={pending}>
+              {pending ? "Saving…" : "Create customer"}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+    </>
+  );
+}

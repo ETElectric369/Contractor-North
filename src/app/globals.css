@@ -1,0 +1,29 @@
+@import "tailwindcss";
+
+/* ── Contractor North theme ───────────────────────────────────────────────
+   Brand color echoes the CED blue from the letterhead.                      */
+@theme inline {
+  --color-brand: #0b57c4;
+  --color-brand-dark: #084298;
+  --color-brand-light: #e8f0fc;
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+:root {
+  --background: #f8fafc;
+  --foreground: #0f172a;
+}
+
+html,
+body {
+  background: var(--background);
+  color: var(--foreground);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Thin, unobtrusive scrollbars for the app shell. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}

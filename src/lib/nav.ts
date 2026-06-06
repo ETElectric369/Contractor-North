@@ -1,0 +1,72 @@
+import {
+  LayoutDashboard,
+  Users,
+  FileText,
+  CalendarDays,
+  ClipboardList,
+  Clock,
+  ShoppingCart,
+  Boxes,
+  Receipt,
+  ListChecks,
+  FileSpreadsheet,
+  GitPullRequestArrow,
+  ScanLine,
+  Sparkles,
+  Settings,
+  type LucideIcon,
+} from "lucide-react";
+
+export interface NavItem {
+  label: string;
+  href: string;
+  icon: LucideIcon;
+  /** Marks modules that are scaffolded but not yet built out. */
+  comingSoon?: boolean;
+}
+
+export interface NavSection {
+  title: string;
+  items: NavItem[];
+}
+
+export const NAV: NavSection[] = [
+  {
+    title: "Overview",
+    items: [
+      { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+      { label: "Assistant", href: "/assistant", icon: Sparkles },
+    ],
+  },
+  {
+    title: "Sales",
+    items: [
+      { label: "CRM", href: "/crm", icon: Users },
+      { label: "Quotes", href: "/quotes", icon: FileText },
+    ],
+  },
+  {
+    title: "Operations",
+    items: [
+      { label: "Schedule", href: "/schedule", icon: CalendarDays },
+      { label: "Work Orders", href: "/work-orders", icon: ClipboardList },
+      { label: "Timeclock", href: "/timeclock", icon: Clock },
+      { label: "Material Lists", href: "/materials", icon: ListChecks, comingSoon: true },
+    ],
+  },
+  {
+    title: "Office",
+    items: [
+      { label: "Purchasing", href: "/purchasing", icon: ShoppingCart, comingSoon: true },
+      { label: "Inventory", href: "/inventory", icon: Boxes, comingSoon: true },
+      { label: "Billing", href: "/billing", icon: Receipt, comingSoon: true },
+      { label: "Change Orders", href: "/change-orders", icon: GitPullRequestArrow, comingSoon: true },
+      { label: "Forms", href: "/forms", icon: FileSpreadsheet, comingSoon: true },
+      { label: "Plans & LiDAR", href: "/plans", icon: ScanLine, comingSoon: true },
+    ],
+  },
+  {
+    title: "System",
+    items: [{ label: "Settings", href: "/settings", icon: Settings }],
+  },
+];
