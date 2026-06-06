@@ -5,6 +5,10 @@ import { Badge } from "@/components/ui/badge";
 import { initials } from "@/lib/utils";
 import { OrgSettingsForm } from "./org-settings-form";
 import { InviteManager } from "./invite-manager";
+import { Button } from "@/components/ui/button";
+import { billingEnabled } from "@/lib/stripe";
+import { trialDaysLeft } from "@/lib/subscription";
+import { startCheckout, openPortal } from "./billing-actions";
 import type { Organization, Profile } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +20,12 @@ const roleTone: Record<string, "purple" | "indigo" | "blue" | "slate"> = {
   tech: "slate",
 };
 
-export default async function SettingsPage() {
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ billing?: string; billing_error?: string }>;
+}) {
+  const { billing, billing_error } = await searchParams;
   const supabase = await createClient();
   const {
     data: { user },
@@ -58,6 +67,68 @@ export default async function SettingsPage() {
               Company
             </h3>
             <OrgSettingsForm org={org as Organization} />
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Subscription (owner/admin) */}
+      {isAdmin && org && (
+        <Card>
+          <CardContent className="py-5">
+            <h3 className="mb-4 text-sm font-semibold text-slate-900">
+              Subscription
+            </h3>
+
+            {billing === "success" && (
+              <div className="mb-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+                Subscription active — thank you!
+              </div>
+            )}
+            {billing_error && (
+              <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+                {billing_error}
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center gap-3">
+              <Badge
+                tone={
+                  (org as Organization).subscription_status === "active"
+                    ? "green"
+                    : "amber"
+                }
+              >
+                {(org as Organization).subscription_status}
+              </Badge>
+              <span className="text-sm text-slate-600">
+                Plan: {(org as Organization).plan}
+              </span>
+              {(org as Organization).subscription_status === "trialing" && (
+                <span className="text-sm text-slate-500">
+                  · {trialDaysLeft(org as Organization)} days left in trial
+                </span>
+              )}
+            </div>
+
+            {billingEnabled ? (
+              <div className="mt-4 flex gap-2">
+                {(org as Organization).subscription_status === "active" ? (
+                  <form action={openPortal}>
+                    <Button variant="outline">Manage billing</Button>
+                  </form>
+                ) : (
+                  <form action={startCheckout}>
+                    <Button>Subscribe</Button>
+                  </form>
+                )}
+              </div>
+            ) : (
+              <p className="mt-3 text-sm text-slate-400">
+                Billing isn't configured yet. Add your Stripe keys
+                (STRIPE_SECRET_KEY, STRIPE_PRICE_ID, STRIPE_WEBHOOK_SECRET) to
+                enable subscriptions.
+              </p>
+            )}
           </CardContent>
         </Card>
       )}
