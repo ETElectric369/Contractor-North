@@ -54,6 +54,20 @@ export function formatDuration(hours: number) {
   return `${h}h ${m}m`;
 }
 
+/**
+ * Make a free-text search term safe to embed in a PostgREST `.or(...)` filter.
+ * Strips the structural characters PostgREST uses as delimiters (commas,
+ * parens, colons, wildcards, backslashes) and caps length, so user input can't
+ * break out of or inject into the filter expression.
+ */
+export function sanitizeSearch(input: string | undefined | null): string {
+  return (input ?? "")
+    .replace(/[,()*:%\\"']/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 100);
+}
+
 export function initials(name: string | null | undefined) {
   if (!name) return "?";
   return name

@@ -30,10 +30,16 @@ export async function POST(req: Request) {
     return new Response("Bad request", { status: 400 });
   }
 
+  // Bound input to control cost/abuse: cap message count and per-message length.
+  const MAX_MESSAGES = 20;
+  const MAX_CHARS = 8000;
   const messages = (body.messages ?? [])
     .filter((m) => m.content?.trim())
-    .slice(-20) // keep context bounded
-    .map((m) => ({ role: m.role, content: m.content }));
+    .slice(-MAX_MESSAGES)
+    .map((m) => ({
+      role: m.role,
+      content: String(m.content).slice(0, MAX_CHARS),
+    }));
 
   if (messages.length === 0) {
     return new Response("No messages", { status: 400 });

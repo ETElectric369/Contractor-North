@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { NewCustomerButton } from "./new-customer-button";
+import { sanitizeSearch } from "@/lib/utils";
 import type { Customer } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -23,9 +24,10 @@ export default async function CrmPage({
     .select("*")
     .order("created_at", { ascending: false });
 
-  if (q) {
+  const term = sanitizeSearch(q);
+  if (term) {
     query = query.or(
-      `name.ilike.%${q}%,company_name.ilike.%${q}%,email.ilike.%${q}%,phone.ilike.%${q}%`,
+      `name.ilike.%${term}%,company_name.ilike.%${term}%,email.ilike.%${term}%,phone.ilike.%${term}%`,
     );
   }
 

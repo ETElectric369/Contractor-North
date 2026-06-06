@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { formatCurrency } from "@/lib/utils";
 import { NewItemButton } from "./new-item-button";
 import { QtyControl } from "./qty-control";
+import { sanitizeSearch } from "@/lib/utils";
 import type { InventoryItem } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -25,9 +26,10 @@ export default async function InventoryPage({
     .eq("active", true)
     .order("name");
 
-  if (q) {
+  const term = sanitizeSearch(q);
+  if (term) {
     query = query.or(
-      `name.ilike.%${q}%,part_number.ilike.%${q}%,category.ilike.%${q}%`,
+      `name.ilike.%${term}%,part_number.ilike.%${term}%,category.ilike.%${term}%`,
     );
   }
 

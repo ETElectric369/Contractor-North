@@ -12,12 +12,18 @@ import { createServiceClient } from "@/lib/supabase/server";
  * Wire up SMS by filling in sendSms() with Twilio (or your provider).
  */
 export async function GET(request: Request) {
+  // Fail closed: this endpoint exposes staff names + phone numbers, so it must
+  // never run unauthenticated. Require CRON_SECRET to be configured AND matched.
   const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const auth = request.headers.get("authorization");
-    if (auth !== `Bearer ${secret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  if (!secret) {
+    return NextResponse.json(
+      { error: "CRON_SECRET is not configured." },
+      { status: 503 },
+    );
+  }
+  const auth = request.headers.get("authorization");
+  if (auth !== `Bearer ${secret}`) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   let supabase;
