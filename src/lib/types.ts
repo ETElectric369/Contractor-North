@@ -26,6 +26,7 @@ export type DocumentKind = "plan" | "photo" | "lidar" | "sketch" | "import" | "o
 
 export interface Profile {
   id: string;
+  org_id: string | null;
   full_name: string | null;
   email: string | null;
   phone: string | null;
@@ -33,6 +34,27 @@ export interface Profile {
   hourly_rate: number | null;
   avatar_url: string | null;
   active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Organization {
+  id: string;
+  name: string;
+  logo_url: string | null;
+  address_line1: string | null;
+  address_line2: string | null;
+  phone: string | null;
+  email: string | null;
+  license: string | null;
+  default_tax_rate: number;
+  brand_color: string;
+  plan: string;
+  subscription_status: string;
+  stripe_customer_id: string | null;
+  stripe_subscription_id: string | null;
+  trial_ends_at: string;
+  current_period_end: string | null;
   created_at: string;
   updated_at: string;
 }

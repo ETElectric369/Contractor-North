@@ -51,21 +51,23 @@ Built with **Next.js 15** (App Router) · **Supabase** (Postgres + Auth + RLS) �
    to add the inventory and purchase-order tables.
 4. Run [`supabase/migrations/0003_billing.sql`](supabase/migrations/0003_billing.sql)
    to add the invoices and payments tables.
-5. Run [`supabase/seed.sql`](supabase/seed.sql) to load standard electrical job
-   codes and a starter safety form.
-6. Go to **Project Settings → API** and copy:
+5. Run [`supabase/migrations/0004_multitenancy.sql`](supabase/migrations/0004_multitenancy.sql)
+   to make the app multi-tenant (organizations, `org_id` everywhere, org-scoped
+   RLS, per-org numbering, onboarding). **Required.**
+6. (`supabase/seed.sql` is now a no-op — job codes and forms are seeded per
+   company automatically during onboarding.)
+7. Go to **Project Settings → API** and copy:
    - **Project URL** → `NEXT_PUBLIC_SUPABASE_URL`
    - **anon public** key → `NEXT_PUBLIC_SUPABASE_ANON_KEY`
    - **service_role** key → `SUPABASE_SERVICE_ROLE_KEY` (keep secret!)
-7. **Auth → Providers → Email**: for getting started fast, turn **off**
-   "Confirm email" so your first account logs in immediately. (Turn it back on
+8. **Auth → Providers → Email**: for getting started fast, turn **off**
+   "Confirm email" so your account logs in immediately. (Turn it back on
    before real use.)
 
-> **Make yourself the owner.** New signups default to the `tech` role. After you
-> sign up, run this in the SQL editor:
-> ```sql
-> update public.profiles set role = 'owner' where email = 'you@example.com';
-> ```
+> **Owner is now automatic.** When you sign up you'll be sent to an onboarding
+> screen to create your company — that makes you the **owner** and seeds your
+> job codes and a safety form. No manual SQL needed. Each company that signs up
+> gets its own isolated data.
 
 ---
 

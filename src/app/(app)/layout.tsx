@@ -22,6 +22,9 @@ export default async function AppLayout({
     .eq("id", user.id)
     .single();
 
+  // No organization yet → finish onboarding before entering the app.
+  if (!profile?.org_id) redirect("/onboarding");
+
   return (
     <div className="flex h-screen overflow-hidden">
       <div className="hidden lg:block">
