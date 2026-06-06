@@ -219,3 +219,53 @@ export interface PurchaseOrderItem {
   received_qty: number;
   sort_order: number;
 }
+
+export type InvoiceStatus =
+  | "draft"
+  | "sent"
+  | "partial"
+  | "paid"
+  | "overdue"
+  | "void";
+
+export interface Invoice {
+  id: string;
+  invoice_number: string;
+  customer_id: string | null;
+  job_id: string | null;
+  quote_id: string | null;
+  status: InvoiceStatus;
+  title: string | null;
+  notes: string | null;
+  tax_rate: number;
+  subtotal: number;
+  tax: number;
+  total: number;
+  amount_paid: number;
+  due_date: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InvoiceItem {
+  id: string;
+  invoice_id: string;
+  description: string;
+  quantity: number;
+  unit: string | null;
+  unit_price: number;
+  line_total: number;
+  sort_order: number;
+}
+
+export interface Payment {
+  id: string;
+  invoice_id: string;
+  amount: number;
+  method: string;
+  note: string | null;
+  paid_at: string;
+  recorded_by: string | null;
+  created_at: string;
+}

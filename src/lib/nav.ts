@@ -59,7 +59,7 @@ export const NAV: NavSection[] = [
     items: [
       { label: "Purchasing", href: "/purchasing", icon: ShoppingCart },
       { label: "Inventory", href: "/inventory", icon: Boxes },
-      { label: "Billing", href: "/billing", icon: Receipt, comingSoon: true },
+      { label: "Billing", href: "/billing", icon: Receipt },
       { label: "Change Orders", href: "/change-orders", icon: GitPullRequestArrow },
       { label: "Forms", href: "/forms", icon: FileSpreadsheet },
       { label: "Plans & LiDAR", href: "/plans", icon: ScanLine, comingSoon: true },

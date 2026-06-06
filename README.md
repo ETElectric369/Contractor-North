@@ -26,7 +26,9 @@ Built with **Next.js 15** (App Router) · **Supabase** (Postgres + Auth + RLS) �
 | **Change Orders** | ✅ | Create against a job, approve/reject, approved-total summary |
 | **Inventory** | ✅ | Stock on hand, low-stock alerts, quick +/− adjustments, stock value |
 | **Purchasing** | ✅ | POs to CED, **seed a PO from a material list**, receive lines, auto status |
-| Billing / Forms / Plans & LiDAR | 🟡 | Scaffolded, in nav, schema ready — UI coming next |
+| **Forms** | ✅ | Custom form builder, field-typed forms, submissions attached to jobs |
+| **Billing** | ✅ | **Invoice from a quote**, line items, record payments, auto paid/partial status |
+| Plans & LiDAR | 🟡 | Scaffolded — needs a mobile/native capture layer (see notes) |
 
 ---
 
@@ -46,14 +48,16 @@ Built with **Next.js 15** (App Router) · **Supabase** (Postgres + Auth + RLS) �
    [`supabase/migrations/0001_init.sql`](supabase/migrations/0001_init.sql), and **Run**.
    This creates the core tables, enums, triggers, and Row Level Security policies.
 3. Run [`supabase/migrations/0002_purchasing_inventory.sql`](supabase/migrations/0002_purchasing_inventory.sql)
-   the same way to add the inventory and purchase-order tables.
-4. Run [`supabase/seed.sql`](supabase/seed.sql) to load standard electrical job
+   to add the inventory and purchase-order tables.
+4. Run [`supabase/migrations/0003_billing.sql`](supabase/migrations/0003_billing.sql)
+   to add the invoices and payments tables.
+5. Run [`supabase/seed.sql`](supabase/seed.sql) to load standard electrical job
    codes and a starter safety form.
-5. Go to **Project Settings → API** and copy:
+6. Go to **Project Settings → API** and copy:
    - **Project URL** → `NEXT_PUBLIC_SUPABASE_URL`
    - **anon public** key → `NEXT_PUBLIC_SUPABASE_ANON_KEY`
    - **service_role** key → `SUPABASE_SERVICE_ROLE_KEY` (keep secret!)
-6. **Auth → Providers → Email**: for getting started fast, turn **off**
+7. **Auth → Providers → Email**: for getting started fast, turn **off**
    "Confirm email" so your first account logs in immediately. (Turn it back on
    before real use.)
 
