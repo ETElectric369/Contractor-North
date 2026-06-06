@@ -57,8 +57,8 @@ export const NAV: NavSection[] = [
   {
     title: "Office",
     items: [
-      { label: "Purchasing", href: "/purchasing", icon: ShoppingCart, comingSoon: true },
-      { label: "Inventory", href: "/inventory", icon: Boxes, comingSoon: true },
+      { label: "Purchasing", href: "/purchasing", icon: ShoppingCart },
+      { label: "Inventory", href: "/inventory", icon: Boxes },
       { label: "Billing", href: "/billing", icon: Receipt, comingSoon: true },
       { label: "Change Orders", href: "/change-orders", icon: GitPullRequestArrow },
       { label: "Forms", href: "/forms", icon: FileSpreadsheet, comingSoon: true },

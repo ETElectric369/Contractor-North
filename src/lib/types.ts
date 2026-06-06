@@ -172,3 +172,50 @@ export interface ConversationMessage {
   content: string;
   created_at: string;
 }
+
+export type PoStatus = "draft" | "sent" | "partial" | "received" | "cancelled";
+
+export interface InventoryItem {
+  id: string;
+  name: string;
+  part_number: string | null;
+  description: string | null;
+  category: string | null;
+  unit: string;
+  quantity_on_hand: number;
+  reorder_point: number;
+  unit_cost: number | null;
+  vendor: string | null;
+  location: string | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PurchaseOrder {
+  id: string;
+  po_number: string;
+  vendor: string;
+  status: PoStatus;
+  job_id: string | null;
+  notes: string | null;
+  subtotal: number;
+  total: number;
+  ordered_at: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PurchaseOrderItem {
+  id: string;
+  po_id: string;
+  description: string;
+  part_number: string | null;
+  quantity: number;
+  unit: string | null;
+  unit_cost: number;
+  line_total: number;
+  received_qty: number;
+  sort_order: number;
+}

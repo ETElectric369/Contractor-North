@@ -22,7 +22,11 @@ Built with **Next.js 15** (App Router) · **Supabase** (Postgres + Auth + RLS) �
 | Timeclock | ✅ | Clock in/out, **GPS capture**, lunch, job codes, "what did you do today?" with **voice dictation**, weekly hours-per-code |
 | "No clock-in" text nudge | ✅ | Cron endpoint (Twilio-ready stub) |
 | AI Assistant | ✅ | Streaming Claude chat with electrical context |
-| Purchasing / Inventory / Billing / Change Orders / Forms / Plans & LiDAR / Material Lists | 🟡 | Scaffolded, in nav, schema ready — UI coming next |
+| **Material Lists** | ✅ | AI take-off generation, inline item editor, cost totals |
+| **Change Orders** | ✅ | Create against a job, approve/reject, approved-total summary |
+| **Inventory** | ✅ | Stock on hand, low-stock alerts, quick +/− adjustments, stock value |
+| **Purchasing** | ✅ | POs to CED, **seed a PO from a material list**, receive lines, auto status |
+| Billing / Forms / Plans & LiDAR | 🟡 | Scaffolded, in nav, schema ready — UI coming next |
 
 ---
 
@@ -40,14 +44,16 @@ Built with **Next.js 15** (App Router) · **Supabase** (Postgres + Auth + RLS) �
 1. Create a new project in the Supabase dashboard. Pick a strong DB password.
 2. Open **SQL Editor** → **New query**, paste the contents of
    [`supabase/migrations/0001_init.sql`](supabase/migrations/0001_init.sql), and **Run**.
-   This creates every table, enum, trigger, and Row Level Security policy.
-3. Run [`supabase/seed.sql`](supabase/seed.sql) the same way to load standard
-   electrical job codes and a starter safety form.
-4. Go to **Project Settings → API** and copy:
+   This creates the core tables, enums, triggers, and Row Level Security policies.
+3. Run [`supabase/migrations/0002_purchasing_inventory.sql`](supabase/migrations/0002_purchasing_inventory.sql)
+   the same way to add the inventory and purchase-order tables.
+4. Run [`supabase/seed.sql`](supabase/seed.sql) to load standard electrical job
+   codes and a starter safety form.
+5. Go to **Project Settings → API** and copy:
    - **Project URL** → `NEXT_PUBLIC_SUPABASE_URL`
    - **anon public** key → `NEXT_PUBLIC_SUPABASE_ANON_KEY`
    - **service_role** key → `SUPABASE_SERVICE_ROLE_KEY` (keep secret!)
-5. **Auth → Providers → Email**: for getting started fast, turn **off**
+6. **Auth → Providers → Email**: for getting started fast, turn **off**
    "Confirm email" so your first account logs in immediately. (Turn it back on
    before real use.)
 
