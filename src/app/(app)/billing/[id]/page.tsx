@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, User, FileText } from "lucide-react";
+import { ArrowLeft, User, FileText, Printer } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
@@ -49,7 +49,8 @@ export default async function InvoicePage({
         <ArrowLeft className="h-4 w-4" /> Back to billing
       </Link>
 
-      <div className="mb-6 flex flex-col gap-2">
+      <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex flex-col gap-2">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-bold text-slate-900">
             {inv.invoice_number}
@@ -77,6 +78,13 @@ export default async function InvoicePage({
             </Link>
           )}
         </div>
+        </div>
+        <Link
+          href={`/print/invoice/${inv.id}`}
+          className="inline-flex items-center gap-2 self-start rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
+        >
+          <Printer className="h-4 w-4" /> Print / PDF
+        </Link>
       </div>
 
       <InvoiceDetail

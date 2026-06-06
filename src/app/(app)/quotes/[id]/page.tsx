@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, User } from "lucide-react";
+import { ArrowLeft, User, Printer } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
@@ -56,7 +56,15 @@ export default async function QuoteDetailPage({
             {q.valid_until ? ` · Valid until ${formatDate(q.valid_until)}` : ""}
           </p>
         </div>
-        <StatusControl id={q.id} status={q.status} />
+        <div className="flex items-center gap-2">
+          <Link
+            href={`/print/quote/${q.id}`}
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
+          >
+            <Printer className="h-4 w-4" /> Print / PDF
+          </Link>
+          <StatusControl id={q.id} status={q.status} />
+        </div>
       </div>
 
       <Card className="mb-6">
