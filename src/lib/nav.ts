@@ -51,7 +51,7 @@ export const NAV: NavSection[] = [
       { label: "Schedule", href: "/schedule", icon: CalendarDays },
       { label: "Work Orders", href: "/work-orders", icon: ClipboardList },
       { label: "Timeclock", href: "/timeclock", icon: Clock },
-      { label: "Material Lists", href: "/materials", icon: ListChecks, comingSoon: true },
+      { label: "Material Lists", href: "/materials", icon: ListChecks },
     ],
   },
   {
@@ -60,7 +60,7 @@ export const NAV: NavSection[] = [
       { label: "Purchasing", href: "/purchasing", icon: ShoppingCart, comingSoon: true },
       { label: "Inventory", href: "/inventory", icon: Boxes, comingSoon: true },
       { label: "Billing", href: "/billing", icon: Receipt, comingSoon: true },
-      { label: "Change Orders", href: "/change-orders", icon: GitPullRequestArrow, comingSoon: true },
+      { label: "Change Orders", href: "/change-orders", icon: GitPullRequestArrow },
       { label: "Forms", href: "/forms", icon: FileSpreadsheet, comingSoon: true },
       { label: "Plans & LiDAR", href: "/plans", icon: ScanLine, comingSoon: true },
     ],
