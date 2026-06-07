@@ -17,6 +17,32 @@ cheaper than retrofitting it later.
 
 ---
 
+## Remediation status (updated after the fix pass)
+
+| Item | Status |
+|------|--------|
+| B1 Multi-tenancy | ✅ Done — `organizations` + `org_id` everywhere, org-scoped RLS, per-org numbering (migration 0004) |
+| B2 Self-serve onboarding | ✅ Done — create-company flow makes you owner; team invites (0004/0005) |
+| B3 Per-tenant customization | ✅ Done — company settings, letterhead from org, per-org brand color, per-org job codes/forms |
+| B4 Subscription billing | ✅ Scaffolded — Stripe checkout/portal/webhook + trial gate (dormant until keys added) |
+| S1 `current_role()` shadow | ✅ Fixed — renamed `app_user_role()` |
+| S2 Cron fails open | ✅ Fixed — `/api/timeclock/nudge` now requires `CRON_SECRET` |
+| S3 Search filter injection | ✅ Fixed — `sanitizeSearch()` on CRM + Inventory |
+| S4 AI rate limiting | 🟡 Partial — input capped; per-user/distributed limit still TODO (Upstash) |
+| S7 server-only guard | ✅ Fixed — `import "server-only"` in the server client |
+| Self role-escalation | ✅ Fixed — DB trigger blocks non-admins changing their own role |
+| Per-org doc numbering | ✅ Done — `doc_counters` + `next_doc_number()` |
+| No tests / CI | 🟡 Partial — GitHub Actions CI (typecheck + build) added; no unit/E2E tests yet |
+| Error boundaries | ✅ Added — `error.tsx`, `global-error.tsx`, `not-found.tsx` |
+
+**Still open / recommended next:** distributed AI rate limiting, an automated
+test suite, an audit log (S6), email-to-customer for quotes/invoices, and a
+**live functional QA pass** (the checklist in §6) against your Supabase — that
+remains the one thing only you can unblock (needs your account + the migrations
+run).
+
+---
+
 ## 1. Does everything actually work?
 
 - **Build:** ✅ `next build` passes clean; TypeScript strict; 30+ routes.

@@ -120,6 +120,22 @@ Central (14:00 UTC), Mon–Fri**. To enable the actual texts, add Twilio env var
 
 ---
 
+## 5b. Subscription billing (optional)
+
+The app is **multi-tenant**: every company that signs up gets isolated data and
+a 14-day free trial. Billing stays **off** until you configure Stripe — without
+it, nothing is gated. To turn it on:
+
+1. In Stripe, create a recurring **Product/Price**; copy the Price ID.
+2. Add env vars: `STRIPE_SECRET_KEY`, `STRIPE_PRICE_ID`, `STRIPE_WEBHOOK_SECRET`.
+3. Add a webhook in **Stripe → Developers → Webhooks** pointing at
+   `https://your-app.vercel.app/api/stripe/webhook` (events:
+   `customer.subscription.*`, `checkout.session.completed`).
+4. Owners can then **Subscribe / Manage billing** from **Settings**. When a
+   trial expires without an active subscription, the org is sent to `/subscribe`.
+
+---
+
 ## 6. Push to GitHub
 
 ```bash
