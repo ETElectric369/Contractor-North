@@ -62,28 +62,9 @@ begin
   return new;
 end $$;
 
--- Current user's role (reads the profiles table). SECURITY DEFINER so RLS
--- policies can call it without recursing into profiles' own policies.
-create or replace function public.current_role()
-returns user_role language sql stable security definer set search_path = public as $$
-  select role from public.profiles where id = auth.uid();
-$$;
-
--- Is the current user office staff or higher (office/admin/owner)?
-create or replace function public.is_staff()
-returns boolean language sql stable security definer set search_path = public as $$
-  select coalesce(
-    (select role in ('owner','admin','office') from public.profiles where id = auth.uid()),
-    false);
-$$;
-
--- Is the current user an active member of the org at all?
-create or replace function public.is_member()
-returns boolean language sql stable security definer set search_path = public as $$
-  select coalesce(
-    (select active from public.profiles where id = auth.uid()),
-    false);
-$$;
+-- NOTE: the role/staff/member helper functions are defined AFTER the profiles
+-- table below — SQL functions are validated against referenced tables at
+-- creation time, so profiles must exist first.
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- PROFILES  (1:1 with auth.users)
@@ -115,6 +96,27 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
+
+-- Role/membership helpers (defined here, after profiles exists). SECURITY
+-- DEFINER so RLS policies can call them without recursing into profiles' policy.
+create or replace function public.current_role()
+returns user_role language sql stable security definer set search_path = public as $$
+  select role from public.profiles where id = auth.uid();
+$$;
+
+create or replace function public.is_staff()
+returns boolean language sql stable security definer set search_path = public as $$
+  select coalesce(
+    (select role in ('owner','admin','office') from public.profiles where id = auth.uid()),
+    false);
+$$;
+
+create or replace function public.is_member()
+returns boolean language sql stable security definer set search_path = public as $$
+  select coalesce(
+    (select active from public.profiles where id = auth.uid()),
+    false);
+$$;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- CUSTOMERS / CRM
