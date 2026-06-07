@@ -29,7 +29,7 @@ export default async function AppLayout({
 
   const { data: org } = await supabase
     .from("organizations")
-    .select("brand_color, subscription_status, trial_ends_at")
+    .select("name, logo_url, brand_color, subscription_status, trial_ends_at")
     .eq("id", profile.org_id)
     .maybeSingle();
 
@@ -40,6 +40,7 @@ export default async function AppLayout({
 
   // Apply the org's brand color across the app shell (white-label).
   const brand = org?.brand_color || "#0b57c4";
+  const branding = { name: org?.name ?? null, logo: org?.logo_url ?? null };
 
   return (
     <div
@@ -53,10 +54,10 @@ export default async function AppLayout({
     >
 
       <div className="hidden lg:block">
-        <Sidebar />
+        <Sidebar branding={branding} />
       </div>
       <div className="flex flex-1 flex-col overflow-hidden">
-        <Topbar profile={(profile as Profile) ?? null} />
+        <Topbar profile={(profile as Profile) ?? null} branding={branding} />
         <main className="flex-1 overflow-y-auto bg-slate-50 p-4 lg:p-6">
           {children}
         </main>

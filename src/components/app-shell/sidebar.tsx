@@ -6,18 +6,37 @@ import { Zap } from "lucide-react";
 import { NAV } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 
-export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
+export function Sidebar({
+  onNavigate,
+  branding,
+}: {
+  onNavigate?: () => void;
+  branding?: { name: string | null; logo: string | null };
+}) {
   const pathname = usePathname();
+  const name = branding?.name || "Contractor North";
+  const logo = branding?.logo;
 
   return (
     <aside className="flex h-full w-64 flex-col border-r border-slate-200 bg-white">
       <div className="flex h-16 items-center gap-2.5 border-b border-slate-200 px-5">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand text-white">
-          <Zap className="h-5 w-5" />
-        </div>
-        <div className="leading-tight">
-          <div className="text-sm font-bold text-slate-900">Contractor North</div>
-          <div className="text-[11px] text-slate-400">CED Field Platform</div>
+        {logo ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={logo}
+            alt={name}
+            className="h-9 w-9 shrink-0 rounded-lg object-contain"
+          />
+        ) : (
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand text-white">
+            <Zap className="h-5 w-5" />
+          </div>
+        )}
+        <div className="min-w-0 leading-tight">
+          <div className="truncate text-sm font-bold text-slate-900">{name}</div>
+          <div className="text-[11px] text-slate-400">
+            {branding?.name ? "Powered by Contractor North" : "CED Field Platform"}
+          </div>
         </div>
       </div>
 

@@ -7,7 +7,13 @@ import { initials } from "@/lib/utils";
 import { signOut } from "@/app/login/actions";
 import type { Profile } from "@/lib/types";
 
-export function Topbar({ profile }: { profile: Profile | null }) {
+export function Topbar({
+  profile,
+  branding,
+}: {
+  profile: Profile | null;
+  branding?: { name: string | null; logo: string | null };
+}) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -62,7 +68,7 @@ export function Topbar({ profile }: { profile: Profile | null }) {
             >
               <X className="h-5 w-5" />
             </button>
-            <Sidebar onNavigate={() => setOpen(false)} />
+            <Sidebar onNavigate={() => setOpen(false)} branding={branding} />
           </div>
         </div>
       )}
