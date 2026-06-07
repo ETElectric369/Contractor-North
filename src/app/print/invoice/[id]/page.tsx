@@ -3,7 +3,8 @@ import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PrintButton } from "@/components/print-button";
-import { Letterhead, companyFromOrg } from "@/components/doc-letterhead";
+import { companyFromOrg } from "@/components/doc-letterhead";
+import { DocHeader } from "@/components/doc-templates";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import type { Invoice, InvoiceItem, Organization, Payment } from "@/lib/types";
 
@@ -44,6 +45,7 @@ export default async function InvoicePrintPage({
     .select("*")
     .maybeSingle();
   const co = companyFromOrg(org as Organization | null);
+  const template = (org as Organization | null)?.doc_template || "classic";
 
   const lineItems = (items ?? []) as InvoiceItem[];
   const pays = (payments ?? []) as Payment[];
@@ -63,29 +65,20 @@ export default async function InvoicePrintPage({
       </div>
 
       <div className="print-page mx-auto max-w-3xl bg-white p-10 shadow-sm">
-        {/* Letterhead */}
-        <div
-          className="flex items-start justify-between border-b-2 pb-5"
-          style={{ borderColor: co.brand }}
-        >
-          <Letterhead co={co} />
-          <div className="text-right">
-            <div className="text-2xl font-bold uppercase tracking-wide text-slate-900">
-              Invoice
-            </div>
-            <div className="mt-1 text-sm font-medium text-slate-700">
-              {inv.invoice_number}
-            </div>
-            <div className="text-xs text-slate-500">
-              Date: {formatDate(inv.created_at)}
-            </div>
-            {inv.due_date && (
-              <div className="text-xs text-slate-500">
-                Due: {formatDate(inv.due_date)}
-              </div>
-            )}
-          </div>
-        </div>
+        <DocHeader
+          co={co}
+          template={template}
+          meta={{
+            docType: "Invoice",
+            number: inv.invoice_number,
+            rows: [
+              { label: "Date", value: formatDate(inv.created_at) },
+              ...(inv.due_date
+                ? [{ label: "Due", value: formatDate(inv.due_date) }]
+                : []),
+            ],
+          }}
+        />
 
         {/* Bill-to + Balance box */}
         <div className="mt-6 flex items-start justify-between">

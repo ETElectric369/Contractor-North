@@ -3,7 +3,8 @@ import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PrintButton } from "@/components/print-button";
-import { Letterhead, companyFromOrg } from "@/components/doc-letterhead";
+import { companyFromOrg } from "@/components/doc-letterhead";
+import { DocHeader } from "@/components/doc-templates";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import type { Organization, Quote, QuoteLineItem } from "@/lib/types";
 
@@ -37,6 +38,7 @@ export default async function QuotePrintPage({
     .select("*")
     .maybeSingle();
   const co = companyFromOrg(org as Organization | null);
+  const template = (org as Organization | null)?.doc_template || "classic";
 
   const lineItems = (items ?? []) as QuoteLineItem[];
   const c = q.customers;
@@ -54,29 +56,20 @@ export default async function QuotePrintPage({
       </div>
 
       <div className="print-page mx-auto max-w-3xl bg-white p-10 shadow-sm">
-        {/* Letterhead */}
-        <div
-          className="flex items-start justify-between border-b-2 pb-5"
-          style={{ borderColor: co.brand }}
-        >
-          <Letterhead co={co} />
-          <div className="text-right">
-            <div className="text-2xl font-bold uppercase tracking-wide text-slate-900">
-              Quote
-            </div>
-            <div className="mt-1 text-sm font-medium text-slate-700">
-              {q.quote_number}
-            </div>
-            <div className="text-xs text-slate-500">
-              Date: {formatDate(q.created_at)}
-            </div>
-            {q.valid_until && (
-              <div className="text-xs text-slate-500">
-                Valid until: {formatDate(q.valid_until)}
-              </div>
-            )}
-          </div>
-        </div>
+        <DocHeader
+          co={co}
+          template={template}
+          meta={{
+            docType: "Quote",
+            number: q.quote_number,
+            rows: [
+              { label: "Date", value: formatDate(q.created_at) },
+              ...(q.valid_until
+                ? [{ label: "Valid until", value: formatDate(q.valid_until) }]
+                : []),
+            ],
+          }}
+        />
 
         {/* Bill-to */}
         <div className="mt-6">

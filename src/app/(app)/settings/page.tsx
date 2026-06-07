@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { initials } from "@/lib/utils";
 import { OrgSettingsForm } from "./org-settings-form";
 import { InviteManager } from "./invite-manager";
+import { TemplatePicker } from "./template-picker";
 import { Button } from "@/components/ui/button";
 import { billingEnabled } from "@/lib/stripe";
 import { trialDaysLeft } from "@/lib/subscription";
@@ -67,6 +68,21 @@ export default async function SettingsPage({
               Company
             </h3>
             <OrgSettingsForm org={org as Organization} />
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Document style (owner/admin) */}
+      {isAdmin && org && (
+        <Card>
+          <CardContent className="py-5">
+            <h3 className="mb-1 text-sm font-semibold text-slate-900">
+              Document style
+            </h3>
+            <TemplatePicker
+              current={(org as Organization).doc_template || "classic"}
+              brand={(org as Organization).brand_color || "#0b57c4"}
+            />
           </CardContent>
         </Card>
       )}
