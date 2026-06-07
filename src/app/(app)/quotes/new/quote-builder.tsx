@@ -6,6 +6,7 @@ import { Plus, Trash2, Sparkles, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { formatCurrency } from "@/lib/utils";
 import {
   saveQuote,
@@ -158,14 +159,10 @@ export function QuoteBuilder({
                     />
                   </div>
                   <div className="col-span-3 sm:col-span-2">
-                    <Input
-                      type="number"
-                      step="any"
+                    <NumberInput
                       placeholder="Qty"
                       value={it.quantity}
-                      onChange={(e) =>
-                        updateItem(idx, { quantity: Number(e.target.value) })
-                      }
+                      onValueChange={(n) => updateItem(idx, { quantity: n })}
                     />
                   </div>
                   <div className="col-span-3 sm:col-span-1">
@@ -176,14 +173,10 @@ export function QuoteBuilder({
                     />
                   </div>
                   <div className="col-span-4 sm:col-span-2">
-                    <Input
-                      type="number"
-                      step="any"
+                    <NumberInput
                       placeholder="Unit $"
                       value={it.unit_price}
-                      onChange={(e) =>
-                        updateItem(idx, { unit_price: Number(e.target.value) })
-                      }
+                      onValueChange={(n) => updateItem(idx, { unit_price: n })}
                     />
                   </div>
                   <div className="col-span-2 flex items-center justify-end gap-1 sm:col-span-2">
