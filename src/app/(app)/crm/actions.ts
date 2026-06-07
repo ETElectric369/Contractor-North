@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { formatPhone, formatState, formatZip, titleCase } from "@/lib/utils";
 
 export type ActionResult = { ok: boolean; error?: string; id?: string };
 
@@ -23,11 +24,11 @@ export async function createCustomer(formData: FormData): Promise<ActionResult> 
       type: String(formData.get("type") ?? "residential"),
       status: String(formData.get("status") ?? "lead"),
       email: emptyToNull(formData.get("email")),
-      phone: emptyToNull(formData.get("phone")),
+      phone: orNull(formatPhone(String(formData.get("phone") ?? ""))),
       address: emptyToNull(formData.get("address")),
-      city: emptyToNull(formData.get("city")),
-      state: emptyToNull(formData.get("state")),
-      zip: emptyToNull(formData.get("zip")),
+      city: orNull(titleCase(String(formData.get("city") ?? ""))),
+      state: orNull(formatState(String(formData.get("state") ?? ""))),
+      zip: orNull(formatZip(String(formData.get("zip") ?? ""))),
       notes: emptyToNull(formData.get("notes")),
       created_by: user.id,
     })
@@ -58,4 +59,9 @@ export async function updateCustomerStatus(
 function emptyToNull(v: FormDataEntryValue | null): string | null {
   const s = String(v ?? "").trim();
   return s.length ? s : null;
+}
+
+function orNull(s: string): string | null {
+  const t = s.trim();
+  return t.length ? t : null;
 }

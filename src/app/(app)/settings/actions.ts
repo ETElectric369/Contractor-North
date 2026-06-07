@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { formatPhone, formatState, formatZip, titleCase } from "@/lib/utils";
 
 export type Result = { ok: boolean; error?: string };
 
@@ -30,10 +31,10 @@ export async function updateOrganization(formData: FormData): Promise<Result> {
       name: String(formData.get("name") ?? "").trim() || "My Company",
       address_line1: emptyToNull(formData.get("address_line1")),
       address_line2: emptyToNull(formData.get("address_line2")),
-      city: emptyToNull(formData.get("city")),
-      state: emptyToNull(formData.get("state")),
-      zip: emptyToNull(formData.get("zip")),
-      phone: emptyToNull(formData.get("phone")),
+      city: norm(titleCase(String(formData.get("city") ?? ""))),
+      state: norm(formatState(String(formData.get("state") ?? ""))),
+      zip: norm(formatZip(String(formData.get("zip") ?? ""))),
+      phone: norm(formatPhone(String(formData.get("phone") ?? ""))),
       email: emptyToNull(formData.get("email")),
       license: emptyToNull(formData.get("license")),
       brand_color: String(formData.get("brand_color") ?? "#0b57c4") || "#0b57c4",
@@ -82,4 +83,9 @@ export async function deleteInvitation(id: string): Promise<Result> {
 function emptyToNull(v: FormDataEntryValue | null): string | null {
   const s = String(v ?? "").trim();
   return s.length ? s : null;
+}
+
+function norm(s: string): string | null {
+  const t = s.trim();
+  return t.length ? t : null;
 }

@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
+import { PhoneInput } from "@/components/ui/phone-input";
 import type { Organization } from "@/lib/types";
 import { updateOrganization } from "./actions";
 
@@ -62,7 +63,7 @@ export function OrgSettingsForm({ org }: { org: Organization }) {
         </div>
         <div>
           <Label htmlFor="phone">Phone</Label>
-          <Input id="phone" name="phone" defaultValue={org.phone ?? ""} />
+          <PhoneInput id="phone" name="phone" defaultValue={org.phone ?? ""} />
         </div>
         <div>
           <Label htmlFor="email">Email</Label>

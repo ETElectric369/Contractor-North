@@ -6,6 +6,7 @@ import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { PhoneInput } from "@/components/ui/phone-input";
 import { createCustomer } from "./actions";
 
 export function NewCustomerButton() {
@@ -71,7 +72,7 @@ export function NewCustomerButton() {
             </div>
             <div>
               <Label htmlFor="phone">Phone</Label>
-              <Input id="phone" name="phone" type="tel" />
+              <PhoneInput id="phone" name="phone" />
             </div>
             <div className="col-span-2">
               <Label htmlFor="address">Address</Label>

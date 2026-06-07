@@ -68,6 +68,39 @@ export function sanitizeSearch(input: string | undefined | null): string {
     .slice(0, 100);
 }
 
+/** Format a US phone number progressively: "(530) 933-6686". */
+export function formatPhone(input: string | null | undefined): string {
+  let digits = (input ?? "").replace(/\D/g, "").slice(0, 11);
+  let country = "";
+  if (digits.length === 11 && digits.startsWith("1")) {
+    country = "1 ";
+    digits = digits.slice(1);
+  }
+  if (digits.length === 0) return "";
+  if (digits.length < 4) return `${country}(${digits}`;
+  if (digits.length < 7) return `${country}(${digits.slice(0, 3)}) ${digits.slice(3)}`;
+  return `${country}(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6, 10)}`;
+}
+
+/** Title-case a string ("dallas" → "Dallas"); good enough for city names. */
+export function titleCase(input: string | null | undefined): string {
+  return (input ?? "")
+    .toLowerCase()
+    .replace(/\b([a-z])/g, (c) => c.toUpperCase())
+    .trim();
+}
+
+/** Two-letter uppercase state code. */
+export function formatState(input: string | null | undefined): string {
+  return (input ?? "").replace(/[^a-zA-Z]/g, "").toUpperCase().slice(0, 2);
+}
+
+/** US zip: "75201" or "75201-1234". */
+export function formatZip(input: string | null | undefined): string {
+  const d = (input ?? "").replace(/[^\d]/g, "").slice(0, 9);
+  return d.length > 5 ? `${d.slice(0, 5)}-${d.slice(5)}` : d;
+}
+
 export function initials(name: string | null | undefined) {
   if (!name) return "?";
   return name
