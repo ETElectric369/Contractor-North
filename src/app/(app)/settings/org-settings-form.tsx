@@ -39,12 +39,26 @@ export function OrgSettingsForm({ org }: { org: Organization }) {
           <Input id="name" name="name" defaultValue={org.name} required />
         </div>
         <div className="col-span-2">
-          <Label htmlFor="address_line1">Address</Label>
+          <Label htmlFor="address_line1">Street address</Label>
           <Input id="address_line1" name="address_line1" defaultValue={org.address_line1 ?? ""} />
         </div>
         <div className="col-span-2">
-          <Label htmlFor="address_line2">Address line 2</Label>
+          <Label htmlFor="address_line2">Suite / Unit (optional)</Label>
           <Input id="address_line2" name="address_line2" defaultValue={org.address_line2 ?? ""} />
+        </div>
+        <div className="col-span-2 grid grid-cols-6 gap-3">
+          <div className="col-span-3">
+            <Label htmlFor="city">City</Label>
+            <Input id="city" name="city" defaultValue={org.city ?? ""} />
+          </div>
+          <div className="col-span-1">
+            <Label htmlFor="state">State</Label>
+            <Input id="state" name="state" maxLength={2} defaultValue={org.state ?? ""} />
+          </div>
+          <div className="col-span-2">
+            <Label htmlFor="zip">Zip</Label>
+            <Input id="zip" name="zip" defaultValue={org.zip ?? ""} />
+          </div>
         </div>
         <div>
           <Label htmlFor="phone">Phone</Label>

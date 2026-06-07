@@ -44,6 +44,9 @@ export interface Organization {
   logo_url: string | null;
   address_line1: string | null;
   address_line2: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
   phone: string | null;
   email: string | null;
   license: string | null;

@@ -7,6 +7,7 @@ export interface CompanyInfo {
   tagline: string;
   address1: string;
   address2: string;
+  cityStateZip: string;
   phone: string;
   email: string;
   license: string;
@@ -15,11 +16,16 @@ export interface CompanyInfo {
 
 /** Build display company info from the org record, falling back to defaults. */
 export function companyFromOrg(org: Organization | null): CompanyInfo {
+  const cityStateZip = [org?.city, org?.state, org?.zip]
+    .filter(Boolean)
+    .join(", ")
+    .replace(/, (\S+)$/, " $1"); // "City, ST 12345"
   return {
     name: org?.name || COMPANY.name,
     tagline: COMPANY.tagline,
     address1: org?.address_line1 || COMPANY.addressLine1,
     address2: org?.address_line2 || COMPANY.addressLine2,
+    cityStateZip,
     phone: org?.phone || COMPANY.phone,
     email: org?.email || COMPANY.email,
     license: org?.license || COMPANY.license,
@@ -31,6 +37,7 @@ export function companyFromOrg(org: Organization | null): CompanyInfo {
 export function Letterhead({ co }: { co: CompanyInfo }) {
   const meta = [
     [co.address1, co.address2].filter(Boolean).join(", "),
+    co.cityStateZip,
     co.phone,
     co.email,
     co.license,
