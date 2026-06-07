@@ -53,6 +53,7 @@ export interface Organization {
   default_tax_rate: number;
   brand_color: string;
   doc_template: string;
+  doc_templates: Record<string, string>;
   plan: string;
   subscription_status: string;
   stripe_customer_id: string | null;

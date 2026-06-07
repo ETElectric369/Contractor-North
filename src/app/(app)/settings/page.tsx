@@ -5,7 +5,8 @@ import { Badge } from "@/components/ui/badge";
 import { initials } from "@/lib/utils";
 import { OrgSettingsForm } from "./org-settings-form";
 import { InviteManager } from "./invite-manager";
-import { TemplatePicker } from "./template-picker";
+import { DocumentDesigner } from "./document-designer";
+import { LogoUpload } from "./logo-upload";
 import { Button } from "@/components/ui/button";
 import { billingEnabled } from "@/lib/stripe";
 import { trialDaysLeft } from "@/lib/subscription";
@@ -72,19 +73,34 @@ export default async function SettingsPage({
         </Card>
       )}
 
-      {/* Document style (owner/admin) */}
+      {/* Branding & documents (owner/admin) */}
       {isAdmin && org && (
-        <Card>
-          <CardContent className="py-5">
-            <h3 className="mb-1 text-sm font-semibold text-slate-900">
-              Document style
-            </h3>
-            <TemplatePicker
-              current={(org as Organization).doc_template || "classic"}
-              brand={(org as Organization).brand_color || "#0b57c4"}
-            />
-          </CardContent>
-        </Card>
+        <>
+          <Card>
+            <CardContent className="py-5">
+              <h3 className="mb-3 text-sm font-semibold text-slate-900">
+                Company logo
+              </h3>
+              <LogoUpload
+                orgId={(org as Organization).id}
+                current={(org as Organization).logo_url}
+              />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="py-5">
+              <h3 className="mb-1 text-sm font-semibold text-slate-900">
+                Document designer
+              </h3>
+              <DocumentDesigner
+                templates={(org as Organization).doc_templates || {}}
+                fallback={(org as Organization).doc_template || "classic"}
+                brand={(org as Organization).brand_color || "#0b57c4"}
+              />
+            </CardContent>
+          </Card>
+        </>
       )}
 
       {/* Subscription (owner/admin) */}

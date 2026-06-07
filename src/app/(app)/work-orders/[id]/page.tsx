@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Briefcase, User, Calendar } from "lucide-react";
+import { ArrowLeft, Briefcase, User, Calendar, Printer } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
@@ -47,7 +47,15 @@ export default async function WorkOrderDetailPage({
           </div>
           <p className="mt-1 text-lg text-slate-700">{w.title}</p>
         </div>
-        <WoStatusControl id={w.id} status={w.status} />
+        <div className="flex items-center gap-2">
+          <Link
+            href={`/print/work-order/${w.id}`}
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
+          >
+            <Printer className="h-4 w-4" /> Print / PDF
+          </Link>
+          <WoStatusControl id={w.id} status={w.status} />
+        </div>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-3">

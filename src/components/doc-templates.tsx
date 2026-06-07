@@ -26,8 +26,34 @@ function metaLine(co: CompanyInfo): string {
     .join(" · ");
 }
 
+/** Company logo image if uploaded, otherwise a brand-colored placeholder mark. */
+function Mark({ co, onColor = false }: { co: CompanyInfo; onColor?: boolean }) {
+  if (co.logo) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return (
+      <img
+        src={co.logo}
+        alt={co.name}
+        className={`h-12 w-auto max-w-[180px] object-contain ${
+          onColor ? "rounded bg-white p-1" : ""
+        }`}
+      />
+    );
+  }
+  return (
+    <div
+      className={`flex h-11 w-11 items-center justify-center rounded-lg ${
+        onColor ? "bg-white/20 text-white" : "text-white"
+      }`}
+      style={onColor ? undefined : { backgroundColor: co.brand }}
+    >
+      <Zap className="h-6 w-6" />
+    </div>
+  );
+}
+
 export interface DocMeta {
-  docType: string; // "Quote" | "Invoice"
+  docType: string; // "Quote" | "Invoice" | "Change Order" | "Work Order"
   number: string;
   rows: { label: string; value: string }[];
 }
@@ -51,9 +77,7 @@ export function DocHeader({
         style={{ backgroundColor: co.brand }}
       >
         <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-white/20">
-            <Zap className="h-6 w-6" />
-          </div>
+          <Mark co={co} onColor />
           <div>
             <div className="text-xl font-bold">{co.name}</div>
             <div className="text-xs text-white/80">{co.tagline}</div>
@@ -76,11 +100,14 @@ export function DocHeader({
   if (template === "minimal") {
     return (
       <div className="mb-8 flex items-end justify-between border-b border-slate-300 pb-4">
-        <div>
-          <div className="text-lg font-semibold tracking-tight text-slate-900">
-            {co.name}
+        <div className="flex items-center gap-3">
+          {co.logo && <Mark co={co} />}
+          <div>
+            <div className="text-lg font-semibold tracking-tight text-slate-900">
+              {co.name}
+            </div>
+            {info && <div className="mt-1 max-w-sm text-[11px] text-slate-500">{info}</div>}
           </div>
-          {info && <div className="mt-1 max-w-sm text-[11px] text-slate-500">{info}</div>}
         </div>
         <div className="text-right">
           <div className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">
@@ -104,12 +131,7 @@ export function DocHeader({
       style={{ borderColor: co.brand }}
     >
       <div className="flex items-center gap-3">
-        <div
-          className="flex h-11 w-11 items-center justify-center rounded-lg text-white"
-          style={{ backgroundColor: co.brand }}
-        >
-          <Zap className="h-6 w-6" />
-        </div>
+        <Mark co={co} />
         <div>
           <div className="text-xl font-bold text-slate-900">{co.name}</div>
           <div className="text-xs text-slate-500">{co.tagline}</div>
@@ -128,5 +150,15 @@ export function DocHeader({
         ))}
       </div>
     </div>
+  );
+}
+
+/** Resolve the template for a given doc type from the org's per-type map. */
+export function templateFor(
+  org: { doc_template?: string; doc_templates?: Record<string, string> } | null,
+  docType: string,
+): string {
+  return (
+    org?.doc_templates?.[docType] || org?.doc_template || "classic"
   );
 }

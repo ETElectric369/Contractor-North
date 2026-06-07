@@ -12,6 +12,7 @@ export interface CompanyInfo {
   email: string;
   license: string;
   brand: string;
+  logo: string;
 }
 
 /** Build display company info from the org record, falling back to defaults. */
@@ -30,6 +31,7 @@ export function companyFromOrg(org: Organization | null): CompanyInfo {
     email: org?.email || COMPANY.email,
     license: org?.license || COMPANY.license,
     brand: org?.brand_color || "#0b57c4",
+    logo: org?.logo_url || "",
   };
 }
 

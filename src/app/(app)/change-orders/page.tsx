@@ -1,4 +1,5 @@
-import { GitPullRequestArrow } from "lucide-react";
+import Link from "next/link";
+import { GitPullRequestArrow, Printer } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
@@ -93,7 +94,16 @@ export default async function ChangeOrdersPage() {
                     <span className="text-sm font-semibold text-slate-900">
                       {formatCurrency(c.amount)}
                     </span>
-                    <CoStatusControl id={c.id} status={c.status} />
+                    <div className="flex items-center gap-2">
+                      <Link
+                        href={`/print/change-order/${c.id}`}
+                        className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                        title="Print / PDF"
+                      >
+                        <Printer className="h-4 w-4" />
+                      </Link>
+                      <CoStatusControl id={c.id} status={c.status} />
+                    </div>
                   </div>
                 </li>
               ))}

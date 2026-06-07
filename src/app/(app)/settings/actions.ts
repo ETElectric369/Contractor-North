@@ -48,6 +48,49 @@ export async function updateOrganization(formData: FormData): Promise<Result> {
   return { ok: true };
 }
 
+export async function setLogoUrl(url: string | null): Promise<Result> {
+  const supabase = await createClient();
+  const orgId = await myOrgId(supabase);
+  if (!orgId) return { ok: false, error: "No organization." };
+  const { error } = await supabase
+    .from("organizations")
+    .update({ logo_url: url })
+    .eq("id", orgId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/settings");
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
+const ALLOWED_TEMPLATES = ["classic", "modern", "minimal"];
+const DOC_TYPES = ["quote", "invoice", "change_order", "work_order"];
+
+export async function setDocTemplateFor(
+  docType: string,
+  template: string,
+): Promise<Result> {
+  const supabase = await createClient();
+  const orgId = await myOrgId(supabase);
+  if (!orgId) return { ok: false, error: "No organization." };
+  if (!DOC_TYPES.includes(docType)) return { ok: false, error: "Unknown document type." };
+  const t = ALLOWED_TEMPLATES.includes(template) ? template : "classic";
+
+  const { data: org } = await supabase
+    .from("organizations")
+    .select("doc_templates")
+    .eq("id", orgId)
+    .single();
+  const map = { ...(org?.doc_templates ?? {}), [docType]: t };
+
+  const { error } = await supabase
+    .from("organizations")
+    .update({ doc_templates: map })
+    .eq("id", orgId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/settings");
+  return { ok: true };
+}
+
 export async function setDocTemplate(template: string): Promise<Result> {
   const supabase = await createClient();
   const orgId = await myOrgId(supabase);

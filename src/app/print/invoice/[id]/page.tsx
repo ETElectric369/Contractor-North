@@ -4,7 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PrintButton } from "@/components/print-button";
 import { companyFromOrg } from "@/components/doc-letterhead";
-import { DocHeader } from "@/components/doc-templates";
+import { DocHeader, templateFor } from "@/components/doc-templates";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import type { Invoice, InvoiceItem, Organization, Payment } from "@/lib/types";
 
@@ -45,7 +45,7 @@ export default async function InvoicePrintPage({
     .select("*")
     .maybeSingle();
   const co = companyFromOrg(org as Organization | null);
-  const template = (org as Organization | null)?.doc_template || "classic";
+  const template = templateFor(org as Organization | null, "invoice");
 
   const lineItems = (items ?? []) as InvoiceItem[];
   const pays = (payments ?? []) as Payment[];
