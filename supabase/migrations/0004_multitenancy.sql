@@ -446,6 +446,13 @@ begin
   returning id into new_org;
 
   update public.profiles set org_id = new_org, role = 'owner' where id = uid;
+  if not found then
+    -- Auth user exists but has no profile row yet (e.g. signed up before the
+    -- profiles trigger existed). Create it now.
+    insert into public.profiles (id, org_id, role, email)
+    values (uid, new_org, 'owner', auth.email())
+    on conflict (id) do update set org_id = new_org, role = 'owner';
+  end if;
 
   -- Seed standard electrical job codes for this org.
   insert into public.job_codes (org_id, code, description, billable) values
