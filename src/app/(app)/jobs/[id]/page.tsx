@@ -17,6 +17,7 @@ import { JobDocuments } from "./job-documents";
 import { JobNotes } from "./job-notes";
 import { JobBills } from "./job-bills";
 import { JobTasks } from "./job-tasks";
+import { JobPermits } from "./job-permits";
 import { JobAddTimeEntry } from "./job-add-time";
 import { JobStatusControl } from "./job-status-control";
 import { NewWorkOrderButton } from "../../work-orders/new-wo-button";
@@ -55,6 +56,7 @@ export default async function JobDetailPage({
     { data: staff },
     { data: bills },
     { data: tasks },
+    { data: permits },
   ] = await Promise.all([
     supabase.from("quotes").select("id, quote_number, status, total").eq("job_id", id),
     supabase.from("work_orders").select("id, wo_number, title, status").eq("job_id", id),
@@ -86,6 +88,11 @@ export default async function JobDetailPage({
       .order("status", { ascending: true })
       .order("priority", { ascending: false })
       .order("due_date", { ascending: true, nullsFirst: false }),
+    supabase
+      .from("permits")
+      .select("id, permit_number, type, authority, status, applied_date, issued_date, inspection_date, inspector, inspection_result, fee, notes")
+      .eq("job_id", id)
+      .order("created_at", { ascending: false }),
   ]);
 
   // Extra data for the per-tab "Add" buttons.
@@ -235,6 +242,18 @@ export default async function JobDetailPage({
         <Card>
           <CardContent className="py-5">
             <JobTasks jobId={j.id} tasks={(tasks ?? []) as any} />
+          </CardContent>
+        </Card>
+      ),
+    },
+    {
+      id: "permits",
+      label: "Permits",
+      count: permits?.length ?? 0,
+      content: (
+        <Card>
+          <CardContent className="py-5">
+            <JobPermits jobId={j.id} permits={(permits ?? []) as any} />
           </CardContent>
         </Card>
       ),
