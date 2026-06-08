@@ -10,6 +10,7 @@ import {
   ClipboardList,
   Clock,
   Boxes,
+  Tags,
   Receipt,
   ListChecks,
   TrendingUp,
@@ -79,6 +80,7 @@ export const NAV: NavSection[] = [
     title: "Office",
     items: [
       { label: "Bills & Purchasing", href: "/bills", icon: Wallet },
+      { label: "Price List", href: "/price-list", icon: Tags },
       { label: "Inventory", href: "/inventory", icon: Boxes },
       { label: "Billing", href: "/billing", icon: Receipt },
       { label: "Change Orders", href: "/change-orders", icon: GitPullRequestArrow },
