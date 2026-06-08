@@ -1,6 +1,7 @@
 import {
   LayoutDashboard,
   Users,
+  UserPlus,
   FileText,
   CalendarDays,
   ClipboardList,
@@ -41,6 +42,7 @@ export const NAV: NavSection[] = [
   {
     title: "Sales",
     items: [
+      { label: "Leads", href: "/leads", icon: UserPlus },
       { label: "CRM", href: "/crm", icon: Users },
       { label: "Quotes", href: "/quotes", icon: FileText },
     ],

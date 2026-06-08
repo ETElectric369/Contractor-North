@@ -41,6 +41,49 @@ export async function createCustomer(formData: FormData): Promise<ActionResult> 
   return { ok: true, id: data.id };
 }
 
+/** Log that a lead was contacted now; optionally set the next follow-up date. */
+export async function markContacted(
+  id: string,
+  nextFollowUp?: string | null,
+): Promise<ActionResult> {
+  const supabase = await createClient();
+  const patch: Record<string, unknown> = {
+    last_contacted_at: new Date().toISOString(),
+  };
+  if (nextFollowUp !== undefined) patch.next_follow_up_at = nextFollowUp || null;
+  const { error } = await supabase.from("customers").update(patch).eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/leads");
+  revalidatePath(`/crm/${id}`);
+  return { ok: true };
+}
+
+export async function setNextFollowUp(
+  id: string,
+  date: string | null,
+): Promise<ActionResult> {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("customers")
+    .update({ next_follow_up_at: date || null })
+    .eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/leads");
+  return { ok: true };
+}
+
+export async function convertLead(id: string): Promise<ActionResult> {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("customers")
+    .update({ status: "active" })
+    .eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/leads");
+  revalidatePath("/crm");
+  return { ok: true };
+}
+
 export async function updateCustomerStatus(
   id: string,
   status: string,
