@@ -25,7 +25,7 @@ export default async function LeadsPage() {
 
   return (
     <div>
-      <PageHeader title="Leads" description="Prospects to follow up and convert.">
+      <PageHeader title="Inquiries" description="New inquiries to follow up and convert.">
         <NewCustomerButton />
       </PageHeader>
 

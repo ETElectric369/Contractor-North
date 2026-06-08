@@ -83,7 +83,7 @@ export default async function DashboardPage() {
   );
 
   const attention = [
-    { label: "Open leads", value: leadsCount.count ?? 0, icon: UserPlus, href: "/leads", tone: "bg-indigo-50 text-indigo-600" },
+    { label: "Open inquiries", value: leadsCount.count ?? 0, icon: UserPlus, href: "/leads", tone: "bg-indigo-50 text-indigo-600" },
     { label: "Outstanding", value: formatCurrency(outstanding), icon: Receipt, href: "/billing", tone: "bg-red-50 text-red-600" },
     { label: "My hours this week", value: formatDuration(weekHours), icon: Clock, href: "/timeclock", tone: "bg-green-50 text-green-600" },
   ];

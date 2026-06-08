@@ -36,7 +36,7 @@ export default async function CrmPage({
 
   return (
     <div>
-      <PageHeader title="CRM" description="Customers, leads, and contacts.">
+      <PageHeader title="Customers" description="Customers, inquiries, and contacts.">
         <NewCustomerButton />
       </PageHeader>
 

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
+import { CameraCapture } from "@/components/camera-capture";
 import { addDocument, deleteDocument } from "../actions";
 
 const CATEGORIES = ["Receipt", "Bill", "Invoice", "Photo", "Plan", "Permit", "Other"];
@@ -44,9 +45,9 @@ export function JobDocuments({
   const [busy, setBusy] = useState(false);
   const [pending, start] = useTransition();
   const fileRef = useRef<HTMLInputElement>(null);
+  const [showCamera, setShowCamera] = useState(false);
 
-  async function onFiles(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? []);
+  async function uploadFiles(files: File[]) {
     if (!files.length) return;
     setError(null);
     setBusy(true);
@@ -77,8 +78,12 @@ export function JobDocuments({
       setError(err?.message ?? "Upload failed.");
     } finally {
       setBusy(false);
-      if (fileRef.current) fileRef.current.value = "";
     }
+  }
+
+  function onFiles(e: React.ChangeEvent<HTMLInputElement>) {
+    uploadFiles(Array.from(e.target.files ?? []));
+    if (fileRef.current) fileRef.current.value = "";
   }
 
   function remove(d: Doc) {
@@ -111,18 +116,20 @@ export function JobDocuments({
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
           Upload file
         </Button>
-        {/* On phones this opens the camera directly. */}
-        <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50">
+        <Button variant="outline" type="button" onClick={() => setShowCamera(true)} disabled={busy}>
           <Camera className="h-4 w-4" /> Take photo
-          <input
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={onFiles}
-          />
-        </label>
+        </Button>
       </div>
+
+      {showCamera && (
+        <CameraCapture
+          onCapture={(file) => {
+            setShowCamera(false);
+            uploadFiles([file]);
+          }}
+          onClose={() => setShowCamera(false)}
+        />
+      )}
       {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
 
       {docs.length === 0 ? (
