@@ -11,15 +11,18 @@ export function Sidebar({
   onNavigate,
   branding,
   lang,
+  role,
 }: {
   onNavigate?: () => void;
   branding?: { name: string | null; logo: string | null };
   lang?: string;
+  role?: string;
 }) {
   const pathname = usePathname();
   const name = branding?.name || "Contractor North";
   const logo = branding?.logo;
   const t = translator(lang);
+  const isStaff = role === "owner" || role === "admin" || role === "office";
 
   return (
     <aside className="flex h-full w-64 flex-col border-r border-slate-200 bg-white">
@@ -51,7 +54,9 @@ export function Sidebar({
               {t(section.title)}
             </div>
             <ul className="space-y-0.5">
-              {section.items.map((item) => {
+              {section.items
+                .filter((item) => !item.staffOnly || isStaff)
+                .map((item) => {
                 const active =
                   pathname === item.href || pathname.startsWith(item.href + "/");
                 const Icon = item.icon;

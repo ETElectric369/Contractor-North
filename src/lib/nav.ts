@@ -4,6 +4,7 @@ import {
   UserPlus,
   FileText,
   CalendarDays,
+  CalendarClock,
   ClipboardList,
   Clock,
   ShoppingCart,
@@ -24,6 +25,8 @@ export interface NavItem {
   icon: LucideIcon;
   /** Marks modules that are scaffolded but not yet built out. */
   comingSoon?: boolean;
+  /** Hidden from techs (office/admin/owner only). */
+  staffOnly?: boolean;
 }
 
 export interface NavSection {
@@ -53,6 +56,7 @@ export const NAV: NavSection[] = [
       { label: "Schedule", href: "/schedule", icon: CalendarDays },
       { label: "Work Orders", href: "/work-orders", icon: ClipboardList },
       { label: "Timeclock", href: "/timeclock", icon: Clock },
+      { label: "Timecards", href: "/timecards", icon: CalendarClock, staffOnly: true },
       { label: "Material Lists", href: "/materials", icon: ListChecks },
     ],
   },
