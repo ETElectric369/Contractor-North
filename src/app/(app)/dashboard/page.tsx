@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
+import { WeatherWidget } from "@/components/weather-widget";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatCurrency, formatDate, hoursBetween, formatDuration } from "@/lib/utils";
@@ -113,6 +114,14 @@ export default async function DashboardPage() {
   ];
   const quote = QUOTES[new Date().getDate() % QUOTES.length];
 
+  // Org location for the weather widget (RLS returns only the user's org).
+  const { data: org } = await supabase
+    .from("organizations")
+    .select("name, city, state, zip")
+    .limit(1)
+    .maybeSingle();
+  const orgLocation = [org?.city, org?.state, org?.zip].filter(Boolean).join(", ") || null;
+
   const stats = [
     {
       label: "Customers",
@@ -150,6 +159,8 @@ export default async function DashboardPage() {
         title="Dashboard"
         description="Your business at a glance."
       />
+
+      <WeatherWidget location={orgLocation} label={org?.city ?? undefined} />
 
       <div className="mb-6 rounded-xl bg-brand-light/50 px-4 py-3 text-sm italic text-brand-dark">
         “{quote}”
