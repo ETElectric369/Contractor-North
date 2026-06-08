@@ -28,6 +28,42 @@ export async function POST(req: Request) {
 
   const supabase = createServiceClient();
 
+  async function recordInvoicePayment(
+    invoiceId: string | undefined,
+    orgId: string | undefined,
+    amount: number,
+  ) {
+    if (!invoiceId || !orgId || amount <= 0) return;
+    // org_id is set explicitly (the set_org_id trigger has no auth context here).
+    await supabase.from("payments").insert({
+      invoice_id: invoiceId,
+      org_id: orgId,
+      amount,
+      method: "card",
+      note: "Online payment",
+    });
+    const { data: pays } = await supabase
+      .from("payments")
+      .select("amount")
+      .eq("invoice_id", invoiceId);
+    const { data: inv } = await supabase
+      .from("invoices")
+      .select("total, status")
+      .eq("id", invoiceId)
+      .single();
+    const paid =
+      (pays ?? []).reduce((s: number, p: any) => s + Number(p.amount ?? 0), 0);
+    let status = inv?.status ?? "sent";
+    if (status !== "void") {
+      const total = Number(inv?.total ?? 0);
+      status = paid >= total && total > 0 ? "paid" : paid > 0 ? "partial" : status;
+    }
+    await supabase
+      .from("invoices")
+      .update({ amount_paid: paid, status })
+      .eq("id", invoiceId);
+  }
+
   async function syncSubscription(sub: Stripe.Subscription) {
     const orgId = sub.metadata?.org_id;
     const customerId =
@@ -57,7 +93,13 @@ export async function POST(req: Request) {
       break;
     case "checkout.session.completed": {
       const session = event.data.object as Stripe.Checkout.Session;
-      if (session.subscription) {
+      if (session.metadata?.kind === "invoice_payment") {
+        await recordInvoicePayment(
+          session.metadata.invoice_id,
+          session.metadata.org_id,
+          (session.amount_total ?? 0) / 100,
+        );
+      } else if (session.subscription) {
         const sub = await getStripe().subscriptions.retrieve(
           session.subscription as string,
         );

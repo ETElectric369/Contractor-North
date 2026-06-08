@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, User, FileText, Printer } from "lucide-react";
+import { ArrowLeft, User, FileText, Printer, CreditCard } from "lucide-react";
+import { billingEnabled } from "@/lib/stripe";
 import { createClient } from "@/lib/supabase/server";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
@@ -80,7 +81,17 @@ export default async function InvoicePage({
           )}
         </div>
         </div>
-        <div className="flex items-center gap-2 self-start">
+        <div className="flex flex-wrap items-center gap-2 self-start">
+          {billingEnabled && Number(inv.total) - Number(inv.amount_paid) > 0 && (
+            <a
+              href={`/api/pay/${(inv as any).public_token}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700"
+            >
+              <CreditCard className="h-4 w-4" /> Collect payment
+            </a>
+          )}
           <EmailButton id={inv.id} kind="invoice" />
           <Link
             href={`/print/invoice/${inv.id}`}

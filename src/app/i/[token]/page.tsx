@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { PrintButton } from "@/components/print-button";
 import { companyFromOrg } from "@/components/doc-letterhead";
 import { DocHeader, templateFor } from "@/components/doc-templates";
+import { billingEnabled } from "@/lib/stripe";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import type { Organization } from "@/lib/types";
 
@@ -10,10 +11,13 @@ export const dynamic = "force-dynamic";
 
 export default async function PublicInvoicePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ token: string }>;
+  searchParams: Promise<{ paid?: string }>;
 }) {
   const { token } = await params;
+  const { paid } = await searchParams;
   const supabase = await createClient();
   const { data } = await supabase.rpc("public_invoice", { p_token: token });
   if (!data) notFound();
@@ -31,6 +35,26 @@ export default async function PublicInvoicePage({
       <div className="no-print mx-auto mb-4 flex max-w-3xl items-center justify-end px-4">
         <PrintButton label="Print / Save PDF" />
       </div>
+
+      {paid && (
+        <div className="no-print mx-auto mb-4 max-w-3xl px-4">
+          <div className="rounded-xl bg-green-50 px-4 py-3 text-center text-sm font-medium text-green-700">
+            Payment received — thank you!
+          </div>
+        </div>
+      )}
+      {!paid && balance > 0 && billingEnabled && (
+        <div className="no-print mx-auto mb-4 max-w-3xl px-4 text-center">
+          <a
+            href={`/api/pay/${token}`}
+            className="inline-flex items-center gap-2 rounded-xl px-6 py-3 text-base font-semibold text-white shadow-sm"
+            style={{ backgroundColor: co.brand }}
+          >
+            Pay {formatCurrency(balance)} now
+          </a>
+          <p className="mt-1.5 text-xs text-slate-400">Secure payment by card, Apple Pay, or Google Pay.</p>
+        </div>
+      )}
       <div className="print-page mx-auto max-w-3xl bg-white p-10 shadow-sm">
         <DocHeader
           co={co}
