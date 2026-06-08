@@ -26,12 +26,20 @@ export default async function PurchaseOrderPage({
   if (!po) notFound();
   const p = po as PurchaseOrder & { jobs: any };
 
-  const { data: items } = await supabase
-    .from("purchase_order_items")
-    .select("*")
-    .eq("po_id", id)
-    .order("sort_order")
-    .order("created_at", { ascending: true });
+  const [{ data: items }, { data: priceItems }] = await Promise.all([
+    supabase
+      .from("purchase_order_items")
+      .select("*")
+      .eq("po_id", id)
+      .order("sort_order")
+      .order("created_at", { ascending: true }),
+    supabase
+      .from("price_list_items")
+      .select("id, code, description, unit, buy_price")
+      .eq("archived", false)
+      .order("description")
+      .limit(2000),
+  ]);
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -62,7 +70,7 @@ export default async function PurchaseOrderPage({
         </div>
       </div>
 
-      <PoDetail po={p} items={(items ?? []) as PurchaseOrderItem[]} />
+      <PoDetail po={p} items={(items ?? []) as PurchaseOrderItem[]} priceItems={(priceItems ?? []) as any} />
     </div>
   );
 }

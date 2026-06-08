@@ -11,12 +11,16 @@ import { formatCurrency } from "@/lib/utils";
 import type { PurchaseOrder, PurchaseOrderItem } from "@/lib/types";
 import { addPoItem, deletePoItem, setPoStatus, receiveItem } from "../actions";
 
+interface PriceItemLite { id: string; code: string | null; description: string; unit: string; buy_price: number; }
+
 export function PoDetail({
   po,
   items,
+  priceItems = [],
 }: {
   po: PurchaseOrder;
   items: PurchaseOrderItem[];
+  priceItems?: PriceItemLite[];
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -26,6 +30,26 @@ export function PoDetail({
   const [qty, setQty] = useState(1);
   const [unit, setUnit] = useState("ea");
   const [cost, setCost] = useState(0);
+  const [plQuery, setPlQuery] = useState("");
+  const [plOpen, setPlOpen] = useState(false);
+
+  const plMatches = plQuery.trim()
+    ? priceItems.filter((p) => [p.code, p.description].some((v) => (v ?? "").toLowerCase().includes(plQuery.trim().toLowerCase()))).slice(0, 6)
+    : [];
+  function addFromPrice(p: PriceItemLite) {
+    start(async () => {
+      await addPoItem(po.id, {
+        description: p.description,
+        part_number: p.code || null,
+        quantity: 1,
+        unit: p.unit || "ea",
+        unit_cost: Number(p.buy_price) || 0,
+      });
+      setPlQuery("");
+      setPlOpen(false);
+      refresh();
+    });
+  }
 
   const canReceive = po.status === "sent" || po.status === "partial";
 
@@ -79,6 +103,38 @@ export function PoDetail({
           </span>
         )}
       </div>
+
+      {priceItems.length > 0 && (
+        <div className="relative">
+          <Input
+            placeholder="Add from Price List — search CED parts…"
+            value={plQuery}
+            onChange={(e) => { setPlQuery(e.target.value); setPlOpen(true); }}
+            onFocus={() => setPlOpen(true)}
+            onBlur={() => setTimeout(() => setPlOpen(false), 150)}
+          />
+          {plOpen && plMatches.length > 0 && (
+            <ul className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+              {plMatches.map((p) => (
+                <li key={p.id}>
+                  <button
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => addFromPrice(p)}
+                    className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-slate-50"
+                  >
+                    <span className="min-w-0 truncate">
+                      {p.code && <span className="mr-1 font-mono text-xs text-slate-400">{p.code}</span>}
+                      {p.description}
+                    </span>
+                    <span className="shrink-0 text-slate-600">{formatCurrency(p.buy_price)}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
         <table className="w-full text-sm">
