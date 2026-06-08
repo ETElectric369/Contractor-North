@@ -12,6 +12,7 @@ import {
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { WeatherWidget } from "@/components/weather-widget";
+import { TasksWidget } from "@/components/tasks-widget";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatCurrency, formatDate, hoursBetween, formatDuration } from "@/lib/utils";
@@ -122,6 +123,15 @@ export default async function DashboardPage() {
     .maybeSingle();
   const orgLocation = [org?.city, org?.state, org?.zip].filter(Boolean).join(", ") || null;
 
+  // Top 6 priority tasks for the dashboard widget.
+  const { data: priorityTasks } = await supabase
+    .from("tasks")
+    .select("id, title, category, priority, due_date, job_id, jobs(name)")
+    .eq("status", "open")
+    .order("priority", { ascending: false })
+    .order("due_date", { ascending: true, nullsFirst: false })
+    .limit(6);
+
   const stats = [
     {
       label: "Customers",
@@ -230,6 +240,10 @@ export default async function DashboardPage() {
             </Link>
           );
         })}
+      </div>
+
+      <div className="mt-6">
+        <TasksWidget tasks={(priorityTasks ?? []) as any} />
       </div>
 
       <Card className="mt-6">

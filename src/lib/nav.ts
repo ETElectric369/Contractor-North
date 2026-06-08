@@ -13,6 +13,10 @@ import {
   Boxes,
   Receipt,
   ListChecks,
+  TrendingUp,
+  Wrench,
+  Building2,
+  Wallet,
   FileSpreadsheet,
   GitPullRequestArrow,
   ScanLine,
@@ -45,6 +49,14 @@ export const NAV: NavSection[] = [
     ],
   },
   {
+    title: "Tasks",
+    items: [
+      { label: "Sales", href: "/tasks/sales", icon: TrendingUp },
+      { label: "Operations", href: "/tasks/operations", icon: Wrench },
+      { label: "Office", href: "/tasks/office", icon: Building2 },
+    ],
+  },
+  {
     title: "Sales",
     items: [
       { label: "Inquiries", href: "/leads", icon: UserPlus },
@@ -67,6 +79,7 @@ export const NAV: NavSection[] = [
   {
     title: "Office",
     items: [
+      { label: "Bills & Purchasing", href: "/bills", icon: Wallet },
       { label: "Purchasing", href: "/purchasing", icon: ShoppingCart },
       { label: "Inventory", href: "/inventory", icon: Boxes },
       { label: "Billing", href: "/billing", icon: Receipt },

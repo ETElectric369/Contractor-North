@@ -16,6 +16,7 @@ import {
 import { JobDocuments } from "./job-documents";
 import { JobNotes } from "./job-notes";
 import { JobBills } from "./job-bills";
+import { JobTasks } from "./job-tasks";
 import { JobStatusControl } from "./job-status-control";
 import { ConvertButton } from "@/components/convert-button";
 import { EditCustomerButton } from "../../crm/[id]/edit-customer-button";
@@ -50,6 +51,7 @@ export default async function JobDetailPage({
     { data: docRows },
     { data: staff },
     { data: bills },
+    { data: tasks },
   ] = await Promise.all([
     supabase.from("quotes").select("id, quote_number, status, total").eq("job_id", id),
     supabase.from("work_orders").select("id, wo_number, title, status").eq("job_id", id),
@@ -74,6 +76,13 @@ export default async function JobDetailPage({
       .select("id, supplier, bill_number, amount, status, bill_date")
       .eq("job_id", id)
       .order("created_at", { ascending: false }),
+    supabase
+      .from("tasks")
+      .select("id, title, category, status, priority, due_date")
+      .eq("job_id", id)
+      .order("status", { ascending: true })
+      .order("priority", { ascending: false })
+      .order("due_date", { ascending: true, nullsFirst: false }),
   ]);
 
   // Costing
@@ -200,6 +209,18 @@ export default async function JobDetailPage({
         <Card>
           <CardContent className="py-5">
             <JobNotes jobId={j.id} notes={j.notes} />
+          </CardContent>
+        </Card>
+      ),
+    },
+    {
+      id: "tasks",
+      label: "Tasks",
+      count: (tasks ?? []).filter((t: any) => t.status !== "done").length,
+      content: (
+        <Card>
+          <CardContent className="py-5">
+            <JobTasks jobId={j.id} tasks={(tasks ?? []) as any} />
           </CardContent>
         </Card>
       ),
