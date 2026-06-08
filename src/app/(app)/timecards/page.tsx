@@ -64,7 +64,8 @@ export default async function TimecardsPage({
 
   for (const e of entries ?? []) {
     const name = (e as any).profiles?.full_name ?? "—";
-    const rec = byTech.get(e.profile_id) ?? { name, entries: [], hours: 0 };
+    const rec =
+      byTech.get(e.profile_id) ?? { name, entries: [] as any[], hours: 0 };
     rec.entries.push(e);
     if (e.status === "closed" && e.clock_out) {
       const h = hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes);
