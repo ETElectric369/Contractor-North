@@ -54,7 +54,7 @@ export const NAV: NavSection[] = [
   {
     title: "Operations",
     items: [
-      { label: "Schedule", href: "/schedule", icon: CalendarDays },
+      { label: "Scheduler", href: "/schedule", icon: CalendarDays },
       { label: "Jobs", href: "/jobs", icon: Briefcase },
       { label: "Work Orders", href: "/work-orders", icon: ClipboardList },
       { label: "Timeclock", href: "/timeclock", icon: Clock },

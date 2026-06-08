@@ -45,6 +45,37 @@ export async function setJobStatus(id: string, status: string): Promise<Result> 
   return { ok: true };
 }
 
+/** Assign a job to a single employee (or clear). */
+export async function setJobAssignee(
+  id: string,
+  employeeId: string,
+): Promise<Result> {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("jobs")
+    .update({ assigned_to: employeeId ? [employeeId] : [] })
+    .eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/schedule");
+  revalidatePath(`/jobs/${id}`);
+  return { ok: true };
+}
+
+/** Reschedule a job (ISO string from the client, or null to clear). */
+export async function rescheduleJob(
+  id: string,
+  startIso: string | null,
+): Promise<Result> {
+  const supabase = await createClient();
+  const patch: Record<string, unknown> = { scheduled_start: startIso };
+  if (startIso) patch.status = "scheduled";
+  const { error } = await supabase.from("jobs").update(patch).eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/schedule");
+  revalidatePath(`/jobs/${id}`);
+  return { ok: true };
+}
+
 function emptyToNull(v: FormDataEntryValue | null): string | null {
   const s = String(v ?? "").trim();
   return s.length ? s : null;
