@@ -37,6 +37,57 @@ export async function createInvoiceForJob(
   });
 }
 
+export async function createBill(input: {
+  job_id: string;
+  supplier: string;
+  bill_number: string;
+  amount: number;
+  status: string;
+  bill_date: string | null;
+  notes: string;
+}): Promise<Result> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+  if (!input.supplier.trim()) return { ok: false, error: "Supplier is required." };
+
+  const { error } = await supabase.from("bills").insert({
+    job_id: input.job_id,
+    supplier: input.supplier.trim(),
+    bill_number: input.bill_number.trim() || null,
+    amount: input.amount || 0,
+    status: input.status || "unpaid",
+    bill_date: input.bill_date || null,
+    notes: input.notes.trim() || null,
+    created_by: user.id,
+  });
+  if (error) return { ok: false, error: error.message };
+  revalidatePath(`/jobs/${input.job_id}`);
+  return { ok: true };
+}
+
+export async function setBillStatus(
+  id: string,
+  status: string,
+  jobId: string,
+): Promise<Result> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("bills").update({ status }).eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath(`/jobs/${jobId}`);
+  return { ok: true };
+}
+
+export async function deleteBill(id: string, jobId: string): Promise<Result> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("bills").delete().eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath(`/jobs/${jobId}`);
+  return { ok: true };
+}
+
 export async function updateJobNotes(
   jobId: string,
   notes: string,

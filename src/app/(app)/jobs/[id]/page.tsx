@@ -15,6 +15,7 @@ import {
 } from "@/lib/utils";
 import { JobDocuments } from "./job-documents";
 import { JobNotes } from "./job-notes";
+import { JobBills } from "./job-bills";
 import { JobStatusControl } from "./job-status-control";
 import { ConvertButton } from "@/components/convert-button";
 import { EditCustomerButton } from "../../crm/[id]/edit-customer-button";
@@ -48,6 +49,7 @@ export default async function JobDetailPage({
     { data: entries },
     { data: docRows },
     { data: staff },
+    { data: bills },
   ] = await Promise.all([
     supabase.from("quotes").select("id, quote_number, status, total").eq("job_id", id),
     supabase.from("work_orders").select("id, wo_number, title, status").eq("job_id", id),
@@ -67,6 +69,11 @@ export default async function JobDetailPage({
     j.assigned_to?.length
       ? supabase.from("profiles").select("id, full_name").in("id", j.assigned_to)
       : Promise.resolve({ data: [] as any[] }),
+    supabase
+      .from("bills")
+      .select("id, supplier, bill_number, amount, status, bill_date")
+      .eq("job_id", id)
+      .order("created_at", { ascending: false }),
   ]);
 
   // Costing
@@ -89,10 +96,11 @@ export default async function JobDetailPage({
     }
   }
   const materialCost = (pos ?? []).reduce((s: number, p: any) => s + Number(p.total ?? 0), 0);
+  const billsCost = (bills ?? []).reduce((s: number, b: any) => s + Number(b.amount ?? 0), 0);
   const invoiced = (invoices ?? []).reduce((s: number, i: any) => s + Number(i.total ?? 0), 0);
   const quoted = (quotes ?? []).reduce((s: number, q: any) => s + Number(q.total ?? 0), 0);
   const revenue = invoiced > 0 ? invoiced : quoted;
-  const profit = revenue - laborCost - materialCost;
+  const profit = revenue - laborCost - materialCost - billsCost;
   const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
 
   const docs = await Promise.all(
@@ -233,10 +241,11 @@ export default async function JobDetailPage({
         <div className="space-y-4">
           <Card>
             <CardContent className="py-5">
-              <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-6">
                 <div><div className="text-lg font-bold text-slate-900">{formatCurrency(revenue)}</div><div className="text-xs text-slate-500">{invoiced > 0 ? "Invoiced" : "Quoted"}</div></div>
                 <div><div className="text-lg font-bold text-slate-900">{formatCurrency(laborCost)}</div><div className="text-xs text-slate-500">Labor · {formatDuration(laborHours)}</div></div>
                 <div><div className="text-lg font-bold text-slate-900">{formatCurrency(materialCost)}</div><div className="text-xs text-slate-500">Materials</div></div>
+                <div><div className="text-lg font-bold text-slate-900">{formatCurrency(billsCost)}</div><div className="text-xs text-slate-500">Bills</div></div>
                 <div><div className={`text-lg font-bold ${profit >= 0 ? "text-green-600" : "text-red-600"}`}>{formatCurrency(profit)}</div><div className="text-xs text-slate-500">Profit</div></div>
                 <div><div className={`text-lg font-bold ${profit >= 0 ? "text-green-600" : "text-red-600"}`}>{margin.toFixed(0)}%</div><div className="text-xs text-slate-500">Margin</div></div>
               </div>
@@ -257,6 +266,18 @@ export default async function JobDetailPage({
             </ul>
           </Card>
         </div>
+      ),
+    },
+    {
+      id: "bills",
+      label: "Bills",
+      count: bills?.length ?? 0,
+      content: (
+        <Card>
+          <CardContent className="py-5">
+            <JobBills jobId={j.id} bills={(bills ?? []) as any} />
+          </CardContent>
+        </Card>
       ),
     },
     {
