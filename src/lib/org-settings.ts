@@ -17,6 +17,7 @@ export interface OrgSettings {
 
   // Financial
   default_labor_rate: number;
+  mileage_rate: number; // $ per mile (e.g. IRS standard rate)
 
   // Scheduling
   work_day_start: string; // "08:00"
@@ -44,6 +45,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   document_footer: "",
   deposit_percent: 0,
   default_labor_rate: 0,
+  mileage_rate: 0.7,
   work_day_start: "08:00",
   work_day_end: "17:00",
   week_start: "monday",

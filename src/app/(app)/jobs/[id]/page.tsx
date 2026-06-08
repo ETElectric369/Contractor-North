@@ -25,6 +25,7 @@ import { NewPoButton } from "../../purchasing/new-po-button";
 import { ConvertButton } from "@/components/convert-button";
 import { EditCustomerButton } from "../../crm/[id]/edit-customer-button";
 import { createInvoiceForJob } from "../actions";
+import { getOrgSettings } from "@/lib/org-settings";
 import type { Customer } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -65,7 +66,7 @@ export default async function JobDetailPage({
     supabase.from("purchase_orders").select("id, po_number, vendor, status, total").eq("job_id", id),
     supabase
       .from("time_entries")
-      .select("id, clock_in, clock_out, lunch_minutes, status, job_code, profiles(full_name, hourly_rate), time_allocations(id, hours, job_code)")
+      .select("id, clock_in, clock_out, lunch_minutes, miles, status, job_code, profiles(full_name, hourly_rate), time_allocations(id, hours, job_code)")
       .eq("job_id", id)
       .order("clock_in", { ascending: false }),
     supabase
@@ -99,12 +100,16 @@ export default async function JobDetailPage({
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  const [{ data: techs }, { data: jobCodes }, { data: lists }] = await Promise.all([
+  const [{ data: techs }, { data: jobCodes }, { data: lists }, { data: org }] = await Promise.all([
     supabase.from("profiles").select("id, full_name").order("full_name"),
     supabase.from("job_codes").select("*").order("code"),
     supabase.from("material_lists").select("id, name").order("created_at", { ascending: false }).limit(100),
+    supabase.from("organizations").select("address_line1, city, state, zip, settings").limit(1).maybeSingle(),
   ]);
   const thisJobOpt = [{ id: j.id, job_number: j.job_number, name: j.name }];
+  const companyAddress = [org?.address_line1, org?.city, org?.state, org?.zip].filter(Boolean).join(", ");
+  const jobAddress = [j.address, j.city, j.state, j.zip].filter(Boolean).join(", ");
+  const mileageRate = getOrgSettings((org as any)?.settings).mileage_rate;
 
   // Costing
   let laborCost = 0;
@@ -127,10 +132,12 @@ export default async function JobDetailPage({
   }
   const materialCost = (pos ?? []).reduce((s: number, p: any) => s + Number(p.total ?? 0), 0);
   const billsCost = (bills ?? []).reduce((s: number, b: any) => s + Number(b.amount ?? 0), 0);
+  const totalMiles = (entries ?? []).reduce((s: number, e: any) => s + Number(e.miles ?? 0), 0);
+  const mileageCost = totalMiles * mileageRate;
   const invoiced = (invoices ?? []).reduce((s: number, i: any) => s + Number(i.total ?? 0), 0);
   const quoted = (quotes ?? []).reduce((s: number, q: any) => s + Number(q.total ?? 0), 0);
   const revenue = invoiced > 0 ? invoiced : quoted;
-  const profit = revenue - laborCost - materialCost - billsCost;
+  const profit = revenue - laborCost - materialCost - billsCost - mileageCost;
   const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
 
   const docs = await Promise.all(
@@ -271,6 +278,9 @@ export default async function JobDetailPage({
               techs={techs ?? []}
               jobCodes={(jobCodes ?? []) as any}
               defaultProfileId={user?.id ?? ""}
+              companyAddress={companyAddress}
+              jobAddress={jobAddress}
+              mileageRate={mileageRate}
             />
           </div>
           <ul className="divide-y divide-slate-100">
@@ -300,11 +310,12 @@ export default async function JobDetailPage({
         <div className="space-y-4">
           <Card>
             <CardContent className="py-5">
-              <div className="grid grid-cols-2 gap-4 sm:grid-cols-6">
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-7">
                 <div><div className="text-lg font-bold text-slate-900">{formatCurrency(revenue)}</div><div className="text-xs text-slate-500">{invoiced > 0 ? "Invoiced" : "Quoted"}</div></div>
                 <div><div className="text-lg font-bold text-slate-900">{formatCurrency(laborCost)}</div><div className="text-xs text-slate-500">Labor · {formatDuration(laborHours)}</div></div>
                 <div><div className="text-lg font-bold text-slate-900">{formatCurrency(materialCost)}</div><div className="text-xs text-slate-500">Materials</div></div>
                 <div><div className="text-lg font-bold text-slate-900">{formatCurrency(billsCost)}</div><div className="text-xs text-slate-500">Bills</div></div>
+                <div><div className="text-lg font-bold text-slate-900">{formatCurrency(mileageCost)}</div><div className="text-xs text-slate-500">Mileage · {totalMiles} mi</div></div>
                 <div><div className={`text-lg font-bold ${profit >= 0 ? "text-green-600" : "text-red-600"}`}>{formatCurrency(profit)}</div><div className="text-xs text-slate-500">Profit</div></div>
                 <div><div className={`text-lg font-bold ${profit >= 0 ? "text-green-600" : "text-red-600"}`}>{margin.toFixed(0)}%</div><div className="text-xs text-slate-500">Margin</div></div>
               </div>

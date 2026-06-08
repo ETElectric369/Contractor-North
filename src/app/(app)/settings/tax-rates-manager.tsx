@@ -31,6 +31,7 @@ export function TaxRatesManager({
   const [error, setError] = useState<string | null>(null);
 
   const [laborRate, setLaborRate] = useState(settings.default_labor_rate);
+  const [mileageRate, setMileageRate] = useState(settings.mileage_rate);
   const [savedLabor, setSavedLabor] = useState(false);
 
   function add() {
@@ -99,13 +100,17 @@ export function TaxRatesManager({
       <div className="border-t border-slate-100 pt-4">
         <h4 className="mb-2 text-sm font-semibold text-slate-900">Defaults</h4>
         <div className="flex items-end gap-3">
-          <div className="w-48">
+          <div className="w-44">
             <Label htmlFor="fin-labor">Default labor rate ($/hr)</Label>
             <NumberInput id="fin-labor" value={laborRate} onValueChange={setLaborRate} />
           </div>
+          <div className="w-44">
+            <Label htmlFor="fin-mileage">Mileage rate ($/mi)</Label>
+            <NumberInput id="fin-mileage" value={mileageRate} onValueChange={setMileageRate} />
+          </div>
           <Button
             size="sm"
-            onClick={() => start(async () => { await updateOrgSettings({ default_labor_rate: laborRate }); setSavedLabor(true); setTimeout(() => setSavedLabor(false), 2000); })}
+            onClick={() => start(async () => { await updateOrgSettings({ default_labor_rate: laborRate, mileage_rate: mileageRate }); setSavedLabor(true); setTimeout(() => setSavedLabor(false), 2000); })}
             disabled={pending}
           >
             Save

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
+import { drivingDistanceMiles } from "@/lib/google-maps";
 import { createManualEntry } from "../../timeclock/actions";
 import type { JobCode } from "@/lib/types";
 
@@ -20,16 +21,33 @@ export function JobAddTimeEntry({
   techs,
   jobCodes,
   defaultProfileId,
+  companyAddress,
+  jobAddress,
+  mileageRate = 0,
 }: {
   jobId: string;
   techs: Tech[];
   jobCodes: JobCode[];
   defaultProfileId: string;
+  companyAddress?: string;
+  jobAddress?: string;
+  mileageRate?: number;
 }) {
   const router = useRouter();
+  const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const [miles, setMiles] = useState(0);
+  const [calcing, setCalcing] = useState(false);
+
+  async function autoMiles() {
+    if (!key || !companyAddress || !jobAddress) return;
+    setCalcing(true);
+    const oneWay = await drivingDistanceMiles(key, companyAddress, jobAddress);
+    setCalcing(false);
+    if (oneWay != null) setMiles(Math.round(oneWay * 2 * 10) / 10); // round trip
+  }
 
   const now = new Date();
   const p = (n: number) => String(n).padStart(2, "0");
@@ -56,6 +74,7 @@ export function JobAddTimeEntry({
         job_code: jobCode || null,
         lunch_minutes: lunch,
         notes,
+        miles,
       });
       if (!res.ok) return setError(res.error ?? "Could not save.");
       setOpen(false);
@@ -104,9 +123,24 @@ export function JobAddTimeEntry({
               </Select>
             </div>
           </div>
-          <div className="w-1/2 pr-1.5">
-            <Label htmlFor="at-lunch">Lunch (minutes)</Label>
-            <NumberInput id="at-lunch" value={lunch} onValueChange={setLunch} />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label htmlFor="at-lunch">Lunch (minutes)</Label>
+              <NumberInput id="at-lunch" value={lunch} onValueChange={setLunch} />
+            </div>
+            <div>
+              <Label htmlFor="at-miles">
+                Miles{mileageRate > 0 && miles > 0 ? ` · $${(miles * mileageRate).toFixed(2)}` : ""}
+              </Label>
+              <div className="flex gap-2">
+                <NumberInput id="at-miles" value={miles} onValueChange={setMiles} />
+                {key && companyAddress && jobAddress && (
+                  <Button type="button" size="sm" variant="outline" onClick={autoMiles} disabled={calcing} title="Round trip: company ↔ job">
+                    {calcing ? "…" : "Auto"}
+                  </Button>
+                )}
+              </div>
+            </div>
           </div>
           <div>
             <Label htmlFor="at-notes">Notes</Label>

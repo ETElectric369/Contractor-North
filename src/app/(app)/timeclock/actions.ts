@@ -112,6 +112,7 @@ export async function createManualEntry(input: {
   job_code: string | null;
   lunch_minutes: number;
   notes: string;
+  miles?: number;
 }): Promise<ClockResult> {
   const supabase = await createClient();
   const {
@@ -142,6 +143,7 @@ export async function createManualEntry(input: {
     clock_out: co.toISOString(),
     lunch_minutes: input.lunch_minutes || 0,
     notes: input.notes || null,
+    miles: input.miles ?? 0,
     status: "closed",
     source: "manual",
   });
@@ -161,6 +163,7 @@ export async function updateTimeEntry(input: {
   lunch_minutes: number;
   job_code: string | null;
   notes: string;
+  miles?: number;
 }): Promise<ClockResult> {
   const supabase = await createClient();
   const ci = new Date(input.clock_in);
@@ -178,6 +181,7 @@ export async function updateTimeEntry(input: {
       lunch_minutes: input.lunch_minutes || 0,
       job_code: input.job_code,
       notes: input.notes || null,
+      miles: input.miles ?? 0,
       status: "closed",
     })
     .eq("id", input.id);

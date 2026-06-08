@@ -17,6 +17,7 @@ interface Entry {
   lunch_minutes: number;
   job_code: string | null;
   notes: string | null;
+  miles?: number;
 }
 
 function parts(iso: string | null) {
@@ -48,6 +49,7 @@ export function EditEntryButton({
   const [endT, setEndT] = useState(outP.time || inP.time);
   const [jobCode, setJobCode] = useState(entry.job_code ?? "");
   const [lunch, setLunch] = useState(entry.lunch_minutes ?? 0);
+  const [miles, setMiles] = useState(entry.miles ?? 0);
   const [notes, setNotes] = useState(entry.notes ?? "");
 
   function save() {
@@ -64,6 +66,7 @@ export function EditEntryButton({
         lunch_minutes: lunch,
         job_code: jobCode || null,
         notes,
+        miles,
       });
       if (!res.ok) return setError(res.error ?? "Could not save.");
       setOpen(false);
@@ -110,7 +113,7 @@ export function EditEntryButton({
               <Input id="e-end" type="time" value={endT} onChange={(e) => setEndT(e.target.value)} />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             <div>
               <Label htmlFor="e-code">Job code</Label>
               <Select id="e-code" value={jobCode} onChange={(e) => setJobCode(e.target.value)}>
@@ -123,8 +126,12 @@ export function EditEntryButton({
               </Select>
             </div>
             <div>
-              <Label htmlFor="e-lunch">Lunch (minutes)</Label>
+              <Label htmlFor="e-lunch">Lunch (min)</Label>
               <NumberInput id="e-lunch" value={lunch} onValueChange={setLunch} />
+            </div>
+            <div>
+              <Label htmlFor="e-miles">Miles</Label>
+              <NumberInput id="e-miles" value={miles} onValueChange={setMiles} />
             </div>
           </div>
           <div>

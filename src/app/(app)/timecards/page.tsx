@@ -64,7 +64,7 @@ export default async function TimecardsPage({
   const { data: entries } = await supabase
     .from("time_entries")
     .select(
-      "id, profile_id, clock_in, clock_out, lunch_minutes, job_code, status, notes, source, profiles:profile_id(full_name), time_allocations(job_code, hours, description)",
+      "id, profile_id, clock_in, clock_out, lunch_minutes, miles, job_code, status, notes, source, profiles:profile_id(full_name), time_allocations(job_code, hours, description)",
     )
     .gte("clock_in", start.toISOString())
     .lt("clock_in", end.toISOString())
