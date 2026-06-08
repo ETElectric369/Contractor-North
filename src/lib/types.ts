@@ -181,6 +181,18 @@ export interface GeoPoint {
   accuracy?: number;
 }
 
+export interface TimeAllocation {
+  id: string;
+  time_entry_id: string;
+  org_id: string;
+  job_id: string | null;
+  job_code: string | null;
+  hours: number;
+  description: string | null;
+  sort_order: number;
+  created_at: string;
+}
+
 export interface ChangeOrder {
   id: string;
   co_number: string;

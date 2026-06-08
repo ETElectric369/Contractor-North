@@ -9,13 +9,25 @@ import {
   MicOff,
   Coffee,
   Loader2,
+  Plus,
+  Trash2,
+  Briefcase,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { hoursBetween, formatDuration } from "@/lib/utils";
 import type { GeoPoint, JobCode, TimeEntry } from "@/lib/types";
 import { clockIn, clockOut } from "./actions";
+
+interface AllocRow {
+  job_id: string;
+  job_code: string;
+  hours: number;
+  minutes: number;
+  description: string;
+}
 
 interface JobOption {
   id: string;
@@ -58,6 +70,21 @@ export function TimeclockPanel({
   // clock-out form
   const [lunch, setLunch] = useState(0);
   const [notes, setNotes] = useState(openEntry?.notes ?? "");
+  const [allocations, setAllocations] = useState<AllocRow[]>([]);
+
+  function addAlloc() {
+    setAllocations((p) => [
+      ...p,
+      { job_id: "", job_code: "", hours: 0, minutes: 0, description: "" },
+    ]);
+  }
+  function updateAlloc(i: number, patch: Partial<AllocRow>) {
+    setAllocations((p) => p.map((a, idx) => (idx === i ? { ...a, ...patch } : a)));
+  }
+  const allocatedHours = allocations.reduce(
+    (s, a) => s + (a.hours || 0) + (a.minutes || 0) / 60,
+    0,
+  );
 
   // live elapsed timer
   const [now, setNow] = useState(() => Date.now());
@@ -124,6 +151,12 @@ export function TimeclockPanel({
         lunch_minutes: lunch,
         notes,
         gps,
+        allocations: allocations.map((a) => ({
+          job_id: a.job_id || null,
+          job_code: a.job_code || null,
+          hours: (a.hours || 0) + (a.minutes || 0) / 60,
+          description: a.description,
+        })),
       });
       if (!res.ok) setError(res.error ?? "Could not clock out.");
     });
@@ -170,6 +203,92 @@ export function TimeclockPanel({
                 onChange={(e) => setLunch(Number(e.target.value) || 0)}
               />
             </div>
+          </div>
+
+          {/* Jobs worked today */}
+          <div>
+            <div className="mb-1.5 flex items-center justify-between">
+              <Label className="mb-0 flex items-center gap-1.5">
+                <Briefcase className="h-4 w-4 text-slate-400" /> Jobs worked today
+              </Label>
+              <button
+                type="button"
+                onClick={addAlloc}
+                className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200"
+              >
+                <Plus className="h-3.5 w-3.5" /> Add job
+              </button>
+            </div>
+            {allocations.length === 0 ? (
+              <p className="text-xs text-slate-400">
+                Optional: break your day down by job, with time and what you did.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {allocations.map((a, i) => (
+                  <div key={i} className="space-y-2 rounded-lg border border-slate-100 p-2">
+                    <div className="flex items-center gap-2">
+                      <Select
+                        value={a.job_id}
+                        onChange={(e) => updateAlloc(i, { job_id: e.target.value })}
+                        className="h-9 flex-1"
+                      >
+                        <option value="">— Job —</option>
+                        {jobs.map((j) => (
+                          <option key={j.id} value={j.id}>
+                            {j.job_number} · {j.name}
+                          </option>
+                        ))}
+                      </Select>
+                      <Select
+                        value={a.job_code}
+                        onChange={(e) => updateAlloc(i, { job_code: e.target.value })}
+                        className="h-9 w-28"
+                      >
+                        <option value="">Code</option>
+                        {jobCodes.map((c) => (
+                          <option key={c.id} value={c.code}>
+                            {c.code}
+                          </option>
+                        ))}
+                      </Select>
+                      <div className="flex items-center gap-1">
+                        <NumberInput
+                          value={a.hours}
+                          onValueChange={(n) => updateAlloc(i, { hours: n })}
+                          className="h-9 w-12 text-center"
+                          placeholder="h"
+                        />
+                        <span className="text-xs text-slate-400">h</span>
+                        <NumberInput
+                          value={a.minutes}
+                          onValueChange={(n) => updateAlloc(i, { minutes: n })}
+                          className="h-9 w-12 text-center"
+                          placeholder="m"
+                        />
+                        <span className="text-xs text-slate-400">m</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setAllocations((p) => p.filter((_, idx) => idx !== i))}
+                        className="text-slate-400 hover:text-red-600"
+                        aria-label="Remove job"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <Input
+                      placeholder="What was done on this job?"
+                      value={a.description}
+                      onChange={(e) => updateAlloc(i, { description: e.target.value })}
+                    />
+                  </div>
+                ))}
+                <div className="text-right text-xs text-slate-500">
+                  Allocated: {formatDuration(allocatedHours)}
+                </div>
+              </div>
+            )}
           </div>
 
           <div>

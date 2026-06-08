@@ -41,12 +41,20 @@ export async function clockIn(input: {
   return { ok: true };
 }
 
+export interface JobAllocationInput {
+  job_id: string | null;
+  job_code: string | null;
+  hours: number;
+  description: string;
+}
+
 export async function clockOut(input: {
   entry_id: string;
   lunch_minutes: number;
   notes: string;
   gps: GeoPoint | null;
   auto?: boolean;
+  allocations?: JobAllocationInput[];
 }): Promise<ClockResult> {
   const supabase = await createClient();
   const {
@@ -68,6 +76,24 @@ export async function clockOut(input: {
     .eq("profile_id", user.id);
 
   if (error) return { ok: false, error: error.message };
+
+  // Replace any existing allocations for this entry with the submitted set.
+  const allocations = (input.allocations ?? []).filter(
+    (a) => a.hours > 0 || a.description.trim() || a.job_id || a.job_code,
+  );
+  await supabase.from("time_allocations").delete().eq("time_entry_id", input.entry_id);
+  if (allocations.length) {
+    const rows = allocations.map((a, idx) => ({
+      time_entry_id: input.entry_id,
+      job_id: a.job_id,
+      job_code: a.job_code,
+      hours: a.hours || 0,
+      description: a.description || null,
+      sort_order: idx,
+    }));
+    const { error: allocErr } = await supabase.from("time_allocations").insert(rows);
+    if (allocErr) return { ok: false, error: allocErr.message };
+  }
 
   revalidatePath("/timeclock");
   return { ok: true };
