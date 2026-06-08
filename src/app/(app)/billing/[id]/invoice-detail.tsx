@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import type { Invoice, InvoiceItem, Payment } from "@/lib/types";
@@ -162,20 +163,16 @@ export function InvoiceDetail({
                   />
                 </td>
                 <td className="px-3 py-2">
-                  <Input
-                    type="number"
-                    step="any"
+                  <NumberInput
                     value={qty}
-                    onChange={(e) => setQty(Number(e.target.value))}
+                    onValueChange={setQty}
                     className="text-right"
                   />
                 </td>
                 <td className="px-3 py-2">
-                  <Input
-                    type="number"
-                    step="any"
+                  <NumberInput
                     value={price}
-                    onChange={(e) => setPrice(Number(e.target.value))}
+                    onValueChange={setPrice}
                     className="text-right"
                   />
                 </td>
@@ -226,12 +223,10 @@ export function InvoiceDetail({
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <Label htmlFor="pay-amt">Amount</Label>
-                <Input
+                <NumberInput
                   id="pay-amt"
-                  type="number"
-                  step="any"
                   value={payAmount}
-                  onChange={(e) => setPayAmount(Number(e.target.value))}
+                  onValueChange={setPayAmount}
                 />
               </div>
               <div>

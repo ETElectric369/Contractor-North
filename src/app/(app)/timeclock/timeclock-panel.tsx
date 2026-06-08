@@ -199,13 +199,7 @@ export function TimeclockPanel({
               <Label htmlFor="lunch" className="flex items-center gap-1.5">
                 <Coffee className="h-4 w-4 text-slate-400" /> {t("tc_lunch")}
               </Label>
-              <Input
-                id="lunch"
-                type="number"
-                min={0}
-                value={lunch}
-                onChange={(e) => setLunch(Number(e.target.value) || 0)}
-              />
+              <NumberInput id="lunch" value={lunch} onValueChange={setLunch} />
             </div>
           </div>
 

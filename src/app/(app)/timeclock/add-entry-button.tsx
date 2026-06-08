@@ -6,6 +6,7 @@ import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { createManualEntry } from "./actions";
 import type { JobCode } from "@/lib/types";
 
@@ -133,13 +134,7 @@ export function AddEntryButton({
             </div>
             <div>
               <Label htmlFor="m-lunch">Lunch (minutes)</Label>
-              <Input
-                id="m-lunch"
-                type="number"
-                min={0}
-                value={lunch}
-                onChange={(e) => setLunch(Number(e.target.value) || 0)}
-              />
+              <NumberInput id="m-lunch" value={lunch} onValueChange={setLunch} />
             </div>
           </div>
 

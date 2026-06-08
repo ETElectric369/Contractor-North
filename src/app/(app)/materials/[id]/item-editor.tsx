@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { formatCurrency } from "@/lib/utils";
 import { addMaterialItem, deleteMaterialItem } from "../actions";
 
@@ -128,25 +129,13 @@ export function ItemEditor({
               <Input placeholder="Part #" value={part} onChange={(e) => setPart(e.target.value)} />
             </td>
             <td className="px-3 py-2">
-              <Input
-                type="number"
-                step="any"
-                value={qty}
-                onChange={(e) => setQty(Number(e.target.value))}
-                className="text-right"
-              />
+              <NumberInput value={qty} onValueChange={setQty} className="text-right" />
             </td>
             <td className="px-3 py-2">
               <Input value={unit} onChange={(e) => setUnit(e.target.value)} />
             </td>
             <td className="px-3 py-2">
-              <Input
-                type="number"
-                step="any"
-                value={cost}
-                onChange={(e) => setCost(Number(e.target.value))}
-                className="text-right"
-              />
+              <NumberInput value={cost} onValueChange={setCost} className="text-right" />
             </td>
             <td className="px-5 py-2 text-right font-semibold text-slate-900">
               {formatCurrency(total)}

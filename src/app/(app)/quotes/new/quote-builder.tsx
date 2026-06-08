@@ -39,7 +39,11 @@ export function QuoteBuilder({
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
   const [taxRate, setTaxRate] = useState(0);
-  const [validUntil, setValidUntil] = useState("");
+  const [validUntil, setValidUntil] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 30);
+    return d.toISOString().slice(0, 10);
+  });
   const [items, setItems] = useState<DraftLineItem[]>([blankItem()]);
 
   const [scope, setScope] = useState("");

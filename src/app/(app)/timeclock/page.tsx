@@ -147,6 +147,9 @@ export default async function TimeclockPage() {
                 </td>
                 <td className="px-3 py-2.5">
                   {e.job_code ? <Badge tone="slate">{e.job_code}</Badge> : "—"}
+                  {e.source === "manual" && (
+                    <Badge tone="amber" className="ml-1">manual</Badge>
+                  )}
                 </td>
                 <td className="px-3 py-2.5 text-right text-slate-500">
                   {e.lunch_minutes}m
