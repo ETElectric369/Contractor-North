@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { StatusControl } from "./status-control";
+import { EmailButton } from "@/components/email-button";
 import type { Quote, QuoteLineItem } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -57,6 +58,7 @@ export default async function QuoteDetailPage({
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <EmailButton id={q.id} kind="quote" />
           <Link
             href={`/print/quote/${q.id}`}
             className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"

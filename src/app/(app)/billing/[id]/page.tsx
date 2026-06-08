@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { InvoiceDetail } from "./invoice-detail";
+import { EmailButton } from "@/components/email-button";
 import type { Invoice, InvoiceItem, Payment } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -79,12 +80,15 @@ export default async function InvoicePage({
           )}
         </div>
         </div>
-        <Link
-          href={`/print/invoice/${inv.id}`}
-          className="inline-flex items-center gap-2 self-start rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
-        >
-          <Printer className="h-4 w-4" /> Print / PDF
-        </Link>
+        <div className="flex items-center gap-2 self-start">
+          <EmailButton id={inv.id} kind="invoice" />
+          <Link
+            href={`/print/invoice/${inv.id}`}
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
+          >
+            <Printer className="h-4 w-4" /> Print / PDF
+          </Link>
+        </div>
       </div>
 
       <InvoiceDetail

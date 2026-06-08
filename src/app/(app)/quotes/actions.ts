@@ -3,6 +3,67 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
+import { sendEmail, renderDocEmail } from "@/lib/email";
+
+export async function emailQuote(
+  id: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const supabase = await createClient();
+
+  const { data: quote } = await supabase
+    .from("quotes")
+    .select("*, customers(name, email)")
+    .eq("id", id)
+    .maybeSingle();
+  if (!quote) return { ok: false, error: "Quote not found." };
+  const customer = (quote as any).customers;
+  if (!customer?.email)
+    return { ok: false, error: "This customer has no email address." };
+
+  const [{ data: items }, { data: org }] = await Promise.all([
+    supabase.from("quote_line_items").select("*").eq("quote_id", id).order("sort_order"),
+    supabase.from("organizations").select("name, brand_color, phone, email").maybeSingle(),
+  ]);
+
+  const html = renderDocEmail({
+    docType: "Quote",
+    number: quote.quote_number,
+    company: {
+      name: org?.name ?? "Contractor North",
+      brand: org?.brand_color ?? "#0b57c4",
+      phone: org?.phone,
+      email: org?.email,
+    },
+    customerName: customer.name,
+    title: quote.title,
+    items: (items ?? []).map((i: any) => ({
+      description: i.description,
+      quantity: i.quantity,
+      unit: i.unit,
+      price: i.unit_price,
+      total: i.line_total,
+    })),
+    subtotal: quote.subtotal,
+    tax: quote.tax,
+    total: quote.total,
+    notes: quote.notes,
+  });
+
+  const res = await sendEmail({
+    to: customer.email,
+    subject: `Quote ${quote.quote_number} from ${org?.name ?? "us"}`,
+    html,
+    replyTo: org?.email ?? undefined,
+  });
+  if (!res.ok) return res;
+
+  // Mark as sent once emailed (unless already accepted/declined).
+  if (["draft"].includes(quote.status)) {
+    await supabase.from("quotes").update({ status: "sent" }).eq("id", id);
+  }
+  revalidatePath(`/quotes/${id}`);
+  return { ok: true };
+}
 
 export interface DraftLineItem {
   description: string;

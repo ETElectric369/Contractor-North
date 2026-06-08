@@ -2,6 +2,68 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { sendEmail, renderDocEmail } from "@/lib/email";
+
+export async function emailInvoice(
+  id: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const supabase = await createClient();
+
+  const { data: invoice } = await supabase
+    .from("invoices")
+    .select("*, customers(name, email)")
+    .eq("id", id)
+    .maybeSingle();
+  if (!invoice) return { ok: false, error: "Invoice not found." };
+  const customer = (invoice as any).customers;
+  if (!customer?.email)
+    return { ok: false, error: "This customer has no email address." };
+
+  const [{ data: items }, { data: org }] = await Promise.all([
+    supabase.from("invoice_items").select("*").eq("invoice_id", id).order("sort_order"),
+    supabase.from("organizations").select("name, brand_color, phone, email").maybeSingle(),
+  ]);
+
+  const balance = Number(invoice.total) - Number(invoice.amount_paid);
+  const html = renderDocEmail({
+    docType: "Invoice",
+    number: invoice.invoice_number,
+    company: {
+      name: org?.name ?? "Contractor North",
+      brand: org?.brand_color ?? "#0b57c4",
+      phone: org?.phone,
+      email: org?.email,
+    },
+    customerName: customer.name,
+    title: invoice.title,
+    items: (items ?? []).map((i: any) => ({
+      description: i.description,
+      quantity: i.quantity,
+      unit: i.unit,
+      price: i.unit_price,
+      total: i.line_total,
+    })),
+    subtotal: invoice.subtotal,
+    tax: invoice.tax,
+    total: invoice.total,
+    balance,
+    notes: invoice.notes,
+  });
+
+  const res = await sendEmail({
+    to: customer.email,
+    subject: `Invoice ${invoice.invoice_number} from ${org?.name ?? "us"}`,
+    html,
+    replyTo: org?.email ?? undefined,
+  });
+  if (!res.ok) return res;
+
+  if (invoice.status === "draft") {
+    await supabase.from("invoices").update({ status: "sent" }).eq("id", id);
+  }
+  revalidatePath(`/billing/${id}`);
+  return { ok: true };
+}
 
 export type Result = { ok: boolean; error?: string; id?: string };
 

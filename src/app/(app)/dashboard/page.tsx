@@ -1,17 +1,19 @@
 import Link from "next/link";
 import {
   Users,
+  UserPlus,
   FileText,
   ClipboardList,
   Clock,
   ArrowRight,
   DollarSign,
+  Receipt,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
-import { formatCurrency, formatDate, hoursBetween } from "@/lib/utils";
+import { formatCurrency, formatDate, hoursBetween, formatDuration } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -53,6 +55,38 @@ export default async function DashboardPage() {
 
   const pipeline =
     openQuotes.data?.reduce((sum, q) => sum + Number(q.total ?? 0), 0) ?? 0;
+
+  // "Needs attention" widgets: open leads, outstanding A/R, my hours this week.
+  const weekAgo = new Date(Date.now() - 7 * 86400_000).toISOString();
+  const [leadsCount, invoiceRows, weekEntries] = await Promise.all([
+    supabase
+      .from("customers")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "lead"),
+    supabase.from("invoices").select("total, amount_paid, status"),
+    supabase
+      .from("time_entries")
+      .select("clock_in, clock_out, lunch_minutes, status")
+      .eq("profile_id", user?.id ?? "")
+      .gte("clock_in", weekAgo),
+  ]);
+
+  const outstanding = (invoiceRows.data ?? [])
+    .filter((i: any) => !["paid", "void"].includes(i.status))
+    .reduce((s: number, i: any) => s + (Number(i.total) - Number(i.amount_paid)), 0);
+  const weekHours = (weekEntries.data ?? []).reduce(
+    (s: number, e: any) =>
+      e.status === "closed" && e.clock_out
+        ? s + hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes)
+        : s,
+    0,
+  );
+
+  const attention = [
+    { label: "Open leads", value: leadsCount.count ?? 0, icon: UserPlus, href: "/leads", tone: "bg-indigo-50 text-indigo-600" },
+    { label: "Outstanding", value: formatCurrency(outstanding), icon: Receipt, href: "/billing", tone: "bg-red-50 text-red-600" },
+    { label: "My hours this week", value: formatDuration(weekHours), icon: Clock, href: "/timeclock", tone: "bg-green-50 text-green-600" },
+  ];
 
   const stats = [
     {
@@ -128,6 +162,27 @@ export default async function DashboardPage() {
                     <div className="text-2xl font-bold text-slate-900">
                       {s.value}
                     </div>
+                    <div className="text-xs text-slate-500">{s.label}</div>
+                  </div>
+                </CardContent>
+              </Card>
+            </Link>
+          );
+        })}
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        {attention.map((s) => {
+          const Icon = s.icon;
+          return (
+            <Link key={s.label} href={s.href}>
+              <Card className="transition-shadow hover:shadow-md">
+                <CardContent className="flex items-center gap-4 py-5">
+                  <div className={`flex h-11 w-11 items-center justify-center rounded-xl ${s.tone}`}>
+                    <Icon className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <div className="text-2xl font-bold text-slate-900">{s.value}</div>
                     <div className="text-xs text-slate-500">{s.label}</div>
                   </div>
                 </CardContent>
