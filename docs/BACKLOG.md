@@ -3,6 +3,19 @@
 Refined from handwritten notes. Status: ✅ done · 🟡 partial · ⬜ new.
 Size: XS (<1h) · S (≈half day) · M (≈1–2 days) · L (multi-day).
 
+> **Update (build pass):** §1–§5 are now BUILT.
+> - ✅ §1 Show password + forgot-password flow
+> - ✅ §2 Leads section + follow-up tracking (migration 0009)
+> - ✅ §3 Multi-job end-of-day timecards (migration 0010)
+> - ✅ §4 Twilio SMS helper + no-clock-in & end-of-day reminders — **code complete,
+>   activates when `TWILIO_*` env vars are added** (logs instead of texting until then)
+> - ✅ §5 Spanish interface for employees + Claude-in-Spanish (migration 0011)
+>
+> Remaining to *activate* (not build): add a **Twilio account** for live texts,
+> and the **`ANTHROPIC_API_KEY`** for Claude-in-Spanish + other AI. Possible
+> future polish: translate more screens beyond timeclock/nav; escalating
+> nag cadence (needs a reminders-sent table + Vercel Pro cron frequency).
+
 ## 1. Auth & access — quick wins
 - ⬜ **XS — Show/hide password toggle** on login + signup (the "eye" icon).
 - ⬜ **S — Forgot password** flow: "Forgot password?" link → email reset
