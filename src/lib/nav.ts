@@ -5,6 +5,7 @@ import {
   FileText,
   CalendarDays,
   CalendarClock,
+  MapPin,
   Briefcase,
   ClipboardList,
   Clock,
@@ -55,6 +56,7 @@ export const NAV: NavSection[] = [
     title: "Operations",
     items: [
       { label: "Scheduler", href: "/schedule", icon: CalendarDays },
+      { label: "Map", href: "/map", icon: MapPin },
       { label: "Jobs", href: "/jobs", icon: Briefcase },
       { label: "Work Orders", href: "/work-orders", icon: ClipboardList },
       { label: "Timeclock", href: "/timeclock", icon: Clock },

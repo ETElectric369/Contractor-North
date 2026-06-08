@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Input } from "@/components/ui/input";
+import { loadGoogleMaps } from "@/lib/google-maps";
 
 export interface AddressParts {
   formatted: string;
@@ -9,23 +10,6 @@ export interface AddressParts {
   city: string;
   state: string;
   zip: string;
-}
-
-let mapsPromise: Promise<void> | null = null;
-function loadMaps(key: string): Promise<void> {
-  if (typeof window === "undefined") return Promise.resolve();
-  if ((window as any).google?.maps?.places) return Promise.resolve();
-  if (!mapsPromise) {
-    mapsPromise = new Promise<void>((resolve, reject) => {
-      const s = document.createElement("script");
-      s.src = `https://maps.googleapis.com/maps/api/js?key=${key}&libraries=places&loading=async`;
-      s.async = true;
-      s.onload = () => resolve();
-      s.onerror = () => reject(new Error("maps failed to load"));
-      document.head.appendChild(s);
-    });
-  }
-  return mapsPromise;
 }
 
 /**
@@ -56,7 +40,7 @@ export function AddressAutocomplete({
   useEffect(() => {
     if (!key || !ref.current) return;
     let ac: any;
-    loadMaps(key)
+    loadGoogleMaps(key)
       .then(() => {
         const g = (window as any).google;
         if (!g?.maps?.places || !ref.current) return;
