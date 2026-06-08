@@ -2,21 +2,35 @@
 
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Plus, Trash2, Upload, Camera, Loader2, FileText } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
-import { Badge } from "@/components/ui/badge";
+import { Badge, statusTone } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { CameraCapture } from "@/components/camera-capture";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { createBill, setBillStatus, deleteBill, addDocument, deleteDocument } from "../jobs/actions";
+import { NewPoButton } from "../purchasing/new-po-button";
 
 interface JobOption {
   id: string;
   job_number: string;
   name: string;
+}
+interface ListOption {
+  id: string;
+  name: string;
+}
+interface PoRow {
+  id: string;
+  po_number: string;
+  vendor: string;
+  status: string;
+  total: number;
+  jobs?: { name: string } | null;
 }
 interface BillRow {
   id: string;
@@ -43,16 +57,20 @@ interface DocRow {
 export function BillsReceipts({
   orgId,
   jobs,
+  lists,
+  pos,
   bills,
   docs,
 }: {
   orgId: string;
   jobs: JobOption[];
+  lists: ListOption[];
+  pos: PoRow[];
   bills: BillRow[];
   docs: DocRow[];
 }) {
   const router = useRouter();
-  const [tab, setTab] = useState<"bills" | "receipts">("bills");
+  const [tab, setTab] = useState<"po" | "bills" | "receipts">("po");
   const [pending, start] = useTransition();
 
   // ── Bills add form ──
@@ -65,6 +83,7 @@ export function BillsReceipts({
   const [billError, setBillError] = useState<string | null>(null);
 
   const totalBills = bills.reduce((s, b) => s + Number(b.amount), 0);
+  const totalPos = pos.reduce((s, p) => s + Number(p.total), 0);
 
   function addBill() {
     setBillError(null);
@@ -138,24 +157,51 @@ export function BillsReceipts({
     if (fileRef.current) fileRef.current.value = "";
   }
 
+  const tabBtn = (id: typeof tab, label: string) => (
+    <button
+      onClick={() => setTab(id)}
+      className={`flex-1 rounded-md px-3 py-1.5 font-medium ${tab === id ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}
+    >
+      {label}
+    </button>
+  );
+
   return (
     <div>
       <div className="mb-4 flex gap-1 rounded-lg bg-slate-100 p-1 text-sm">
-        <button
-          onClick={() => setTab("bills")}
-          className={`flex-1 rounded-md px-3 py-1.5 font-medium ${tab === "bills" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}
-        >
-          Bills ({bills.length})
-        </button>
-        <button
-          onClick={() => setTab("receipts")}
-          className={`flex-1 rounded-md px-3 py-1.5 font-medium ${tab === "receipts" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}
-        >
-          Receipts ({docs.length})
-        </button>
+        {tabBtn("po", `Purchase Orders (${pos.length})`)}
+        {tabBtn("bills", `Bills (${bills.length})`)}
+        {tabBtn("receipts", `Receipts (${docs.length})`)}
       </div>
 
-      {tab === "bills" ? (
+      {tab === "po" && (
+        <Card className="p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <span className="text-xs text-slate-500">{pos.length} POs · {formatCurrency(totalPos)} total</span>
+            <NewPoButton jobs={jobs} lists={lists} />
+          </div>
+          {pos.length === 0 ? (
+            <p className="py-4 text-center text-sm text-slate-400">No purchase orders yet. Click “New PO” to create one.</p>
+          ) : (
+            <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+              {pos.map((p) => (
+                <li key={p.id}>
+                  <Link href={`/purchasing/${p.id}`} className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-slate-50">
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium text-slate-900">{p.po_number} · {p.vendor}</div>
+                      <div className="text-xs text-slate-400">{p.jobs?.name ?? "No job"}</div>
+                    </div>
+                    <span className="font-medium text-slate-800">{formatCurrency(p.total)}</span>
+                    <Badge tone={statusTone(p.status)}>{p.status}</Badge>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      )}
+
+      {tab === "bills" && (
         <Card className="p-4">
           <div className="mb-3 space-y-3 rounded-lg border border-slate-200 p-3">
             {billError && <p className="text-sm text-red-600">{billError}</p>}
@@ -234,7 +280,9 @@ export function BillsReceipts({
             </ul>
           )}
         </Card>
-      ) : (
+      )}
+
+      {tab === "receipts" && (
         <Card className="p-4">
           <div className="mb-3 flex flex-wrap items-end gap-2 rounded-lg border border-slate-200 p-3">
             <div className="min-w-[160px] flex-1">

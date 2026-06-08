@@ -9,7 +9,6 @@ import {
   Briefcase,
   ClipboardList,
   Clock,
-  ShoppingCart,
   Boxes,
   Receipt,
   ListChecks,
@@ -80,7 +79,6 @@ export const NAV: NavSection[] = [
     title: "Office",
     items: [
       { label: "Bills & Purchasing", href: "/bills", icon: Wallet },
-      { label: "Purchasing", href: "/purchasing", icon: ShoppingCart },
       { label: "Inventory", href: "/inventory", icon: Boxes },
       { label: "Billing", href: "/billing", icon: Receipt },
       { label: "Change Orders", href: "/change-orders", icon: GitPullRequestArrow },

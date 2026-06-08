@@ -36,10 +36,10 @@ export default async function PurchaseOrderPage({
   return (
     <div className="mx-auto max-w-4xl">
       <Link
-        href="/purchasing"
+        href="/bills"
         className="mb-4 inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800"
       >
-        <ArrowLeft className="h-4 w-4" /> Back to purchasing
+        <ArrowLeft className="h-4 w-4" /> Back to Bills &amp; Purchasing
       </Link>
 
       <div className="mb-6 flex flex-col gap-2">

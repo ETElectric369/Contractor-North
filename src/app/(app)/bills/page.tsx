@@ -1,6 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
-import { NewPoButton } from "../purchasing/new-po-button";
 import { BillsReceipts } from "./bills-receipts";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +16,11 @@ export default async function BillsPage() {
     .maybeSingle();
   const orgId = profile?.org_id ?? "";
 
-  const [{ data: bills }, { data: docRows }, { data: jobs }, { data: lists }] = await Promise.all([
+  const [{ data: pos }, { data: bills }, { data: docRows }, { data: jobs }, { data: lists }] = await Promise.all([
+    supabase
+      .from("purchase_orders")
+      .select("id, po_number, vendor, status, total, jobs(name)")
+      .order("created_at", { ascending: false }),
     supabase
       .from("bills")
       .select("id, supplier, bill_number, amount, status, bill_date, job_id, jobs(job_number, name)")
@@ -43,12 +46,17 @@ export default async function BillsPage() {
     <div>
       <PageHeader
         title="Bills & Purchasing"
-        description="Supplier bills, receipts, and purchase orders across every job."
-      >
-        <NewPoButton jobs={jobs ?? []} lists={lists ?? []} />
-      </PageHeader>
+        description="Purchase orders, supplier bills, and receipts across every job."
+      />
 
-      <BillsReceipts orgId={orgId} jobs={jobs ?? []} bills={(bills ?? []) as any} docs={docs as any} />
+      <BillsReceipts
+        orgId={orgId}
+        jobs={jobs ?? []}
+        lists={lists ?? []}
+        pos={(pos ?? []) as any}
+        bills={(bills ?? []) as any}
+        docs={docs as any}
+      />
     </div>
   );
 }
