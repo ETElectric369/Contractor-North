@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { Input } from "@/components/ui/input";
 import { loadGoogleMaps } from "@/lib/google-maps";
 
@@ -13,9 +13,9 @@ export interface AddressParts {
 }
 
 /**
- * Address field with Google Places autocomplete. Falls back to a plain text
- * input until NEXT_PUBLIC_GOOGLE_MAPS_API_KEY is set. On selection it sets the
- * input to the full formatted address and calls onResolved with parsed parts.
+ * Address field with Google Places autocomplete using the NEW
+ * PlaceAutocompleteElement (works with "Places API (New)"). Falls back to a
+ * plain text input when the Maps key isn't set or the element is unavailable.
  */
 export function AddressAutocomplete({
   id,
@@ -30,56 +30,86 @@ export function AddressAutocomplete({
   defaultValue?: string;
   placeholder?: string;
   onResolved?: (parts: AddressParts) => void;
-  /** When true, the input keeps just the street line (city/state/zip go to onResolved). */
   streetOnly?: boolean;
 }) {
   const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-  const ref = useRef<HTMLInputElement>(null);
-  const [value, setValue] = useState(defaultValue ?? "");
+  const containerRef = useRef<HTMLDivElement>(null);
+  const hiddenRef = useRef<HTMLInputElement>(null);
+  const attached = useRef(false);
+
+  function setHidden(val: string) {
+    const el = hiddenRef.current;
+    if (!el) return;
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      "value",
+    )?.set;
+    setter?.call(el, val);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  }
 
   useEffect(() => {
-    if (!key || !ref.current) return;
-    let ac: any;
+    if (!key || !containerRef.current || attached.current) return;
+    let el: any;
     loadGoogleMaps(key)
-      .then(() => {
+      .then(async () => {
         const g = (window as any).google;
-        if (!g?.maps?.places || !ref.current) return;
-        ac = new g.maps.places.Autocomplete(ref.current, {
-          types: ["address"],
-          fields: ["formatted_address", "address_components"],
-          componentRestrictions: { country: ["us"] },
+        const places = g?.maps?.places;
+        if (!places?.PlaceAutocompleteElement || !containerRef.current) return;
+        attached.current = true;
+
+        el = new places.PlaceAutocompleteElement();
+        el.style.width = "100%";
+        if (defaultValue) try { el.value = defaultValue; } catch {}
+        containerRef.current.appendChild(el);
+
+        // Keep the hidden form value synced with raw typing too.
+        containerRef.current.addEventListener("input", (e: any) => {
+          const v = e?.target?.value;
+          if (typeof v === "string") setHidden(v);
         });
-        ac.addListener("place_changed", () => {
-          const place = ac.getPlace();
+
+        const onSelect = async (event: any) => {
+          const pred = event.placePrediction ?? event.detail?.placePrediction;
+          if (!pred) return;
+          const place = pred.toPlace();
+          await place.fetchFields({
+            fields: ["formattedAddress", "addressComponents"],
+          });
+          const comps: any[] = place.addressComponents ?? [];
           const get = (type: string, short = false) => {
-            const c = place.address_components?.find((x: any) => x.types.includes(type));
-            return (short ? c?.short_name : c?.long_name) ?? "";
+            const c = comps.find((x) => (x.types || []).includes(type));
+            return (short ? c?.shortText ?? c?.short_name : c?.longText ?? c?.long_name) ?? "";
           };
           const line1 = `${get("street_number")} ${get("route")}`.trim();
           const parts: AddressParts = {
-            formatted: place.formatted_address ?? "",
+            formatted: place.formattedAddress ?? "",
             line1,
-            city: get("locality") || get("sublocality") || get("postal_town"),
+            city: get("locality") || get("postal_town") || get("sublocality"),
             state: get("administrative_area_level_1", true),
             zip: get("postal_code"),
           };
-          setValue(streetOnly ? parts.line1 || parts.formatted : parts.formatted);
+          setHidden(streetOnly ? parts.line1 || parts.formatted : parts.formatted);
           onResolved?.(parts);
-        });
+        };
+        el.addEventListener("gmp-select", onSelect);
+        el.addEventListener("gmp-placeselect", onSelect);
       })
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 
+  // No key → plain input that submits normally.
+  if (!key) {
+    return (
+      <Input id={id} name={name} defaultValue={defaultValue} placeholder={placeholder ?? "Address"} autoComplete="off" />
+    );
+  }
+
   return (
-    <Input
-      ref={ref}
-      id={id}
-      name={name}
-      value={value}
-      onChange={(e) => setValue(e.target.value)}
-      placeholder={placeholder ?? "Start typing an address…"}
-      autoComplete="off"
-    />
+    <div>
+      <div ref={containerRef} className="gmp-autocomplete" />
+      <input ref={hiddenRef} type="hidden" name={name} defaultValue={defaultValue} />
+    </div>
   );
 }
