@@ -8,9 +8,11 @@ import { Badge } from "@/components/ui/badge";
 import {
   formatDuration,
   formatDateTime,
+  formatCurrency,
   hoursBetween,
   initials,
 } from "@/lib/utils";
+import { getOrgSettings } from "@/lib/org-settings";
 import { AddEntryButton } from "../timeclock/add-entry-button";
 import { EditEntryButton } from "./edit-entry-button";
 import type { JobCode } from "@/lib/types";
@@ -49,7 +51,7 @@ export default async function TimecardsPage({
     redirect("/timeclock");
   }
 
-  const [{ data: members }, { data: jobCodes }, { data: jobs }] = await Promise.all([
+  const [{ data: members }, { data: jobCodes }, { data: jobs }, { data: org }] = await Promise.all([
     supabase.from("profiles").select("id, full_name").eq("active", true).order("full_name"),
     supabase.from("job_codes").select("*").eq("active", true).order("code"),
     supabase
@@ -57,7 +59,9 @@ export default async function TimecardsPage({
       .select("id, job_number, name")
       .order("created_at", { ascending: false })
       .limit(50),
+    supabase.from("organizations").select("settings").limit(1).maybeSingle(),
   ]);
+  const mileageRate = getOrgSettings((org as any)?.settings).mileage_rate;
 
   const { start, end } = weekRange(offset);
 
@@ -71,15 +75,18 @@ export default async function TimecardsPage({
     .order("clock_in", { ascending: true });
 
   // Group by tech.
-  const byTech = new Map<string, { name: string; entries: any[]; hours: number }>();
+  const byTech = new Map<string, { name: string; entries: any[]; hours: number; miles: number }>();
   const perCode = new Map<string, number>();
   let crewTotal = 0;
+  let crewMiles = 0;
 
   for (const e of entries ?? []) {
     const name = (e as any).profiles?.full_name ?? "—";
     const rec =
-      byTech.get(e.profile_id) ?? { name, entries: [] as any[], hours: 0 };
+      byTech.get(e.profile_id) ?? { name, entries: [] as any[], hours: 0, miles: 0 };
     rec.entries.push(e);
+    rec.miles += Number(e.miles ?? 0);
+    crewMiles += Number(e.miles ?? 0);
     if (e.status === "closed" && e.clock_out) {
       const h = hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes);
       rec.hours += h;
@@ -127,7 +134,7 @@ export default async function TimecardsPage({
         </div>
       </PageHeader>
 
-      <div className="mb-4 grid grid-cols-2 gap-4 sm:max-w-md">
+      <div className="mb-4 grid grid-cols-3 gap-4 sm:max-w-2xl">
         <Card>
           <CardContent className="py-4">
             <div className="text-2xl font-bold text-slate-900">{formatDuration(crewTotal)}</div>
@@ -138,6 +145,14 @@ export default async function TimecardsPage({
           <CardContent className="py-4">
             <div className="text-2xl font-bold text-slate-900">{techs.length}</div>
             <div className="text-xs text-slate-500">People with entries</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="py-4">
+            <div className="text-2xl font-bold text-slate-900">{crewMiles.toFixed(1)} mi</div>
+            <div className="text-xs text-slate-500">
+              {mileageRate > 0 ? `${formatCurrency(crewMiles * mileageRate)} · ` : ""}Crew miles
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -179,6 +194,9 @@ export default async function TimecardsPage({
                 </div>
                 <span className="text-sm font-bold text-slate-900">
                   {formatDuration(rec.hours)}
+                  {rec.miles > 0 && (
+                    <span className="ml-2 text-xs font-normal text-slate-400">{rec.miles.toFixed(1)} mi</span>
+                  )}
                 </span>
               </div>
               <ul className="divide-y divide-slate-100">

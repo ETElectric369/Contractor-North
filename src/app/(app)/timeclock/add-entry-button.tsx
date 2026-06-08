@@ -44,6 +44,7 @@ export function AddEntryButton({
   const [jobId, setJobId] = useState("");
   const [jobCode, setJobCode] = useState("");
   const [lunch, setLunch] = useState(0);
+  const [miles, setMiles] = useState(0);
   const [notes, setNotes] = useState("");
 
   function submit() {
@@ -68,6 +69,7 @@ export function AddEntryButton({
         job_code: jobCode || null,
         lunch_minutes: lunch,
         notes,
+        miles,
       });
       if (!res.ok) {
         setError(res.error ?? "Could not add entry.");
@@ -120,8 +122,8 @@ export function AddEntryButton({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="col-span-2">
               <Label htmlFor="m-code">Job code</Label>
               <Select id="m-code" value={jobCode} onChange={(e) => setJobCode(e.target.value)}>
                 <option value="">— Code —</option>
@@ -133,8 +135,12 @@ export function AddEntryButton({
               </Select>
             </div>
             <div>
-              <Label htmlFor="m-lunch">Lunch (minutes)</Label>
+              <Label htmlFor="m-lunch">Lunch (min)</Label>
               <NumberInput id="m-lunch" value={lunch} onValueChange={setLunch} />
+            </div>
+            <div>
+              <Label htmlFor="m-miles">Miles</Label>
+              <NumberInput id="m-miles" value={miles} onValueChange={setMiles} />
             </div>
           </div>
 
