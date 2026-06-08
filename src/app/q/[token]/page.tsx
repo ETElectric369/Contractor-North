@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { PrintButton } from "@/components/print-button";
 import { companyFromOrg } from "@/components/doc-letterhead";
 import { DocHeader, templateFor } from "@/components/doc-templates";
+import { PublicQuoteAccept } from "./accept";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import type { Organization } from "@/lib/types";
 
@@ -89,6 +90,14 @@ export default async function PublicQuotePage({
             <div className="flex justify-between text-slate-600"><span>Tax ({(q.tax_rate * 100).toFixed(2)}%)</span><span>{formatCurrency(q.tax)}</span></div>
             <div className="flex justify-between border-t border-slate-300 pt-1 text-base font-bold text-slate-900"><span>Total</span><span>{formatCurrency(q.total)}</span></div>
           </div>
+        </div>
+
+        <div className="mt-8">
+          <PublicQuoteAccept
+            token={token}
+            accepted={q.status === "accepted"}
+            brand={co.brand}
+          />
         </div>
 
         {q.notes && (

@@ -165,6 +165,40 @@ export async function saveQuote(input: SaveQuoteInput) {
   return { ok: true as const, id: quote.id };
 }
 
+export async function createJobFromQuote(
+  quoteId: string,
+): Promise<{ ok: boolean; error?: string; id?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  const { data: q } = await supabase
+    .from("quotes")
+    .select("id, job_id, customer_id, title, quote_number")
+    .eq("id", quoteId)
+    .maybeSingle();
+  if (!q) return { ok: false, error: "Quote not found." };
+  if (q.job_id) return { ok: true, id: q.job_id };
+
+  const { data: job, error } = await supabase
+    .from("jobs")
+    .insert({
+      customer_id: q.customer_id,
+      name: q.title || `Job from ${q.quote_number}`,
+      status: "scheduled",
+      created_by: user.id,
+    })
+    .select("id")
+    .single();
+  if (error) return { ok: false, error: error.message };
+
+  await supabase.from("quotes").update({ job_id: job.id }).eq("id", quoteId);
+  revalidatePath(`/quotes/${quoteId}`);
+  return { ok: true, id: job.id };
+}
+
 export async function updateQuoteStatus(id: string, status: string) {
   const supabase = await createClient();
   const { error } = await supabase

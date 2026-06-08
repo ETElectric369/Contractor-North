@@ -6,6 +6,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { JobDocuments } from "./job-documents";
+import { ConvertButton } from "@/components/convert-button";
+import { createInvoiceForJob } from "../actions";
 
 export const dynamic = "force-dynamic";
 
@@ -56,7 +58,8 @@ export default async function JobDetailPage({
         <ArrowLeft className="h-4 w-4" /> Back to schedule
       </Link>
 
-      <div className="mb-6">
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-bold text-slate-900">{j.name}</h1>
           <Badge tone={statusTone(j.status)}>{j.status.replace("_", " ")}</Badge>
@@ -76,6 +79,12 @@ export default async function JobDetailPage({
           {j.scheduled_start && <span>{formatDate(j.scheduled_start)}</span>}
         </div>
         {j.description && <p className="mt-3 text-sm text-slate-600">{j.description}</p>}
+        </div>
+        <ConvertButton
+          label="Create invoice"
+          run={createInvoiceForJob.bind(null, j.id)}
+          hrefPrefix="/billing/"
+        />
       </div>
 
       {/* Receipts & documents */}

@@ -7,6 +7,9 @@ import { Badge, statusTone } from "@/components/ui/badge";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { StatusControl } from "./status-control";
 import { EmailButton } from "@/components/email-button";
+import { ConvertButton } from "@/components/convert-button";
+import { createJobFromQuote } from "../actions";
+import { Briefcase } from "lucide-react";
 import type { Quote, QuoteLineItem } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -57,7 +60,7 @@ export default async function QuoteDetailPage({
             {q.valid_until ? ` · Valid until ${formatDate(q.valid_until)}` : ""}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <EmailButton id={q.id} kind="quote" />
           <Link
             href={`/print/quote/${q.id}`}
@@ -65,6 +68,21 @@ export default async function QuoteDetailPage({
           >
             <Printer className="h-4 w-4" /> Print / PDF
           </Link>
+          {(q as any).job_id ? (
+            <Link
+              href={`/jobs/${(q as any).job_id}`}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
+            >
+              <Briefcase className="h-4 w-4" /> View job
+            </Link>
+          ) : (
+            <ConvertButton
+              label="Create job"
+              run={createJobFromQuote.bind(null, q.id)}
+              hrefPrefix="/jobs/"
+              variant="outline"
+            />
+          )}
           <StatusControl id={q.id} status={q.status} />
         </div>
       </div>

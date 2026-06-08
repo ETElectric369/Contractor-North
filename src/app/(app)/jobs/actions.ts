@@ -2,8 +2,40 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { createInvoiceFromQuote, createBlankInvoice } from "../billing/actions";
 
 export type Result = { ok: boolean; error?: string };
+
+/** Create an invoice for a job — from its quote if it has one, else blank. */
+export async function createInvoiceForJob(
+  jobId: string,
+): Promise<{ ok: boolean; error?: string; id?: string }> {
+  const supabase = await createClient();
+
+  const { data: quote } = await supabase
+    .from("quotes")
+    .select("id")
+    .eq("job_id", jobId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (quote) {
+    const res = await createInvoiceFromQuote(quote.id);
+    return res;
+  }
+
+  const { data: job } = await supabase
+    .from("jobs")
+    .select("customer_id, name")
+    .eq("id", jobId)
+    .maybeSingle();
+  return createBlankInvoice({
+    customer_id: job?.customer_id ?? null,
+    title: job?.name ?? "",
+    tax_rate: 0,
+  });
+}
 
 export async function addDocument(input: {
   job_id: string;
