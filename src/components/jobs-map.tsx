@@ -20,6 +20,7 @@ export function JobsMap({ jobs }: { jobs: MapJob[] }) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [routing, setRouting] = useState(false);
+  const [located, setLocated] = useState(0);
 
   useEffect(() => {
     if (!key) return;
@@ -57,7 +58,10 @@ export function JobsMap({ jobs }: { jobs: MapJob[] }) {
           } catch {}
         }
         if (ptsRef.current.length) map.fitBounds(bounds);
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLocated(ptsRef.current.length);
+          setLoading(false);
+        }
       })
       .catch(() => {
         setError("Couldn't load Google Maps. Check the API key and that the Maps JavaScript API is enabled.");
@@ -72,7 +76,12 @@ export function JobsMap({ jobs }: { jobs: MapJob[] }) {
   function planRoute() {
     const g = (window as any).google;
     const pts = ptsRef.current;
-    if (!g || pts.length < 2) return;
+    if (!g) return;
+    if (pts.length < 2) {
+      setError("Add at least 2 jobs with addresses to suggest a route.");
+      return;
+    }
+    setError(null);
     setRouting(true);
     const svc = new g.maps.DirectionsService();
     if (!rendererRef.current) {
@@ -108,8 +117,9 @@ export function JobsMap({ jobs }: { jobs: MapJob[] }) {
         <div className="text-sm text-slate-500">{jobs.length} job{jobs.length === 1 ? "" : "s"} with an address</div>
         <button
           onClick={planRoute}
-          disabled={routing}
-          className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-60"
+          disabled={routing || located < 2}
+          title={located < 2 ? "Needs at least 2 jobs with addresses" : "Optimize a driving route between stops"}
+          className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {routing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Route className="h-4 w-4" />}
           Suggest route
