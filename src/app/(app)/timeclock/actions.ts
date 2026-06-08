@@ -99,6 +99,59 @@ export async function clockOut(input: {
   return { ok: true };
 }
 
+/**
+ * Add a past (manual) timecard entry. Techs can add their own; owner/admin/
+ * office can add for any crew member. clock_in/clock_out are ISO strings built
+ * on the client (so the user's local time is used).
+ */
+export async function createManualEntry(input: {
+  profile_id: string;
+  clock_in: string;
+  clock_out: string;
+  job_id: string | null;
+  job_code: string | null;
+  lunch_minutes: number;
+  notes: string;
+}): Promise<ClockResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  const { data: me } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .maybeSingle();
+  const isStaff = !!me && ["owner", "admin", "office"].includes(me.role);
+  const profileId = isStaff ? input.profile_id || user.id : user.id;
+
+  const ci = new Date(input.clock_in);
+  const co = new Date(input.clock_out);
+  if (isNaN(ci.getTime()) || isNaN(co.getTime())) {
+    return { ok: false, error: "Invalid date/time." };
+  }
+  if (co <= ci) return { ok: false, error: "End must be after start." };
+
+  const { error } = await supabase.from("time_entries").insert({
+    profile_id: profileId,
+    job_id: input.job_id,
+    job_code: input.job_code,
+    clock_in: ci.toISOString(),
+    clock_out: co.toISOString(),
+    lunch_minutes: input.lunch_minutes || 0,
+    notes: input.notes || null,
+    status: "closed",
+    source: "manual",
+  });
+  if (error) return { ok: false, error: error.message };
+
+  revalidatePath("/timeclock");
+  revalidatePath("/timecards");
+  return { ok: true };
+}
+
 /** Save the "what did you do today?" note (and optional translation) mid-shift. */
 export async function saveEntryNotes(
   entry_id: string,

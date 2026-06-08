@@ -3,6 +3,7 @@ import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { TimeclockPanel } from "./timeclock-panel";
+import { AddEntryButton } from "./add-entry-button";
 import { formatDateTime, hoursBetween, formatDuration } from "@/lib/utils";
 import { translator } from "@/lib/i18n";
 import type { JobCode, TimeEntry } from "@/lib/types";
@@ -19,11 +20,20 @@ export default async function TimeclockPage() {
 
   const { data: prof } = await supabase
     .from("profiles")
-    .select("language")
+    .select("language, role")
     .eq("id", user?.id ?? "")
     .maybeSingle();
   const lang = prof?.language ?? "en";
   const t = translator(lang);
+  const isStaff = !!prof && ["owner", "admin", "office"].includes(prof.role);
+
+  const { data: members } = isStaff
+    ? await supabase
+        .from("profiles")
+        .select("id, full_name")
+        .eq("active", true)
+        .order("full_name")
+    : { data: [] as { id: string; full_name: string | null }[] };
 
   const [openRes, codesRes, jobsRes, weekRes] = await Promise.all([
     supabase
@@ -63,7 +73,14 @@ export default async function TimeclockPage() {
 
   return (
     <div className="mx-auto max-w-4xl">
-      <PageHeader title={t("tc_title")} description={t("tc_desc")} />
+      <PageHeader title={t("tc_title")} description={t("tc_desc")}>
+        <AddEntryButton
+          isStaff={isStaff}
+          members={members ?? []}
+          jobCodes={(codesRes.data ?? []) as JobCode[]}
+          jobs={jobsRes.data ?? []}
+        />
+      </PageHeader>
 
       <div className="grid gap-6 lg:grid-cols-5">
         <div className="lg:col-span-3">

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Menu, X, LogOut } from "lucide-react";
 import { Sidebar } from "./sidebar";
+import { LanguageSwitcher } from "@/components/language-switcher";
 import { initials } from "@/lib/utils";
 import { signOut } from "@/app/login/actions";
 import type { Profile } from "@/lib/types";
@@ -34,6 +35,7 @@ export function Topbar({
         <div className="flex-1" />
 
         <div className="flex items-center gap-3">
+          <LanguageSwitcher current={lang} />
           <div className="hidden text-right sm:block">
             <div className="text-sm font-medium text-slate-900">
               {profile?.full_name ?? "—"}

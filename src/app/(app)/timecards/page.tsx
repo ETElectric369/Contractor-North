@@ -11,6 +11,8 @@ import {
   hoursBetween,
   initials,
 } from "@/lib/utils";
+import { AddEntryButton } from "../timeclock/add-entry-button";
+import type { JobCode } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +47,16 @@ export default async function TimecardsPage({
   if (!me || !["owner", "admin", "office"].includes(me.role)) {
     redirect("/timeclock");
   }
+
+  const [{ data: members }, { data: jobCodes }, { data: jobs }] = await Promise.all([
+    supabase.from("profiles").select("id, full_name").eq("active", true).order("full_name"),
+    supabase.from("job_codes").select("*").eq("active", true).order("code"),
+    supabase
+      .from("jobs")
+      .select("id, job_number, name")
+      .order("created_at", { ascending: false })
+      .limit(50),
+  ]);
 
   const { start, end } = weekRange(offset);
 
@@ -85,7 +97,13 @@ export default async function TimecardsPage({
   return (
     <div>
       <PageHeader title="Timecards" description="Review your crew's hours by week.">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <AddEntryButton
+            isStaff
+            members={members ?? []}
+            jobCodes={(jobCodes ?? []) as JobCode[]}
+            jobs={jobs ?? []}
+          />
           <Link
             href={`/timecards?week=${offset + 1}`}
             className="rounded-lg border border-slate-300 bg-white p-2 text-slate-600 hover:bg-slate-50"
