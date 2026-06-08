@@ -5,17 +5,21 @@ import { usePathname } from "next/navigation";
 import { Zap } from "lucide-react";
 import { NAV } from "@/lib/nav";
 import { cn } from "@/lib/utils";
+import { translator } from "@/lib/i18n";
 
 export function Sidebar({
   onNavigate,
   branding,
+  lang,
 }: {
   onNavigate?: () => void;
   branding?: { name: string | null; logo: string | null };
+  lang?: string;
 }) {
   const pathname = usePathname();
   const name = branding?.name || "Contractor North";
   const logo = branding?.logo;
+  const t = translator(lang);
 
   return (
     <aside className="flex h-full w-64 flex-col border-r border-slate-200 bg-white">
@@ -44,7 +48,7 @@ export function Sidebar({
         {NAV.map((section) => (
           <div key={section.title}>
             <div className="px-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-              {section.title}
+              {t(section.title)}
             </div>
             <ul className="space-y-0.5">
               {section.items.map((item) => {
@@ -69,7 +73,7 @@ export function Sidebar({
                           active ? "text-brand" : "text-slate-400 group-hover:text-slate-600",
                         )}
                       />
-                      <span className="flex-1">{item.label}</span>
+                      <span className="flex-1">{t(item.label)}</span>
                       {item.comingSoon && (
                         <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-400">
                           soon

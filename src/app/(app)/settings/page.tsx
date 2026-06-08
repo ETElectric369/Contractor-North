@@ -7,6 +7,8 @@ import { OrgSettingsForm } from "./org-settings-form";
 import { InviteManager } from "./invite-manager";
 import { DocumentDesigner } from "./document-designer";
 import { LogoUpload } from "./logo-upload";
+import { LanguageToggle } from "./language-toggle";
+import { translator } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { billingEnabled } from "@/lib/stripe";
 import { trialDaysLeft } from "@/lib/subscription";
@@ -40,6 +42,7 @@ export default async function SettingsPage({
     .single();
   const profile = me as Profile | null;
   const isAdmin = profile?.role === "owner" || profile?.role === "admin";
+  const t = translator(profile?.language);
 
   const [{ data: org }, { data: team }, { data: invites }] = await Promise.all([
     profile?.org_id
@@ -182,6 +185,12 @@ export default async function SettingsPage({
                 {profile?.role}
               </Badge>
             </div>
+          </div>
+
+          <div className="mt-5 border-t border-slate-100 pt-4">
+            <div className="text-sm font-medium text-slate-700">{t("s_language")}</div>
+            <div className="mb-2 text-xs text-slate-400">{t("s_languageDesc")}</div>
+            <LanguageToggle current={profile?.language ?? "en"} />
           </div>
         </CardContent>
       </Card>

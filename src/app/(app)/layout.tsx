@@ -54,10 +54,10 @@ export default async function AppLayout({
     >
 
       <div className="hidden lg:block">
-        <Sidebar branding={branding} />
+        <Sidebar branding={branding} lang={profile.language} />
       </div>
       <div className="flex flex-1 flex-col overflow-hidden">
-        <Topbar profile={(profile as Profile) ?? null} branding={branding} />
+        <Topbar profile={(profile as Profile) ?? null} branding={branding} lang={profile.language} />
         <main className="flex-1 overflow-y-auto bg-slate-50 p-4 lg:p-6">
           {children}
         </main>

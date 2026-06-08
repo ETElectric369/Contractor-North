@@ -34,6 +34,7 @@ export interface Profile {
   hourly_rate: number | null;
   avatar_url: string | null;
   active: boolean;
+  language: string;
   created_at: string;
   updated_at: string;
 }

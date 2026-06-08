@@ -10,9 +10,11 @@ import type { Profile } from "@/lib/types";
 export function Topbar({
   profile,
   branding,
+  lang,
 }: {
   profile: Profile | null;
   branding?: { name: string | null; logo: string | null };
+  lang?: string;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -68,7 +70,7 @@ export function Topbar({
             >
               <X className="h-5 w-5" />
             </button>
-            <Sidebar onNavigate={() => setOpen(false)} branding={branding} />
+            <Sidebar onNavigate={() => setOpen(false)} branding={branding} lang={lang} />
           </div>
         </div>
       )}

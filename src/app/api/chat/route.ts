@@ -23,6 +23,18 @@ export async function POST(req: Request) {
     return new Response("Unauthorized", { status: 401 });
   }
 
+  // Respond in the user's preferred language.
+  const { data: prof } = await supabase
+    .from("profiles")
+    .select("language")
+    .eq("id", user.id)
+    .maybeSingle();
+  const systemPrompt =
+    prof?.language === "es"
+      ? ASSISTANT_SYSTEM_PROMPT +
+        "\n\nThe user's preferred language is Spanish (español). Respond in Spanish unless the user writes to you in English. Use clear, friendly Spanish suitable for an electrician in the field."
+      : ASSISTANT_SYSTEM_PROMPT;
+
   let body: { messages: ChatMessage[] };
   try {
     body = await req.json();
@@ -62,7 +74,7 @@ export async function POST(req: Request) {
         const anthropicStream = client.messages.stream({
           model: DEFAULT_MODEL,
           max_tokens: 2048,
-          system: ASSISTANT_SYSTEM_PROMPT,
+          system: systemPrompt,
           messages,
         });
 

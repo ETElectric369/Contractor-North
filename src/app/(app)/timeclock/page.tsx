@@ -4,6 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { TimeclockPanel } from "./timeclock-panel";
 import { formatDateTime, hoursBetween, formatDuration } from "@/lib/utils";
+import { translator } from "@/lib/i18n";
 import type { JobCode, TimeEntry } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -15,6 +16,14 @@ export default async function TimeclockPage() {
   } = await supabase.auth.getUser();
 
   const weekAgo = new Date(Date.now() - 7 * 86400_000).toISOString();
+
+  const { data: prof } = await supabase
+    .from("profiles")
+    .select("language")
+    .eq("id", user?.id ?? "")
+    .maybeSingle();
+  const lang = prof?.language ?? "en";
+  const t = translator(lang);
 
   const [openRes, codesRes, jobsRes, weekRes] = await Promise.all([
     supabase
@@ -54,10 +63,7 @@ export default async function TimeclockPage() {
 
   return (
     <div className="mx-auto max-w-4xl">
-      <PageHeader
-        title="Timeclock"
-        description="Clock in and out, log lunch, and record what you worked on."
-      />
+      <PageHeader title={t("tc_title")} description={t("tc_desc")} />
 
       <div className="grid gap-6 lg:grid-cols-5">
         <div className="lg:col-span-3">
@@ -65,6 +71,7 @@ export default async function TimeclockPage() {
             openEntry={openEntry}
             jobCodes={(codesRes.data ?? []) as JobCode[]}
             jobs={jobsRes.data ?? []}
+            lang={lang}
           />
         </div>
 
@@ -72,7 +79,7 @@ export default async function TimeclockPage() {
           <Card>
             <CardContent className="py-5">
               <h3 className="mb-3 text-sm font-semibold text-slate-900">
-                This week
+                {t("tc_thisWeek")}
               </h3>
               <div className="mb-3 text-3xl font-bold text-slate-900">
                 {formatDuration(weekTotal)}
@@ -98,7 +105,7 @@ export default async function TimeclockPage() {
 
       <Card className="mt-6 overflow-hidden">
         <div className="border-b border-slate-100 px-5 py-3">
-          <h3 className="text-sm font-semibold text-slate-900">Recent entries</h3>
+          <h3 className="text-sm font-semibold text-slate-900">{t("tc_recent")}</h3>
         </div>
         <table className="w-full text-sm">
           <thead className="border-b border-slate-100 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-400">
@@ -118,7 +125,7 @@ export default async function TimeclockPage() {
                 </td>
                 <td className="px-3 py-2.5 text-slate-500">
                   {e.clock_out ? formatDateTime(e.clock_out) : (
-                    <Badge tone="green">open</Badge>
+                    <Badge tone="green">{t("tc_open")}</Badge>
                   )}
                 </td>
                 <td className="px-3 py-2.5">
@@ -139,7 +146,7 @@ export default async function TimeclockPage() {
             {week.length === 0 && (
               <tr>
                 <td colSpan={5} className="px-5 py-6 text-center text-slate-400">
-                  No entries in the last 7 days.
+                  {t("tc_noEntries")}
                 </td>
               </tr>
             )}

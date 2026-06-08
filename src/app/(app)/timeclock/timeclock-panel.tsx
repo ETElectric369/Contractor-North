@@ -18,6 +18,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { hoursBetween, formatDuration } from "@/lib/utils";
+import { translator } from "@/lib/i18n";
 import type { GeoPoint, JobCode, TimeEntry } from "@/lib/types";
 import { clockIn, clockOut } from "./actions";
 
@@ -55,11 +56,14 @@ export function TimeclockPanel({
   openEntry,
   jobCodes,
   jobs,
+  lang,
 }: {
   openEntry: TimeEntry | null;
   jobCodes: JobCode[];
   jobs: JobOption[];
+  lang?: string;
 }) {
+  const t = translator(lang);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
@@ -175,7 +179,7 @@ export function TimeclockPanel({
               <span className="relative inline-flex h-3 w-3 rounded-full bg-green-500" />
             </span>
             <span className="text-sm font-medium text-green-700">
-              Clocked in — {jobLabel}
+              {t("tc_clockedIn")} — {jobLabel}
               {openEntry.job_code ? ` · ${openEntry.job_code}` : ""}
             </span>
           </div>
@@ -185,15 +189,15 @@ export function TimeclockPanel({
               {formatDuration(elapsed)}
             </div>
             <div className="mt-1 text-sm text-slate-400">
-              Since {new Date(openEntry.clock_in).toLocaleTimeString()}
-              {openEntry.gps_in ? " · 📍 location captured" : ""}
+              {t("tc_since")} {new Date(openEntry.clock_in).toLocaleTimeString()}
+              {openEntry.gps_in ? " · 📍" : ""}
             </div>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <Label htmlFor="lunch" className="flex items-center gap-1.5">
-                <Coffee className="h-4 w-4 text-slate-400" /> Lunch (minutes)
+                <Coffee className="h-4 w-4 text-slate-400" /> {t("tc_lunch")}
               </Label>
               <Input
                 id="lunch"
@@ -209,20 +213,18 @@ export function TimeclockPanel({
           <div>
             <div className="mb-1.5 flex items-center justify-between">
               <Label className="mb-0 flex items-center gap-1.5">
-                <Briefcase className="h-4 w-4 text-slate-400" /> Jobs worked today
+                <Briefcase className="h-4 w-4 text-slate-400" /> {t("tc_jobsToday")}
               </Label>
               <button
                 type="button"
                 onClick={addAlloc}
                 className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200"
               >
-                <Plus className="h-3.5 w-3.5" /> Add job
+                <Plus className="h-3.5 w-3.5" /> {t("tc_addJob")}
               </button>
             </div>
             {allocations.length === 0 ? (
-              <p className="text-xs text-slate-400">
-                Optional: break your day down by job, with time and what you did.
-              </p>
+              <p className="text-xs text-slate-400">{t("tc_breakdownHint")}</p>
             ) : (
               <div className="space-y-2">
                 {allocations.map((a, i) => (
@@ -278,14 +280,14 @@ export function TimeclockPanel({
                       </button>
                     </div>
                     <Input
-                      placeholder="What was done on this job?"
+                      placeholder={t("tc_whatDone")}
                       value={a.description}
                       onChange={(e) => updateAlloc(i, { description: e.target.value })}
                     />
                   </div>
                 ))}
                 <div className="text-right text-xs text-slate-500">
-                  Allocated: {formatDuration(allocatedHours)}
+                  {t("tc_allocated")}: {formatDuration(allocatedHours)}
                 </div>
               </div>
             )}
@@ -293,7 +295,7 @@ export function TimeclockPanel({
 
           <div>
             <div className="mb-1.5 flex items-center justify-between">
-              <Label className="mb-0">What did you do today?</Label>
+              <Label className="mb-0">{t("tc_whatToday")}</Label>
               {speechSupported && (
                 <button
                   type="button"
@@ -306,11 +308,11 @@ export function TimeclockPanel({
                 >
                   {listening ? (
                     <>
-                      <MicOff className="h-3.5 w-3.5" /> Stop
+                      <MicOff className="h-3.5 w-3.5" /> {t("tc_stop")}
                     </>
                   ) : (
                     <>
-                      <Mic className="h-3.5 w-3.5" /> Dictate
+                      <Mic className="h-3.5 w-3.5" /> {t("tc_dictate")}
                     </>
                   )}
                 </button>
@@ -318,7 +320,7 @@ export function TimeclockPanel({
             </div>
             <Textarea
               rows={3}
-              placeholder="Summarize the work performed…"
+              placeholder={t("tc_summarize")}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
             />
@@ -335,11 +337,11 @@ export function TimeclockPanel({
           >
             {pending ? (
               <>
-                <Loader2 className="h-5 w-5 animate-spin" /> Clocking out…
+                <Loader2 className="h-5 w-5 animate-spin" /> {t("tc_clockingOut")}
               </>
             ) : (
               <>
-                <Square className="h-5 w-5" /> Clock out
+                <Square className="h-5 w-5" /> {t("tc_clockOut")}
               </>
             )}
           </Button>
@@ -353,14 +355,14 @@ export function TimeclockPanel({
     <Card>
       <CardContent className="space-y-5 py-6">
         <div className="text-center">
-          <p className="text-sm text-slate-500">You're not clocked in.</p>
+          <p className="text-sm text-slate-500">{t("tc_notClockedIn")}</p>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <Label htmlFor="job">Job (optional)</Label>
+            <Label htmlFor="job">{t("tc_job")}</Label>
             <Select id="job" value={jobId} onChange={(e) => setJobId(e.target.value)}>
-              <option value="">— No job —</option>
+              <option value="">{t("tc_noJob")}</option>
               {jobs.map((j) => (
                 <option key={j.id} value={j.id}>
                   {j.job_number} · {j.name}
@@ -369,9 +371,9 @@ export function TimeclockPanel({
             </Select>
           </div>
           <div>
-            <Label htmlFor="code">Job code</Label>
+            <Label htmlFor="code">{t("tc_jobCode")}</Label>
             <Select id="code" value={jobCode} onChange={(e) => setJobCode(e.target.value)}>
-              <option value="">— Select code —</option>
+              <option value="">{t("tc_selectCode")}</option>
               {jobCodes.map((c) => (
                 <option key={c.id} value={c.code}>
                   {c.code} — {c.description}
@@ -386,17 +388,16 @@ export function TimeclockPanel({
         <Button size="lg" className="w-full" onClick={doClockIn} disabled={pending}>
           {pending ? (
             <>
-              <Loader2 className="h-5 w-5 animate-spin" /> Clocking in…
+              <Loader2 className="h-5 w-5 animate-spin" /> {t("tc_clockingIn")}
             </>
           ) : (
             <>
-              <Play className="h-5 w-5" /> Clock in
+              <Play className="h-5 w-5" /> {t("tc_clockIn")}
             </>
           )}
         </Button>
         <p className="flex items-center justify-center gap-1.5 text-xs text-slate-400">
-          <MapPin className="h-3.5 w-3.5" /> Your location is captured at clock
-          in/out for job verification.
+          <MapPin className="h-3.5 w-3.5" /> {t("tc_locationNote")}
         </p>
       </CardContent>
     </Card>

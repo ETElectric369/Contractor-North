@@ -48,6 +48,22 @@ export async function updateOrganization(formData: FormData): Promise<Result> {
   return { ok: true };
 }
 
+export async function setLanguage(language: string): Promise<Result> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+  const lang = ["en", "es"].includes(language) ? language : "en";
+  const { error } = await supabase
+    .from("profiles")
+    .update({ language: lang })
+    .eq("id", user.id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
 export async function setLogoUrl(url: string | null): Promise<Result> {
   const supabase = await createClient();
   const orgId = await myOrgId(supabase);
