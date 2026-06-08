@@ -11,8 +11,10 @@ import { LanguageToggle } from "./language-toggle";
 import { translator } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { billingEnabled } from "@/lib/stripe";
+import { qboConfigured } from "@/lib/quickbooks";
 import { trialDaysLeft } from "@/lib/subscription";
 import { startCheckout, openPortal } from "./billing-actions";
+import { disconnectQuickbooks } from "./actions";
 import type { Organization, Profile } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -27,9 +29,13 @@ const roleTone: Record<string, "purple" | "indigo" | "blue" | "slate"> = {
 export default async function SettingsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ billing?: string; billing_error?: string }>;
+  searchParams: Promise<{
+    billing?: string;
+    billing_error?: string;
+    qbo?: string;
+  }>;
 }) {
-  const { billing, billing_error } = await searchParams;
+  const { billing, billing_error, qbo } = await searchParams;
   const supabase = await createClient();
   const {
     data: { user },
@@ -59,6 +65,10 @@ export default async function SettingsPage({
 
   const members = (team ?? []) as Profile[];
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "";
+
+  const { data: qboConn } = isAdmin
+    ? await supabase.from("accounting_connections").select("realm_id, connected_at").maybeSingle()
+    : { data: null };
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -163,6 +173,58 @@ export default async function SettingsPage({
                 (STRIPE_SECRET_KEY, STRIPE_PRICE_ID, STRIPE_WEBHOOK_SECRET) to
                 enable subscriptions.
               </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* QuickBooks (owner/admin) */}
+      {isAdmin && (
+        <Card>
+          <CardContent className="py-5">
+            <h3 className="mb-3 text-sm font-semibold text-slate-900">QuickBooks</h3>
+            {qbo === "connected" && (
+              <div className="mb-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+                Connected to QuickBooks Online.
+              </div>
+            )}
+            {(qbo === "error" || qbo === "denied") && (
+              <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+                Could not connect to QuickBooks. Please try again.
+              </div>
+            )}
+            {!qboConfigured() ? (
+              <p className="text-sm text-slate-400">
+                Not configured yet. Add QBO_CLIENT_ID, QBO_CLIENT_SECRET, and
+                QBO_ENVIRONMENT to enable syncing.
+              </p>
+            ) : qboConn?.realm_id ? (
+              <div className="flex flex-wrap items-center gap-3">
+                <Badge tone="green">Connected</Badge>
+                <span className="text-sm text-slate-500">
+                  Send invoices to QuickBooks from any invoice page.
+                </span>
+                <form
+                  action={async () => {
+                    "use server";
+                    await disconnectQuickbooks();
+                  }}
+                >
+                  <Button variant="outline">Disconnect</Button>
+                </form>
+              </div>
+            ) : (
+              <div>
+                <a
+                  href="/api/quickbooks/connect"
+                  className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark"
+                >
+                  Connect QuickBooks
+                </a>
+                <p className="mt-2 text-xs text-slate-400">
+                  Sync customers and invoices to QuickBooks Online.
+                </p>
+              </div>
             )}
           </CardContent>
         </Card>

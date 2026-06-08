@@ -1,8 +1,27 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { formatPhone, formatState, formatZip, titleCase } from "@/lib/utils";
+
+export async function disconnectQuickbooks(): Promise<Result> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const { data: me } = await supabase
+    .from("profiles")
+    .select("org_id, role")
+    .eq("id", user?.id ?? "")
+    .maybeSingle();
+  if (!me?.org_id || !["owner", "admin"].includes(me.role)) {
+    return { ok: false, error: "Not allowed." };
+  }
+  const svc = createServiceClient();
+  await svc.from("accounting_connections").delete().eq("org_id", me.org_id);
+  revalidatePath("/settings");
+  return { ok: true };
+}
 
 export type Result = { ok: boolean; error?: string };
 

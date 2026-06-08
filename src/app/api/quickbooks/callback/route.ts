@@ -1,0 +1,48 @@
+import { NextResponse } from "next/server";
+import { exchangeCode } from "@/lib/quickbooks";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
+
+export const runtime = "nodejs";
+
+/** OAuth redirect target: exchange the code and store the org's connection. */
+export async function GET(req: Request) {
+  const site = process.env.NEXT_PUBLIC_SITE_URL || "";
+  const { searchParams } = new URL(req.url);
+  const code = searchParams.get("code");
+  const realmId = searchParams.get("realmId");
+  if (!code || !realmId) {
+    return NextResponse.redirect(`${site}/settings?qbo=error`);
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return NextResponse.redirect(`${site}/login`);
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("org_id, role")
+    .eq("id", user.id)
+    .maybeSingle();
+  if (!profile?.org_id || !["owner", "admin"].includes(profile.role)) {
+    return NextResponse.redirect(`${site}/settings?qbo=denied`);
+  }
+
+  try {
+    const t = await exchangeCode(code);
+    const svc = createServiceClient();
+    await svc.from("accounting_connections").upsert({
+      org_id: profile.org_id,
+      provider: "quickbooks",
+      realm_id: realmId,
+      access_token: t.access_token,
+      refresh_token: t.refresh_token,
+      expires_at: new Date(Date.now() + (t.expires_in ?? 3600) * 1000).toISOString(),
+      connected_at: new Date().toISOString(),
+    });
+    return NextResponse.redirect(`${site}/settings?qbo=connected`);
+  } catch {
+    return NextResponse.redirect(`${site}/settings?qbo=error`);
+  }
+}

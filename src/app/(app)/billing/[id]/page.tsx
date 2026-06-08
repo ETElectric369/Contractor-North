@@ -2,6 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, User, FileText, Printer, CreditCard } from "lucide-react";
 import { billingEnabled } from "@/lib/stripe";
+import { qboConfigured } from "@/lib/quickbooks";
+import { QboInvoiceButton } from "./qbo-button";
 import { createClient } from "@/lib/supabase/server";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
@@ -99,6 +101,7 @@ export default async function InvoicePage({
           >
             <Printer className="h-4 w-4" /> Print / PDF
           </Link>
+          {qboConfigured() && <QboInvoiceButton id={inv.id} />}
         </div>
       </div>
 

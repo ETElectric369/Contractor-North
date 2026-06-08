@@ -4,6 +4,27 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { sendEmail, renderDocEmail } from "@/lib/email";
 import { sendSms } from "@/lib/sms";
+import { pushInvoiceToQbo } from "@/lib/quickbooks";
+
+export async function sendInvoiceToQuickbooks(
+  id: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const { data: me } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user?.id ?? "")
+    .maybeSingle();
+  if (!me || !["owner", "admin", "office"].includes(me.role)) {
+    return { ok: false, error: "Not allowed." };
+  }
+  const res = await pushInvoiceToQbo(id);
+  if (res.ok) revalidatePath(`/billing/${id}`);
+  return { ok: res.ok, error: res.error };
+}
 
 function publicInvoiceLink(token: string) {
   return `${process.env.NEXT_PUBLIC_SITE_URL || ""}/i/${token}`;
