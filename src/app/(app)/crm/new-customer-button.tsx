@@ -7,12 +7,16 @@ import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { PhoneInput } from "@/components/ui/phone-input";
+import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { createCustomer } from "./actions";
 
 export function NewCustomerButton() {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const [city, setCity] = useState("");
+  const [state, setState] = useState("");
+  const [zip, setZip] = useState("");
   const router = useRouter();
 
   function onSubmit(formData: FormData) {
@@ -76,20 +80,29 @@ export function NewCustomerButton() {
             </div>
             <div className="col-span-2">
               <Label htmlFor="address">Address</Label>
-              <Input id="address" name="address" />
+              <AddressAutocomplete
+                id="address"
+                name="address"
+                streetOnly
+                onResolved={(p) => {
+                  setCity(p.city);
+                  setState(p.state);
+                  setZip(p.zip);
+                }}
+              />
             </div>
             <div>
               <Label htmlFor="city">City</Label>
-              <Input id="city" name="city" />
+              <Input id="city" name="city" value={city} onChange={(e) => setCity(e.target.value)} />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label htmlFor="state">State</Label>
-                <Input id="state" name="state" maxLength={2} />
+                <Input id="state" name="state" maxLength={2} value={state} onChange={(e) => setState(e.target.value)} />
               </div>
               <div>
                 <Label htmlFor="zip">Zip</Label>
-                <Input id="zip" name="zip" />
+                <Input id="zip" name="zip" value={zip} onChange={(e) => setZip(e.target.value)} />
               </div>
             </div>
             <div className="col-span-2">

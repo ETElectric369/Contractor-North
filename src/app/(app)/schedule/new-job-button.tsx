@@ -6,6 +6,7 @@ import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { createJob } from "./actions";
 
 interface CustomerOption {
@@ -73,7 +74,7 @@ export function NewJobButton({ customers }: { customers: CustomerOption[] }) {
           </div>
           <div>
             <Label htmlFor="address">Site address</Label>
-            <Input id="address" name="address" />
+            <AddressAutocomplete id="address" name="address" />
           </div>
           <div>
             <Label htmlFor="scheduled_start">Scheduled start</Label>
