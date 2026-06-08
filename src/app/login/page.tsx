@@ -3,6 +3,7 @@ import { Zap } from "lucide-react";
 import { login, signup } from "./actions";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 
 export default async function LoginPage({
   searchParams,
@@ -63,8 +64,15 @@ export default async function LoginPage({
               <Input id="email" name="email" type="email" placeholder="you@company.com" defaultValue={email ?? ""} required />
             </div>
             <div>
-              <Label htmlFor="password">Password</Label>
-              <Input id="password" name="password" type="password" placeholder="••••••••" required minLength={6} />
+              <div className="mb-1.5 flex items-center justify-between">
+                <Label htmlFor="password" className="mb-0">Password</Label>
+                {!isSignup && (
+                  <Link href="/forgot" className="text-xs font-medium text-brand hover:underline">
+                    Forgot password?
+                  </Link>
+                )}
+              </div>
+              <PasswordInput id="password" name="password" placeholder="••••••••" required minLength={6} />
             </div>
 
             <Button
