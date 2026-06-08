@@ -73,7 +73,7 @@ export default async function SchedulePage() {
                 {items.map((j) => (
                   <Link
                     key={j.id}
-                    href={`/work-orders?job=${j.id}`}
+                    href={`/jobs/${j.id}`}
                     className="flex items-center gap-4 px-5 py-3 hover:bg-slate-50"
                   >
                     <div className="w-16 shrink-0 text-sm font-medium text-slate-500">

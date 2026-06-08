@@ -66,7 +66,7 @@ export default async function WorkOrderDetailPage({
             </div>
             <div className="mt-1 text-sm font-medium text-slate-900">
               {w.jobs ? (
-                <Link href={`/work-orders?job=${w.jobs.id}`} className="hover:text-brand">
+                <Link href={`/jobs/${w.jobs.id}`} className="hover:text-brand">
                   {w.jobs.name}
                 </Link>
               ) : (
