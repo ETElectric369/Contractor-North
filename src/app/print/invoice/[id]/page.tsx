@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { PrintButton } from "@/components/print-button";
 import { companyFromOrg } from "@/components/doc-letterhead";
 import { DocHeader, templateFor } from "@/components/doc-templates";
+import { getOrgSettings } from "@/lib/org-settings";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import type { Invoice, InvoiceItem, Organization, Payment } from "@/lib/types";
 
@@ -46,6 +47,7 @@ export default async function InvoicePrintPage({
     .maybeSingle();
   const co = companyFromOrg(org as Organization | null);
   const template = templateFor(org as Organization | null, "invoice");
+  const settings = getOrgSettings((org as any)?.settings);
 
   const lineItems = (items ?? []) as InvoiceItem[];
   const pays = (payments ?? []) as Payment[];
@@ -197,11 +199,21 @@ export default async function InvoicePrintPage({
           </div>
         )}
 
+        {settings.invoice_terms && (
+          <div className="mt-6 border-t border-slate-200 pt-4">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Terms</div>
+            <p className="mt-1 whitespace-pre-wrap text-sm text-slate-600">{settings.invoice_terms}</p>
+          </div>
+        )}
+
         <div className="mt-10 text-center text-xs text-slate-400">
           {balance > 0
             ? `Please remit ${formatCurrency(balance)}. Thank you for your business.`
             : "Paid in full — thank you for your business."}
         </div>
+        {settings.document_footer && (
+          <div className="mt-3 whitespace-pre-wrap text-center text-xs text-slate-400">{settings.document_footer}</div>
+        )}
       </div>
     </div>
   );

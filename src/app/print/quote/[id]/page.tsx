@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { PrintButton } from "@/components/print-button";
 import { companyFromOrg } from "@/components/doc-letterhead";
 import { DocHeader, templateFor } from "@/components/doc-templates";
+import { getOrgSettings } from "@/lib/org-settings";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import type { Organization, Quote, QuoteLineItem } from "@/lib/types";
 
@@ -39,6 +40,7 @@ export default async function QuotePrintPage({
     .maybeSingle();
   const co = companyFromOrg(org as Organization | null);
   const template = templateFor(org as Organization | null, "quote");
+  const settings = getOrgSettings((org as any)?.settings);
 
   const lineItems = (items ?? []) as QuoteLineItem[];
   const c = q.customers;
@@ -151,8 +153,15 @@ export default async function QuotePrintPage({
           </div>
         )}
 
-        <div className="mt-10 text-center text-xs text-slate-400">
-          Thank you for the opportunity to earn your business.
+        {settings.quote_terms && (
+          <div className="mt-6 border-t border-slate-200 pt-4">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Terms</div>
+            <p className="mt-1 whitespace-pre-wrap text-sm text-slate-600">{settings.quote_terms}</p>
+          </div>
+        )}
+
+        <div className="mt-10 whitespace-pre-wrap text-center text-xs text-slate-400">
+          {settings.document_footer || "Thank you for the opportunity to earn your business."}
         </div>
       </div>
     </div>
