@@ -1,0 +1,80 @@
+// Org-wide preferences stored in organizations.settings (JSONB). Centralized
+// here with defaults so the app can read settings safely anywhere.
+
+export interface OrgSettings {
+  // Company
+  currency: string; // ISO 4217, e.g. "USD"
+  timezone: string; // IANA, e.g. "America/Los_Angeles"
+  tax_number: string; // EIN / tax #
+
+  // Documents
+  quote_expiry_days: number;
+  invoice_due_days: number;
+  quote_terms: string;
+  invoice_terms: string;
+  document_footer: string;
+  deposit_percent: number;
+
+  // Financial
+  default_labor_rate: number;
+
+  // Scheduling
+  work_day_start: string; // "08:00"
+  work_day_end: string; // "17:00"
+  week_start: "sunday" | "monday";
+  time_tracking_method: "start_end" | "duration";
+
+  // Payments
+  payment_methods: string[];
+
+  // Notifications (reminder engine — toggles stored now, engine wires later)
+  remind_quote_followup: boolean;
+  remind_invoice_due: boolean;
+  remind_appointments: boolean;
+}
+
+export const DEFAULT_SETTINGS: OrgSettings = {
+  currency: "USD",
+  timezone: "America/Los_Angeles",
+  tax_number: "",
+  quote_expiry_days: 30,
+  invoice_due_days: 14,
+  quote_terms: "",
+  invoice_terms: "",
+  document_footer: "",
+  deposit_percent: 0,
+  default_labor_rate: 0,
+  work_day_start: "08:00",
+  work_day_end: "17:00",
+  week_start: "monday",
+  time_tracking_method: "start_end",
+  payment_methods: ["Cash", "Check", "Card", "Zelle", "Venmo"],
+  remind_quote_followup: false,
+  remind_invoice_due: false,
+  remind_appointments: false,
+};
+
+/** Merge stored settings over defaults so every key is always present. */
+export function getOrgSettings(raw: unknown): OrgSettings {
+  const stored = (raw && typeof raw === "object" ? raw : {}) as Partial<OrgSettings>;
+  return { ...DEFAULT_SETTINGS, ...stored };
+}
+
+export const CURRENCIES = [
+  { code: "USD", label: "US Dollar ($)" },
+  { code: "CAD", label: "Canadian Dollar ($)" },
+  { code: "AUD", label: "Australian Dollar ($)" },
+  { code: "GBP", label: "British Pound (£)" },
+  { code: "EUR", label: "Euro (€)" },
+  { code: "NZD", label: "New Zealand Dollar ($)" },
+];
+
+export const TIMEZONES = [
+  "America/Los_Angeles",
+  "America/Denver",
+  "America/Chicago",
+  "America/New_York",
+  "America/Phoenix",
+  "America/Anchorage",
+  "Pacific/Honolulu",
+];

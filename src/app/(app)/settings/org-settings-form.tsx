@@ -3,12 +3,14 @@
 import { useState, useTransition } from "react";
 import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input, Label } from "@/components/ui/input";
+import { Input, Label, Select } from "@/components/ui/input";
 import { PhoneInput } from "@/components/ui/phone-input";
 import type { Organization } from "@/lib/types";
+import { getOrgSettings, CURRENCIES, TIMEZONES } from "@/lib/org-settings";
 import { updateOrganization } from "./actions";
 
 export function OrgSettingsForm({ org }: { org: Organization }) {
+  const s = getOrgSettings((org as any).settings);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   const [pending, start] = useTransition();
@@ -95,6 +97,26 @@ export function OrgSettingsForm({ org }: { org: Organization }) {
             />
             <span className="text-xs text-slate-400">Used across the app & documents</span>
           </div>
+        </div>
+        <div>
+          <Label htmlFor="tax_number">Tax # / EIN</Label>
+          <Input id="tax_number" name="tax_number" defaultValue={s.tax_number} />
+        </div>
+        <div>
+          <Label htmlFor="currency">Currency</Label>
+          <Select id="currency" name="currency" defaultValue={s.currency}>
+            {CURRENCIES.map((c) => (
+              <option key={c.code} value={c.code}>{c.label}</option>
+            ))}
+          </Select>
+        </div>
+        <div>
+          <Label htmlFor="timezone">Time zone</Label>
+          <Select id="timezone" name="timezone" defaultValue={s.timezone}>
+            {TIMEZONES.map((tz) => (
+              <option key={tz} value={tz}>{tz.replace("_", " ")}</option>
+            ))}
+          </Select>
         </div>
       </div>
       <div className="flex items-center gap-3">

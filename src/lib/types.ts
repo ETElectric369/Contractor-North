@@ -55,6 +55,7 @@ export interface Organization {
   brand_color: string;
   doc_template: string;
   doc_templates: Record<string, string>;
+  settings: Record<string, unknown>;
   plan: string;
   subscription_status: string;
   stripe_customer_id: string | null;

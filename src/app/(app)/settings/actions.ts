@@ -44,6 +44,20 @@ export async function updateOrganization(formData: FormData): Promise<Result> {
   if (!orgId) return { ok: false, error: "No organization." };
 
   const taxPct = Number(formData.get("default_tax_pct"));
+
+  // Currency / timezone / tax number live in the settings JSONB — merge them in.
+  const { data: existing } = await supabase
+    .from("organizations")
+    .select("settings")
+    .eq("id", orgId)
+    .single();
+  const mergedSettings = {
+    ...(existing?.settings ?? {}),
+    currency: String(formData.get("currency") ?? "USD") || "USD",
+    timezone: String(formData.get("timezone") ?? "America/Los_Angeles"),
+    tax_number: String(formData.get("tax_number") ?? "").trim(),
+  };
+
   const { error } = await supabase
     .from("organizations")
     .update({
@@ -58,6 +72,7 @@ export async function updateOrganization(formData: FormData): Promise<Result> {
       license: emptyToNull(formData.get("license")),
       brand_color: String(formData.get("brand_color") ?? "#0b57c4") || "#0b57c4",
       default_tax_rate: Number.isFinite(taxPct) ? taxPct / 100 : 0,
+      settings: mergedSettings,
     })
     .eq("id", orgId);
 
@@ -168,6 +183,73 @@ export async function createInvitation(formData: FormData): Promise<Result> {
 export async function deleteInvitation(id: string): Promise<Result> {
   const supabase = await createClient();
   const { error } = await supabase.from("invitations").delete().eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/settings");
+  return { ok: true };
+}
+
+/** Merge a partial settings patch into organizations.settings (JSONB). */
+export async function updateOrgSettings(
+  patch: Record<string, unknown>,
+): Promise<Result> {
+  const supabase = await createClient();
+  const orgId = await myOrgId(supabase);
+  if (!orgId) return { ok: false, error: "No organization." };
+
+  const { data: org } = await supabase
+    .from("organizations")
+    .select("settings")
+    .eq("id", orgId)
+    .single();
+  const merged = { ...(org?.settings ?? {}), ...patch };
+
+  const { error } = await supabase
+    .from("organizations")
+    .update({ settings: merged })
+    .eq("id", orgId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/settings");
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
+export async function createTaxRate(input: {
+  name: string;
+  rate: number;
+  is_default?: boolean;
+}): Promise<Result> {
+  const supabase = await createClient();
+  const orgId = await myOrgId(supabase);
+  if (!orgId) return { ok: false, error: "No organization." };
+  if (!input.name.trim()) return { ok: false, error: "Name is required." };
+
+  if (input.is_default) {
+    await supabase.from("tax_rates").update({ is_default: false }).eq("org_id", orgId);
+  }
+  const { error } = await supabase.from("tax_rates").insert({
+    name: input.name.trim(),
+    rate: Number.isFinite(input.rate) ? input.rate : 0,
+    is_default: !!input.is_default,
+  });
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/settings");
+  return { ok: true };
+}
+
+export async function setDefaultTaxRate(id: string): Promise<Result> {
+  const supabase = await createClient();
+  const orgId = await myOrgId(supabase);
+  if (!orgId) return { ok: false, error: "No organization." };
+  await supabase.from("tax_rates").update({ is_default: false }).eq("org_id", orgId);
+  const { error } = await supabase.from("tax_rates").update({ is_default: true }).eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/settings");
+  return { ok: true };
+}
+
+export async function deleteTaxRate(id: string): Promise<Result> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("tax_rates").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/settings");
   return { ok: true };
