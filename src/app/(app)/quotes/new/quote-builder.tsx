@@ -19,6 +19,21 @@ interface CustomerOption {
   name: string;
   company_name: string | null;
 }
+interface PriceItemLite {
+  id: string;
+  code: string | null;
+  description: string;
+  category?: string | null;
+  unit: string;
+  buy_price: number;
+  markup_pct: number;
+}
+interface TaxRateLite {
+  id: string;
+  name: string;
+  rate: number;
+  is_default: boolean;
+}
 
 const blankItem = (): DraftLineItem => ({
   description: "",
@@ -27,24 +42,61 @@ const blankItem = (): DraftLineItem => ({
   unit_price: 0,
 });
 
+const sellPrice = (buy: number, markup: number) => buy * (1 + (markup || 0) / 100);
+
 export function QuoteBuilder({
   customers,
   preselected,
+  priceItems = [],
+  taxRates = [],
+  quoteExpiryDays = 30,
 }: {
   customers: CustomerOption[];
   preselected?: string;
+  priceItems?: PriceItemLite[];
+  taxRates?: TaxRateLite[];
+  quoteExpiryDays?: number;
 }) {
   const router = useRouter();
+  const defaultRate = taxRates.find((t) => t.is_default);
   const [customerId, setCustomerId] = useState(preselected ?? "");
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
-  const [taxRate, setTaxRate] = useState(0);
+  const [taxRate, setTaxRate] = useState(defaultRate ? Number(defaultRate.rate) / 100 : 0);
+  const [taxChoice, setTaxChoice] = useState(defaultRate ? defaultRate.id : "");
   const [validUntil, setValidUntil] = useState(() => {
     const d = new Date();
-    d.setDate(d.getDate() + 30);
+    d.setDate(d.getDate() + (quoteExpiryDays || 30));
     return d.toISOString().slice(0, 10);
   });
   const [items, setItems] = useState<DraftLineItem[]>([blankItem()]);
+  const [plQuery, setPlQuery] = useState("");
+  const [plOpen, setPlOpen] = useState(false);
+
+  const plMatches = plQuery.trim()
+    ? priceItems
+        .filter((p) =>
+          [p.code, p.description, p.category].some((v) =>
+            (v ?? "").toLowerCase().includes(plQuery.trim().toLowerCase()),
+          ),
+        )
+        .slice(0, 8)
+    : [];
+
+  function addFromPrice(p: PriceItemLite) {
+    const real = items.filter((i) => i.description.trim());
+    setItems([
+      ...real,
+      {
+        description: p.code ? `${p.code} — ${p.description}` : p.description,
+        quantity: 1,
+        unit: p.unit || "ea",
+        unit_price: Number(sellPrice(p.buy_price, p.markup_pct).toFixed(2)),
+      },
+    ]);
+    setPlQuery("");
+    setPlOpen(false);
+  }
 
   const [scope, setScope] = useState("");
   const [aiError, setAiError] = useState<string | null>(null);
@@ -147,6 +199,38 @@ export function QuoteBuilder({
               </Button>
             </div>
 
+            {priceItems.length > 0 && (
+              <div className="relative mb-3">
+                <Input
+                  placeholder="Add from Price List — search items…"
+                  value={plQuery}
+                  onChange={(e) => { setPlQuery(e.target.value); setPlOpen(true); }}
+                  onFocus={() => setPlOpen(true)}
+                  onBlur={() => setTimeout(() => setPlOpen(false), 150)}
+                />
+                {plOpen && plMatches.length > 0 && (
+                  <ul className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+                    {plMatches.map((p) => (
+                      <li key={p.id}>
+                        <button
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => addFromPrice(p)}
+                          className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-slate-50"
+                        >
+                          <span className="min-w-0 truncate">
+                            {p.code && <span className="mr-1 font-mono text-xs text-slate-400">{p.code}</span>}
+                            {p.description}
+                          </span>
+                          <span className="shrink-0 text-slate-600">{formatCurrency(sellPrice(p.buy_price, p.markup_pct))}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+
             <div className="space-y-2">
               {items.map((it, idx) => (
                 <div
@@ -235,16 +319,34 @@ export function QuoteBuilder({
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label htmlFor="tax">Tax rate %</Label>
-                <Input
-                  id="tax"
-                  type="number"
-                  step="any"
-                  placeholder="8.25"
-                  onChange={(e) =>
-                    setTaxRate((Number(e.target.value) || 0) / 100)
-                  }
-                />
+                <Label htmlFor="tax">Tax rate</Label>
+                {taxRates.length > 0 ? (
+                  <Select
+                    id="tax"
+                    value={taxChoice}
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      setTaxChoice(id);
+                      const r = taxRates.find((t) => t.id === id);
+                      setTaxRate(r ? Number(r.rate) / 100 : 0);
+                    }}
+                  >
+                    <option value="">No tax</option>
+                    {taxRates.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name} ({Number(t.rate)}%)
+                      </option>
+                    ))}
+                  </Select>
+                ) : (
+                  <Input
+                    id="tax"
+                    type="number"
+                    step="any"
+                    placeholder="8.25"
+                    onChange={(e) => setTaxRate((Number(e.target.value) || 0) / 100)}
+                  />
+                )}
               </div>
               <div>
                 <Label htmlFor="valid">Valid until</Label>

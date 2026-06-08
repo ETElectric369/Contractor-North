@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
+import { getOrgSettings } from "@/lib/org-settings";
 import { QuoteBuilder } from "./quote-builder";
 
 export const dynamic = "force-dynamic";
@@ -13,10 +14,19 @@ export default async function NewQuotePage({
 }) {
   const { customer } = await searchParams;
   const supabase = await createClient();
-  const { data: customers } = await supabase
-    .from("customers")
-    .select("id, name, company_name")
-    .order("name");
+  const [{ data: customers }, { data: priceItems }, { data: taxRates }, { data: org }] =
+    await Promise.all([
+      supabase.from("customers").select("id, name, company_name").order("name"),
+      supabase
+        .from("price_list_items")
+        .select("id, code, description, category, unit, buy_price, markup_pct")
+        .eq("archived", false)
+        .order("description")
+        .limit(2000),
+      supabase.from("tax_rates").select("id, name, rate, is_default").order("created_at"),
+      supabase.from("organizations").select("settings").limit(1).maybeSingle(),
+    ]);
+  const expiryDays = getOrgSettings((org as any)?.settings).quote_expiry_days;
 
   return (
     <div>
@@ -30,7 +40,13 @@ export default async function NewQuotePage({
         title="New quote"
         description="Build line items by hand or let the AI draft them from a scope of work."
       />
-      <QuoteBuilder customers={customers ?? []} preselected={customer} />
+      <QuoteBuilder
+        customers={customers ?? []}
+        preselected={customer}
+        priceItems={(priceItems ?? []) as any}
+        taxRates={(taxRates ?? []) as any}
+        quoteExpiryDays={expiryDays}
+      />
     </div>
   );
 }
