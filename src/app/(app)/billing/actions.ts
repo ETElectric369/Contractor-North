@@ -3,6 +3,39 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { sendEmail, renderDocEmail } from "@/lib/email";
+import { sendSms } from "@/lib/sms";
+
+function publicInvoiceLink(token: string) {
+  return `${process.env.NEXT_PUBLIC_SITE_URL || ""}/i/${token}`;
+}
+
+export async function textInvoice(
+  id: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const supabase = await createClient();
+  const { data: invoice } = await supabase
+    .from("invoices")
+    .select("invoice_number, total, amount_paid, status, public_token, customers(name, phone)")
+    .eq("id", id)
+    .maybeSingle();
+  if (!invoice) return { ok: false, error: "Invoice not found." };
+  const customer = (invoice as any).customers;
+  if (!customer?.phone)
+    return { ok: false, error: "This customer has no phone number." };
+
+  const { data: org } = await supabase.from("organizations").select("name").maybeSingle();
+  const balance = Number(invoice.total) - Number(invoice.amount_paid);
+  const link = publicInvoiceLink((invoice as any).public_token);
+  const body = `${org?.name ?? "Your contractor"}: Invoice ${invoice.invoice_number}, balance $${balance.toFixed(2)}. View/pay: ${link}`;
+
+  const sent = await sendSms(customer.phone, body);
+  if (!sent)
+    return { ok: false, error: "Text not sent — add your Twilio account to enable SMS." };
+  if (invoice.status === "draft") {
+    await supabase.from("invoices").update({ status: "sent" }).eq("id", id);
+  }
+  return { ok: true };
+}
 
 export async function emailInvoice(
   id: string,
@@ -18,6 +51,7 @@ export async function emailInvoice(
   const customer = (invoice as any).customers;
   if (!customer?.email)
     return { ok: false, error: "This customer has no email address." };
+  const link = publicInvoiceLink((invoice as any).public_token);
 
   const [{ data: items }, { data: org }] = await Promise.all([
     supabase.from("invoice_items").select("*").eq("invoice_id", id).order("sort_order"),
@@ -48,6 +82,7 @@ export async function emailInvoice(
     total: invoice.total,
     balance,
     notes: invoice.notes,
+    link,
   });
 
   const res = await sendEmail({

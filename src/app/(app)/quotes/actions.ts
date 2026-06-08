@@ -4,6 +4,38 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { sendEmail, renderDocEmail } from "@/lib/email";
+import { sendSms } from "@/lib/sms";
+
+function publicQuoteLink(token: string) {
+  return `${process.env.NEXT_PUBLIC_SITE_URL || ""}/q/${token}`;
+}
+
+export async function textQuote(
+  id: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const supabase = await createClient();
+  const { data: quote } = await supabase
+    .from("quotes")
+    .select("quote_number, total, public_token, customers(name, phone)")
+    .eq("id", id)
+    .maybeSingle();
+  if (!quote) return { ok: false, error: "Quote not found." };
+  const customer = (quote as any).customers;
+  if (!customer?.phone)
+    return { ok: false, error: "This customer has no phone number." };
+
+  const { data: org } = await supabase.from("organizations").select("name").maybeSingle();
+  const link = publicQuoteLink((quote as any).public_token);
+  const body = `${org?.name ?? "Your contractor"}: Quote ${quote.quote_number} ($${Number(quote.total).toFixed(2)}). View: ${link}`;
+
+  const sent = await sendSms(customer.phone, body);
+  if (!sent)
+    return { ok: false, error: "Text not sent — add your Twilio account to enable SMS." };
+  if (["draft"].includes((quote as any).status ?? "")) {
+    await supabase.from("quotes").update({ status: "sent" }).eq("id", id);
+  }
+  return { ok: true };
+}
 
 export async function emailQuote(
   id: string,
@@ -19,6 +51,7 @@ export async function emailQuote(
   const customer = (quote as any).customers;
   if (!customer?.email)
     return { ok: false, error: "This customer has no email address." };
+  const link = publicQuoteLink((quote as any).public_token);
 
   const [{ data: items }, { data: org }] = await Promise.all([
     supabase.from("quote_line_items").select("*").eq("quote_id", id).order("sort_order"),
@@ -47,6 +80,7 @@ export async function emailQuote(
     tax: quote.tax,
     total: quote.total,
     notes: quote.notes,
+    link,
   });
 
   const res = await sendEmail({

@@ -65,6 +65,7 @@ export function renderDocEmail(input: {
   total: number;
   balance?: number | null;
   notes?: string | null;
+  link?: string;
 }): string {
   const rows = input.items
     .map(
@@ -91,6 +92,7 @@ export function renderDocEmail(input: {
     </div>
     <p style="font-size:14px">Hi ${escape(input.customerName)},</p>
     <p style="font-size:14px;color:#475569">Please find your ${input.docType.toLowerCase()} <strong>${escape(input.number)}</strong>${input.title ? ` — ${escape(input.title)}` : ""} below.</p>
+    ${input.link ? `<p style="margin:14px 0"><a href="${input.link}" style="display:inline-block;background:${input.company.brand};color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-size:14px;font-weight:600">View ${input.docType.toLowerCase()} online</a></p>` : ""}
     <table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:12px">
       <thead>
         <tr>
