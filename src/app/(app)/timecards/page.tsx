@@ -12,6 +12,7 @@ import {
   initials,
 } from "@/lib/utils";
 import { AddEntryButton } from "../timeclock/add-entry-button";
+import { EditEntryButton } from "./edit-entry-button";
 import type { JobCode } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -209,9 +210,15 @@ export default async function TimecardsPage({
                             </span>
                           )}
                         </div>
-                        <span className="font-medium text-slate-800">
-                          {h != null ? formatDuration(h) : "—"}
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-medium text-slate-800">
+                            {h != null ? formatDuration(h) : "—"}
+                          </span>
+                          <EditEntryButton
+                            entry={e}
+                            jobCodes={(jobCodes ?? []) as JobCode[]}
+                          />
+                        </div>
                       </div>
                       {e.notes && (
                         <p className="mt-1 text-xs text-slate-500">{e.notes}</p>

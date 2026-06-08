@@ -152,6 +152,51 @@ export async function createManualEntry(input: {
   return { ok: true };
 }
 
+/** Edit an existing time entry (office payroll correction). RLS allows the
+ *  entry owner or org staff. */
+export async function updateTimeEntry(input: {
+  id: string;
+  clock_in: string;
+  clock_out: string;
+  lunch_minutes: number;
+  job_code: string | null;
+  notes: string;
+}): Promise<ClockResult> {
+  const supabase = await createClient();
+  const ci = new Date(input.clock_in);
+  const co = new Date(input.clock_out);
+  if (isNaN(ci.getTime()) || isNaN(co.getTime())) {
+    return { ok: false, error: "Invalid date/time." };
+  }
+  if (co <= ci) return { ok: false, error: "End must be after start." };
+
+  const { error } = await supabase
+    .from("time_entries")
+    .update({
+      clock_in: ci.toISOString(),
+      clock_out: co.toISOString(),
+      lunch_minutes: input.lunch_minutes || 0,
+      job_code: input.job_code,
+      notes: input.notes || null,
+      status: "closed",
+    })
+    .eq("id", input.id);
+  if (error) return { ok: false, error: error.message };
+
+  revalidatePath("/timecards");
+  revalidatePath("/timeclock");
+  return { ok: true };
+}
+
+export async function deleteTimeEntry(id: string): Promise<ClockResult> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("time_entries").delete().eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/timecards");
+  revalidatePath("/timeclock");
+  return { ok: true };
+}
+
 /** Save the "what did you do today?" note (and optional translation) mid-shift. */
 export async function saveEntryNotes(
   entry_id: string,
