@@ -4,7 +4,7 @@ import { ArrowLeft, MapPin, User, FileText, ClipboardList, Receipt } from "lucid
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency, formatDate, formatDuration, hoursBetween } from "@/lib/utils";
 import { JobDocuments } from "./job-documents";
 import { ConvertButton } from "@/components/convert-button";
 import { createInvoiceForJob } from "../actions";
@@ -38,6 +38,47 @@ export default async function JobDetailPage({
         .eq("job_id", id)
         .order("created_at", { ascending: false }),
     ]);
+
+  // ── Job costing: revenue (invoiced/quoted) vs labor (hrs × rate) + materials (POs)
+  const [{ data: invoices }, { data: pos }, { data: jobEntries }, { data: jobAllocs }] =
+    await Promise.all([
+      supabase.from("invoices").select("total, amount_paid").eq("job_id", id),
+      supabase.from("purchase_orders").select("total").eq("job_id", id),
+      supabase
+        .from("time_entries")
+        .select("clock_in, clock_out, lunch_minutes, status, profiles(hourly_rate), time_allocations(id)")
+        .eq("job_id", id)
+        .eq("status", "closed"),
+      supabase
+        .from("time_allocations")
+        .select("hours, time_entries(profiles(hourly_rate))")
+        .eq("job_id", id),
+    ]);
+
+  // Entry-level labor (only entries with NO per-job split, to avoid double count)
+  let laborCost = 0;
+  let laborHours = 0;
+  for (const e of jobEntries ?? []) {
+    if ((e as any).time_allocations?.length) continue;
+    if (!e.clock_out) continue;
+    const h = hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes);
+    laborHours += h;
+    laborCost += h * Number((e as any).profiles?.hourly_rate ?? 0);
+  }
+  // Allocation-level labor (per-job split at clock-out)
+  for (const a of jobAllocs ?? []) {
+    const h = Number((a as any).hours ?? 0);
+    laborHours += h;
+    laborCost += h * Number((a as any).time_entries?.profiles?.hourly_rate ?? 0);
+  }
+
+  const materialCost = (pos ?? []).reduce((s: number, p: any) => s + Number(p.total ?? 0), 0);
+  const invoiced = (invoices ?? []).reduce((s: number, i: any) => s + Number(i.total ?? 0), 0);
+  const quoted = (quotes ?? []).reduce((s: number, q: any) => s + Number(q.total ?? 0), 0);
+  const revenue = invoiced > 0 ? invoiced : quoted;
+  const cost = laborCost + materialCost;
+  const profit = revenue - cost;
+  const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
 
   // Sign each document URL for private access.
   const docs = await Promise.all(
@@ -86,6 +127,42 @@ export default async function JobDetailPage({
           hrefPrefix="/billing/"
         />
       </div>
+
+      {/* Job costing */}
+      <Card className="mb-6">
+        <CardContent className="py-5">
+          <h3 className="mb-3 text-sm font-semibold text-slate-900">Job costing</h3>
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
+            <div>
+              <div className="text-lg font-bold text-slate-900">{formatCurrency(revenue)}</div>
+              <div className="text-xs text-slate-500">{invoiced > 0 ? "Invoiced" : "Quoted"}</div>
+            </div>
+            <div>
+              <div className="text-lg font-bold text-slate-900">{formatCurrency(laborCost)}</div>
+              <div className="text-xs text-slate-500">Labor · {formatDuration(laborHours)}</div>
+            </div>
+            <div>
+              <div className="text-lg font-bold text-slate-900">{formatCurrency(materialCost)}</div>
+              <div className="text-xs text-slate-500">Materials (POs)</div>
+            </div>
+            <div>
+              <div className={`text-lg font-bold ${profit >= 0 ? "text-green-600" : "text-red-600"}`}>
+                {formatCurrency(profit)}
+              </div>
+              <div className="text-xs text-slate-500">Profit</div>
+            </div>
+            <div>
+              <div className={`text-lg font-bold ${profit >= 0 ? "text-green-600" : "text-red-600"}`}>
+                {margin.toFixed(0)}%
+              </div>
+              <div className="text-xs text-slate-500">Margin</div>
+            </div>
+          </div>
+          <p className="mt-2 text-xs text-slate-400">
+            Labor uses each teammate's hourly rate (set in their profile); materials from purchase orders linked to this job.
+          </p>
+        </CardContent>
+      </Card>
 
       {/* Receipts & documents */}
       <Card className="mb-6">
