@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Home, ChevronRight, MapPin, User, Calendar, Receipt } from "lucide-react";
+import { Home, ChevronRight, MapPin, Calendar, Receipt, Plus } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
@@ -17,7 +17,10 @@ import { JobDocuments } from "./job-documents";
 import { JobNotes } from "./job-notes";
 import { JobBills } from "./job-bills";
 import { JobTasks } from "./job-tasks";
+import { JobAddTimeEntry } from "./job-add-time";
 import { JobStatusControl } from "./job-status-control";
+import { NewWorkOrderButton } from "../../work-orders/new-wo-button";
+import { NewPoButton } from "../../purchasing/new-po-button";
 import { ConvertButton } from "@/components/convert-button";
 import { EditCustomerButton } from "../../crm/[id]/edit-customer-button";
 import { createInvoiceForJob } from "../actions";
@@ -84,6 +87,17 @@ export default async function JobDetailPage({
       .order("priority", { ascending: false })
       .order("due_date", { ascending: true, nullsFirst: false }),
   ]);
+
+  // Extra data for the per-tab "Add" buttons.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const [{ data: techs }, { data: jobCodes }, { data: lists }] = await Promise.all([
+    supabase.from("profiles").select("id, full_name").order("full_name"),
+    supabase.from("job_codes").select("*").order("code"),
+    supabase.from("material_lists").select("id, name").order("created_at", { ascending: false }).limit(100),
+  ]);
+  const thisJobOpt = [{ id: j.id, job_number: j.job_number, name: j.name }];
 
   // Costing
   let laborCost = 0;
@@ -232,8 +246,13 @@ export default async function JobDetailPage({
       content: (
         <Card className="overflow-hidden">
           <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3 text-sm">
-            <span className="font-semibold text-slate-900">Time on this job</span>
-            <span className="font-medium text-slate-700">{formatDuration(laborHours)}</span>
+            <span className="font-semibold text-slate-900">Time on this job · {formatDuration(laborHours)}</span>
+            <JobAddTimeEntry
+              jobId={j.id}
+              techs={techs ?? []}
+              jobCodes={(jobCodes ?? []) as any}
+              defaultProfileId={user?.id ?? ""}
+            />
           </div>
           <ul className="divide-y divide-slate-100">
             {(entries ?? []).map((e: any) => {
@@ -273,7 +292,10 @@ export default async function JobDetailPage({
             </CardContent>
           </Card>
           <Card className="overflow-hidden">
-            <div className="border-b border-slate-100 px-5 py-3 text-sm font-semibold text-slate-900">Material purchase orders</div>
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
+              <span className="text-sm font-semibold text-slate-900">Material purchase orders</span>
+              <NewPoButton jobs={thisJobOpt} lists={lists ?? []} />
+            </div>
             <ul className="divide-y divide-slate-100">
               {(pos ?? []).map((p: any) => (
                 <li key={p.id}>
@@ -286,19 +308,23 @@ export default async function JobDetailPage({
               {(!pos || pos.length === 0) && empty("purchase orders")}
             </ul>
           </Card>
+
+          <Card>
+            <div className="border-b border-slate-100 px-5 py-3 text-sm font-semibold text-slate-900">Supplier bills</div>
+            <CardContent className="py-5">
+              <JobBills jobId={j.id} bills={(bills ?? []) as any} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3 text-sm font-semibold text-slate-900">
+              <Receipt className="h-4 w-4 text-slate-400" /> Receipts &amp; documents
+            </div>
+            <CardContent className="py-5">
+              <JobDocuments orgId={j.org_id} jobId={j.id} docs={docs} />
+            </CardContent>
+          </Card>
         </div>
-      ),
-    },
-    {
-      id: "bills",
-      label: "Bills",
-      count: bills?.length ?? 0,
-      content: (
-        <Card>
-          <CardContent className="py-5">
-            <JobBills jobId={j.id} bills={(bills ?? []) as any} />
-          </CardContent>
-        </Card>
       ),
     },
     {
@@ -306,7 +332,16 @@ export default async function JobDetailPage({
       label: "Quotes",
       count: quotes?.length ?? 0,
       content: (
-        <Card className="overflow-hidden">
+        <div className="space-y-3">
+          <div className="flex justify-end">
+            <Link
+              href={`/quotes/new?customer=${j.customer_id ?? ""}`}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
+            >
+              <Plus className="h-3.5 w-3.5" /> New quote
+            </Link>
+          </div>
+          <Card className="overflow-hidden">
           <ul className="divide-y divide-slate-100">
             {(quotes ?? []).map((q: any) => (
               <li key={q.id}>
@@ -318,7 +353,8 @@ export default async function JobDetailPage({
             ))}
             {(!quotes || quotes.length === 0) && empty("quotes")}
           </ul>
-        </Card>
+          </Card>
+        </div>
       ),
     },
     {
@@ -326,7 +362,15 @@ export default async function JobDetailPage({
       label: "Invoices",
       count: invoices?.length ?? 0,
       content: (
-        <Card className="overflow-hidden">
+        <div className="space-y-3">
+          <div className="flex justify-end">
+            <ConvertButton
+              label="Create invoice"
+              run={createInvoiceForJob.bind(null, j.id)}
+              hrefPrefix="/billing/"
+            />
+          </div>
+          <Card className="overflow-hidden">
           <ul className="divide-y divide-slate-100">
             {(invoices ?? []).map((iv: any) => (
               <li key={iv.id}>
@@ -338,7 +382,8 @@ export default async function JobDetailPage({
             ))}
             {(!invoices || invoices.length === 0) && empty("invoices")}
           </ul>
-        </Card>
+          </Card>
+        </div>
       ),
     },
     {
@@ -346,7 +391,11 @@ export default async function JobDetailPage({
       label: "Work Orders",
       count: workOrders?.length ?? 0,
       content: (
-        <Card className="overflow-hidden">
+        <div className="space-y-3">
+          <div className="flex justify-end">
+            <NewWorkOrderButton jobs={thisJobOpt} techs={techs ?? []} defaultJob={j.id} autoOpen={false} />
+          </div>
+          <Card className="overflow-hidden">
           <ul className="divide-y divide-slate-100">
             {(workOrders ?? []).map((w: any) => (
               <li key={w.id}>
@@ -358,22 +407,8 @@ export default async function JobDetailPage({
             ))}
             {(!workOrders || workOrders.length === 0) && empty("work orders")}
           </ul>
-        </Card>
-      ),
-    },
-    {
-      id: "receipts",
-      label: "Receipts",
-      count: docs.length,
-      content: (
-        <Card>
-          <CardContent className="py-5">
-            <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-900">
-              <Receipt className="h-4 w-4 text-slate-400" /> Receipts &amp; documents
-            </h3>
-            <JobDocuments orgId={j.org_id} jobId={j.id} docs={docs} />
-          </CardContent>
-        </Card>
+          </Card>
+        </div>
       ),
     },
   ];

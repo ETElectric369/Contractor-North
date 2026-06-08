@@ -22,12 +22,14 @@ export function NewWorkOrderButton({
   jobs,
   techs,
   defaultJob,
+  autoOpen,
 }: {
   jobs: JobOption[];
   techs: TechOption[];
   defaultJob?: string;
+  autoOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(Boolean(defaultJob));
+  const [open, setOpen] = useState(autoOpen ?? Boolean(defaultJob));
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const router = useRouter();
