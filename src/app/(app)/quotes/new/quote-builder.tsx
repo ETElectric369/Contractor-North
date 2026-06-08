@@ -34,6 +34,11 @@ interface TaxRateLite {
   rate: number;
   is_default: boolean;
 }
+interface KitLite {
+  id: string;
+  name: string;
+  kit_items: { description: string; quantity: number; unit: string; unit_price: number }[];
+}
 
 const blankItem = (): DraftLineItem => ({
   description: "",
@@ -49,12 +54,14 @@ export function QuoteBuilder({
   preselected,
   priceItems = [],
   taxRates = [],
+  kits = [],
   quoteExpiryDays = 30,
 }: {
   customers: CustomerOption[];
   preselected?: string;
   priceItems?: PriceItemLite[];
   taxRates?: TaxRateLite[];
+  kits?: KitLite[];
   quoteExpiryDays?: number;
 }) {
   const router = useRouter();
@@ -96,6 +103,19 @@ export function QuoteBuilder({
     ]);
     setPlQuery("");
     setPlOpen(false);
+  }
+
+  function addKit(kitId: string) {
+    const k = kits.find((x) => x.id === kitId);
+    if (!k) return;
+    const real = items.filter((i) => i.description.trim());
+    const kitLines: DraftLineItem[] = (k.kit_items ?? []).map((it) => ({
+      description: it.description,
+      quantity: Number(it.quantity) || 1,
+      unit: it.unit || "ea",
+      unit_price: Number(it.unit_price) || 0,
+    }));
+    setItems([...real, ...kitLines]);
   }
 
   const [scope, setScope] = useState("");
@@ -228,6 +248,17 @@ export function QuoteBuilder({
                     ))}
                   </ul>
                 )}
+              </div>
+            )}
+
+            {kits.length > 0 && (
+              <div className="mb-3">
+                <Select value="" onChange={(e) => { if (e.target.value) { addKit(e.target.value); e.target.value = ""; } }}>
+                  <option value="">+ Add a kit…</option>
+                  {kits.map((k) => (
+                    <option key={k.id} value={k.id}>{k.name}</option>
+                  ))}
+                </Select>
               </div>
             )}
 

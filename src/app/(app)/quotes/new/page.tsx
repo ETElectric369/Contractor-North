@@ -14,7 +14,7 @@ export default async function NewQuotePage({
 }) {
   const { customer } = await searchParams;
   const supabase = await createClient();
-  const [{ data: customers }, { data: priceItems }, { data: taxRates }, { data: org }] =
+  const [{ data: customers }, { data: priceItems }, { data: taxRates }, { data: kits }, { data: org }] =
     await Promise.all([
       supabase.from("customers").select("id, name, company_name").order("name"),
       supabase
@@ -24,6 +24,10 @@ export default async function NewQuotePage({
         .order("description")
         .limit(2000),
       supabase.from("tax_rates").select("id, name, rate, is_default").order("created_at"),
+      supabase
+        .from("kits")
+        .select("id, name, kit_items(description, quantity, unit, unit_price, sort_order)")
+        .order("name"),
       supabase.from("organizations").select("settings").limit(1).maybeSingle(),
     ]);
   const expiryDays = getOrgSettings((org as any)?.settings).quote_expiry_days;
@@ -45,6 +49,7 @@ export default async function NewQuotePage({
         preselected={customer}
         priceItems={(priceItems ?? []) as any}
         taxRates={(taxRates ?? []) as any}
+        kits={(kits ?? []) as any}
         quoteExpiryDays={expiryDays}
       />
     </div>
