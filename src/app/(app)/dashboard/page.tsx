@@ -88,6 +88,31 @@ export default async function DashboardPage() {
     { label: "My hours this week", value: formatDuration(weekHours), icon: Clock, href: "/timeclock", tone: "bg-green-50 text-green-600" },
   ];
 
+  // Today's jobs + a daily motivational quote.
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const todayEnd = new Date(todayStart.getTime() + 86_400_000);
+  const { data: todayJobs } = await supabase
+    .from("jobs")
+    .select("id, name, job_number, status, scheduled_start, customers(name)")
+    .gte("scheduled_start", todayStart.toISOString())
+    .lt("scheduled_start", todayEnd.toISOString())
+    .order("scheduled_start");
+
+  const QUOTES = [
+    "Service. Integrity. Reliability.",
+    "Measure twice, cut once.",
+    "The bitterness of poor quality remains long after the sweetness of low price is forgotten.",
+    "Do the hard jobs first. The easy jobs will take care of themselves.",
+    "Quality means doing it right when no one is looking.",
+    "A job worth doing is worth doing well.",
+    "Take care of your customers and they'll take care of you.",
+    "Safety first — go home the same way you came to work.",
+    "Small daily improvements lead to stunning results.",
+    "Hard work beats talent when talent doesn't work hard.",
+  ];
+  const quote = QUOTES[new Date().getDate() % QUOTES.length];
+
   const stats = [
     {
       label: "Customers",
@@ -125,6 +150,10 @@ export default async function DashboardPage() {
         title="Dashboard"
         description="Your business at a glance."
       />
+
+      <div className="mb-6 rounded-xl bg-brand-light/50 px-4 py-3 text-sm italic text-brand-dark">
+        “{quote}”
+      </div>
 
       {myOpen.data && (
         <Card className="mb-6 border-green-200 bg-green-50">
@@ -191,6 +220,34 @@ export default async function DashboardPage() {
           );
         })}
       </div>
+
+      <Card className="mt-6">
+        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+          <h3 className="text-sm font-semibold text-slate-900">Today's jobs</h3>
+          <Link href="/schedule" className="flex items-center gap-1 text-xs text-brand hover:underline">
+            Scheduler <ArrowRight className="h-3 w-3" />
+          </Link>
+        </div>
+        <ul className="divide-y divide-slate-100">
+          {(todayJobs ?? []).map((j: any) => (
+            <li key={j.id}>
+              <Link href={`/jobs/${j.id}`} className="flex items-center justify-between px-5 py-3 hover:bg-slate-50">
+                <div>
+                  <div className="text-sm font-medium text-slate-900">{j.name}</div>
+                  <div className="text-xs text-slate-400">
+                    {j.scheduled_start && new Date(j.scheduled_start).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
+                    {j.customers?.name ? ` · ${j.customers.name}` : ""}
+                  </div>
+                </div>
+                <Badge tone={statusTone(j.status)}>{j.status.replace("_", " ")}</Badge>
+              </Link>
+            </li>
+          ))}
+          {(!todayJobs || todayJobs.length === 0) && (
+            <li className="px-5 py-8 text-center text-sm text-slate-400">No jobs scheduled today.</li>
+          )}
+        </ul>
+      </Card>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <Card>

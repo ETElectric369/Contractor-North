@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { Sidebar } from "@/components/app-shell/sidebar";
 import { Topbar } from "@/components/app-shell/topbar";
+import { GlobalVoiceButton } from "@/components/global-voice-button";
 import { billingEnabled } from "@/lib/stripe";
 import { hasActiveAccess } from "@/lib/subscription";
 import type { Profile } from "@/lib/types";
@@ -62,6 +63,7 @@ export default async function AppLayout({
           {children}
         </main>
       </div>
+      <GlobalVoiceButton lang={profile.language} />
     </div>
   );
 }
