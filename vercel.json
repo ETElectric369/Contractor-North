@@ -6,6 +6,10 @@
     {
       "path": "/api/timeclock/nudge",
       "schedule": "0 14 * * 1-5"
+    },
+    {
+      "path": "/api/timeclock/eod-reminder",
+      "schedule": "0 1 * * *"
     }
   ]
 }
