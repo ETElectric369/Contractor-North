@@ -3,12 +3,13 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Phone, Mail, CheckCircle2, ArrowRightCircle } from "lucide-react";
+import { Phone, Mail, CheckCircle2, FileText, Briefcase } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { ConvertButton } from "@/components/convert-button";
 import { formatDate } from "@/lib/utils";
-import { markContacted, convertLead } from "@/app/(app)/crm/actions";
+import { markContacted, createJobForCustomer } from "@/app/(app)/crm/actions";
 import type { Customer } from "@/lib/types";
 
 export function LeadRow({ lead }: { lead: Customer }) {
@@ -22,12 +23,6 @@ export function LeadRow({ lead }: { lead: Customer }) {
   function contacted() {
     start(async () => {
       await markContacted(lead.id, followUp || null);
-      router.refresh();
-    });
-  }
-  function convert() {
-    start(async () => {
-      await convertLead(lead.id);
       router.refresh();
     });
   }
@@ -77,9 +72,16 @@ export function LeadRow({ lead }: { lead: Customer }) {
         <Button size="sm" variant="outline" onClick={contacted} disabled={pending}>
           <CheckCircle2 className="h-3.5 w-3.5" /> Contacted
         </Button>
-        <Button size="sm" onClick={convert} disabled={pending}>
-          <ArrowRightCircle className="h-3.5 w-3.5" /> Convert
-        </Button>
+        <Link href={`/quotes/new?customer=${lead.id}`}>
+          <Button size="sm" variant="outline">
+            <FileText className="h-3.5 w-3.5" /> Quote
+          </Button>
+        </Link>
+        <ConvertButton
+          label="Job"
+          run={createJobForCustomer.bind(null, lead.id)}
+          hrefPrefix="/jobs/"
+        />
       </div>
     </li>
   );

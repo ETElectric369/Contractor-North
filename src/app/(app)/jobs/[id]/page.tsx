@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatCurrency, formatDate, formatDuration, hoursBetween } from "@/lib/utils";
 import { JobDocuments } from "./job-documents";
+import { JobNotes } from "./job-notes";
 import { ConvertButton } from "@/components/convert-button";
 import { createInvoiceForJob } from "../actions";
 
@@ -161,6 +162,14 @@ export default async function JobDetailPage({
           <p className="mt-2 text-xs text-slate-400">
             Labor uses each teammate's hourly rate (set in their profile); materials from purchase orders linked to this job.
           </p>
+        </CardContent>
+      </Card>
+
+      {/* Job notes */}
+      <Card className="mb-6">
+        <CardContent className="py-5">
+          <h3 className="mb-3 text-sm font-semibold text-slate-900">Job notes</h3>
+          <JobNotes jobId={j.id} notes={j.notes} />
         </CardContent>
       </Card>
 

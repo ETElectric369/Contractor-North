@@ -37,6 +37,20 @@ export async function createInvoiceForJob(
   });
 }
 
+export async function updateJobNotes(
+  jobId: string,
+  notes: string,
+): Promise<Result> {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("jobs")
+    .update({ notes: notes.trim() || null })
+    .eq("id", jobId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath(`/jobs/${jobId}`);
+  return { ok: true };
+}
+
 export async function addDocument(input: {
   job_id: string;
   name: string;

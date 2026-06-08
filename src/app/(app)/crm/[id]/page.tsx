@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { EditCustomerButton } from "./edit-customer-button";
 import type { Customer, Job, Quote } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -62,11 +63,14 @@ export default async function CustomerDetailPage({
             {c.type}
           </Badge>
         </div>
-        <Link href={`/quotes/new?customer=${c.id}`}>
-          <Button>
-            <Plus className="h-4 w-4" /> New quote
-          </Button>
-        </Link>
+        <div className="flex items-center gap-2">
+          <EditCustomerButton customer={c} />
+          <Link href={`/quotes/new?customer=${c.id}`}>
+            <Button>
+              <Plus className="h-4 w-4" /> New quote
+            </Button>
+          </Link>
+        </div>
       </div>
 
       <div className="grid gap-6 md:grid-cols-3">
