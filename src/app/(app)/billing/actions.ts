@@ -279,6 +279,20 @@ export async function recordPayment(input: {
   return { ok: true };
 }
 
+/** Set the invoice tax rate (percent in → stored as decimal) and recompute. */
+export async function setInvoiceTaxRate(
+  invoiceId: string,
+  ratePercent: number,
+): Promise<{ ok: boolean; error?: string }> {
+  const supabase = await createClient();
+  const rate = Number.isFinite(ratePercent) ? ratePercent / 100 : 0;
+  const { error } = await supabase.from("invoices").update({ tax_rate: rate }).eq("id", invoiceId);
+  if (error) return { ok: false, error: error.message };
+  await recalcInvoice(supabase, invoiceId);
+  revalidatePath(`/billing/${invoiceId}`);
+  return { ok: true };
+}
+
 /** Recompute totals from items + payments, and auto-advance paid status. */
 async function recalcInvoice(supabase: any, invoiceId: string) {
   const [{ data: items }, { data: pays }, { data: inv }] = await Promise.all([

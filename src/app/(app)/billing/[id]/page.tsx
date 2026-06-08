@@ -9,6 +9,7 @@ import { Badge, statusTone } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { InvoiceDetail } from "./invoice-detail";
 import { EmailButton } from "@/components/email-button";
+import { getOrgSettings } from "@/lib/org-settings";
 import type { Invoice, InvoiceItem, Payment } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -30,19 +31,25 @@ export default async function InvoicePage({
   if (!invoice) notFound();
   const inv = invoice as Invoice & { customers: any; quotes: any };
 
-  const [{ data: items }, { data: payments }] = await Promise.all([
-    supabase
-      .from("invoice_items")
-      .select("*")
-      .eq("invoice_id", id)
-      .order("sort_order")
-      .order("created_at", { ascending: true }),
-    supabase
-      .from("payments")
-      .select("*")
-      .eq("invoice_id", id)
-      .order("paid_at", { ascending: false }),
-  ]);
+  const [{ data: items }, { data: payments }, { data: priceItems }, { data: taxRates }, { data: org }] =
+    await Promise.all([
+      supabase
+        .from("invoice_items")
+        .select("*")
+        .eq("invoice_id", id)
+        .order("sort_order")
+        .order("created_at", { ascending: true }),
+      supabase.from("payments").select("*").eq("invoice_id", id).order("paid_at", { ascending: false }),
+      supabase
+        .from("price_list_items")
+        .select("id, code, description, unit, buy_price, markup_pct")
+        .eq("archived", false)
+        .order("description")
+        .limit(2000),
+      supabase.from("tax_rates").select("id, name, rate, is_default").order("created_at"),
+      supabase.from("organizations").select("settings").limit(1).maybeSingle(),
+    ]);
+  const paymentMethods = getOrgSettings((org as any)?.settings).payment_methods;
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -109,6 +116,9 @@ export default async function InvoicePage({
         invoice={inv}
         items={(items ?? []) as InvoiceItem[]}
         payments={(payments ?? []) as Payment[]}
+        priceItems={(priceItems ?? []) as any}
+        taxRates={(taxRates ?? []) as any}
+        paymentMethods={paymentMethods}
       />
     </div>
   );

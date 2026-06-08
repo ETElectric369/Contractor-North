@@ -13,17 +13,29 @@ import {
   addInvoiceItem,
   deleteInvoiceItem,
   setInvoiceStatus,
+  setInvoiceTaxRate,
   recordPayment,
 } from "../actions";
+
+interface PriceItemLite { id: string; code: string | null; description: string; unit: string; buy_price: number; markup_pct: number; }
+interface TaxRateLite { id: string; name: string; rate: number; is_default: boolean; }
+
+const sellPrice = (buy: number, markup: number) => buy * (1 + (markup || 0) / 100);
 
 export function InvoiceDetail({
   invoice,
   items,
   payments,
+  priceItems = [],
+  taxRates = [],
+  paymentMethods = [],
 }: {
   invoice: Invoice;
   items: InvoiceItem[];
   payments: Payment[];
+  priceItems?: PriceItemLite[];
+  taxRates?: TaxRateLite[];
+  paymentMethods?: string[];
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -36,10 +48,29 @@ export function InvoiceDetail({
   const [qty, setQty] = useState(1);
   const [unit, setUnit] = useState("ea");
   const [price, setPrice] = useState(0);
+  const [plQuery, setPlQuery] = useState("");
+  const [plOpen, setPlOpen] = useState(false);
 
   // payment state
   const [payAmount, setPayAmount] = useState(balance > 0 ? balance : 0);
-  const [payMethod, setPayMethod] = useState("check");
+  const [payMethod, setPayMethod] = useState(paymentMethods[0] ?? "Check");
+
+  const plMatches = plQuery.trim()
+    ? priceItems.filter((p) => [p.code, p.description].some((v) => (v ?? "").toLowerCase().includes(plQuery.trim().toLowerCase()))).slice(0, 6)
+    : [];
+  function addFromPrice(p: PriceItemLite) {
+    start(async () => {
+      await addInvoiceItem(invoice.id, {
+        description: p.code ? `${p.code} — ${p.description}` : p.description,
+        quantity: 1,
+        unit: p.unit || "ea",
+        unit_price: Number(sellPrice(p.buy_price, p.markup_pct).toFixed(2)),
+      });
+      setPlQuery("");
+      setPlOpen(false);
+      refresh();
+    });
+  }
   const [payNote, setPayNote] = useState("");
   const [payError, setPayError] = useState<string | null>(null);
 
@@ -102,6 +133,38 @@ export function InvoiceDetail({
             <option value="void">Void</option>
           </Select>
         </div>
+
+        {priceItems.length > 0 && (
+          <div className="relative">
+            <Input
+              placeholder="Add from Price List — search items…"
+              value={plQuery}
+              onChange={(e) => { setPlQuery(e.target.value); setPlOpen(true); }}
+              onFocus={() => setPlOpen(true)}
+              onBlur={() => setTimeout(() => setPlOpen(false), 150)}
+            />
+            {plOpen && plMatches.length > 0 && (
+              <ul className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+                {plMatches.map((p) => (
+                  <li key={p.id}>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => addFromPrice(p)}
+                      className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-slate-50"
+                    >
+                      <span className="min-w-0 truncate">
+                        {p.code && <span className="mr-1 font-mono text-xs text-slate-400">{p.code}</span>}
+                        {p.description}
+                      </span>
+                      <span className="shrink-0 text-slate-600">{formatCurrency(sellPrice(p.buy_price, p.markup_pct))}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
 
         <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
           <table className="w-full text-sm">
@@ -197,8 +260,28 @@ export function InvoiceDetail({
               <span>Subtotal</span>
               <span>{formatCurrency(invoice.subtotal)}</span>
             </div>
-            <div className="flex justify-between text-slate-600">
-              <span>Tax ({(invoice.tax_rate * 100).toFixed(2)}%)</span>
+            <div className="flex items-center justify-between gap-2 text-slate-600">
+              {taxRates.length > 0 ? (
+                <Select
+                  className="h-8 w-44 text-xs"
+                  value={taxRates.find((t) => Math.abs(Number(t.rate) / 100 - Number(invoice.tax_rate)) < 1e-9)?.id ?? ""}
+                  disabled={pending}
+                  onChange={(e) =>
+                    start(async () => {
+                      const r = taxRates.find((t) => t.id === e.target.value);
+                      await setInvoiceTaxRate(invoice.id, r ? Number(r.rate) : 0);
+                      refresh();
+                    })
+                  }
+                >
+                  <option value="">No tax</option>
+                  {taxRates.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name} ({Number(t.rate)}%)</option>
+                  ))}
+                </Select>
+              ) : (
+                <span>Tax ({(invoice.tax_rate * 100).toFixed(2)}%)</span>
+              )}
               <span>{formatCurrency(invoice.tax)}</span>
             </div>
             <div className="flex justify-between border-t border-slate-100 pt-2 font-semibold text-slate-900">
@@ -236,11 +319,9 @@ export function InvoiceDetail({
                   value={payMethod}
                   onChange={(e) => setPayMethod(e.target.value)}
                 >
-                  <option value="check">Check</option>
-                  <option value="card">Card</option>
-                  <option value="cash">Cash</option>
-                  <option value="ach">ACH</option>
-                  <option value="other">Other</option>
+                  {(paymentMethods.length ? paymentMethods : ["Check", "Card", "Cash"]).map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
                 </Select>
               </div>
             </div>
