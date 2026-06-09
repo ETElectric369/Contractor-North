@@ -92,7 +92,8 @@ export default async function InventoryPage({
         </EmptyState>
       ) : (
         <Card className="overflow-hidden">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[640px] text-sm">
             <thead className="border-b border-slate-100 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-400">
               <tr>
                 <th className="px-5 py-3 font-semibold">Item</th>
@@ -134,6 +135,7 @@ export default async function InventoryPage({
               })}
             </tbody>
           </table>
+          </div>
         </Card>
       )}
     </div>

@@ -91,7 +91,8 @@ export default async function PublicInvoicePage({
 
         {inv.title && <div className="mt-5 text-base font-semibold text-slate-900">{inv.title}</div>}
 
-        <table className="mt-4 w-full text-sm">
+        <div className="mt-4 overflow-x-auto">
+        <table className="w-full min-w-[460px] text-sm">
           <thead>
             <tr className="border-b border-slate-300 text-left text-xs uppercase tracking-wide text-slate-500">
               <th className="py-2 font-semibold">Description</th>
@@ -111,6 +112,7 @@ export default async function PublicInvoicePage({
             ))}
           </tbody>
         </table>
+        </div>
 
         <div className="mt-4 flex justify-end">
           <div className="w-64 space-y-1 text-sm">
