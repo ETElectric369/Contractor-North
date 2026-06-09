@@ -132,6 +132,15 @@ export default async function DashboardPage() {
     .order("due_date", { ascending: true, nullsFirst: false })
     .limit(6);
 
+  // Compliance items expiring within 45 days (or already expired) — renewal nudge.
+  const soonDate = new Date(Date.now() + 45 * 86_400_000).toISOString().slice(0, 10);
+  const { data: expiringCompliance } = await supabase
+    .from("compliance_items")
+    .select("id, type, name, expires_date")
+    .not("expires_date", "is", null)
+    .lte("expires_date", soonDate)
+    .order("expires_date", { ascending: true });
+
   const stats = [
     {
       label: "Customers",
@@ -171,6 +180,25 @@ export default async function DashboardPage() {
       />
 
       <WeatherWidget location={orgLocation} label={org?.city ?? undefined} />
+
+      {(expiringCompliance ?? []).length > 0 && (() => {
+        const today = new Date().toISOString().slice(0, 10);
+        const hasExpired = (expiringCompliance ?? []).some((c: any) => c.expires_date < today);
+        return (
+          <Link
+            href="/compliance"
+            className={`mb-4 block rounded-xl border px-4 py-3 text-sm ${hasExpired ? "border-red-200 bg-red-50 text-red-800" : "border-amber-200 bg-amber-50 text-amber-800"}`}
+          >
+            <span className="font-semibold">⚠️ Renewals due:</span>{" "}
+            {(expiringCompliance ?? [])
+              .slice(0, 4)
+              .map((c: any) => `${c.name} (${formatDate(c.expires_date)})`)
+              .join(" · ")}
+            {(expiringCompliance ?? []).length > 4 ? " …" : ""}
+            <span className="ml-1 underline">Review compliance →</span>
+          </Link>
+        );
+      })()}
 
       <div className="mb-6 rounded-xl bg-brand-light/50 px-4 py-3 text-sm italic text-brand-dark">
         “{quote}”
