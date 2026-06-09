@@ -43,7 +43,7 @@ export default async function InquirePage({ params }: { params: Promise<{ org: s
         />
       )}
 
-      <div className="relative mx-auto grid min-h-screen max-w-5xl items-end gap-8 px-4 pb-10 pt-[42vh] md:grid-cols-2 md:pt-[38vh]">
+      <div className="relative mx-auto grid min-h-screen max-w-5xl items-end gap-8 px-4 pb-10 pt-[32vh] md:grid-cols-2 md:pt-[28vh]">
         <div className={bg ? "text-white" : ""} style={bg ? { textShadow: "0 1px 6px rgba(0,0,0,.65)" } : undefined}>
           {!bg && o.logo_url ? (
             // eslint-disable-next-line @next/next/no-img-element

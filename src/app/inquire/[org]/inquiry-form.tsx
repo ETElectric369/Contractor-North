@@ -43,7 +43,7 @@ export function InquiryForm({ org, brandColor }: { org: string; brandColor: stri
 
   if (done) {
     return (
-      <div className="rounded-2xl bg-white/85 p-8 text-center shadow-xl backdrop-blur-md">
+      <div className="rounded-2xl bg-white/75 p-8 text-center shadow-xl backdrop-blur-md">
         <CheckCircle2 className="mx-auto h-12 w-12" style={{ color: brandColor }} />
         <h2 className="mt-3 text-xl font-bold text-slate-900">Thank you!</h2>
         <p className="mt-1 text-slate-600">We got your request and will reach out shortly.</p>
@@ -53,7 +53,7 @@ export function InquiryForm({ org, brandColor }: { org: string; brandColor: stri
 
   const field = "w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2";
   return (
-    <form onSubmit={submit} className="space-y-3 rounded-2xl bg-white/85 p-6 shadow-xl backdrop-blur-md">
+    <form onSubmit={submit} className="space-y-3 rounded-2xl bg-white/70 p-6 shadow-xl backdrop-blur-md">
       <h2 className="text-lg font-bold text-slate-900">Request a quote</h2>
       {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
       <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name *" className={field} style={{ ["--tw-ring-color" as any]: brandColor }} />
