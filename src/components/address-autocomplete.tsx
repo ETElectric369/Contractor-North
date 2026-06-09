@@ -16,8 +16,6 @@ interface Suggestion {
   text: string;
 }
 
-const AUTOCOMPLETE_URL = "https://places.googleapis.com/v1/places:autocomplete";
-const DETAILS_URL = "https://places.googleapis.com/v1/places";
 
 /**
  * Address field with Google Places autocomplete via the Places API (New) REST
@@ -71,14 +69,11 @@ export function AddressAutocomplete({
     const ctrl = new AbortController();
     const t = setTimeout(async () => {
       try {
-        const res = await fetch(AUTOCOMPLETE_URL, {
+        const res = await fetch("/api/places", {
           method: "POST",
           signal: ctrl.signal,
-          headers: {
-            "Content-Type": "application/json",
-            "X-Goog-Api-Key": key,
-          },
-          body: JSON.stringify({ input: q, includedRegionCodes: ["us"] }),
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ input: q }),
         });
         if (!res.ok) return;
         const data = await res.json();
@@ -114,12 +109,7 @@ export function AddressAutocomplete({
     setSuggestions([]);
     if (!key) return;
     try {
-      const res = await fetch(`${DETAILS_URL}/${s.placeId}`, {
-        headers: {
-          "X-Goog-Api-Key": key,
-          "X-Goog-FieldMask": "formattedAddress,addressComponents",
-        },
-      });
+      const res = await fetch(`/api/places?placeId=${encodeURIComponent(s.placeId)}`);
       const place = res.ok ? await res.json() : {};
       const comps: any[] = place.addressComponents ?? [];
       const get = (type: string, short = false) => {
