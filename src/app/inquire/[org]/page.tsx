@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { Phone, Mail, MapPin, Zap, ShieldCheck } from "lucide-react";
+import { Phone, Mail, MapPin, Zap } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { InquiryForm } from "./inquiry-form";
 
@@ -20,7 +20,10 @@ export default async function InquirePage({ params }: { params: Promise<{ org: s
     .split("\n")
     .map((s: string) => s.trim())
     .filter(Boolean);
-  const credentials = o.splash_credentials || "";
+  const credLines = String(o.splash_credentials || "")
+    .split("\n")
+    .map((s: string) => s.trim())
+    .filter(Boolean);
 
   return (
     <div className="relative min-h-screen">
@@ -40,7 +43,7 @@ export default async function InquirePage({ params }: { params: Promise<{ org: s
         />
       )}
 
-      <div className="relative mx-auto grid max-w-5xl items-center gap-8 px-4 py-12 md:grid-cols-2 md:py-20">
+      <div className="relative mx-auto grid min-h-screen max-w-5xl items-end gap-8 px-4 pb-10 pt-[42vh] md:grid-cols-2 md:pt-[38vh]">
         <div className={bg ? "text-white" : ""} style={bg ? { textShadow: "0 1px 6px rgba(0,0,0,.65)" } : undefined}>
           {!bg && o.logo_url ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -49,7 +52,7 @@ export default async function InquirePage({ params }: { params: Promise<{ org: s
           <div className="inline-block rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide text-white shadow" style={{ backgroundColor: brand }}>
             {o.name} · Now booking
           </div>
-          <h1 className={`mt-4 text-4xl font-extrabold tracking-tight sm:text-5xl ${bg ? "text-white drop-shadow" : "text-slate-900"}`}>
+          <h1 className={`mt-3 text-2xl font-extrabold tracking-tight sm:text-3xl ${bg ? "text-white drop-shadow" : "text-slate-900"}`}>
             {headline}
           </h1>
           {tagline && (
@@ -87,9 +90,11 @@ export default async function InquirePage({ params }: { params: Promise<{ org: s
               </div>
             )}
           </div>
-          {credentials && (
-            <div className={`mt-4 inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-semibold ${bg ? "bg-white/15 text-white ring-1 ring-white/25" : "bg-slate-100 text-slate-700"}`}>
-              <ShieldCheck className="h-4 w-4 shrink-0" /> {credentials}
+          {credLines.length > 0 && (
+            <div className={`mt-2 space-y-0.5 text-sm ${bg ? "text-slate-200" : "text-slate-500"}`}>
+              {credLines.map((line: string, i: number) => (
+                <div key={i}>{line}</div>
+              ))}
             </div>
           )}
         </div>

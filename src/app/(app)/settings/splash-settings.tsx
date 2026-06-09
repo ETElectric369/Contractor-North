@@ -41,8 +41,8 @@ export function SplashSettings({ settings }: { settings: OrgSettings }) {
         <Textarea id="sp-bullets" rows={3} value={bullets} onChange={(e) => setBullets(e.target.value)} placeholder={"All phases of electrical infrastructure\nComplex troubleshooting\nCustom lighting design & fabrication"} />
       </div>
       <div>
-        <Label htmlFor="sp-cred">License / insurance line</Label>
-        <Input id="sp-cred" value={credentials} onChange={(e) => setCredentials(e.target.value)} placeholder="Licensed · Bonded · Insured · CA C-10 #1156091" />
+        <Label htmlFor="sp-cred">Below-contact lines (one per line)</Label>
+        <Textarea id="sp-cred" rows={3} value={credentials} onChange={(e) => setCredentials(e.target.value)} placeholder={"Serving Tahoe · Truckee · Sierra Valley, CA\nLicensed · Bonded · Insured\nCA C-10 License #1156091"} />
       </div>
       <div>
         <Label htmlFor="sp-bg">Background image URL</Label>
