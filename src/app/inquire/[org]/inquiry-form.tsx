@@ -3,12 +3,16 @@
 import { useState } from "react";
 import { CheckCircle2, Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { AddressAutocomplete } from "@/components/address-autocomplete";
 
 export function InquiryForm({ org, brandColor }: { org: string; brandColor: string }) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [address, setAddress] = useState("");
+  const [city, setCity] = useState("");
+  const [stateName, setStateName] = useState("");
+  const [zip, setZip] = useState("");
   const [message, setMessage] = useState("");
   const [hp, setHp] = useState(""); // honeypot
   const [busy, setBusy] = useState(false);
@@ -31,6 +35,9 @@ export function InquiryForm({ org, brandColor }: { org: string; brandColor: stri
         p_phone: phone || null,
         p_message: message || null,
         p_address: address || null,
+        p_city: city || null,
+        p_state: stateName || null,
+        p_zip: zip || null,
       });
       if (rpcErr) throw rpcErr;
       setDone(true);
@@ -61,7 +68,16 @@ export function InquiryForm({ org, brandColor }: { org: string; brandColor: stri
         <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone" className={field} inputMode="tel" />
         <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" className={field} inputMode="email" />
       </div>
-      <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Job address" className={field} />
+      <AddressAutocomplete
+        placeholder="Job address"
+        onTextChange={setAddress}
+        onResolved={(p) => {
+          if (p.formatted) setAddress(p.formatted);
+          setCity(p.city);
+          setStateName(p.state);
+          setZip(p.zip);
+        }}
+      />
       <textarea value={message} onChange={(e) => setMessage(e.target.value)} placeholder="What do you need help with?" rows={4} className={field} />
       {/* honeypot — hidden from humans */}
       <input value={hp} onChange={(e) => setHp(e.target.value)} tabIndex={-1} autoComplete="off" className="hidden" aria-hidden />

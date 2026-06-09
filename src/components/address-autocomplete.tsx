@@ -30,6 +30,7 @@ export function AddressAutocomplete({
   defaultValue,
   placeholder,
   onResolved,
+  onTextChange,
   streetOnly = false,
 }: {
   id?: string;
@@ -37,6 +38,7 @@ export function AddressAutocomplete({
   defaultValue?: string;
   placeholder?: string;
   onResolved?: (parts: AddressParts) => void;
+  onTextChange?: (value: string) => void;
   streetOnly?: boolean;
 }) {
   const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
@@ -46,6 +48,12 @@ export function AddressAutocomplete({
   const [active, setActive] = useState(-1);
   const justSelected = useRef(false);
   const boxRef = useRef<HTMLDivElement>(null);
+
+  // Surface the current text to the parent (typing + selection).
+  useEffect(() => {
+    onTextChange?.(value);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
 
   // Debounced fetch of predictions.
   useEffect(() => {

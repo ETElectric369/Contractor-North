@@ -99,7 +99,9 @@ export default async function InquirePage({ params }: { params: Promise<{ org: s
           )}
         </div>
 
-        <InquiryForm org={org} brandColor={brand} />
+        <div className="w-full md:max-w-sm md:justify-self-end">
+          <InquiryForm org={org} brandColor={brand} />
+        </div>
       </div>
 
       <p className={`relative pb-6 text-center text-xs ${bg ? "text-slate-300" : "text-slate-400"}`}>Powered by Contractor North</p>
