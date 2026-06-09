@@ -67,87 +67,58 @@ export function ItemEditor({
   }
 
   return (
-    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-      <table className="w-full text-sm">
-        <thead className="border-b border-slate-100 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-400">
-          <tr>
-            <th className="px-5 py-3 font-semibold">Description</th>
-            <th className="px-3 py-3 font-semibold">Part #</th>
-            <th className="px-3 py-3 text-right font-semibold">Qty</th>
-            <th className="px-3 py-3 font-semibold">Unit</th>
-            <th className="px-3 py-3 text-right font-semibold">Est. cost</th>
-            <th className="px-5 py-3 text-right font-semibold">Line</th>
-            <th className="px-3 py-3" />
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-100">
-          {items.map((it) => (
-            <tr key={it.id}>
-              <td className="px-5 py-2.5 text-slate-800">{it.description}</td>
-              <td className="px-3 py-2.5 text-slate-500">{it.part_number ?? "—"}</td>
-              <td className="px-3 py-2.5 text-right text-slate-600">{it.quantity}</td>
-              <td className="px-3 py-2.5 text-slate-500">{it.unit}</td>
-              <td className="px-3 py-2.5 text-right text-slate-600">
-                {it.est_cost != null ? formatCurrency(it.est_cost) : "—"}
-              </td>
-              <td className="px-5 py-2.5 text-right font-medium text-slate-900">
-                {it.est_cost != null
-                  ? formatCurrency(it.est_cost * it.quantity)
-                  : "—"}
-              </td>
-              <td className="px-3 py-2.5 text-right">
-                <button
-                  onClick={() => remove(it.id)}
-                  disabled={pending}
-                  className="text-slate-400 hover:text-red-600"
-                  aria-label="Remove item"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </td>
-            </tr>
-          ))}
-          {items.length === 0 && (
-            <tr>
-              <td colSpan={7} className="px-5 py-6 text-center text-slate-400">
-                No items yet — add one below.
-              </td>
-            </tr>
-          )}
-        </tbody>
-        <tfoot>
-          <tr className="border-t border-slate-100 bg-slate-50/50">
-            <td className="px-5 py-2">
-              <Input
-                placeholder="Add item…"
-                value={desc}
-                onChange={(e) => setDesc(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && add()}
-              />
-            </td>
-            <td className="px-3 py-2">
-              <Input placeholder="Part #" value={part} onChange={(e) => setPart(e.target.value)} />
-            </td>
-            <td className="px-3 py-2">
-              <NumberInput value={qty} onValueChange={setQty} className="text-right" />
-            </td>
-            <td className="px-3 py-2">
-              <Input value={unit} onChange={(e) => setUnit(e.target.value)} />
-            </td>
-            <td className="px-3 py-2">
-              <NumberInput value={cost} onValueChange={setCost} className="text-right" />
-            </td>
-            <td className="px-5 py-2 text-right font-semibold text-slate-900">
-              {formatCurrency(total)}
-            </td>
-            <td className="px-3 py-2 text-right">
-              <Button size="icon" onClick={add} disabled={pending || !desc.trim()}>
-                <Plus className="h-4 w-4" />
-              </Button>
-            </td>
-          </tr>
-        </tfoot>
-      </table>
+    <div className="rounded-xl border border-slate-200 bg-white">
+      <ul className="divide-y divide-slate-100">
+        {items.map((it) => (
+          <li key={it.id} className="flex items-center gap-3 px-4 py-3 text-sm">
+            <div className="min-w-0 flex-1">
+              <div className="font-medium text-slate-800">{it.description}</div>
+              <div className="text-xs text-slate-400">
+                {it.part_number ? `#${it.part_number} · ` : ""}
+                {it.quantity} {it.unit}
+                {it.est_cost != null ? ` × ${formatCurrency(it.est_cost)}` : ""}
+              </div>
+            </div>
+            <div className="shrink-0 font-medium text-slate-900">
+              {it.est_cost != null ? formatCurrency(it.est_cost * it.quantity) : "—"}
+            </div>
+            <button
+              onClick={() => remove(it.id)}
+              disabled={pending}
+              className="shrink-0 text-slate-400 hover:text-red-600"
+              aria-label="Remove item"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          </li>
+        ))}
+        {items.length === 0 && (
+          <li className="px-4 py-6 text-center text-slate-400">No items yet — add one below.</li>
+        )}
+      </ul>
+
+      {items.length > 0 && (
+        <div className="flex justify-between border-t border-slate-100 px-4 py-2 text-sm">
+          <span className="text-slate-500">Estimated total</span>
+          <span className="font-semibold text-slate-900">{formatCurrency(total)}</span>
+        </div>
+      )}
+
+      {/* Add item */}
+      <div className="space-y-2 border-t border-slate-100 bg-slate-50/60 p-3">
+        <div className="flex gap-2">
+          <Input placeholder="Add an item…" value={desc} onChange={(e) => setDesc(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} className="flex-1" />
+          <Input placeholder="Part #" value={part} onChange={(e) => setPart(e.target.value)} className="w-24 shrink-0" />
+        </div>
+        <div className="flex items-center gap-2">
+          <NumberInput value={qty} onValueChange={setQty} className="w-16 text-center" placeholder="Qty" />
+          <Input value={unit} onChange={(e) => setUnit(e.target.value)} className="w-16 shrink-0" placeholder="ea" />
+          <NumberInput value={cost} onValueChange={setCost} className="flex-1 text-right" placeholder="Est. cost" />
+          <Button onClick={add} disabled={pending || !desc.trim()}>
+            <Plus className="h-4 w-4" /> Add
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

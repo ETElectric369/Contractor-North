@@ -129,7 +129,8 @@ export default async function TimeclockPage() {
         <div className="border-b border-slate-100 px-5 py-3">
           <h3 className="text-sm font-semibold text-slate-900">{t("tc_recent")}</h3>
         </div>
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[480px] text-sm">
           <thead className="border-b border-slate-100 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-400">
             <tr>
               <th className="px-5 py-2.5 font-semibold">Clock in</th>
@@ -177,6 +178,7 @@ export default async function TimeclockPage() {
             )}
           </tbody>
         </table>
+        </div>
       </Card>
     </div>
   );
