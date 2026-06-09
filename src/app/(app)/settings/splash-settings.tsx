@@ -12,13 +12,14 @@ export function SplashSettings({ settings }: { settings: OrgSettings }) {
   const [tagline, setTagline] = useState(settings.splash_tagline);
   const [bg, setBg] = useState(settings.splash_bg_url);
   const [bullets, setBullets] = useState(settings.splash_bullets);
+  const [credentials, setCredentials] = useState(settings.splash_credentials);
   const [pending, start] = useTransition();
   const [done, setDone] = useState(false);
 
   function save() {
     setDone(false);
     start(async () => {
-      await updateOrgSettings({ splash_headline: headline, splash_tagline: tagline, splash_bg_url: bg, splash_bullets: bullets });
+      await updateOrgSettings({ splash_headline: headline, splash_tagline: tagline, splash_bg_url: bg, splash_bullets: bullets, splash_credentials: credentials });
       setDone(true);
       setTimeout(() => setDone(false), 2500);
     });
@@ -38,6 +39,10 @@ export function SplashSettings({ settings }: { settings: OrgSettings }) {
       <div>
         <Label htmlFor="sp-bullets">Highlights (one per line)</Label>
         <Textarea id="sp-bullets" rows={3} value={bullets} onChange={(e) => setBullets(e.target.value)} placeholder={"All phases of electrical infrastructure\nComplex troubleshooting\nCustom lighting design & fabrication"} />
+      </div>
+      <div>
+        <Label htmlFor="sp-cred">License / insurance line</Label>
+        <Input id="sp-cred" value={credentials} onChange={(e) => setCredentials(e.target.value)} placeholder="Licensed · Bonded · Insured · CA C-10 #1156091" />
       </div>
       <div>
         <Label htmlFor="sp-bg">Background image URL</Label>

@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { Phone, Mail, MapPin, Zap } from "lucide-react";
+import { Phone, Mail, MapPin, Zap, ShieldCheck } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { InquiryForm } from "./inquiry-form";
 
@@ -20,6 +20,7 @@ export default async function InquirePage({ params }: { params: Promise<{ org: s
     .split("\n")
     .map((s: string) => s.trim())
     .filter(Boolean);
+  const credentials = o.splash_credentials || "";
 
   return (
     <div className="relative min-h-screen">
@@ -84,6 +85,11 @@ export default async function InquirePage({ params }: { params: Promise<{ org: s
               </div>
             )}
           </div>
+          {credentials && (
+            <div className={`mt-4 inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-semibold ${bg ? "bg-white/15 text-white ring-1 ring-white/25" : "bg-slate-100 text-slate-700"}`}>
+              <ShieldCheck className="h-4 w-4 shrink-0" /> {credentials}
+            </div>
+          )}
         </div>
 
         <InquiryForm org={org} brandColor={brand} />

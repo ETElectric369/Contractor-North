@@ -40,6 +40,7 @@ export interface OrgSettings {
   splash_tagline: string;
   splash_bg_url: string;
   splash_bullets: string; // one bullet per line
+  splash_credentials: string; // e.g. "Licensed · Bonded · Insured · CA C-10 #…"
 }
 
 export const DEFAULT_SETTINGS: OrgSettings = {
@@ -68,6 +69,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   splash_tagline: "",
   splash_bg_url: "",
   splash_bullets: "",
+  splash_credentials: "",
 };
 
 /** Merge stored settings over defaults so every key is always present. */
