@@ -57,11 +57,15 @@ export function TimeclockPanel({
   jobCodes,
   jobs,
   lang,
+  laborLaw = false,
+  autoLunch = false,
 }: {
   openEntry: TimeEntry | null;
   jobCodes: JobCode[];
   jobs: JobOption[];
   lang?: string;
+  laborLaw?: boolean;
+  autoLunch?: boolean;
 }) {
   const t = translator(lang);
   const [error, setError] = useState<string | null>(null);
@@ -75,6 +79,11 @@ export function TimeclockPanel({
   const [lunch, setLunch] = useState(0);
   const [notes, setNotes] = useState(openEntry?.notes ?? "");
   const [allocations, setAllocations] = useState<AllocRow[]>([]);
+
+  // labor-law break confirmation
+  const [break1, setBreak1] = useState(false);
+  const [break2, setBreak2] = useState(false);
+  const [meal, setMeal] = useState(false);
 
   function addAlloc() {
     setAllocations((p) => [
@@ -145,6 +154,18 @@ export function TimeclockPanel({
     });
   }
 
+  // Labor-law break logic (gross hours worked, ignoring lunch deduction).
+  const grossElapsed = openEntry ? hoursBetween(openEntry.clock_in, new Date(now), 0) : 0;
+  const autoLunchApplies = !!autoLunch && grossElapsed > 5;
+  const lunchToUse = autoLunchApplies ? 30 : lunch;
+  const requiredSecondBreak = grossElapsed >= 5;
+  const requiredMeal = grossElapsed > 5;
+  const breaksOk =
+    !laborLaw ||
+    (break1 &&
+      (!requiredSecondBreak || break2) &&
+      (!requiredMeal || autoLunchApplies || meal));
+
   function doClockOut() {
     if (!openEntry) return;
     setError(null);
@@ -152,7 +173,7 @@ export function TimeclockPanel({
       const gps = await getGps();
       const res = await clockOut({
         entry_id: openEntry.id,
-        lunch_minutes: lunch,
+        lunch_minutes: lunchToUse,
         notes,
         gps,
         allocations: allocations.map((a) => ({
@@ -167,7 +188,7 @@ export function TimeclockPanel({
   }
 
   if (openEntry) {
-    const elapsed = hoursBetween(openEntry.clock_in, new Date(now), lunch);
+    const elapsed = hoursBetween(openEntry.clock_in, new Date(now), lunchToUse);
     const jobLabel =
       jobs.find((j) => j.id === openEntry.job_id)?.name ?? "No job selected";
     return (
@@ -199,7 +220,13 @@ export function TimeclockPanel({
               <Label htmlFor="lunch" className="flex items-center gap-1.5">
                 <Coffee className="h-4 w-4 text-slate-400" /> {t("tc_lunch")}
               </Label>
-              <NumberInput id="lunch" value={lunch} onValueChange={setLunch} />
+              {autoLunchApplies ? (
+                <div className="flex h-10 items-center rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-500">
+                  30 min (auto · unpaid)
+                </div>
+              ) : (
+                <NumberInput id="lunch" value={lunch} onValueChange={setLunch} />
+              )}
             </div>
           </div>
 
@@ -320,6 +347,28 @@ export function TimeclockPanel({
             />
           </div>
 
+          {laborLaw && (
+            <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm">
+              <div className="font-medium text-amber-900">Confirm your breaks (required)</div>
+              <label className="flex items-center gap-2 text-amber-800">
+                <input type="checkbox" checked={break1} onChange={(e) => setBreak1(e.target.checked)} className="h-4 w-4 rounded border-amber-300 text-brand" />
+                I took my first 10-minute rest break
+              </label>
+              {requiredSecondBreak && (
+                <label className="flex items-center gap-2 text-amber-800">
+                  <input type="checkbox" checked={break2} onChange={(e) => setBreak2(e.target.checked)} className="h-4 w-4 rounded border-amber-300 text-brand" />
+                  I took my second 10-minute rest break
+                </label>
+              )}
+              {requiredMeal && !autoLunchApplies && (
+                <label className="flex items-center gap-2 text-amber-800">
+                  <input type="checkbox" checked={meal} onChange={(e) => setMeal(e.target.checked)} className="h-4 w-4 rounded border-amber-300 text-brand" />
+                  I took my 30-minute meal break
+                </label>
+              )}
+            </div>
+          )}
+
           {error && <p className="text-sm text-red-600">{error}</p>}
 
           <Button
@@ -327,7 +376,7 @@ export function TimeclockPanel({
             size="lg"
             className="w-full"
             onClick={doClockOut}
-            disabled={pending}
+            disabled={pending || !breaksOk}
           >
             {pending ? (
               <>

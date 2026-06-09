@@ -3,6 +3,7 @@ import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { TimeclockPanel } from "./timeclock-panel";
+import { getOrgSettings } from "@/lib/org-settings";
 import { AddEntryButton } from "./add-entry-button";
 import { formatDateTime, hoursBetween, formatDuration } from "@/lib/utils";
 import { translator } from "@/lib/i18n";
@@ -35,7 +36,7 @@ export default async function TimeclockPage() {
         .order("full_name")
     : { data: [] as { id: string; full_name: string | null }[] };
 
-  const [openRes, codesRes, jobsRes, weekRes] = await Promise.all([
+  const [openRes, codesRes, jobsRes, weekRes, orgRes] = await Promise.all([
     supabase
       .from("time_entries")
       .select("*")
@@ -55,7 +56,9 @@ export default async function TimeclockPage() {
       .eq("profile_id", user?.id ?? "")
       .gte("clock_in", weekAgo)
       .order("clock_in", { ascending: false }),
+    supabase.from("organizations").select("settings").limit(1).maybeSingle(),
   ]);
+  const orgSettings = getOrgSettings((orgRes.data as any)?.settings);
 
   const openEntry = (openRes.data as TimeEntry) ?? null;
   const week = (weekRes.data ?? []) as TimeEntry[];
@@ -89,6 +92,8 @@ export default async function TimeclockPage() {
             jobCodes={(codesRes.data ?? []) as JobCode[]}
             jobs={jobsRes.data ?? []}
             lang={lang}
+            laborLaw={orgSettings.labor_law_breaks}
+            autoLunch={orgSettings.auto_lunch_30}
           />
         </div>
 

@@ -24,6 +24,8 @@ export interface OrgSettings {
   work_day_end: string; // "17:00"
   week_start: "sunday" | "monday";
   time_tracking_method: "start_end" | "duration";
+  labor_law_breaks: boolean; // require break confirmation at clock-out (CA)
+  auto_lunch_30: boolean; // auto-apply 30-min unpaid lunch on shifts > 5h
 
   // Payments
   payment_methods: string[];
@@ -50,6 +52,8 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   work_day_end: "17:00",
   week_start: "monday",
   time_tracking_method: "start_end",
+  labor_law_breaks: false,
+  auto_lunch_30: false,
   payment_methods: ["Cash", "Check", "Card", "Zelle", "Venmo"],
   remind_quote_followup: false,
   remind_invoice_due: false,
