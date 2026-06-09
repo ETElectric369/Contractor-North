@@ -17,6 +17,7 @@ import { PaymentMethods } from "./payment-methods";
 import { AutomationSettings } from "./automation-settings";
 import { TaxRatesManager } from "./tax-rates-manager";
 import { SplashSettings } from "./splash-settings";
+import { AiStatus } from "./ai-status";
 import { translator } from "@/lib/i18n";
 import { billingEnabled } from "@/lib/stripe";
 import { qboConfigured } from "@/lib/quickbooks";
@@ -210,6 +211,13 @@ export default async function SettingsPage({
           id: "integrations",
           label: "Integrations",
           content: (
+            <div className="space-y-6">
+            <Section title="AI assistant">
+              <AiStatus
+                configured={!!process.env.ANTHROPIC_API_KEY}
+                model={process.env.ANTHROPIC_MODEL || "claude-opus-4-8"}
+              />
+            </Section>
             <Section title="QuickBooks">
               {qbo === "connected" && (
                 <div className="mb-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">Connected to QuickBooks Online.</div>
@@ -234,6 +242,7 @@ export default async function SettingsPage({
                 </div>
               )}
             </Section>
+            </div>
           ),
         },
         {
