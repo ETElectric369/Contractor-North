@@ -39,6 +39,7 @@ export interface OrgSettings {
   splash_headline: string;
   splash_tagline: string;
   splash_bg_url: string;
+  splash_bullets: string; // one bullet per line
 }
 
 export const DEFAULT_SETTINGS: OrgSettings = {
@@ -66,6 +67,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   splash_headline: "",
   splash_tagline: "",
   splash_bg_url: "",
+  splash_bullets: "",
 };
 
 /** Merge stored settings over defaults so every key is always present. */

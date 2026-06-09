@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { Phone, Mail, MapPin } from "lucide-react";
+import { Phone, Mail, MapPin, Zap } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { InquiryForm } from "./inquiry-form";
 
@@ -16,6 +16,10 @@ export default async function InquirePage({ params }: { params: Promise<{ org: s
   const bg = o.splash_bg_url || "";
   const headline = o.splash_headline || o.name;
   const tagline = o.splash_tagline || "";
+  const bullets = String(o.splash_bullets || "")
+    .split("\n")
+    .map((s: string) => s.trim())
+    .filter(Boolean);
 
   return (
     <div className="relative min-h-screen">
@@ -31,12 +35,12 @@ export default async function InquirePage({ params }: { params: Promise<{ org: s
       {bg && (
         <div
           className="absolute inset-0"
-          style={{ background: "linear-gradient(90deg, rgba(2,6,23,.82), rgba(2,6,23,.5) 55%, rgba(2,6,23,.72))" }}
+          style={{ background: "linear-gradient(90deg, rgba(2,6,23,.66), rgba(2,6,23,.18) 48%, rgba(2,6,23,.30))" }}
         />
       )}
 
       <div className="relative mx-auto grid max-w-5xl items-center gap-8 px-4 py-12 md:grid-cols-2 md:py-20">
-        <div className={bg ? "text-white" : ""}>
+        <div className={bg ? "text-white" : ""} style={bg ? { textShadow: "0 1px 6px rgba(0,0,0,.65)" } : undefined}>
           {o.logo_url ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={o.logo_url} alt={o.name} className="mb-4 h-14 w-auto" />
@@ -54,6 +58,15 @@ export default async function InquirePage({ params }: { params: Promise<{ org: s
             Our new site is on the way — but we're open for business and taking new projects now.
             Send a request and we'll get right back to you.
           </p>
+          {bullets.length > 0 && (
+            <ul className="mt-4 space-y-2">
+              {bullets.map((b: string, i: number) => (
+                <li key={i} className={`flex items-center gap-2 text-base font-semibold ${bg ? "text-white" : "text-slate-800"}`}>
+                  <Zap className="h-4 w-4 shrink-0" style={{ color: bg ? "#fde68a" : brand }} /> {b}
+                </li>
+              ))}
+            </ul>
+          )}
           <div className={`mt-5 space-y-1.5 text-sm ${bg ? "text-slate-100" : "text-slate-600"}`}>
             {o.phone && (
               <a href={`tel:${o.phone}`} className="flex items-center gap-2 hover:opacity-80">

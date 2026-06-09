@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input, Label } from "@/components/ui/input";
+import { Input, Label, Textarea } from "@/components/ui/input";
 import type { OrgSettings } from "@/lib/org-settings";
 import { updateOrgSettings } from "./actions";
 
@@ -11,13 +11,14 @@ export function SplashSettings({ settings }: { settings: OrgSettings }) {
   const [headline, setHeadline] = useState(settings.splash_headline);
   const [tagline, setTagline] = useState(settings.splash_tagline);
   const [bg, setBg] = useState(settings.splash_bg_url);
+  const [bullets, setBullets] = useState(settings.splash_bullets);
   const [pending, start] = useTransition();
   const [done, setDone] = useState(false);
 
   function save() {
     setDone(false);
     start(async () => {
-      await updateOrgSettings({ splash_headline: headline, splash_tagline: tagline, splash_bg_url: bg });
+      await updateOrgSettings({ splash_headline: headline, splash_tagline: tagline, splash_bg_url: bg, splash_bullets: bullets });
       setDone(true);
       setTimeout(() => setDone(false), 2500);
     });
@@ -33,6 +34,10 @@ export function SplashSettings({ settings }: { settings: OrgSettings }) {
       <div>
         <Label htmlFor="sp-tagline">Tagline</Label>
         <Input id="sp-tagline" value={tagline} onChange={(e) => setTagline(e.target.value)} placeholder="e.g. Design & fabrication for distinctive spaces" />
+      </div>
+      <div>
+        <Label htmlFor="sp-bullets">Highlights (one per line)</Label>
+        <Textarea id="sp-bullets" rows={3} value={bullets} onChange={(e) => setBullets(e.target.value)} placeholder={"All phases of electrical infrastructure\nComplex troubleshooting\nCustom lighting design & fabrication"} />
       </div>
       <div>
         <Label htmlFor="sp-bg">Background image URL</Label>
