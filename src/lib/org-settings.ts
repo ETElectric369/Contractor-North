@@ -34,6 +34,11 @@ export interface OrgSettings {
   remind_quote_followup: boolean;
   remind_invoice_due: boolean;
   remind_appointments: boolean;
+
+  // Public inquiry splash page
+  splash_headline: string;
+  splash_tagline: string;
+  splash_bg_url: string;
 }
 
 export const DEFAULT_SETTINGS: OrgSettings = {
@@ -58,6 +63,9 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   remind_quote_followup: false,
   remind_invoice_due: false,
   remind_appointments: false,
+  splash_headline: "",
+  splash_tagline: "",
+  splash_bg_url: "",
 };
 
 /** Merge stored settings over defaults so every key is always present. */

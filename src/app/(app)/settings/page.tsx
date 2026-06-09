@@ -16,6 +16,7 @@ import { SchedulingSettings } from "./scheduling-settings";
 import { PaymentMethods } from "./payment-methods";
 import { AutomationSettings } from "./automation-settings";
 import { TaxRatesManager } from "./tax-rates-manager";
+import { SplashSettings } from "./splash-settings";
 import { translator } from "@/lib/i18n";
 import { billingEnabled } from "@/lib/stripe";
 import { qboConfigured } from "@/lib/quickbooks";
@@ -154,6 +155,7 @@ export default async function SettingsPage({
                   {(siteUrl || "https://contractor-north.vercel.app")}/inquire/{(org as Organization).id}
                 </code>
               </Section>
+              <Section title="Splash page"><SplashSettings settings={settings} /></Section>
             </div>
           ),
         },
