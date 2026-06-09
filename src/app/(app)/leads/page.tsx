@@ -2,39 +2,46 @@ import { UserPlus } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
-import { NewCustomerButton } from "../crm/new-customer-button";
-import { LeadRow } from "./lead-row";
-import type { Customer } from "@/lib/types";
+import { InquiryModal } from "./inquiry-modal";
+import { InquiryRow } from "./inquiry-row";
+import type { Inquiry } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-export default async function LeadsPage() {
+export default async function InquiriesPage() {
   const supabase = await createClient();
-  const { data } = await supabase
-    .from("customers")
-    .select("*")
-    .eq("status", "lead")
-    .order("next_follow_up_at", { ascending: true, nullsFirst: false })
-    .order("created_at", { ascending: false });
 
-  const leads = (data ?? []) as Customer[];
+  const [{ data: inqData }, { data: custData }] = await Promise.all([
+    supabase
+      .from("inquiries")
+      .select("*")
+      .is("converted_at", null)
+      .neq("status", "lost")
+      .order("next_follow_up_at", { ascending: true, nullsFirst: false })
+      .order("created_at", { ascending: false }),
+    supabase.from("customers").select("id, name").order("name"),
+  ]);
+
+  const inquiries = (inqData ?? []) as Inquiry[];
+  const customers = (custData ?? []) as { id: string; name: string }[];
+
   const today = new Date(new Date().toDateString());
-  const dueToday = leads.filter(
-    (l) => l.next_follow_up_at && new Date(l.next_follow_up_at) <= today,
+  const dueToday = inquiries.filter(
+    (i) => i.next_follow_up_at && new Date(i.next_follow_up_at) <= today,
   ).length;
 
   return (
     <div>
-      <PageHeader title="Inquiries" description="New inquiries to follow up and convert.">
-        <NewCustomerButton />
+      <PageHeader title="Inquiries" description="New requests to follow up and convert — nothing converts automatically.">
+        <InquiryModal />
       </PageHeader>
 
-      {leads.length > 0 && (
+      {inquiries.length > 0 && (
         <div className="mb-4 grid grid-cols-2 gap-4 sm:max-w-sm">
           <Card>
             <CardContent className="py-4">
-              <div className="text-2xl font-bold text-slate-900">{leads.length}</div>
-              <div className="text-xs text-slate-500">Open leads</div>
+              <div className="text-2xl font-bold text-slate-900">{inquiries.length}</div>
+              <div className="text-xs text-slate-500">Open inquiries</div>
             </CardContent>
           </Card>
           <Card className={dueToday ? "border-amber-200 bg-amber-50" : ""}>
@@ -46,19 +53,19 @@ export default async function LeadsPage() {
         </div>
       )}
 
-      {leads.length === 0 ? (
+      {inquiries.length === 0 ? (
         <EmptyState
           icon={UserPlus}
-          title="No open leads"
-          description="New customers with the 'lead' status show up here for follow-up."
+          title="No open inquiries"
+          description="Web submissions and manually-added inquiries show up here to follow up and convert."
         >
-          <NewCustomerButton />
+          <InquiryModal />
         </EmptyState>
       ) : (
         <Card className="overflow-hidden">
           <ul className="divide-y divide-slate-100">
-            {leads.map((l) => (
-              <LeadRow key={l.id} lead={l} />
+            {inquiries.map((i) => (
+              <InquiryRow key={i.id} inquiry={i} customers={customers} />
             ))}
           </ul>
         </Card>

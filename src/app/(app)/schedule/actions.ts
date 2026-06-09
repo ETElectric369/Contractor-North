@@ -17,11 +17,30 @@ export async function createJob(formData: FormData): Promise<Result> {
 
   const start = String(formData.get("scheduled_start") ?? "");
 
+  // Optionally create a customer inline (when no existing one is selected).
+  let customerId = emptyToNull(formData.get("customer_id"));
+  const newCustomerName = String(formData.get("new_customer_name") ?? "").trim();
+  if (!customerId && newCustomerName) {
+    const { data: cust, error: cErr } = await supabase
+      .from("customers")
+      .insert({
+        name: newCustomerName,
+        phone: emptyToNull(formData.get("new_customer_phone")),
+        email: emptyToNull(formData.get("new_customer_email")),
+        status: "active",
+        created_by: user.id,
+      })
+      .select("id")
+      .single();
+    if (cErr) return { ok: false, error: cErr.message };
+    customerId = cust.id;
+  }
+
   const { data, error } = await supabase
     .from("jobs")
     .insert({
       name,
-      customer_id: emptyToNull(formData.get("customer_id")),
+      customer_id: customerId,
       description: emptyToNull(formData.get("description")),
       status: String(formData.get("status") ?? "estimate"),
       address: emptyToNull(formData.get("address")),

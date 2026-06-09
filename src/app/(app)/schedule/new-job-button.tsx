@@ -18,6 +18,7 @@ export function NewJobButton({ customers }: { customers: CustomerOption[] }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const [newCust, setNewCust] = useState(false);
   const router = useRouter();
 
   function onSubmit(formData: FormData) {
@@ -52,15 +53,28 @@ export function NewJobButton({ customers }: { customers: CustomerOption[] }) {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label htmlFor="customer_id">Customer</Label>
-              <Select id="customer_id" name="customer_id" defaultValue="">
-                <option value="">— None —</option>
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </Select>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="customer_id">Customer</Label>
+                <button
+                  type="button"
+                  onClick={() => setNewCust((v) => !v)}
+                  className="text-xs font-medium text-brand hover:underline"
+                >
+                  {newCust ? "Pick existing" : "+ New customer"}
+                </button>
+              </div>
+              {newCust ? (
+                <Input name="new_customer_name" placeholder="New customer name" autoFocus />
+              ) : (
+                <Select id="customer_id" name="customer_id" defaultValue="">
+                  <option value="">— None —</option>
+                  {customers.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </Select>
+              )}
             </div>
             <div>
               <Label htmlFor="status">Status</Label>
@@ -72,6 +86,18 @@ export function NewJobButton({ customers }: { customers: CustomerOption[] }) {
               </Select>
             </div>
           </div>
+          {newCust && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="new_customer_phone">Customer phone</Label>
+                <Input id="new_customer_phone" name="new_customer_phone" placeholder="(optional)" />
+              </div>
+              <div>
+                <Label htmlFor="new_customer_email">Customer email</Label>
+                <Input id="new_customer_email" name="new_customer_email" type="email" placeholder="(optional)" />
+              </div>
+            </div>
+          )}
           <div>
             <Label htmlFor="address">Site address</Label>
             <AddressAutocomplete id="address" name="address" />

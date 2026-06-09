@@ -66,6 +66,33 @@ export interface Organization {
   updated_at: string;
 }
 
+export type InquiryStatus = "new" | "contacted" | "quoted" | "won" | "lost";
+
+export interface Inquiry {
+  id: string;
+  name: string;
+  company_name: string | null;
+  type: CustomerType;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  message: string | null;
+  notes: string | null;
+  source: "manual" | "public_form";
+  status: InquiryStatus;
+  next_follow_up_at: string | null;
+  last_contacted_at: string | null;
+  customer_id: string | null;
+  converted_to: "customer" | "quote" | "job" | null;
+  converted_at: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Customer {
   id: string;
   name: string;
