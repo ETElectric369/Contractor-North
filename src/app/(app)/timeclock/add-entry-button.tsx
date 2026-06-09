@@ -43,9 +43,16 @@ export function AddEntryButton({
   const [endT, setEndT] = useState("16:00");
   const [jobId, setJobId] = useState("");
   const [jobCode, setJobCode] = useState("");
-  const [lunch, setLunch] = useState(0);
+  const [lunchTaken, setLunchTaken] = useState(false);
   const [miles, setMiles] = useState(0);
   const [notes, setNotes] = useState("");
+
+  const lunchRequired = (() => {
+    const ci = new Date(`${date}T${startT}:00`);
+    const co = new Date(`${date}T${endT}:00`);
+    if (isNaN(ci.getTime()) || isNaN(co.getTime()) || co <= ci) return false;
+    return (co.getTime() - ci.getTime()) / 3_600_000 > 5;
+  })();
 
   function submit() {
     setError(null);
@@ -60,6 +67,10 @@ export function AddEntryButton({
       setError("End time must be after start time.");
       return;
     }
+    if (lunchRequired && !lunchTaken) {
+      setError("Confirm the 30-minute lunch — it's required for shifts over 5 hours.");
+      return;
+    }
     start(async () => {
       const res = await createManualEntry({
         profile_id: member,
@@ -67,7 +78,7 @@ export function AddEntryButton({
         clock_out: clockOut.toISOString(),
         job_id: jobId || null,
         job_code: jobCode || null,
-        lunch_minutes: lunch,
+        lunch_minutes: lunchTaken ? 30 : 0,
         notes,
         miles,
       });
@@ -122,7 +133,7 @@ export function AddEntryButton({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <div className="col-span-2">
               <Label htmlFor="m-code">Job code</Label>
               <Select id="m-code" value={jobCode} onChange={(e) => setJobCode(e.target.value)}>
@@ -135,14 +146,14 @@ export function AddEntryButton({
               </Select>
             </div>
             <div>
-              <Label htmlFor="m-lunch">Lunch (min)</Label>
-              <NumberInput id="m-lunch" value={lunch} onValueChange={setLunch} />
-            </div>
-            <div>
               <Label htmlFor="m-miles">Miles</Label>
               <NumberInput id="m-miles" value={miles} onValueChange={setMiles} />
             </div>
           </div>
+          <label className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${lunchRequired && !lunchTaken ? "border-amber-300 bg-amber-50" : "border-slate-200"}`}>
+            <input type="checkbox" checked={lunchTaken} onChange={(e) => setLunchTaken(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand" />
+            <span className="text-slate-700">Took a 30-minute lunch{lunchRequired ? <span className="font-medium text-amber-700"> · required (over 5 hrs)</span> : null}</span>
+          </label>
 
           <div>
             <Label htmlFor="m-job">Job (optional)</Label>

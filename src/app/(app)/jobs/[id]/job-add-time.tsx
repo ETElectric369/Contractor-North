@@ -56,8 +56,15 @@ export function JobAddTimeEntry({
   const [endT, setEndT] = useState("16:00");
   const [profileId, setProfileId] = useState(defaultProfileId);
   const [jobCode, setJobCode] = useState("");
-  const [lunch, setLunch] = useState(0);
+  const [lunchTaken, setLunchTaken] = useState(false);
   const [notes, setNotes] = useState("");
+
+  const lunchRequired = (() => {
+    const ci = new Date(`${date}T${startT}:00`);
+    const co = new Date(`${date}T${endT}:00`);
+    if (isNaN(ci.getTime()) || isNaN(co.getTime()) || co <= ci) return false;
+    return (co.getTime() - ci.getTime()) / 3_600_000 > 5;
+  })();
 
   function save() {
     setError(null);
@@ -65,6 +72,7 @@ export function JobAddTimeEntry({
     const co = new Date(`${date}T${endT}:00`);
     if (isNaN(ci.getTime()) || isNaN(co.getTime())) return setError("Invalid date/time.");
     if (co <= ci) return setError("End must be after start.");
+    if (lunchRequired && !lunchTaken) return setError("Confirm the 30-minute lunch — required for shifts over 5 hours.");
     start(async () => {
       const res = await createManualEntry({
         profile_id: profileId,
@@ -72,7 +80,7 @@ export function JobAddTimeEntry({
         clock_out: co.toISOString(),
         job_id: jobId,
         job_code: jobCode || null,
-        lunch_minutes: lunch,
+        lunch_minutes: lunchTaken ? 30 : 0,
         notes,
         miles,
       });
@@ -123,25 +131,23 @@ export function JobAddTimeEntry({
               </Select>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label htmlFor="at-lunch">Lunch (minutes)</Label>
-              <NumberInput id="at-lunch" value={lunch} onValueChange={setLunch} />
-            </div>
-            <div>
-              <Label htmlFor="at-miles">
-                Miles{mileageRate > 0 && miles > 0 ? ` · $${(miles * mileageRate).toFixed(2)}` : ""}
-              </Label>
-              <div className="flex gap-2">
-                <NumberInput id="at-miles" value={miles} onValueChange={setMiles} />
-                {key && companyAddress && jobAddress && (
-                  <Button type="button" size="sm" variant="outline" onClick={autoMiles} disabled={calcing} title="Round trip: company ↔ job">
-                    {calcing ? "…" : "Auto"}
-                  </Button>
-                )}
-              </div>
+          <div>
+            <Label htmlFor="at-miles">
+              Miles{mileageRate > 0 && miles > 0 ? ` · $${(miles * mileageRate).toFixed(2)}` : ""}
+            </Label>
+            <div className="flex gap-2">
+              <NumberInput id="at-miles" value={miles} onValueChange={setMiles} />
+              {key && companyAddress && jobAddress && (
+                <Button type="button" size="sm" variant="outline" onClick={autoMiles} disabled={calcing} title="Round trip: company ↔ job">
+                  {calcing ? "…" : "Auto"}
+                </Button>
+              )}
             </div>
           </div>
+          <label className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${lunchRequired && !lunchTaken ? "border-amber-300 bg-amber-50" : "border-slate-200"}`}>
+            <input type="checkbox" checked={lunchTaken} onChange={(e) => setLunchTaken(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand" />
+            <span className="text-slate-700">Took a 30-minute lunch{lunchRequired ? <span className="font-medium text-amber-700"> · required (over 5 hrs)</span> : null}</span>
+          </label>
           <div>
             <Label htmlFor="at-notes">Notes</Label>
             <Textarea id="at-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />

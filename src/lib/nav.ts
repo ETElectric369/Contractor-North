@@ -76,7 +76,7 @@ export const NAV: NavSection[] = [
   {
     title: "Money",
     items: [
-      { label: "Billing", href: "/billing", icon: Receipt },
+      { label: "Invoices", href: "/billing", icon: Receipt },
       { label: "Bills & Purchasing", href: "/bills", icon: Wallet },
       { label: "Price List", href: "/price-list", icon: Tags },
       { label: "Inventory", href: "/inventory", icon: Boxes },

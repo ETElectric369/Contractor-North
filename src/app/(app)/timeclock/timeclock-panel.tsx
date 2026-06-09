@@ -76,14 +76,13 @@ export function TimeclockPanel({
   const [jobCode, setJobCode] = useState("");
 
   // clock-out form
-  const [lunch, setLunch] = useState(0);
+  const [lunchTaken, setLunchTaken] = useState(false);
   const [notes, setNotes] = useState(openEntry?.notes ?? "");
   const [allocations, setAllocations] = useState<AllocRow[]>([]);
 
   // labor-law break confirmation
   const [break1, setBreak1] = useState(false);
   const [break2, setBreak2] = useState(false);
-  const [meal, setMeal] = useState(false);
 
   function addAlloc() {
     setAllocations((p) => [
@@ -156,15 +155,16 @@ export function TimeclockPanel({
 
   // Labor-law break logic (gross hours worked, ignoring lunch deduction).
   const grossElapsed = openEntry ? hoursBetween(openEntry.clock_in, new Date(now), 0) : 0;
-  const autoLunchApplies = !!autoLunch && grossElapsed > 5;
-  const lunchToUse = autoLunchApplies ? 30 : lunch;
+  const lunchToUse = lunchTaken ? 30 : 0;
   const requiredSecondBreak = grossElapsed >= 5;
   const requiredMeal = grossElapsed > 5;
-  const breaksOk =
-    !laborLaw ||
-    (break1 &&
-      (!requiredSecondBreak || break2) &&
-      (!requiredMeal || autoLunchApplies || meal));
+  const restBreaksOk = !laborLaw || (break1 && (!requiredSecondBreak || break2));
+  const breaksOk = (!requiredMeal || lunchTaken) && restBreaksOk;
+
+  // If the org auto-applies a 30-min lunch, pre-check it on long shifts.
+  useEffect(() => {
+    if (autoLunch && requiredMeal) setLunchTaken(true);
+  }, [autoLunch, requiredMeal]);
 
   function doClockOut() {
     if (!openEntry) return;
@@ -215,20 +215,11 @@ export function TimeclockPanel({
             </div>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <Label htmlFor="lunch" className="flex items-center gap-1.5">
-                <Coffee className="h-4 w-4 text-slate-400" /> {t("tc_lunch")}
-              </Label>
-              {autoLunchApplies ? (
-                <div className="flex h-10 items-center rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-500">
-                  30 min (auto · unpaid)
-                </div>
-              ) : (
-                <NumberInput id="lunch" value={lunch} onValueChange={setLunch} />
-              )}
-            </div>
-          </div>
+          <label className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm ${requiredMeal && !lunchTaken ? "border-amber-300 bg-amber-50" : "border-slate-200"}`}>
+            <input type="checkbox" checked={lunchTaken} onChange={(e) => setLunchTaken(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand" />
+            <Coffee className="h-4 w-4 text-slate-400" />
+            <span className="text-slate-700">Took a 30-minute lunch{requiredMeal ? <span className="font-medium text-amber-700"> · required (over 5 hrs)</span> : null}</span>
+          </label>
 
           {/* Jobs worked today */}
           <div>
@@ -358,12 +349,6 @@ export function TimeclockPanel({
                 <label className="flex items-center gap-2 text-amber-800">
                   <input type="checkbox" checked={break2} onChange={(e) => setBreak2(e.target.checked)} className="h-4 w-4 rounded border-amber-300 text-brand" />
                   I took my second 10-minute rest break
-                </label>
-              )}
-              {requiredMeal && !autoLunchApplies && (
-                <label className="flex items-center gap-2 text-amber-800">
-                  <input type="checkbox" checked={meal} onChange={(e) => setMeal(e.target.checked)} className="h-4 w-4 rounded border-amber-300 text-brand" />
-                  I took my 30-minute meal break
                 </label>
               )}
             </div>

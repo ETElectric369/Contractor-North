@@ -7,13 +7,22 @@ import { Input, Label, Select } from "@/components/ui/input";
 import type { OrgSettings } from "@/lib/org-settings";
 import { updateOrgSettings } from "./actions";
 
-export function SchedulingSettings({ settings }: { settings: OrgSettings }) {
+export function SchedulingSettings({
+  settings,
+  employees = [],
+  ownerName,
+}: {
+  settings: OrgSettings;
+  employees?: { id: string; full_name: string | null }[];
+  ownerName?: string;
+}) {
   const [start, setStart] = useState(settings.work_day_start);
   const [end, setEnd] = useState(settings.work_day_end);
   const [weekStart, setWeekStart] = useState(settings.week_start);
   const [method, setMethod] = useState(settings.time_tracking_method);
   const [laborLaw, setLaborLaw] = useState(settings.labor_law_breaks);
   const [autoLunch, setAutoLunch] = useState(settings.auto_lunch_30);
+  const [supervisor, setSupervisor] = useState(settings.timecard_supervisor_id);
   const [pending, startT] = useTransition();
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -29,6 +38,7 @@ export function SchedulingSettings({ settings }: { settings: OrgSettings }) {
         time_tracking_method: method,
         labor_law_breaks: laborLaw,
         auto_lunch_30: autoLunch,
+        timecard_supervisor_id: supervisor,
       });
       if (!res.ok) return setError(res.error ?? "Could not save.");
       setDone(true);
@@ -75,9 +85,21 @@ export function SchedulingSettings({ settings }: { settings: OrgSettings }) {
         </label>
         <label className="flex items-start gap-2 text-sm text-slate-600">
           <input type="checkbox" checked={autoLunch} onChange={(e) => setAutoLunch(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand" />
-          <span>Auto-apply a 30-min unpaid lunch on shifts over 5 hours (not adjustable by the crew member).</span>
+          <span>Pre-check the 30-min unpaid lunch on shifts over 5 hours. (A 30-min lunch is required over 5 hrs either way — the crew confirms it on every entry.)</span>
         </label>
       </div>
+
+      <div className="space-y-1.5 border-t border-slate-100 pt-4">
+        <Label htmlFor="sup">Timecard supervisor</Label>
+        <Select id="sup" value={supervisor} onChange={(e) => setSupervisor(e.target.value)}>
+          <option value="">Owner{ownerName ? ` — ${ownerName}` : ""} (default)</option>
+          {employees.map((e) => (
+            <option key={e.id} value={e.id}>{e.full_name ?? "Unnamed"}</option>
+          ))}
+        </Select>
+        <p className="text-xs text-slate-400">Who reviews &amp; approves timecards. Defaults to the owner.</p>
+      </div>
+
       <div className="flex items-center gap-3">
         <Button onClick={save} disabled={pending}>{pending ? "Saving…" : "Save changes"}</Button>
         {done && <span className="flex items-center gap-1 text-sm font-medium text-green-600"><Check className="h-4 w-4" /> Saved</span>}

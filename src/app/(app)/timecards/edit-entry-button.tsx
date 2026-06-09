@@ -48,9 +48,16 @@ export function EditEntryButton({
   const [startT, setStartT] = useState(inP.time);
   const [endT, setEndT] = useState(outP.time || inP.time);
   const [jobCode, setJobCode] = useState(entry.job_code ?? "");
-  const [lunch, setLunch] = useState(entry.lunch_minutes ?? 0);
+  const [lunchTaken, setLunchTaken] = useState((entry.lunch_minutes ?? 0) >= 30);
   const [miles, setMiles] = useState(entry.miles ?? 0);
   const [notes, setNotes] = useState(entry.notes ?? "");
+
+  const lunchRequired = (() => {
+    const ci = new Date(`${date}T${startT}:00`);
+    const co = new Date(`${date}T${endT}:00`);
+    if (isNaN(ci.getTime()) || isNaN(co.getTime()) || co <= ci) return false;
+    return (co.getTime() - ci.getTime()) / 3_600_000 > 5;
+  })();
 
   function save() {
     setError(null);
@@ -58,12 +65,13 @@ export function EditEntryButton({
     const co = new Date(`${date}T${endT}:00`);
     if (isNaN(ci.getTime()) || isNaN(co.getTime())) return setError("Invalid date/time.");
     if (co <= ci) return setError("End must be after start.");
+    if (lunchRequired && !lunchTaken) return setError("Confirm the 30-minute lunch — required for shifts over 5 hours.");
     start(async () => {
       const res = await updateTimeEntry({
         id: entry.id,
         clock_in: ci.toISOString(),
         clock_out: co.toISOString(),
-        lunch_minutes: lunch,
+        lunch_minutes: lunchTaken ? 30 : 0,
         job_code: jobCode || null,
         notes,
         miles,
@@ -113,8 +121,8 @@ export function EditEntryButton({
               <Input id="e-end" type="time" value={endT} onChange={(e) => setEndT(e.target.value)} />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            <div className="col-span-2 sm:col-span-1">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
               <Label htmlFor="e-code">Job code</Label>
               <Select id="e-code" value={jobCode} onChange={(e) => setJobCode(e.target.value)}>
                 <option value="">— Code —</option>
@@ -126,14 +134,14 @@ export function EditEntryButton({
               </Select>
             </div>
             <div>
-              <Label htmlFor="e-lunch">Lunch (min)</Label>
-              <NumberInput id="e-lunch" value={lunch} onValueChange={setLunch} />
-            </div>
-            <div>
               <Label htmlFor="e-miles">Miles</Label>
               <NumberInput id="e-miles" value={miles} onValueChange={setMiles} />
             </div>
           </div>
+          <label className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${lunchRequired && !lunchTaken ? "border-amber-300 bg-amber-50" : "border-slate-200"}`}>
+            <input type="checkbox" checked={lunchTaken} onChange={(e) => setLunchTaken(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand" />
+            <span className="text-slate-700">Took a 30-minute lunch{lunchRequired ? <span className="font-medium text-amber-700"> · required (over 5 hrs)</span> : null}</span>
+          </label>
           <div>
             <Label htmlFor="e-notes">Notes</Label>
             <Textarea id="e-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />

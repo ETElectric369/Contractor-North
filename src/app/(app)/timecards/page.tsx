@@ -102,9 +102,14 @@ export default async function TimecardsPage({
     end.getTime() - 1,
   ).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
 
+  const supId = getOrgSettings((org as any)?.settings).timecard_supervisor_id;
+  const approver = supId
+    ? (members?.find((m: any) => m.id === supId)?.full_name ?? "—")
+    : "Owner";
+
   return (
     <div>
-      <PageHeader title="Timecards" description="Review your crew's hours by week.">
+      <PageHeader title="Timecards" description={`Review your crew's hours by week.  ·  Approver: ${approver}`}>
         <div className="flex flex-wrap items-center gap-2">
           <AddEntryButton
             isStaff

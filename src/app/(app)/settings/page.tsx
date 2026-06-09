@@ -186,7 +186,15 @@ export default async function SettingsPage({
         {
           id: "scheduling",
           label: "Scheduling",
-          content: <Section title="Scheduler & timesheets"><SchedulingSettings settings={settings} /></Section>,
+          content: (
+            <Section title="Scheduler & timesheets">
+              <SchedulingSettings
+                settings={settings}
+                employees={members.map((m) => ({ id: m.id, full_name: m.full_name }))}
+                ownerName={members.find((m) => m.role === "owner")?.full_name ?? undefined}
+              />
+            </Section>
+          ),
         },
         {
           id: "payments",

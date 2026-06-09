@@ -26,6 +26,7 @@ export interface OrgSettings {
   time_tracking_method: "start_end" | "duration";
   labor_law_breaks: boolean; // require break confirmation at clock-out (CA)
   auto_lunch_30: boolean; // auto-apply 30-min unpaid lunch on shifts > 5h
+  timecard_supervisor_id: string; // who approves timecards ("" = org owner)
 
   // Payments
   payment_methods: string[];
@@ -61,6 +62,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   time_tracking_method: "start_end",
   labor_law_breaks: false,
   auto_lunch_30: false,
+  timecard_supervisor_id: "",
   payment_methods: ["Cash", "Check", "Card", "Zelle", "Venmo"],
   remind_quote_followup: false,
   remind_invoice_due: false,
