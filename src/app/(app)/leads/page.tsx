@@ -62,7 +62,7 @@ export default async function InquiriesPage() {
           <InquiryModal />
         </EmptyState>
       ) : (
-        <Card className="overflow-hidden">
+        <Card>
           <ul className="divide-y divide-slate-100">
             {inquiries.map((i) => (
               <InquiryRow key={i.id} inquiry={i} customers={customers} />
