@@ -26,7 +26,7 @@ export default async function InquirePage({ params }: { params: Promise<{ org: s
     .filter(Boolean);
 
   return (
-    <div className="relative min-h-screen">
+    <div className="relative min-h-screen overflow-x-hidden">
       {/* Background */}
       <div
         className="absolute inset-0 bg-cover bg-center"
@@ -43,7 +43,7 @@ export default async function InquirePage({ params }: { params: Promise<{ org: s
         />
       )}
 
-      <div className="relative mx-auto grid min-h-screen max-w-5xl items-end gap-8 px-4 pb-10 pt-[32vh] md:grid-cols-2 md:pt-[28vh]">
+      <div className="relative mx-auto grid min-h-screen max-w-5xl items-end gap-8 px-4 pb-[32vh] pt-[10vh] md:grid-cols-2">
         <div className={bg ? "text-white" : ""} style={bg ? { textShadow: "0 1px 6px rgba(0,0,0,.65)" } : undefined}>
           {!bg && o.logo_url ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -91,15 +91,17 @@ export default async function InquirePage({ params }: { params: Promise<{ org: s
             )}
           </div>
           {credLines.length > 0 && (
-            <div className={`mt-2 space-y-0.5 text-sm ${bg ? "text-slate-200" : "text-slate-500"}`}>
+            <ul className={`mt-3 space-y-1.5 text-sm ${bg ? "text-slate-100" : "text-slate-600"}`}>
               {credLines.map((line: string, i: number) => (
-                <div key={i}>{line}</div>
+                <li key={i} className="flex items-center gap-2">
+                  <Zap className="h-3.5 w-3.5 shrink-0" style={{ color: bg ? "#fde68a" : brand }} /> {line}
+                </li>
               ))}
-            </div>
+            </ul>
           )}
         </div>
 
-        <div className="w-full md:max-w-sm md:justify-self-end">
+        <div className="w-full md:max-w-sm md:justify-self-end md:translate-x-4 lg:translate-x-10">
           <InquiryForm org={org} brandColor={brand} />
         </div>
       </div>
