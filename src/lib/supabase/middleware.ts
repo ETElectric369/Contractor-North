@@ -7,6 +7,7 @@ const PUBLIC_PATHS = [
   "/auth",
   "/q/",
   "/i/",
+  "/inquire",
   "/api/pay",
   "/api/stripe",
   "/api/timeclock",
