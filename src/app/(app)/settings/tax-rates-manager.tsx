@@ -8,7 +8,10 @@ import { Input, Label } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Badge } from "@/components/ui/badge";
 import type { OrgSettings } from "@/lib/org-settings";
-import { createTaxRate, setDefaultTaxRate, deleteTaxRate, updateOrgSettings } from "./actions";
+import {
+  createTaxRate, setDefaultTaxRate, deleteTaxRate, updateOrgSettings,
+  createPricingLevel, setDefaultPricingLevel, deletePricingLevel,
+} from "./actions";
 
 interface TaxRate {
   id: string;
@@ -16,12 +19,20 @@ interface TaxRate {
   rate: number;
   is_default: boolean;
 }
+interface PricingLevel {
+  id: string;
+  name: string;
+  markup_pct: number;
+  is_default: boolean;
+}
 
 export function TaxRatesManager({
   taxRates,
+  pricingLevels = [],
   settings,
 }: {
   taxRates: TaxRate[];
+  pricingLevels?: PricingLevel[];
   settings: OrgSettings;
 }) {
   const router = useRouter();
@@ -33,6 +44,19 @@ export function TaxRatesManager({
   const [laborRate, setLaborRate] = useState(settings.default_labor_rate);
   const [mileageRate, setMileageRate] = useState(settings.mileage_rate);
   const [savedLabor, setSavedLabor] = useState(false);
+
+  const [levelName, setLevelName] = useState("");
+  const [levelMarkup, setLevelMarkup] = useState(0);
+
+  function addLevel() {
+    if (!levelName.trim()) return;
+    start(async () => {
+      await createPricingLevel({ name: levelName, markup_pct: levelMarkup, is_default: pricingLevels.length === 0 });
+      setLevelName("");
+      setLevelMarkup(0);
+      router.refresh();
+    });
+  }
 
   function add() {
     setError(null);
@@ -116,6 +140,34 @@ export function TaxRatesManager({
             Save
           </Button>
           {savedLabor && <span className="flex items-center gap-1 text-sm font-medium text-green-600"><Check className="h-4 w-4" /> Saved</span>}
+        </div>
+      </div>
+
+      <div className="border-t border-slate-100 pt-4">
+        <h4 className="mb-2 text-sm font-semibold text-slate-900">Pricing levels</h4>
+        <p className="mb-3 text-sm text-slate-500">
+          Customer tiers — each level's markup % sets price-list sell prices on quotes (e.g. Retail vs Trade/Builder). Assign a level on the customer's page.
+        </p>
+        {pricingLevels.length > 0 && (
+          <ul className="mb-3 divide-y divide-slate-100 rounded-lg border border-slate-200">
+            {pricingLevels.map((l) => (
+              <li key={l.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
+                <span className="flex-1 font-medium text-slate-900">{l.name}</span>
+                <span className="text-slate-700">{Number(l.markup_pct)}% markup</span>
+                {l.is_default ? (
+                  <Badge tone="green">default</Badge>
+                ) : (
+                  <button onClick={() => start(async () => { await setDefaultPricingLevel(l.id); router.refresh(); })} className="text-slate-400 hover:text-amber-500" title="Make default"><Star className="h-4 w-4" /></button>
+                )}
+                <button onClick={() => start(async () => { await deletePricingLevel(l.id); router.refresh(); })} className="text-slate-400 hover:text-red-600" title="Delete"><Trash2 className="h-4 w-4" /></button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="flex items-end gap-2">
+          <div className="flex-1"><Label htmlFor="pl-name">Name</Label><Input id="pl-name" value={levelName} onChange={(e) => setLevelName(e.target.value)} placeholder="e.g. Trade / Builder" /></div>
+          <div className="w-28"><Label htmlFor="pl-markup">Markup %</Label><NumberInput id="pl-markup" value={levelMarkup} onValueChange={setLevelMarkup} /></div>
+          <Button size="sm" onClick={addLevel} disabled={pending || !levelName.trim()}><Plus className="h-3.5 w-3.5" /> Add</Button>
         </div>
       </div>
     </div>

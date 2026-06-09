@@ -10,7 +10,13 @@ import { PhoneInput } from "@/components/ui/phone-input";
 import { updateCustomer } from "../actions";
 import type { Customer } from "@/lib/types";
 
-export function EditCustomerButton({ customer }: { customer: Customer }) {
+export function EditCustomerButton({
+  customer,
+  pricingLevels = [],
+}: {
+  customer: Customer;
+  pricingLevels?: { id: string; name: string; markup_pct: number }[];
+}) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -66,6 +72,17 @@ export function EditCustomerButton({ customer }: { customer: Customer }) {
                 <option value="inactive">Inactive</option>
               </Select>
             </div>
+            {pricingLevels.length > 0 && (
+              <div className="col-span-2">
+                <Label htmlFor="pricing_level_id">Pricing level</Label>
+                <Select id="pricing_level_id" name="pricing_level_id" defaultValue={(c as any).pricing_level_id ?? ""}>
+                  <option value="">— Default —</option>
+                  {pricingLevels.map((l) => (
+                    <option key={l.id} value={l.id}>{l.name} ({Number(l.markup_pct)}% markup)</option>
+                  ))}
+                </Select>
+              </div>
+            )}
             <div>
               <Label htmlFor="email">Email</Label>
               <Input id="email" name="email" type="email" defaultValue={c.email ?? ""} />

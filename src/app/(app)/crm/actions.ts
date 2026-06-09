@@ -63,6 +63,7 @@ export async function updateCustomer(
       state: orNull(formatState(String(formData.get("state") ?? ""))),
       zip: orNull(formatZip(String(formData.get("zip") ?? ""))),
       notes: emptyToNull(formData.get("notes")),
+      pricing_level_id: emptyToNull(formData.get("pricing_level_id")),
     })
     .eq("id", id);
   if (error) return { ok: false, error: error.message };

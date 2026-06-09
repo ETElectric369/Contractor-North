@@ -28,7 +28,7 @@ export default async function CustomerDetailPage({
   if (!customer) notFound();
   const c = customer as Customer;
 
-  const [{ data: jobs }, { data: quotes }, { data: invoices }] = await Promise.all([
+  const [{ data: jobs }, { data: quotes }, { data: invoices }, { data: pricingLevels }] = await Promise.all([
     supabase.from("jobs").select("*").eq("customer_id", id).order("created_at", { ascending: false }),
     supabase.from("quotes").select("*").eq("customer_id", id).order("created_at", { ascending: false }),
     supabase
@@ -36,6 +36,7 @@ export default async function CustomerDetailPage({
       .select("id, invoice_number, status, total")
       .eq("customer_id", id)
       .order("created_at", { ascending: false }),
+    supabase.from("pricing_levels").select("id, name, markup_pct").order("created_at"),
   ]);
 
   const empty = (label: string) => (
@@ -166,7 +167,7 @@ export default async function CustomerDetailPage({
           <Badge tone="slate" className="mt-2">{c.type}</Badge>
         </div>
         <div className="flex items-center gap-2">
-          <EditCustomerButton customer={c} />
+          <EditCustomerButton customer={c} pricingLevels={(pricingLevels ?? []) as any} />
           <Link href={`/quotes/new?customer=${c.id}`}>
             <Button>
               <Plus className="h-4 w-4" /> New quote

@@ -18,6 +18,7 @@ interface CustomerOption {
   id: string;
   name: string;
   company_name: string | null;
+  level_markup?: number | null;
 }
 interface PriceItemLite {
   id: string;
@@ -80,6 +81,12 @@ export function QuoteBuilder({
   const [plQuery, setPlQuery] = useState("");
   const [plOpen, setPlOpen] = useState(false);
 
+  // Resolve the markup to use: the selected customer's pricing-level markup
+  // overrides the item's own default markup.
+  const selectedCust = customers.find((c) => c.id === customerId);
+  const levelMarkup = selectedCust?.level_markup;
+  const markupFor = (p: PriceItemLite) => (levelMarkup != null ? levelMarkup : p.markup_pct);
+
   const plMatches = plQuery.trim()
     ? priceItems
         .filter((p) =>
@@ -98,7 +105,7 @@ export function QuoteBuilder({
         description: p.code ? `${p.code} — ${p.description}` : p.description,
         quantity: 1,
         unit: p.unit || "ea",
-        unit_price: Number(sellPrice(p.buy_price, p.markup_pct).toFixed(2)),
+        unit_price: Number(sellPrice(p.buy_price, markupFor(p)).toFixed(2)),
       },
     ]);
     setPlQuery("");
@@ -242,7 +249,7 @@ export function QuoteBuilder({
                             {p.code && <span className="mr-1 font-mono text-xs text-slate-400">{p.code}</span>}
                             {p.description}
                           </span>
-                          <span className="shrink-0 text-slate-600">{formatCurrency(sellPrice(p.buy_price, p.markup_pct))}</span>
+                          <span className="shrink-0 text-slate-600">{formatCurrency(sellPrice(p.buy_price, markupFor(p)))}</span>
                         </button>
                       </li>
                     ))}

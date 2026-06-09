@@ -60,7 +60,7 @@ export default async function SettingsPage({
   const isAdmin = profile?.role === "owner" || profile?.role === "admin";
   const t = translator(profile?.language);
 
-  const [{ data: org }, { data: team }, { data: invites }, { data: taxRates }] = await Promise.all([
+  const [{ data: org }, { data: team }, { data: invites }, { data: taxRates }, { data: pricingLevels }] = await Promise.all([
     profile?.org_id
       ? supabase.from("organizations").select("*").eq("id", profile.org_id).maybeSingle()
       : Promise.resolve({ data: null }),
@@ -69,6 +69,7 @@ export default async function SettingsPage({
       ? supabase.from("invitations").select("*").order("created_at", { ascending: false })
       : Promise.resolve({ data: [] }),
     supabase.from("tax_rates").select("id, name, rate, is_default").order("created_at"),
+    supabase.from("pricing_levels").select("id, name, markup_pct, is_default").order("created_at"),
   ]);
 
   const members = (team ?? []) as Profile[];
@@ -147,7 +148,7 @@ export default async function SettingsPage({
         {
           id: "financial",
           label: "Financial",
-          content: <Section title="Tax & financial defaults"><TaxRatesManager taxRates={(taxRates ?? []) as any} settings={settings} /></Section>,
+          content: <Section title="Tax, pricing & financial defaults"><TaxRatesManager taxRates={(taxRates ?? []) as any} pricingLevels={(pricingLevels ?? []) as any} settings={settings} /></Section>,
         },
         {
           id: "documents",

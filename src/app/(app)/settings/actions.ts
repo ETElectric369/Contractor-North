@@ -255,6 +255,47 @@ export async function deleteTaxRate(id: string): Promise<Result> {
   return { ok: true };
 }
 
+export async function createPricingLevel(input: {
+  name: string;
+  markup_pct: number;
+  is_default?: boolean;
+}): Promise<Result> {
+  const supabase = await createClient();
+  const orgId = await myOrgId(supabase);
+  if (!orgId) return { ok: false, error: "No organization." };
+  if (!input.name.trim()) return { ok: false, error: "Name is required." };
+  if (input.is_default) {
+    await supabase.from("pricing_levels").update({ is_default: false }).eq("org_id", orgId);
+  }
+  const { error } = await supabase.from("pricing_levels").insert({
+    name: input.name.trim(),
+    markup_pct: Number.isFinite(input.markup_pct) ? input.markup_pct : 0,
+    is_default: !!input.is_default,
+  });
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/settings");
+  return { ok: true };
+}
+
+export async function setDefaultPricingLevel(id: string): Promise<Result> {
+  const supabase = await createClient();
+  const orgId = await myOrgId(supabase);
+  if (!orgId) return { ok: false, error: "No organization." };
+  await supabase.from("pricing_levels").update({ is_default: false }).eq("org_id", orgId);
+  const { error } = await supabase.from("pricing_levels").update({ is_default: true }).eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/settings");
+  return { ok: true };
+}
+
+export async function deletePricingLevel(id: string): Promise<Result> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("pricing_levels").delete().eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/settings");
+  return { ok: true };
+}
+
 function emptyToNull(v: FormDataEntryValue | null): string | null {
   const s = String(v ?? "").trim();
   return s.length ? s : null;
