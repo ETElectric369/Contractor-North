@@ -44,15 +44,19 @@ export function AddEntryButton({
   const [jobId, setJobId] = useState("");
   const [jobCode, setJobCode] = useState("");
   const [lunchTaken, setLunchTaken] = useState(false);
+  const [breaksTaken, setBreaksTaken] = useState(false);
   const [miles, setMiles] = useState(0);
   const [notes, setNotes] = useState("");
 
-  const lunchRequired = (() => {
+  const grossHrs = (() => {
     const ci = new Date(`${date}T${startT}:00`);
     const co = new Date(`${date}T${endT}:00`);
-    if (isNaN(ci.getTime()) || isNaN(co.getTime()) || co <= ci) return false;
-    return (co.getTime() - ci.getTime()) / 3_600_000 > 5;
+    if (isNaN(ci.getTime()) || isNaN(co.getTime()) || co <= ci) return 0;
+    return (co.getTime() - ci.getTime()) / 3_600_000;
   })();
+  const lunchRequired = grossHrs > 5;
+  const breaksRequired = grossHrs > 3.5;
+  const twoBreaks = grossHrs > 5;
 
   function submit() {
     setError(null);
@@ -69,6 +73,10 @@ export function AddEntryButton({
     }
     if (lunchRequired && !lunchTaken) {
       setError("Confirm the 30-minute lunch — it's required for shifts over 5 hours.");
+      return;
+    }
+    if (breaksRequired && !breaksTaken) {
+      setError("Confirm the rest break(s) — required by labor law.");
       return;
     }
     start(async () => {
@@ -153,6 +161,10 @@ export function AddEntryButton({
           <label className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${lunchRequired && !lunchTaken ? "border-amber-300 bg-amber-50" : "border-slate-200"}`}>
             <input type="checkbox" checked={lunchTaken} onChange={(e) => setLunchTaken(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand" />
             <span className="text-slate-700">Took a 30-minute lunch{lunchRequired ? <span className="font-medium text-amber-700"> · required (over 5 hrs)</span> : null}</span>
+          </label>
+          <label className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${breaksRequired && !breaksTaken ? "border-amber-300 bg-amber-50" : "border-slate-200"}`}>
+            <input type="checkbox" checked={breaksTaken} onChange={(e) => setBreaksTaken(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand" />
+            <span className="text-slate-700">Took {twoBreaks ? "two 10-minute rest breaks" : "a 10-minute rest break"}{breaksRequired ? <span className="font-medium text-amber-700"> · required</span> : null}</span>
           </label>
 
           <div>

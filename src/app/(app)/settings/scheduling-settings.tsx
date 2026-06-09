@@ -20,7 +20,6 @@ export function SchedulingSettings({
   const [end, setEnd] = useState(settings.work_day_end);
   const [weekStart, setWeekStart] = useState(settings.week_start);
   const [method, setMethod] = useState(settings.time_tracking_method);
-  const [laborLaw, setLaborLaw] = useState(settings.labor_law_breaks);
   const [autoLunch, setAutoLunch] = useState(settings.auto_lunch_30);
   const [supervisor, setSupervisor] = useState(settings.timecard_supervisor_id);
   const [pending, startT] = useTransition();
@@ -36,7 +35,6 @@ export function SchedulingSettings({
         work_day_end: end,
         week_start: weekStart,
         time_tracking_method: method,
-        labor_law_breaks: laborLaw,
         auto_lunch_30: autoLunch,
         timecard_supervisor_id: supervisor,
       });
@@ -78,14 +76,14 @@ export function SchedulingSettings({
       </p>
 
       <div className="space-y-2 border-t border-slate-100 pt-4">
-        <div className="text-sm font-medium text-slate-700">Labor-law compliance (timeclock)</div>
-        <label className="flex items-start gap-2 text-sm text-slate-600">
-          <input type="checkbox" checked={laborLaw} onChange={(e) => setLaborLaw(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand" />
-          <span>Require crew to confirm rest breaks at clock-out (CA: 2× 10-min if 5+ hrs, otherwise 1×).</span>
-        </label>
+        <div className="text-sm font-medium text-slate-700">Timeclock (labor law)</div>
+        <p className="text-xs text-slate-500">
+          On every time entry, the crew confirms a 30-min lunch (required over 5 hrs) and rest breaks
+          (two 10-min over 5 hrs, otherwise one).
+        </p>
         <label className="flex items-start gap-2 text-sm text-slate-600">
           <input type="checkbox" checked={autoLunch} onChange={(e) => setAutoLunch(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand" />
-          <span>Pre-check the 30-min unpaid lunch on shifts over 5 hours. (A 30-min lunch is required over 5 hrs either way — the crew confirms it on every entry.)</span>
+          <span>Pre-check the 30-min unpaid lunch on shifts over 5 hours (crew still confirms).</span>
         </label>
       </div>
 

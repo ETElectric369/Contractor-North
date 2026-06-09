@@ -92,7 +92,6 @@ export default async function TimeclockPage() {
             jobCodes={(codesRes.data ?? []) as JobCode[]}
             jobs={jobsRes.data ?? []}
             lang={lang}
-            laborLaw={orgSettings.labor_law_breaks}
             autoLunch={orgSettings.auto_lunch_30}
           />
         </div>

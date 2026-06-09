@@ -57,14 +57,12 @@ export function TimeclockPanel({
   jobCodes,
   jobs,
   lang,
-  laborLaw = false,
   autoLunch = false,
 }: {
   openEntry: TimeEntry | null;
   jobCodes: JobCode[];
   jobs: JobOption[];
   lang?: string;
-  laborLaw?: boolean;
   autoLunch?: boolean;
 }) {
   const t = translator(lang);
@@ -81,8 +79,7 @@ export function TimeclockPanel({
   const [allocations, setAllocations] = useState<AllocRow[]>([]);
 
   // labor-law break confirmation
-  const [break1, setBreak1] = useState(false);
-  const [break2, setBreak2] = useState(false);
+  const [breaksTaken, setBreaksTaken] = useState(false);
 
   function addAlloc() {
     setAllocations((p) => [
@@ -156,10 +153,10 @@ export function TimeclockPanel({
   // Labor-law break logic (gross hours worked, ignoring lunch deduction).
   const grossElapsed = openEntry ? hoursBetween(openEntry.clock_in, new Date(now), 0) : 0;
   const lunchToUse = lunchTaken ? 30 : 0;
-  const requiredSecondBreak = grossElapsed >= 5;
   const requiredMeal = grossElapsed > 5;
-  const restBreaksOk = !laborLaw || (break1 && (!requiredSecondBreak || break2));
-  const breaksOk = (!requiredMeal || lunchTaken) && restBreaksOk;
+  const breaksRequired = grossElapsed > 3.5;
+  const twoBreaks = grossElapsed > 5;
+  const breaksOk = (!requiredMeal || lunchTaken) && (!breaksRequired || breaksTaken);
 
   // If the org auto-applies a 30-min lunch, pre-check it on long shifts.
   useEffect(() => {
@@ -219,6 +216,11 @@ export function TimeclockPanel({
             <input type="checkbox" checked={lunchTaken} onChange={(e) => setLunchTaken(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand" />
             <Coffee className="h-4 w-4 text-slate-400" />
             <span className="text-slate-700">Took a 30-minute lunch{requiredMeal ? <span className="font-medium text-amber-700"> · required (over 5 hrs)</span> : null}</span>
+          </label>
+          <label className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm ${breaksRequired && !breaksTaken ? "border-amber-300 bg-amber-50" : "border-slate-200"}`}>
+            <input type="checkbox" checked={breaksTaken} onChange={(e) => setBreaksTaken(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand" />
+            <Coffee className="h-4 w-4 text-slate-400" />
+            <span className="text-slate-700">Took {twoBreaks ? "two 10-minute rest breaks" : "a 10-minute rest break"}{breaksRequired ? <span className="font-medium text-amber-700"> · required</span> : null}</span>
           </label>
 
           {/* Jobs worked today */}
@@ -337,22 +339,6 @@ export function TimeclockPanel({
               onChange={(e) => setNotes(e.target.value)}
             />
           </div>
-
-          {laborLaw && (
-            <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm">
-              <div className="font-medium text-amber-900">Confirm your breaks (required)</div>
-              <label className="flex items-center gap-2 text-amber-800">
-                <input type="checkbox" checked={break1} onChange={(e) => setBreak1(e.target.checked)} className="h-4 w-4 rounded border-amber-300 text-brand" />
-                I took my first 10-minute rest break
-              </label>
-              {requiredSecondBreak && (
-                <label className="flex items-center gap-2 text-amber-800">
-                  <input type="checkbox" checked={break2} onChange={(e) => setBreak2(e.target.checked)} className="h-4 w-4 rounded border-amber-300 text-brand" />
-                  I took my second 10-minute rest break
-                </label>
-              )}
-            </div>
-          )}
 
           {error && <p className="text-sm text-red-600">{error}</p>}
 
