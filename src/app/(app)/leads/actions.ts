@@ -109,7 +109,7 @@ export async function deleteInquiry(id: string): Promise<Result> {
  */
 export async function convertInquiry(
   id: string,
-  target: "customer" | "quote" | "job",
+  target: "customer" | "quote" | "estimate" | "job",
   opts: { customerId?: string | null } = {},
 ): Promise<Result> {
   const supabase = await createClient();
@@ -152,14 +152,17 @@ export async function convertInquiry(
   if (target === "quote") {
     newStatus = "quoted";
     redirect = `/quotes/new?customer=${customerId}`;
-  } else if (target === "job") {
+  } else if (target === "estimate" || target === "job") {
+    // An estimate is still in the pipeline; a scheduled job means the inquiry is won.
+    newStatus = target === "estimate" ? "quoted" : "won";
     const { data: job, error: jErr } = await supabase
       .from("jobs")
       .insert({
         customer_id: customerId,
         name: `Job — ${inq.name}`,
         description: inq.message ?? null,
-        status: "estimate",
+        status: target === "estimate" ? "estimate" : "scheduled",
+
         address: inq.address,
         city: inq.city,
         state: inq.state,

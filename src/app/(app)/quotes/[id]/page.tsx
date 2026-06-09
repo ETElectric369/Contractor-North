@@ -8,6 +8,7 @@ import { formatCurrency, formatDate } from "@/lib/utils";
 import { StatusControl } from "./status-control";
 import { EmailButton } from "@/components/email-button";
 import { ConvertButton } from "@/components/convert-button";
+import { EditCustomerButton } from "../../crm/[id]/edit-customer-button";
 import { createJobFromQuote } from "../actions";
 import { Briefcase } from "lucide-react";
 import type { Quote, QuoteLineItem } from "@/lib/types";
@@ -24,7 +25,7 @@ export default async function QuoteDetailPage({
 
   const { data: quote } = await supabase
     .from("quotes")
-    .select("*, customers(id, name, company_name, email, phone)")
+    .select("*, customers(*)")
     .eq("id", id)
     .maybeSingle();
 
@@ -90,22 +91,25 @@ export default async function QuoteDetailPage({
       <Card className="mb-6">
         <CardContent className="py-5">
           {q.customers ? (
-            <Link
-              href={`/crm/${q.customers.id}`}
-              className="flex items-center gap-3 hover:text-brand"
-            >
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100">
-                <User className="h-4 w-4 text-slate-500" />
-              </div>
-              <div>
-                <div className="text-sm font-medium text-slate-900">
-                  {q.customers.name}
+            <div className="flex items-center justify-between gap-3">
+              <Link
+                href={`/crm/${q.customers.id}`}
+                className="flex items-center gap-3 hover:text-brand"
+              >
+                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100">
+                  <User className="h-4 w-4 text-slate-500" />
                 </div>
-                <div className="text-xs text-slate-400">
-                  {q.customers.email ?? q.customers.phone ?? q.customers.company_name ?? ""}
+                <div>
+                  <div className="text-sm font-medium text-slate-900">
+                    {q.customers.name}
+                  </div>
+                  <div className="text-xs text-slate-400">
+                    {q.customers.email ?? q.customers.phone ?? q.customers.company_name ?? ""}
+                  </div>
                 </div>
-              </div>
-            </Link>
+              </Link>
+              <EditCustomerButton customer={q.customers} />
+            </div>
           ) : (
             <p className="text-sm text-slate-400">No customer attached.</p>
           )}

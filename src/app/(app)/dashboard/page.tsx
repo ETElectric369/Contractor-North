@@ -58,13 +58,14 @@ export default async function DashboardPage() {
   const pipeline =
     openQuotes.data?.reduce((sum, q) => sum + Number(q.total ?? 0), 0) ?? 0;
 
-  // "Needs attention" widgets: open leads, outstanding A/R, my hours this week.
+  // "Needs attention" widgets: open inquiries, outstanding A/R, my hours this week.
   const weekAgo = new Date(Date.now() - 7 * 86400_000).toISOString();
   const [leadsCount, invoiceRows, weekEntries] = await Promise.all([
     supabase
-      .from("customers")
+      .from("inquiries")
       .select("id", { count: "exact", head: true })
-      .eq("status", "lead"),
+      .is("converted_at", null)
+      .neq("status", "lost"),
     supabase.from("invoices").select("total, amount_paid, status"),
     supabase
       .from("time_entries")

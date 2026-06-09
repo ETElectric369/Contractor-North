@@ -37,6 +37,73 @@ export async function createInvoiceForJob(
   });
 }
 
+/** Edit every job field in one place: details, address, schedule, customer
+ *  (existing or created inline), and assigned staff. */
+export async function updateJob(
+  id: string,
+  formData: FormData,
+): Promise<{ ok: boolean; error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  const name = String(formData.get("name") ?? "").trim();
+  if (!name) return { ok: false, error: "Job name is required." };
+
+  const emptyToNull = (v: FormDataEntryValue | null) => {
+    const s = String(v ?? "").trim();
+    return s.length ? s : null;
+  };
+
+  // Optionally create a customer inline (when none selected).
+  let customerId = emptyToNull(formData.get("customer_id"));
+  const newCustomerName = String(formData.get("new_customer_name") ?? "").trim();
+  if (!customerId && newCustomerName) {
+    const { data: cust, error: cErr } = await supabase
+      .from("customers")
+      .insert({
+        name: newCustomerName,
+        phone: emptyToNull(formData.get("new_customer_phone")),
+        email: emptyToNull(formData.get("new_customer_email")),
+        status: "active",
+        created_by: user.id,
+      })
+      .select("id")
+      .single();
+    if (cErr) return { ok: false, error: cErr.message };
+    customerId = cust.id;
+  }
+
+  const start = String(formData.get("scheduled_start") ?? "");
+  const end = String(formData.get("scheduled_end") ?? "");
+  const assigned = formData.getAll("assigned_to").map(String).filter(Boolean);
+
+  const { error } = await supabase
+    .from("jobs")
+    .update({
+      name,
+      description: emptyToNull(formData.get("description")),
+      customer_id: customerId,
+      address: emptyToNull(formData.get("address")),
+      city: emptyToNull(formData.get("city")),
+      state: emptyToNull(formData.get("state")),
+      zip: emptyToNull(formData.get("zip")),
+      scheduled_start: start ? new Date(start).toISOString() : null,
+      scheduled_end: end ? new Date(end).toISOString() : null,
+      assigned_to: assigned,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id);
+  if (error) return { ok: false, error: error.message };
+
+  revalidatePath(`/jobs/${id}`);
+  revalidatePath("/jobs");
+  revalidatePath("/schedule");
+  return { ok: true };
+}
+
 export async function createBill(input: {
   job_id: string;
   supplier: string;

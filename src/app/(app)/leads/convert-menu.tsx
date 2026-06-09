@@ -8,8 +8,13 @@ import { Modal } from "@/components/ui/modal";
 import { Label, Select } from "@/components/ui/input";
 import { convertInquiry } from "./actions";
 
-type Target = "customer" | "quote" | "job";
-const LABELS: Record<Target, string> = { customer: "Customer", quote: "Quote", job: "Job" };
+type Target = "customer" | "quote" | "estimate" | "job";
+const LABELS: Record<Target, string> = {
+  customer: "Customer",
+  quote: "Quote",
+  estimate: "Estimate",
+  job: "Job",
+};
 
 /** "Convert ▾" — explicit, never automatic. Pick a target, then link an
  *  existing customer or create one from the inquiry. */
@@ -67,7 +72,7 @@ export function ConvertMenu({
           <>
             <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
             <div className="absolute right-0 top-full z-20 mt-1 w-40 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
-              {(["customer", "quote", "job"] as Target[]).map((t) => (
+              {(["customer", "quote", "estimate", "job"] as Target[]).map((t) => (
                 <button
                   key={t}
                   onClick={() => choose(t)}

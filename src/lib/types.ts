@@ -86,7 +86,7 @@ export interface Inquiry {
   next_follow_up_at: string | null;
   last_contacted_at: string | null;
   customer_id: string | null;
-  converted_to: "customer" | "quote" | "job" | null;
+  converted_to: "customer" | "quote" | "estimate" | "job" | null;
   converted_at: string | null;
   created_by: string | null;
   created_at: string;

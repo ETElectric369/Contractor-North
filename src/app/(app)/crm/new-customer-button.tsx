@@ -64,8 +64,7 @@ export function NewCustomerButton() {
             </div>
             <div>
               <Label htmlFor="status">Status</Label>
-              <Select id="status" name="status" defaultValue="lead">
-                <option value="lead">Lead</option>
+              <Select id="status" name="status" defaultValue="active">
                 <option value="active">Active</option>
                 <option value="inactive">Inactive</option>
               </Select>

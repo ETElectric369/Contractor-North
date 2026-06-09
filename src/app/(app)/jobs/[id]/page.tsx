@@ -20,6 +20,7 @@ import { JobTasks } from "./job-tasks";
 import { JobPermits } from "./job-permits";
 import { JobAddTimeEntry } from "./job-add-time";
 import { JobStatusControl } from "./job-status-control";
+import { JobEditButton } from "./job-edit-button";
 import { NewWorkOrderButton } from "../../work-orders/new-wo-button";
 import { NewPoButton } from "../../purchasing/new-po-button";
 import { ConvertButton } from "@/components/convert-button";
@@ -100,11 +101,12 @@ export default async function JobDetailPage({
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  const [{ data: techs }, { data: jobCodes }, { data: lists }, { data: org }] = await Promise.all([
+  const [{ data: techs }, { data: jobCodes }, { data: lists }, { data: org }, { data: allCustomers }] = await Promise.all([
     supabase.from("profiles").select("id, full_name").order("full_name"),
     supabase.from("job_codes").select("*").order("code"),
     supabase.from("material_lists").select("id, name").order("created_at", { ascending: false }).limit(100),
     supabase.from("organizations").select("address_line1, city, state, zip, settings").limit(1).maybeSingle(),
+    supabase.from("customers").select("id, name").order("name"),
   ]);
   const thisJobOpt = [{ id: j.id, job_number: j.job_number, name: j.name }];
   const companyAddress = [org?.address_line1, org?.city, org?.state, org?.zip].filter(Boolean).join(", ");
@@ -461,11 +463,14 @@ export default async function JobDetailPage({
             <Badge tone={statusTone(j.status)}>{j.status.replace("_", " ")}</Badge>
           </div>
         </div>
-        <ConvertButton
-          label="Create invoice"
-          run={createInvoiceForJob.bind(null, j.id)}
-          hrefPrefix="/billing/"
-        />
+        <div className="flex flex-wrap items-center gap-2">
+          <JobEditButton job={j} customers={allCustomers ?? []} techs={techs ?? []} />
+          <ConvertButton
+            label="Create invoice"
+            run={createInvoiceForJob.bind(null, j.id)}
+            hrefPrefix="/billing/"
+          />
+        </div>
       </div>
 
       <Tabs tabs={tabs} />

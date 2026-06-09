@@ -22,7 +22,7 @@ export async function createCustomer(formData: FormData): Promise<ActionResult> 
       name,
       company_name: emptyToNull(formData.get("company_name")),
       type: String(formData.get("type") ?? "residential"),
-      status: String(formData.get("status") ?? "lead"),
+      status: String(formData.get("status") ?? "active"),
       email: emptyToNull(formData.get("email")),
       phone: orNull(formatPhone(String(formData.get("phone") ?? ""))),
       address: emptyToNull(formData.get("address")),
