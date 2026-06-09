@@ -166,90 +166,48 @@ export function InvoiceDetail({
           </div>
         )}
 
-        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-          <table className="w-full min-w-[600px] text-sm">
-            <thead className="border-b border-slate-100 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-400">
-              <tr>
-                <th className="px-5 py-3 font-semibold">Description</th>
-                <th className="px-3 py-3 text-right font-semibold">Qty</th>
-                <th className="px-3 py-3 text-right font-semibold">Price</th>
-                <th className="px-5 py-3 text-right font-semibold">Total</th>
-                <th className="px-3 py-3" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {items.map((it) => (
-                <tr key={it.id}>
-                  <td className="px-5 py-2.5 text-slate-800">{it.description}</td>
-                  <td className="px-3 py-2.5 text-right text-slate-600">
-                    {it.quantity} {it.unit}
-                  </td>
-                  <td className="px-3 py-2.5 text-right text-slate-600">
-                    {formatCurrency(it.unit_price)}
-                  </td>
-                  <td className="px-5 py-2.5 text-right font-medium text-slate-900">
-                    {formatCurrency(it.line_total)}
-                  </td>
-                  <td className="px-3 py-2.5 text-right">
-                    <button
-                      onClick={() =>
-                        start(async () => {
-                          await deleteInvoiceItem(it.id, invoice.id);
-                          refresh();
-                        })
-                      }
-                      disabled={pending}
-                      className="text-slate-400 hover:text-red-600"
-                      aria-label="Remove"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {items.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="px-5 py-6 text-center text-slate-400">
-                    No line items yet.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-            <tfoot>
-              <tr className="border-t border-slate-100 bg-slate-50/50">
-                <td className="px-5 py-2">
-                  <Input
-                    placeholder="Add line item…"
-                    value={desc}
-                    onChange={(e) => setDesc(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && addItem()}
-                  />
-                </td>
-                <td className="px-3 py-2">
-                  <NumberInput
-                    value={qty}
-                    onValueChange={setQty}
-                    className="text-right"
-                  />
-                </td>
-                <td className="px-3 py-2">
-                  <NumberInput
-                    value={price}
-                    onValueChange={setPrice}
-                    className="text-right"
-                  />
-                </td>
-                <td className="px-5 py-2 text-right font-semibold text-slate-900">
-                  {formatCurrency(invoice.subtotal)}
-                </td>
-                <td className="px-3 py-2 text-right">
-                  <Button size="icon" onClick={addItem} disabled={pending || !desc.trim()}>
-                    <Plus className="h-4 w-4" />
-                  </Button>
-                </td>
-              </tr>
-            </tfoot>
-          </table>
+        <div className="rounded-xl border border-slate-200 bg-white">
+          <ul className="divide-y divide-slate-100">
+            {items.map((it) => (
+              <li key={it.id} className="flex items-center gap-3 px-4 py-3 text-sm">
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium text-slate-800">{it.description}</div>
+                  <div className="text-xs text-slate-400">
+                    {it.quantity} {it.unit} × {formatCurrency(it.unit_price)}
+                  </div>
+                </div>
+                <div className="shrink-0 font-medium text-slate-900">{formatCurrency(it.line_total)}</div>
+                <button
+                  onClick={() => start(async () => { await deleteInvoiceItem(it.id, invoice.id); refresh(); })}
+                  disabled={pending}
+                  className="shrink-0 text-slate-400 hover:text-red-600"
+                  aria-label="Remove"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </li>
+            ))}
+            {items.length === 0 && (
+              <li className="px-4 py-6 text-center text-slate-400">No line items yet.</li>
+            )}
+          </ul>
+          {/* Add line item */}
+          <div className="space-y-2 border-t border-slate-100 bg-slate-50/60 p-3">
+            <Input
+              placeholder="Add a line item…"
+              value={desc}
+              onChange={(e) => setDesc(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && addItem()}
+            />
+            <div className="flex items-center gap-2">
+              <NumberInput value={qty} onValueChange={setQty} className="w-20 text-center" placeholder="Qty" />
+              <span className="text-slate-400">×</span>
+              <NumberInput value={price} onValueChange={setPrice} className="flex-1 text-right" placeholder="Price" />
+              <Button onClick={addItem} disabled={pending || !desc.trim()}>
+                <Plus className="h-4 w-4" /> Add
+              </Button>
+            </div>
+          </div>
         </div>
       </div>
 

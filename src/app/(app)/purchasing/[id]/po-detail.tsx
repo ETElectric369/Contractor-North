@@ -136,114 +136,63 @@ export function PoDetail({
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-        <table className="w-full min-w-[600px] text-sm">
-          <thead className="border-b border-slate-100 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-400">
-            <tr>
-              <th className="px-5 py-3 font-semibold">Description</th>
-              <th className="px-3 py-3 font-semibold">Part #</th>
-              <th className="px-3 py-3 text-right font-semibold">Qty</th>
-              <th className="px-3 py-3 text-right font-semibold">Unit cost</th>
-              <th className="px-3 py-3 text-right font-semibold">Line</th>
-              <th className="px-5 py-3 text-right font-semibold">Received</th>
-              <th className="px-3 py-3" />
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {items.map((it) => {
-              const fully = Number(it.received_qty) >= Number(it.quantity);
-              return (
-                <tr key={it.id}>
-                  <td className="px-5 py-2.5 text-slate-800">{it.description}</td>
-                  <td className="px-3 py-2.5 text-slate-500">{it.part_number ?? "—"}</td>
-                  <td className="px-3 py-2.5 text-right text-slate-600">
-                    {it.quantity} {it.unit}
-                  </td>
-                  <td className="px-3 py-2.5 text-right text-slate-600">
-                    {formatCurrency(it.unit_cost)}
-                  </td>
-                  <td className="px-3 py-2.5 text-right font-medium text-slate-900">
-                    {formatCurrency(it.line_total)}
-                  </td>
-                  <td className="px-5 py-2.5 text-right">
-                    {fully ? (
-                      <Badge tone="green" className="gap-1">
-                        <Check className="h-3 w-3" /> {it.received_qty}
-                      </Badge>
-                    ) : canReceive ? (
-                      <button
-                        onClick={() =>
-                          start(async () => {
-                            await receiveItem(it.id, po.id, it.quantity);
-                            refresh();
-                          })
-                        }
-                        disabled={pending}
-                        className="inline-flex items-center gap-1 rounded-md bg-brand-light px-2 py-1 text-xs font-medium text-brand hover:bg-brand-light/70"
-                      >
-                        <PackageCheck className="h-3.5 w-3.5" /> Receive
-                      </button>
-                    ) : (
-                      <span className="text-slate-400">{it.received_qty}</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2.5 text-right">
-                    <button
-                      onClick={() =>
-                        start(async () => {
-                          await deletePoItem(it.id, po.id);
-                          refresh();
-                        })
-                      }
-                      disabled={pending}
-                      className="text-slate-400 hover:text-red-600"
-                      aria-label="Remove"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-            {items.length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-5 py-6 text-center text-slate-400">
-                  No items yet — add one below.
-                </td>
-              </tr>
-            )}
-          </tbody>
-          <tfoot>
-            <tr className="border-t border-slate-100 bg-slate-50/50">
-              <td className="px-5 py-2">
-                <Input
-                  placeholder="Add item…"
-                  value={desc}
-                  onChange={(e) => setDesc(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && add()}
-                />
-              </td>
-              <td className="px-3 py-2">
-                <Input placeholder="Part #" value={part} onChange={(e) => setPart(e.target.value)} />
-              </td>
-              <td className="px-3 py-2">
-                <NumberInput value={qty} onValueChange={setQty} className="text-right" />
-              </td>
-              <td className="px-3 py-2">
-                <NumberInput value={cost} onValueChange={setCost} className="text-right" />
-              </td>
-              <td className="px-3 py-2 text-right font-semibold text-slate-900">
-                {formatCurrency(po.total)}
-              </td>
-              <td />
-              <td className="px-3 py-2 text-right">
-                <Button size="icon" onClick={add} disabled={pending || !desc.trim()}>
-                  <Plus className="h-4 w-4" />
-                </Button>
-              </td>
-            </tr>
-          </tfoot>
-        </table>
+      <div className="rounded-xl border border-slate-200 bg-white">
+        <ul className="divide-y divide-slate-100">
+          {items.map((it) => {
+            const fully = Number(it.received_qty) >= Number(it.quantity);
+            return (
+              <li key={it.id} className="flex items-center gap-3 px-4 py-3 text-sm">
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium text-slate-800">{it.description}</div>
+                  <div className="text-xs text-slate-400">
+                    {it.part_number ? `#${it.part_number} · ` : ""}
+                    {it.quantity} {it.unit} × {formatCurrency(it.unit_cost)}
+                  </div>
+                </div>
+                {fully ? (
+                  <Badge tone="green" className="shrink-0 gap-1">
+                    <Check className="h-3 w-3" /> {it.received_qty}
+                  </Badge>
+                ) : canReceive ? (
+                  <button
+                    onClick={() => start(async () => { await receiveItem(it.id, po.id, it.quantity); refresh(); })}
+                    disabled={pending}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-md bg-brand-light px-2 py-1 text-xs font-medium text-brand hover:bg-brand-light/70"
+                  >
+                    <PackageCheck className="h-3.5 w-3.5" /> Receive
+                  </button>
+                ) : null}
+                <div className="shrink-0 font-medium text-slate-900">{formatCurrency(it.line_total)}</div>
+                <button
+                  onClick={() => start(async () => { await deletePoItem(it.id, po.id); refresh(); })}
+                  disabled={pending}
+                  className="shrink-0 text-slate-400 hover:text-red-600"
+                  aria-label="Remove"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </li>
+            );
+          })}
+          {items.length === 0 && (
+            <li className="px-4 py-6 text-center text-slate-400">No items yet — add one below.</li>
+          )}
+        </ul>
+        {/* Add item */}
+        <div className="space-y-2 border-t border-slate-100 bg-slate-50/60 p-3">
+          <div className="flex gap-2">
+            <Input placeholder="Add an item…" value={desc} onChange={(e) => setDesc(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} className="flex-1" />
+            <Input placeholder="Part #" value={part} onChange={(e) => setPart(e.target.value)} className="w-24 shrink-0" />
+          </div>
+          <div className="flex items-center gap-2">
+            <NumberInput value={qty} onValueChange={setQty} className="w-20 text-center" placeholder="Qty" />
+            <span className="text-slate-400">×</span>
+            <NumberInput value={cost} onValueChange={setCost} className="flex-1 text-right" placeholder="Unit cost" />
+            <Button onClick={add} disabled={pending || !desc.trim()}>
+              <Plus className="h-4 w-4" /> Add
+            </Button>
+          </div>
+        </div>
       </div>
     </div>
   );
