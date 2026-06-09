@@ -42,7 +42,7 @@ export default async function InquirePage({ params }: { params: Promise<{ org: s
 
       <div className="relative mx-auto grid max-w-5xl items-center gap-8 px-4 py-12 md:grid-cols-2 md:py-20">
         <div className={bg ? "text-white" : ""} style={bg ? { textShadow: "0 1px 6px rgba(0,0,0,.65)" } : undefined}>
-          {o.logo_url ? (
+          {!bg && o.logo_url ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={o.logo_url} alt={o.name} className="mb-4 h-14 w-auto" />
           ) : null}
@@ -55,10 +55,12 @@ export default async function InquirePage({ params }: { params: Promise<{ org: s
           {tagline && (
             <p className={`mt-3 text-xl font-medium ${bg ? "text-slate-100" : "text-slate-700"}`}>{tagline}</p>
           )}
-          <p className={`mt-3 text-base ${bg ? "text-slate-200" : "text-slate-600"}`}>
-            Our new site is on the way — but we're open for business and taking new projects now.
-            Send a request and we'll get right back to you.
-          </p>
+          {bullets.length === 0 && (
+            <p className={`mt-3 text-base ${bg ? "text-slate-200" : "text-slate-600"}`}>
+              Our new site is on the way — but we're open for business and taking new projects now.
+              Send a request and we'll get right back to you.
+            </p>
+          )}
           {bullets.length > 0 && (
             <ul className="mt-4 space-y-2">
               {bullets.map((b: string, i: number) => (
