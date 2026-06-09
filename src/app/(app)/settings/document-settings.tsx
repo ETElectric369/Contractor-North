@@ -40,7 +40,7 @@ export function DocumentSettings({ settings }: { settings: OrgSettings }) {
   return (
     <div className="space-y-4">
       {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div>
           <Label htmlFor="ds-expiry">Quote valid for (days)</Label>
           <NumberInput id="ds-expiry" value={expiry} onValueChange={setExpiry} />

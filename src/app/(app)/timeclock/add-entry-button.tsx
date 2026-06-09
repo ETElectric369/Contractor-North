@@ -107,8 +107,8 @@ export function AddEntryButton({
             </div>
           )}
 
-          <div className="grid grid-cols-3 gap-3">
-            <div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <div className="col-span-2 sm:col-span-1">
               <Label htmlFor="date">Date</Label>
               <Input id="date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
             </div>

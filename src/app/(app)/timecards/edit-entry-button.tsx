@@ -99,8 +99,8 @@ export function EditEntryButton({
           {error && (
             <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
           )}
-          <div className="grid grid-cols-3 gap-3">
-            <div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <div className="col-span-2 sm:col-span-1">
               <Label htmlFor="e-date">Date</Label>
               <Input id="e-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
             </div>
@@ -113,8 +113,8 @@ export function EditEntryButton({
               <Input id="e-end" type="time" value={endT} onChange={(e) => setEndT(e.target.value)} />
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <div className="col-span-2 sm:col-span-1">
               <Label htmlFor="e-code">Job code</Label>
               <Select id="e-code" value={jobCode} onChange={(e) => setJobCode(e.target.value)}>
                 <option value="">— Code —</option>

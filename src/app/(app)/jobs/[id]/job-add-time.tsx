@@ -90,8 +90,8 @@ export function JobAddTimeEntry({
       <Modal open={open} onClose={() => setOpen(false)} title="Add time entry">
         <div className="space-y-4">
           {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-          <div className="grid grid-cols-3 gap-3">
-            <div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <div className="col-span-2 sm:col-span-1">
               <Label htmlFor="at-date">Date</Label>
               <Input id="at-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
             </div>
