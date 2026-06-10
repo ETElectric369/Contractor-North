@@ -3,18 +3,25 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Check } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { setJobSchedule } from "../../schedule/actions";
 
-function toLocalInput(iso: string | null): string {
+/** ISO → yyyy-mm-dd in local time for a date input. */
+function toLocalDate(iso: string | null): string {
   if (!iso) return "";
   const d = new Date(iso);
   const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
-/** Inline start/end schedule editor on the Job tab — change dates right here. */
+/** Build an ISO timestamp from a local date string at a fixed local hour, so
+ *  jobs land on the right calendar day in the user's timezone. */
+function dateToIso(date: string, hour: number): string | null {
+  if (!date) return null;
+  return new Date(`${date}T${String(hour).padStart(2, "0")}:00:00`).toISOString();
+}
+
+/** Date-only start/end editor on the Job tab — saves as soon as a date is picked. */
 export function JobScheduleControl({
   id,
   start,
@@ -25,26 +32,21 @@ export function JobScheduleControl({
   end: string | null;
 }) {
   const router = useRouter();
-  const [s, setS] = useState(toLocalInput(start));
-  const [e, setE] = useState(toLocalInput(end));
+  const [s, setS] = useState(toLocalDate(start));
+  const [e, setE] = useState(toLocalDate(end));
   const [pending, startT] = useTransition();
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const dirty = s !== toLocalInput(start) || e !== toLocalInput(end);
-
-  function save() {
+  function save(nextS: string, nextE: string) {
     setError(null);
-    if (s && e && new Date(e) <= new Date(s)) {
-      setError("End must be after start.");
+    if (nextS && nextE && nextE < nextS) {
+      setError("End date is before the start date.");
       return;
     }
     startT(async () => {
-      const res = await setJobSchedule(
-        id,
-        s ? new Date(s).toISOString() : null,
-        e ? new Date(e).toISOString() : null,
-      );
+      // Start lands at 8am local, end at 4pm, so the Scheduler shows a work day.
+      const res = await setJobSchedule(id, dateToIso(nextS, 8), dateToIso(nextE, 16));
       if (!res.ok) {
         setError(res.error ?? "Could not save.");
         return;
@@ -59,26 +61,30 @@ export function JobScheduleControl({
     <div className="space-y-1.5">
       <div className="flex flex-wrap items-center gap-2">
         <Input
-          type="datetime-local"
+          type="date"
           value={s}
-          onChange={(ev) => setS(ev.target.value)}
-          className="h-8 w-[200px] text-xs"
-          aria-label="Scheduled start"
+          onChange={(ev) => {
+            setS(ev.target.value);
+            save(ev.target.value, e);
+          }}
+          disabled={pending}
+          className="h-9 w-[150px]"
+          aria-label="Start date"
         />
         <span className="text-xs text-slate-400">to</span>
         <Input
-          type="datetime-local"
+          type="date"
           value={e}
-          onChange={(ev) => setE(ev.target.value)}
-          className="h-8 w-[200px] text-xs"
-          aria-label="Scheduled end"
+          onChange={(ev) => {
+            setE(ev.target.value);
+            save(s, ev.target.value);
+          }}
+          disabled={pending}
+          className="h-9 w-[150px]"
+          aria-label="End date"
         />
-        {dirty && (
-          <Button size="sm" onClick={save} disabled={pending}>
-            {pending ? "Saving…" : "Save"}
-          </Button>
-        )}
-        {saved && (
+        {pending && <span className="text-xs text-slate-400">Saving…</span>}
+        {saved && !pending && (
           <span className="flex items-center gap-1 text-xs font-medium text-green-600">
             <Check className="h-3.5 w-3.5" /> Saved
           </span>

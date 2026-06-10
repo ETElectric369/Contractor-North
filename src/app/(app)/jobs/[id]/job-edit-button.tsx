@@ -10,12 +10,12 @@ import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { updateJob } from "../actions";
 import type { Job } from "@/lib/types";
 
-/** ISO timestamp → value for a datetime-local input (local time, no seconds). */
-function toLocalInput(iso: string | null): string {
+/** ISO → yyyy-mm-dd in local time for a date input. */
+function toLocalDate(iso: string | null): string {
   if (!iso) return "";
   const d = new Date(iso);
   const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
 export function JobEditButton({
@@ -34,10 +34,15 @@ export function JobEditButton({
   const [city, setCity] = useState(job.city ?? "");
   const [state, setState] = useState(job.state ?? "");
   const [zip, setZip] = useState(job.zip ?? "");
+  const [startDate, setStartDate] = useState(toLocalDate(job.scheduled_start));
+  const [endDate, setEndDate] = useState(toLocalDate(job.scheduled_end));
   const router = useRouter();
 
   function onSubmit(formData: FormData) {
     setError(null);
+    // Convert local dates to ISO here so the server never guesses the timezone.
+    formData.set("scheduled_start", startDate ? new Date(`${startDate}T08:00:00`).toISOString() : "");
+    formData.set("scheduled_end", endDate ? new Date(`${endDate}T16:00:00`).toISOString() : "");
     start(async () => {
       const res = await updateJob(job.id, formData);
       if (!res.ok) {
@@ -122,14 +127,14 @@ export function JobEditButton({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label htmlFor="ej-start">Scheduled start</Label>
-              <Input id="ej-start" name="scheduled_start" type="datetime-local" defaultValue={toLocalInput(job.scheduled_start)} />
+              <Label htmlFor="ej-start">Start date</Label>
+              <Input id="ej-start" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
             </div>
             <div>
-              <Label htmlFor="ej-end">Scheduled end</Label>
-              <Input id="ej-end" name="scheduled_end" type="datetime-local" defaultValue={toLocalInput(job.scheduled_end)} />
+              <Label htmlFor="ej-end">End date</Label>
+              <Input id="ej-end" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
             </div>
           </div>
 

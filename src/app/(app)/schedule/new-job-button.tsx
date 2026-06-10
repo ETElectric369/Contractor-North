@@ -25,10 +25,13 @@ export function NewJobButton({
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const [newCust, setNewCust] = useState(false);
+  const [startDate, setStartDate] = useState("");
   const router = useRouter();
 
   function onSubmit(formData: FormData) {
     setError(null);
+    // Convert the local date to ISO here so the server never guesses the timezone.
+    formData.set("scheduled_start", startDate ? new Date(`${startDate}T08:00:00`).toISOString() : "");
     start(async () => {
       const res = await createJob(formData);
       if (!res.ok) {
@@ -109,8 +112,8 @@ export function NewJobButton({
             <AddressAutocomplete id="address" name="address" />
           </div>
           <div>
-            <Label htmlFor="scheduled_start">Scheduled start</Label>
-            <Input id="scheduled_start" name="scheduled_start" type="datetime-local" />
+            <Label htmlFor="scheduled_start">Scheduled date</Label>
+            <Input id="scheduled_start" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
           </div>
           <div>
             <Label htmlFor="description">Description</Label>
