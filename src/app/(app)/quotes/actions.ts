@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
+import { getOrgSettings } from "@/lib/org-settings";
 import { sendEmail, renderDocEmail } from "@/lib/email";
 import { sendSms } from "@/lib/sms";
 
@@ -333,12 +334,24 @@ export async function generateQuoteDraft(
   if (!scope.trim()) return { ok: false, error: "Describe the work first." };
 
   try {
+    // The org's quoting playbook (rates, markup, habits) steers the draft.
+    const supabase = await createClient();
+    const { data: org } = await supabase
+      .from("organizations")
+      .select("settings")
+      .limit(1)
+      .maybeSingle();
+    const playbook = getOrgSettings((org as any)?.settings).quote_playbook?.trim();
+
     const client = getAnthropic();
     const msg = await client.messages.create({
       model: DEFAULT_MODEL,
       max_tokens: 1500,
       system:
-        "You are an estimator for an electrical contractor. Given a scope of work, produce a JSON array of quote line items. Each item: {\"description\": string, \"quantity\": number, \"unit\": string (ea/ft/hr/lot), \"unit_price\": number (USD, rough but realistic for US electrical work)}. Include both materials and labor lines. Respond with ONLY the JSON array, no prose.",
+        "You are an estimator for an electrical contractor. Given a scope of work, produce a JSON array of quote line items. Each item: {\"description\": string, \"quantity\": number, \"unit\": string (ea/ft/hr/lot), \"unit_price\": number (USD, rough but realistic for US electrical work)}. Include both materials and labor lines. Respond with ONLY the JSON array, no prose." +
+        (playbook
+          ? `\n\nThis company's quoting playbook — follow it over generic assumptions:\n${playbook}`
+          : ""),
       messages: [{ role: "user", content: scope }],
     });
 

@@ -4,6 +4,7 @@ import {
   DEFAULT_MODEL,
   ASSISTANT_SYSTEM_PROMPT,
 } from "@/lib/anthropic";
+import { getOrgSettings } from "@/lib/org-settings";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -23,17 +24,20 @@ export async function POST(req: Request) {
     return new Response("Unauthorized", { status: 401 });
   }
 
-  // Respond in the user's preferred language.
-  const { data: prof } = await supabase
-    .from("profiles")
-    .select("language")
-    .eq("id", user.id)
-    .maybeSingle();
-  const systemPrompt =
-    prof?.language === "es"
-      ? ASSISTANT_SYSTEM_PROMPT +
-        "\n\nThe user's preferred language is Spanish (español). Respond in Spanish unless the user writes to you in English. Use clear, friendly Spanish suitable for an electrician in the field."
-      : ASSISTANT_SYSTEM_PROMPT;
+  // Respond in the user's preferred language + follow the org's quoting playbook.
+  const [{ data: prof }, { data: org }] = await Promise.all([
+    supabase.from("profiles").select("language").eq("id", user.id).maybeSingle(),
+    supabase.from("organizations").select("settings").limit(1).maybeSingle(),
+  ]);
+  const playbook = getOrgSettings((org as any)?.settings).quote_playbook?.trim();
+  let systemPrompt = ASSISTANT_SYSTEM_PROMPT;
+  if (playbook) {
+    systemPrompt += `\n\nThis company's quoting playbook — when estimating or drafting quotes/proposals, follow it over generic assumptions:\n${playbook}`;
+  }
+  if (prof?.language === "es") {
+    systemPrompt +=
+      "\n\nThe user's preferred language is Spanish (español). Respond in Spanish unless the user writes to you in English. Use clear, friendly Spanish suitable for an electrician in the field.";
+  }
 
   let body: { messages: ChatMessage[] };
   try {

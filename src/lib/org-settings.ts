@@ -18,6 +18,8 @@ export interface OrgSettings {
   // Financial
   default_labor_rate: number;
   mileage_rate: number; // $ per mile (e.g. IRS standard rate)
+  /** Free-text "how we quote" playbook injected into AI quote drafts + assistant. */
+  quote_playbook: string;
 
   // Scheduling
   work_day_start: string; // "08:00"
@@ -56,6 +58,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   deposit_percent: 0,
   default_labor_rate: 0,
   mileage_rate: 0.7,
+  quote_playbook: "",
   work_day_start: "08:00",
   work_day_end: "17:00",
   week_start: "monday",

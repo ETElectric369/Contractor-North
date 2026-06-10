@@ -18,6 +18,7 @@ import { AutomationSettings } from "./automation-settings";
 import { TaxRatesManager } from "./tax-rates-manager";
 import { SplashSettings } from "./splash-settings";
 import { AiStatus } from "./ai-status";
+import { QuotePlaybookForm } from "./quote-playbook-form";
 import { translator } from "@/lib/i18n";
 import { billingEnabled } from "@/lib/stripe";
 import { qboConfigured } from "@/lib/quickbooks";
@@ -163,7 +164,12 @@ export default async function SettingsPage({
         {
           id: "financial",
           label: "Financial",
-          content: <Section title="Tax, pricing & financial defaults"><TaxRatesManager taxRates={(taxRates ?? []) as any} pricingLevels={(pricingLevels ?? []) as any} settings={settings} /></Section>,
+          content: (
+            <div className="space-y-6">
+              <Section title="Tax, pricing & financial defaults"><TaxRatesManager taxRates={(taxRates ?? []) as any} pricingLevels={(pricingLevels ?? []) as any} settings={settings} /></Section>
+              <Section title="How we quote (AI playbook)"><QuotePlaybookForm settings={settings} /></Section>
+            </div>
+          ),
         },
         {
           id: "documents",
