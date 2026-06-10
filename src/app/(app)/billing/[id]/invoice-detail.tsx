@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, Pencil, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
@@ -11,6 +11,7 @@ import { formatCurrency, formatDateTime } from "@/lib/utils";
 import type { Invoice, InvoiceItem, Payment } from "@/lib/types";
 import {
   addInvoiceItem,
+  updateInvoiceItem,
   deleteInvoiceItem,
   setInvoiceStatus,
   setInvoiceTaxRate,
@@ -54,6 +55,32 @@ export function InvoiceDetail({
   // payment state
   const [payAmount, setPayAmount] = useState(balance > 0 ? balance : 0);
   const [payMethod, setPayMethod] = useState(paymentMethods[0] ?? "Check");
+
+  // edit-item state
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editDesc, setEditDesc] = useState("");
+  const [editQty, setEditQty] = useState(1);
+  const [editPrice, setEditPrice] = useState(0);
+
+  function startEdit(it: InvoiceItem) {
+    setEditId(it.id);
+    setEditDesc(it.description);
+    setEditQty(Number(it.quantity));
+    setEditPrice(Number(it.unit_price));
+  }
+
+  function saveEdit() {
+    if (!editId) return;
+    start(async () => {
+      await updateInvoiceItem(editId, invoice.id, {
+        description: editDesc,
+        quantity: editQty,
+        unit_price: editPrice,
+      });
+      setEditId(null);
+      refresh();
+    });
+  }
 
   const plMatches = plQuery.trim()
     ? priceItems.filter((p) => [p.code, p.description].some((v) => (v ?? "").toLowerCase().includes(plQuery.trim().toLowerCase()))).slice(0, 6)
@@ -168,25 +195,59 @@ export function InvoiceDetail({
 
         <div className="rounded-xl border border-slate-200 bg-white">
           <ul className="divide-y divide-slate-100">
-            {items.map((it) => (
-              <li key={it.id} className="flex items-center gap-3 px-4 py-3 text-sm">
-                <div className="min-w-0 flex-1">
-                  <div className="font-medium text-slate-800">{it.description}</div>
-                  <div className="text-xs text-slate-400">
-                    {it.quantity} {it.unit} × {formatCurrency(it.unit_price)}
+            {items.map((it) =>
+              editId === it.id ? (
+                <li key={it.id} className="space-y-2 bg-slate-50/80 px-4 py-3 text-sm">
+                  <Input value={editDesc} onChange={(e) => setEditDesc(e.target.value)} placeholder="Description" />
+                  <div className="flex items-center gap-2">
+                    <NumberInput value={editQty} onValueChange={setEditQty} className="w-20 text-center" />
+                    <span className="text-slate-400">×</span>
+                    <NumberInput value={editPrice} onValueChange={setEditPrice} className="flex-1 text-right" />
+                    <button
+                      onClick={saveEdit}
+                      disabled={pending || !editDesc.trim()}
+                      className="rounded-md bg-brand p-1.5 text-white hover:bg-brand-dark disabled:opacity-50"
+                      aria-label="Save"
+                    >
+                      <Check className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={() => setEditId(null)}
+                      className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100"
+                      aria-label="Cancel"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
                   </div>
-                </div>
-                <div className="shrink-0 font-medium text-slate-900">{formatCurrency(it.line_total)}</div>
-                <button
-                  onClick={() => start(async () => { await deleteInvoiceItem(it.id, invoice.id); refresh(); })}
-                  disabled={pending}
-                  className="shrink-0 text-slate-400 hover:text-red-600"
-                  aria-label="Remove"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </li>
-            ))}
+                </li>
+              ) : (
+                <li key={it.id} className="flex items-center gap-3 px-4 py-3 text-sm">
+                  <div className="min-w-0 flex-1">
+                    <div className="font-medium text-slate-800">{it.description}</div>
+                    <div className="text-xs text-slate-400">
+                      {it.quantity} {it.unit} × {formatCurrency(it.unit_price)}
+                    </div>
+                  </div>
+                  <div className="shrink-0 font-medium text-slate-900">{formatCurrency(it.line_total)}</div>
+                  <button
+                    onClick={() => startEdit(it)}
+                    disabled={pending}
+                    className="shrink-0 text-slate-400 hover:text-slate-700"
+                    aria-label="Edit"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </button>
+                  <button
+                    onClick={() => start(async () => { await deleteInvoiceItem(it.id, invoice.id); refresh(); })}
+                    disabled={pending}
+                    className="shrink-0 text-slate-400 hover:text-red-600"
+                    aria-label="Remove"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </li>
+              ),
+            )}
             {items.length === 0 && (
               <li className="px-4 py-6 text-center text-slate-400">No line items yet.</li>
             )}

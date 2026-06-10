@@ -21,11 +21,13 @@ import { JobPermits } from "./job-permits";
 import { JobAddTimeEntry } from "./job-add-time";
 import { JobStatusControl } from "./job-status-control";
 import { JobEditButton } from "./job-edit-button";
+import { JobScheduleControl } from "./job-schedule-control";
 import { NewWorkOrderButton } from "../../work-orders/new-wo-button";
 import { NewPoButton } from "../../purchasing/new-po-button";
 import { ConvertButton } from "@/components/convert-button";
+import { DeleteButton } from "@/components/delete-button";
 import { EditCustomerButton } from "../../crm/[id]/edit-customer-button";
-import { createInvoiceForJob } from "../actions";
+import { createInvoiceForJob, deleteJob } from "../actions";
 import { getOrgSettings } from "@/lib/org-settings";
 import type { Customer } from "@/lib/types";
 
@@ -196,11 +198,10 @@ export default async function JobDetailPage({
                     ) : "—"}
                   </div>
                 </div>
-                <div>
+                <div className="sm:col-span-2">
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Scheduled</div>
-                  <div className="mt-1 flex items-center gap-1 text-sm text-slate-700">
-                    <Calendar className="h-3.5 w-3.5 text-slate-400" />
-                    {j.scheduled_start ? formatDateTime(j.scheduled_start) : "—"}
+                  <div className="mt-1">
+                    <JobScheduleControl id={j.id} start={j.scheduled_start} end={j.scheduled_end} />
                   </div>
                 </div>
               </div>
@@ -469,6 +470,11 @@ export default async function JobDetailPage({
             label="Create invoice"
             run={createInvoiceForJob.bind(null, j.id)}
             hrefPrefix="/billing/"
+          />
+          <DeleteButton
+            run={deleteJob.bind(null, j.id)}
+            confirmText={`Delete job ${j.job_number}? Time entries, quotes, and invoices keep their data but lose the job link.`}
+            redirectTo="/jobs"
           />
         </div>
       </div>

@@ -6,6 +6,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatDateTime } from "@/lib/utils";
 import { WoStatusControl } from "./wo-status-control";
+import { WoEditButton } from "./wo-edit-button";
+import { DeleteButton } from "@/components/delete-button";
+import { deleteWorkOrder } from "../actions";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +31,16 @@ export default async function WorkOrderDetailPage({
   if (!wo) notFound();
   const w = wo as any;
 
+  const [{ data: jobs }, { data: techs }] = await Promise.all([
+    supabase
+      .from("jobs")
+      .select("id, job_number, name")
+      .in("status", ["estimate", "scheduled", "in_progress", "on_hold"])
+      .order("created_at", { ascending: false })
+      .limit(100),
+    supabase.from("profiles").select("id, full_name").eq("active", true).order("full_name"),
+  ]);
+
   return (
     <div className="mx-auto max-w-3xl">
       <Link
@@ -47,7 +60,8 @@ export default async function WorkOrderDetailPage({
           </div>
           <p className="mt-1 text-lg text-slate-700">{w.title}</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <WoEditButton wo={w} jobs={jobs ?? []} techs={techs ?? []} />
           <Link
             href={`/print/work-order/${w.id}`}
             className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
@@ -55,6 +69,11 @@ export default async function WorkOrderDetailPage({
             <Printer className="h-4 w-4" /> Print / PDF
           </Link>
           <WoStatusControl id={w.id} status={w.status} />
+          <DeleteButton
+            run={deleteWorkOrder.bind(null, w.id)}
+            confirmText={`Delete work order ${w.wo_number}?`}
+            redirectTo="/work-orders"
+          />
         </div>
       </div>
 

@@ -115,6 +115,118 @@ export interface SaveQuoteInput {
   items: DraftLineItem[];
 }
 
+/** Recompute subtotal/tax/total from the quote's line items. */
+async function recalcQuote(supabase: any, quoteId: string) {
+  const { data: quote } = await supabase
+    .from("quotes")
+    .select("tax_rate")
+    .eq("id", quoteId)
+    .maybeSingle();
+  const { data: items } = await supabase
+    .from("quote_line_items")
+    .select("line_total")
+    .eq("quote_id", quoteId);
+  const subtotal = round2((items ?? []).reduce((s: number, i: any) => s + Number(i.line_total ?? 0), 0));
+  const tax = round2(subtotal * Number(quote?.tax_rate ?? 0));
+  await supabase
+    .from("quotes")
+    .update({ subtotal, tax, total: round2(subtotal + tax) })
+    .eq("id", quoteId);
+}
+
+export async function addQuoteItem(
+  quoteId: string,
+  item: { description: string; quantity: number; unit: string; unit_price: number },
+): Promise<{ ok: boolean; error?: string }> {
+  const supabase = await createClient();
+  if (!item.description.trim()) return { ok: false, error: "Description is required." };
+  const { data: last } = await supabase
+    .from("quote_line_items")
+    .select("sort_order")
+    .eq("quote_id", quoteId)
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const { error } = await supabase.from("quote_line_items").insert({
+    quote_id: quoteId,
+    description: item.description.trim(),
+    quantity: item.quantity || 1,
+    unit: item.unit || "ea",
+    unit_price: item.unit_price || 0,
+    sort_order: (last?.sort_order ?? -1) + 1,
+  });
+  if (error) return { ok: false, error: error.message };
+  await recalcQuote(supabase, quoteId);
+  revalidatePath(`/quotes/${quoteId}`);
+  revalidatePath("/quotes");
+  return { ok: true };
+}
+
+export async function updateQuoteItem(
+  itemId: string,
+  quoteId: string,
+  item: { description: string; quantity: number; unit_price: number },
+): Promise<{ ok: boolean; error?: string }> {
+  const supabase = await createClient();
+  if (!item.description.trim()) return { ok: false, error: "Description is required." };
+  const { error } = await supabase
+    .from("quote_line_items")
+    .update({
+      description: item.description.trim(),
+      quantity: item.quantity || 1,
+      unit_price: item.unit_price || 0,
+    })
+    .eq("id", itemId);
+  if (error) return { ok: false, error: error.message };
+  await recalcQuote(supabase, quoteId);
+  revalidatePath(`/quotes/${quoteId}`);
+  revalidatePath("/quotes");
+  return { ok: true };
+}
+
+export async function deleteQuoteItem(
+  itemId: string,
+  quoteId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("quote_line_items").delete().eq("id", itemId);
+  if (error) return { ok: false, error: error.message };
+  await recalcQuote(supabase, quoteId);
+  revalidatePath(`/quotes/${quoteId}`);
+  revalidatePath("/quotes");
+  return { ok: true };
+}
+
+/** Edit quote header fields: title, notes, tax rate (fraction), valid-until. */
+export async function updateQuoteMeta(
+  quoteId: string,
+  meta: { title: string; notes: string; tax_rate: number; valid_until: string | null },
+): Promise<{ ok: boolean; error?: string }> {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("quotes")
+    .update({
+      title: meta.title.trim() || null,
+      notes: meta.notes.trim() || null,
+      tax_rate: meta.tax_rate || 0,
+      valid_until: meta.valid_until,
+    })
+    .eq("id", quoteId);
+  if (error) return { ok: false, error: error.message };
+  await recalcQuote(supabase, quoteId);
+  revalidatePath(`/quotes/${quoteId}`);
+  revalidatePath("/quotes");
+  return { ok: true };
+}
+
+export async function deleteQuote(id: string): Promise<{ ok: boolean; error?: string }> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("quotes").delete().eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/quotes");
+  return { ok: true };
+}
+
 export async function saveQuote(input: SaveQuoteInput) {
   const supabase = await createClient();
   const {

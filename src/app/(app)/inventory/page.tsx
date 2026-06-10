@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { formatCurrency } from "@/lib/utils";
 import { NewItemButton } from "./new-item-button";
 import { QtyControl } from "./qty-control";
+import { ItemActions } from "./item-actions";
 import { sanitizeSearch } from "@/lib/utils";
 import type { InventoryItem } from "@/lib/types";
 
@@ -101,6 +102,7 @@ export default async function InventoryPage({
                 <th className="px-3 py-3 font-semibold">Location</th>
                 <th className="px-3 py-3 text-right font-semibold">Unit cost</th>
                 <th className="px-5 py-3 text-right font-semibold">On hand</th>
+                <th className="px-3 py-3 text-right font-semibold" aria-label="Actions"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -129,6 +131,9 @@ export default async function InventoryPage({
                     </td>
                     <td className="px-5 py-3">
                       <QtyControl id={it.id} quantity={it.quantity_on_hand} unit={it.unit} />
+                    </td>
+                    <td className="px-3 py-3">
+                      <ItemActions item={it} />
                     </td>
                   </tr>
                 );

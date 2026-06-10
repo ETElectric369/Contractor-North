@@ -32,6 +32,32 @@ export async function createChangeOrder(formData: FormData): Promise<Result> {
   return { ok: true, id: data.id };
 }
 
+export async function updateChangeOrder(id: string, formData: FormData): Promise<Result> {
+  const supabase = await createClient();
+  const description = String(formData.get("description") ?? "").trim();
+  if (!description) return { ok: false, error: "Description is required." };
+
+  const { error } = await supabase
+    .from("change_orders")
+    .update({
+      description,
+      amount: Number(formData.get("amount")) || 0,
+      job_id: emptyToNull(formData.get("job_id")),
+    })
+    .eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/change-orders");
+  return { ok: true };
+}
+
+export async function deleteChangeOrder(id: string): Promise<Result> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("change_orders").delete().eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/change-orders");
+  return { ok: true };
+}
+
 export async function setChangeOrderStatus(
   id: string,
   status: string,

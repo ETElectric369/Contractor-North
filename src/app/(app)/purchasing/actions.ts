@@ -103,6 +103,15 @@ export async function setPoStatus(id: string, status: string): Promise<Result> {
   return { ok: true };
 }
 
+export async function deletePurchaseOrder(id: string): Promise<Result> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("purchase_orders").delete().eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/purchasing");
+  revalidatePath("/bills");
+  return { ok: true };
+}
+
 /** Mark a line fully received; recompute PO status from line receipts. */
 export async function receiveItem(
   itemId: string,

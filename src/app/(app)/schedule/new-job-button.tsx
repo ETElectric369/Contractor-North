@@ -14,7 +14,13 @@ interface CustomerOption {
   name: string;
 }
 
-export function NewJobButton({ customers }: { customers: CustomerOption[] }) {
+export function NewJobButton({
+  customers,
+  defaultCustomerId,
+}: {
+  customers: CustomerOption[];
+  defaultCustomerId?: string;
+}) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -66,7 +72,7 @@ export function NewJobButton({ customers }: { customers: CustomerOption[] }) {
               {newCust ? (
                 <Input name="new_customer_name" placeholder="New customer name" autoFocus />
               ) : (
-                <Select id="customer_id" name="customer_id" defaultValue="">
+                <Select id="customer_id" name="customer_id" defaultValue={defaultCustomerId ?? ""}>
                   <option value="">— None —</option>
                   {customers.map((c) => (
                     <option key={c.id} value={c.id}>

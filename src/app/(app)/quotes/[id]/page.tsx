@@ -6,10 +6,12 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { StatusControl } from "./status-control";
+import { QuoteItemsEditor } from "./quote-items-editor";
 import { EmailButton } from "@/components/email-button";
 import { ConvertButton } from "@/components/convert-button";
+import { DeleteButton } from "@/components/delete-button";
 import { EditCustomerButton } from "../../crm/[id]/edit-customer-button";
-import { createJobFromQuote } from "../actions";
+import { createJobFromQuote, deleteQuote } from "../actions";
 import { Briefcase } from "lucide-react";
 import type { Quote, QuoteLineItem } from "@/lib/types";
 
@@ -85,6 +87,11 @@ export default async function QuoteDetailPage({
             />
           )}
           <StatusControl id={q.id} status={q.status} />
+          <DeleteButton
+            run={deleteQuote.bind(null, q.id)}
+            confirmText={`Delete quote ${q.quote_number}? Its line items go with it.`}
+            redirectTo="/quotes"
+          />
         </div>
       </div>
 
@@ -116,68 +123,7 @@ export default async function QuoteDetailPage({
         </CardContent>
       </Card>
 
-      <Card className="overflow-hidden">
-        <div className="overflow-x-auto">
-        <table className="w-full min-w-[520px] text-sm">
-          <thead className="border-b border-slate-100 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-400">
-            <tr>
-              <th className="px-5 py-3 font-semibold">Description</th>
-              <th className="px-3 py-3 text-right font-semibold">Qty</th>
-              <th className="px-3 py-3 text-right font-semibold">Unit</th>
-              <th className="px-3 py-3 text-right font-semibold">Price</th>
-              <th className="px-5 py-3 text-right font-semibold">Total</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {lineItems.map((it) => (
-              <tr key={it.id}>
-                <td className="px-5 py-3 text-slate-800">{it.description}</td>
-                <td className="px-3 py-3 text-right text-slate-600">{it.quantity}</td>
-                <td className="px-3 py-3 text-right text-slate-500">{it.unit}</td>
-                <td className="px-3 py-3 text-right text-slate-600">
-                  {formatCurrency(it.unit_price)}
-                </td>
-                <td className="px-5 py-3 text-right font-medium text-slate-900">
-                  {formatCurrency(it.line_total)}
-                </td>
-              </tr>
-            ))}
-            {lineItems.length === 0 && (
-              <tr>
-                <td colSpan={5} className="px-5 py-6 text-center text-slate-400">
-                  No line items.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-        </div>
-        <div className="border-t border-slate-100 px-5 py-4">
-          <div className="ml-auto max-w-xs space-y-1.5 text-sm">
-            <div className="flex justify-between text-slate-600">
-              <span>Subtotal</span>
-              <span>{formatCurrency(q.subtotal)}</span>
-            </div>
-            <div className="flex justify-between text-slate-600">
-              <span>Tax ({(q.tax_rate * 100).toFixed(2)}%)</span>
-              <span>{formatCurrency(q.tax)}</span>
-            </div>
-            <div className="flex justify-between border-t border-slate-100 pt-1.5 text-base font-semibold text-slate-900">
-              <span>Total</span>
-              <span>{formatCurrency(q.total)}</span>
-            </div>
-          </div>
-        </div>
-      </Card>
-
-      {q.notes && (
-        <Card className="mt-6">
-          <CardContent className="py-5">
-            <h3 className="mb-1 text-sm font-semibold text-slate-900">Notes</h3>
-            <p className="whitespace-pre-wrap text-sm text-slate-600">{q.notes}</p>
-          </CardContent>
-        </Card>
-      )}
+      <QuoteItemsEditor quote={q} items={lineItems} />
     </div>
   );
 }

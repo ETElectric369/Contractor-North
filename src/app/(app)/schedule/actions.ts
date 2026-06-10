@@ -80,6 +80,26 @@ export async function setJobAssignee(
   return { ok: true };
 }
 
+/** Set a job's full schedule window from anywhere (ISO strings or null). */
+export async function setJobSchedule(
+  id: string,
+  startIso: string | null,
+  endIso: string | null,
+): Promise<Result> {
+  const supabase = await createClient();
+  const patch: Record<string, unknown> = {
+    scheduled_start: startIso,
+    scheduled_end: endIso,
+    updated_at: new Date().toISOString(),
+  };
+  const { error } = await supabase.from("jobs").update(patch).eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/schedule");
+  revalidatePath("/jobs");
+  revalidatePath(`/jobs/${id}`);
+  return { ok: true };
+}
+
 /** Reschedule a job (ISO string from the client, or null to clear). */
 export async function rescheduleJob(
   id: string,

@@ -226,6 +226,27 @@ export async function addInvoiceItem(
   return { ok: true };
 }
 
+export async function updateInvoiceItem(
+  itemId: string,
+  invoiceId: string,
+  item: { description: string; quantity: number; unit_price: number },
+): Promise<Result> {
+  const supabase = await createClient();
+  if (!item.description.trim()) return { ok: false, error: "Description is required." };
+  const { error } = await supabase
+    .from("invoice_items")
+    .update({
+      description: item.description.trim(),
+      quantity: item.quantity || 1,
+      unit_price: item.unit_price || 0,
+    })
+    .eq("id", itemId);
+  if (error) return { ok: false, error: error.message };
+  await recalcInvoice(supabase, invoiceId);
+  revalidatePath(`/billing/${invoiceId}`);
+  return { ok: true };
+}
+
 export async function deleteInvoiceItem(
   itemId: string,
   invoiceId: string,

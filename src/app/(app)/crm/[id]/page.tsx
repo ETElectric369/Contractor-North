@@ -8,6 +8,9 @@ import { Button } from "@/components/ui/button";
 import { Tabs } from "@/components/tabs";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { EditCustomerButton } from "./edit-customer-button";
+import { DeleteButton } from "@/components/delete-button";
+import { NewJobButton } from "../../schedule/new-job-button";
+import { deleteCustomer } from "../actions";
 import type { Customer, Job, Quote } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -166,13 +169,19 @@ export default async function CustomerDetailPage({
           {c.company_name && <p className="mt-1 text-sm text-slate-500">{c.company_name}</p>}
           <Badge tone="slate" className="mt-2">{c.type}</Badge>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <EditCustomerButton customer={c} pricingLevels={(pricingLevels ?? []) as any} />
+          <NewJobButton customers={[{ id: c.id, name: c.name }]} defaultCustomerId={c.id} />
           <Link href={`/quotes/new?customer=${c.id}`}>
             <Button>
               <Plus className="h-4 w-4" /> New quote
             </Button>
           </Link>
+          <DeleteButton
+            run={deleteCustomer.bind(null, c.id)}
+            confirmText={`Delete ${c.name}? This only works when no jobs, quotes, or invoices reference them.`}
+            redirectTo="/crm"
+          />
         </div>
       </div>
 

@@ -73,6 +73,33 @@ export async function updateCustomer(
   return { ok: true };
 }
 
+/** Delete a customer — blocked while jobs/quotes/invoices still reference it,
+ *  so history can never disappear by accident. */
+export async function deleteCustomer(id: string): Promise<ActionResult> {
+  const supabase = await createClient();
+
+  const [{ count: jobs }, { count: quotes }, { count: invoices }] = await Promise.all([
+    supabase.from("jobs").select("id", { count: "exact", head: true }).eq("customer_id", id),
+    supabase.from("quotes").select("id", { count: "exact", head: true }).eq("customer_id", id),
+    supabase.from("invoices").select("id", { count: "exact", head: true }).eq("customer_id", id),
+  ]);
+  const linked: string[] = [];
+  if (jobs) linked.push(`${jobs} job${jobs > 1 ? "s" : ""}`);
+  if (quotes) linked.push(`${quotes} quote${quotes > 1 ? "s" : ""}`);
+  if (invoices) linked.push(`${invoices} invoice${invoices > 1 ? "s" : ""}`);
+  if (linked.length) {
+    return {
+      ok: false,
+      error: `This customer has ${linked.join(", ")}. Reassign or delete those first, or mark the customer inactive instead.`,
+    };
+  }
+
+  const { error } = await supabase.from("customers").delete().eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/crm");
+  return { ok: true };
+}
+
 export async function updateCustomerStatus(
   id: string,
   status: string,

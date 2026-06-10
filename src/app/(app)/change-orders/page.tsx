@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { NewChangeOrderButton } from "./new-co-button";
 import { CoStatusControl } from "./co-status-control";
+import { CoRowActions } from "./co-row-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -102,6 +103,7 @@ export default async function ChangeOrdersPage() {
                       >
                         <Printer className="h-4 w-4" />
                       </Link>
+                      <CoRowActions co={c} jobs={jobs ?? []} />
                       <CoStatusControl id={c.id} status={c.status} />
                     </div>
                   </div>

@@ -37,6 +37,17 @@ export async function createInvoiceForJob(
   });
 }
 
+/** Delete a job after warning about linked records (quotes/invoices keep
+ *  their data; their job link is cleared by FK rules). */
+export async function deleteJob(id: string): Promise<{ ok: boolean; error?: string }> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("jobs").delete().eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/jobs");
+  revalidatePath("/schedule");
+  return { ok: true };
+}
+
 /** Edit every job field in one place: details, address, schedule, customer
  *  (existing or created inline), and assigned staff. */
 export async function updateJob(

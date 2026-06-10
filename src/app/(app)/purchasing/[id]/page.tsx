@@ -5,6 +5,8 @@ import { createClient } from "@/lib/supabase/server";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { PoDetail } from "./po-detail";
+import { DeleteButton } from "@/components/delete-button";
+import { deletePurchaseOrder } from "../actions";
 import type { PurchaseOrder, PurchaseOrderItem } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -51,9 +53,17 @@ export default async function PurchaseOrderPage({
       </Link>
 
       <div className="mb-6 flex flex-col gap-2">
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-2xl font-bold text-slate-900">{p.po_number}</h1>
           <Badge tone={statusTone(p.status)}>{p.status}</Badge>
+          <div className="ml-auto">
+            <DeleteButton
+              run={deletePurchaseOrder.bind(null, p.id)}
+              confirmText={`Delete ${p.po_number}? Its line items go with it.`}
+              redirectTo="/bills"
+              size="sm"
+            />
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-3 text-sm text-slate-400">
           <span className="font-medium text-slate-600">{p.vendor}</span>
