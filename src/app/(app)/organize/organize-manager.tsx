@@ -78,12 +78,15 @@ export function OrganizeManager({
   const captureRef = useRef<HTMLInputElement>(null);
 
   // Phones get the REAL camera app (tap-to-focus, flash, HDR) via a
-  // capture-input; the in-browser webcam modal is for desktops only.
+  // capture-input. The in-browser webcam modal exists ONLY for desktops with
+  // a fine pointer — any hint of a touch device routes to the native camera.
   function takePhoto() {
-    const mobile =
-      typeof navigator !== "undefined" &&
-      (navigator.maxTouchPoints > 1 || /iPhone|iPad|Android/i.test(navigator.userAgent));
-    if (mobile) captureRef.current?.click();
+    const touchy =
+      typeof window !== "undefined" &&
+      (window.matchMedia?.("(pointer: coarse)").matches ||
+        navigator.maxTouchPoints > 0 ||
+        /iPhone|iPad|iPod|Android|Mobile/i.test(navigator.userAgent));
+    if (touchy) captureRef.current?.click();
     else setShowCamera(true);
   }
 
