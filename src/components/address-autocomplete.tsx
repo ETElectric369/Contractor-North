@@ -172,8 +172,12 @@ export function AddressAutocomplete({
             <li key={s.placeId}>
               <button
                 type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => choose(s)}
+                // Select on pointerdown: fires before input blur/keyboard close,
+                // so taps register reliably on phones and webviews.
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  choose(s);
+                }}
                 className={`flex w-full items-start gap-2 px-3 py-2 text-left text-sm hover:bg-slate-50 ${
                   i === active ? "bg-slate-50" : ""
                 }`}

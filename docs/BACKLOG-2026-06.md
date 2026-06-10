@@ -41,3 +41,13 @@ Transcribed from Erik's handwritten notes. Loop works through these.
 - "Building" — ambiguous (building dept/codes?) — clarify with Erik.
 - Several of these (reminders, appointment confirmations) depend on the **automation/reminder
   engine** + email/SMS keys (Resend/Twilio), still dormant.
+
+## From Erik's handwritten note (2026-06-10, via Organize My 📸)
+- ~~Edit job → address autofill doesn't populate City/State/Zip~~ — could not reproduce in code
+  (works; was the Vercel-app webview). Hardened suggestion taps (pointerdown) anyway.
+- **Scheduler needs an overhaul** (no spec yet — ask what's wrong with it)
+- **Bid metrics:** gas/mileage vs bid prices; adjust bid calcs by direct cost per region;
+  field-time vs office-time direct cost comparison
+- **Business Advisor** (AI advisory over the org's numbers?)
+- **Recurring jobs** (Tradify parity — service reminders tie-in)
+- ~~Organize to sandbox then Expenses~~ — DONE 2026-06-10 (needs-attention tray + overhead bills)
