@@ -20,6 +20,7 @@ import {
   GitPullRequestArrow,
   Calculator,
   Stamp,
+  Wand2,
   ShieldCheck,
   HardHat,
   IdCard,
@@ -52,6 +53,7 @@ export const NAV: NavSection[] = [
       { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
       { label: "Tasks", href: "/tasks", icon: ListTodo },
       { label: "Assistant", href: "/assistant", icon: Sparkles },
+      { label: "Organize My…", href: "/organize", icon: Wand2 },
     ],
   },
   {
