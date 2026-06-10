@@ -43,6 +43,13 @@ export default async function AppLayout({
   const brand = org?.brand_color || "#0b57c4";
   const branding = { name: org?.name ?? null, logo: org?.logo_url ?? null };
 
+  // Attention counts surfaced as sidebar badges.
+  const { count: organizeCount } = await supabase
+    .from("organized_items")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "needs_review");
+  const badges = { "/organize": organizeCount ?? 0 };
+
   return (
     <div
       className="flex h-screen overflow-hidden"
@@ -55,10 +62,10 @@ export default async function AppLayout({
     >
 
       <div className="hidden lg:block">
-        <Sidebar branding={branding} lang={profile.language} role={profile.role} />
+        <Sidebar branding={branding} lang={profile.language} role={profile.role} badges={badges} />
       </div>
       <div className="flex flex-1 flex-col overflow-hidden">
-        <Topbar profile={(profile as Profile) ?? null} branding={branding} lang={profile.language} role={profile.role} />
+        <Topbar profile={(profile as Profile) ?? null} branding={branding} lang={profile.language} role={profile.role} badges={badges} />
         <main className="flex-1 overflow-y-auto bg-slate-50 p-4 lg:p-6">
           {children}
         </main>

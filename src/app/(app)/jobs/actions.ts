@@ -116,13 +116,14 @@ export async function updateJob(
 }
 
 export async function createBill(input: {
-  job_id: string;
+  job_id: string | null; // null = company overhead (no job)
   supplier: string;
   bill_number: string;
   amount: number;
   status: string;
   bill_date: string | null;
   notes: string;
+  category?: string | null;
 }): Promise<Result> {
   const supabase = await createClient();
   const {
@@ -132,17 +133,19 @@ export async function createBill(input: {
   if (!input.supplier.trim()) return { ok: false, error: "Supplier is required." };
 
   const { error } = await supabase.from("bills").insert({
-    job_id: input.job_id,
+    job_id: input.job_id || null,
     supplier: input.supplier.trim(),
     bill_number: input.bill_number.trim() || null,
     amount: input.amount || 0,
     status: input.status || "unpaid",
     bill_date: input.bill_date || null,
     notes: input.notes.trim() || null,
+    category: input.category ?? null,
     created_by: user.id,
   });
   if (error) return { ok: false, error: error.message };
-  revalidatePath(`/jobs/${input.job_id}`);
+  if (input.job_id) revalidatePath(`/jobs/${input.job_id}`);
+  revalidatePath("/bills");
   return { ok: true };
 }
 

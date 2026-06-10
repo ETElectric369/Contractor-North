@@ -13,11 +13,13 @@ export function Topbar({
   branding,
   lang,
   role,
+  badges,
 }: {
   profile: Profile | null;
   branding?: { name: string | null; logo: string | null };
   lang?: string;
   role?: string;
+  badges?: Record<string, number>;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -74,7 +76,7 @@ export function Topbar({
             >
               <X className="h-5 w-5" />
             </button>
-            <Sidebar onNavigate={() => setOpen(false)} branding={branding} lang={lang} role={role} />
+            <Sidebar onNavigate={() => setOpen(false)} branding={branding} lang={lang} role={role} badges={badges} />
           </div>
         </div>
       )}

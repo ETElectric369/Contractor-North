@@ -40,6 +40,7 @@ interface BillRow {
   status: string;
   bill_date: string | null;
   job_id: string | null;
+  category: string | null;
   jobs?: { job_number: string; name: string } | null;
 }
 interface DocRow {
@@ -80,24 +81,28 @@ export function BillsReceipts({
   const [status, setStatus] = useState("unpaid");
   const [billDate, setBillDate] = useState("");
   const [billJob, setBillJob] = useState("");
+  const [billCategory, setBillCategory] = useState("Shop supplies");
+  const [billFilter, setBillFilter] = useState<"all" | "jobs" | "overhead">("all");
   const [billError, setBillError] = useState<string | null>(null);
 
-  const totalBills = bills.reduce((s, b) => s + Number(b.amount), 0);
+  const shownBills =
+    billFilter === "all" ? bills : bills.filter((b) => (billFilter === "jobs" ? b.job_id : !b.job_id));
+  const totalBills = shownBills.reduce((s, b) => s + Number(b.amount), 0);
   const totalPos = pos.reduce((s, p) => s + Number(p.total), 0);
 
   function addBill() {
     setBillError(null);
     if (!supplier.trim()) return setBillError("Supplier is required.");
-    if (!billJob) return setBillError("Pick a job for this bill.");
     start(async () => {
       const res = await createBill({
-        job_id: billJob,
+        job_id: billJob === "__overhead" ? null : billJob || null,
         supplier,
         bill_number: billNumber,
         amount,
         status,
         bill_date: billDate || null,
         notes: "",
+        category: billJob === "__overhead" ? billCategory : null,
       });
       if (!res.ok) return setBillError(res.error ?? "Could not save.");
       setSupplier("");
@@ -211,14 +216,25 @@ export function BillsReceipts({
                 <Input id="b-supplier" value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder="e.g. CED" />
               </div>
               <div>
-                <Label htmlFor="b-job">Job *</Label>
+                <Label htmlFor="b-job">Job</Label>
                 <Select id="b-job" value={billJob} onChange={(e) => setBillJob(e.target.value)}>
                   <option value="">— Pick a job —</option>
+                  <option value="__overhead">Overhead (no job)</option>
                   {jobs.map((j) => (
                     <option key={j.id} value={j.id}>{j.job_number} · {j.name}</option>
                   ))}
                 </Select>
               </div>
+              {billJob === "__overhead" && (
+                <div>
+                  <Label htmlFor="b-cat">Overhead category</Label>
+                  <Select id="b-cat" value={billCategory} onChange={(e) => setBillCategory(e.target.value)}>
+                    {["Fuel", "Shop supplies", "Tools", "Office", "Insurance", "Vehicle", "Other"].map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </Select>
+                </div>
+              )}
               <div>
                 <Label htmlFor="b-num">Bill #</Label>
                 <Input id="b-num" value={billNumber} onChange={(e) => setBillNumber(e.target.value)} />
@@ -240,25 +256,43 @@ export function BillsReceipts({
               </div>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-xs text-slate-500">{bills.length} bills · {formatCurrency(totalBills)} total</span>
+              <span className="text-xs text-slate-500">{shownBills.length} bills · {formatCurrency(totalBills)} total</span>
               <Button size="sm" onClick={addBill} disabled={pending || !supplier.trim()}>
                 <Plus className="h-3.5 w-3.5" /> Add bill
               </Button>
             </div>
           </div>
 
-          {bills.length === 0 ? (
-            <p className="py-4 text-center text-sm text-slate-400">No supplier bills yet.</p>
+          <div className="mb-3 flex gap-2">
+            {([
+              ["all", `All (${bills.length})`],
+              ["jobs", `Job bills (${bills.filter((b) => b.job_id).length})`],
+              ["overhead", `Overhead (${bills.filter((b) => !b.job_id).length})`],
+            ] as const).map(([id, label]) => (
+              <button
+                key={id}
+                onClick={() => setBillFilter(id)}
+                className={`rounded-full px-3 py-1 text-xs font-medium ${
+                  billFilter === id ? "bg-brand text-white" : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {shownBills.length === 0 ? (
+            <p className="py-4 text-center text-sm text-slate-400">No bills here yet.</p>
           ) : (
             <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
-              {bills.map((b) => (
+              {shownBills.map((b) => (
                 <li key={b.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
                   <div className="min-w-0 flex-1">
                     <div className="font-medium text-slate-900">{b.supplier}</div>
                     <div className="text-xs text-slate-400">
                       {b.bill_number ? `#${b.bill_number} · ` : ""}
                       {b.bill_date ? `${formatDate(b.bill_date)} · ` : ""}
-                      {b.jobs?.name ?? "No job"}
+                      {b.jobs?.name ?? `Overhead${b.category ? ` · ${b.category}` : ""}`}
                     </div>
                   </div>
                   <span className="font-medium text-slate-800">{formatCurrency(b.amount)}</span>

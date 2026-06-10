@@ -20,6 +20,8 @@ export interface OrganizedResult {
     job_id: string | null;
     job_label: string | null;
     confidence: string;
+    status: string; // filed | needs_review
+    destination: string; // job | overhead | note | none
   };
 }
 
@@ -102,9 +104,13 @@ Respond with ONLY a JSON object (no prose):
   "amount": total in dollars as a number, or null,
   "date": "YYYY-MM-DD" date printed on it, or null,
   "category": "Receipt" | "Bill" | "Invoice" | "Photo" | "Plan" | "Permit" | "Other",
+  "destination": "job" | "overhead" | "unsure" — receipts only. "job" if the purchase is materials for a specific job; "overhead" if it is clearly a company expense NOT tied to one job (fuel/gas station, shop supplies, small tools, office, vehicle, insurance); "unsure" otherwise,
+  "overhead_category": "Fuel" | "Shop supplies" | "Tools" | "Office" | "Insurance" | "Vehicle" | "Other" or null — only when destination is "overhead",
   "job_id": the id of the matching job ONLY if the content clearly points to one (job number, customer name, or address visible), else null,
   "confidence": "low" | "medium" | "high"
 }
+
+Rules: never guess a job_id — only match when something on the paper points to it. A gas-station or convenience receipt is overhead (Fuel). Generic supply-house receipts with no job reference are "unsure", not overhead.
 
 Jobs you may match against (id — label):
 ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
@@ -125,10 +131,34 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
   const jobId = jobList.some((j) => j.id === parsed.job_id) ? parsed.job_id : null;
   const category = String(parsed.category || KIND_TO_CATEGORY[kind] || "Other");
   const title = String(parsed.title || input.name).slice(0, 200);
+  const confidence = ["low", "medium", "high"].includes(parsed.confidence) ? parsed.confidence : "medium";
+  const amount = parsed.amount != null && !isNaN(Number(parsed.amount)) ? Number(parsed.amount) : null;
+  const itemDate = /^\d{4}-\d{2}-\d{2}$/.test(String(parsed.date ?? "")) ? parsed.date : null;
+  const overheadCategory = String(parsed.overhead_category || "Other");
 
-  // File it on the job (documents row) when matched, so it shows on the job page.
+  // Decide where it goes — auto-file only when confident, else the tray.
+  // - job matched → file to that job (any kind)
+  // - clear overhead receipt with an amount → overhead bill (no job)
+  // - notes stand alone fine → filed
+  // - everything else → needs_review
+  const isOverhead =
+    kind === "receipt" && parsed.destination === "overhead" && amount != null && confidence !== "low";
+  let destination: "job" | "overhead" | "note" | "none" = "none";
+  let status = "needs_review";
+  if (jobId && confidence !== "low") {
+    destination = "job";
+    status = "filed";
+  } else if (isOverhead) {
+    destination = "overhead";
+    status = "filed";
+  } else if (kind === "note") {
+    destination = "note";
+    status = "filed";
+  }
+
+  // File on the job (documents row) so it shows on the job page.
   let documentId: string | null = null;
-  if (jobId) {
+  if (destination === "job" && jobId) {
     const { data: doc } = await supabase
       .from("documents")
       .insert({
@@ -145,6 +175,26 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
     documentId = doc?.id ?? null;
   }
 
+  // Overhead receipt → company expense: a bill with no job.
+  let billId: string | null = null;
+  if (destination === "overhead") {
+    const { data: bill } = await supabase
+      .from("bills")
+      .insert({
+        job_id: null,
+        supplier: parsed.vendor ? String(parsed.vendor).slice(0, 200) : title,
+        amount,
+        status: "paid",
+        bill_date: itemDate,
+        category: overheadCategory,
+        notes: `Filed by Organize My: ${title}`,
+        created_by: user.id,
+      })
+      .select("id")
+      .single();
+    billId = bill?.id ?? null;
+  }
+
   const { data: item, error } = await supabase
     .from("organized_items")
     .insert({
@@ -152,12 +202,14 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
       title,
       summary: parsed.summary ? String(parsed.summary).slice(0, 4000) : null,
       vendor: parsed.vendor ? String(parsed.vendor).slice(0, 200) : null,
-      amount: parsed.amount != null && !isNaN(Number(parsed.amount)) ? Number(parsed.amount) : null,
-      item_date: /^\d{4}-\d{2}-\d{2}$/.test(String(parsed.date ?? "")) ? parsed.date : null,
-      category,
-      confidence: ["low", "medium", "high"].includes(parsed.confidence) ? parsed.confidence : "medium",
-      job_id: jobId,
+      amount,
+      item_date: itemDate,
+      category: destination === "overhead" ? overheadCategory : category,
+      confidence,
+      status,
+      job_id: destination === "job" ? jobId : null,
       document_id: documentId,
+      bill_id: billId,
       file_url: input.path,
       created_by: user.id,
     })
@@ -166,6 +218,7 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
   if (error) return { ok: false, error: error.message };
 
   revalidatePath("/organize");
+  revalidatePath("/bills");
   if (jobId) revalidatePath(`/jobs/${jobId}`);
 
   return {
@@ -176,20 +229,29 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
       title,
       summary: parsed.summary ?? null,
       vendor: parsed.vendor ?? null,
-      amount: parsed.amount != null ? Number(parsed.amount) : null,
-      item_date: parsed.date ?? null,
-      job_id: jobId,
-      job_label: jobList.find((j) => j.id === jobId)?.label ?? null,
-      confidence: parsed.confidence ?? "medium",
+      amount,
+      item_date: itemDate,
+      job_id: destination === "job" ? jobId : null,
+      job_label: destination === "job" ? jobList.find((j) => j.id === jobId)?.label ?? null : null,
+      confidence,
+      status,
+      destination,
     },
   };
 }
 
-/** Re-file an item: change its job (and keep the job-page documents row in sync). */
-export async function refileItem(
-  id: string,
-  jobId: string | null,
-): Promise<Result> {
+export type FileDestination =
+  | { type: "job"; jobId: string }
+  | { type: "overhead"; category: string }
+  | { type: "petty_cash" }
+  | { type: "unfiled" };
+
+/**
+ * File (or re-file) an item to any destination. Tears down whatever rows the
+ * previous destination created, then creates the new ones, so moving things
+ * around can never double-count.
+ */
+export async function fileItem(id: string, dest: FileDestination): Promise<Result> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -199,19 +261,26 @@ export async function refileItem(
   const { data: item } = await supabase.from("organized_items").select("*").eq("id", id).maybeSingle();
   if (!item) return { ok: false, error: "Item not found." };
 
-  let documentId: string | null = item.document_id;
-  if (item.document_id && !jobId) {
-    await supabase.from("documents").delete().eq("id", item.document_id);
-    documentId = null;
-  } else if (item.document_id && jobId) {
-    await supabase.from("documents").update({ job_id: jobId }).eq("id", item.document_id);
-  } else if (!item.document_id && jobId) {
+  // Tear down the previous filing.
+  if (item.document_id) await supabase.from("documents").delete().eq("id", item.document_id);
+  if (item.bill_id) await supabase.from("bills").delete().eq("id", item.bill_id);
+  const prevJob = item.job_id;
+
+  let documentId: string | null = null;
+  let billId: string | null = null;
+  let jobId: string | null = null;
+  let category: string | null = item.category;
+
+  if (dest.type === "job") {
+    jobId = dest.jobId;
+    const docCategory = item.kind === "receipt" ? "Receipt" : item.category && item.kind === "job_document" ? item.category : "Other";
+    category = docCategory;
     const { data: doc } = await supabase
       .from("documents")
       .insert({
-        job_id: jobId,
+        job_id: dest.jobId,
         name: item.title,
-        category: item.category ?? "Other",
+        category: docCategory,
         kind: "other",
         file_url: item.file_url,
         uploaded_by: user.id,
@@ -219,30 +288,63 @@ export async function refileItem(
       .select("id")
       .single();
     documentId = doc?.id ?? null;
+  } else if (dest.type === "overhead") {
+    category = dest.category;
+    const { data: bill } = await supabase
+      .from("bills")
+      .insert({
+        job_id: null,
+        supplier: item.vendor ?? item.title,
+        amount: item.amount ?? 0,
+        status: "paid",
+        bill_date: item.item_date,
+        category: dest.category,
+        notes: `Filed by Organize My: ${item.title}`,
+        created_by: user.id,
+      })
+      .select("id")
+      .single();
+    billId = bill?.id ?? null;
+  } else if (dest.type === "petty_cash") {
+    category = "Petty cash";
+    const { error: pcErr } = await supabase.from("petty_cash").insert({
+      tx_date: item.item_date ?? new Date().toISOString().slice(0, 10),
+      kind: "expense",
+      amount: item.amount ?? 0,
+      category: item.kind === "receipt" ? "Receipt" : "Other",
+      description: item.title,
+      created_by: user.id,
+    });
+    if (pcErr) return { ok: false, error: pcErr.message };
   }
 
   const { error } = await supabase
     .from("organized_items")
-    .update({ job_id: jobId, document_id: documentId })
+    .update({ job_id: jobId, document_id: documentId, bill_id: billId, category, status: "filed" })
     .eq("id", id);
   if (error) return { ok: false, error: error.message };
 
   revalidatePath("/organize");
+  revalidatePath("/bills");
+  revalidatePath("/petty-cash");
   if (jobId) revalidatePath(`/jobs/${jobId}`);
+  if (prevJob) revalidatePath(`/jobs/${prevJob}`);
   return { ok: true };
 }
 
-/** Delete an organized item, its job-page document row, and the stored file. */
+/** Delete an organized item, everything it filed (doc row, overhead bill), and the stored file. */
 export async function deleteOrganizedItem(id: string): Promise<Result> {
   const supabase = await createClient();
   const { data: item } = await supabase.from("organized_items").select("*").eq("id", id).maybeSingle();
   if (!item) return { ok: false, error: "Item not found." };
 
   if (item.document_id) await supabase.from("documents").delete().eq("id", item.document_id);
+  if (item.bill_id) await supabase.from("bills").delete().eq("id", item.bill_id);
   if (item.file_url) await supabase.storage.from("documents").remove([item.file_url]);
   const { error } = await supabase.from("organized_items").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
 
   revalidatePath("/organize");
+  revalidatePath("/bills");
   return { ok: true };
 }

@@ -12,7 +12,10 @@ import {
   FileText,
   Sparkles,
   Briefcase,
+  Wallet,
+  Coins,
   Check,
+  AlertCircle,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -21,8 +24,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { CameraCapture } from "@/components/camera-capture";
 import { formatCurrency, formatDate } from "@/lib/utils";
-import { analyzeAndFile, refileItem, deleteOrganizedItem } from "./actions";
-import { createBill } from "../jobs/actions";
+import { analyzeAndFile, fileItem, deleteOrganizedItem } from "./actions";
+import { OVERHEAD_CATEGORIES } from "./constants";
 
 export interface OrganizedItemRow {
   id: string;
@@ -34,7 +37,9 @@ export interface OrganizedItemRow {
   item_date: string | null;
   category: string | null;
   confidence: string;
+  status: string;
   job_id: string | null;
+  bill_id: string | null;
   created_at: string;
   signedUrl: string | null;
   jobs: { job_number: string; name: string } | null;
@@ -68,10 +73,11 @@ export function OrganizeManager({
   const [uploads, setUploads] = useState<UploadState[]>([]);
   const [filter, setFilter] = useState<string>("all");
   const [showCamera, setShowCamera] = useState(false);
-  const [billed, setBilled] = useState<Set<string>>(new Set());
   const fileRef = useRef<HTMLInputElement>(null);
 
   const busy = uploads.some((u) => u.status === "uploading" || u.status === "reading");
+  const tray = items.filter((i) => i.status === "needs_review");
+  const filed = items.filter((i) => i.status !== "needs_review");
 
   async function processFiles(files: File[]) {
     if (!files.length) return;
@@ -93,13 +99,22 @@ export function OrganizeManager({
         setState("reading");
         const res = await analyzeAndFile({ path, name: file.name, mime: file.type, size: file.size });
         if (!res.ok) throw new Error(res.error);
-        setState("done", res.item?.job_label ? `Filed to ${res.item.job_label}` : "Filed (no job match — assign below)");
+        const it = res.item!;
+        setState(
+          "done",
+          it.status === "needs_review"
+            ? "Needs your call — see the tray below"
+            : it.destination === "job"
+              ? `Filed to ${it.job_label}`
+              : it.destination === "overhead"
+                ? "Filed as overhead"
+                : "Filed",
+        );
       } catch (err: any) {
         setState("error", err?.message ?? "Failed.");
       }
     }
     router.refresh();
-    // Clear finished rows after a beat so the list stays tidy.
     setTimeout(() => setUploads((u) => u.filter((x) => x.status === "error")), 6000);
   }
 
@@ -108,42 +123,138 @@ export function OrganizeManager({
     if (fileRef.current) fileRef.current.value = "";
   }
 
-  function refile(item: OrganizedItemRow, jobId: string) {
+  function file(item: OrganizedItemRow, dest: Parameters<typeof fileItem>[1]) {
     start(async () => {
-      await refileItem(item.id, jobId || null);
+      await fileItem(item.id, dest);
       router.refresh();
     });
   }
 
   function remove(item: OrganizedItemRow) {
-    if (!confirm(`Delete "${item.title}"? This also removes it from the job and storage.`)) return;
+    if (!confirm(`Delete "${item.title}"? This also removes whatever it filed.`)) return;
     start(async () => {
       await deleteOrganizedItem(item.id);
       router.refresh();
     });
   }
 
-  function addAsBill(item: OrganizedItemRow) {
-    if (!item.job_id || item.amount == null) return;
-    start(async () => {
-      const res = await createBill({
-        job_id: item.job_id!,
-        supplier: item.vendor ?? "Receipt",
-        bill_number: "",
-        amount: item.amount!,
-        status: "paid",
-        bill_date: item.item_date,
-        notes: `From Organize My: ${item.title}`,
-      });
-      if (res.ok) setBilled((b) => new Set(b).add(item.id));
-    });
+  /** Where the item currently lives, as a short badge. */
+  function filedBadge(item: OrganizedItemRow) {
+    if (item.job_id && item.jobs)
+      return <Badge tone="blue">{item.jobs.job_number} · {item.jobs.name}</Badge>;
+    if (item.bill_id) return <Badge tone="purple">Overhead · {item.category ?? "Other"}</Badge>;
+    if (item.category === "Petty cash") return <Badge tone="indigo">Petty cash</Badge>;
+    if (item.kind === "note") return <Badge tone="amber">Note</Badge>;
+    return <Badge tone="slate">Unfiled</Badge>;
   }
 
-  const shown = filter === "all" ? items : items.filter((i) => i.kind === filter);
+  function ItemCard({ item, attention = false }: { item: OrganizedItemRow; attention?: boolean }) {
+    const meta = KIND_META[item.kind] ?? KIND_META.job_document;
+    const Icon = meta.icon;
+    return (
+      <Card className={attention ? "border-amber-300 bg-amber-50/40" : undefined}>
+        <div className="flex gap-4 p-4">
+          {item.signedUrl ? (
+            <a href={item.signedUrl} target="_blank" rel="noreferrer" className="shrink-0">
+              {/\.pdf($|\?)/i.test(item.signedUrl) ? (
+                <span className="flex h-16 w-16 items-center justify-center rounded-lg bg-slate-100">
+                  <FileText className="h-6 w-6 text-slate-400" />
+                </span>
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={item.signedUrl} alt="" className="h-16 w-16 rounded-lg object-cover" />
+              )}
+            </a>
+          ) : (
+            <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg bg-slate-100">
+              <Icon className="h-6 w-6 text-slate-400" />
+            </span>
+          )}
+
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-medium text-slate-900">{item.title}</span>
+              <Badge tone={meta.tone}>{meta.label}</Badge>
+              {!attention && filedBadge(item)}
+            </div>
+            <div className="mt-0.5 flex flex-wrap items-center gap-3 text-xs text-slate-500">
+              {item.vendor && <span>{item.vendor}</span>}
+              {item.amount != null && <span className="font-medium text-slate-700">{formatCurrency(item.amount)}</span>}
+              {item.item_date && <span>{formatDate(item.item_date)}</span>}
+              <span>Added {formatDate(item.created_at)}</span>
+            </div>
+            {item.summary && (
+              <details className="mt-1.5">
+                <summary className="cursor-pointer text-xs font-medium text-brand">
+                  {item.kind === "note" ? "Read transcription" : "Details"}
+                </summary>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-slate-600">{item.summary}</p>
+              </details>
+            )}
+
+            {/* The four exits: job · overhead · petty cash · delete */}
+            <div className="mt-2.5 flex flex-wrap items-center gap-2">
+              <span className="flex items-center gap-1.5">
+                <Briefcase className="h-3.5 w-3.5 text-slate-400" />
+                <Select
+                  value={item.job_id ?? ""}
+                  onChange={(e) =>
+                    e.target.value
+                      ? file(item, { type: "job", jobId: e.target.value })
+                      : file(item, { type: "unfiled" })
+                  }
+                  disabled={pending}
+                  className="h-8 w-48 text-xs"
+                >
+                  <option value="">{item.job_id ? "Remove from job" : "File to job…"}</option>
+                  {jobs.map((j) => (
+                    <option key={j.id} value={j.id}>
+                      {j.job_number} — {j.name}
+                    </option>
+                  ))}
+                </Select>
+              </span>
+              {item.kind === "receipt" && (
+                <span className="flex items-center gap-1.5">
+                  <Wallet className="h-3.5 w-3.5 text-slate-400" />
+                  <Select
+                    value={item.bill_id ? item.category ?? "" : ""}
+                    onChange={(e) => e.target.value && file(item, { type: "overhead", category: e.target.value })}
+                    disabled={pending}
+                    className="h-8 w-40 text-xs"
+                  >
+                    <option value="">Overhead…</option>
+                    {OVERHEAD_CATEGORIES.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </Select>
+                </span>
+              )}
+              {item.kind === "receipt" && item.amount != null && item.category !== "Petty cash" && (
+                <Button size="sm" variant="outline" onClick={() => file(item, { type: "petty_cash" })} disabled={pending}>
+                  <Coins className="h-3.5 w-3.5" /> Petty cash
+                </Button>
+              )}
+              <button
+                onClick={() => remove(item)}
+                disabled={pending}
+                className="ml-auto rounded-md p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                title="Delete"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </Card>
+    );
+  }
+
+  const shown = filter === "all" ? filed : filed.filter((i) => i.kind === filter);
   const counts = {
-    receipt: items.filter((i) => i.kind === "receipt").length,
-    note: items.filter((i) => i.kind === "note").length,
-    job_document: items.filter((i) => i.kind === "job_document").length,
+    receipt: filed.filter((i) => i.kind === "receipt").length,
+    note: filed.filter((i) => i.kind === "note").length,
+    job_document: filed.filter((i) => i.kind === "job_document").length,
   };
 
   return (
@@ -157,8 +268,8 @@ export function OrganizeManager({
           <div>
             <div className="font-semibold text-slate-900">Snap it — I&apos;ll sort and file it.</div>
             <p className="mt-1 text-sm text-slate-500">
-              Receipts, handwritten notes, plans, permits… I read each one, pull out the details,
-              and file it to the right job.
+              Receipts, handwritten notes, plans, permits… Job costs file to the job, company
+              expenses file to overhead, and anything I&apos;m not sure about waits for your call.
             </p>
           </div>
           <div className="flex flex-wrap justify-center gap-2">
@@ -200,10 +311,28 @@ export function OrganizeManager({
         )}
       </Card>
 
+      {/* Needs attention tray */}
+      {tray.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 text-amber-600" />
+            <h2 className="text-sm font-semibold text-slate-900">
+              Needs your call <span className="text-amber-600">({tray.length})</span>
+            </h2>
+            <span className="text-xs text-slate-400">— pick a destination and it files itself</span>
+          </div>
+          <ul className="space-y-3">
+            {tray.map((item) => (
+              <ItemCard key={item.id} item={item} attention />
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* Filter chips */}
       <div className="flex flex-wrap gap-2">
         {[
-          { id: "all", label: `All (${items.length})` },
+          { id: "all", label: `All (${filed.length})` },
           { id: "receipt", label: `Receipts (${counts.receipt})` },
           { id: "note", label: `Notes (${counts.note})` },
           { id: "job_document", label: `Job docs (${counts.job_document})` },
@@ -227,90 +356,9 @@ export function OrganizeManager({
         </p>
       ) : (
         <ul className="space-y-3">
-          {shown.map((item) => {
-            const meta = KIND_META[item.kind] ?? KIND_META.job_document;
-            const Icon = meta.icon;
-            return (
-              <Card key={item.id}>
-                <div className="flex gap-4 p-4">
-                  {item.signedUrl ? (
-                    <a href={item.signedUrl} target="_blank" rel="noreferrer" className="shrink-0">
-                      {/\.pdf($|\?)/i.test(item.signedUrl) ? (
-                        <span className="flex h-16 w-16 items-center justify-center rounded-lg bg-slate-100">
-                          <FileText className="h-6 w-6 text-slate-400" />
-                        </span>
-                      ) : (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={item.signedUrl} alt="" className="h-16 w-16 rounded-lg object-cover" />
-                      )}
-                    </a>
-                  ) : (
-                    <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg bg-slate-100">
-                      <Icon className="h-6 w-6 text-slate-400" />
-                    </span>
-                  )}
-
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium text-slate-900">{item.title}</span>
-                      <Badge tone={meta.tone}>{meta.label}</Badge>
-                      {item.confidence === "low" && <Badge tone="red">check me</Badge>}
-                    </div>
-                    <div className="mt-0.5 flex flex-wrap items-center gap-3 text-xs text-slate-500">
-                      {item.vendor && <span>{item.vendor}</span>}
-                      {item.amount != null && <span className="font-medium text-slate-700">{formatCurrency(item.amount)}</span>}
-                      {item.item_date && <span>{formatDate(item.item_date)}</span>}
-                      <span>Added {formatDate(item.created_at)}</span>
-                    </div>
-                    {item.summary && (
-                      <details className="mt-1.5">
-                        <summary className="cursor-pointer text-xs font-medium text-brand">
-                          {item.kind === "note" ? "Read transcription" : "Details"}
-                        </summary>
-                        <p className="mt-1 whitespace-pre-wrap text-sm text-slate-600">{item.summary}</p>
-                      </details>
-                    )}
-
-                    <div className="mt-2.5 flex flex-wrap items-center gap-2">
-                      <Briefcase className="h-3.5 w-3.5 text-slate-400" />
-                      <Select
-                        value={item.job_id ?? ""}
-                        onChange={(e) => refile(item, e.target.value)}
-                        disabled={pending}
-                        className="h-8 w-56 text-xs"
-                      >
-                        <option value="">No job (unfiled)</option>
-                        {jobs.map((j) => (
-                          <option key={j.id} value={j.id}>
-                            {j.job_number} — {j.name}
-                          </option>
-                        ))}
-                      </Select>
-                      {item.kind === "receipt" && item.job_id && item.amount != null && (
-                        billed.has(item.id) ? (
-                          <span className="flex items-center gap-1 text-xs font-medium text-green-600">
-                            <Check className="h-3.5 w-3.5" /> Added as bill
-                          </span>
-                        ) : (
-                          <Button size="sm" variant="outline" onClick={() => addAsBill(item)} disabled={pending}>
-                            <Receipt className="h-3.5 w-3.5" /> Add as job bill
-                          </Button>
-                        )
-                      )}
-                      <button
-                        onClick={() => remove(item)}
-                        disabled={pending}
-                        className="ml-auto rounded-md p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                        title="Delete"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </Card>
-            );
-          })}
+          {shown.map((item) => (
+            <ItemCard key={item.id} item={item} />
+          ))}
         </ul>
       )}
 

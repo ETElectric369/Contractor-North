@@ -23,7 +23,7 @@ export default async function BillsPage() {
       .order("created_at", { ascending: false }),
     supabase
       .from("bills")
-      .select("id, supplier, bill_number, amount, status, bill_date, job_id, jobs(job_number, name)")
+      .select("id, supplier, bill_number, amount, status, bill_date, job_id, category, jobs(job_number, name)")
       .order("created_at", { ascending: false }),
     supabase
       .from("documents")

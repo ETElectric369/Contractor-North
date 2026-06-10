@@ -12,11 +12,14 @@ export function Sidebar({
   branding,
   lang,
   role,
+  badges,
 }: {
   onNavigate?: () => void;
   branding?: { name: string | null; logo: string | null };
   lang?: string;
   role?: string;
+  /** href → count, shown as an attention chip (e.g. Organize My needs-review). */
+  badges?: Record<string, number>;
 }) {
   const pathname = usePathname();
   const name = branding?.name || "Contractor North";
@@ -79,6 +82,11 @@ export function Sidebar({
                         )}
                       />
                       <span className="flex-1">{t(item.label)}</span>
+                      {(badges?.[item.href] ?? 0) > 0 && (
+                        <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                          {badges![item.href]}
+                        </span>
+                      )}
                       {item.comingSoon && (
                         <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-400">
                           soon
