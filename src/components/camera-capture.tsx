@@ -26,7 +26,13 @@ export function CameraCapture({
     (async () => {
       try {
         const s = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment" },
+          // Ask for a high-res stream — without this many devices hand back
+          // 640×480 and receipt text becomes unreadable.
+          video: {
+            facingMode: "environment",
+            width: { ideal: 2560 },
+            height: { ideal: 1440 },
+          },
           audio: false,
         });
         if (cancelled) {
@@ -49,6 +55,8 @@ export function CameraCapture({
     };
   }, []);
 
+  const [encoding, setEncoding] = useState(false);
+
   function snap() {
     const v = videoRef.current;
     if (!v) return;
@@ -57,9 +65,12 @@ export function CameraCapture({
     canvas.height = v.videoHeight;
     canvas.getContext("2d")?.drawImage(v, 0, 0);
     setShot(canvas.toDataURL("image/jpeg", 0.9));
+    fileRef.current = null;
+    setEncoding(true);
     canvas.toBlob(
       (blob) => {
         if (blob) fileRef.current = new File([blob], `photo-${Date.now()}.jpg`, { type: "image/jpeg" });
+        setEncoding(false);
       },
       "image/jpeg",
       0.9,
@@ -67,10 +78,10 @@ export function CameraCapture({
   }
 
   function usePhoto() {
-    if (fileRef.current) {
-      streamRef.current?.getTracks().forEach((t) => t.stop());
-      onCapture(fileRef.current);
-    }
+    // toBlob is async — never let "Use photo" silently no-op mid-encode.
+    if (!fileRef.current) return;
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    onCapture(fileRef.current);
   }
 
   return (
@@ -113,8 +124,12 @@ export function CameraCapture({
               <button onClick={() => setShot(null)} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700">
                 <RotateCcw className="h-4 w-4" /> Retake
               </button>
-              <button onClick={usePhoto} className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white">
-                <Check className="h-4 w-4" /> Use photo
+              <button
+                onClick={usePhoto}
+                disabled={encoding}
+                className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+              >
+                {encoding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Use photo
               </button>
             </>
           ) : (

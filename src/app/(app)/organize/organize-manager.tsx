@@ -24,6 +24,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { CameraCapture } from "@/components/camera-capture";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { prepareImageForUpload } from "@/lib/image-prep";
 import { analyzeAndFile, fileItem, deleteOrganizedItem } from "./actions";
 import { OVERHEAD_CATEGORIES } from "./constants";
 
@@ -74,6 +75,17 @@ export function OrganizeManager({
   const [filter, setFilter] = useState<string>("all");
   const [showCamera, setShowCamera] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const captureRef = useRef<HTMLInputElement>(null);
+
+  // Phones get the REAL camera app (tap-to-focus, flash, HDR) via a
+  // capture-input; the in-browser webcam modal is for desktops only.
+  function takePhoto() {
+    const mobile =
+      typeof navigator !== "undefined" &&
+      (navigator.maxTouchPoints > 1 || /iPhone|iPad|Android/i.test(navigator.userAgent));
+    if (mobile) captureRef.current?.click();
+    else setShowCamera(true);
+  }
 
   const busy = uploads.some((u) => u.status === "uploading" || u.status === "reading");
   const tray = items.filter((i) => i.status === "needs_review");
@@ -83,13 +95,15 @@ export function OrganizeManager({
     if (!files.length) return;
     const supabase = createClient();
 
-    for (const file of files) {
-      const label = file.name;
+    for (const raw of files) {
+      const label = raw.name;
       setUploads((u) => [...u, { name: label, status: "uploading" }]);
       const setState = (status: UploadState["status"], message?: string) =>
         setUploads((u) => u.map((x) => (x.name === label ? { ...x, status, message } : x)));
 
       try {
+        // Normalize: HEIC → JPEG, giant photos downscaled. PDFs pass through.
+        const file = await prepareImageForUpload(raw);
         if (file.size > 8 * 1024 * 1024) throw new Error("Over 8 MB — try a smaller photo.");
         const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
         const path = `${orgId}/organize/${Date.now()}-${safe}`;
@@ -121,6 +135,7 @@ export function OrganizeManager({
   function onFiles(e: React.ChangeEvent<HTMLInputElement>) {
     processFiles(Array.from(e.target.files ?? []));
     if (fileRef.current) fileRef.current.value = "";
+    if (captureRef.current) captureRef.current.value = "";
   }
 
   function file(item: OrganizedItemRow, dest: Parameters<typeof fileItem>[1]) {
@@ -273,7 +288,7 @@ export function OrganizeManager({
             </p>
           </div>
           <div className="flex flex-wrap justify-center gap-2">
-            <Button onClick={() => setShowCamera(true)} disabled={busy}>
+            <Button onClick={takePhoto} disabled={busy}>
               <Camera className="h-4 w-4" /> Take photo
             </Button>
             <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={busy}>
@@ -283,7 +298,15 @@ export function OrganizeManager({
               ref={fileRef}
               type="file"
               multiple
-              accept="image/jpeg,image/png,image/webp,image/gif,application/pdf"
+              accept="image/*,application/pdf"
+              className="hidden"
+              onChange={onFiles}
+            />
+            <input
+              ref={captureRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
               className="hidden"
               onChange={onFiles}
             />
