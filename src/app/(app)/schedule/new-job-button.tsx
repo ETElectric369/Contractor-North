@@ -25,7 +25,14 @@ export function NewJobButton({
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const [newCust, setNewCust] = useState(false);
-  const [startDate, setStartDate] = useState("");
+  const [name, setName] = useState("");
+  // "Auto pick a date for you" — default to today, still changeable.
+  const today = (() => {
+    const d = new Date();
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  })();
+  const [startDate, setStartDate] = useState(today);
   const router = useRouter();
 
   function onSubmit(formData: FormData) {
@@ -58,7 +65,14 @@ export function NewJobButton({
           )}
           <div>
             <Label htmlFor="name">Job name *</Label>
-            <Input id="name" name="name" required placeholder="e.g. Smith panel upgrade" />
+            <Input
+              id="name"
+              name="name"
+              required
+              placeholder="e.g. Smith panel upgrade"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -109,7 +123,14 @@ export function NewJobButton({
           )}
           <div>
             <Label htmlFor="address">Site address</Label>
-            <AddressAutocomplete id="address" name="address" />
+            <AddressAutocomplete
+              id="address"
+              name="address"
+              onResolved={(p) => {
+                // Auto-fill the job name with "number + street" when empty.
+                if (!name.trim() && p.line1) setName(p.line1);
+              }}
+            />
           </div>
           <div>
             <Label htmlFor="scheduled_start">Scheduled date</Label>

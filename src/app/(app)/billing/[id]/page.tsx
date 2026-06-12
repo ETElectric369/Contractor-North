@@ -105,7 +105,7 @@ export default async function InvoicePage({
             href={`/print/invoice/${inv.id}`}
             className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
           >
-            <Printer className="h-4 w-4" /> Print / PDF
+            <Printer className="h-4 w-4" /> Preview / Print
           </Link>
           {qboConfigured() && <QboInvoiceButton id={inv.id} />}
         </div>

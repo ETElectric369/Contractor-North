@@ -1,8 +1,9 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Zap } from "lucide-react";
+import { Zap, ChevronDown } from "lucide-react";
 import { NAV } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 import { translator } from "@/lib/i18n";
@@ -26,6 +27,25 @@ export function Sidebar({
   const logo = branding?.logo;
   const t = translator(lang);
   const isStaff = role === "owner" || role === "admin" || role === "office";
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    try {
+      setCollapsed(JSON.parse(localStorage.getItem("nav-collapsed") ?? "{}"));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  function toggleSection(title: string) {
+    setCollapsed((c) => {
+      const next = { ...c, [title]: !c[title] };
+      try {
+        localStorage.setItem("nav-collapsed", JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }
 
   return (
     <aside className="flex h-full w-64 flex-col border-r border-slate-200 bg-white">
@@ -53,10 +73,16 @@ export function Sidebar({
       <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-4">
         {NAV.map((section) => (
           <div key={section.title}>
-            <div className="px-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+            <button
+              onClick={() => toggleSection(section.title)}
+              className="flex w-full items-center justify-between px-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400 hover:text-slate-600"
+            >
               {t(section.title)}
-            </div>
-            <ul className="space-y-0.5">
+              <ChevronDown
+                className={cn("h-3.5 w-3.5 transition-transform", collapsed[section.title] && "-rotate-90")}
+              />
+            </button>
+            <ul className={cn("space-y-0.5", collapsed[section.title] && "hidden")}>
               {section.items
                 .filter((item) => !item.staffOnly || isStaff)
                 .map((item) => {

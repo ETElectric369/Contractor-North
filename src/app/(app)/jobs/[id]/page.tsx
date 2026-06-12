@@ -239,7 +239,7 @@ export default async function JobDetailPage({
       content: (
         <Card>
           <CardContent className="py-5">
-            <JobNotes jobId={j.id} notes={j.notes} />
+            <JobNotes jobId={j.id} orgId={j.org_id} notes={j.notes} />
           </CardContent>
         </Card>
       ),
