@@ -21,6 +21,7 @@ import {
   Calculator,
   Stamp,
   Wand2,
+  Wrench,
   ShieldCheck,
   HardHat,
   IdCard,
@@ -69,6 +70,7 @@ export const NAV: NavSection[] = [
     items: [
       { label: "Jobs", href: "/jobs", icon: Briefcase },
       { label: "Scheduler", href: "/schedule", icon: CalendarDays },
+      { label: "Calendar", href: "/calendar", icon: CalendarClock },
       { label: "Map", href: "/map", icon: MapPin },
       { label: "Work Orders", href: "/work-orders", icon: ClipboardList },
       { label: "Timeclock", href: "/timeclock", icon: Clock },
@@ -102,6 +104,7 @@ export const NAV: NavSection[] = [
   {
     title: "System",
     items: [
+      { label: "Tools", href: "/tools", icon: Wrench },
       { label: "Settings", href: "/settings", icon: Settings },
       { label: "Plans & LiDAR", href: "/plans", icon: ScanLine, comingSoon: true },
     ],

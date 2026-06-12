@@ -19,6 +19,7 @@ import { TaxRatesManager } from "./tax-rates-manager";
 import { SplashSettings } from "./splash-settings";
 import { AiStatus } from "./ai-status";
 import { QuotePlaybookForm } from "./quote-playbook-form";
+import { MemberRate } from "./member-rate";
 import { translator } from "@/lib/i18n";
 import { billingEnabled } from "@/lib/stripe";
 import { qboConfigured } from "@/lib/quickbooks";
@@ -131,6 +132,7 @@ export default async function SettingsPage({
                   <div className="text-sm font-medium text-slate-900">{m.full_name ?? "—"}</div>
                   <div className="text-xs text-slate-400">{m.email}</div>
                 </div>
+                {isAdmin && <MemberRate id={m.id} rate={m.hourly_rate} />}
                 {!m.active && <Badge tone="red">inactive</Badge>}
                 <Badge tone={roleTone[m.role]}>{m.role}</Badge>
               </li>

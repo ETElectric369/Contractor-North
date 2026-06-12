@@ -73,6 +73,60 @@ export async function updateCustomer(
   return { ok: true };
 }
 
+export interface CustomerImportRow {
+  name: string;
+  company_name?: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  notes?: string;
+}
+
+/** Bulk-import customers from a CSV (skips rows with no name; dedupes on
+ *  exact name+phone already present). */
+export async function bulkImportCustomers(rows: CustomerImportRow[]): Promise<ActionResult & { imported?: number; skipped?: number }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  const clean = rows
+    .map((r) => ({
+      name: String(r.name ?? "").trim(),
+      company_name: orNull(String(r.company_name ?? "")),
+      email: orNull(String(r.email ?? "")),
+      phone: orNull(formatPhone(String(r.phone ?? ""))),
+      address: orNull(String(r.address ?? "")),
+      city: orNull(titleCase(String(r.city ?? ""))),
+      state: orNull(formatState(String(r.state ?? ""))),
+      zip: orNull(formatZip(String(r.zip ?? ""))),
+      notes: orNull(String(r.notes ?? "")),
+      type: "residential",
+      status: "active",
+      created_by: user.id,
+    }))
+    .filter((r) => r.name);
+  if (!clean.length) return { ok: false, error: "No rows with a name to import." };
+  if (clean.length > 2000) return { ok: false, error: "Max 2,000 rows per import." };
+
+  // Skip exact duplicates already in the book.
+  const { data: existing } = await supabase.from("customers").select("name, phone");
+  const seen = new Set((existing ?? []).map((c: any) => `${(c.name ?? "").toLowerCase()}|${c.phone ?? ""}`));
+  const fresh = clean.filter((r) => !seen.has(`${r.name.toLowerCase()}|${r.phone ?? ""}`));
+  const skipped = clean.length - fresh.length;
+
+  if (fresh.length) {
+    const { error } = await supabase.from("customers").insert(fresh);
+    if (error) return { ok: false, error: error.message };
+  }
+  revalidatePath("/crm");
+  return { ok: true, imported: fresh.length, skipped };
+}
+
 /** Delete a customer — blocked while jobs/quotes/invoices still reference it,
  *  so history can never disappear by accident. */
 export async function deleteCustomer(id: string): Promise<ActionResult> {

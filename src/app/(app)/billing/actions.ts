@@ -226,6 +226,164 @@ export async function addInvoiceItem(
   return { ok: true };
 }
 
+/** Next sort_order after the invoice's current items. */
+async function nextSortOrder(supabase: any, invoiceId: string): Promise<number> {
+  const { data } = await supabase
+    .from("invoice_items")
+    .select("sort_order")
+    .eq("invoice_id", invoiceId)
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return (data?.sort_order ?? -1) + 1;
+}
+
+/** Import the linked job's quote line items into this invoice (appends). */
+export async function importQuoteItemsIntoInvoice(invoiceId: string): Promise<Result> {
+  const supabase = await createClient();
+  const { data: inv } = await supabase
+    .from("invoices")
+    .select("id, job_id, quote_id")
+    .eq("id", invoiceId)
+    .maybeSingle();
+  if (!inv) return { ok: false, error: "Invoice not found." };
+
+  let quoteId = inv.quote_id;
+  if (!quoteId && inv.job_id) {
+    const { data: q } = await supabase
+      .from("quotes")
+      .select("id")
+      .eq("job_id", inv.job_id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    quoteId = q?.id ?? null;
+  }
+  if (!quoteId) return { ok: false, error: "No quote found on this invoice's job." };
+
+  const { data: items } = await supabase
+    .from("quote_line_items")
+    .select("description, quantity, unit, unit_price")
+    .eq("quote_id", quoteId)
+    .order("sort_order");
+  if (!items?.length) return { ok: false, error: "The quote has no line items." };
+
+  let sort = await nextSortOrder(supabase, invoiceId);
+  const { error } = await supabase.from("invoice_items").insert(
+    items.map((it: any) => ({
+      invoice_id: invoiceId,
+      description: it.description,
+      quantity: it.quantity,
+      unit: it.unit,
+      unit_price: it.unit_price,
+      sort_order: sort++,
+    })),
+  );
+  if (error) return { ok: false, error: error.message };
+  await recalcInvoice(supabase, invoiceId);
+  revalidatePath(`/billing/${invoiceId}`);
+  return { ok: true };
+}
+
+/** Import labor from the job's closed time entries: one line per person,
+ *  hours × their hourly rate (falls back to the org default labor rate). */
+export async function importLaborIntoInvoice(invoiceId: string): Promise<Result> {
+  const supabase = await createClient();
+  const { data: inv } = await supabase
+    .from("invoices")
+    .select("id, job_id")
+    .eq("id", invoiceId)
+    .maybeSingle();
+  if (!inv?.job_id) return { ok: false, error: "This invoice isn't linked to a job." };
+
+  const [{ data: entries }, { data: org }] = await Promise.all([
+    supabase
+      .from("time_entries")
+      .select("clock_in, clock_out, lunch_minutes, status, profiles(id, full_name, hourly_rate)")
+      .eq("job_id", inv.job_id)
+      .eq("status", "closed"),
+    supabase.from("organizations").select("settings").limit(1).maybeSingle(),
+  ]);
+  if (!entries?.length) return { ok: false, error: "No closed time entries on this job yet." };
+
+  const defaultRate = Number(((org as any)?.settings ?? {}).default_labor_rate ?? 0);
+  const perPerson = new Map<string, { name: string; rate: number; hours: number }>();
+  for (const e of entries as any[]) {
+    if (!e.clock_out) continue;
+    const hrs =
+      (new Date(e.clock_out).getTime() - new Date(e.clock_in).getTime()) / 3_600_000 -
+      (e.lunch_minutes ?? 0) / 60;
+    if (hrs <= 0) continue;
+    const key = e.profiles?.id ?? "unknown";
+    const cur = perPerson.get(key) ?? {
+      name: e.profiles?.full_name ?? "Crew",
+      rate: Number(e.profiles?.hourly_rate ?? 0) || defaultRate,
+      hours: 0,
+    };
+    cur.hours += hrs;
+    perPerson.set(key, cur);
+  }
+  if (perPerson.size === 0) return { ok: false, error: "No billable hours found." };
+
+  let sort = await nextSortOrder(supabase, invoiceId);
+  const rows = [...perPerson.values()].map((p) => ({
+    invoice_id: invoiceId,
+    description: `Labor — ${p.name}`,
+    quantity: Math.round(p.hours * 4) / 4, // quarter-hour rounding
+    unit: "hr",
+    unit_price: p.rate,
+    sort_order: sort++,
+  }));
+  const { error } = await supabase.from("invoice_items").insert(rows);
+  if (error) return { ok: false, error: error.message };
+  await recalcInvoice(supabase, invoiceId);
+  revalidatePath(`/billing/${invoiceId}`);
+  return { ok: true };
+}
+
+/** Import materials from the job's costs: purchase orders + supplier bills
+ *  (at cost — adjust pricing on the lines afterwards). */
+export async function importCostsIntoInvoice(invoiceId: string): Promise<Result> {
+  const supabase = await createClient();
+  const { data: inv } = await supabase
+    .from("invoices")
+    .select("id, job_id")
+    .eq("id", invoiceId)
+    .maybeSingle();
+  if (!inv?.job_id) return { ok: false, error: "This invoice isn't linked to a job." };
+
+  const [{ data: pos }, { data: bills }] = await Promise.all([
+    supabase.from("purchase_orders").select("po_number, vendor, total").eq("job_id", inv.job_id),
+    supabase.from("bills").select("supplier, bill_number, amount").eq("job_id", inv.job_id),
+  ]);
+
+  const rows: { description: string; unit_price: number }[] = [];
+  for (const p of pos ?? []) {
+    if (Number(p.total) > 0) rows.push({ description: `Materials — ${p.vendor} (PO ${p.po_number})`, unit_price: Number(p.total) });
+  }
+  for (const b of bills ?? []) {
+    if (Number(b.amount) > 0)
+      rows.push({ description: `Materials — ${b.supplier}${b.bill_number ? ` (bill #${b.bill_number})` : ""}`, unit_price: Number(b.amount) });
+  }
+  if (!rows.length) return { ok: false, error: "No purchase orders or bills on this job yet." };
+
+  let sort = await nextSortOrder(supabase, invoiceId);
+  const { error } = await supabase.from("invoice_items").insert(
+    rows.map((r) => ({
+      invoice_id: invoiceId,
+      description: r.description,
+      quantity: 1,
+      unit: "lot",
+      unit_price: r.unit_price,
+      sort_order: sort++,
+    })),
+  );
+  if (error) return { ok: false, error: error.message };
+  await recalcInvoice(supabase, invoiceId);
+  revalidatePath(`/billing/${invoiceId}`);
+  return { ok: true };
+}
+
 export async function updateInvoiceItem(
   itemId: string,
   invoiceId: string,

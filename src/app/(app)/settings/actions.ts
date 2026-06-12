@@ -188,6 +188,25 @@ export async function deleteInvitation(id: string): Promise<Result> {
   return { ok: true };
 }
 
+/** Owner/admin sets a team member's billable hourly rate. */
+export async function updateMemberRate(
+  id: string,
+  hourlyRate: number | null,
+): Promise<Result> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+  const { data: me } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
+  if (!me || !["owner", "admin"].includes(me.role)) return { ok: false, error: "Not allowed." };
+
+  const { error } = await supabase.from("profiles").update({ hourly_rate: hourlyRate }).eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/settings");
+  return { ok: true };
+}
+
 /** Merge a partial settings patch into organizations.settings (JSONB). */
 export async function updateOrgSettings(
   patch: Record<string, unknown>,

@@ -22,6 +22,7 @@ import { JobAddTimeEntry } from "./job-add-time";
 import { JobStatusControl } from "./job-status-control";
 import { JobEditButton } from "./job-edit-button";
 import { JobScheduleControl } from "./job-schedule-control";
+import { FinishJobButton } from "./finish-job-button";
 import { NewWorkOrderButton } from "../../work-orders/new-wo-button";
 import { NewPoButton } from "../../purchasing/new-po-button";
 import { ConvertButton } from "@/components/convert-button";
@@ -465,6 +466,9 @@ export default async function JobDetailPage({
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {j.status !== "complete" && j.status !== "invoiced" && j.status !== "cancelled" && (
+            <FinishJobButton jobId={j.id} hasQuote={(quotes ?? []).length > 0} />
+          )}
           <JobEditButton job={j} customers={allCustomers ?? []} techs={techs ?? []} />
           <ConvertButton
             label="Create invoice"

@@ -2,7 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { createInvoiceFromQuote, createBlankInvoice } from "../billing/actions";
+import {
+  createInvoiceFromQuote,
+  createBlankInvoice,
+  importLaborIntoInvoice,
+  importCostsIntoInvoice,
+} from "../billing/actions";
 
 export type Result = { ok: boolean; error?: string };
 
@@ -35,6 +40,34 @@ export async function createInvoiceForJob(
     title: job?.name ?? "",
     tax_rate: 0,
   });
+}
+
+/** Finish a job: mark complete and auto-build a draft invoice — from the
+ *  job's quote when there is one, optionally pulling labor from timecards
+ *  and materials from POs/bills. Returns the invoice id for review. */
+export async function finishJob(
+  jobId: string,
+  opts: { importLabor: boolean; importCosts: boolean },
+): Promise<{ ok: boolean; error?: string; id?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  const inv = await createInvoiceForJob(jobId);
+  if (!inv.ok || !inv.id) return { ok: false, error: inv.error ?? "Could not create the invoice." };
+
+  // Best-effort imports — "nothing to import" shouldn't block finishing.
+  if (opts.importLabor) await importLaborIntoInvoice(inv.id);
+  if (opts.importCosts) await importCostsIntoInvoice(inv.id);
+
+  const { error } = await supabase.from("jobs").update({ status: "complete" }).eq("id", jobId);
+  if (error) return { ok: false, error: error.message };
+
+  revalidatePath(`/jobs/${jobId}`);
+  revalidatePath("/jobs");
+  return { ok: true, id: inv.id };
 }
 
 /** Delete a job after warning about linked records (quotes/invoices keep

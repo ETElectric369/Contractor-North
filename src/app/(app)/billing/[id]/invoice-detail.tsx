@@ -16,6 +16,9 @@ import {
   setInvoiceStatus,
   setInvoiceTaxRate,
   recordPayment,
+  importQuoteItemsIntoInvoice,
+  importLaborIntoInvoice,
+  importCostsIntoInvoice,
 } from "../actions";
 
 interface PriceItemLite { id: string; code: string | null; description: string; unit: string; buy_price: number; markup_pct: number; }
@@ -55,6 +58,18 @@ export function InvoiceDetail({
   // payment state
   const [payAmount, setPayAmount] = useState(balance > 0 ? balance : 0);
   const [payMethod, setPayMethod] = useState(paymentMethods[0] ?? "Check");
+
+  // import state
+  const [importMsg, setImportMsg] = useState<string | null>(null);
+  function runImport(fn: (id: string) => Promise<{ ok: boolean; error?: string }>, label: string) {
+    setImportMsg(null);
+    start(async () => {
+      const res = await fn(invoice.id);
+      setImportMsg(res.ok ? `${label} imported.` : res.error ?? "Import failed.");
+      setTimeout(() => setImportMsg(null), 5000);
+      refresh();
+    });
+  }
 
   // edit-item state
   const [editId, setEditId] = useState<string | null>(null);
@@ -190,6 +205,26 @@ export function InvoiceDetail({
                 ))}
               </ul>
             )}
+          </div>
+        )}
+
+        {(invoice.job_id || (invoice as any).quote_id) && (
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50/60 px-3 py-2.5">
+            <span className="text-xs font-medium text-slate-500">Import:</span>
+            <Button size="sm" variant="outline" onClick={() => runImport(importQuoteItemsIntoInvoice, "Quote items")} disabled={pending}>
+              From quote
+            </Button>
+            {invoice.job_id && (
+              <>
+                <Button size="sm" variant="outline" onClick={() => runImport(importLaborIntoInvoice, "Labor")} disabled={pending}>
+                  Labor from timecards
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => runImport(importCostsIntoInvoice, "Materials")} disabled={pending}>
+                  Materials from costs
+                </Button>
+              </>
+            )}
+            {importMsg && <span className="text-xs text-slate-500">{importMsg}</span>}
           </div>
         )}
 
