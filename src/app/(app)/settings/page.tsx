@@ -109,6 +109,7 @@ export default async function SettingsPage({
         <div className="flex flex-wrap items-center gap-5">
           <AvatarUpload
             userId={profile?.id ?? ""}
+            orgId={profile?.org_id ?? ""}
             name={profile?.full_name ?? null}
             current={profile?.avatar_url ?? null}
           />

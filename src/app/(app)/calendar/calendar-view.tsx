@@ -102,7 +102,7 @@ export function CalendarView({ entries, jobs }: { entries: CalEntry[]; jobs: Cal
       {view === "month" && (
         <MonthGrid anchor={anchor} byDay={byDay} onPick={(d) => { setAnchor(d); setView("day"); }} />
       )}
-      {view === "week" && <WeekList anchor={anchor} byDay={byDay} onPick={(d) => { setAnchor(d); setView("day"); }} />}
+      {view === "week" && <WeekGrid anchor={anchor} byDay={byDay} onPick={(d) => { setAnchor(d); setView("day"); }} />}
       {view === "day" && <DayDetail date={anchor} data={byDay.get(dayKey(anchor))} />}
     </div>
   );
@@ -185,7 +185,12 @@ function MonthGrid({
   );
 }
 
-function WeekList({
+const GRID_START = 6; // 6 AM
+const GRID_END = 20; // 8 PM
+const ROW_PX = 48;
+
+/** Vertical week: hours down the left, days across the top, blocks placed by time. */
+function WeekGrid({
   anchor,
   byDay,
   onPick,
@@ -202,46 +207,90 @@ function WeekList({
     days.push(d);
   }
   const todayK = dayKey(new Date());
+  const hours = Array.from({ length: GRID_END - GRID_START }, (_, i) => GRID_START + i);
+  const colH = hours.length * ROW_PX;
+
+  const topOf = (iso: string) => {
+    const d = new Date(iso);
+    const h = d.getHours() + d.getMinutes() / 60;
+    return Math.max(0, Math.min(colH - 24, (h - GRID_START) * ROW_PX));
+  };
+  const heightOf = (startIso: string, endIso: string | null, fallbackHrs: number) => {
+    const dur = endIso
+      ? (new Date(endIso).getTime() - new Date(startIso).getTime()) / 3_600_000
+      : fallbackHrs;
+    return Math.max(24, Math.min(colH, dur * ROW_PX));
+  };
 
   return (
-    <div className="space-y-2">
-      {days.map((d) => {
-        const k = dayKey(d);
-        const data = byDay.get(k);
-        const totalHrs = data ? data.entries.reduce((s, e) => s + hrs(e), 0) : 0;
-        return (
-          <Card key={k} className={k === todayK ? "border-brand/40" : undefined}>
-            <div onClick={() => onPick(d)} className="w-full cursor-pointer p-3 text-left hover:bg-slate-50">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-semibold text-slate-900">
-                  {d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}
-                </span>
-                <span className="text-xs text-slate-500">
-                  {data?.jobs.length ? `${data.jobs.length} job${data.jobs.length > 1 ? "s" : ""}` : ""}
-                  {data?.jobs.length && totalHrs > 0 ? " · " : ""}
-                  {totalHrs > 0 ? `${totalHrs.toFixed(1)} hrs logged` : ""}
-                  {!data?.jobs.length && totalHrs === 0 ? "—" : ""}
-                </span>
-              </div>
-              {(data?.jobs.length ?? 0) > 0 && (
-                <div className="mt-1 flex flex-wrap gap-1">
-                  {data!.jobs.map((j) => (
-                    <Link
-                      key={j.id}
-                      href={`/jobs/${j.id}`}
-                      onClick={(e) => e.stopPropagation()}
-                      className="rounded bg-blue-50 px-1.5 py-0.5 text-[11px] text-blue-700 hover:bg-blue-100"
+    <Card className="overflow-hidden">
+      <div className="overflow-x-auto">
+        <div className="min-w-[760px]">
+          {/* Day headers */}
+          <div className="grid border-b border-slate-100 bg-slate-50" style={{ gridTemplateColumns: `48px repeat(7, 1fr)` }}>
+            <div />
+            {days.map((d) => {
+              const k = dayKey(d);
+              return (
+                <button
+                  key={k}
+                  onClick={() => onPick(d)}
+                  className={`py-2 text-center text-xs font-semibold hover:bg-slate-100 ${k === todayK ? "text-brand" : "text-slate-500"}`}
+                >
+                  {d.toLocaleDateString(undefined, { weekday: "short" })}{" "}
+                  <span className={k === todayK ? "rounded-full bg-brand px-1.5 py-0.5 text-white" : ""}>{d.getDate()}</span>
+                </button>
+              );
+            })}
+          </div>
+          {/* Time grid */}
+          <div className="grid" style={{ gridTemplateColumns: `48px repeat(7, 1fr)` }}>
+            {/* Hour labels */}
+            <div className="relative" style={{ height: colH }}>
+              {hours.map((h, i) => (
+                <div key={h} className="absolute right-1.5 -translate-y-1/2 text-[10px] text-slate-400" style={{ top: i * ROW_PX }}>
+                  {h === 12 ? "12 PM" : h > 12 ? `${h - 12} PM` : `${h} AM`}
+                </div>
+              ))}
+            </div>
+            {days.map((d) => {
+              const k = dayKey(d);
+              const data = byDay.get(k);
+              return (
+                <div key={k} className={`relative border-l border-slate-100 ${k === todayK ? "bg-brand/[0.03]" : ""}`} style={{ height: colH }}>
+                  {hours.map((h, i) => (
+                    <div key={h} className="absolute inset-x-0 border-t border-slate-100" style={{ top: i * ROW_PX }} />
+                  ))}
+                  {data?.jobs.map((j) =>
+                    j.scheduled_start ? (
+                      <Link
+                        key={j.id}
+                        href={`/jobs/${j.id}`}
+                        className="absolute inset-x-0.5 z-10 overflow-hidden rounded border border-blue-200 bg-blue-50 px-1 py-0.5 text-[10px] leading-tight text-blue-800 hover:bg-blue-100"
+                        style={{ top: topOf(j.scheduled_start), height: heightOf(j.scheduled_start, j.scheduled_end, 8) }}
+                        title={`${j.job_number} — ${j.name}`}
+                      >
+                        <span className="font-semibold">{j.name}</span>
+                      </Link>
+                    ) : null,
+                  )}
+                  {data?.entries.map((e) => (
+                    <div
+                      key={e.id}
+                      className="absolute right-0.5 z-10 w-[42%] overflow-hidden rounded border border-green-200 bg-green-50 px-1 py-0.5 text-[9px] leading-tight text-green-800"
+                      style={{ top: topOf(e.clock_in), height: heightOf(e.clock_in, e.clock_out, 1) }}
+                      title={`${e.profiles?.full_name ?? "Crew"} ${fmtTime(e.clock_in)}${e.clock_out ? `–${fmtTime(e.clock_out)}` : ""}`}
                     >
-                      {j.job_number} {j.name}
-                    </Link>
+                      {e.profiles?.full_name?.split(" ")[0] ?? "⏱"}
+                    </div>
                   ))}
                 </div>
-              )}
-            </div>
-          </Card>
-        );
-      })}
-    </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </Card>
   );
 }
 

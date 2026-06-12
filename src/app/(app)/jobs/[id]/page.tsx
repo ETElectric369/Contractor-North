@@ -23,6 +23,7 @@ import { JobStatusControl } from "./job-status-control";
 import { JobEditButton } from "./job-edit-button";
 import { JobScheduleControl } from "./job-schedule-control";
 import { FinishJobButton } from "./finish-job-button";
+import { ProposeDatesButton } from "./propose-dates-button";
 import { NewWorkOrderButton } from "../../work-orders/new-wo-button";
 import { NewPoButton } from "../../purchasing/new-po-button";
 import { ConvertButton } from "@/components/convert-button";
@@ -99,6 +100,13 @@ export default async function JobDetailPage({
       .eq("job_id", id)
       .order("created_at", { ascending: false }),
   ]);
+
+  const { data: pendingProposal } = await supabase
+    .from("schedule_proposals")
+    .select("id, token, dates")
+    .eq("job_id", id)
+    .eq("status", "pending")
+    .maybeSingle();
 
   // Extra data for the per-tab "Add" buttons.
   const {
@@ -467,7 +475,14 @@ export default async function JobDetailPage({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {j.status !== "complete" && j.status !== "invoiced" && j.status !== "cancelled" && (
-            <FinishJobButton jobId={j.id} hasQuote={(quotes ?? []).length > 0} />
+            <>
+              <ProposeDatesButton
+                jobId={j.id}
+                customerPhone={j.customers?.phone}
+                pending={(pendingProposal as any) ?? null}
+              />
+              <FinishJobButton jobId={j.id} hasQuote={(quotes ?? []).length > 0} />
+            </>
           )}
           <JobEditButton job={j} customers={allCustomers ?? []} techs={techs ?? []} />
           <ConvertButton

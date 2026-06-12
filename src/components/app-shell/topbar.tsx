@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { Menu, X, LogOut, ArrowLeft, ArrowRight } from "lucide-react";
+import Link from "next/link";
+import { useRouter, usePathname } from "next/navigation";
+import { Menu, X, LogOut, ArrowLeft, ArrowRight, LayoutDashboard, ListTodo, Sparkles, Wand2 } from "lucide-react";
 import { Sidebar } from "./sidebar";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { initials } from "@/lib/utils";
@@ -24,6 +25,7 @@ export function Topbar({
 }) {
   const [open, setOpen] = useState(false);
   const router = useRouter();
+  const pathname = usePathname();
 
   return (
     <>
@@ -52,7 +54,30 @@ export function Topbar({
           <ArrowRight className="h-5 w-5" />
         </button>
 
-        <div className="flex-1" />
+        {/* Big one-tap destinations — always within thumb's reach. */}
+        <nav className="flex flex-1 items-center justify-center gap-1 sm:gap-2">
+          {[
+            { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+            { href: "/tasks", label: "Tasks", icon: ListTodo },
+            { href: "/assistant", label: "Assistant", icon: Sparkles },
+            { href: "/organize", label: "Organize", icon: Wand2 },
+          ].map((d) => {
+            const active = pathname === d.href || pathname.startsWith(d.href + "/");
+            return (
+              <Link
+                key={d.href}
+                href={d.href}
+                className={`flex flex-col items-center gap-0.5 rounded-lg px-2.5 py-1 sm:flex-row sm:gap-1.5 sm:px-3 sm:py-2 ${
+                  active ? "bg-brand-light text-brand-dark" : "text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+                }`}
+                title={d.label}
+              >
+                <d.icon className="h-5 w-5" />
+                <span className="text-[10px] font-medium sm:text-sm">{d.label}</span>
+              </Link>
+            );
+          })}
+        </nav>
 
         <div className="flex items-center gap-3">
           <LanguageSwitcher current={lang} />

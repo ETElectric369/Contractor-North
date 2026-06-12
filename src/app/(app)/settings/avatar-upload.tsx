@@ -12,10 +12,13 @@ import { setAvatarUrl } from "./actions";
 /** Profile picture: tap to pick/snap, auto-resized, stored publicly. */
 export function AvatarUpload({
   userId,
+  orgId,
   name,
   current,
 }: {
   userId: string;
+  /** Storage policy requires paths to live under the org folder. */
+  orgId: string;
   name: string | null;
   current: string | null;
 }) {
@@ -33,7 +36,7 @@ export function AvatarUpload({
     setError(null);
     try {
       const file = await prepareImageForUpload(raw);
-      const path = `avatars/${userId}-${Date.now()}.jpg`;
+      const path = `${orgId}/avatars/${userId}-${Date.now()}.jpg`;
       const supabase = createClient();
       const { error: upErr } = await supabase.storage
         .from("branding")

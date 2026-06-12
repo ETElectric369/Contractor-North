@@ -28,6 +28,33 @@ function parseCSV(text: string): string[][] {
   return rows.filter((r) => r.some((x) => x.trim() !== ""));
 }
 
+/** Parse vCards (iPhone/iCloud contact exports) into import rows. */
+function parseVCF(text: string): CustomerImportRow[] {
+  const cards = text.split(/BEGIN:VCARD/i).slice(1);
+  const unfold = (s: string) => s.replace(/\r?\n[ \t]/g, ""); // RFC line folding
+  return cards
+    .map((raw) => {
+      const lines = unfold(raw).split(/\r?\n/);
+      const get = (prefix: RegExp) => {
+        const l = lines.find((x) => prefix.test(x));
+        return l ? l.slice(l.indexOf(":") + 1).trim() : "";
+      };
+      const name = get(/^FN[:;]/i) || get(/^N[:;]/i).split(";").reverse().filter(Boolean).join(" ");
+      const adr = get(/^ADR[:;]/i).split(";"); // ;;street;city;state;zip;country
+      return {
+        name,
+        company_name: get(/^ORG[:;]/i).replace(/;+$/, ""),
+        phone: get(/^TEL[:;]/i),
+        email: get(/^EMAIL[:;]/i),
+        address: adr[2] ?? "",
+        city: adr[3] ?? "",
+        state: adr[4] ?? "",
+        zip: adr[5] ?? "",
+      };
+    })
+    .filter((r) => r.name);
+}
+
 const FIELDS: { key: keyof CustomerImportRow; label: string; match: RegExp }[] = [
   { key: "name", label: "Name *", match: /^name$|full.?name|contact|first/i },
   { key: "company_name", label: "Company", match: /company|business|organization/i },
@@ -51,13 +78,41 @@ export function ImportCustomersButton() {
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
+  function runVcfImport(rows: CustomerImportRow[]) {
+    start(async () => {
+      const res = await bulkImportCustomers(rows);
+      setMsg(
+        res.ok
+          ? `Imported ${res.imported} contact${res.imported === 1 ? "" : "s"}${res.skipped ? ` (${res.skipped} duplicates skipped)` : ""}.`
+          : res.error ?? "Import failed.",
+      );
+      setOpen(true);
+      router.refresh();
+    });
+  }
+
   function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (fileRef.current) fileRef.current.value = "";
     if (!f) return;
     const reader = new FileReader();
     reader.onload = () => {
-      const rows = parseCSV(String(reader.result ?? ""));
+      const text = String(reader.result ?? "");
+
+      // iPhone "Share Contact" / iCloud exports arrive as vCards.
+      if (/^BEGIN:VCARD/im.test(text) || f.name.toLowerCase().endsWith(".vcf")) {
+        const rows = parseVCF(text);
+        if (!rows.length) {
+          setMsg("No contacts found in that vCard file.");
+          setOpen(true);
+          return;
+        }
+        setHeaders([]);
+        runVcfImport(rows);
+        return;
+      }
+
+      const rows = parseCSV(text);
       if (rows.length < 2) {
         setMsg("That CSV needs a header row plus at least one data row.");
         setOpen(true);
@@ -109,9 +164,9 @@ export function ImportCustomersButton() {
   return (
     <>
       <Button variant="outline" onClick={() => fileRef.current?.click()}>
-        <Upload className="h-4 w-4" /> Import CSV
+        <Upload className="h-4 w-4" /> Import contacts
       </Button>
-      <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden" onChange={onFile} />
+      <input ref={fileRef} type="file" accept=".csv,text/csv,.vcf,text/vcard" className="hidden" onChange={onFile} />
 
       <Modal open={open} onClose={() => setOpen(false)} title="Import customers from CSV">
         <div className="space-y-4">

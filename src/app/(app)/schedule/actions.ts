@@ -80,6 +80,41 @@ export async function setJobAssignee(
   return { ok: true };
 }
 
+/** Offer the customer up to 3 dates; returns the public pick-a-date token. */
+export async function createScheduleProposal(
+  jobId: string,
+  dates: string[],
+): Promise<Result & { token?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  const clean = [...new Set(dates.filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)))].slice(0, 3);
+  if (!clean.length) return { ok: false, error: "Pick at least one date." };
+
+  // One pending proposal per job — replace any existing one.
+  await supabase.from("schedule_proposals").update({ status: "cancelled" }).eq("job_id", jobId).eq("status", "pending");
+
+  const { data, error } = await supabase
+    .from("schedule_proposals")
+    .insert({ job_id: jobId, dates: clean, created_by: user.id })
+    .select("token")
+    .single();
+  if (error) return { ok: false, error: error.message };
+  revalidatePath(`/jobs/${jobId}`);
+  return { ok: true, token: data.token };
+}
+
+export async function cancelScheduleProposal(id: string, jobId: string): Promise<Result> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("schedule_proposals").update({ status: "cancelled" }).eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath(`/jobs/${jobId}`);
+  return { ok: true };
+}
+
 /** Set a job's full schedule window from anywhere (ISO strings or null). */
 export async function setJobSchedule(
   id: string,
