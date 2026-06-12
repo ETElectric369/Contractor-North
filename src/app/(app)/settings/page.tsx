@@ -25,6 +25,7 @@ import { AddEmployeeButton } from "./add-employee-button";
 import { adminConfigured } from "@/lib/supabase/admin";
 import { gcalConfigured } from "@/lib/google-calendar";
 import { GcalCard } from "./gcal-card";
+import QRCode from "qrcode";
 import { translator } from "@/lib/i18n";
 import { billingEnabled } from "@/lib/stripe";
 import { qboConfigured } from "@/lib/quickbooks";
@@ -91,6 +92,14 @@ export default async function SettingsPage({
   const { data: gcalConn } = isAdmin
     ? await supabase.from("calendar_connections").select("id").eq("provider", "google").maybeSingle()
     : { data: null };
+
+  // QR for the public inquiry page (trucks, signs, business cards).
+  const inquiryUrl = process.env.SPLASH_DOMAIN
+    ? `https://${process.env.SPLASH_DOMAIN}`
+    : `${siteUrl || "https://contractor-north.vercel.app"}/inquire/${profile?.org_id}`;
+  const inquiryQr = org
+    ? await QRCode.toDataURL(inquiryUrl, { margin: 1, width: 280, color: { dark: "#0f172a" } })
+    : null;
 
   const profileTab = {
     id: "profile",
@@ -174,6 +183,31 @@ export default async function SettingsPage({
                 <code className="block break-all rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-700">
                   {(siteUrl || "https://contractor-north.vercel.app")}/inquire/{(org as Organization).id}
                 </code>
+                <div className="mt-4 flex flex-wrap items-center gap-4">
+                  {inquiryQr && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={inquiryQr} alt="Inquiry page QR code" className="h-28 w-28 rounded-lg border border-slate-200" />
+                  )}
+                  <div className="space-y-2 text-sm">
+                    <p className="text-slate-500">
+                      The QR code opens the same page — put it on trucks, yard signs, and cards.
+                      {inquiryQr && (
+                        <>
+                          {" "}
+                          <a href={inquiryQr} download="inquiry-qr.png" className="font-medium text-brand hover:underline">
+                            Download PNG
+                          </a>
+                        </>
+                      )}
+                    </p>
+                    <a
+                      href="/print/business-card"
+                      className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
+                    >
+                      Print business cards →
+                    </a>
+                  </div>
+                </div>
               </Section>
               <Section title="Splash page"><SplashSettings settings={settings} /></Section>
             </div>

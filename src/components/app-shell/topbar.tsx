@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Menu, X, LogOut, ArrowLeft } from "lucide-react";
+import { Menu, X, LogOut, ArrowLeft, ArrowRight } from "lucide-react";
 import { Sidebar } from "./sidebar";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { initials } from "@/lib/utils";
@@ -42,6 +42,14 @@ export function Topbar({
           title="Back"
         >
           <ArrowLeft className="h-5 w-5" />
+        </button>
+        <button
+          className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"
+          onClick={() => router.forward()}
+          aria-label="Go forward"
+          title="Forward"
+        >
+          <ArrowRight className="h-5 w-5" />
         </button>
 
         <div className="flex-1" />

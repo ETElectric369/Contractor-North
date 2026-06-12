@@ -458,6 +458,53 @@ export async function recordPayment(input: {
   return { ok: true };
 }
 
+/** Edit a recorded payment (amount / method / note) and recompute the invoice. */
+export async function updatePayment(
+  paymentId: string,
+  invoiceId: string,
+  patch: { amount: number; method: string; note: string },
+): Promise<Result> {
+  const supabase = await createClient();
+  if (!patch.amount || patch.amount <= 0) return { ok: false, error: "Enter a payment amount." };
+  const { error } = await supabase
+    .from("payments")
+    .update({ amount: patch.amount, method: patch.method || "check", note: patch.note || null })
+    .eq("id", paymentId);
+  if (error) return { ok: false, error: error.message };
+  await recalcInvoice(supabase, invoiceId);
+  revalidatePath(`/billing/${invoiceId}`);
+  revalidatePath("/billing");
+  return { ok: true };
+}
+
+/** Remove a recorded payment (typo'd entry etc.) and recompute the invoice. */
+export async function deletePayment(paymentId: string, invoiceId: string): Promise<Result> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("payments").delete().eq("id", paymentId);
+  if (error) return { ok: false, error: error.message };
+  await recalcInvoice(supabase, invoiceId);
+  revalidatePath(`/billing/${invoiceId}`);
+  revalidatePath("/billing");
+  return { ok: true };
+}
+
+/** Delete an invoice — only while no payments are recorded against it
+ *  (paid history must stay; void those instead). */
+export async function deleteInvoice(id: string): Promise<Result> {
+  const supabase = await createClient();
+  const { count } = await supabase
+    .from("payments")
+    .select("id", { count: "exact", head: true })
+    .eq("invoice_id", id);
+  if (count && count > 0) {
+    return { ok: false, error: "This invoice has recorded payments — delete those first or mark the invoice void." };
+  }
+  const { error } = await supabase.from("invoices").delete().eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/billing");
+  return { ok: true };
+}
+
 /** Set the invoice tax rate (percent in → stored as decimal) and recompute. */
 export async function setInvoiceTaxRate(
   invoiceId: string,

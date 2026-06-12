@@ -28,14 +28,39 @@ const CONDUIT_FILL: Record<string, Record<string, number>> = {
   EMT: { '1/2"': 0.122, '3/4"': 0.213, '1"': 0.346, '1-1/4"': 0.598, '1-1/2"': 0.814, '2"': 1.342, '2-1/2"': 2.343, '3"': 3.538, '4"': 5.901 },
 };
 
+/* Ampacity, 75°C copper / aluminum (NEC 310.16). */
+const AMPACITY_CU: Record<string, number> = {
+  "14": 20, "12": 25, "10": 35, "8": 50, "6": 65, "4": 85, "3": 100, "2": 115,
+  "1": 130, "1/0": 150, "2/0": 175, "3/0": 200, "4/0": 230, "250": 255,
+  "300": 285, "350": 310, "500": 380,
+};
+const AMPACITY_AL: Record<string, number> = {
+  "12": 20, "10": 30, "8": 40, "6": 50, "4": 65, "3": 75, "2": 90, "1": 100,
+  "1/0": 120, "2/0": 135, "3/0": 155, "4/0": 180, "250": 205, "300": 230,
+  "350": 250, "500": 310,
+};
+
 const SIZES = Object.keys(CMIL);
 
-function Section({ icon: Icon, title, children }: { icon: any; title: string; children: React.ReactNode }) {
+function Section({
+  icon: Icon,
+  title,
+  formula,
+  children,
+}: {
+  icon: any;
+  title: string;
+  formula?: string;
+  children: React.ReactNode;
+}) {
   return (
     <Card>
-      <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-slate-100 px-5 py-3">
         <Icon className="h-4 w-4 text-brand" />
         <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
+        {formula && (
+          <code className="ml-auto rounded bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">{formula}</code>
+        )}
       </div>
       <div className="p-5">{children}</div>
     </Card>
@@ -172,19 +197,81 @@ function BoardFeet() {
   );
 }
 
+function WireSize() {
+  const [amps, setAmps] = useState(80);
+  const [volts, setVolts] = useState(240);
+  const [feet, setFeet] = useState(100);
+  const [metal, setMetal] = useState<"cu" | "al">("cu");
+  const [maxPct, setMaxPct] = useState(3);
+
+  const amp = metal === "cu" ? AMPACITY_CU : AMPACITY_AL;
+  const k = metal === "cu" ? 12.9 : 21.2;
+
+  // Smallest size that passes BOTH ampacity and voltage drop.
+  const pick = SIZES.find((s) => {
+    const a = amp[s];
+    if (!a || a < amps) return false;
+    const vd = (2 * k * amps * feet) / CMIL[s];
+    return volts > 0 && (vd / volts) * 100 <= maxPct;
+  });
+  const detail = pick
+    ? (() => {
+        const vd = (2 * k * amps * feet) / CMIL[pick];
+        return { vd, pct: (vd / volts) * 100, amp: amp[pick] };
+      })()
+    : null;
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+        <div><Label>Amps (load)</Label><NumberInput value={amps} onValueChange={setAmps} /></div>
+        <div><Label>Volts</Label><NumberInput value={volts} onValueChange={setVolts} /></div>
+        <div><Label>One-way feet</Label><NumberInput value={feet} onValueChange={setFeet} /></div>
+        <div>
+          <Label>Metal</Label>
+          <Select value={metal} onChange={(e) => setMetal(e.target.value as any)}>
+            <option value="cu">Copper</option>
+            <option value="al">Aluminum</option>
+          </Select>
+        </div>
+        <div>
+          <Label>Max drop %</Label>
+          <Select value={String(maxPct)} onChange={(e) => setMaxPct(Number(e.target.value))}>
+            <option value="3">3% (branch)</option>
+            <option value="5">5% (feeder)</option>
+          </Select>
+        </div>
+      </div>
+      <div className={`rounded-lg px-4 py-3 text-sm ${pick ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>
+        {pick && detail ? (
+          <>
+            Use <strong>{pick} AWG/kcmil {metal === "cu" ? "copper" : "aluminum"}</strong> — ampacity {detail.amp} A (75°C),
+            drop {detail.vd.toFixed(2)} V ({detail.pct.toFixed(2)}%) at {feet} ft.
+          </>
+        ) : (
+          <>No single conductor up to 500 kcmil meets that — parallel runs or shorten the distance.</>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function ToolsView() {
   return (
     <div className="space-y-5">
-      <Section icon={Zap} title="Voltage drop">
+      <Section icon={Cable} title="Wire size (pick for me)" formula="size = min AWG where ampacity ≥ I and VD% ≤ target">
+        <WireSize />
+      </Section>
+      <Section icon={Zap} title="Voltage drop" formula="VD = 2 × K × I × L ÷ CM  (K: Cu 12.9, Al 21.2)">
         <VoltageDrop />
       </Section>
-      <Section icon={Cable} title="Conduit fill (THHN, 40% NEC)">
+      <Section icon={Cable} title="Conduit fill (THHN, 40% NEC)" formula="fill = n × conductor in² ≤ 40% of conduit in²">
         <ConduitFill />
       </Section>
-      <Section icon={Calculator} title="Ohm's law / load">
+      <Section icon={Calculator} title="Ohm's law / load" formula="I = P ÷ V · R = V ÷ I · breaker ≥ 1.25 × I">
         <OhmsLaw />
       </Section>
-      <Section icon={Ruler} title="Board feet">
+      <Section icon={Ruler} title="Board feet" formula="BF = T(in) × W(in) × L(ft) ÷ 12 × qty">
         <BoardFeet />
       </Section>
     </div>

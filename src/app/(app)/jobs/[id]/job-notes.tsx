@@ -70,7 +70,7 @@ export function JobNotes({
   return (
     <div>
       <Textarea
-        rows={4}
+        rows={Math.min(30, Math.max(4, value.split("\n").length + 1))}
         value={value}
         onChange={(e) => setValue(e.target.value)}
         placeholder="Running notes for this job — site details, access, customer preferences, follow-ups…"

@@ -19,6 +19,8 @@ import {
   importQuoteItemsIntoInvoice,
   importLaborIntoInvoice,
   importCostsIntoInvoice,
+  updatePayment,
+  deletePayment,
 } from "../actions";
 
 interface PriceItemLite { id: string; code: string | null; description: string; unit: string; buy_price: number; markup_pct: number; }
@@ -70,6 +72,12 @@ export function InvoiceDetail({
       refresh();
     });
   }
+
+  // edit-payment state
+  const [payEditId, setPayEditId] = useState<string | null>(null);
+  const [payEditAmount, setPayEditAmount] = useState(0);
+  const [payEditMethod, setPayEditMethod] = useState("check");
+  const [payEditNote, setPayEditNote] = useState("");
 
   // edit-item state
   const [editId, setEditId] = useState<string | null>(null);
@@ -396,25 +404,83 @@ export function InvoiceDetail({
               <h3 className="text-sm font-semibold text-slate-900">Payments</h3>
             </div>
             <ul className="divide-y divide-slate-100">
-              {payments.map((p) => (
-                <li
-                  key={p.id}
-                  className="flex items-center justify-between px-5 py-2.5 text-sm"
-                >
-                  <div>
-                    <div className="font-medium text-slate-900">
-                      {formatCurrency(p.amount)}
+              {payments.map((p) =>
+                payEditId === p.id ? (
+                  <li key={p.id} className="space-y-2 bg-slate-50/80 px-5 py-3 text-sm">
+                    <div className="flex items-center gap-2">
+                      <NumberInput value={payEditAmount} onValueChange={setPayEditAmount} className="w-28 text-right" />
+                      <Select value={payEditMethod} onChange={(e) => setPayEditMethod(e.target.value)} className="flex-1">
+                        {paymentMethods.length ? (
+                          paymentMethods.map((m) => <option key={m} value={m}>{m}</option>)
+                        ) : (
+                          <option value="check">Check</option>
+                        )}
+                      </Select>
                     </div>
-                    <div className="text-xs capitalize text-slate-400">
-                      {p.method}
-                      {p.note ? ` · ${p.note}` : ""}
+                    <div className="flex items-center gap-2">
+                      <Input value={payEditNote} onChange={(e) => setPayEditNote(e.target.value)} placeholder="Note" />
+                      <button
+                        onClick={() =>
+                          start(async () => {
+                            await updatePayment(p.id, invoice.id, { amount: payEditAmount, method: payEditMethod, note: payEditNote });
+                            setPayEditId(null);
+                            refresh();
+                          })
+                        }
+                        disabled={pending || payEditAmount <= 0}
+                        className="rounded-md bg-brand p-1.5 text-white disabled:opacity-50"
+                        aria-label="Save payment"
+                      >
+                        <Check className="h-4 w-4" />
+                      </button>
+                      <button onClick={() => setPayEditId(null)} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Cancel">
+                        <X className="h-4 w-4" />
+                      </button>
                     </div>
-                  </div>
-                  <span className="text-xs text-slate-400">
-                    {formatDateTime(p.paid_at)}
-                  </span>
-                </li>
-              ))}
+                  </li>
+                ) : (
+                  <li key={p.id} className="flex items-center justify-between gap-2 px-5 py-2.5 text-sm">
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium text-slate-900">
+                        {formatCurrency(p.amount)}
+                      </div>
+                      <div className="text-xs capitalize text-slate-400">
+                        {p.method}
+                        {p.note ? ` · ${p.note}` : ""}
+                      </div>
+                    </div>
+                    <span className="text-xs text-slate-400">
+                      {formatDateTime(p.paid_at)}
+                    </span>
+                    <button
+                      onClick={() => {
+                        setPayEditId(p.id);
+                        setPayEditAmount(Number(p.amount));
+                        setPayEditMethod(p.method);
+                        setPayEditNote(p.note ?? "");
+                      }}
+                      className="shrink-0 text-slate-400 hover:text-slate-700"
+                      aria-label="Edit payment"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (!confirm(`Delete this ${formatCurrency(p.amount)} payment? The invoice balance recalculates.`)) return;
+                        start(async () => {
+                          await deletePayment(p.id, invoice.id);
+                          refresh();
+                        });
+                      }}
+                      disabled={pending}
+                      className="shrink-0 text-slate-400 hover:text-red-600"
+                      aria-label="Delete payment"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </li>
+                ),
+              )}
             </ul>
           </Card>
         )}

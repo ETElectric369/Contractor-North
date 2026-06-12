@@ -8,6 +8,7 @@ import { Modal } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { PhoneInput } from "@/components/ui/phone-input";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
+import { StateSelect } from "@/components/ui/state-select";
 import { createCustomer } from "./actions";
 
 export function NewCustomerButton() {
@@ -97,7 +98,7 @@ export function NewCustomerButton() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label htmlFor="state">State</Label>
-                <Input id="state" name="state" maxLength={2} value={state} onChange={(e) => setState(e.target.value)} />
+                <StateSelect id="state" name="state" value={state} onChange={setState} />
               </div>
               <div>
                 <Label htmlFor="zip">Zip</Label>

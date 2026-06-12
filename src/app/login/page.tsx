@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { Zap } from "lucide-react";
 import { login, signup } from "./actions";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
@@ -22,8 +21,9 @@ export default async function LoginPage({
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-brand to-brand-dark px-4">
       <div className="w-full max-w-md">
         <div className="mb-8 text-center text-white">
-          <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/15 backdrop-blur">
-            <Zap className="h-7 w-7" />
+          <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-white p-1.5 shadow-lg">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/cn-logo.svg" alt="Contractor North" className="h-full w-full" />
           </div>
           <h1 className="text-2xl font-bold tracking-tight">Contractor North</h1>
           <p className="mt-1 text-sm text-white/80">

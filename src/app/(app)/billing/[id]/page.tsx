@@ -9,6 +9,8 @@ import { Badge, statusTone } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { InvoiceDetail } from "./invoice-detail";
 import { EmailButton } from "@/components/email-button";
+import { DeleteButton } from "@/components/delete-button";
+import { deleteInvoice } from "../actions";
 import { getOrgSettings } from "@/lib/org-settings";
 import type { Invoice, InvoiceItem, Payment } from "@/lib/types";
 
@@ -108,6 +110,11 @@ export default async function InvoicePage({
             <Printer className="h-4 w-4" /> Preview / Print
           </Link>
           {qboConfigured() && <QboInvoiceButton id={inv.id} />}
+          <DeleteButton
+            run={deleteInvoice.bind(null, inv.id)}
+            confirmText={`Delete ${inv.invoice_number}? Only allowed while no payments are recorded.`}
+            redirectTo="/billing"
+          />
         </div>
       </div>
 

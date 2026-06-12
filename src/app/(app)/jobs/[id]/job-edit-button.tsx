@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { Input, Label, Textarea, Select } from "@/components/ui/input";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
+import { StateSelect } from "@/components/ui/state-select";
 import { updateJob } from "../actions";
 import type { Job } from "@/lib/types";
 
@@ -119,7 +120,7 @@ export function JobEditButton({
             </div>
             <div>
               <Label htmlFor="ej-state">State</Label>
-              <Input id="ej-state" name="state" maxLength={2} value={state} onChange={(e) => setState(e.target.value)} />
+              <StateSelect id="ej-state" name="state" value={state} onChange={setState} />
             </div>
             <div>
               <Label htmlFor="ej-zip">Zip</Label>

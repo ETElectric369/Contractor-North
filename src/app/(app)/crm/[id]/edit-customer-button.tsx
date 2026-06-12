@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { PhoneInput } from "@/components/ui/phone-input";
+import { StateSelect } from "@/components/ui/state-select";
 import { updateCustomer } from "../actions";
 import type { Customer } from "@/lib/types";
 
@@ -22,6 +23,7 @@ export function EditCustomerButton({
   const [pending, start] = useTransition();
   const router = useRouter();
   const c = customer;
+  const [stateVal, setStateVal] = useState(c.state ?? "");
 
   function onSubmit(formData: FormData) {
     setError(null);
@@ -102,7 +104,7 @@ export function EditCustomerButton({
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label htmlFor="state">State</Label>
-                <Input id="state" name="state" maxLength={2} defaultValue={c.state ?? ""} />
+                <StateSelect id="state" name="state" value={stateVal} onChange={setStateVal} />
               </div>
               <div>
                 <Label htmlFor="zip">Zip</Label>

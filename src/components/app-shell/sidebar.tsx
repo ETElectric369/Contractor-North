@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Zap, ChevronDown } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { NAV } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 import { translator } from "@/lib/i18n";
@@ -58,9 +58,8 @@ export function Sidebar({
             className="h-9 w-9 shrink-0 rounded-lg object-contain"
           />
         ) : (
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand text-white">
-            <Zap className="h-5 w-5" />
-          </div>
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src="/cn-logo.svg" alt="Contractor North" className="h-9 w-9 shrink-0" />
         )}
         <div className="min-w-0 leading-tight">
           <div className="truncate text-sm font-bold text-slate-900">{name}</div>

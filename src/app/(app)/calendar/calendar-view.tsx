@@ -148,19 +148,25 @@ function MonthGrid({
           const totalHrs = data ? data.entries.reduce((s, e) => s + hrs(e), 0) : 0;
           const inMonth = d.getMonth() === anchor.getMonth();
           return (
-            <button
+            <div
               key={i}
               onClick={() => onPick(d)}
-              className={`min-h-[72px] border-b border-r border-slate-100 p-1 text-left align-top hover:bg-slate-50 ${inMonth ? "" : "bg-slate-50/60 text-slate-300"}`}
+              className={`min-h-[72px] cursor-pointer border-b border-r border-slate-100 p-1 text-left align-top hover:bg-slate-50 ${inMonth ? "" : "bg-slate-50/60 text-slate-300"}`}
             >
               <div className={`text-xs ${k === todayK ? "inline-flex h-5 w-5 items-center justify-center rounded-full bg-brand font-semibold text-white" : "text-slate-500"}`}>
                 {d.getDate()}
               </div>
               <div className="mt-0.5 space-y-0.5">
                 {data?.jobs.slice(0, 2).map((j) => (
-                  <div key={j.id} className="truncate rounded bg-blue-50 px-1 text-[10px] text-blue-700">
+                  <Link
+                    key={j.id}
+                    href={`/jobs/${j.id}`}
+                    onClick={(e) => e.stopPropagation()}
+                    className="block truncate rounded bg-blue-50 px-1 text-[10px] text-blue-700 hover:bg-blue-100"
+                    title={`${j.job_number} — ${j.name} (open job)`}
+                  >
                     {j.name}
-                  </div>
+                  </Link>
                 ))}
                 {(data?.jobs.length ?? 0) > 2 && (
                   <div className="text-[10px] text-slate-400">+{data!.jobs.length - 2} more</div>
@@ -171,7 +177,7 @@ function MonthGrid({
                   </div>
                 )}
               </div>
-            </button>
+            </div>
           );
         })}
       </div>
@@ -205,7 +211,7 @@ function WeekList({
         const totalHrs = data ? data.entries.reduce((s, e) => s + hrs(e), 0) : 0;
         return (
           <Card key={k} className={k === todayK ? "border-brand/40" : undefined}>
-            <button onClick={() => onPick(d)} className="w-full p-3 text-left hover:bg-slate-50">
+            <div onClick={() => onPick(d)} className="w-full cursor-pointer p-3 text-left hover:bg-slate-50">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-semibold text-slate-900">
                   {d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}
@@ -220,13 +226,18 @@ function WeekList({
               {(data?.jobs.length ?? 0) > 0 && (
                 <div className="mt-1 flex flex-wrap gap-1">
                   {data!.jobs.map((j) => (
-                    <span key={j.id} className="rounded bg-blue-50 px-1.5 py-0.5 text-[11px] text-blue-700">
+                    <Link
+                      key={j.id}
+                      href={`/jobs/${j.id}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="rounded bg-blue-50 px-1.5 py-0.5 text-[11px] text-blue-700 hover:bg-blue-100"
+                    >
                       {j.job_number} {j.name}
-                    </span>
+                    </Link>
                   ))}
                 </div>
               )}
-            </button>
+            </div>
           </Card>
         );
       })}
