@@ -53,6 +53,7 @@ const sellPrice = (buy: number, markup: number) => buy * (1 + (markup || 0) / 10
 export function QuoteBuilder({
   customers,
   preselected,
+  jobId,
   priceItems = [],
   taxRates = [],
   kits = [],
@@ -60,6 +61,8 @@ export function QuoteBuilder({
 }: {
   customers: CustomerOption[];
   preselected?: string;
+  /** When launched from a job, the quote attaches to it. */
+  jobId?: string;
   priceItems?: PriceItemLite[];
   taxRates?: TaxRateLite[];
   kits?: KitLite[];
@@ -165,6 +168,7 @@ export function QuoteBuilder({
     startSave(async () => {
       const res = await saveQuote({
         customer_id: customerId || null,
+        job_id: jobId || null,
         title,
         notes,
         tax_rate: taxRate,

@@ -109,6 +109,7 @@ export interface DraftLineItem {
 
 export interface SaveQuoteInput {
   customer_id: string | null;
+  job_id?: string | null;
   title: string;
   notes: string;
   tax_rate: number;
@@ -245,6 +246,7 @@ export async function saveQuote(input: SaveQuoteInput) {
     .from("quotes")
     .insert({
       customer_id: input.customer_id,
+      job_id: input.job_id || null,
       title: input.title || null,
       notes: input.notes || null,
       tax_rate: input.tax_rate || 0,

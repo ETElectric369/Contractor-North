@@ -369,7 +369,7 @@ export default async function JobDetailPage({
         <div className="space-y-3">
           <div className="flex justify-end">
             <Link
-              href={`/quotes/new?customer=${j.customer_id ?? ""}`}
+              href={`/quotes/new?customer=${j.customer_id ?? ""}&job=${j.id}`}
               className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
             >
               <Plus className="h-3.5 w-3.5" /> New quote

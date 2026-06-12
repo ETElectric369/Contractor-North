@@ -410,10 +410,14 @@ export function InvoiceDetail({
                     <div className="flex items-center gap-2">
                       <NumberInput value={payEditAmount} onValueChange={setPayEditAmount} className="w-28 text-right" />
                       <Select value={payEditMethod} onChange={(e) => setPayEditMethod(e.target.value)} className="flex-1">
+                        {/* Keep the stored method selectable even if it's not in the configured list. */}
+                        {payEditMethod && !paymentMethods.includes(payEditMethod) && (
+                          <option value={payEditMethod}>{payEditMethod}</option>
+                        )}
                         {paymentMethods.length ? (
                           paymentMethods.map((m) => <option key={m} value={m}>{m}</option>)
                         ) : (
-                          <option value="check">Check</option>
+                          <option value="check">check</option>
                         )}
                       </Select>
                     </div>
