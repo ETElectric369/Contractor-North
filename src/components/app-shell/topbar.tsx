@@ -54,26 +54,27 @@ export function Topbar({
           <ArrowRight className="h-5 w-5" />
         </button>
 
-        {/* Big one-tap destinations — always within thumb's reach. */}
-        <nav className="flex flex-1 items-center justify-center gap-1 sm:gap-2">
+        {/* Big one-tap destinations — solid buttons that hand themselves back
+            to the sidebar one by one as the screen narrows. */}
+        <nav className="flex flex-1 items-center justify-center gap-1.5 sm:gap-2">
           {[
-            { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-            { href: "/tasks", label: "Tasks", icon: ListTodo },
-            { href: "/assistant", label: "Assistant", icon: Sparkles },
-            { href: "/organize", label: "Organize", icon: Wand2 },
+            { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, show: "flex" },
+            { href: "/tasks", label: "Tasks", icon: ListTodo, show: "hidden min-[480px]:flex" },
+            { href: "/assistant", label: "Assistant", icon: Sparkles, show: "hidden sm:flex" },
+            { href: "/organize", label: "Organize", icon: Wand2, show: "hidden md:flex" },
           ].map((d) => {
             const active = pathname === d.href || pathname.startsWith(d.href + "/");
             return (
               <Link
                 key={d.href}
                 href={d.href}
-                className={`flex flex-col items-center gap-0.5 rounded-lg px-2.5 py-1 sm:flex-row sm:gap-1.5 sm:px-3 sm:py-2 ${
-                  active ? "bg-brand-light text-brand-dark" : "text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+                className={`${d.show} items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-white shadow-sm transition-colors ${
+                  active ? "bg-brand-dark ring-2 ring-brand-light" : "bg-brand hover:bg-brand-dark"
                 }`}
                 title={d.label}
               >
-                <d.icon className="h-5 w-5" />
-                <span className="text-[10px] font-medium sm:text-sm">{d.label}</span>
+                <d.icon className="h-4.5 w-4.5" />
+                <span className="hidden min-[560px]:inline">{d.label}</span>
               </Link>
             );
           })}
