@@ -23,6 +23,8 @@ import { MemberRate } from "./member-rate";
 import { AvatarUpload } from "./avatar-upload";
 import { AddEmployeeButton } from "./add-employee-button";
 import { adminConfigured } from "@/lib/supabase/admin";
+import { gcalConfigured } from "@/lib/google-calendar";
+import { GcalCard } from "./gcal-card";
 import { translator } from "@/lib/i18n";
 import { billingEnabled } from "@/lib/stripe";
 import { qboConfigured } from "@/lib/quickbooks";
@@ -54,9 +56,9 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 export default async function SettingsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ billing?: string; billing_error?: string; qbo?: string }>;
+  searchParams: Promise<{ billing?: string; billing_error?: string; qbo?: string; gcal?: string }>;
 }) {
-  const { billing, billing_error, qbo } = await searchParams;
+  const { billing, billing_error, qbo, gcal } = await searchParams;
   const supabase = await createClient();
   const {
     data: { user },
@@ -85,6 +87,9 @@ export default async function SettingsPage({
 
   const { data: qboConn } = isAdmin
     ? await supabase.from("accounting_connections").select("realm_id, connected_at").maybeSingle()
+    : { data: null };
+  const { data: gcalConn } = isAdmin
+    ? await supabase.from("calendar_connections").select("id").eq("provider", "google").maybeSingle()
     : { data: null };
 
   const profileTab = {
@@ -236,6 +241,9 @@ export default async function SettingsPage({
                 configured={!!process.env.ANTHROPIC_API_KEY}
                 model={process.env.ANTHROPIC_MODEL || "claude-opus-4-8"}
               />
+            </Section>
+            <Section title="Google Calendar">
+              <GcalCard configured={gcalConfigured()} connected={!!gcalConn} flash={gcal} />
             </Section>
             <Section title="QuickBooks">
               {qbo === "connected" && (

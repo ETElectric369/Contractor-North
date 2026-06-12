@@ -19,7 +19,7 @@ export default async function PermitsPage() {
   const supabase = await createClient();
   const { data: permits } = await supabase
     .from("permits")
-    .select("id, permit_number, type, authority, status, inspection_date, inspection_result, job_id, jobs(job_number, name)")
+    .select("id, permit_number, type, authority, status, inspection_date, inspection_result, job_id, portal_url, jobs(job_number, name)")
     .order("inspection_date", { ascending: true, nullsFirst: false })
     .order("created_at", { ascending: false });
 
@@ -42,20 +42,32 @@ export default async function PermitsPage() {
           </div>
           <ul className="divide-y divide-slate-100">
             {rows.map((p: any) => (
-              <li key={p.id}>
-                <Link href={p.job_id ? `/jobs/${p.job_id}` : "#"} className="grid grid-cols-2 gap-2 px-5 py-3 hover:bg-slate-50 md:grid-cols-12 md:items-center md:gap-3">
-                  <div className="col-span-2 text-sm font-medium text-slate-900">{p.type}</div>
-                  <div className="col-span-2 font-mono text-xs text-slate-500">{p.permit_number ?? "—"}</div>
-                  <div className="col-span-3 text-sm text-slate-600">
-                    {p.jobs?.name ?? "—"}
-                    {p.authority ? <span className="block text-xs text-slate-400">{p.authority}</span> : null}
-                  </div>
-                  <div className="col-span-2 text-sm text-slate-600">{p.inspection_date ? formatDate(p.inspection_date) : "—"}</div>
-                  <div className="col-span-3 flex items-center justify-end gap-2">
-                    <Badge tone={p.inspection_result === "passed" ? "green" : p.inspection_result === "failed" ? "red" : "slate"}>{p.inspection_result}</Badge>
-                    <Badge tone={statusTone(p.status)}>{p.status.replace("_", " ")}</Badge>
-                  </div>
-                </Link>
+              <li key={p.id} className="grid grid-cols-2 gap-2 px-5 py-3 hover:bg-slate-50 md:grid-cols-12 md:items-center md:gap-3">
+                <div className="col-span-2 text-sm font-medium text-slate-900">{p.type}</div>
+                <div className="col-span-2 font-mono text-xs text-slate-500">{p.permit_number ?? "—"}</div>
+                <div className="col-span-3 text-sm text-slate-600">
+                  {p.job_id ? (
+                    <Link href={`/jobs/${p.job_id}`} className="hover:text-brand">{p.jobs?.name ?? "Job"}</Link>
+                  ) : (
+                    "—"
+                  )}
+                  {p.authority ? <span className="block text-xs text-slate-400">{p.authority}</span> : null}
+                  {p.portal_url && (
+                    <a
+                      href={p.portal_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-0.5 inline-block rounded bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-blue-700 hover:bg-blue-100"
+                    >
+                      Check with city ↗
+                    </a>
+                  )}
+                </div>
+                <div className="col-span-2 text-sm text-slate-600">{p.inspection_date ? formatDate(p.inspection_date) : "—"}</div>
+                <div className="col-span-3 flex items-center justify-end gap-2">
+                  <Badge tone={p.inspection_result === "passed" ? "green" : p.inspection_result === "failed" ? "red" : "slate"}>{p.inspection_result}</Badge>
+                  <Badge tone={statusTone(p.status)}>{p.status.replace("_", " ")}</Badge>
+                </div>
               </li>
             ))}
           </ul>

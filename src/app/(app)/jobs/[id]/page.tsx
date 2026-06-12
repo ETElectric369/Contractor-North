@@ -95,7 +95,7 @@ export default async function JobDetailPage({
       .order("due_date", { ascending: true, nullsFirst: false }),
     supabase
       .from("permits")
-      .select("id, permit_number, type, authority, status, applied_date, issued_date, inspection_date, inspector, inspection_result, fee, notes")
+      .select("id, permit_number, type, authority, status, applied_date, issued_date, inspection_date, inspector, inspection_result, fee, notes, portal_url")
       .eq("job_id", id)
       .order("created_at", { ascending: false }),
   ]);

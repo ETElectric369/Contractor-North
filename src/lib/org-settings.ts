@@ -20,6 +20,8 @@ export interface OrgSettings {
   mileage_rate: number; // $ per mile (e.g. IRS standard rate)
   /** Free-text "how we quote" playbook injected into AI quote drafts + assistant. */
   quote_playbook: string;
+  /** Employee handbook text (simple #/## headings + paragraphs). */
+  employee_handbook: string;
 
   // Scheduling
   work_day_start: string; // "08:00"
@@ -59,6 +61,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   default_labor_rate: 0,
   mileage_rate: 0.7,
   quote_playbook: "",
+  employee_handbook: "",
   work_day_start: "08:00",
   work_day_end: "17:00",
   week_start: "monday",

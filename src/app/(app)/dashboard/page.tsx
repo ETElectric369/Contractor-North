@@ -58,6 +58,43 @@ export default async function DashboardPage() {
   const pipeline =
     openQuotes.data?.reduce((sum, q) => sum + Number(q.total ?? 0), 0) ?? 0;
 
+  // ── My Day: what's on YOUR plate — assigned jobs + work orders ──────────
+  const dayEnd = new Date();
+  dayEnd.setHours(23, 59, 59, 999);
+  const [{ data: myJobs }, { data: myWos }] = await Promise.all([
+    supabase
+      .from("jobs")
+      .select("id, job_number, name, status, address, city, description, scheduled_start")
+      .contains("assigned_to", [user?.id ?? ""])
+      .in("status", ["scheduled", "in_progress"])
+      .lte("scheduled_start", dayEnd.toISOString())
+      .order("scheduled_start"),
+    supabase
+      .from("work_orders")
+      .select("id, wo_number, title, description, status, scheduled_for, jobs(job_number, name, address)")
+      .eq("assigned_to", user?.id ?? "")
+      .in("status", ["assigned", "in_progress"])
+      .order("scheduled_for", { ascending: true, nullsFirst: false }),
+  ]);
+  const myDay = [
+    ...((myJobs ?? []) as any[]).map((j) => ({
+      kind: "job" as const,
+      href: `/jobs/${j.id}`,
+      title: `${j.job_number} — ${j.name}`,
+      address: [j.address, j.city].filter(Boolean).join(", "),
+      instructions: j.description,
+      status: j.status,
+    })),
+    ...((myWos ?? []) as any[]).map((w) => ({
+      kind: "wo" as const,
+      href: `/work-orders/${w.id}`,
+      title: `${w.wo_number} — ${w.title}`,
+      address: w.jobs?.address ?? "",
+      instructions: w.description,
+      status: w.status,
+    })),
+  ];
+
   // "Needs attention" widgets: open inquiries, outstanding A/R, my hours this week.
   const weekAgo = new Date(Date.now() - 7 * 86400_000).toISOString();
   const [leadsCount, invoiceRows, weekEntries] = await Promise.all([
@@ -181,6 +218,39 @@ export default async function DashboardPage() {
       />
 
       <WeatherWidget location={orgLocation} label={org?.city ?? undefined} />
+
+      {myDay.length > 0 && (
+        <Card className="mb-4 border-brand/30">
+          <div className="border-b border-slate-100 px-5 py-3 text-sm font-semibold text-slate-900">
+            My day — your assignments
+          </div>
+          <ul className="divide-y divide-slate-100">
+            {myDay.map((a) => (
+              <li key={a.href} className="px-5 py-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Link href={a.href} className="text-sm font-medium text-slate-900 hover:text-brand">
+                    {a.title}
+                  </Link>
+                  <Badge tone={statusTone(a.status)}>{a.status.replace("_", " ")}</Badge>
+                </div>
+                {a.address && (
+                  <a
+                    href={`https://maps.apple.com/?q=${encodeURIComponent(a.address)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs text-brand hover:underline"
+                  >
+                    📍 {a.address}
+                  </a>
+                )}
+                {a.instructions && (
+                  <p className="mt-1 line-clamp-2 whitespace-pre-wrap text-xs text-slate-500">{a.instructions}</p>
+                )}
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
 
       {(expiringCompliance ?? []).length > 0 && (() => {
         const today = new Date().toISOString().slice(0, 10);

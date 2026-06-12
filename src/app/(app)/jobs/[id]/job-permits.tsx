@@ -71,6 +71,7 @@ export function JobPermits({ jobId, permits }: { jobId: string; permits: Permit[
   const [inspector, setInspector] = useState("");
   const [result, setResult] = useState("pending");
   const [notes, setNotes] = useState("");
+  const [portalUrl, setPortalUrl] = useState("");
 
   function add() {
     setError(null);
@@ -78,10 +79,10 @@ export function JobPermits({ jobId, permits }: { jobId: string; permits: Permit[
       const res = await createPermit({
         job_id: jobId, type, permit_number: num, authority, status,
         applied_date: applied || null, fee, inspection_date: inspDate || null,
-        inspector, inspection_result: result, notes,
+        inspector, inspection_result: result, notes, portal_url: portalUrl,
       });
       if (!res.ok) return setError(res.error ?? "Could not save.");
-      setNum(""); setAuthority(""); setApplied(""); setFee(0); setInspDate(""); setInspector(""); setNotes("");
+      setNum(""); setAuthority(""); setApplied(""); setFee(0); setInspDate(""); setInspector(""); setNotes(""); setPortalUrl("");
       setAdding(false);
       router.refresh();
     });
@@ -108,6 +109,10 @@ export function JobPermits({ jobId, permits }: { jobId: string; permits: Permit[
             <div><Label htmlFor="p-insp">Inspector</Label><Input id="p-insp" value={inspector} onChange={(e) => setInspector(e.target.value)} /></div>
             <div><Label htmlFor="p-res">Inspection result</Label><Select id="p-res" value={result} onChange={(e) => setResult(e.target.value)}>{RESULTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Select></div>
           </div>
+          <div>
+            <Label htmlFor="p-portal">City portal link</Label>
+            <Input id="p-portal" value={portalUrl} onChange={(e) => setPortalUrl(e.target.value)} placeholder="https://… (the authority's permit-status page)" />
+          </div>
           <div><Label htmlFor="p-notes">Notes</Label><Textarea id="p-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} /></div>
           <div className="flex justify-end gap-2">
             <Button size="sm" variant="outline" onClick={() => setAdding(false)}>Cancel</Button>
@@ -129,6 +134,16 @@ export function JobPermits({ jobId, permits }: { jobId: string; permits: Permit[
                     <span className="font-medium text-slate-900">{p.type}</span>
                     {p.permit_number && <span className="font-mono text-xs text-slate-500">#{p.permit_number}</span>}
                     {p.authority && <span className="text-xs text-slate-400">· {p.authority}</span>}
+                    {(p as any).portal_url && (
+                      <a
+                        href={(p as any).portal_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-blue-700 hover:bg-blue-100"
+                      >
+                        Check with city ↗
+                      </a>
+                    )}
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-400">
                     {p.applied_date && <span>Applied {formatDate(p.applied_date)}</span>}

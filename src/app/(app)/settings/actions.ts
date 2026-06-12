@@ -254,6 +254,57 @@ export async function createEmployee(input: {
   return { ok: true };
 }
 
+/** Push upcoming scheduled jobs (next 60 days) to the connected Google
+ *  Calendar — updates existing events, creates the rest. */
+export async function syncScheduleToGoogle(): Promise<Result & { synced?: number }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  const { gcalAccessToken, gcalUpsertJobEvent } = await import("@/lib/google-calendar");
+  let auth;
+  try {
+    auth = await gcalAccessToken(supabase);
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? "Token refresh failed." };
+  }
+  if (!auth) return { ok: false, error: "Google Calendar isn't connected yet." };
+
+  const { data: jobs } = await supabase
+    .from("jobs")
+    .select("id, job_number, name, address, description, scheduled_start, scheduled_end, google_event_id")
+    .gte("scheduled_start", new Date().toISOString())
+    .lte("scheduled_start", new Date(Date.now() + 60 * 86400_000).toISOString())
+    .not("scheduled_start", "is", null)
+    .in("status", ["estimate", "scheduled", "in_progress", "on_hold"]);
+  if (!jobs?.length) return { ok: true, synced: 0 };
+
+  let synced = 0;
+  for (const j of jobs as any[]) {
+    try {
+      const eventId = await gcalUpsertJobEvent(auth.token, auth.calendarId, j);
+      if (eventId !== j.google_event_id) {
+        await supabase.from("jobs").update({ google_event_id: eventId }).eq("id", j.id);
+      }
+      synced++;
+    } catch {
+      /* keep going — report what synced */
+    }
+  }
+  revalidatePath("/settings");
+  return { ok: true, synced };
+}
+
+export async function disconnectGoogleCalendar(): Promise<Result> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("calendar_connections").delete().eq("provider", "google");
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/settings");
+  return { ok: true };
+}
+
 /** Set (or clear) the signed-in user's avatar. */
 export async function setAvatarUrl(url: string | null): Promise<Result> {
   const supabase = await createClient();

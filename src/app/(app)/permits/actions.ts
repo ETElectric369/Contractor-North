@@ -19,6 +19,7 @@ export interface PermitInput {
   inspector?: string | null;
   inspection_result?: string;
   notes?: string | null;
+  portal_url?: string | null;
 }
 
 function rev(jobId?: string | null) {
@@ -47,6 +48,7 @@ export async function createPermit(input: PermitInput): Promise<Result> {
     inspector: input.inspector?.trim() || null,
     inspection_result: input.inspection_result || "pending",
     notes: input.notes?.trim() || null,
+    portal_url: input.portal_url?.trim() || null,
     created_by: user.id,
   });
   if (error) return { ok: false, error: error.message };
@@ -59,7 +61,7 @@ export async function updatePermit(id: string, patch: PermitInput): Promise<Resu
   const clean: Record<string, unknown> = {};
   for (const k of [
     "permit_number", "type", "authority", "status", "applied_date", "issued_date",
-    "expires_date", "inspection_date", "inspector", "inspection_result", "notes",
+    "expires_date", "inspection_date", "inspector", "inspection_result", "notes", "portal_url",
   ] as const) {
     if (patch[k] !== undefined) clean[k] = (patch[k] as string) || null;
   }
