@@ -37,8 +37,7 @@ export default async function InvoicePage({
         .from("invoice_items")
         .select("*")
         .eq("invoice_id", id)
-        .order("sort_order")
-        .order("created_at", { ascending: true }),
+        .order("sort_order"),
       supabase.from("payments").select("*").eq("invoice_id", id).order("paid_at", { ascending: false }),
       supabase
         .from("price_list_items")

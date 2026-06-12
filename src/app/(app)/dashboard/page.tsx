@@ -161,7 +161,7 @@ export default async function DashboardPage() {
       label: "Active jobs",
       value: activeJobs.count ?? 0,
       icon: ClipboardList,
-      href: "/work-orders",
+      href: "/jobs",
       tone: "bg-green-50 text-green-600",
     },
     {
@@ -342,20 +342,22 @@ export default async function DashboardPage() {
         <Card>
           <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
             <h3 className="text-sm font-semibold text-slate-900">Recent jobs</h3>
-            <Link href="/work-orders" className="flex items-center gap-1 text-xs text-brand hover:underline">
+            <Link href="/jobs" className="flex items-center gap-1 text-xs text-brand hover:underline">
               View all <ArrowRight className="h-3 w-3" />
             </Link>
           </div>
           <ul className="divide-y divide-slate-100">
             {(recentJobs.data ?? []).map((j) => (
-              <li key={j.id} className="flex items-center justify-between px-5 py-3">
-                <div>
-                  <div className="text-sm font-medium text-slate-900">{j.name}</div>
-                  <div className="text-xs text-slate-400">
-                    {j.job_number} · {formatDate(j.scheduled_start)}
+              <li key={j.id}>
+                <Link href={`/jobs/${j.id}`} className="flex items-center justify-between px-5 py-3 hover:bg-slate-50">
+                  <div>
+                    <div className="text-sm font-medium text-slate-900">{j.name}</div>
+                    <div className="text-xs text-slate-400">
+                      {j.job_number} · {formatDate(j.scheduled_start)}
+                    </div>
                   </div>
-                </div>
-                <Badge tone={statusTone(j.status)}>{j.status.replace("_", " ")}</Badge>
+                  <Badge tone={statusTone(j.status)}>{j.status.replace("_", " ")}</Badge>
+                </Link>
               </li>
             ))}
             {(!recentJobs.data || recentJobs.data.length === 0) && (

@@ -29,23 +29,39 @@ function writeCache(loc: string, c: { lat: number; lng: number }) {
   }
 }
 
+/** Device GPS position (resolves null on denial/timeout — never throws). */
+function devicePosition(): Promise<{ lat: number; lng: number } | null> {
+  return new Promise((resolve) => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) return resolve(null);
+    navigator.geolocation.getCurrentPosition(
+      (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
+      () => resolve(null),
+      { timeout: 5000, maximumAge: 10 * 60 * 1000 },
+    );
+  });
+}
+
 /**
- * Current-conditions weather card for the org's location. Geocodes the address
- * client-side (Maps JS, cached) then calls the Google Weather API. Renders
- * nothing when no key / no location is configured.
+ * Current-conditions weather card for WHERE THE USER IS (device GPS), falling
+ * back to the org's configured location when GPS is denied/unavailable.
+ * Renders nothing when no key / no location is available.
  */
 export function WeatherWidget({ location, label }: { location: string | null; label?: string }) {
   const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
   const [data, setData] = useState<WeatherData | null>(null);
   const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
+  const [usedGps, setUsedGps] = useState(false);
 
   useEffect(() => {
-    if (!key || !location) return;
+    if (!key) return;
     let cancelled = false;
     (async () => {
       try {
-        let coords = readCache(location);
-        if (!coords) {
+        // Prefer the device's real location — the crew isn't always at the shop.
+        let coords = await devicePosition();
+        if (coords) setUsedGps(true);
+        if (!coords && location) coords = readCache(location);
+        if (!coords && location) {
           await loadGoogleMaps(key);
           const g = (window as any).google;
           const geocoder = new g.maps.Geocoder();
@@ -55,6 +71,7 @@ export function WeatherWidget({ location, label }: { location: string | null; la
           coords = { lat: loc.lat(), lng: loc.lng() };
           writeCache(location, coords);
         }
+        if (!coords) throw new Error("no location");
         const url =
           `https://weather.googleapis.com/v1/currentConditions:lookup?key=${key}` +
           `&location.latitude=${coords.lat}&location.longitude=${coords.lng}&unitsSystem=IMPERIAL`;
@@ -81,7 +98,7 @@ export function WeatherWidget({ location, label }: { location: string | null; la
   }, [key, location]);
 
   // Not configured → render nothing (keeps dashboard clean).
-  if (!key || !location || status === "error") return null;
+  if (!key || status === "error") return null;
 
   return (
     <div className="mb-4 flex items-center gap-4 rounded-xl border border-sky-100 bg-gradient-to-br from-sky-50 to-white px-5 py-4">
@@ -104,7 +121,7 @@ export function WeatherWidget({ location, label }: { location: string | null; la
               Feels like {data.feelsF}°
               {data.windMph != null ? ` · Wind ${data.windMph} mph` : ""}
               {data.humidity != null ? ` · Humidity ${data.humidity}%` : ""}
-              {label ? ` · ${label}` : ""}
+              {usedGps ? " · Your location" : label ? ` · ${label}` : ""}
             </div>
           </>
         )}

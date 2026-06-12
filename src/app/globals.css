@@ -32,6 +32,24 @@ body {
   scrollbar-color: #cbd5e1 transparent;
 }
 
+/* ── Mobile polish ────────────────────────────────────────────────────────
+   iOS Safari zooms the whole page when a focused input's font-size is under
+   16px ("screen resizes for the keyboard"). Keep inputs ≥16px on phones. */
+@media (max-width: 1023px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Smooth, contained scrolling on touch devices — no rubber-band chaining
+   from the scrollable main area into the page chrome. */
+main {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+}
+
 /* ── Print: hide UI chrome, give the document clean margins ─────────────── */
 @media print {
   .no-print {

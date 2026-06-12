@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Menu, X, LogOut } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Menu, X, LogOut, ArrowLeft } from "lucide-react";
 import { Sidebar } from "./sidebar";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { initials } from "@/lib/utils";
@@ -22,16 +23,25 @@ export function Topbar({
   badges?: Record<string, number>;
 }) {
   const [open, setOpen] = useState(false);
+  const router = useRouter();
 
   return (
     <>
-      <header className="flex h-16 items-center justify-between gap-4 border-b border-slate-200 bg-white px-4 lg:px-6">
+      <header className="flex h-16 items-center justify-between gap-2 border-b border-slate-200 bg-white px-4 lg:px-6">
         <button
           className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 lg:hidden"
           onClick={() => setOpen(true)}
           aria-label="Open menu"
         >
           <Menu className="h-5 w-5" />
+        </button>
+        <button
+          className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"
+          onClick={() => router.back()}
+          aria-label="Go back"
+          title="Back"
+        >
+          <ArrowLeft className="h-5 w-5" />
         </button>
 
         <div className="flex-1" />

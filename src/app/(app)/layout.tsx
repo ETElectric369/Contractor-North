@@ -52,7 +52,7 @@ export default async function AppLayout({
 
   return (
     <div
-      className="flex h-screen overflow-hidden"
+      className="flex h-dvh overflow-hidden"
       style={
         {
           "--color-brand": brand,
