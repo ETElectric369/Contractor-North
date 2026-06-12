@@ -20,6 +20,9 @@ import { SplashSettings } from "./splash-settings";
 import { AiStatus } from "./ai-status";
 import { QuotePlaybookForm } from "./quote-playbook-form";
 import { MemberRate } from "./member-rate";
+import { AvatarUpload } from "./avatar-upload";
+import { AddEmployeeButton } from "./add-employee-button";
+import { adminConfigured } from "@/lib/supabase/admin";
 import { translator } from "@/lib/i18n";
 import { billingEnabled } from "@/lib/stripe";
 import { qboConfigured } from "@/lib/quickbooks";
@@ -89,10 +92,12 @@ export default async function SettingsPage({
     label: "Profile",
     content: (
       <Section title="Your profile">
-        <div className="flex items-center gap-4">
-          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-brand text-lg font-semibold text-white">
-            {initials(profile?.full_name)}
-          </div>
+        <div className="flex flex-wrap items-center gap-5">
+          <AvatarUpload
+            userId={profile?.id ?? ""}
+            name={profile?.full_name ?? null}
+            current={profile?.avatar_url ?? null}
+          />
           <div>
             <div className="text-base font-medium text-slate-900">{profile?.full_name ?? "—"}</div>
             <div className="text-sm text-slate-500">{profile?.email}</div>
@@ -116,6 +121,12 @@ export default async function SettingsPage({
         {isAdmin && (
           <Section title="Invite team members">
             <InviteManager invites={(invites as any) ?? []} siteUrl={siteUrl} />
+            <div className="mt-4 border-t border-slate-100 pt-4">
+              <div className="mb-2 text-xs text-slate-500">
+                Or create their login yourself and hand them the password — no email needed:
+              </div>
+              <AddEmployeeButton configured={adminConfigured()} />
+            </div>
           </Section>
         )}
         <Card>

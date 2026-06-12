@@ -56,9 +56,18 @@ export function Topbar({
               {profile?.role ?? "user"}
             </div>
           </div>
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-brand text-sm font-semibold text-white">
-            {initials(profile?.full_name)}
-          </div>
+          {profile?.avatar_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={profile.avatar_url}
+              alt=""
+              className="h-9 w-9 rounded-full object-cover"
+            />
+          ) : (
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-brand text-sm font-semibold text-white">
+              {initials(profile?.full_name)}
+            </div>
+          )}
           <form action={signOut}>
             <button
               className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"

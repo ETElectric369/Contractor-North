@@ -188,6 +188,86 @@ export async function deleteInvitation(id: string): Promise<Result> {
   return { ok: true };
 }
 
+/**
+ * Create an employee login directly — no email invite. Needs the
+ * service-role key (SUPABASE_SERVICE_ROLE_KEY) on the server. The owner
+ * hands the email + password to the employee; they can log in immediately.
+ */
+export async function createEmployee(input: {
+  full_name: string;
+  email: string;
+  password: string;
+  role: string;
+  hourly_rate: number | null;
+}): Promise<Result> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+  const { data: me } = await supabase
+    .from("profiles")
+    .select("role, org_id")
+    .eq("id", user.id)
+    .maybeSingle();
+  if (!me || !["owner", "admin"].includes(me.role)) return { ok: false, error: "Not allowed." };
+  if (!me.org_id) return { ok: false, error: "No organization." };
+
+  const name = input.full_name.trim();
+  const email = input.email.trim().toLowerCase();
+  if (!name) return { ok: false, error: "Name is required." };
+  if (!email.includes("@")) return { ok: false, error: "Enter a valid email." };
+  if (input.password.length < 8) return { ok: false, error: "Password must be at least 8 characters." };
+  const role = ["admin", "office", "tech"].includes(input.role) ? input.role : "tech";
+
+  const { adminConfigured, createAdminClient } = await import("@/lib/supabase/admin");
+  if (!adminConfigured()) {
+    return {
+      ok: false,
+      error: "Direct employee creation needs SUPABASE_SERVICE_ROLE_KEY set on the server. Use an email invite instead, or add the key in Vercel.",
+    };
+  }
+
+  const admin = createAdminClient();
+  const { data: created, error: authErr } = await admin.auth.admin.createUser({
+    email,
+    password: input.password,
+    email_confirm: true,
+    user_metadata: { full_name: name },
+  });
+  if (authErr || !created.user) return { ok: false, error: authErr?.message ?? "Could not create the login." };
+
+  // The on-signup trigger created the profile — attach it to this org.
+  const { error: profErr } = await admin
+    .from("profiles")
+    .update({
+      org_id: me.org_id,
+      full_name: name,
+      role,
+      hourly_rate: input.hourly_rate,
+      active: true,
+    })
+    .eq("id", created.user.id);
+  if (profErr) return { ok: false, error: profErr.message };
+
+  revalidatePath("/settings");
+  return { ok: true };
+}
+
+/** Set (or clear) the signed-in user's avatar. */
+export async function setAvatarUrl(url: string | null): Promise<Result> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+  const { error } = await supabase.from("profiles").update({ avatar_url: url }).eq("id", user.id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/settings");
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
 /** Owner/admin sets a team member's billable hourly rate. */
 export async function updateMemberRate(
   id: string,
