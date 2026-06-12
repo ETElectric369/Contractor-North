@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, Clock, Briefcase } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -52,7 +52,19 @@ export function CalendarView({ entries, jobs }: { entries: CalEntry[]; jobs: Cal
       return m.get(k)!;
     };
     for (const e of entries) get(dayKey(new Date(e.clock_in))).entries.push(e);
-    for (const j of jobs) if (j.scheduled_start) get(dayKey(new Date(j.scheduled_start))).jobs.push(j);
+    // Multi-day jobs appear on EVERY day they span (like Google Calendar).
+    for (const j of jobs) {
+      if (!j.scheduled_start) continue;
+      const d = new Date(j.scheduled_start);
+      d.setHours(0, 0, 0, 0);
+      const last = new Date(j.scheduled_end ?? j.scheduled_start);
+      last.setHours(0, 0, 0, 0);
+      let guard = 0;
+      while (d <= last && guard++ < 45) {
+        get(dayKey(d)).jobs.push(j);
+        d.setDate(d.getDate() + 1);
+      }
+    }
     return m;
   }, [entries, jobs]);
 
@@ -185,11 +197,11 @@ function MonthGrid({
   );
 }
 
-const GRID_START = 6; // 6 AM
-const GRID_END = 20; // 8 PM
 const ROW_PX = 48;
+const DAY_H = 24 * ROW_PX; // full 24-hour timeline, scrollable
 
-/** Vertical week: hours down the left, days across the top, blocks placed by time. */
+/** Google-style week: hours scroll down the left, days across the top,
+ *  jobs/timecards drawn as boxes clamped into each day they touch. */
 function WeekGrid({
   anchor,
   byDay,
@@ -199,6 +211,12 @@ function WeekGrid({
   byDay: Map<string, { entries: CalEntry[]; jobs: CalJob[] }>;
   onPick: (d: Date) => void;
 }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // Open the timeline at 6 AM, like Google Calendar.
+    if (scrollRef.current) scrollRef.current.scrollTop = 6 * ROW_PX;
+  }, []);
+
   const start = startOfWeek(anchor);
   const days: Date[] = [];
   for (let i = 0; i < 7; i++) {
@@ -207,27 +225,29 @@ function WeekGrid({
     days.push(d);
   }
   const todayK = dayKey(new Date());
-  const hours = Array.from({ length: GRID_END - GRID_START }, (_, i) => GRID_START + i);
-  const colH = hours.length * ROW_PX;
+  const hours = Array.from({ length: 24 }, (_, i) => i);
 
-  const topOf = (iso: string) => {
-    const d = new Date(iso);
-    const h = d.getHours() + d.getMinutes() / 60;
-    return Math.max(0, Math.min(colH - 24, (h - GRID_START) * ROW_PX));
-  };
-  const heightOf = (startIso: string, endIso: string | null, fallbackHrs: number) => {
-    const dur = endIso
-      ? (new Date(endIso).getTime() - new Date(startIso).getTime()) / 3_600_000
-      : fallbackHrs;
-    return Math.max(24, Math.min(colH, dur * ROW_PX));
+  /** Clamp a start/end span into THIS day's column (multi-day jobs fill it). */
+  const segment = (day: Date, startIso: string, endIso: string | null, fallbackHrs: number) => {
+    const dayStart = new Date(day);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(dayStart.getTime() + 24 * 3_600_000);
+    const s = new Date(startIso);
+    const e = endIso ? new Date(endIso) : new Date(s.getTime() + fallbackHrs * 3_600_000);
+    const from = Math.max(s.getTime(), dayStart.getTime());
+    const to = Math.min(e.getTime(), dayEnd.getTime());
+    if (to <= from) return null;
+    const top = ((from - dayStart.getTime()) / 3_600_000) * ROW_PX;
+    const height = Math.max(22, ((to - from) / 3_600_000) * ROW_PX);
+    return { top, height: Math.min(height, DAY_H - top) };
   };
 
   return (
     <Card className="overflow-hidden">
       <div className="overflow-x-auto">
         <div className="min-w-[760px]">
-          {/* Day headers */}
-          <div className="grid border-b border-slate-100 bg-slate-50" style={{ gridTemplateColumns: `48px repeat(7, 1fr)` }}>
+          {/* Day headers (stay put while the timeline scrolls) */}
+          <div className="grid border-b border-slate-100 bg-slate-50" style={{ gridTemplateColumns: `52px repeat(7, 1fr)` }}>
             <div />
             {days.map((d) => {
               const k = dayKey(d);
@@ -243,50 +263,60 @@ function WeekGrid({
               );
             })}
           </div>
-          {/* Time grid */}
-          <div className="grid" style={{ gridTemplateColumns: `48px repeat(7, 1fr)` }}>
-            {/* Hour labels */}
-            <div className="relative" style={{ height: colH }}>
-              {hours.map((h, i) => (
-                <div key={h} className="absolute right-1.5 -translate-y-1/2 text-[10px] text-slate-400" style={{ top: i * ROW_PX }}>
-                  {h === 12 ? "12 PM" : h > 12 ? `${h - 12} PM` : `${h} AM`}
-                </div>
-              ))}
+          {/* Scrollable 24h timeline */}
+          <div ref={scrollRef} className="max-h-[62vh] overflow-y-auto">
+            <div className="grid" style={{ gridTemplateColumns: `52px repeat(7, 1fr)` }}>
+              {/* Hour rail */}
+              <div className="relative" style={{ height: DAY_H }}>
+                {hours.map((h) => (
+                  <div key={h} className="absolute right-1.5 -translate-y-1/2 text-[10px] text-slate-400" style={{ top: h * ROW_PX }}>
+                    {h === 0 ? "" : h === 12 ? "12 PM" : h > 12 ? `${h - 12} PM` : `${h} AM`}
+                  </div>
+                ))}
+              </div>
+              {days.map((d) => {
+                const k = dayKey(d);
+                const data = byDay.get(k);
+                return (
+                  <div key={k} className={`relative border-l border-slate-100 ${k === todayK ? "bg-brand/[0.03]" : ""}`} style={{ height: DAY_H }}>
+                    {hours.map((h) => (
+                      <div key={h} className="absolute inset-x-0 border-t border-slate-100" style={{ top: h * ROW_PX }} />
+                    ))}
+                    {data?.jobs.map((j) => {
+                      if (!j.scheduled_start) return null;
+                      const seg = segment(d, j.scheduled_start, j.scheduled_end, 8);
+                      if (!seg) return null;
+                      return (
+                        <Link
+                          key={j.id}
+                          href={`/jobs/${j.id}`}
+                          className="absolute inset-x-0.5 z-10 overflow-hidden rounded-md border border-blue-300 bg-blue-100/90 px-1 py-0.5 text-[10px] leading-tight text-blue-900 shadow-sm hover:bg-blue-200"
+                          style={seg}
+                          title={`${j.job_number} — ${j.name} (open job)`}
+                        >
+                          <span className="font-semibold">{j.name}</span>
+                          <span className="block text-[9px] text-blue-700/80">{j.job_number}</span>
+                        </Link>
+                      );
+                    })}
+                    {data?.entries.map((e) => {
+                      const seg = segment(d, e.clock_in, e.clock_out, 1);
+                      if (!seg) return null;
+                      return (
+                        <div
+                          key={e.id}
+                          className="absolute right-0.5 z-20 w-[40%] overflow-hidden rounded-md border border-green-300 bg-green-100/90 px-1 py-0.5 text-[9px] leading-tight text-green-900"
+                          style={seg}
+                          title={`${e.profiles?.full_name ?? "Crew"} ${fmtTime(e.clock_in)}${e.clock_out ? `–${fmtTime(e.clock_out)}` : ""}`}
+                        >
+                          {e.profiles?.full_name?.split(" ")[0] ?? "⏱"}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
             </div>
-            {days.map((d) => {
-              const k = dayKey(d);
-              const data = byDay.get(k);
-              return (
-                <div key={k} className={`relative border-l border-slate-100 ${k === todayK ? "bg-brand/[0.03]" : ""}`} style={{ height: colH }}>
-                  {hours.map((h, i) => (
-                    <div key={h} className="absolute inset-x-0 border-t border-slate-100" style={{ top: i * ROW_PX }} />
-                  ))}
-                  {data?.jobs.map((j) =>
-                    j.scheduled_start ? (
-                      <Link
-                        key={j.id}
-                        href={`/jobs/${j.id}`}
-                        className="absolute inset-x-0.5 z-10 overflow-hidden rounded border border-blue-200 bg-blue-50 px-1 py-0.5 text-[10px] leading-tight text-blue-800 hover:bg-blue-100"
-                        style={{ top: topOf(j.scheduled_start), height: heightOf(j.scheduled_start, j.scheduled_end, 8) }}
-                        title={`${j.job_number} — ${j.name}`}
-                      >
-                        <span className="font-semibold">{j.name}</span>
-                      </Link>
-                    ) : null,
-                  )}
-                  {data?.entries.map((e) => (
-                    <div
-                      key={e.id}
-                      className="absolute right-0.5 z-10 w-[42%] overflow-hidden rounded border border-green-200 bg-green-50 px-1 py-0.5 text-[9px] leading-tight text-green-800"
-                      style={{ top: topOf(e.clock_in), height: heightOf(e.clock_in, e.clock_out, 1) }}
-                      title={`${e.profiles?.full_name ?? "Crew"} ${fmtTime(e.clock_in)}${e.clock_out ? `–${fmtTime(e.clock_out)}` : ""}`}
-                    >
-                      {e.profiles?.full_name?.split(" ")[0] ?? "⏱"}
-                    </div>
-                  ))}
-                </div>
-              );
-            })}
           </div>
         </div>
       </div>
