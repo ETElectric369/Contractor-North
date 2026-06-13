@@ -168,6 +168,14 @@ export default async function SchedulePage({
           <Link href={`/schedule?${baseQ}week=${offset - 1}`} className="rounded-lg border border-slate-300 bg-white p-2 text-slate-600 hover:bg-slate-50">
             <ChevronLeft className="h-4 w-4" />
           </Link>
+          {offset !== 0 && (
+            <Link
+              href={`/schedule${isMonth ? "?view=month" : ""}`}
+              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+            >
+              Today
+            </Link>
+          )}
           <span className="min-w-[140px] text-center text-sm font-medium text-slate-700">{label}</span>
           <Link href={`/schedule?${baseQ}week=${offset + 1}`} className="rounded-lg border border-slate-300 bg-white p-2 text-slate-600 hover:bg-slate-50">
             <ChevronRight className="h-4 w-4" />
