@@ -62,11 +62,15 @@ export function CalendarView({
   jobs,
   segments = [],
   appointments = [],
+  workStart = 8,
+  workEnd = 17,
 }: {
   entries: CalEntry[];
   jobs: CalJob[];
   segments?: CalSegment[];
   appointments?: CalAppt[];
+  workStart?: number;
+  workEnd?: number;
 }) {
   const [view, setView] = useState<View>("week");
   const [anchor, setAnchor] = useState(() => new Date());
@@ -157,7 +161,7 @@ export function CalendarView({
       {view === "month" && (
         <MonthGrid anchor={anchor} byDay={byDay} onPick={(d) => { setAnchor(d); setView("day"); }} />
       )}
-      {view === "week" && <WeekGrid anchor={anchor} byDay={byDay} onPick={(d) => { setAnchor(d); setView("day"); }} />}
+      {view === "week" && <WeekGrid anchor={anchor} byDay={byDay} onPick={(d) => { setAnchor(d); setView("day"); }} workStart={workStart} workEnd={workEnd} />}
       {view === "day" && <DayDetail date={anchor} data={byDay.get(dayKey(anchor))} />}
     </div>
   );
@@ -262,10 +266,14 @@ function WeekGrid({
   anchor,
   byDay,
   onPick,
+  workStart,
+  workEnd,
 }: {
   anchor: Date;
   byDay: Map<string, { entries: CalEntry[]; jobs: CalJob[]; appts: CalAppt[] }>;
   onPick: (d: Date) => void;
+  workStart: number;
+  workEnd: number;
 }) {
   const start = startOfWeek(anchor);
   const days: Date[] = [];
@@ -292,6 +300,15 @@ function WeekGrid({
     const height = Math.max(22, ((to - from) / 3_600_000) * ROW_PX);
     return { top, height: Math.min(height, DAY_H - top) };
   };
+
+  // Scheduled jobs are date-based; show each one as a block over the configured
+  // work day (e.g. 9–5) within the visible window — not the whole 6a–7p grid.
+  const jobBlock = (() => {
+    const from = Math.max(workStart, WORK_START);
+    const to = Math.min(workEnd, WORK_END);
+    if (to <= from) return null;
+    return { top: (from - WORK_START) * ROW_PX, height: Math.max(22, (to - from) * ROW_PX) };
+  })();
 
   return (
     <Card className="overflow-hidden">
@@ -333,16 +350,16 @@ function WeekGrid({
                     {hours.map((h) => (
                       <div key={h} className="absolute inset-x-0 border-t border-slate-100" style={{ top: (h - WORK_START) * ROW_PX }} />
                     ))}
-                    {data?.jobs.map((j) => {
-                      if (!j.scheduled_start) return null;
-                      const seg = segment(d, j.scheduled_start, j.scheduled_end, 8);
-                      if (!seg) return null;
+                    {data?.jobs.map((j, ji, arr) => {
+                      if (!j.scheduled_start || !jobBlock) return null;
+                      // Split width when several jobs land on the same day so they don't stack.
+                      const w = 100 / arr.length;
                       return (
                         <Link
                           key={j.id}
                           href={`/jobs/${j.id}`}
-                          className="absolute inset-x-0.5 z-10 overflow-hidden rounded-md border border-blue-300 bg-blue-100/90 px-1 py-0.5 text-[10px] leading-tight text-blue-900 shadow-sm hover:bg-blue-200"
-                          style={seg}
+                          className="absolute z-10 overflow-hidden rounded-md border border-blue-300 bg-blue-100/90 px-1 py-0.5 text-[10px] leading-tight text-blue-900 shadow-sm hover:bg-blue-200"
+                          style={{ ...jobBlock, left: `${ji * w}%`, width: `calc(${w}% - 2px)` }}
                           title={`${j.job_number} — ${j.name} (open job)`}
                         >
                           <span className="font-semibold">{j.name}</span>

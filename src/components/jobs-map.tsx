@@ -11,16 +11,18 @@ interface MapJob {
   customer: string | null;
 }
 
-export function JobsMap({ jobs }: { jobs: MapJob[] }) {
+export function JobsMap({ jobs, homeAddress }: { jobs: MapJob[]; homeAddress?: string | null }) {
   const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
   const ref = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const rendererRef = useRef<any>(null);
   const ptsRef = useRef<{ loc: any; name: string }[]>([]);
+  const homeRef = useRef<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [routing, setRouting] = useState(false);
   const [located, setLocated] = useState(0);
+  const [hasHome, setHasHome] = useState(false);
 
   useEffect(() => {
     if (!key) return;
@@ -57,7 +59,26 @@ export function JobsMap({ jobs }: { jobs: MapJob[] }) {
             ptsRef.current.push({ loc, name: j.name });
           } catch {}
         }
-        if (ptsRef.current.length) map.fitBounds(bounds);
+        // Geocode the employee's home as the route start point.
+        if (homeAddress) {
+          try {
+            const res = await geocoder.geocode({ address: homeAddress });
+            const loc = res.results?.[0]?.geometry?.location;
+            if (loc) {
+              homeRef.current = loc;
+              new g.maps.Marker({
+                map,
+                position: loc,
+                title: "Home",
+                label: { text: "🏠", fontSize: "16px" },
+              });
+              bounds.extend(loc);
+              if (!cancelled) setHasHome(true);
+            }
+          } catch {}
+        }
+
+        if (ptsRef.current.length || homeRef.current) map.fitBounds(bounds);
         if (!cancelled) {
           setLocated(ptsRef.current.length);
           setLoading(false);
@@ -76,9 +97,12 @@ export function JobsMap({ jobs }: { jobs: MapJob[] }) {
   function planRoute() {
     const g = (window as any).google;
     const pts = ptsRef.current;
+    const home = homeRef.current;
     if (!g) return;
-    if (pts.length < 2) {
-      setError("Add at least 2 jobs with addresses to suggest a route.");
+    // With a home address we can route home → first job (even a single job).
+    // Without one, we still need at least two job stops.
+    if (!((home && pts.length >= 1) || pts.length >= 2)) {
+      setError(home ? "Add at least one job with an address." : "Set your home address (Settings) or add 2 jobs to suggest a route.");
       return;
     }
     setError(null);
@@ -87,12 +111,16 @@ export function JobsMap({ jobs }: { jobs: MapJob[] }) {
     if (!rendererRef.current) {
       rendererRef.current = new g.maps.DirectionsRenderer({ map: mapRef.current, suppressMarkers: false });
     }
+    // Home → all jobs in schedule order; or (no home) first job → … → last job.
+    const stops = home ? pts : pts.slice(1);
+    const origin = home ?? pts[0].loc;
     svc.route(
       {
-        origin: pts[0].loc,
-        destination: pts[pts.length - 1].loc,
-        waypoints: pts.slice(1, -1).map((p) => ({ location: p.loc, stopover: true })),
-        optimizeWaypoints: true,
+        origin,
+        destination: stops[stops.length - 1].loc,
+        waypoints: stops.slice(0, -1).map((p) => ({ location: p.loc, stopover: true })),
+        // Keep schedule order when starting from home; otherwise optimize.
+        optimizeWaypoints: !home,
         travelMode: g.maps.TravelMode.DRIVING,
       },
       (result: any, status: string) => {
@@ -102,6 +130,7 @@ export function JobsMap({ jobs }: { jobs: MapJob[] }) {
       },
     );
   }
+  const canRoute = (hasHome && located >= 1) || located >= 2;
 
   if (!key) {
     return (
@@ -117,12 +146,12 @@ export function JobsMap({ jobs }: { jobs: MapJob[] }) {
         <div className="text-sm text-slate-500">{jobs.length} job{jobs.length === 1 ? "" : "s"} with an address</div>
         <button
           onClick={planRoute}
-          disabled={routing || located < 2}
-          title={located < 2 ? "Needs at least 2 jobs with addresses" : "Optimize a driving route between stops"}
+          disabled={routing || !canRoute}
+          title={!canRoute ? "Set your home address (Settings) or add 2 jobs" : "Driving route through your stops"}
           className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {routing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Route className="h-4 w-4" />}
-          Suggest route
+          {hasHome ? "Route from home" : "Suggest route"}
         </button>
       </div>
       {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
