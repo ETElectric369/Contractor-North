@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, Clock, Briefcase } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,12 @@ export interface CalJob {
   scheduled_end: string | null;
 }
 
+export interface CalSegment {
+  job_id: string;
+  start_date: string; // yyyy-mm-dd
+  end_date: string;
+}
+
 type View = "month" | "week" | "day";
 
 const dayKey = (d: Date) => {
@@ -41,8 +47,16 @@ const hrs = (e: CalEntry) =>
 const fmtTime = (iso: string) =>
   new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 
-export function CalendarView({ entries, jobs }: { entries: CalEntry[]; jobs: CalJob[] }) {
-  const [view, setView] = useState<View>("month");
+export function CalendarView({
+  entries,
+  jobs,
+  segments = [],
+}: {
+  entries: CalEntry[];
+  jobs: CalJob[];
+  segments?: CalSegment[];
+}) {
+  const [view, setView] = useState<View>("week");
   const [anchor, setAnchor] = useState(() => new Date());
 
   const byDay = useMemo(() => {
@@ -52,21 +66,37 @@ export function CalendarView({ entries, jobs }: { entries: CalEntry[]; jobs: Cal
       return m.get(k)!;
     };
     for (const e of entries) get(dayKey(new Date(e.clock_in))).entries.push(e);
-    // Multi-day jobs appear on EVERY day they span (like Google Calendar).
-    for (const j of jobs) {
-      if (!j.scheduled_start) continue;
-      const d = new Date(j.scheduled_start);
-      d.setHours(0, 0, 0, 0);
-      const last = new Date(j.scheduled_end ?? j.scheduled_start);
-      last.setHours(0, 0, 0, 0);
-      let guard = 0;
-      while (d <= last && guard++ < 45) {
-        get(dayKey(d)).jobs.push(j);
-        d.setDate(d.getDate() + 1);
-      }
+
+    // Group multi-range segments by job; a job with segments is placed only on
+    // the days its ranges cover, so gaps (e.g. between two work weeks) stay empty.
+    const segByJob = new Map<string, CalSegment[]>();
+    for (const s of segments) {
+      if (!segByJob.has(s.job_id)) segByJob.set(s.job_id, []);
+      segByJob.get(s.job_id)!.push(s);
     }
+    const spanDays = (jobId: string, push: (k: string) => void) => {
+      const segs = segByJob.get(jobId);
+      const j = jobs.find((x) => x.id === jobId);
+      const place = (startD: Date, endD: Date) => {
+        const d = new Date(startD);
+        d.setHours(0, 0, 0, 0);
+        const last = new Date(endD);
+        last.setHours(0, 0, 0, 0);
+        let guard = 0;
+        while (d <= last && guard++ < 45) {
+          push(dayKey(d));
+          d.setDate(d.getDate() + 1);
+        }
+      };
+      if (segs && segs.length) {
+        for (const s of segs) place(new Date(`${s.start_date}T00:00:00`), new Date(`${s.end_date}T00:00:00`));
+      } else if (j?.scheduled_start) {
+        place(new Date(j.scheduled_start), new Date(j.scheduled_end ?? j.scheduled_start));
+      }
+    };
+    for (const j of jobs) spanDays(j.id, (k) => get(k).jobs.push(j));
     return m;
-  }, [entries, jobs]);
+  }, [entries, jobs, segments]);
 
   function shift(dir: -1 | 1) {
     const d = new Date(anchor);
@@ -198,9 +228,13 @@ function MonthGrid({
 }
 
 const ROW_PX = 48;
-const DAY_H = 24 * ROW_PX; // full 24-hour timeline, scrollable
+// Show the workday only — no empty overnight hours to scroll past.
+const WORK_START = 6; // 6 AM
+const WORK_END = 19; // 7 PM
+const WORK_HOURS = WORK_END - WORK_START;
+const DAY_H = WORK_HOURS * ROW_PX;
 
-/** Google-style week: hours scroll down the left, days across the top,
+/** Google-style week: workday hours down the left, days across the top,
  *  jobs/timecards drawn as boxes clamped into each day they touch. */
 function WeekGrid({
   anchor,
@@ -211,12 +245,6 @@ function WeekGrid({
   byDay: Map<string, { entries: CalEntry[]; jobs: CalJob[] }>;
   onPick: (d: Date) => void;
 }) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    // Open the timeline at 6 AM, like Google Calendar.
-    if (scrollRef.current) scrollRef.current.scrollTop = 6 * ROW_PX;
-  }, []);
-
   const start = startOfWeek(anchor);
   const days: Date[] = [];
   for (let i = 0; i < 7; i++) {
@@ -225,19 +253,20 @@ function WeekGrid({
     days.push(d);
   }
   const todayK = dayKey(new Date());
-  const hours = Array.from({ length: 24 }, (_, i) => i);
+  const hours = Array.from({ length: WORK_HOURS }, (_, i) => WORK_START + i);
 
-  /** Clamp a start/end span into THIS day's column (multi-day jobs fill it). */
+  /** Clamp a start/end span into THIS day's workday window. */
   const segment = (day: Date, startIso: string, endIso: string | null, fallbackHrs: number) => {
     const dayStart = new Date(day);
     dayStart.setHours(0, 0, 0, 0);
-    const dayEnd = new Date(dayStart.getTime() + 24 * 3_600_000);
+    const winStart = dayStart.getTime() + WORK_START * 3_600_000;
+    const winEnd = dayStart.getTime() + WORK_END * 3_600_000;
     const s = new Date(startIso);
     const e = endIso ? new Date(endIso) : new Date(s.getTime() + fallbackHrs * 3_600_000);
-    const from = Math.max(s.getTime(), dayStart.getTime());
-    const to = Math.min(e.getTime(), dayEnd.getTime());
+    const from = Math.max(s.getTime(), winStart);
+    const to = Math.min(e.getTime(), winEnd);
     if (to <= from) return null;
-    const top = ((from - dayStart.getTime()) / 3_600_000) * ROW_PX;
+    const top = ((from - winStart) / 3_600_000) * ROW_PX;
     const height = Math.max(22, ((to - from) / 3_600_000) * ROW_PX);
     return { top, height: Math.min(height, DAY_H - top) };
   };
@@ -263,14 +292,14 @@ function WeekGrid({
               );
             })}
           </div>
-          {/* Scrollable 24h timeline */}
-          <div ref={scrollRef} className="max-h-[62vh] overflow-y-auto">
+          {/* Workday timeline */}
+          <div className="max-h-[62vh] overflow-y-auto">
             <div className="grid" style={{ gridTemplateColumns: `52px repeat(7, 1fr)` }}>
               {/* Hour rail */}
               <div className="relative" style={{ height: DAY_H }}>
                 {hours.map((h) => (
-                  <div key={h} className="absolute right-1.5 -translate-y-1/2 text-[10px] text-slate-400" style={{ top: h * ROW_PX }}>
-                    {h === 0 ? "" : h === 12 ? "12 PM" : h > 12 ? `${h - 12} PM` : `${h} AM`}
+                  <div key={h} className="absolute right-1.5 -translate-y-1/2 text-[10px] text-slate-400" style={{ top: (h - WORK_START) * ROW_PX }}>
+                    {h === 0 ? "12 AM" : h === 12 ? "12 PM" : h > 12 ? `${h - 12} PM` : `${h} AM`}
                   </div>
                 ))}
               </div>
@@ -280,7 +309,7 @@ function WeekGrid({
                 return (
                   <div key={k} className={`relative border-l border-slate-100 ${k === todayK ? "bg-brand/[0.03]" : ""}`} style={{ height: DAY_H }}>
                     {hours.map((h) => (
-                      <div key={h} className="absolute inset-x-0 border-t border-slate-100" style={{ top: h * ROW_PX }} />
+                      <div key={h} className="absolute inset-x-0 border-t border-slate-100" style={{ top: (h - WORK_START) * ROW_PX }} />
                     ))}
                     {data?.jobs.map((j) => {
                       if (!j.scheduled_start) return null;
@@ -305,11 +334,12 @@ function WeekGrid({
                       return (
                         <div
                           key={e.id}
-                          className="absolute right-0.5 z-20 w-[40%] overflow-hidden rounded-md border border-green-300 bg-green-100/90 px-1 py-0.5 text-[9px] leading-tight text-green-900"
+                          className="absolute right-0.5 z-20 w-[46%] overflow-hidden rounded-md border border-green-300 bg-green-100/90 px-1 py-0.5 text-[9px] leading-tight text-green-900"
                           style={seg}
-                          title={`${e.profiles?.full_name ?? "Crew"} ${fmtTime(e.clock_in)}${e.clock_out ? `–${fmtTime(e.clock_out)}` : ""}`}
+                          title={`${e.profiles?.full_name ?? "Crew"} · ${fmtTime(e.clock_in)}${e.clock_out ? `–${fmtTime(e.clock_out)} · ${hrs(e).toFixed(2)} h` : " (open)"}`}
                         >
-                          {e.profiles?.full_name?.split(" ")[0] ?? "⏱"}
+                          <span className="font-semibold">{e.profiles?.full_name?.split(" ")[0] ?? "Crew"}</span>
+                          <span className="block text-[8px] text-green-700/90">{e.clock_out ? `${hrs(e).toFixed(1)}h` : "open"}</span>
                         </div>
                       );
                     })}

@@ -135,18 +135,81 @@ export async function setJobSchedule(
   return { ok: true };
 }
 
-/** Reschedule a job (ISO string from the client, or null to clear). */
+/** Reschedule a job (ISO string from the client, or null to clear). A single
+ *  date here collapses the job back to one window, so clear any multi-range
+ *  segments to keep the calendar/scheduler consistent. */
 export async function rescheduleJob(
   id: string,
   startIso: string | null,
 ): Promise<Result> {
   const supabase = await createClient();
+  // Clearing segments is best-effort: if the table isn't there yet (migration
+  // 0040 not applied), the error is ignored and single-window rescheduling
+  // still works.
+  await supabase.from("job_schedule_segments").delete().eq("job_id", id);
   const patch: Record<string, unknown> = { scheduled_start: startIso };
   if (startIso) patch.status = "scheduled";
   const { error } = await supabase.from("jobs").update(patch).eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/schedule");
+  revalidatePath("/calendar");
   revalidatePath(`/jobs/${id}`);
+  return { ok: true };
+}
+
+export type DateRange = { start: string; end: string }; // yyyy-mm-dd each
+
+/** Canonical writer for a job's schedule as one or more date ranges. Replaces
+ *  all segments, and mirrors the overall min start / max end onto
+ *  jobs.scheduled_start/end (8am–4pm local) so every legacy reader still works. */
+export async function setJobScheduleRanges(
+  jobId: string,
+  ranges: DateRange[],
+): Promise<Result> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  // Keep only well-formed ranges; default a missing end to the start.
+  const clean = ranges
+    .map((r) => ({ start: r.start, end: r.end || r.start }))
+    .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.start) && /^\d{4}-\d{2}-\d{2}$/.test(r.end))
+    .map((r) => (r.end < r.start ? { start: r.start, end: r.start } : r))
+    .sort((a, b) => a.start.localeCompare(b.start));
+
+  // Mirror the overall window onto the job FIRST — this is what every legacy
+  // reader uses, and it must succeed even if the segments table isn't there.
+  const minStart = clean.length ? clean[0].start : null;
+  const maxEnd = clean.length ? clean.reduce((m, r) => (r.end > m ? r.end : m), clean[0].end) : null;
+  const patch: Record<string, unknown> = {
+    scheduled_start: minStart ? new Date(`${minStart}T08:00:00`).toISOString() : null,
+    scheduled_end: maxEnd ? new Date(`${maxEnd}T16:00:00`).toISOString() : null,
+    updated_at: new Date().toISOString(),
+  };
+  const { error } = await supabase.from("jobs").update(patch).eq("id", jobId);
+  if (error) return { ok: false, error: error.message };
+
+  // Replace segments wholesale. If the table is missing (migration 0040 not yet
+  // applied) a single range is already fully saved via the mirror above; only
+  // multi-range needs the table, so surface a clear message in that case.
+  const { error: delErr } = await supabase.from("job_schedule_segments").delete().eq("job_id", jobId);
+  let segOk = !delErr;
+  if (segOk && clean.length) {
+    const rows = clean.map((r) => ({ job_id: jobId, start_date: r.start, end_date: r.end }));
+    const { error: insErr } = await supabase.from("job_schedule_segments").insert(rows);
+    segOk = !insErr;
+  }
+
+  revalidatePath("/schedule");
+  revalidatePath("/calendar");
+  revalidatePath("/jobs");
+  revalidatePath(`/jobs/${jobId}`);
+
+  if (!segOk && clean.length > 1) {
+    return { ok: false, error: "Multiple date ranges need a quick database update (migration 0040). The first range was saved." };
+  }
   return { ok: true };
 }
 

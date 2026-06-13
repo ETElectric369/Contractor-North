@@ -2,9 +2,9 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check } from "lucide-react";
+import { Check, Plus, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { setJobSchedule } from "../../schedule/actions";
+import { setJobScheduleRanges, type DateRange } from "../../schedule/actions";
 
 /** ISO → yyyy-mm-dd in local time for a date input. */
 function toLocalDate(iso: string | null): string {
@@ -14,39 +14,47 @@ function toLocalDate(iso: string | null): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
-/** Build an ISO timestamp from a local date string at a fixed local hour, so
- *  jobs land on the right calendar day in the user's timezone. */
-function dateToIso(date: string, hour: number): string | null {
-  if (!date) return null;
-  return new Date(`${date}T${String(hour).padStart(2, "0")}:00:00`).toISOString();
+export interface ScheduleSegment {
+  start_date: string; // yyyy-mm-dd
+  end_date: string;
 }
 
-/** Date-only start/end editor on the Job tab — saves as soon as a date is picked. */
+/** Date-only schedule editor: one or more date ranges per job (e.g. Mon–Thu
+ *  this week + Tue–Fri next week). Saves as soon as a range is complete. */
 export function JobScheduleControl({
   id,
   start,
   end,
+  segments,
 }: {
   id: string;
   start: string | null;
   end: string | null;
+  segments?: ScheduleSegment[];
 }) {
   const router = useRouter();
-  const [s, setS] = useState(toLocalDate(start));
-  const [e, setE] = useState(toLocalDate(end));
+
+  const initial: DateRange[] =
+    segments && segments.length
+      ? segments.map((s) => ({ start: s.start_date, end: s.end_date }))
+      : start
+        ? [{ start: toLocalDate(start), end: toLocalDate(end) }]
+        : [{ start: "", end: "" }];
+
+  const [ranges, setRanges] = useState<DateRange[]>(initial);
   const [pending, startT] = useTransition();
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  function save(nextS: string, nextE: string) {
+  function persist(next: DateRange[]) {
     setError(null);
-    if (nextS && nextE && nextE < nextS) {
-      setError("End date is before the start date.");
+    const filled = next.filter((r) => r.start);
+    if (filled.some((r) => r.end && r.end < r.start)) {
+      setError("A range ends before it starts.");
       return;
     }
     startT(async () => {
-      // Start lands at 8am local, end at 4pm, so the Scheduler shows a work day.
-      const res = await setJobSchedule(id, dateToIso(nextS, 8), dateToIso(nextE, 16));
+      const res = await setJobScheduleRanges(id, filled);
       if (!res.ok) {
         setError(res.error ?? "Could not save.");
         return;
@@ -57,32 +65,66 @@ export function JobScheduleControl({
     });
   }
 
+  function update(i: number, patch: Partial<DateRange>) {
+    const next = ranges.map((r, idx) => (idx === i ? { ...r, ...patch } : r));
+    setRanges(next);
+    persist(next);
+  }
+
+  function addRange() {
+    setRanges((r) => [...r, { start: "", end: "" }]);
+  }
+
+  function removeRange(i: number) {
+    const next = ranges.filter((_, idx) => idx !== i);
+    const ensured = next.length ? next : [{ start: "", end: "" }];
+    setRanges(ensured);
+    persist(ensured);
+  }
+
   return (
-    <div className="space-y-1.5">
-      <div className="flex flex-wrap items-center gap-2">
-        <Input
-          type="date"
-          value={s}
-          onChange={(ev) => {
-            setS(ev.target.value);
-            save(ev.target.value, e);
-          }}
-          disabled={pending}
-          className="h-9 w-[150px]"
-          aria-label="Start date"
-        />
-        <span className="text-xs text-slate-400">to</span>
-        <Input
-          type="date"
-          value={e}
-          onChange={(ev) => {
-            setE(ev.target.value);
-            save(s, ev.target.value);
-          }}
-          disabled={pending}
-          className="h-9 w-[150px]"
-          aria-label="End date"
-        />
+    <div className="space-y-2">
+      {ranges.map((r, i) => (
+        <div key={i} className="flex flex-wrap items-center gap-2">
+          <Input
+            type="date"
+            value={r.start}
+            onChange={(ev) => update(i, { start: ev.target.value })}
+            disabled={pending}
+            className="h-9 w-[150px]"
+            aria-label={`Start date ${i + 1}`}
+          />
+          <span className="text-xs text-slate-400">to</span>
+          <Input
+            type="date"
+            value={r.end}
+            onChange={(ev) => update(i, { end: ev.target.value })}
+            disabled={pending}
+            className="h-9 w-[150px]"
+            aria-label={`End date ${i + 1}`}
+          />
+          {ranges.length > 1 && (
+            <button
+              type="button"
+              onClick={() => removeRange(i)}
+              className="rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
+              aria-label="Remove date range"
+              title="Remove this range"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+      ))}
+
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={addRange}
+          className="inline-flex items-center gap-1 text-xs font-medium text-brand hover:underline"
+        >
+          <Plus className="h-3.5 w-3.5" /> Add date range
+        </button>
         {pending && <span className="text-xs text-slate-400">Saving…</span>}
         {saved && !pending && (
           <span className="flex items-center gap-1 text-xs font-medium text-green-600">

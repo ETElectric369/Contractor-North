@@ -47,7 +47,8 @@ export default async function SchedulePage({
       })()
     : weekRange(offset);
 
-  const [{ data: scheduled }, { data: unscheduled }, { data: members }, { data: customers }] =
+  const isoDate = (d: Date) => d.toISOString().slice(0, 10);
+  const [{ data: scheduled }, { data: unscheduled }, { data: members }, { data: customers }, { data: segments }] =
     await Promise.all([
       supabase
         .from("jobs")
@@ -64,15 +65,42 @@ export default async function SchedulePage({
         .limit(30),
       supabase.from("profiles").select("id, full_name").eq("active", true).order("full_name"),
       supabase.from("customers").select("id, name").order("name"),
+      supabase
+        .from("job_schedule_segments")
+        .select("job_id, start_date, end_date")
+        .gte("end_date", isoDate(span.start))
+        .lte("start_date", isoDate(span.end)),
     ]);
 
-  // Place each job on every day it spans (scheduled_start..scheduled_end).
+  // Group multi-range segments by job; jobs with segments are placed only on
+  // the days their ranges cover (gaps between work weeks stay empty).
+  const segByJob = new Map<string, { start_date: string; end_date: string }[]>();
+  for (const s of (segments ?? []) as any[]) {
+    if (!segByJob.has(s.job_id)) segByJob.set(s.job_id, []);
+    segByJob.get(s.job_id)!.push(s);
+  }
+
+  // A job's earliest range (its mirrored scheduled_start) can sit before the
+  // visible span while a later range lands inside it — fetch those too so they
+  // don't vanish from the week/month they actually occur in.
+  const haveIds = new Set((scheduled ?? []).map((j: any) => j.id));
+  const missingIds = [...segByJob.keys()].filter((id) => !haveIds.has(id));
+  let extraJobs: any[] = [];
+  if (missingIds.length) {
+    const { data } = await supabase
+      .from("jobs")
+      .select("id, name, job_number, status, scheduled_start, scheduled_end, assigned_to, customers(name)")
+      .in("id", missingIds);
+    extraJobs = data ?? [];
+  }
+  const allJobs = [...(scheduled ?? []), ...extraJobs];
+
+  // Place each job on every day it actually spans.
   const byDay = new Map<string, any[]>();
-  for (const j of scheduled ?? []) {
-    if (!j.scheduled_start) continue;
-    const d = new Date(j.scheduled_start as string);
+  const place = (j: any, startD: Date, endD: Date) => {
+    const d = new Date(startD);
     d.setHours(0, 0, 0, 0);
-    const last = new Date((j.scheduled_end ?? j.scheduled_start) as string);
+    const last = new Date(endD);
     last.setHours(0, 0, 0, 0);
     let guard = 0;
     while (d <= last && guard++ < 45) {
@@ -80,6 +108,14 @@ export default async function SchedulePage({
       if (!byDay.has(k)) byDay.set(k, []);
       byDay.get(k)!.push(j);
       d.setDate(d.getDate() + 1);
+    }
+  };
+  for (const j of allJobs) {
+    const segs = segByJob.get(j.id as string);
+    if (segs && segs.length) {
+      for (const s of segs) place(j, new Date(`${s.start_date}T00:00:00`), new Date(`${s.end_date}T00:00:00`));
+    } else if (j.scheduled_start) {
+      place(j, new Date(j.scheduled_start as string), new Date((j.scheduled_end ?? j.scheduled_start) as string));
     }
   }
 

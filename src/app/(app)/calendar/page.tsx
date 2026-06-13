@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
-import { CalendarView, type CalEntry, type CalJob } from "./calendar-view";
+import { CalendarView, type CalEntry, type CalJob, type CalSegment } from "./calendar-view";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +11,7 @@ export default async function CalendarPage() {
   const from = new Date(Date.now() - 60 * 86400_000).toISOString();
   const to = new Date(Date.now() + 60 * 86400_000).toISOString();
 
-  const [{ data: entries }, { data: jobs }] = await Promise.all([
+  const [{ data: entries }, { data: jobs }, { data: segments }] = await Promise.all([
     supabase
       .from("time_entries")
       .select("id, clock_in, clock_out, lunch_minutes, status, job_code, job_id, profiles(full_name), jobs(job_number, name)")
@@ -24,6 +24,11 @@ export default async function CalendarPage() {
       .gte("scheduled_start", from)
       .lte("scheduled_start", to)
       .order("scheduled_start"),
+    supabase
+      .from("job_schedule_segments")
+      .select("job_id, start_date, end_date")
+      .gte("end_date", from.slice(0, 10))
+      .lte("start_date", to.slice(0, 10)),
   ]);
 
   return (
@@ -32,7 +37,11 @@ export default async function CalendarPage() {
         title="Calendar"
         description="Timecard entries and scheduled jobs — month, week, or day."
       />
-      <CalendarView entries={(entries ?? []) as unknown as CalEntry[]} jobs={(jobs ?? []) as unknown as CalJob[]} />
+      <CalendarView
+        entries={(entries ?? []) as unknown as CalEntry[]}
+        jobs={(jobs ?? []) as unknown as CalJob[]}
+        segments={(segments ?? []) as unknown as CalSegment[]}
+      />
     </div>
   );
 }

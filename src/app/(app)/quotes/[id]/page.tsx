@@ -12,6 +12,7 @@ import { ConvertButton } from "@/components/convert-button";
 import { DeleteButton } from "@/components/delete-button";
 import { EditCustomerButton } from "../../crm/[id]/edit-customer-button";
 import { createJobFromQuote, deleteQuote } from "../actions";
+import { createMaterialListFromQuote } from "../../materials/actions";
 import { Briefcase } from "lucide-react";
 import type { Quote, QuoteLineItem } from "@/lib/types";
 
@@ -71,6 +72,14 @@ export default async function QuoteDetailPage({
           >
             <Printer className="h-4 w-4" /> Print / PDF
           </Link>
+          {lineItems.length > 0 && (
+            <ConvertButton
+              label="Build material list"
+              run={createMaterialListFromQuote.bind(null, q.id)}
+              hrefPrefix="/materials/"
+              variant="outline"
+            />
+          )}
           {(q as any).job_id ? (
             <Link
               href={`/jobs/${(q as any).job_id}`}

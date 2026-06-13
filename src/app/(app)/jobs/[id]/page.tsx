@@ -109,6 +109,18 @@ export default async function JobDetailPage({
     .eq("status", "pending")
     .maybeSingle();
 
+  const { data: scheduleSegments } = await supabase
+    .from("job_schedule_segments")
+    .select("start_date, end_date")
+    .eq("job_id", id)
+    .order("start_date");
+
+  const { data: jobLists } = await supabase
+    .from("material_lists")
+    .select("id, name, created_at, material_list_items(count)")
+    .eq("job_id", id)
+    .order("created_at", { ascending: false });
+
   // Extra data for the per-tab "Add" buttons.
   const {
     data: { user },
@@ -211,7 +223,7 @@ export default async function JobDetailPage({
                 <div className="sm:col-span-2">
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Scheduled</div>
                   <div className="mt-1">
-                    <JobScheduleControl id={j.id} start={j.scheduled_start} end={j.scheduled_end} />
+                    <JobScheduleControl id={j.id} start={j.scheduled_start} end={j.scheduled_end} segments={(scheduleSegments ?? []) as any} />
                   </div>
                 </div>
               </div>
@@ -379,6 +391,41 @@ export default async function JobDetailPage({
               <JobDocuments orgId={j.org_id} jobId={j.id} docs={docs} />
             </CardContent>
           </Card>
+        </div>
+      ),
+    },
+    {
+      id: "materials",
+      label: "Materials",
+      count: jobLists?.length ?? 0,
+      content: (
+        <div className="space-y-3">
+          {(jobLists ?? []).length === 0 ? (
+            <Card>
+              <CardContent className="py-8 text-center">
+                <p className="text-sm text-slate-500">No material lists yet.</p>
+                <p className="mt-1 text-xs text-slate-400">
+                  Open a quote and tap <span className="font-medium">Build material list</span> to generate a take-off from its line items.
+                </p>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card className="overflow-hidden">
+              <ul className="divide-y divide-slate-100">
+                {(jobLists ?? []).map((ml: any) => {
+                  const count = ml.material_list_items?.[0]?.count ?? 0;
+                  return (
+                    <li key={ml.id}>
+                      <Link href={`/materials/${ml.id}`} className="flex items-center justify-between px-5 py-3 text-sm hover:bg-slate-50">
+                        <span className="font-medium text-slate-900">{ml.name}</span>
+                        <span className="text-slate-500">{count} {count === 1 ? "item" : "items"}</span>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </Card>
+          )}
         </div>
       ),
     },

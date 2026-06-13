@@ -43,3 +43,6 @@ yarn-error.log*
 # claude code local settings
 .claude/settings.local.json
 .claude/
+
+# remote-control automation state + logs (local only)
+/automation/

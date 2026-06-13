@@ -103,6 +103,62 @@ export async function deleteMaterialList(listId: string): Promise<Result> {
   return { ok: true };
 }
 
+/** Build a material take-off list straight from a quote's line items, attached
+ *  to the quote's job. Maps each line: description → description, qty → qty,
+ *  unit → unit, unit_price → est_cost. Returns the new list id. */
+export async function createMaterialListFromQuote(quoteId: string): Promise<Result> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  const { data: quote, error: qErr } = await supabase
+    .from("quotes")
+    .select("id, quote_number, job_id, title")
+    .eq("id", quoteId)
+    .maybeSingle();
+  if (qErr) return { ok: false, error: qErr.message };
+  if (!quote) return { ok: false, error: "Quote not found." };
+
+  const { data: items, error: iErr } = await supabase
+    .from("quote_line_items")
+    .select("description, quantity, unit, unit_price, sort_order")
+    .eq("quote_id", quoteId)
+    .order("sort_order");
+  if (iErr) return { ok: false, error: iErr.message };
+  if (!items || items.length === 0)
+    return { ok: false, error: "This quote has no line items to build from." };
+
+  const { data: list, error } = await supabase
+    .from("material_lists")
+    .insert({
+      name: `Materials — ${quote.quote_number}`,
+      job_id: quote.job_id,
+      created_by: user.id,
+    })
+    .select("id")
+    .single();
+  if (error) return { ok: false, error: error.message };
+
+  const rows = items.map((it: any, idx: number) => ({
+    list_id: list.id,
+    description: it.description,
+    part_number: null,
+    quantity: Number(it.quantity) || 1,
+    unit: it.unit || "ea",
+    vendor: null,
+    est_cost: it.unit_price != null ? Number(it.unit_price) : null,
+    sort_order: it.sort_order ?? idx,
+  }));
+  const { error: itemsErr } = await supabase.from("material_list_items").insert(rows);
+  if (itemsErr) return { ok: false, error: itemsErr.message };
+
+  revalidatePath("/materials");
+  if (quote.job_id) revalidatePath(`/jobs/${quote.job_id}`);
+  return { ok: true, id: list.id };
+}
+
 /** Ask Claude to build an electrical material take-off from a scope of work. */
 export async function generateMaterialDraft(
   scope: string,
