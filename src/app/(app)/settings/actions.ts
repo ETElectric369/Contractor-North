@@ -319,6 +319,73 @@ export async function setAvatarUrl(url: string | null): Promise<Result> {
   return { ok: true };
 }
 
+/** Owner/admin edits a team member's profile (name, role, active, rate). */
+export async function updateMember(
+  id: string,
+  patch: { full_name?: string; role?: string; active?: boolean; hourly_rate?: number | null },
+): Promise<Result> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+  const { data: me } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
+  if (!me || !["owner", "admin"].includes(me.role)) return { ok: false, error: "Not allowed." };
+  if (id === user.id && patch.role && patch.role !== "owner") {
+    return { ok: false, error: "You can't change your own owner role." };
+  }
+
+  const clean: Record<string, unknown> = {};
+  if (patch.full_name !== undefined) clean.full_name = patch.full_name.trim() || null;
+  if (patch.role !== undefined && ["admin", "office", "tech"].includes(patch.role)) clean.role = patch.role;
+  if (patch.active !== undefined) clean.active = patch.active;
+  if (patch.hourly_rate !== undefined) clean.hourly_rate = patch.hourly_rate;
+  if (!Object.keys(clean).length) return { ok: true };
+
+  const { error } = await supabase.from("profiles").update(clean).eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/settings");
+  return { ok: true };
+}
+
+/** Owner/admin resets a member's login email and/or password (needs the
+ *  service-role key). The owner hands the new password to the employee. */
+export async function updateMemberAuth(
+  id: string,
+  patch: { email?: string; password?: string },
+): Promise<Result> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+  const { data: me } = await supabase.from("profiles").select("role, org_id").eq("id", user.id).maybeSingle();
+  if (!me || !["owner", "admin"].includes(me.role)) return { ok: false, error: "Not allowed." };
+
+  // The target must be in the same org.
+  const { data: target } = await supabase.from("profiles").select("org_id").eq("id", id).maybeSingle();
+  if (!target || target.org_id !== me.org_id) return { ok: false, error: "Member not found." };
+
+  const { adminConfigured, createAdminClient } = await import("@/lib/supabase/admin");
+  if (!adminConfigured()) {
+    return { ok: false, error: "Changing logins needs SUPABASE_SERVICE_ROLE_KEY on the server. Add it in Vercel, then redeploy." };
+  }
+  const attrs: Record<string, unknown> = {};
+  if (patch.email?.trim()) attrs.email = patch.email.trim().toLowerCase();
+  if (patch.password) {
+    if (patch.password.length < 8) return { ok: false, error: "Password must be at least 8 characters." };
+    attrs.password = patch.password;
+  }
+  if (!Object.keys(attrs).length) return { ok: true };
+
+  const admin = createAdminClient();
+  const { error } = await admin.auth.admin.updateUserById(id, attrs);
+  if (error) return { ok: false, error: error.message };
+  if (attrs.email) await admin.from("profiles").update({ email: attrs.email }).eq("id", id);
+  revalidatePath("/settings");
+  return { ok: true };
+}
+
 /** Owner/admin sets a team member's billable hourly rate. */
 export async function updateMemberRate(
   id: string,

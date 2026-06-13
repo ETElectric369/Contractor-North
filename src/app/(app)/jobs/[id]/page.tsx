@@ -14,6 +14,7 @@ import {
   initials,
 } from "@/lib/utils";
 import { JobDocuments } from "./job-documents";
+import { JobPhotos } from "./job-photos";
 import { JobNotes } from "./job-notes";
 import { JobBills } from "./job-bills";
 import { JobTasks } from "./job-tasks";
@@ -249,6 +250,18 @@ export default async function JobDetailPage({
         <Card>
           <CardContent className="py-5">
             <JobNotes jobId={j.id} orgId={j.org_id} notes={j.notes} />
+          </CardContent>
+        </Card>
+      ),
+    },
+    {
+      id: "photos",
+      label: "Photos",
+      count: docs.filter((d: any) => /\.(jpe?g|png|webp|gif|heic)($|\?)/i.test(d.signedUrl ?? d.name)).length,
+      content: (
+        <Card>
+          <CardContent className="py-5">
+            <JobPhotos orgId={j.org_id} jobId={j.id} docs={docs} />
           </CardContent>
         </Card>
       ),

@@ -20,6 +20,7 @@ import { SplashSettings } from "./splash-settings";
 import { AiStatus } from "./ai-status";
 import { QuotePlaybookForm } from "./quote-playbook-form";
 import { MemberRate } from "./member-rate";
+import { EditMemberButton } from "./edit-member-button";
 import { AvatarUpload } from "./avatar-upload";
 import { AddEmployeeButton } from "./add-employee-button";
 import { adminConfigured } from "@/lib/supabase/admin";
@@ -161,6 +162,13 @@ export default async function SettingsPage({
                 {isAdmin && <MemberRate id={m.id} rate={m.hourly_rate} />}
                 {!m.active && <Badge tone="red">inactive</Badge>}
                 <Badge tone={roleTone[m.role]}>{m.role}</Badge>
+                {isAdmin && (
+                  <EditMemberButton
+                    member={{ id: m.id, full_name: m.full_name, email: m.email, role: m.role, active: m.active }}
+                    isSelf={m.id === profile?.id}
+                    authConfigured={adminConfigured()}
+                  />
+                )}
               </li>
             ))}
           </ul>
