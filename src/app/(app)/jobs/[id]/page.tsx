@@ -25,6 +25,7 @@ import { JobEditButton } from "./job-edit-button";
 import { JobScheduleControl } from "./job-schedule-control";
 import { FinishJobButton } from "./finish-job-button";
 import { ProposeDatesButton } from "./propose-dates-button";
+import { ProgressInvoiceButton } from "./progress-invoice-button";
 import { NewWorkOrderButton } from "../../work-orders/new-wo-button";
 import { NewPoButton } from "../../purchasing/new-po-button";
 import { ConvertButton } from "@/components/convert-button";
@@ -466,7 +467,8 @@ export default async function JobDetailPage({
       count: invoices?.length ?? 0,
       content: (
         <div className="space-y-3">
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-2">
+            <ProgressInvoiceButton jobId={j.id} />
             <ConvertButton
               label="Create invoice"
               run={createInvoiceForJob.bind(null, j.id)}
