@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { TimeclockPanel } from "./timeclock-panel";
 import { getOrgSettings } from "@/lib/org-settings";
 import { AddEntryButton } from "./add-entry-button";
+import { EditEntryButton } from "../timecards/edit-entry-button";
 import { formatDateTime, hoursBetween, formatDuration } from "@/lib/utils";
 import { translator } from "@/lib/i18n";
 import type { JobCode, TimeEntry } from "@/lib/types";
@@ -62,6 +63,18 @@ export default async function TimeclockPage() {
 
   const openEntry = (openRes.data as TimeEntry) ?? null;
   const week = (weekRes.data ?? []) as TimeEntry[];
+
+  // Recent entries table: staff see the whole crew (with names + edit), everyone
+  // else sees their own. Editable inline.
+  let recentQ = supabase
+    .from("time_entries")
+    .select("*, profiles:profile_id(full_name)")
+    .gte("clock_in", weekAgo)
+    .order("clock_in", { ascending: false })
+    .limit(60);
+  if (!isStaff) recentQ = recentQ.eq("profile_id", user?.id ?? "");
+  const { data: recentData } = await recentQ;
+  const recent = (recentData ?? []) as any[];
 
   // Aggregate hours per job code for the week (closed entries only).
   const perCode = new Map<string, number>();
@@ -129,48 +142,44 @@ export default async function TimeclockPage() {
           <h3 className="text-sm font-semibold text-slate-900">{t("tc_recent")}</h3>
         </div>
         <div className="overflow-x-auto">
-        <table className="w-full min-w-[480px] text-sm">
+        <table className="w-full min-w-[520px] text-sm">
           <thead className="border-b border-slate-100 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-400">
             <tr>
+              {isStaff && <th className="px-5 py-2.5 font-semibold">Who</th>}
               <th className="px-5 py-2.5 font-semibold">Clock in</th>
               <th className="px-3 py-2.5 font-semibold">Clock out</th>
               <th className="px-3 py-2.5 font-semibold">Code</th>
               <th className="px-3 py-2.5 text-right font-semibold">Lunch</th>
-              <th className="px-5 py-2.5 text-right font-semibold">Hours</th>
+              <th className="px-3 py-2.5 text-right font-semibold">Hours</th>
+              <th className="px-5 py-2.5 text-right font-semibold">Edit</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {week.map((e) => (
+            {recent.map((e) => (
               <tr key={e.id}>
-                <td className="px-5 py-2.5 text-slate-700">
-                  {formatDateTime(e.clock_in)}
-                </td>
+                {isStaff && (
+                  <td className="px-5 py-2.5 font-medium text-slate-700">{e.profiles?.full_name ?? "—"}</td>
+                )}
+                <td className="px-5 py-2.5 text-slate-700">{formatDateTime(e.clock_in)}</td>
                 <td className="px-3 py-2.5 text-slate-500">
-                  {e.clock_out ? formatDateTime(e.clock_out) : (
-                    <Badge tone="green">{t("tc_open")}</Badge>
-                  )}
+                  {e.clock_out ? formatDateTime(e.clock_out) : <Badge tone="green">{t("tc_open")}</Badge>}
                 </td>
                 <td className="px-3 py-2.5">
                   {e.job_code ? <Badge tone="slate">{e.job_code}</Badge> : "—"}
-                  {e.source === "manual" && (
-                    <Badge tone="amber" className="ml-1">manual</Badge>
-                  )}
+                  {e.source === "manual" && <Badge tone="amber" className="ml-1">manual</Badge>}
                 </td>
-                <td className="px-3 py-2.5 text-right text-slate-500">
-                  {e.lunch_minutes}m
+                <td className="px-3 py-2.5 text-right text-slate-500">{e.lunch_minutes}m</td>
+                <td className="px-3 py-2.5 text-right font-medium text-slate-800">
+                  {e.clock_out ? formatDuration(hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes)) : "—"}
                 </td>
-                <td className="px-5 py-2.5 text-right font-medium text-slate-800">
-                  {e.clock_out
-                    ? formatDuration(
-                        hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes),
-                      )
-                    : "—"}
+                <td className="px-5 py-2.5 text-right">
+                  <EditEntryButton entry={e} jobCodes={(codesRes.data ?? []) as JobCode[]} members={members ?? []} isStaff={isStaff} />
                 </td>
               </tr>
             ))}
-            {week.length === 0 && (
+            {recent.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-5 py-6 text-center text-slate-400">
+                <td colSpan={isStaff ? 7 : 6} className="px-5 py-6 text-center text-slate-400">
                   {t("tc_noEntries")}
                 </td>
               </tr>

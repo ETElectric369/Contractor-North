@@ -179,6 +179,7 @@ export async function updateTimeEntry(input: {
   job_code: string | null;
   notes: string;
   miles?: number;
+  profile_id?: string | null; // reassign the entry to a different team member
 }): Promise<ClockResult> {
   const supabase = await createClient();
   const ci = new Date(input.clock_in);
@@ -188,17 +189,20 @@ export async function updateTimeEntry(input: {
   }
   if (co <= ci) return { ok: false, error: "End must be after start." };
 
+  const patch: Record<string, unknown> = {
+    clock_in: ci.toISOString(),
+    clock_out: co.toISOString(),
+    lunch_minutes: input.lunch_minutes || 0,
+    job_code: input.job_code,
+    notes: input.notes || null,
+    miles: input.miles ?? 0,
+    status: "closed",
+  };
+  if (input.profile_id) patch.profile_id = input.profile_id;
+
   const { error } = await supabase
     .from("time_entries")
-    .update({
-      clock_in: ci.toISOString(),
-      clock_out: co.toISOString(),
-      lunch_minutes: input.lunch_minutes || 0,
-      job_code: input.job_code,
-      notes: input.notes || null,
-      miles: input.miles ?? 0,
-      status: "closed",
-    })
+    .update(patch)
     .eq("id", input.id);
   if (error) return { ok: false, error: error.message };
 

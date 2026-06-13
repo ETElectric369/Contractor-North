@@ -43,8 +43,11 @@ export function AddEntryButton({
   const [endT, setEndT] = useState("16:00");
   const [jobId, setJobId] = useState("");
   const [jobCode, setJobCode] = useState("");
-  const [lunchTaken, setLunchTaken] = useState(false);
-  const [breaksTaken, setBreaksTaken] = useState(false);
+  // Default to "taken" so a normal workday entry saves in one tap; uncheck if
+  // the person actually skipped them. (Unchecked-by-default was silently
+  // blocking saves on any shift over 5 hrs.)
+  const [lunchTaken, setLunchTaken] = useState(true);
+  const [breaksTaken, setBreaksTaken] = useState(true);
   const [miles, setMiles] = useState(0);
   const [notes, setNotes] = useState("");
 

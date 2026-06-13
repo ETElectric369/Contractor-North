@@ -18,6 +18,12 @@ interface Entry {
   job_code: string | null;
   notes: string | null;
   miles?: number;
+  profile_id?: string;
+  profiles?: { full_name: string | null } | null;
+}
+interface Member {
+  id: string;
+  full_name: string | null;
 }
 
 function parts(iso: string | null) {
@@ -33,9 +39,13 @@ function parts(iso: string | null) {
 export function EditEntryButton({
   entry,
   jobCodes,
+  members = [],
+  isStaff = false,
 }: {
   entry: Entry;
   jobCodes: JobCode[];
+  members?: Member[];
+  isStaff?: boolean;
 }) {
   const router = useRouter();
   const inP = parts(entry.clock_in);
@@ -44,6 +54,7 @@ export function EditEntryButton({
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const [profileId, setProfileId] = useState(entry.profile_id ?? "");
   const [date, setDate] = useState(inP.date);
   const [startT, setStartT] = useState(inP.time);
   const [endT, setEndT] = useState(outP.time || inP.time);
@@ -80,6 +91,7 @@ export function EditEntryButton({
         job_code: jobCode || null,
         notes,
         miles,
+        profile_id: profileId || undefined,
       });
       if (!res.ok) return setError(res.error ?? "Could not save.");
       setOpen(false);
@@ -112,6 +124,21 @@ export function EditEntryButton({
           {error && (
             <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
           )}
+          <div>
+            <Label htmlFor="e-member">Team member</Label>
+            {isStaff && members.length > 0 ? (
+              <Select id="e-member" value={profileId} onChange={(e) => setProfileId(e.target.value)}>
+                {!entry.profile_id && <option value="">— Select —</option>}
+                {members.map((m) => (
+                  <option key={m.id} value={m.id}>{m.full_name ?? "Unnamed"}</option>
+                ))}
+              </Select>
+            ) : (
+              <div className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">
+                {entry.profiles?.full_name ?? "—"}
+              </div>
+            )}
+          </div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <div className="col-span-2 sm:col-span-1">
               <Label htmlFor="e-date">Date</Label>

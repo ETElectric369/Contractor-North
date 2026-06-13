@@ -240,6 +240,8 @@ export default async function TimecardsPage({
                           <EditEntryButton
                             entry={e}
                             jobCodes={(jobCodes ?? []) as JobCode[]}
+                            members={members ?? []}
+                            isStaff
                           />
                         </div>
                       </div>
