@@ -1,3 +1,4 @@
+import type Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@/lib/supabase/server";
 import {
   getAnthropic,
@@ -5,6 +6,7 @@ import {
   ASSISTANT_SYSTEM_PROMPT,
 } from "@/lib/anthropic";
 import { getOrgSettings } from "@/lib/org-settings";
+import { DATA_TOOLS, runDataTool } from "@/lib/assistant-tools";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -72,26 +74,55 @@ export async function POST(req: Request) {
   }
 
   const encoder = new TextEncoder();
+  // Agentic loop: the model may call read-only data tools (scoped to this user's
+  // org by RLS) before answering. We stream its text out in every round and run
+  // tool calls in between, until it stops asking for tools.
+  const MAX_ROUNDS = 6;
+  const convo: Anthropic.MessageParam[] = messages.map((m) => ({
+    role: m.role,
+    content: m.content,
+  }));
+
   const stream = new ReadableStream({
     async start(controller) {
+      const emit = (t: string) => controller.enqueue(encoder.encode(t));
       try {
-        const anthropicStream = client.messages.stream({
-          model: DEFAULT_MODEL,
-          max_tokens: 2048,
-          system: systemPrompt,
-          messages,
-        });
+        for (let round = 0; round < MAX_ROUNDS; round++) {
+          const turn = client.messages.stream({
+            model: DEFAULT_MODEL,
+            max_tokens: 2048,
+            system: systemPrompt,
+            tools: DATA_TOOLS,
+            messages: convo,
+          });
+          turn.on("text", (text) => emit(text));
+          const final = await turn.finalMessage();
+          convo.push({ role: "assistant", content: final.content });
 
-        anthropicStream.on("text", (text) => {
-          controller.enqueue(encoder.encode(text));
-        });
+          if (final.stop_reason !== "tool_use") break;
 
-        await anthropicStream.finalMessage();
+          const toolUses = final.content.filter(
+            (b: Anthropic.ContentBlock): b is Anthropic.ToolUseBlock =>
+              b.type === "tool_use",
+          );
+          const results: Anthropic.ToolResultBlockParam[] = [];
+          for (const tu of toolUses) {
+            const out = await runDataTool(tu.name, tu.input, supabase);
+            results.push({
+              type: "tool_result",
+              tool_use_id: tu.id,
+              content: out,
+            });
+          }
+          convo.push({ role: "user", content: results });
+
+          if (round === MAX_ROUNDS - 1) {
+            emit("\n\n[Reached the tool-call limit — answering with what I have.]");
+          }
+        }
         controller.close();
       } catch (e: any) {
-        controller.enqueue(
-          encoder.encode(`\n\n[Error: ${e?.message ?? "stream failed"}]`),
-        );
+        emit(`\n\n[Error: ${e?.message ?? "stream failed"}]`);
         controller.close();
       }
     },

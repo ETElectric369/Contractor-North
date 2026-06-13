@@ -11,10 +11,10 @@ interface Msg {
 }
 
 const SUGGESTIONS = [
+  "What's on the schedule this week?",
+  "Show me my open quotes and their totals.",
+  "Which invoices are still unpaid?",
   "Draft a material list for a 200A residential panel upgrade.",
-  "Write a scope of work for adding 6 recessed lights in a kitchen.",
-  "Estimate labor hours to rough-in a 1,500 sq ft house.",
-  "Translate these field notes to English and clean them up.",
 ];
 
 export function AssistantChat() {
@@ -95,8 +95,8 @@ export function AssistantChat() {
               How can I help?
             </h3>
             <p className="mt-1 max-w-sm text-sm text-slate-500">
-              I know electrical work — quotes, take-offs, scopes, code questions,
-              and cleaning up field notes.
+              I can pull up your jobs, quotes, invoices, schedule, and who&apos;s
+              clocked in — plus help with take-offs, scopes, and code questions.
             </p>
             <div className="mt-5 grid w-full max-w-lg gap-2 sm:grid-cols-2">
               {SUGGESTIONS.map((s) => (

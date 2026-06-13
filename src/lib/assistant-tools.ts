@@ -1,0 +1,382 @@
+import "server-only";
+import type Anthropic from "@anthropic-ai/sdk";
+
+/**
+ * Read-only data tools for the in-app assistant.
+ *
+ * Every tool runs against the *caller's* RLS-scoped Supabase client (their own
+ * signed-in session), so the database itself guarantees the assistant can only
+ * ever see the current user's organization. There is no service-role access and
+ * no write path here — these tools only SELECT.
+ */
+
+export const DATA_TOOLS: Anthropic.Tool[] = [
+  {
+    name: "list_jobs",
+    description:
+      "List this company's jobs. Use for questions like 'what jobs are in progress', 'show me my jobs', 'find the job at the Smith house'. Filter by status and/or a text search on job name/number/description.",
+    input_schema: {
+      type: "object",
+      properties: {
+        status: {
+          type: "string",
+          enum: [
+            "estimate",
+            "scheduled",
+            "in_progress",
+            "on_hold",
+            "complete",
+            "invoiced",
+            "cancelled",
+          ],
+          description: "Optional job-status filter.",
+        },
+        search: {
+          type: "string",
+          description: "Optional text to match against job name, number, or description.",
+        },
+        limit: { type: "integer", description: "Max rows (default 15, max 40)." },
+      },
+    },
+  },
+  {
+    name: "list_quotes",
+    description:
+      "List this company's quotes/estimates with their status, total, and customer. Use for 'show me all quotes', 'which quotes are still open', 'what did I quote the Jones job'. Common statuses: draft, sent, accepted, declined, expired.",
+    input_schema: {
+      type: "object",
+      properties: {
+        status: { type: "string", description: "Optional status filter (e.g. draft, sent, accepted)." },
+        search: { type: "string", description: "Optional text to match against quote number or title." },
+        limit: { type: "integer", description: "Max rows (default 15, max 40)." },
+      },
+    },
+  },
+  {
+    name: "list_invoices",
+    description:
+      "List invoices with status, total, amount paid, and remaining balance. Use for 'who owes me money', 'show unpaid invoices', 'what's outstanding'.",
+    input_schema: {
+      type: "object",
+      properties: {
+        unpaid_only: {
+          type: "boolean",
+          description: "When true, only return invoices with a remaining balance (default false).",
+        },
+        limit: { type: "integer", description: "Max rows (default 15, max 40)." },
+      },
+    },
+  },
+  {
+    name: "list_customers",
+    description:
+      "List or search customers (name, company, phone, email, city). Use for 'find a customer', 'what's Jane's phone number', 'how many customers do I have'.",
+    input_schema: {
+      type: "object",
+      properties: {
+        search: { type: "string", description: "Optional text to match against name, company, phone, or email." },
+        limit: { type: "integer", description: "Max rows (default 20, max 40)." },
+      },
+    },
+  },
+  {
+    name: "schedule_overview",
+    description:
+      "What's scheduled in a time window — jobs and appointments. Use for 'what's on the schedule this week', 'what do I have today', 'anything next week'.",
+    input_schema: {
+      type: "object",
+      properties: {
+        range: {
+          type: "string",
+          enum: ["today", "this_week", "next_week", "this_month"],
+          description: "Which window to look at (default this_week).",
+        },
+      },
+    },
+  },
+  {
+    name: "who_is_clocked_in",
+    description:
+      "Who is currently clocked in (open time entries with no clock-out yet), and on which job. Use for 'who's working right now', 'is anyone clocked in'.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "business_summary",
+    description:
+      "A quick snapshot of the business right now: count of active jobs, open quotes, total unpaid invoice balance, and how many people are clocked in. Use for 'how's business', 'give me a status update', 'what's going on'.",
+    input_schema: { type: "object", properties: {} },
+  },
+];
+
+const VALID_TOOL_NAMES = new Set(DATA_TOOLS.map((t) => t.name));
+
+/** Strip characters that would break a PostgREST `.or()` filter expression. */
+function sanitize(s: unknown): string {
+  return String(s ?? "")
+    .replace(/[,()%*]/g, " ")
+    .trim()
+    .slice(0, 80);
+}
+
+function clampLimit(n: unknown, def: number, max = 40): number {
+  const v = Math.floor(Number(n));
+  if (!Number.isFinite(v) || v <= 0) return def;
+  return Math.min(v, max);
+}
+
+/** Normalize a Supabase to-one embed that may arrive as an object or array. */
+function embedName(rel: any): string | null {
+  if (!rel) return null;
+  const r = Array.isArray(rel) ? rel[0] : rel;
+  return r?.name ?? r?.full_name ?? null;
+}
+
+const money = (n: any) => Math.round(Number(n ?? 0) * 100) / 100;
+
+/** Compute [startISO, endISO) for a named window, in UTC (matches the calendar). */
+function windowFor(range: string): { start: string; end: string; label: string } {
+  const now = new Date();
+  const startOfDay = new Date(now);
+  startOfDay.setUTCHours(0, 0, 0, 0);
+
+  if (range === "today") {
+    const end = new Date(startOfDay);
+    end.setUTCDate(end.getUTCDate() + 1);
+    return { start: startOfDay.toISOString(), end: end.toISOString(), label: "today" };
+  }
+  if (range === "this_month") {
+    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+    return { start: start.toISOString(), end: end.toISOString(), label: "this month" };
+  }
+  // week-based (Monday start), this_week or next_week
+  const day = (now.getUTCDay() + 6) % 7; // Monday = 0
+  const weekStart = new Date(startOfDay);
+  weekStart.setUTCDate(startOfDay.getUTCDate() - day + (range === "next_week" ? 7 : 0));
+  const weekEnd = new Date(weekStart);
+  weekEnd.setUTCDate(weekStart.getUTCDate() + 7);
+  return {
+    start: weekStart.toISOString(),
+    end: weekEnd.toISOString(),
+    label: range === "next_week" ? "next week" : "this week",
+  };
+}
+
+/**
+ * Execute a read-only data tool. `supabase` must be the request-scoped client
+ * (RLS-bound to the signed-in user). Returns a compact JSON string for the model.
+ */
+export async function runDataTool(
+  name: string,
+  rawInput: unknown,
+  supabase: any,
+): Promise<string> {
+  if (!VALID_TOOL_NAMES.has(name)) {
+    return JSON.stringify({ error: `Unknown tool: ${name}` });
+  }
+  const input = (rawInput ?? {}) as Record<string, unknown>;
+
+  try {
+    switch (name) {
+      case "list_jobs": {
+        const lim = clampLimit(input.limit, 15);
+        let q = supabase
+          .from("jobs")
+          .select("job_number, name, status, scheduled_start, scheduled_end, customers(name)")
+          .order("created_at", { ascending: false })
+          .limit(lim);
+        if (input.status) q = q.eq("status", String(input.status));
+        if (input.search) {
+          const s = sanitize(input.search);
+          if (s) q = q.or(`name.ilike.%${s}%,job_number.ilike.%${s}%,description.ilike.%${s}%`);
+        }
+        const { data, error } = await q;
+        if (error) throw error;
+        return JSON.stringify({
+          count: data?.length ?? 0,
+          jobs: (data ?? []).map((j: any) => ({
+            job: j.job_number,
+            name: j.name,
+            status: j.status,
+            customer: embedName(j.customers),
+            scheduled_start: j.scheduled_start,
+            scheduled_end: j.scheduled_end,
+          })),
+        });
+      }
+
+      case "list_quotes": {
+        const lim = clampLimit(input.limit, 15);
+        let q = supabase
+          .from("quotes")
+          .select("quote_number, title, status, total, created_at, valid_until, customers(name)")
+          .order("created_at", { ascending: false })
+          .limit(lim);
+        if (input.status) q = q.eq("status", String(input.status));
+        if (input.search) {
+          const s = sanitize(input.search);
+          if (s) q = q.or(`quote_number.ilike.%${s}%,title.ilike.%${s}%`);
+        }
+        const { data, error } = await q;
+        if (error) throw error;
+        return JSON.stringify({
+          count: data?.length ?? 0,
+          quotes: (data ?? []).map((r: any) => ({
+            quote: r.quote_number,
+            title: r.title,
+            status: r.status,
+            total: money(r.total),
+            customer: embedName(r.customers),
+            valid_until: r.valid_until,
+            created_at: r.created_at,
+          })),
+        });
+      }
+
+      case "list_invoices": {
+        const lim = clampLimit(input.limit, 15);
+        const { data, error } = await supabase
+          .from("invoices")
+          .select("invoice_number, status, total, amount_paid, due_date, created_at, customers(name)")
+          .order("created_at", { ascending: false })
+          .limit(40);
+        if (error) throw error;
+        let rows = (data ?? []).map((r: any) => {
+          const total = money(r.total);
+          const paid = money(r.amount_paid);
+          return {
+            invoice: r.invoice_number,
+            status: r.status,
+            total,
+            paid,
+            balance: money(total - paid),
+            due_date: r.due_date,
+            customer: embedName(r.customers),
+          };
+        });
+        if (input.unpaid_only) rows = rows.filter((r: any) => r.balance > 0.005);
+        const outstanding = rows.reduce((s: number, r: any) => s + (r.balance > 0 ? r.balance : 0), 0);
+        return JSON.stringify({
+          count: rows.length,
+          total_outstanding: money(outstanding),
+          invoices: rows.slice(0, lim),
+        });
+      }
+
+      case "list_customers": {
+        const lim = clampLimit(input.limit, 20);
+        let q = supabase
+          .from("customers")
+          .select("name, company_name, phone, email, city, state")
+          .order("name")
+          .limit(lim);
+        if (input.search) {
+          const s = sanitize(input.search);
+          if (s)
+            q = q.or(
+              `name.ilike.%${s}%,company_name.ilike.%${s}%,phone.ilike.%${s}%,email.ilike.%${s}%`,
+            );
+        }
+        const { data, error } = await q;
+        if (error) throw error;
+        return JSON.stringify({
+          count: data?.length ?? 0,
+          customers: (data ?? []).map((c: any) => ({
+            name: c.name,
+            company: c.company_name,
+            phone: c.phone,
+            email: c.email,
+            city: c.city,
+            state: c.state,
+          })),
+        });
+      }
+
+      case "schedule_overview": {
+        const { start, end, label } = windowFor(String(input.range ?? "this_week"));
+        const [jobsRes, apptRes] = await Promise.all([
+          supabase
+            .from("jobs")
+            .select("job_number, name, status, scheduled_start, scheduled_end, customers(name)")
+            .gte("scheduled_start", start)
+            .lt("scheduled_start", end)
+            .order("scheduled_start"),
+          supabase
+            .from("appointments")
+            .select("title, type, starts_at, ends_at, location, status, customers(name), jobs(name)")
+            .gte("starts_at", start)
+            .lt("starts_at", end)
+            .order("starts_at"),
+        ]);
+        if (jobsRes.error) throw jobsRes.error;
+        if (apptRes.error) throw apptRes.error;
+        return JSON.stringify({
+          window: label,
+          jobs: (jobsRes.data ?? []).map((j: any) => ({
+            job: j.job_number,
+            name: j.name,
+            status: j.status,
+            customer: embedName(j.customers),
+            scheduled_start: j.scheduled_start,
+            scheduled_end: j.scheduled_end,
+          })),
+          appointments: (apptRes.data ?? []).map((a: any) => ({
+            title: a.title,
+            type: a.type,
+            starts_at: a.starts_at,
+            ends_at: a.ends_at,
+            location: a.location,
+            status: a.status,
+            customer: embedName(a.customers),
+            job: embedName(a.jobs),
+          })),
+        });
+      }
+
+      case "who_is_clocked_in": {
+        const { data, error } = await supabase
+          .from("time_entries")
+          .select("clock_in, status, profiles(full_name), jobs(name, job_number)")
+          .is("clock_out", null)
+          .order("clock_in");
+        if (error) throw error;
+        return JSON.stringify({
+          count: data?.length ?? 0,
+          clocked_in: (data ?? []).map((t: any) => ({
+            person: embedName(t.profiles),
+            job: embedName(t.jobs),
+            since: t.clock_in,
+            status: t.status,
+          })),
+        });
+      }
+
+      case "business_summary": {
+        const head = { count: "exact" as const, head: true };
+        const [activeJobs, openQuotes, clockedIn, invoices] = await Promise.all([
+          supabase
+            .from("jobs")
+            .select("id", head)
+            .in("status", ["scheduled", "in_progress", "on_hold"]),
+          supabase.from("quotes").select("id", head).in("status", ["draft", "sent"]),
+          supabase.from("time_entries").select("id", head).is("clock_out", null),
+          supabase.from("invoices").select("total, amount_paid, status").limit(1000),
+        ]);
+        const outstanding = (invoices.data ?? [])
+          .filter((r: any) => !["paid", "void", "cancelled"].includes(r.status))
+          .reduce((s: number, r: any) => s + Math.max(0, money(r.total) - money(r.amount_paid)), 0);
+        return JSON.stringify({
+          active_jobs: activeJobs.count ?? 0,
+          open_quotes: openQuotes.count ?? 0,
+          people_clocked_in: clockedIn.count ?? 0,
+          unpaid_invoice_balance: money(outstanding),
+        });
+      }
+
+      default:
+        return JSON.stringify({ error: `Unhandled tool: ${name}` });
+    }
+  } catch (e: any) {
+    return JSON.stringify({ error: e?.message ?? "Query failed." });
+  }
+}
