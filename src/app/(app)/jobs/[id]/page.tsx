@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Home, ChevronRight, MapPin, Calendar, Receipt, Plus } from "lucide-react";
+import { Home, ChevronRight, MapPin, Calendar, Receipt, Plus, Printer } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
@@ -27,6 +27,11 @@ import { FinishJobButton } from "./finish-job-button";
 import { ProposeDatesButton } from "./propose-dates-button";
 import { ProgressInvoiceButton } from "./progress-invoice-button";
 import { NewWorkOrderButton } from "../../work-orders/new-wo-button";
+import { NewChangeOrderButton } from "../../change-orders/new-co-button";
+import { CoStatusControl } from "../../change-orders/co-status-control";
+import { CoRowActions } from "../../change-orders/co-row-actions";
+import { NewListButton } from "../../materials/new-list-button";
+import { AppointmentButton } from "../../appointments/appointment-button";
 import { NewPoButton } from "../../purchasing/new-po-button";
 import { ConvertButton } from "@/components/convert-button";
 import { DeleteButton } from "@/components/delete-button";
@@ -68,7 +73,7 @@ export default async function JobDetailPage({
   ] = await Promise.all([
     supabase.from("quotes").select("id, quote_number, status, total").eq("job_id", id),
     supabase.from("work_orders").select("id, wo_number, title, status").eq("job_id", id),
-    supabase.from("change_orders").select("id, co_number, amount, status").eq("job_id", id),
+    supabase.from("change_orders").select("*").eq("job_id", id).order("created_at", { ascending: false }),
     supabase.from("invoices").select("id, invoice_number, status, total, amount_paid").eq("job_id", id),
     supabase.from("purchase_orders").select("id, po_number, vendor, status, total").eq("job_id", id),
     supabase
@@ -122,6 +127,12 @@ export default async function JobDetailPage({
     .eq("job_id", id)
     .order("created_at", { ascending: false });
 
+  const { data: jobAppts } = await supabase
+    .from("appointments")
+    .select("id, type, title, starts_at, ends_at, location, status")
+    .eq("job_id", id)
+    .order("starts_at");
+
   // Extra data for the per-tab "Add" buttons.
   const {
     data: { user },
@@ -134,6 +145,10 @@ export default async function JobDetailPage({
     supabase.from("customers").select("id, name").order("name"),
   ]);
   const thisJobOpt = [{ id: j.id, job_number: j.job_number, name: j.name }];
+  // Appointment button takes {id,label} option lists.
+  const apptJobOpts = [{ id: j.id, label: `${j.job_number} · ${j.name}` }];
+  const apptCustOpts = (allCustomers ?? []).map((c: any) => ({ id: c.id, label: c.name }));
+  const apptStaffOpts = (techs ?? []).map((t: any) => ({ id: t.id, label: t.full_name ?? "Unnamed" }));
   const companyAddress = [org?.address_line1, org?.city, org?.state, org?.zip].filter(Boolean).join(", ");
   const jobAddress = [j.address, j.city, j.state, j.zip].filter(Boolean).join(", ");
   const mileageRate = getOrgSettings((org as any)?.settings).mileage_rate;
@@ -343,6 +358,33 @@ export default async function JobDetailPage({
       ),
     },
     {
+      id: "appointments",
+      label: "Appointments",
+      count: jobAppts?.length ?? 0,
+      content: (
+        <div className="space-y-3">
+          <div className="flex justify-end">
+            <AppointmentButton jobs={apptJobOpts} customers={apptCustOpts} staff={apptStaffOpts} />
+          </div>
+          <Card className="overflow-hidden">
+            <ul className="divide-y divide-slate-100">
+              {(jobAppts ?? []).map((a: any) => (
+                <li key={a.id} className="flex items-center justify-between gap-3 px-5 py-3 text-sm">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <Badge tone={a.type === "inspection" ? "amber" : "blue"}>{a.type}</Badge>
+                    <span className="truncate font-medium text-slate-900">{a.title}</span>
+                    {a.status === "completed" && <Badge tone="green">done</Badge>}
+                  </div>
+                  <span className="shrink-0 text-slate-500">{formatDateTime(a.starts_at)}</span>
+                </li>
+              ))}
+              {(!jobAppts || jobAppts.length === 0) && empty("appointments")}
+            </ul>
+          </Card>
+        </div>
+      ),
+    },
+    {
       id: "costs",
       label: "Costs",
       content: (
@@ -402,6 +444,9 @@ export default async function JobDetailPage({
       count: jobLists?.length ?? 0,
       content: (
         <div className="space-y-3">
+          <div className="flex justify-end">
+            <NewListButton jobs={thisJobOpt} />
+          </div>
           {(jobLists ?? []).length === 0 ? (
             <Card>
               <CardContent className="py-8 text-center">
@@ -487,6 +532,48 @@ export default async function JobDetailPage({
             ))}
             {(!invoices || invoices.length === 0) && empty("invoices")}
           </ul>
+          </Card>
+        </div>
+      ),
+    },
+    {
+      id: "change-orders",
+      label: "Change Orders",
+      count: changeOrders?.length ?? 0,
+      content: (
+        <div className="space-y-3">
+          <div className="flex justify-end">
+            <NewChangeOrderButton jobs={thisJobOpt} />
+          </div>
+          <Card className="overflow-hidden">
+            <ul className="divide-y divide-slate-100">
+              {(changeOrders ?? []).map((c: any) => (
+                <li key={c.id} className="flex items-start gap-4 px-5 py-4">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-slate-900">{c.co_number}</span>
+                      <span className="text-xs text-slate-400">{formatDate(c.created_at)}</span>
+                    </div>
+                    {c.description && <p className="mt-1 text-sm text-slate-600">{c.description}</p>}
+                  </div>
+                  <div className="flex shrink-0 flex-col items-end gap-2">
+                    <span className="text-sm font-semibold text-slate-900">{formatCurrency(c.amount)}</span>
+                    <div className="flex items-center gap-2">
+                      <Link
+                        href={`/print/change-order/${c.id}`}
+                        className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                        title="Print / PDF"
+                      >
+                        <Printer className="h-4 w-4" />
+                      </Link>
+                      <CoRowActions co={c} jobs={thisJobOpt} />
+                      <CoStatusControl id={c.id} status={c.status} />
+                    </div>
+                  </div>
+                </li>
+              ))}
+              {(!changeOrders || changeOrders.length === 0) && empty("change orders")}
+            </ul>
           </Card>
         </div>
       ),
