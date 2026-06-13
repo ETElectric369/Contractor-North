@@ -6,6 +6,7 @@ import { Plus, Sparkles, Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { formatCurrency } from "@/lib/utils";
 import {
   createMaterialList,
@@ -25,7 +26,23 @@ export function NewListButton({ jobs }: { jobs: JobOption[] }) {
   const [jobId, setJobId] = useState("");
   const [scope, setScope] = useState("");
   const [items, setItems] = useState<DraftMaterial[]>([]);
+  const [mDesc, setMDesc] = useState("");
+  const [mQty, setMQty] = useState(1);
+  const [mUnit, setMUnit] = useState("ea");
+  const [mCost, setMCost] = useState(0);
   const [error, setError] = useState<string | null>(null);
+
+  function addManual() {
+    if (!mDesc.trim()) return;
+    setItems((p) => [
+      ...p,
+      { description: mDesc.trim(), part_number: null, quantity: mQty || 1, unit: mUnit || "ea", vendor: null, est_cost: mCost || null },
+    ]);
+    setMDesc("");
+    setMQty(1);
+    setMUnit("ea");
+    setMCost(0);
+  }
   const [generating, startGen] = useTransition();
   const [saving, startSave] = useTransition();
   const router = useRouter();
@@ -124,6 +141,20 @@ export function NewListButton({ jobs }: { jobs: JobOption[] }) {
                 </>
               )}
             </Button>
+          </div>
+
+          {/* Or add items by hand */}
+          <div className="rounded-lg border border-slate-200 p-3">
+            <div className="mb-2 text-sm font-semibold text-slate-900">Add an item</div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Input value={mDesc} onChange={(e) => setMDesc(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addManual())} placeholder="e.g. 20A breaker" className="min-w-[160px] flex-1" />
+              <NumberInput value={mQty} onValueChange={setMQty} className="w-16 text-center" placeholder="Qty" />
+              <Input value={mUnit} onChange={(e) => setMUnit(e.target.value)} className="w-14" placeholder="ea" />
+              <NumberInput value={mCost} onValueChange={setMCost} className="w-24 text-right" placeholder="$ each" />
+              <Button size="sm" variant="outline" onClick={addManual} disabled={!mDesc.trim()}>
+                <Plus className="h-3.5 w-3.5" /> Add
+              </Button>
+            </div>
           </div>
 
           {items.length > 0 && (

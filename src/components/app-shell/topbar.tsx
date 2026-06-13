@@ -39,7 +39,12 @@ export function Topbar({
         </button>
         <button
           className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"
-          onClick={() => router.back()}
+          onClick={() => {
+            // router.back() does nothing (looks "frozen") when there's no app
+            // history — e.g. you opened a link straight into a page. Fall back home.
+            if (typeof window !== "undefined" && window.history.length > 1) router.back();
+            else router.push("/dashboard");
+          }}
           aria-label="Go back"
           title="Back"
         >
