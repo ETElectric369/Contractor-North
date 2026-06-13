@@ -561,7 +561,7 @@ export default async function JobDetailPage({
         </div>
       </div>
 
-      <Tabs tabs={tabs} />
+      <Tabs tabs={tabs} urlSync />
     </div>
   );
 }

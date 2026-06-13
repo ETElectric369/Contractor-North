@@ -185,7 +185,7 @@ export default async function CustomerDetailPage({
         </div>
       </div>
 
-      <Tabs tabs={tabs} />
+      <Tabs tabs={tabs} urlSync />
     </div>
   );
 }
