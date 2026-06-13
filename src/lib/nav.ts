@@ -1,5 +1,7 @@
 import {
   LayoutDashboard,
+  Sun,
+  Activity,
   ListTodo,
   Sparkles,
   UserPlus,
@@ -55,7 +57,9 @@ export const NAV: NavSection[] = [
     title: "Overview",
     items: [
       { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+      { label: "My Day", href: "/planner", icon: Sun },
       { label: "Tasks", href: "/tasks", icon: ListTodo },
+      { label: "Activity", href: "/activity", icon: Activity, staffOnly: true },
       { label: "Assistant", href: "/assistant", icon: Sparkles },
       { label: "Organize My…", href: "/organize", icon: Wand2 },
     ],
