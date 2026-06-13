@@ -164,7 +164,7 @@ export default async function SettingsPage({
                 <Badge tone={roleTone[m.role]}>{m.role}</Badge>
                 {isAdmin && (
                   <EditMemberButton
-                    member={{ id: m.id, full_name: m.full_name, email: m.email, role: m.role, active: m.active }}
+                    member={{ id: m.id, full_name: m.full_name, email: m.email, role: m.role, active: m.active, home_address: m.home_address }}
                     isSelf={m.id === profile?.id}
                     authConfigured={adminConfigured()}
                   />

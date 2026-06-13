@@ -34,6 +34,16 @@ export interface CalSegment {
   end_date: string;
 }
 
+export interface CalAppt {
+  id: string;
+  type: string; // appointment | inspection
+  title: string;
+  starts_at: string;
+  ends_at: string | null;
+  status: string;
+  job_id: string | null;
+}
+
 type View = "month" | "week" | "day";
 
 const dayKey = (d: Date) => {
@@ -51,21 +61,24 @@ export function CalendarView({
   entries,
   jobs,
   segments = [],
+  appointments = [],
 }: {
   entries: CalEntry[];
   jobs: CalJob[];
   segments?: CalSegment[];
+  appointments?: CalAppt[];
 }) {
   const [view, setView] = useState<View>("week");
   const [anchor, setAnchor] = useState(() => new Date());
 
   const byDay = useMemo(() => {
-    const m = new Map<string, { entries: CalEntry[]; jobs: CalJob[] }>();
+    const m = new Map<string, { entries: CalEntry[]; jobs: CalJob[]; appts: CalAppt[] }>();
     const get = (k: string) => {
-      if (!m.has(k)) m.set(k, { entries: [], jobs: [] });
+      if (!m.has(k)) m.set(k, { entries: [], jobs: [], appts: [] });
       return m.get(k)!;
     };
     for (const e of entries) get(dayKey(new Date(e.clock_in))).entries.push(e);
+    for (const a of appointments) get(dayKey(new Date(a.starts_at))).appts.push(a);
 
     // Group multi-range segments by job; a job with segments is placed only on
     // the days its ranges cover, so gaps (e.g. between two work weeks) stay empty.
@@ -96,7 +109,7 @@ export function CalendarView({
     };
     for (const j of jobs) spanDays(j.id, (k) => get(k).jobs.push(j));
     return m;
-  }, [entries, jobs, segments]);
+  }, [entries, jobs, segments, appointments]);
 
   function shift(dir: -1 | 1) {
     const d = new Date(anchor);
@@ -163,7 +176,7 @@ function MonthGrid({
   onPick,
 }: {
   anchor: Date;
-  byDay: Map<string, { entries: CalEntry[]; jobs: CalJob[] }>;
+  byDay: Map<string, { entries: CalEntry[]; jobs: CalJob[]; appts: CalAppt[] }>;
   onPick: (d: Date) => void;
 }) {
   const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
@@ -213,6 +226,15 @@ function MonthGrid({
                 {(data?.jobs.length ?? 0) > 2 && (
                   <div className="text-[10px] text-slate-400">+{data!.jobs.length - 2} more</div>
                 )}
+                {data?.appts.slice(0, 2).map((a) => (
+                  <div
+                    key={a.id}
+                    className={`truncate rounded px-1 text-[10px] ${a.type === "inspection" ? "bg-amber-50 text-amber-700" : "bg-purple-50 text-purple-700"}`}
+                    title={a.title}
+                  >
+                    {a.type === "inspection" ? "🔍" : "📅"} {a.title}
+                  </div>
+                ))}
                 {totalHrs > 0 && (
                   <div className="truncate rounded bg-green-50 px-1 text-[10px] text-green-700">
                     ⏱ {totalHrs.toFixed(1)}h
@@ -242,7 +264,7 @@ function WeekGrid({
   onPick,
 }: {
   anchor: Date;
-  byDay: Map<string, { entries: CalEntry[]; jobs: CalJob[] }>;
+  byDay: Map<string, { entries: CalEntry[]; jobs: CalJob[]; appts: CalAppt[] }>;
   onPick: (d: Date) => void;
 }) {
   const start = startOfWeek(anchor);
@@ -343,6 +365,21 @@ function WeekGrid({
                         </div>
                       );
                     })}
+                    {data?.appts.map((a) => {
+                      const seg = segment(d, a.starts_at, a.ends_at, 1);
+                      if (!seg) return null;
+                      const insp = a.type === "inspection";
+                      return (
+                        <div
+                          key={a.id}
+                          className={`absolute left-0.5 z-30 w-[52%] overflow-hidden rounded-md border px-1 py-0.5 text-[9px] leading-tight ${insp ? "border-amber-300 bg-amber-100/95 text-amber-900" : "border-purple-300 bg-purple-100/95 text-purple-900"}`}
+                          style={seg}
+                          title={`${a.title} · ${fmtTime(a.starts_at)}`}
+                        >
+                          <span className="font-semibold">{insp ? "🔍" : "📅"} {a.title}</span>
+                        </div>
+                      );
+                    })}
                   </div>
                 );
               })}
@@ -354,7 +391,7 @@ function WeekGrid({
   );
 }
 
-function DayDetail({ date, data }: { date: Date; data?: { entries: CalEntry[]; jobs: CalJob[] } }) {
+function DayDetail({ date, data }: { date: Date; data?: { entries: CalEntry[]; jobs: CalJob[]; appts: CalAppt[] } }) {
   return (
     <div className="space-y-4">
       <Card>
@@ -374,6 +411,28 @@ function DayDetail({ date, data }: { date: Date; data?: { entries: CalEntry[]; j
           {!data?.jobs.length && <li className="px-5 py-5 text-center text-sm text-slate-400">Nothing scheduled.</li>}
         </ul>
       </Card>
+
+      {(data?.appts.length ?? 0) > 0 && (
+        <Card>
+          <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3">
+            <span className="text-sm">📅</span>
+            <h3 className="text-sm font-semibold text-slate-900">Appointments &amp; inspections</h3>
+          </div>
+          <ul className="divide-y divide-slate-100">
+            {data!.appts.map((a) => (
+              <li key={a.id} className="flex items-center justify-between px-5 py-2.5 text-sm">
+                <span>
+                  <span className="font-medium text-slate-900">{a.title}</span>
+                  <span className="ml-2 text-xs text-slate-500">
+                    {fmtTime(a.starts_at)}{a.ends_at ? `–${fmtTime(a.ends_at)}` : ""}
+                  </span>
+                </span>
+                <Badge tone={a.type === "inspection" ? "amber" : "blue"}>{a.type}</Badge>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
 
       <Card>
         <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3">

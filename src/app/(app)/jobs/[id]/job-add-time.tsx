@@ -14,6 +14,7 @@ import type { JobCode } from "@/lib/types";
 interface Tech {
   id: string;
   full_name: string | null;
+  home_address?: string | null;
 }
 
 export function JobAddTimeEntry({
@@ -41,10 +42,10 @@ export function JobAddTimeEntry({
   const [miles, setMiles] = useState(0);
   const [calcing, setCalcing] = useState(false);
 
-  async function autoMiles() {
-    if (!key || !companyAddress || !jobAddress) return;
+  async function autoMiles(originAddr: string) {
+    if (!key || !originAddr || !jobAddress) return;
     setCalcing(true);
-    const oneWay = await drivingDistanceMiles(key, companyAddress, jobAddress);
+    const oneWay = await drivingDistanceMiles(key, originAddr, jobAddress);
     setCalcing(false);
     if (oneWay != null) setMiles(Math.round(oneWay * 2 * 10) / 10); // round trip
   }
@@ -60,6 +61,9 @@ export function JobAddTimeEntry({
   const [lunchTaken, setLunchTaken] = useState(false);
   const [breaksTaken, setBreaksTaken] = useState(false);
   const [notes, setNotes] = useState("");
+
+  // Mileage origin: the selected employee's home address if set, else the company address.
+  const mileageOrigin = (techs.find((t) => t.id === profileId)?.home_address || companyAddress || "").trim();
 
   const grossHrs = (() => {
     const ci = new Date(`${date}T${startT}:00`);
@@ -149,8 +153,8 @@ export function JobAddTimeEntry({
             </Label>
             <div className="flex gap-2">
               <NumberInput id="at-miles" value={miles} onValueChange={setMiles} />
-              {key && companyAddress && jobAddress && (
-                <Button type="button" size="sm" variant="outline" onClick={autoMiles} disabled={calcing} title="Round trip: company ↔ job">
+              {key && mileageOrigin && jobAddress && (
+                <Button type="button" size="sm" variant="outline" onClick={() => autoMiles(mileageOrigin)} disabled={calcing} title={`Round trip: ${mileageOrigin} ↔ job`}>
                   {calcing ? "…" : "Auto"}
                 </Button>
               )}

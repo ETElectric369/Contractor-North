@@ -14,6 +14,7 @@ interface Member {
   email: string | null;
   role: string;
   active: boolean;
+  home_address?: string | null;
 }
 
 /** Owner/admin edit for a team member: name/role/active + login email/password. */
@@ -32,6 +33,7 @@ export function EditMemberButton({
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const [name, setName] = useState(member.full_name ?? "");
+  const [homeAddress, setHomeAddress] = useState(member.home_address ?? "");
   const [role, setRole] = useState(member.role);
   const [active, setActive] = useState(member.active);
   const [email, setEmail] = useState(member.email ?? "");
@@ -44,6 +46,7 @@ export function EditMemberButton({
     start(async () => {
       const res = await updateMember(member.id, {
         full_name: name,
+        home_address: homeAddress,
         role: isSelf ? undefined : role,
         active: isSelf ? undefined : active,
       });
@@ -78,6 +81,10 @@ export function EditMemberButton({
           <div>
             <Label htmlFor="m-name">Name</Label>
             <Input id="m-name" value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div>
+            <Label htmlFor="m-home">Home address</Label>
+            <Input id="m-home" value={homeAddress} onChange={(e) => setHomeAddress(e.target.value)} placeholder="For auto-mileage from home to the job" />
           </div>
           {!isSelf && (
             <div className="grid grid-cols-2 gap-3">

@@ -126,7 +126,7 @@ export default async function JobDetailPage({
     data: { user },
   } = await supabase.auth.getUser();
   const [{ data: techs }, { data: jobCodes }, { data: lists }, { data: org }, { data: allCustomers }] = await Promise.all([
-    supabase.from("profiles").select("id, full_name").order("full_name"),
+    supabase.from("profiles").select("id, full_name, home_address").order("full_name"),
     supabase.from("job_codes").select("*").order("code"),
     supabase.from("material_lists").select("id, name").order("created_at", { ascending: false }).limit(100),
     supabase.from("organizations").select("address_line1, city, state, zip, settings").limit(1).maybeSingle(),
