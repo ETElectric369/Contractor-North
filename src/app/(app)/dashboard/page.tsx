@@ -95,6 +95,26 @@ export default async function DashboardPage() {
     })),
   ];
 
+  // Current / next job quick-jump (org-wide — works for a solo shop too).
+  const nowIso = new Date().toISOString();
+  const [{ data: curRows }, { data: nextRows }] = await Promise.all([
+    supabase
+      .from("jobs")
+      .select("id, job_number, name, status, scheduled_start")
+      .eq("status", "in_progress")
+      .order("scheduled_start", { ascending: false })
+      .limit(1),
+    supabase
+      .from("jobs")
+      .select("id, job_number, name, status, scheduled_start")
+      .in("status", ["scheduled", "in_progress"])
+      .gt("scheduled_start", nowIso)
+      .order("scheduled_start", { ascending: true })
+      .limit(1),
+  ]);
+  const currentJob = (curRows ?? [])[0] ?? null;
+  const nextJob = (nextRows ?? [])[0] ?? null;
+
   // "Needs attention" widgets: open inquiries, outstanding A/R, my hours this week.
   const weekAgo = new Date(Date.now() - 7 * 86400_000).toISOString();
   const [leadsCount, invoiceRows, weekEntries] = await Promise.all([
@@ -218,6 +238,35 @@ export default async function DashboardPage() {
       />
 
       <WeatherWidget location={orgLocation} label={org?.city ?? undefined} />
+
+      {(currentJob || nextJob) && (
+        <div className="mb-4 grid gap-3 sm:grid-cols-2">
+          {currentJob && (
+            <Link
+              href={`/jobs/${currentJob.id}`}
+              className="flex items-center gap-3 rounded-xl border border-green-200 bg-green-50 px-4 py-3 transition-shadow hover:shadow-md"
+            >
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-green-100 text-green-700">▶</span>
+              <span className="min-w-0">
+                <span className="block text-[11px] font-semibold uppercase tracking-wide text-green-700">Current job</span>
+                <span className="block truncate text-sm font-medium text-slate-900">{currentJob.job_number} — {currentJob.name}</span>
+              </span>
+            </Link>
+          )}
+          {nextJob && (
+            <Link
+              href={`/jobs/${nextJob.id}`}
+              className="flex items-center gap-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 transition-shadow hover:shadow-md"
+            >
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-100 text-blue-700">⏭</span>
+              <span className="min-w-0">
+                <span className="block text-[11px] font-semibold uppercase tracking-wide text-blue-700">Next job{nextJob.scheduled_start ? ` · ${formatDate(nextJob.scheduled_start)}` : ""}</span>
+                <span className="block truncate text-sm font-medium text-slate-900">{nextJob.job_number} — {nextJob.name}</span>
+              </span>
+            </Link>
+          )}
+        </div>
+      )}
 
       {myDay.length > 0 && (
         <Card className="mb-4 border-brand/30">

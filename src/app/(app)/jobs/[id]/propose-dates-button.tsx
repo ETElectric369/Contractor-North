@@ -40,6 +40,7 @@ export function ProposeDatesButton({
   const [busy, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [dates, setDates] = useState<string[]>(defaultDates());
+  const [timeNote, setTimeNote] = useState("");
   const [token, setToken] = useState<string | null>(pendingProposal?.token ?? null);
   const [copied, setCopied] = useState(false);
 
@@ -52,7 +53,7 @@ export function ProposeDatesButton({
   function create() {
     setError(null);
     start(async () => {
-      const res = await createScheduleProposal(jobId, dates);
+      const res = await createScheduleProposal(jobId, dates, timeNote.trim() || null);
       if (!res.ok || !res.token) return setError(res.error ?? "Could not create the link.");
       setToken(res.token);
       router.refresh();
@@ -139,6 +140,16 @@ export function ProposeDatesButton({
                     />
                   </div>
                 ))}
+              </div>
+              <div>
+                <Label htmlFor="time-note">Arrival window (optional)</Label>
+                <Input
+                  id="time-note"
+                  placeholder="e.g. 8–10 AM, or “morning”"
+                  value={timeNote}
+                  onChange={(e) => setTimeNote(e.target.value)}
+                />
+                <p className="mt-1 text-xs text-slate-400">Shown to the customer with every date option.</p>
               </div>
               <div className="flex justify-end gap-2">
                 <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>

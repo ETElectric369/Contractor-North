@@ -56,6 +56,7 @@ export function JobAddTimeEntry({
   const [endT, setEndT] = useState("16:00");
   const [profileId, setProfileId] = useState(defaultProfileId);
   const [jobCode, setJobCode] = useState("");
+  const [rate, setRate] = useState(0); // 0 = use the employee's default rate
   const [lunchTaken, setLunchTaken] = useState(false);
   const [breaksTaken, setBreaksTaken] = useState(false);
   const [notes, setNotes] = useState("");
@@ -88,6 +89,7 @@ export function JobAddTimeEntry({
         lunch_minutes: lunchTaken ? 30 : 0,
         notes,
         miles,
+        rate_override: rate > 0 ? rate : null,
       });
       if (!res.ok) return setError(res.error ?? "Could not save.");
       setOpen(false);
@@ -135,6 +137,11 @@ export function JobAddTimeEntry({
                 ))}
               </Select>
             </div>
+          </div>
+          <div>
+            <Label htmlFor="at-rate">Pay rate ($/hr) — supervisor / override</Label>
+            <NumberInput id="at-rate" value={rate} onValueChange={setRate} placeholder="Default rate" />
+            <p className="mt-1 text-xs text-slate-400">Leave 0 to use this person's default hourly rate.</p>
           </div>
           <div>
             <Label htmlFor="at-miles">

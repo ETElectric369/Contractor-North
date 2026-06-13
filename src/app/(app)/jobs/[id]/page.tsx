@@ -72,7 +72,7 @@ export default async function JobDetailPage({
     supabase.from("purchase_orders").select("id, po_number, vendor, status, total").eq("job_id", id),
     supabase
       .from("time_entries")
-      .select("id, clock_in, clock_out, lunch_minutes, miles, status, job_code, profiles(full_name, hourly_rate), time_allocations(id, hours, job_code)")
+      .select("id, clock_in, clock_out, lunch_minutes, miles, status, job_code, rate_override, profiles(full_name, hourly_rate), time_allocations(id, hours, job_code)")
       .eq("job_id", id)
       .order("clock_in", { ascending: false }),
     supabase
@@ -141,11 +141,12 @@ export default async function JobDetailPage({
   let laborCost = 0;
   let laborHours = 0;
   for (const e of entries ?? []) {
+    // Per-entry pay rate: an explicit override (e.g. supervisor rate) wins,
+    // otherwise the person's default profile rate.
+    const rate = Number((e as any).rate_override ?? (e as any).profiles?.hourly_rate ?? 0);
     if ((e as any).time_allocations?.length) {
       for (const a of (e as any).time_allocations)
         laborHours += Number(a.hours ?? 0);
-      // allocation cost uses this entry's rate
-      const rate = Number((e as any).profiles?.hourly_rate ?? 0);
       for (const a of (e as any).time_allocations)
         laborCost += Number(a.hours ?? 0) * rate;
       continue;
@@ -153,7 +154,7 @@ export default async function JobDetailPage({
     if (e.status === "closed" && e.clock_out) {
       const h = hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes);
       laborHours += h;
-      laborCost += h * Number((e as any).profiles?.hourly_rate ?? 0);
+      laborCost += h * rate;
     }
   }
   const materialCost = (pos ?? []).reduce((s: number, p: any) => s + Number(p.total ?? 0), 0);

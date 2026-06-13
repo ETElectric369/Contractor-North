@@ -126,6 +126,7 @@ export async function createManualEntry(input: {
   lunch_minutes: number;
   notes: string;
   miles?: number;
+  rate_override?: number | null;
 }): Promise<ClockResult> {
   const supabase = await createClient();
   const {
@@ -157,6 +158,7 @@ export async function createManualEntry(input: {
     lunch_minutes: input.lunch_minutes || 0,
     notes: input.notes || null,
     miles: input.miles ?? 0,
+    rate_override: input.rate_override ?? null,
     status: "closed",
     source: "manual",
   });

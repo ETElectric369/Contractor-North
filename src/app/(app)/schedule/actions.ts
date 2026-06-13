@@ -84,6 +84,7 @@ export async function setJobAssignee(
 export async function createScheduleProposal(
   jobId: string,
   dates: string[],
+  timeNote?: string | null,
 ): Promise<Result & { token?: string }> {
   const supabase = await createClient();
   const {
@@ -99,7 +100,7 @@ export async function createScheduleProposal(
 
   const { data, error } = await supabase
     .from("schedule_proposals")
-    .insert({ job_id: jobId, dates: clean, created_by: user.id })
+    .insert({ job_id: jobId, dates: clean, time_note: timeNote || null, created_by: user.id })
     .select("token")
     .single();
   if (error) return { ok: false, error: error.message };
