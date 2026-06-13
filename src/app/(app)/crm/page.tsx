@@ -39,7 +39,7 @@ export default async function CrmPage({
     <div>
       <PageHeader title="Customers" description="Your customers and contacts. New inquiries live in the Inquiries tab.">
         <div className="flex flex-wrap gap-2">
-          <ImportCustomersButton />
+          <ImportCustomersButton csv={false} />
           <NewCustomerButton />
         </div>
       </PageHeader>

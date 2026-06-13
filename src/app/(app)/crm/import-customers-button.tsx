@@ -67,8 +67,9 @@ const FIELDS: { key: keyof CustomerImportRow; label: string; match: RegExp }[] =
   { key: "notes", label: "Notes", match: /note|comment|memo/i },
 ];
 
-/** CSV import for the customer book (exports from Contacts, Tradify, etc.). */
-export function ImportCustomersButton() {
+/** Import for the customer book. `csv` mode (Settings) takes a CSV with column
+ *  mapping or a vCard; otherwise (CRM) it's a single-contact vCard import. */
+export function ImportCustomersButton({ csv = true, label }: { csv?: boolean; label?: string }) {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
@@ -112,6 +113,11 @@ export function ImportCustomersButton() {
         return;
       }
 
+      if (!csv) {
+        setMsg("That looks like a CSV — import spreadsheets from Settings → Company. Here, pick a single contact (.vcf).");
+        setOpen(true);
+        return;
+      }
       const rows = parseCSV(text);
       if (rows.length < 2) {
         setMsg("That CSV needs a header row plus at least one data row.");
@@ -164,11 +170,17 @@ export function ImportCustomersButton() {
   return (
     <>
       <Button variant="outline" onClick={() => fileRef.current?.click()}>
-        <Upload className="h-4 w-4" /> Import contacts
+        <Upload className="h-4 w-4" /> {label ?? (csv ? "Import contacts" : "Import a contact")}
       </Button>
-      <input ref={fileRef} type="file" accept=".csv,text/csv,.vcf,text/vcard" className="hidden" onChange={onFile} />
+      <input
+        ref={fileRef}
+        type="file"
+        accept={csv ? ".csv,text/csv,.vcf,text/vcard" : ".vcf,text/vcard"}
+        className="hidden"
+        onChange={onFile}
+      />
 
-      <Modal open={open} onClose={() => setOpen(false)} title="Import customers from CSV">
+      <Modal open={open} onClose={() => setOpen(false)} title={csv ? "Import customers" : "Import a contact"}>
         <div className="space-y-4">
           {msg && <div className="rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-700">{msg}</div>}
           {headers.length > 0 && (

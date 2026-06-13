@@ -21,6 +21,7 @@ import { AiStatus } from "./ai-status";
 import { QuotePlaybookForm } from "./quote-playbook-form";
 import { MemberRate } from "./member-rate";
 import { EditMemberButton } from "./edit-member-button";
+import { ImportCustomersButton } from "../crm/import-customers-button";
 import { AvatarUpload } from "./avatar-upload";
 import { AddEmployeeButton } from "./add-employee-button";
 import { adminConfigured } from "@/lib/supabase/admin";
@@ -185,6 +186,12 @@ export default async function SettingsPage({
           content: (
             <div className="space-y-6">
               <Section title="Company details"><OrgSettingsForm org={org as Organization} /></Section>
+              <Section title="Import customers">
+                <p className="mb-3 text-sm text-slate-500">
+                  Bring your whole customer book over from a spreadsheet (CSV export from Contacts, Tradify, QuickBooks…) or a vCard — map the columns and import in one shot. Adding people one at a time? Do that from the <strong>Customers</strong> page.
+                </p>
+                <ImportCustomersButton />
+              </Section>
               <Section title="Public inquiry link">
                 <p className="mb-2 text-sm text-slate-500">
                   Post this link online (or text/email it). Anyone who submits the form becomes a new lead in <strong>Inquiries</strong> — no login needed for them.
