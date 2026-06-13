@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
+import { OVERHEAD_CATEGORIES } from "./constants";
 
 export type Result = { ok: boolean; error?: string };
 
@@ -409,4 +410,137 @@ export async function deleteOrganizedItem(id: string): Promise<Result> {
   revalidatePath("/organize");
   revalidatePath("/bills");
   return { ok: true };
+}
+
+/** Save a typed/dictated note as a needs-review item (no photo). */
+export async function saveVoiceNote(text: string): Promise<Result> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+  const clean = text.trim();
+  if (!clean) return { ok: false, error: "Nothing to save." };
+  const title = clean.length > 60 ? clean.slice(0, 57) + "…" : clean;
+  const { error } = await supabase.from("organized_items").insert({
+    kind: "note",
+    title,
+    summary: clean,
+    category: "Note",
+    confidence: "high",
+    status: "needs_review",
+    file_url: null,
+    created_by: user.id,
+  });
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/organize");
+  return { ok: true };
+}
+
+/** Set an item aside without filing it (moves it to the Archive). */
+export async function archiveItem(id: string): Promise<Result> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("organized_items").update({ status: "archived" }).eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/organize");
+  return { ok: true };
+}
+
+/** Bring an archived/filed item back to the needs-review tray. */
+export async function unarchiveItem(id: string): Promise<Result> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("organized_items").update({ status: "needs_review" }).eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/organize");
+  return { ok: true };
+}
+
+/** Let Claude review a needs-attention item and file it appropriately:
+ *  match it to a job, file it as overhead, turn a to-do note into a task, or
+ *  keep it as a reference note. Returns what it did. */
+export async function aiReviewItem(id: string): Promise<{ ok: boolean; message: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, message: "Not signed in." };
+  const { data: item } = await supabase.from("organized_items").select("*").eq("id", id).maybeSingle();
+  if (!item) return { ok: false, message: "Item not found." };
+
+  const { data: jobs } = await supabase
+    .from("jobs")
+    .select("id, job_number, name, address, customers(name)")
+    .in("status", ["estimate", "scheduled", "in_progress", "on_hold"])
+    .order("created_at", { ascending: false })
+    .limit(40);
+  const jobList = (jobs ?? []).map((j: any) => ({
+    id: j.id,
+    label: `${j.job_number} — ${j.name}${j.customers?.name ? ` (${j.customers.name})` : ""}${j.address ? `, ${j.address}` : ""}`,
+  }));
+
+  let parsed: any;
+  try {
+    const client = getAnthropic();
+    const msg = await client.messages.create({
+      model: DEFAULT_MODEL,
+      max_tokens: 500,
+      system: `You triage one piece of paperwork for an electrical contractor and decide the single best action. Output ONLY a JSON object:
+{
+  "action": "file_job" | "overhead" | "task" | "keep_note" | "unsure",
+  "job_id": an id from the list below, or null,
+  "overhead_category": one of [${OVERHEAD_CATEGORIES.join(", ")}], or null,
+  "task_title": short imperative (e.g. "Call inspector Tuesday"), or null,
+  "task_category": "office" | "operations" | "sales",
+  "reason": one short sentence
+}
+Rules: "file_job" ONLY if the content clearly points to a job in the list. "overhead" only for a company-expense receipt with an amount. "task" when a note describes something to DO (call, order, schedule, follow up). "keep_note" for reference info. "unsure" if you genuinely can't tell.
+
+Jobs (id — label):
+${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
+      messages: [
+        {
+          role: "user",
+          content: `kind=${item.kind}; title="${item.title}"; amount=${item.amount ?? "none"}; vendor=${item.vendor ?? "none"}. Content: ${item.summary ?? item.title}`,
+        },
+      ],
+    });
+    const block = msg.content.find((b) => b.type === "text") as { text: string } | undefined;
+    parsed = JSON.parse(extractJsonObject(block?.text ?? ""));
+  } catch (e: any) {
+    return {
+      ok: false,
+      message: e?.message?.includes("ANTHROPIC_API_KEY") ? "AI review needs the API key set." : "AI couldn't review this one.",
+    };
+  }
+
+  const action = String(parsed?.action ?? "unsure");
+  const reason = typeof parsed?.reason === "string" ? parsed.reason : "";
+  try {
+    if (action === "file_job" && jobList.some((j) => j.id === parsed.job_id)) {
+      await fileItem(id, { type: "job", jobId: parsed.job_id });
+      return { ok: true, message: `Filed to ${jobList.find((j) => j.id === parsed.job_id)?.label}. ${reason}`.trim() };
+    }
+    if (action === "overhead") {
+      const cat = OVERHEAD_CATEGORIES.includes(parsed.overhead_category) ? parsed.overhead_category : "Other";
+      await fileItem(id, { type: "overhead", category: cat });
+      return { ok: true, message: `Filed as overhead (${cat}). ${reason}`.trim() };
+    }
+    if (action === "task") {
+      const title = String(parsed.task_title || item.title).slice(0, 200);
+      const category = ["office", "operations", "sales"].includes(parsed.task_category) ? parsed.task_category : "operations";
+      await supabase.from("tasks").insert({ title, category, status: "open", created_by: user.id });
+      await supabase.from("organized_items").update({ status: "filed", category: "Task" }).eq("id", id);
+      revalidatePath("/organize");
+      revalidatePath("/tasks");
+      return { ok: true, message: `Made a task: "${title}". ${reason}`.trim() };
+    }
+    if (action === "keep_note") {
+      await supabase.from("organized_items").update({ status: "filed" }).eq("id", id);
+      revalidatePath("/organize");
+      return { ok: true, message: `Kept as a note in your archive. ${reason}`.trim() };
+    }
+    return { ok: false, message: reason || "Not sure where this goes — pick a destination yourself." };
+  } catch (e: any) {
+    return { ok: false, message: e?.message ?? "Couldn't apply the suggestion." };
+  }
 }

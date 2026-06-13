@@ -24,6 +24,7 @@ export default async function OrganizePage() {
 
   const withUrls: OrganizedItemRow[] = await Promise.all(
     ((items ?? []) as any[]).map(async (i) => {
+      if (!i.file_url) return { ...i, signedUrl: null }; // voice/typed notes have no file
       const { data } = await supabase.storage.from("documents").createSignedUrl(i.file_url, 3600);
       return { ...i, signedUrl: data?.signedUrl ?? null };
     }),
