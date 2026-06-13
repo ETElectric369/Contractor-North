@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
+import { DashboardGreeting } from "./dashboard-greeting";
 import { WeatherWidget } from "@/components/weather-widget";
 import { TasksWidget } from "@/components/tasks-widget";
 import { Card, CardContent } from "@/components/ui/card";
@@ -26,7 +27,7 @@ export default async function DashboardPage() {
   } = await supabase.auth.getUser();
 
   // Pull a handful of counts + recents in parallel.
-  const [customers, openQuotes, activeJobs, recentQuotes, recentJobs, myOpen] =
+  const [customers, openQuotes, activeJobs, recentQuotes, recentJobs, myOpen, profile] =
     await Promise.all([
       supabase.from("customers").select("id", { count: "exact", head: true }),
       supabase
@@ -53,7 +54,17 @@ export default async function DashboardPage() {
         .eq("profile_id", user?.id ?? "")
         .eq("status", "open")
         .maybeSingle(),
+      supabase
+        .from("profiles")
+        .select("full_name")
+        .eq("id", user?.id ?? "")
+        .maybeSingle(),
     ]);
+
+  // First name for the dashboard greeting (the greeting's time-of-day half is
+  // computed client-side so it matches the user's local clock).
+  const firstName =
+    (profile.data?.full_name ?? "").trim().split(/\s+/)[0] || undefined;
 
   const pipeline =
     openQuotes.data?.reduce((sum, q) => sum + Number(q.total ?? 0), 0) ?? 0;
@@ -233,7 +244,7 @@ export default async function DashboardPage() {
   return (
     <div>
       <PageHeader
-        title="Dashboard"
+        title={<DashboardGreeting name={firstName} />}
         description="Your business at a glance."
       />
 
