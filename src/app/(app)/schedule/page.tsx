@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { NewJobButton } from "./new-job-button";
 import { JobScheduleCard } from "./job-schedule-card";
+import { AppointmentButton } from "../appointments/appointment-button";
 
 export const dynamic = "force-dynamic";
 
@@ -122,6 +123,13 @@ export default async function SchedulePage({
   const todayKey = new Date().toDateString();
   const baseQ = isMonth ? "view=month&" : "";
 
+  // Options for the "New appointment" button (reuses the appointments module).
+  const apptJobMap = new Map<string, any>();
+  for (const j of [...(scheduled ?? []), ...(unscheduled ?? [])]) apptJobMap.set(j.id, j);
+  const jobOpts = [...apptJobMap.values()].map((j: any) => ({ id: j.id, label: `${j.job_number} · ${j.name}` }));
+  const custOpts = (customers ?? []).map((c: any) => ({ id: c.id, label: c.name }));
+  const staffOpts = (members ?? []).map((m: any) => ({ id: m.id, label: m.full_name ?? "Unnamed" }));
+
   let label: string;
   if (isMonth) {
     label = monthRange(offset).first.toLocaleDateString("en-US", { month: "long", year: "numeric" });
@@ -164,6 +172,7 @@ export default async function SchedulePage({
           <Link href={`/schedule?${baseQ}week=${offset + 1}`} className="rounded-lg border border-slate-300 bg-white p-2 text-slate-600 hover:bg-slate-50">
             <ChevronRight className="h-4 w-4" />
           </Link>
+          <AppointmentButton jobs={jobOpts} customers={custOpts} staff={staffOpts} />
           <NewJobButton customers={customers ?? []} />
         </div>
       </PageHeader>
