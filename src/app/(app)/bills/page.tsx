@@ -23,7 +23,7 @@ export default async function BillsPage() {
       .order("created_at", { ascending: false }),
     supabase
       .from("bills")
-      .select("id, supplier, bill_number, amount, status, bill_date, job_id, category, jobs(job_number, name)")
+      .select("id, supplier, bill_number, amount, status, bill_date, job_id, category, jobs(job_number, name), bill_line_items(description, quantity, unit_price, amount, category, sort_order)")
       .order("created_at", { ascending: false }),
     supabase
       .from("documents")
@@ -33,6 +33,12 @@ export default async function BillsPage() {
     supabase.from("jobs").select("id, job_number, name").order("created_at", { ascending: false }).limit(100),
     supabase.from("material_lists").select("id, name").order("created_at", { ascending: false }).limit(100),
   ]);
+
+  // Sort each bill's embedded line items by sort_order for display.
+  const billsWithLines = (bills ?? []).map((b: any) => ({
+    ...b,
+    line_items: [...(b.bill_line_items ?? [])].sort((a: any, c: any) => (a.sort_order ?? 0) - (c.sort_order ?? 0)),
+  }));
 
   // Sign the receipt/bill document URLs.
   const docs = await Promise.all(
@@ -54,7 +60,7 @@ export default async function BillsPage() {
         jobs={jobs ?? []}
         lists={lists ?? []}
         pos={(pos ?? []) as any}
-        bills={(bills ?? []) as any}
+        bills={billsWithLines as any}
         docs={docs as any}
       />
     </div>

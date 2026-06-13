@@ -32,6 +32,67 @@ const KIND_TO_CATEGORY: Record<string, string> = {
   job_document: "Plan",
 };
 
+export interface BillLine {
+  description: string;
+  quantity: number;
+  unit_price: number;
+  amount: number;
+  category: string | null;
+}
+
+/** Normalize the AI's line_items into clean BillLine rows. */
+function cleanLines(raw: any): BillLine[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((l: any) => {
+      const quantity = Number(l?.quantity) || 1;
+      const unit_price = l?.unit_price != null && !isNaN(Number(l.unit_price)) ? Number(l.unit_price) : 0;
+      const amount =
+        l?.amount != null && !isNaN(Number(l.amount)) ? Number(l.amount) : Math.round(quantity * unit_price * 100) / 100;
+      return {
+        description: String(l?.description ?? "").slice(0, 300).trim(),
+        quantity,
+        unit_price,
+        amount,
+        category: l?.category ? String(l.category).slice(0, 60) : null,
+      };
+    })
+    .filter((l: BillLine) => l.description.length > 0)
+    .slice(0, 100);
+}
+
+/** Insert a bill plus its line items (an itemized receipt → billable cost). */
+async function insertItemizedBill(
+  supabase: any,
+  bill: {
+    job_id: string | null;
+    supplier: string;
+    amount: number | null;
+    bill_date: string | null;
+    category: string;
+    notes: string;
+    created_by: string;
+  },
+  lines: BillLine[],
+): Promise<string | null> {
+  const { data, error } = await supabase.from("bills").insert({ ...bill, status: "paid" }).select("id").single();
+  if (error || !data) return null;
+  if (lines.length) {
+    await supabase.from("bill_line_items").insert(
+      lines.map((l, i) => ({
+        bill_id: data.id,
+        description: l.description,
+        quantity: l.quantity,
+        unit_price: l.unit_price,
+        amount: l.amount,
+        category: l.category,
+        sort_order: i,
+      })),
+    );
+  }
+  return data.id;
+}
+
 /** Pull a JSON object out of a Claude reply (tolerates ```json fences). */
 function extractJsonObject(text: string): string {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
@@ -100,6 +161,7 @@ Respond with ONLY a JSON object (no prose):
   "kind": "receipt" | "note" | "job_document",
   "title": short label, e.g. "Home Depot — $84.12" or "Note: call inspector Tuesday",
   "summary": receipt → brief list of what was bought; note → full clean transcription of the handwriting; job_document → what the document is,
+  "line_items": receipts ONLY — an array of every purchased line: [{"description": item name, "quantity": number, "unit_price": price each (number), "amount": line total (number), "category": one of "Materials" | "Electrical" | "Tools" | "Fasteners" | "Lumber" | "Plumbing" | "Paint" | "Rental" | "Tax" | "Other"}]. Transcribe EVERY line you can read, including tax as its own line. Use [] for notes/documents or an unreadable receipt,
   "vendor": store/supplier name or null,
   "amount": total in dollars as a number, or null,
   "date": "YYYY-MM-DD" date printed on it, or null,
@@ -135,6 +197,7 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
   const amount = parsed.amount != null && !isNaN(Number(parsed.amount)) ? Number(parsed.amount) : null;
   const itemDate = /^\d{4}-\d{2}-\d{2}$/.test(String(parsed.date ?? "")) ? parsed.date : null;
   const overheadCategory = String(parsed.overhead_category || "Other");
+  const lines = kind === "receipt" ? cleanLines(parsed.line_items) : [];
 
   // Decide where it goes — auto-file only when confident, else the tray.
   // - job matched → file to that job (any kind)
@@ -156,7 +219,9 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
     status = "filed";
   }
 
-  // File on the job (documents row) so it shows on the job page.
+  const vendor = parsed.vendor ? String(parsed.vendor).slice(0, 200) : title;
+
+  // File on the job (documents row) so the image shows on the job page.
   let documentId: string | null = null;
   if (destination === "job" && jobId) {
     const { data: doc } = await supabase
@@ -175,24 +240,21 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
     documentId = doc?.id ?? null;
   }
 
-  // Overhead receipt → company expense: a bill with no job.
+  // A receipt becomes a billable cost: an itemized bill on the job (job receipt)
+  // or a company expense bill (overhead). Notes/job-documents make no bill.
   let billId: string | null = null;
-  if (destination === "overhead") {
-    const { data: bill } = await supabase
-      .from("bills")
-      .insert({
-        job_id: null,
-        supplier: parsed.vendor ? String(parsed.vendor).slice(0, 200) : title,
-        amount,
-        status: "paid",
-        bill_date: itemDate,
-        category: overheadCategory,
-        notes: `Filed by Organize My: ${title}`,
-        created_by: user.id,
-      })
-      .select("id")
-      .single();
-    billId = bill?.id ?? null;
+  if (kind === "receipt" && amount != null && destination === "job" && jobId) {
+    billId = await insertItemizedBill(
+      supabase,
+      { job_id: jobId, supplier: vendor, amount, bill_date: itemDate, category, notes: `Receipt filed by Organize My: ${title}`, created_by: user.id },
+      lines,
+    );
+  } else if (destination === "overhead") {
+    billId = await insertItemizedBill(
+      supabase,
+      { job_id: null, supplier: vendor, amount, bill_date: itemDate, category: overheadCategory, notes: `Filed by Organize My: ${title}`, created_by: user.id },
+      lines,
+    );
   }
 
   const { data: item, error } = await supabase
@@ -210,6 +272,7 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
       job_id: destination === "job" ? jobId : null,
       document_id: documentId,
       bill_id: billId,
+      line_items: lines.length ? lines : null,
       file_url: input.path,
       created_by: user.id,
     })
@@ -265,6 +328,7 @@ export async function fileItem(id: string, dest: FileDestination): Promise<Resul
   if (item.document_id) await supabase.from("documents").delete().eq("id", item.document_id);
   if (item.bill_id) await supabase.from("bills").delete().eq("id", item.bill_id);
   const prevJob = item.job_id;
+  const lines = cleanLines(item.line_items);
 
   let documentId: string | null = null;
   let billId: string | null = null;
@@ -288,23 +352,21 @@ export async function fileItem(id: string, dest: FileDestination): Promise<Resul
       .select("id")
       .single();
     documentId = doc?.id ?? null;
+    // A receipt filed to a job becomes an itemized billable cost on that job.
+    if (item.kind === "receipt" && item.amount != null) {
+      billId = await insertItemizedBill(
+        supabase,
+        { job_id: dest.jobId, supplier: item.vendor ?? item.title, amount: item.amount, bill_date: item.item_date, category: "Receipt", notes: `Receipt filed by Organize My: ${item.title}`, created_by: user.id },
+        lines,
+      );
+    }
   } else if (dest.type === "overhead") {
     category = dest.category;
-    const { data: bill } = await supabase
-      .from("bills")
-      .insert({
-        job_id: null,
-        supplier: item.vendor ?? item.title,
-        amount: item.amount ?? 0,
-        status: "paid",
-        bill_date: item.item_date,
-        category: dest.category,
-        notes: `Filed by Organize My: ${item.title}`,
-        created_by: user.id,
-      })
-      .select("id")
-      .single();
-    billId = bill?.id ?? null;
+    billId = await insertItemizedBill(
+      supabase,
+      { job_id: null, supplier: item.vendor ?? item.title, amount: item.amount ?? 0, bill_date: item.item_date, category: dest.category, notes: `Filed by Organize My: ${item.title}`, created_by: user.id },
+      lines,
+    );
   } else if (dest.type === "petty_cash") {
     category = "Petty cash";
     const { error: pcErr } = await supabase.from("petty_cash").insert({

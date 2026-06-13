@@ -32,6 +32,13 @@ interface PoRow {
   total: number;
   jobs?: { name: string } | null;
 }
+interface BillLineRow {
+  description: string;
+  quantity: number;
+  unit_price: number;
+  amount: number;
+  category: string | null;
+}
 interface BillRow {
   id: string;
   supplier: string;
@@ -42,6 +49,7 @@ interface BillRow {
   job_id: string | null;
   category: string | null;
   jobs?: { job_number: string; name: string } | null;
+  line_items?: BillLineRow[];
 }
 interface DocRow {
   id: string;
@@ -286,29 +294,45 @@ export function BillsReceipts({
           ) : (
             <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
               {shownBills.map((b) => (
-                <li key={b.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
-                  <div className="min-w-0 flex-1">
-                    <div className="font-medium text-slate-900">{b.supplier}</div>
-                    <div className="text-xs text-slate-400">
-                      {b.bill_number ? `#${b.bill_number} · ` : ""}
-                      {b.bill_date ? `${formatDate(b.bill_date)} · ` : ""}
-                      {b.jobs?.name ?? `Overhead${b.category ? ` · ${b.category}` : ""}`}
+                <li key={b.id} className="px-4 py-2.5 text-sm">
+                  <div className="flex items-center gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium text-slate-900">{b.supplier}</div>
+                      <div className="text-xs text-slate-400">
+                        {b.bill_number ? `#${b.bill_number} · ` : ""}
+                        {b.bill_date ? `${formatDate(b.bill_date)} · ` : ""}
+                        {b.jobs?.name ?? `Overhead${b.category ? ` · ${b.category}` : ""}`}
+                        {(b.line_items?.length ?? 0) > 0 ? ` · ${b.line_items!.length} items` : ""}
+                      </div>
                     </div>
+                    <span className="font-medium text-slate-800">{formatCurrency(b.amount)}</span>
+                    <button
+                      onClick={() => start(async () => { await setBillStatus(b.id, b.status === "paid" ? "unpaid" : "paid", b.job_id ?? ""); router.refresh(); })}
+                      title="Toggle paid/unpaid"
+                    >
+                      <Badge tone={b.status === "paid" ? "green" : "amber"}>{b.status}</Badge>
+                    </button>
+                    <button
+                      onClick={() => start(async () => { await deleteBill(b.id, b.job_id ?? ""); router.refresh(); })}
+                      className="text-slate-400 hover:text-red-600"
+                      title="Delete"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
                   </div>
-                  <span className="font-medium text-slate-800">{formatCurrency(b.amount)}</span>
-                  <button
-                    onClick={() => start(async () => { await setBillStatus(b.id, b.status === "paid" ? "unpaid" : "paid", b.job_id ?? ""); router.refresh(); })}
-                    title="Toggle paid/unpaid"
-                  >
-                    <Badge tone={b.status === "paid" ? "green" : "amber"}>{b.status}</Badge>
-                  </button>
-                  <button
-                    onClick={() => start(async () => { await deleteBill(b.id, b.job_id ?? ""); router.refresh(); })}
-                    className="text-slate-400 hover:text-red-600"
-                    title="Delete"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
+                  {(b.line_items?.length ?? 0) > 0 && (
+                    <ul className="mt-1.5 ml-1 space-y-0.5 border-l-2 border-slate-100 pl-3">
+                      {b.line_items!.map((li, i) => (
+                        <li key={i} className="flex items-center justify-between gap-2 text-xs text-slate-500">
+                          <span className="min-w-0 truncate">
+                            {li.quantity && li.quantity !== 1 ? `${li.quantity}× ` : ""}{li.description}
+                            {li.category ? <span className="ml-1 text-slate-400">· {li.category}</span> : null}
+                          </span>
+                          <span className="shrink-0 tabular-nums">{formatCurrency(li.amount)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </li>
               ))}
             </ul>
