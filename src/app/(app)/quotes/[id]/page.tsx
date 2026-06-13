@@ -13,6 +13,7 @@ import { DeleteButton } from "@/components/delete-button";
 import { EditCustomerButton } from "../../crm/[id]/edit-customer-button";
 import { createJobFromQuote, deleteQuote } from "../actions";
 import { createMaterialListFromQuote } from "../../materials/actions";
+import { createWorkOrderFromQuote } from "../../work-orders/actions";
 import { Briefcase } from "lucide-react";
 import type { Quote, QuoteLineItem } from "@/lib/types";
 
@@ -77,6 +78,14 @@ export default async function QuoteDetailPage({
               label="Build material list"
               run={createMaterialListFromQuote.bind(null, q.id)}
               hrefPrefix="/materials/"
+              variant="outline"
+            />
+          )}
+          {lineItems.length > 0 && (
+            <ConvertButton
+              label="Create work order"
+              run={createWorkOrderFromQuote.bind(null, q.id)}
+              hrefPrefix="/work-orders/"
               variant="outline"
             />
           )}

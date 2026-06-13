@@ -72,6 +72,20 @@ export function TimeclockPanel({
   // clock-in form
   const [jobId, setJobId] = useState("");
   const [jobCode, setJobCode] = useState("");
+  const [startAt, setStartAt] = useState(""); // "" = now; otherwise a backdated ISO
+
+  // Backdate choices for "I forgot to clock in" — now, top of this hour, top of last hour.
+  const fmtClock = (d: Date) => d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const startChoices = (() => {
+    const now = new Date();
+    const thisHour = new Date(now); thisHour.setMinutes(0, 0, 0);
+    const lastHour = new Date(thisHour); lastHour.setHours(thisHour.getHours() - 1);
+    const opts = [{ value: "", label: `Now (${fmtClock(now)})` }];
+    if (thisHour.getTime() < now.getTime() - 60_000)
+      opts.push({ value: thisHour.toISOString(), label: `Top of this hour (${fmtClock(thisHour)})` });
+    opts.push({ value: lastHour.toISOString(), label: `Top of last hour (${fmtClock(lastHour)})` });
+    return opts;
+  })();
 
   // clock-out form
   const [lunchTaken, setLunchTaken] = useState(false);
@@ -145,6 +159,7 @@ export function TimeclockPanel({
         job_id: jobId || null,
         job_code: jobCode || null,
         gps,
+        clock_in_at: startAt || null,
       });
       if (!res.ok) setError(res.error ?? "Could not clock in.");
     });
@@ -395,6 +410,20 @@ export function TimeclockPanel({
               ))}
             </Select>
           </div>
+        </div>
+
+        <div>
+          <Label htmlFor="start-at">Start time</Label>
+          <Select id="start-at" value={startAt} onChange={(e) => setStartAt(e.target.value)}>
+            {startChoices.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </Select>
+          {startAt && (
+            <p className="mt-1 text-xs text-amber-600">Backdating your clock-in — use this only if you forgot to clock in.</p>
+          )}
         </div>
 
         {error && <p className="text-sm text-red-600">{error}</p>}

@@ -10,6 +10,7 @@ export async function clockIn(input: {
   job_id: string | null;
   job_code: string | null;
   gps: GeoPoint | null;
+  clock_in_at?: string | null; // optional backdated start (e.g. forgot to clock in)
 }): Promise<ClockResult> {
   const supabase = await createClient();
   const {
@@ -17,15 +18,27 @@ export async function clockIn(input: {
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
 
+  // Allow backdating the start (never into the future, capped at 12h ago).
+  let clockInIso = new Date().toISOString();
+  let backdated = false;
+  if (input.clock_in_at) {
+    const d = new Date(input.clock_in_at);
+    const ms = d.getTime();
+    if (!isNaN(ms) && ms <= Date.now() + 60_000 && ms >= Date.now() - 12 * 3_600_000) {
+      clockInIso = d.toISOString();
+      backdated = true;
+    }
+  }
+
   // The DB has a unique index preventing two open entries; surface a friendly msg.
   const { error } = await supabase.from("time_entries").insert({
     profile_id: user.id,
     job_id: input.job_id,
     job_code: input.job_code,
     gps_in: input.gps,
-    clock_in: new Date().toISOString(),
+    clock_in: clockInIso,
     status: "open",
-    source: input.gps ? "app" : "manual",
+    source: backdated ? "manual" : input.gps ? "app" : "manual",
   });
 
   if (error) {

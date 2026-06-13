@@ -57,7 +57,7 @@ export default async function QuotePrintPage({
         <PrintButton />
       </div>
 
-      <div className="print-page mx-auto max-w-3xl bg-white p-10 shadow-sm">
+      <div className="print-page mx-auto max-w-3xl bg-white p-8 shadow-sm print:p-6">
         <DocHeader
           co={co}
           template={template}
@@ -95,40 +95,51 @@ export default async function QuotePrintPage({
         </div>
 
         {q.title && (
-          <div className="mt-5 text-base font-semibold text-slate-900">{q.title}</div>
+          <div className="mt-4 text-base font-semibold text-slate-900">{q.title}</div>
         )}
 
-        {/* Line items */}
-        <table className="mt-4 w-full text-sm">
+        {/* Line items — compact. A multi-line description renders extra lines as
+            indented sub-items (e.g. the materials that make up a service line). */}
+        <table className="mt-3 w-full border-collapse text-[13px] leading-snug">
           <thead>
-            <tr className="border-b border-slate-300 text-left text-xs uppercase tracking-wide text-slate-500">
-              <th className="py-2 font-semibold">Description</th>
-              <th className="py-2 text-right font-semibold">Qty</th>
-              <th className="py-2 text-right font-semibold">Unit</th>
-              <th className="py-2 text-right font-semibold">Price</th>
-              <th className="py-2 text-right font-semibold">Amount</th>
+            <tr className="border-b border-slate-300 text-left text-[11px] uppercase tracking-wide text-slate-500">
+              <th className="py-1.5 font-semibold">Description</th>
+              <th className="w-12 py-1.5 text-right font-semibold">Qty</th>
+              <th className="w-12 py-1.5 text-right font-semibold">Unit</th>
+              <th className="w-20 py-1.5 text-right font-semibold">Price</th>
+              <th className="w-24 py-1.5 text-right font-semibold">Amount</th>
             </tr>
           </thead>
           <tbody>
-            {lineItems.map((it) => (
-              <tr key={it.id} className="border-b border-slate-100">
-                <td className="py-2 pr-2 text-slate-800">{it.description}</td>
-                <td className="py-2 text-right text-slate-600">{it.quantity}</td>
-                <td className="py-2 text-right text-slate-500">{it.unit}</td>
-                <td className="py-2 text-right text-slate-600">
-                  {formatCurrency(it.unit_price)}
-                </td>
-                <td className="py-2 text-right font-medium text-slate-900">
-                  {formatCurrency(it.line_total)}
-                </td>
-              </tr>
-            ))}
+            {lineItems.map((it) => {
+              const lines = String(it.description ?? "").split("\n");
+              const head = lines[0];
+              const subs = lines.slice(1).map((s) => s.replace(/^\s*[-•*]\s*/, "").trim()).filter(Boolean);
+              return (
+                <tr key={it.id} className="border-b border-slate-100 align-top [break-inside:avoid]">
+                  <td className="py-1 pr-2 text-slate-800">
+                    <div>{head}</div>
+                    {subs.length > 0 && (
+                      <ul className="ml-3 mt-0.5 list-disc text-[11px] text-slate-500 marker:text-slate-300">
+                        {subs.map((s, i) => (
+                          <li key={i}>{s}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </td>
+                  <td className="py-1 text-right text-slate-600">{it.quantity}</td>
+                  <td className="py-1 text-right text-slate-500">{it.unit}</td>
+                  <td className="py-1 text-right text-slate-600">{formatCurrency(it.unit_price)}</td>
+                  <td className="py-1 text-right font-medium text-slate-900">{formatCurrency(it.line_total)}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
 
         {/* Totals */}
-        <div className="mt-4 flex justify-end">
-          <div className="w-64 space-y-1 text-sm">
+        <div className="mt-3 flex justify-end">
+          <div className="w-60 space-y-0.5 text-[13px]">
             <div className="flex justify-between text-slate-600">
               <span>Subtotal</span>
               <span>{formatCurrency(q.subtotal)}</span>
@@ -145,22 +156,22 @@ export default async function QuotePrintPage({
         </div>
 
         {q.notes && (
-          <div className="mt-8 border-t border-slate-200 pt-4">
+          <div className="mt-5 border-t border-slate-200 pt-3 [break-inside:avoid]">
             <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">
               Notes
             </div>
-            <p className="mt-1 whitespace-pre-wrap text-sm text-slate-600">{q.notes}</p>
+            <p className="mt-1 whitespace-pre-wrap text-[13px] text-slate-600">{q.notes}</p>
           </div>
         )}
 
         {settings.quote_terms && (
-          <div className="mt-6 border-t border-slate-200 pt-4">
+          <div className="mt-4 border-t border-slate-200 pt-3 [break-inside:avoid]">
             <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Terms</div>
-            <p className="mt-1 whitespace-pre-wrap text-sm text-slate-600">{settings.quote_terms}</p>
+            <p className="mt-1 whitespace-pre-wrap text-[13px] text-slate-600">{settings.quote_terms}</p>
           </div>
         )}
 
-        <div className="mt-10 whitespace-pre-wrap text-center text-xs text-slate-400">
+        <div className="mt-6 whitespace-pre-wrap text-center text-xs text-slate-400">
           {settings.document_footer || "Thank you for the opportunity to earn your business."}
         </div>
       </div>
