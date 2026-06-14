@@ -11,13 +11,25 @@ function publicQuoteLink(token: string) {
   return `${process.env.NEXT_PUBLIC_SITE_URL || ""}/q/${token}`;
 }
 
+export async function setQuoteType(id: string, docType: "estimate" | "quote") {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("quotes")
+    .update({ doc_type: docType, updated_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath(`/quotes/${id}`);
+  revalidatePath("/quotes");
+  return { ok: true };
+}
+
 export async function textQuote(
   id: string,
 ): Promise<{ ok: boolean; error?: string }> {
   const supabase = await createClient();
   const { data: quote } = await supabase
     .from("quotes")
-    .select("quote_number, total, public_token, customers(name, phone)")
+    .select("quote_number, total, public_token, doc_type, customers(name, phone)")
     .eq("id", id)
     .maybeSingle();
   if (!quote) return { ok: false, error: "Quote not found." };
@@ -25,9 +37,10 @@ export async function textQuote(
   if (!customer?.phone)
     return { ok: false, error: "This customer has no phone number." };
 
+  const label = ((quote as any).doc_type ?? "quote") === "estimate" ? "Estimate" : "Quote";
   const { data: org } = await supabase.from("organizations").select("name").maybeSingle();
   const link = publicQuoteLink((quote as any).public_token);
-  const body = `${org?.name ?? "Your contractor"}: Quote ${quote.quote_number} ($${Number(quote.total).toFixed(2)}). View: ${link}`;
+  const body = `${org?.name ?? "Your contractor"}: ${label} ${quote.quote_number} ($${Number(quote.total).toFixed(2)}). View: ${link}`;
 
   const sent = await sendSms(customer.phone, body);
   if (!sent)
@@ -53,6 +66,7 @@ export async function emailQuote(
   if (!customer?.email)
     return { ok: false, error: "This customer has no email address." };
   const link = publicQuoteLink((quote as any).public_token);
+  const label = ((quote as any).doc_type ?? "quote") === "estimate" ? "Estimate" : "Quote";
 
   const [{ data: items }, { data: org }] = await Promise.all([
     supabase.from("quote_line_items").select("*").eq("quote_id", id).order("sort_order"),
@@ -60,7 +74,7 @@ export async function emailQuote(
   ]);
 
   const html = renderDocEmail({
-    docType: "Quote",
+    docType: label,
     number: quote.quote_number,
     company: {
       name: org?.name ?? "Contractor North",
@@ -86,7 +100,7 @@ export async function emailQuote(
 
   const res = await sendEmail({
     to: customer.email,
-    subject: `Quote ${quote.quote_number} from ${org?.name ?? "us"}`,
+    subject: `${label} ${quote.quote_number} from ${org?.name ?? "us"}`,
     html,
     replyTo: org?.email ?? undefined,
   });

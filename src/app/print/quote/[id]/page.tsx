@@ -45,6 +45,10 @@ export default async function QuotePrintPage({
 
   const lineItems = (items ?? []) as QuoteLineItem[];
   const c = q.customers;
+  // Quote = fixed price · Estimate = time & materials. Same record, the
+  // customer-facing wording follows doc_type.
+  const isEstimate = ((q as any).doc_type ?? "quote") === "estimate";
+  const docLabel = isEstimate ? "Estimate" : "Quote";
 
   return (
     <div className="min-h-screen bg-slate-100 py-8 print:bg-white print:py-0">
@@ -63,7 +67,7 @@ export default async function QuotePrintPage({
           co={co}
           template={template}
           meta={{
-            docType: "Quote",
+            docType: docLabel,
             number: q.quote_number,
             rows: [
               { label: "Date", value: formatDate(q.created_at) },

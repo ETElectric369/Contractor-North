@@ -54,7 +54,7 @@ export function money(n: number | null | undefined): string {
 
 /** Build a simple branded HTML document email for a quote or invoice. */
 export function renderDocEmail(input: {
-  docType: "Quote" | "Invoice";
+  docType: "Quote" | "Estimate" | "Invoice";
   number: string;
   company: { name: string; brand: string; phone?: string | null; email?: string | null };
   customerName: string;

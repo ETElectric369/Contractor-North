@@ -20,7 +20,7 @@ export default async function QuotesPage() {
 
   return (
     <div>
-      <PageHeader title="Quotes" description="Estimates and proposals.">
+      <PageHeader title="Quotes & estimates" description="Fixed-price quotes and time-&-materials estimates — toggle the type on any one.">
         <Link href="/quotes/new">
           <Button>
             <Plus className="h-4 w-4" /> New quote
@@ -58,6 +58,9 @@ export default async function QuotesPage() {
                 >
                   <div className="col-span-2 font-medium text-slate-900">
                     {q.quote_number}
+                    <span className="ml-2 align-middle rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                      {(q.doc_type ?? "quote") === "estimate" ? "Est" : "Quote"}
+                    </span>
                   </div>
                   <div className="col-span-4 text-sm text-slate-600">
                     {q.customers?.name ?? "—"}

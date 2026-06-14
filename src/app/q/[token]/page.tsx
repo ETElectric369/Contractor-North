@@ -36,7 +36,7 @@ export default async function PublicQuotePage({
           co={co}
           template={template}
           meta={{
-            docType: "Quote",
+            docType: (q.doc_type ?? "quote") === "estimate" ? "Estimate" : "Quote",
             number: q.quote_number,
             rows: [
               { label: "Date", value: formatDate(q.created_at) },

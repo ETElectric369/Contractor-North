@@ -9,6 +9,7 @@ import { StatusControl } from "./status-control";
 import { QuoteItemsEditor } from "./quote-items-editor";
 import { EmailButton } from "@/components/email-button";
 import { SectionMapButton } from "@/components/section-map-button";
+import { QuoteTypeToggle } from "./quote-type-toggle";
 import type { NavTree } from "@/lib/nav-tree";
 import { DeleteButton } from "@/components/delete-button";
 import { EditCustomerButton } from "../../crm/[id]/edit-customer-button";
@@ -91,6 +92,7 @@ export default async function QuoteDetailPage({
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold text-slate-900">{q.quote_number}</h1>
             <Badge tone={statusTone(q.status)}>{q.status}</Badge>
+            <QuoteTypeToggle id={q.id} value={(((q as any).doc_type ?? "quote") as "estimate" | "quote")} />
           </div>
           {q.title && <p className="mt-1 text-slate-600">{q.title}</p>}
           <p className="mt-1 text-sm text-slate-400">
