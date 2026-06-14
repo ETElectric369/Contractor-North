@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
-import { Menu, X, LogOut, ArrowLeft, ArrowRight, LayoutDashboard, ListTodo, Sparkles, Wand2 } from "lucide-react";
+import { Menu, X, LogOut, ArrowLeft, ArrowRight, LayoutDashboard, ListTodo, Sparkles, Wand2, Search } from "lucide-react";
 import { Sidebar } from "./sidebar";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { initials } from "@/lib/utils";
@@ -86,6 +86,16 @@ export function Topbar({
         </nav>
 
         <div className="flex items-center gap-3">
+          <button
+            onClick={() => window.dispatchEvent(new Event("cn:command"))}
+            className="flex items-center gap-2 rounded-lg border border-slate-200 px-2.5 py-2 text-slate-500 hover:bg-slate-50 sm:px-3"
+            title="Search & commands (⌘K)"
+            aria-label="Search and commands"
+          >
+            <Search className="h-4 w-4" />
+            <span className="hidden text-sm md:inline">Search</span>
+            <span className="hidden rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-400 md:inline">⌘K</span>
+          </button>
           <LanguageSwitcher current={lang} />
           <div className="hidden text-right sm:block">
             <div className="text-sm font-medium text-slate-900">

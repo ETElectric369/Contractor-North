@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Send, Sparkles, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
@@ -82,6 +82,20 @@ export function AssistantChat() {
       scrollToBottom();
     }
   }
+
+  // When opened with ?q= (e.g. "Ask the assistant" from the command bar),
+  // auto-send that query once, then strip the param so a refresh won't resend.
+  const didInit = useRef(false);
+  useEffect(() => {
+    if (didInit.current) return;
+    didInit.current = true;
+    const q = new URLSearchParams(window.location.search).get("q");
+    if (q && q.trim()) {
+      send(q.trim());
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white">
