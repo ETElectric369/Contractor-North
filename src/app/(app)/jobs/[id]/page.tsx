@@ -408,14 +408,18 @@ export default async function JobDetailPage({
         <div className="space-y-4">
           <Card>
             <CardContent className="py-5">
-              <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-7">
-                <div><div className="text-lg font-bold text-slate-900">{formatCurrency(revenue)}</div><div className="text-xs text-slate-500">{invoiced > 0 ? "Invoiced" : "Quoted"}</div></div>
-                <div><div className="text-lg font-bold text-slate-900">{formatCurrency(laborCost)}</div><div className="text-xs text-slate-500">Labor · {formatDuration(laborHours)}</div></div>
-                <div><div className="text-lg font-bold text-slate-900">{formatCurrency(materialCost)}</div><div className="text-xs text-slate-500">Materials</div></div>
-                <div><div className="text-lg font-bold text-slate-900">{formatCurrency(billsCost)}</div><div className="text-xs text-slate-500">Bills</div></div>
-                <div><div className="text-lg font-bold text-slate-900">{formatCurrency(mileageCost)}</div><div className="text-xs text-slate-500">Mileage · {totalMiles} mi</div></div>
-                <div><div className={`text-lg font-bold ${profit >= 0 ? "text-green-600" : "text-red-600"}`}>{formatCurrency(profit)}</div><div className="text-xs text-slate-500">Profit</div></div>
-                <div><div className={`text-lg font-bold ${profit >= 0 ? "text-green-600" : "text-red-600"}`}>{margin.toFixed(0)}%</div><div className="text-xs text-slate-500">Margin</div></div>
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3 lg:grid-cols-5">
+                  <div><div className="text-base font-semibold text-slate-700">{formatCurrency(revenue)}</div><div className="text-[11px] uppercase tracking-wide text-slate-400">{invoiced > 0 ? "Invoiced" : "Quoted"}</div></div>
+                  <div><div className="text-base font-semibold text-slate-700">{formatCurrency(laborCost)}</div><div className="text-[11px] uppercase tracking-wide text-slate-400">Labor · {formatDuration(laborHours)}</div></div>
+                  <div><div className="text-base font-semibold text-slate-700">{formatCurrency(materialCost)}</div><div className="text-[11px] uppercase tracking-wide text-slate-400">Materials</div></div>
+                  <div><div className="text-base font-semibold text-slate-700">{formatCurrency(billsCost)}</div><div className="text-[11px] uppercase tracking-wide text-slate-400">Bills</div></div>
+                  <div><div className="text-base font-semibold text-slate-700">{formatCurrency(mileageCost)}</div><div className="text-[11px] uppercase tracking-wide text-slate-400">Mileage · {totalMiles} mi</div></div>
+                </div>
+                <div className="flex gap-6 border-t border-slate-100 pt-3 sm:border-l sm:border-t-0 sm:pl-6 sm:pt-0">
+                  <div><div className={`text-2xl font-bold ${profit >= 0 ? "text-green-600" : "text-red-600"}`}>{formatCurrency(profit)}</div><div className="text-xs font-medium text-slate-500">Profit</div></div>
+                  <div><div className={`text-2xl font-bold ${profit >= 0 ? "text-green-600" : "text-red-600"}`}>{margin.toFixed(0)}%</div><div className="text-xs font-medium text-slate-500">Margin</div></div>
+                </div>
               </div>
             </CardContent>
           </Card>

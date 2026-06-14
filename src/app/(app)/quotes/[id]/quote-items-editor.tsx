@@ -118,27 +118,35 @@ export function QuoteItemsEditor({ quote, items }: { quote: Quote; items: QuoteL
                 </div>
               </li>
             ) : (
-              <li key={it.id} className="flex items-center gap-3 px-5 py-3 text-sm">
-                <div className="min-w-0 flex-1">
+              <li key={it.id} className="group flex items-center gap-3 px-5 py-3 text-sm transition-colors hover:bg-slate-50">
+                <button
+                  type="button"
+                  onClick={() => startEdit(it)}
+                  disabled={pending}
+                  className="min-w-0 flex-1 cursor-pointer text-left"
+                  title="Edit line item"
+                >
                   <div className="font-medium text-slate-800">{it.description}</div>
                   <div className="text-xs text-slate-400">
                     {it.quantity} {it.unit} × {formatCurrency(it.unit_price)}
                   </div>
-                </div>
+                </button>
                 <div className="shrink-0 font-medium text-slate-900">{formatCurrency(it.line_total)}</div>
                 <button
                   onClick={() => startEdit(it)}
                   disabled={pending}
-                  className="shrink-0 text-slate-400 hover:text-slate-700"
+                  className="shrink-0 text-slate-500 hover:text-brand"
                   aria-label="Edit"
+                  title="Edit"
                 >
                   <Pencil className="h-4 w-4" />
                 </button>
                 <button
                   onClick={() => start(async () => { await deleteQuoteItem(it.id, quote.id); refresh(); })}
                   disabled={pending}
-                  className="shrink-0 text-slate-400 hover:text-red-600"
+                  className="shrink-0 text-slate-500 hover:text-red-600"
                   aria-label="Remove"
+                  title="Remove"
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>
