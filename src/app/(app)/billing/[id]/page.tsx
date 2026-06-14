@@ -9,6 +9,8 @@ import { Badge, statusTone } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { InvoiceDetail } from "./invoice-detail";
 import { EmailButton } from "@/components/email-button";
+import { SectionMapButton } from "@/components/section-map-button";
+import { invoiceSectionTree } from "@/lib/nav-tree";
 import { DeleteButton } from "@/components/delete-button";
 import { deleteInvoice } from "../actions";
 import { getOrgSettings } from "@/lib/org-settings";
@@ -103,6 +105,13 @@ export default async function InvoicePage({
             </a>
           )}
           <EmailButton id={inv.id} kind="invoice" />
+          <SectionMapButton
+            tree={invoiceSectionTree(inv.id, inv.invoice_number, {
+              customerId: inv.customers?.id ?? null,
+              quoteId: inv.quotes?.id ?? null,
+              jobId: (inv as any).job_id ?? null,
+            })}
+          />
           <Link
             href={`/print/invoice/${inv.id}`}
             className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"

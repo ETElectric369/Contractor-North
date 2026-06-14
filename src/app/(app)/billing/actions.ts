@@ -138,6 +138,16 @@ export async function createInvoiceFromQuote(quoteId: string): Promise<Result> {
     .maybeSingle();
   if (qErr || !quote) return { ok: false, error: "Quote not found." };
 
+  // Idempotent: a quote maps to one invoice. Re-tapping "Create invoice" returns
+  // the existing one instead of billing the customer twice.
+  const { data: existingInv } = await supabase
+    .from("invoices")
+    .select("id")
+    .eq("quote_id", quoteId)
+    .limit(1)
+    .maybeSingle();
+  if (existingInv) return { ok: true, id: existingInv.id };
+
   const { data: invoice, error } = await supabase
     .from("invoices")
     .insert({

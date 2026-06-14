@@ -8,13 +8,15 @@ import { formatCurrency, formatDate } from "@/lib/utils";
 import { StatusControl } from "./status-control";
 import { QuoteItemsEditor } from "./quote-items-editor";
 import { EmailButton } from "@/components/email-button";
-import { ConvertButton } from "@/components/convert-button";
+import { ConvertMenu, type ConvertOption } from "@/components/convert-button";
+import { SectionMapButton } from "@/components/section-map-button";
+import { quoteSectionTree } from "@/lib/nav-tree";
 import { DeleteButton } from "@/components/delete-button";
 import { EditCustomerButton } from "../../crm/[id]/edit-customer-button";
 import { createJobFromQuote, deleteQuote } from "../actions";
 import { createMaterialListFromQuote } from "../../materials/actions";
 import { createWorkOrderFromQuote } from "../../work-orders/actions";
-import { Briefcase } from "lucide-react";
+import { createInvoiceFromQuote } from "../../billing/actions";
 import type { Quote, QuoteLineItem } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -43,6 +45,29 @@ export default async function QuoteDetailPage({
     .order("sort_order");
 
   const lineItems = (items ?? []) as QuoteLineItem[];
+
+  // Has this quote already been turned into an invoice? (Drives idempotent UI.)
+  const { data: existingInv } = await supabase
+    .from("invoices")
+    .select("id")
+    .eq("quote_id", id)
+    .limit(1)
+    .maybeSingle();
+
+  const convertOptions: ConvertOption[] = [
+    existingInv
+      ? { label: "View invoice", href: `/billing/${existingInv.id}` }
+      : { label: "Create invoice", run: createInvoiceFromQuote.bind(null, q.id), hrefPrefix: "/billing/" },
+    (q as any).job_id
+      ? { label: "View job", href: `/jobs/${(q as any).job_id}` }
+      : { label: "Create job", run: createJobFromQuote.bind(null, q.id), hrefPrefix: "/jobs/" },
+    ...(lineItems.length > 0
+      ? [
+          { label: "Create work order", run: createWorkOrderFromQuote.bind(null, q.id), hrefPrefix: "/work-orders/" },
+          { label: "Build material list", run: createMaterialListFromQuote.bind(null, q.id), hrefPrefix: "/materials/" },
+        ]
+      : []),
+  ];
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -73,37 +98,13 @@ export default async function QuoteDetailPage({
           >
             <Printer className="h-4 w-4" /> Print / PDF
           </Link>
-          {lineItems.length > 0 && (
-            <ConvertButton
-              label="Build material list"
-              run={createMaterialListFromQuote.bind(null, q.id)}
-              hrefPrefix="/materials/"
-              variant="outline"
-            />
-          )}
-          {lineItems.length > 0 && (
-            <ConvertButton
-              label="Create work order"
-              run={createWorkOrderFromQuote.bind(null, q.id)}
-              hrefPrefix="/work-orders/"
-              variant="outline"
-            />
-          )}
-          {(q as any).job_id ? (
-            <Link
-              href={`/jobs/${(q as any).job_id}`}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
-            >
-              <Briefcase className="h-4 w-4" /> View job
-            </Link>
-          ) : (
-            <ConvertButton
-              label="Create job"
-              run={createJobFromQuote.bind(null, q.id)}
-              hrefPrefix="/jobs/"
-              variant="outline"
-            />
-          )}
+          <SectionMapButton
+            tree={quoteSectionTree(q.id, q.quote_number, {
+              customerId: q.customers?.id ?? null,
+              jobId: (q as any).job_id ?? null,
+            })}
+          />
+          <ConvertMenu options={convertOptions} />
           <StatusControl id={q.id} status={q.status} />
           <DeleteButton
             run={deleteQuote.bind(null, q.id)}

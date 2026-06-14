@@ -116,6 +116,35 @@ export function jobSectionTree(jobId: string, jobLabel: string): NavTree {
   };
 }
 
+/** A quote's relationships as a mind-map (linear page → related records). */
+export function quoteSectionTree(
+  quoteId: string,
+  label: string,
+  rel: { customerId?: string | null; jobId?: string | null },
+): NavTree {
+  const nodes: TreeNode[] = [{ id: "q-self", label: "This quote", icon: "fileText", href: `/quotes/${quoteId}` }];
+  if (rel.customerId) nodes.push({ id: "q-cust", label: "Customer", icon: "users", href: `/crm/${rel.customerId}` });
+  if (rel.jobId) nodes.push({ id: "q-job", label: "Job", icon: "briefcase", href: `/jobs/${rel.jobId}` });
+  nodes.push({ id: "q-print", label: "Print / PDF", icon: "fileSpreadsheet", href: `/print/quote/${quoteId}` });
+  nodes.push({ id: "q-all", label: "All quotes", icon: "list", href: "/quotes" });
+  return { center: { label, icon: "fileText" }, nodes };
+}
+
+/** An invoice's relationships as a mind-map. */
+export function invoiceSectionTree(
+  invoiceId: string,
+  label: string,
+  rel: { customerId?: string | null; quoteId?: string | null; jobId?: string | null },
+): NavTree {
+  const nodes: TreeNode[] = [{ id: "i-self", label: "This invoice", icon: "receipt", href: `/billing/${invoiceId}` }];
+  if (rel.customerId) nodes.push({ id: "i-cust", label: "Customer", icon: "users", href: `/crm/${rel.customerId}` });
+  if (rel.jobId) nodes.push({ id: "i-job", label: "Job", icon: "briefcase", href: `/jobs/${rel.jobId}` });
+  if (rel.quoteId) nodes.push({ id: "i-quote", label: "Source quote", icon: "fileText", href: `/quotes/${rel.quoteId}` });
+  nodes.push({ id: "i-print", label: "Print / PDF", icon: "fileSpreadsheet", href: `/print/invoice/${invoiceId}` });
+  nodes.push({ id: "i-all", label: "All invoices", icon: "list", href: "/billing" });
+  return { center: { label, icon: "receipt" }, nodes };
+}
+
 /** A customer's tabs as a mind-map; each leaf deep-links to that tab (?tab=). */
 export function customerSectionTree(custId: string, custLabel: string): NavTree {
   const tab = (t: string) => `/crm/${custId}?tab=${t}`;
