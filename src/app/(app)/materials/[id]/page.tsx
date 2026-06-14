@@ -5,6 +5,9 @@ import { createClient } from "@/lib/supabase/server";
 import { formatDate } from "@/lib/utils";
 import { ItemEditor } from "./item-editor";
 import { DeleteListButton } from "./delete-list-button";
+import { NewPoButton } from "../../purchasing/new-po-button";
+import { SectionMapButton } from "@/components/section-map-button";
+import { materialListSectionTree } from "@/lib/nav-tree";
 
 export const dynamic = "force-dynamic";
 
@@ -56,7 +59,14 @@ export default async function MaterialListPage({
             )}
           </div>
         </div>
-        <DeleteListButton listId={l.id} />
+        <div className="flex flex-wrap items-center gap-2">
+          <SectionMapButton tree={materialListSectionTree(l.id, l.name, { jobId: l.jobs?.id ?? null })} />
+          <NewPoButton
+            jobs={l.jobs ? [{ id: l.jobs.id, job_number: l.jobs.job_number, name: l.jobs.name }] : []}
+            lists={[{ id: l.id, name: l.name }]}
+          />
+          <DeleteListButton listId={l.id} />
+        </div>
       </div>
 
       <ItemEditor listId={l.id} items={items ?? []} />
