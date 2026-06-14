@@ -16,6 +16,12 @@ const PUBLIC_PATHS = [
   "/api/health",
   "/_next",
   "/favicon",
+  // PWA assets must load without auth, or install/offline break.
+  "/sw.js",
+  "/manifest.webmanifest",
+  "/offline",
+  "/icon-",
+  "/apple-touch-icon",
 ];
 
 /**
