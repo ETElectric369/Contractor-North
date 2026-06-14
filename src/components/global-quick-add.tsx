@@ -15,7 +15,7 @@ const ACTIONS = [
 /** Movable floating "+" — always on screen, opens quick-create shortcuts. */
 export function GlobalQuickAdd() {
   const router = useRouter();
-  const [pos, setPos] = useState({ x: 20, y: 84 }); // from bottom-right, above the mic
+  const [pos, setPos] = useState({ x: 20, y: 140 }); // above the mic, clearing the mobile bottom nav
   const [open, setOpen] = useState(false);
   const drag = useRef<{ sx: number; sy: number; bx: number; by: number; moved: boolean } | null>(null);
 

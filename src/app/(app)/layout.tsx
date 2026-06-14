@@ -5,6 +5,7 @@ import { Topbar } from "@/components/app-shell/topbar";
 import { GlobalVoiceButton } from "@/components/global-voice-button";
 import { GlobalQuickAdd } from "@/components/global-quick-add";
 import { CommandBar } from "@/components/command-bar";
+import { BottomNav } from "@/components/bottom-nav";
 import { billingEnabled } from "@/lib/stripe";
 import { hasActiveAccess } from "@/lib/subscription";
 import type { Profile } from "@/lib/types";
@@ -68,13 +69,14 @@ export default async function AppLayout({
       </div>
       <div className="flex flex-1 flex-col overflow-hidden">
         <Topbar profile={(profile as Profile) ?? null} branding={branding} lang={profile.language} role={profile.role} badges={badges} />
-        <main className="flex-1 overflow-y-auto bg-slate-50 p-4 lg:p-6">
+        <main className="flex-1 overflow-y-auto bg-slate-50 p-4 pb-20 lg:p-6">
           {children}
         </main>
       </div>
       <GlobalVoiceButton lang={profile.language} />
       <GlobalQuickAdd />
       <CommandBar />
+      <BottomNav />
     </div>
   );
 }
