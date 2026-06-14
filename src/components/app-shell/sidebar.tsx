@@ -30,7 +30,11 @@ export function Sidebar({
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   useEffect(() => {
     try {
-      setCollapsed(JSON.parse(localStorage.getItem("nav-collapsed") ?? "{}"));
+      const saved = localStorage.getItem("nav-collapsed");
+      // First-time users land with the back-office groups collapsed so the
+      // sidebar reads as ~7 everyday items; once they toggle anything, their
+      // saved preference wins.
+      setCollapsed(saved === null ? { Money: true, Office: true } : JSON.parse(saved));
     } catch {
       /* ignore */
     }
