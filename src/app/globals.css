@@ -50,6 +50,21 @@ main {
   overscroll-behavior-y: contain;
 }
 
+/* ── Mind-map navigator: nodes bloom out from the center when a hub expands ── */
+@keyframes mm-bloom {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.7);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+.mm-bloom {
+  animation: mm-bloom 0.22s ease-out both;
+}
+
 /* ── Print: hide UI chrome, give the document clean margins ─────────────── */
 @media print {
   .no-print {

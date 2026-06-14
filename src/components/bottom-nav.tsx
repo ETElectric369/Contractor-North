@@ -2,15 +2,15 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Briefcase, CalendarDays, Search, Sparkles, type LucideIcon } from "lucide-react";
+import { LayoutDashboard, Briefcase, CalendarDays, Network, Sparkles, type LucideIcon } from "lucide-react";
 
-type Tab = { label: string; icon: LucideIcon; href?: string; action?: "search" };
+type Tab = { label: string; icon: LucideIcon; href?: string; action?: "map" };
 
 const TABS: Tab[] = [
   { label: "Home", href: "/dashboard", icon: LayoutDashboard },
   { label: "Jobs", href: "/jobs", icon: Briefcase },
+  { label: "Map", icon: Network, action: "map" },
   { label: "Schedule", href: "/schedule", icon: CalendarDays },
-  { label: "Search", icon: Search, action: "search" },
   { label: "Assistant", href: "/assistant", icon: Sparkles },
 ];
 
@@ -23,9 +23,9 @@ export function BottomNav() {
         const active = t.href ? pathname === t.href || pathname.startsWith(t.href + "/") : false;
         const cls = `flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-medium ${active ? "text-brand" : "text-slate-500"}`;
         const Icon = t.icon;
-        if (t.action === "search") {
+        if (t.action === "map") {
           return (
-            <button key="search" onClick={() => window.dispatchEvent(new Event("cn:command"))} className={cls} aria-label="Search and commands">
+            <button key="map" onClick={() => window.dispatchEvent(new Event("cn:mindmap"))} className={cls} aria-label="Open the navigator">
               <Icon className="h-5 w-5" />
               {t.label}
             </button>
