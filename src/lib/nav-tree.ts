@@ -171,6 +171,18 @@ export function materialListSectionTree(listId: string, label: string, rel: { jo
   return { center: { label, icon: "boxes" }, nodes };
 }
 
+/** A purchase order's relationships as a mind-map. */
+export function purchaseOrderSectionTree(
+  poId: string,
+  label: string,
+  rel: { jobId?: string | null },
+): NavTree {
+  const nodes: TreeNode[] = [{ id: "po-self", label: "This PO", icon: "wallet", href: `/purchasing/${poId}` }];
+  if (rel.jobId) nodes.push({ id: "po-job", label: "Job", icon: "briefcase", href: `/jobs/${rel.jobId}` });
+  nodes.push({ id: "po-all", label: "All bills & POs", icon: "list", href: "/bills" });
+  return { center: { label, icon: "wallet" }, nodes };
+}
+
 /** A customer's tabs as a mind-map; each leaf deep-links to that tab (?tab=). */
 export function customerSectionTree(custId: string, custLabel: string): NavTree {
   const tab = (t: string) => `/crm/${custId}?tab=${t}`;

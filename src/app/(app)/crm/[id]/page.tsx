@@ -175,12 +175,6 @@ export default async function CustomerDetailPage({
           <SectionMapButton tree={customerSectionTree(c.id, c.name)} />
           <EditCustomerButton customer={c} pricingLevels={(pricingLevels ?? []) as any} />
           <NewJobButton customers={[{ id: c.id, name: c.name }]} defaultCustomerId={c.id} />
-          <Link
-            href={`/quotes/new?customer=${c.id}`}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
-          >
-            New quote
-          </Link>
           <Link href={`/quotes/new?customer=${c.id}`}>
             <Button>
               <Plus className="h-4 w-4" /> New quote

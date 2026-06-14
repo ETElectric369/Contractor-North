@@ -6,6 +6,8 @@ import { Badge, statusTone } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { PoDetail } from "./po-detail";
 import { DeleteButton } from "@/components/delete-button";
+import { SectionMapButton } from "@/components/section-map-button";
+import { purchaseOrderSectionTree } from "@/lib/nav-tree";
 import { deletePurchaseOrder } from "../actions";
 import type { PurchaseOrder, PurchaseOrderItem } from "@/lib/types";
 
@@ -56,7 +58,10 @@ export default async function PurchaseOrderPage({
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-2xl font-bold text-slate-900">{p.po_number}</h1>
           <Badge tone={statusTone(p.status)}>{p.status}</Badge>
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-2">
+            <SectionMapButton
+              tree={purchaseOrderSectionTree(p.id, p.po_number, { jobId: p.jobs?.id ?? null })}
+            />
             <DeleteButton
               run={deletePurchaseOrder.bind(null, p.id)}
               confirmText={`Delete ${p.po_number}? Its line items go with it.`}
