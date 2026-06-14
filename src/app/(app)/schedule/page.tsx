@@ -5,8 +5,42 @@ import { PageHeader } from "@/components/page-header";
 import { NewJobButton } from "./new-job-button";
 import { JobScheduleCard } from "./job-schedule-card";
 import { AppointmentButton } from "../appointments/appointment-button";
+import { CalendarPanel } from "./calendar-panel";
+import { AppointmentsPanel } from "./appointments-panel";
+import { MapPanel } from "./map-panel";
 
 export const dynamic = "force-dynamic";
+
+// Unified "Schedule" hub: one screen with a Board / Calendar / Appointments /
+// Map view switcher (?view=). The board (default) keeps its own ?week= offset
+// and ?span=week|month sub-toggle.
+const VIEWS = [
+  { id: "board", label: "Board", href: "/schedule" },
+  { id: "calendar", label: "Calendar", href: "/schedule?view=calendar" },
+  { id: "appointments", label: "Appointments", href: "/schedule?view=appointments" },
+  { id: "map", label: "Map", href: "/schedule?view=map" },
+];
+
+function ScheduleFrame({ view, children }: { view: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <PageHeader title="Schedule" description="Your jobs board, calendar, appointments and map — all in one place.">
+        <div className="flex overflow-x-auto rounded-lg bg-slate-100 p-0.5 text-sm">
+          {VIEWS.map((v) => (
+            <Link
+              key={v.id}
+              href={v.href}
+              className={`whitespace-nowrap rounded-md px-3 py-1 font-medium ${view === v.id ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}
+            >
+              {v.label}
+            </Link>
+          ))}
+        </div>
+      </PageHeader>
+      {children}
+    </div>
+  );
+}
 
 function weekRange(offset: number) {
   const now = new Date();
@@ -32,11 +66,35 @@ const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 export default async function SchedulePage({
   searchParams,
 }: {
-  searchParams: Promise<{ week?: string; view?: string }>;
+  searchParams: Promise<{ view?: string; week?: string; span?: string }>;
 }) {
-  const { week, view } = await searchParams;
-  const offset = parseInt(week ?? "0", 10) || 0;
-  const isMonth = view === "month";
+  const sp = await searchParams;
+  const view = ["calendar", "appointments", "map"].includes(sp.view ?? "")
+    ? (sp.view as string)
+    : "board";
+
+  if (view === "calendar")
+    return (
+      <ScheduleFrame view="calendar">
+        <CalendarPanel />
+      </ScheduleFrame>
+    );
+  if (view === "appointments")
+    return (
+      <ScheduleFrame view="appointments">
+        <AppointmentsPanel />
+      </ScheduleFrame>
+    );
+  if (view === "map")
+    return (
+      <ScheduleFrame view="map">
+        <MapPanel />
+      </ScheduleFrame>
+    );
+
+  // ---- Board view (default) ----
+  const offset = parseInt(sp.week ?? "0", 10) || 0;
+  const isMonth = sp.span === "month";
   const supabase = await createClient();
 
   const span = isMonth
@@ -121,7 +179,7 @@ export default async function SchedulePage({
   }
 
   const todayKey = new Date().toDateString();
-  const baseQ = isMonth ? "view=month&" : "";
+  const baseQ = isMonth ? "span=month&" : "";
 
   // Options for the "New appointment" button (reuses the appointments module).
   const apptJobMap = new Map<string, any>();
@@ -158,32 +216,30 @@ export default async function SchedulePage({
   const monthFirst = monthRange(offset).first;
 
   return (
-    <div>
-      <PageHeader title="Scheduler" description="Assign and schedule jobs.">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex rounded-lg bg-slate-100 p-0.5 text-sm">
-            <Link href="/schedule" className={`rounded-md px-3 py-1 font-medium ${!isMonth ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}>Week</Link>
-            <Link href="/schedule?view=month" className={`rounded-md px-3 py-1 font-medium ${isMonth ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}>Month</Link>
-          </div>
-          <Link href={`/schedule?${baseQ}week=${offset - 1}`} className="rounded-lg border border-slate-300 bg-white p-2 text-slate-600 hover:bg-slate-50">
-            <ChevronLeft className="h-4 w-4" />
-          </Link>
-          {offset !== 0 && (
-            <Link
-              href={`/schedule${isMonth ? "?view=month" : ""}`}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
-            >
-              Today
-            </Link>
-          )}
-          <span className="min-w-[140px] text-center text-sm font-medium text-slate-700">{label}</span>
-          <Link href={`/schedule?${baseQ}week=${offset + 1}`} className="rounded-lg border border-slate-300 bg-white p-2 text-slate-600 hover:bg-slate-50">
-            <ChevronRight className="h-4 w-4" />
-          </Link>
-          <AppointmentButton jobs={jobOpts} customers={custOpts} staff={staffOpts} />
-          <NewJobButton customers={customers ?? []} />
+    <ScheduleFrame view="board">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <div className="flex rounded-lg bg-slate-100 p-0.5 text-sm">
+          <Link href="/schedule" className={`rounded-md px-3 py-1 font-medium ${!isMonth ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}>Week</Link>
+          <Link href="/schedule?span=month" className={`rounded-md px-3 py-1 font-medium ${isMonth ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}>Month</Link>
         </div>
-      </PageHeader>
+        <Link href={`/schedule?${baseQ}week=${offset - 1}`} className="rounded-lg border border-slate-300 bg-white p-2 text-slate-600 hover:bg-slate-50">
+          <ChevronLeft className="h-4 w-4" />
+        </Link>
+        {offset !== 0 && (
+          <Link
+            href={`/schedule${isMonth ? "?span=month" : ""}`}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+          >
+            Today
+          </Link>
+        )}
+        <span className="min-w-[140px] text-center text-sm font-medium text-slate-700">{label}</span>
+        <Link href={`/schedule?${baseQ}week=${offset + 1}`} className="rounded-lg border border-slate-300 bg-white p-2 text-slate-600 hover:bg-slate-50">
+          <ChevronRight className="h-4 w-4" />
+        </Link>
+        <AppointmentButton jobs={jobOpts} customers={custOpts} staff={staffOpts} />
+        <NewJobButton customers={customers ?? []} />
+      </div>
 
       {unscheduled && unscheduled.length > 0 && (
         <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50/50 p-3">
@@ -253,6 +309,6 @@ export default async function SchedulePage({
           })}
         </div>
       )}
-    </div>
+    </ScheduleFrame>
   );
 }
