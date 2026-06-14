@@ -58,6 +58,19 @@ export function AppointmentButton({
 
   function submit(formData: FormData) {
     setError(null);
+    // Resolve the picked date+time to ISO here in the browser, so the user's own
+    // timezone is honored (the server action runs in UTC).
+    const date = String(formData.get("date") ?? "");
+    if (date) {
+      const st = String(formData.get("start_time") ?? "") || "08:00";
+      const startD = new Date(`${date}T${st}:00`);
+      if (!isNaN(startD.getTime())) formData.set("starts_at_iso", startD.toISOString());
+      const et = String(formData.get("end_time") ?? "");
+      if (et) {
+        const endD = new Date(`${date}T${et}:00`);
+        if (!isNaN(endD.getTime())) formData.set("ends_at_iso", endD.toISOString());
+      }
+    }
     start(async () => {
       const res = editing
         ? await updateAppointment(appointment!.id, formData)

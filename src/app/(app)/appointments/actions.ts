@@ -29,10 +29,16 @@ export async function createAppointment(formData: FormData): Promise<Result> {
   const title = String(formData.get("title") ?? "").trim();
   if (!title) return { ok: false, error: "Title is required." };
 
-  const startIso = toIso(String(formData.get("date") ?? ""), String(formData.get("start_time") ?? ""));
+  // Prefer the ISO the browser computed in the user's own timezone; fall back to
+  // server-side parsing only if it's missing.
+  const startIso =
+    emptyToNull(formData.get("starts_at_iso")) ??
+    toIso(String(formData.get("date") ?? ""), String(formData.get("start_time") ?? ""));
   if (!startIso) return { ok: false, error: "Pick a date." };
   const endTime = String(formData.get("end_time") ?? "");
-  const endIso = endTime ? toIso(String(formData.get("date") ?? ""), endTime) : null;
+  const endIso =
+    emptyToNull(formData.get("ends_at_iso")) ??
+    (endTime ? toIso(String(formData.get("date") ?? ""), endTime) : null);
 
   const { data, error } = await supabase
     .from("appointments")
@@ -61,8 +67,7 @@ export async function createAppointment(formData: FormData): Promise<Result> {
     });
   }
 
-  revalidatePath("/appointments");
-  revalidatePath("/calendar");
+  revalidatePath("/schedule");
   return { ok: true, id: data.id };
 }
 
@@ -71,10 +76,16 @@ export async function updateAppointment(id: string, formData: FormData): Promise
   const title = String(formData.get("title") ?? "").trim();
   if (!title) return { ok: false, error: "Title is required." };
 
-  const startIso = toIso(String(formData.get("date") ?? ""), String(formData.get("start_time") ?? ""));
+  // Prefer the ISO the browser computed in the user's own timezone; fall back to
+  // server-side parsing only if it's missing.
+  const startIso =
+    emptyToNull(formData.get("starts_at_iso")) ??
+    toIso(String(formData.get("date") ?? ""), String(formData.get("start_time") ?? ""));
   if (!startIso) return { ok: false, error: "Pick a date." };
   const endTime = String(formData.get("end_time") ?? "");
-  const endIso = endTime ? toIso(String(formData.get("date") ?? ""), endTime) : null;
+  const endIso =
+    emptyToNull(formData.get("ends_at_iso")) ??
+    (endTime ? toIso(String(formData.get("date") ?? ""), endTime) : null);
 
   const { error } = await supabase
     .from("appointments")
@@ -93,8 +104,7 @@ export async function updateAppointment(id: string, formData: FormData): Promise
     .eq("id", id);
   if (error) return { ok: false, error: error.message };
 
-  revalidatePath("/appointments");
-  revalidatePath("/calendar");
+  revalidatePath("/schedule");
   return { ok: true };
 }
 
@@ -105,8 +115,7 @@ export async function setAppointmentStatus(id: string, status: string): Promise<
     .update({ status, updated_at: new Date().toISOString() })
     .eq("id", id);
   if (error) return { ok: false, error: error.message };
-  revalidatePath("/appointments");
-  revalidatePath("/calendar");
+  revalidatePath("/schedule");
   return { ok: true };
 }
 
@@ -114,7 +123,6 @@ export async function deleteAppointment(id: string): Promise<Result> {
   const supabase = await createClient();
   const { error } = await supabase.from("appointments").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
-  revalidatePath("/appointments");
-  revalidatePath("/calendar");
+  revalidatePath("/schedule");
   return { ok: true };
 }

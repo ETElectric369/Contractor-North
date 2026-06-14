@@ -9,6 +9,8 @@ import { Tabs } from "@/components/tabs";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { EditCustomerButton } from "./edit-customer-button";
 import { DeleteButton } from "@/components/delete-button";
+import { SectionMapButton } from "@/components/section-map-button";
+import { customerSectionTree } from "@/lib/nav-tree";
 import { NewJobButton } from "../../schedule/new-job-button";
 import { deleteCustomer } from "../actions";
 import type { Customer, Job, Quote } from "@/lib/types";
@@ -170,6 +172,7 @@ export default async function CustomerDetailPage({
           <Badge tone="slate" className="mt-2">{c.type}</Badge>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <SectionMapButton tree={customerSectionTree(c.id, c.name)} />
           <EditCustomerButton customer={c} pricingLevels={(pricingLevels ?? []) as any} />
           <NewJobButton customers={[{ id: c.id, name: c.name }]} defaultCustomerId={c.id} />
           <Link href={`/quotes/new?customer=${c.id}`}>

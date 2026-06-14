@@ -5,18 +5,23 @@ import { useRouter } from "next/navigation";
 import { X } from "lucide-react";
 import { MindMapNav } from "./mind-map-nav";
 import { NAV_TREE } from "@/lib/nav-tree";
+import type { NavTree } from "@/lib/nav-tree";
 
 /**
  * Full-screen mind-map navigator, openable from anywhere via the `cn:mindmap`
- * window event (the topbar map button + the mobile bottom-nav). Esc or the X
- * closes it; tapping a leaf navigates and closes.
+ * window event (the topbar map button + the mobile bottom-nav). A detail page
+ * can pass its own tree in the event — `new CustomEvent("cn:mindmap", { detail:
+ * { tree } })` — to open *its* sections as a mini-map. Esc / X / leaf-tap closes.
  */
 export function MindMapOverlay() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [tree, setTree] = useState<NavTree>(NAV_TREE);
 
   useEffect(() => {
-    function onEvt() {
+    function onEvt(e: Event) {
+      const t = (e as CustomEvent).detail?.tree as NavTree | undefined;
+      setTree(t ?? NAV_TREE);
       setOpen(true);
     }
     function onKey(e: KeyboardEvent) {
@@ -47,7 +52,8 @@ export function MindMapOverlay() {
       <div className="flex flex-1 items-center justify-center overflow-auto py-4">
         <div className="w-full">
           <MindMapNav
-            tree={NAV_TREE}
+            key={tree.center.label}
+            tree={tree}
             onNavigate={(href) => {
               setOpen(false);
               router.push(href);
