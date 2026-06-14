@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, User, Printer } from "lucide-react";
+import { ArrowLeft, User } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
@@ -8,9 +8,8 @@ import { formatCurrency, formatDate } from "@/lib/utils";
 import { StatusControl } from "./status-control";
 import { QuoteItemsEditor } from "./quote-items-editor";
 import { EmailButton } from "@/components/email-button";
-import { ConvertMenu, type ConvertOption } from "@/components/convert-button";
 import { SectionMapButton } from "@/components/section-map-button";
-import { quoteSectionTree } from "@/lib/nav-tree";
+import type { NavTree } from "@/lib/nav-tree";
 import { DeleteButton } from "@/components/delete-button";
 import { EditCustomerButton } from "../../crm/[id]/edit-customer-button";
 import { createJobFromQuote, deleteQuote } from "../actions";
@@ -54,20 +53,29 @@ export default async function QuoteDetailPage({
     .limit(1)
     .maybeSingle();
 
-  const convertOptions: ConvertOption[] = [
-    existingInv
-      ? { label: "View invoice", href: `/billing/${existingInv.id}` }
-      : { label: "Create invoice", run: createInvoiceFromQuote.bind(null, q.id), hrefPrefix: "/billing/" },
-    (q as any).job_id
-      ? { label: "View job", href: `/jobs/${(q as any).job_id}` }
-      : { label: "Create job", run: createJobFromQuote.bind(null, q.id), hrefPrefix: "/jobs/" },
-    ...(lineItems.length > 0
-      ? [
-          { label: "Create work order", run: createWorkOrderFromQuote.bind(null, q.id), hrefPrefix: "/work-orders/" },
-          { label: "Build material list", run: createMaterialListFromQuote.bind(null, q.id), hrefPrefix: "/materials/" },
-        ]
-      : []),
-  ];
+  // The quote's whole "neighborhood" — what it connects to AND what it can
+  // become — as one map. Conversion nodes (with `run`) create the record then
+  // open it; relationship nodes navigate.
+  const quoteMap: NavTree = {
+    center: { label: q.quote_number, icon: "fileText" },
+    nodes: [
+      ...(q.customers ? [{ id: "qm-cust", label: "Customer", icon: "users", href: `/crm/${q.customers.id}` }] : []),
+      existingInv
+        ? { id: "qm-inv", label: "View invoice", icon: "receipt", href: `/billing/${existingInv.id}` }
+        : { id: "qm-inv", label: "Create invoice", icon: "receipt", run: createInvoiceFromQuote.bind(null, q.id), hrefPrefix: "/billing/" },
+      (q as any).job_id
+        ? { id: "qm-job", label: "View job", icon: "briefcase", href: `/jobs/${(q as any).job_id}` }
+        : { id: "qm-job", label: "Create job", icon: "briefcase", run: createJobFromQuote.bind(null, q.id), hrefPrefix: "/jobs/" },
+      ...(lineItems.length > 0
+        ? [
+            { id: "qm-wo", label: "Work order", icon: "clipboardCheck", run: createWorkOrderFromQuote.bind(null, q.id), hrefPrefix: "/work-orders/" },
+            { id: "qm-ml", label: "Material list", icon: "boxes", run: createMaterialListFromQuote.bind(null, q.id), hrefPrefix: "/materials/" },
+          ]
+        : []),
+      { id: "qm-print", label: "Print / PDF", icon: "fileSpreadsheet", href: `/print/quote/${q.id}` },
+      { id: "qm-all", label: "All quotes", icon: "list", href: "/quotes" },
+    ],
+  };
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -92,19 +100,7 @@ export default async function QuoteDetailPage({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <EmailButton id={q.id} kind="quote" />
-          <Link
-            href={`/print/quote/${q.id}`}
-            className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
-          >
-            <Printer className="h-4 w-4" /> Print / PDF
-          </Link>
-          <SectionMapButton
-            tree={quoteSectionTree(q.id, q.quote_number, {
-              customerId: q.customers?.id ?? null,
-              jobId: (q as any).job_id ?? null,
-            })}
-          />
-          <ConvertMenu options={convertOptions} />
+          <SectionMapButton tree={quoteMap} label="Convert / map" />
           <StatusControl id={q.id} status={q.status} />
           <DeleteButton
             run={deleteQuote.bind(null, q.id)}

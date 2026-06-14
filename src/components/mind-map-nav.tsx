@@ -33,6 +33,7 @@ import {
   Columns3,
   Circle,
   ArrowLeft,
+  Loader2,
   type LucideIcon,
 } from "lucide-react";
 import type { NavTree, TreeNode } from "@/lib/nav-tree";
@@ -90,6 +91,8 @@ export function MindMapNav({
 }) {
   const router = useRouter();
   const [path, setPath] = useState<TreeNode[]>([]);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
 
   const focusNode = path.length ? path[path.length - 1] : null;
   const focusChildren = focusNode ? focusNode.children ?? [] : tree.nodes;
@@ -101,8 +104,35 @@ export function MindMapNav({
     else router.push(href);
   }
   function tapChild(n: TreeNode) {
-    if (n.children && n.children.length) setPath((p) => [...p, n]);
-    else if (n.href) go(n.href);
+    if (n.children && n.children.length) {
+      setPath((p) => [...p, n]);
+      return;
+    }
+    if (n.run) {
+      runAction(n);
+      return;
+    }
+    if (n.href) go(n.href);
+  }
+  async function runAction(n: TreeNode) {
+    setBusyId(n.id);
+    setErr(null);
+    try {
+      const res = await n.run!();
+      if (res.ok && res.id && n.hrefPrefix) {
+        go(`${n.hrefPrefix}${res.id}`);
+        return;
+      }
+      if (res.ok) {
+        if (n.href) go(n.href);
+        else router.refresh();
+        return;
+      }
+      setErr(res.error ?? "Couldn't do that.");
+    } catch {
+      setErr("Couldn't do that.");
+    }
+    setBusyId(null);
   }
   function tapCenter() {
     if (path.length) setPath((p) => p.slice(0, -1));
@@ -156,6 +186,8 @@ export function MindMapNav({
         {positioned.map((p, i) => {
           const cnt = p.n.countKey ? counts?.[p.n.countKey] : undefined;
           const hasKids = !!(p.n.children && p.n.children.length);
+          const isAction = !!p.n.run;
+          const isBusy = busyId === p.n.id;
           return (
             <button
               key={p.n.id}
@@ -164,7 +196,11 @@ export function MindMapNav({
               style={{ left: `${p.x}%`, top: `${p.y}%`, animationDelay: `${i * 28}ms` }}
             >
               <span className="relative flex h-16 w-16 items-center justify-center rounded-2xl border border-slate-200 bg-white shadow-sm transition-transform hover:scale-110 hover:border-brand">
-                <Ic k={p.n.icon} className="h-6 w-6 text-brand" />
+                {isBusy ? (
+                  <Loader2 className="h-6 w-6 animate-spin text-brand" />
+                ) : (
+                  <Ic k={p.n.icon} className="h-6 w-6 text-brand" />
+                )}
                 {typeof cnt === "number" && cnt > 0 && (
                   <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-brand px-1 text-[10px] font-semibold text-white">
                     {cnt}
@@ -172,6 +208,11 @@ export function MindMapNav({
                 )}
                 {hasKids && (
                   <span className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-slate-900 text-[10px] leading-none text-white">
+                    +
+                  </span>
+                )}
+                {isAction && (
+                  <span className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-green-600 text-[10px] leading-none text-white">
                     +
                   </span>
                 )}
@@ -191,6 +232,9 @@ export function MindMapNav({
           <span className="text-xs font-semibold text-slate-700">{path.length ? `Back · ${centerLabel}` : centerLabel}</span>
         </button>
       </div>
+      {err && (
+        <div className="mx-auto mt-3 max-w-sm rounded-lg bg-red-50 px-3 py-2 text-center text-sm text-red-700">{err}</div>
+      )}
     </div>
   );
 }

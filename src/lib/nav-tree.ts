@@ -9,6 +9,10 @@ export type TreeNode = {
   href?: string;
   countKey?: string;
   children?: TreeNode[];
+  /** Action node: run a server action (e.g. a conversion), then navigate to
+   *  hrefPrefix + the returned id. Lets the map *do* things, not just go places. */
+  run?: () => Promise<{ ok: boolean; id?: string; error?: string }>;
+  hrefPrefix?: string;
 };
 
 export type NavTree = {
