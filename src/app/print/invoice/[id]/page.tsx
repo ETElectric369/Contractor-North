@@ -7,6 +7,7 @@ import { companyFromOrg } from "@/components/doc-letterhead";
 import { DocHeader, templateFor } from "@/components/doc-templates";
 import { getOrgSettings } from "@/lib/org-settings";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { LineItemText } from "@/components/line-item-text";
 import type { Invoice, InvoiceItem, Organization, Payment } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -130,7 +131,9 @@ export default async function InvoicePrintPage({
           <tbody>
             {lineItems.map((it) => (
               <tr key={it.id} className="border-b border-slate-100">
-                <td className="py-2 pr-2 text-slate-800">{it.description}</td>
+                <td className="py-2 pr-2 text-slate-800">
+                  <LineItemText description={it.description} />
+                </td>
                 <td className="py-2 text-right text-slate-600">
                   {it.quantity} {it.unit}
                 </td>

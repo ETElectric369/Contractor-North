@@ -8,6 +8,7 @@ import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
+import { LineItemText } from "@/components/line-item-text";
 import type { Invoice, InvoiceItem, Payment } from "@/lib/types";
 import {
   addInvoiceItem,
@@ -272,7 +273,7 @@ export function InvoiceDetail({
                     className="min-w-0 flex-1 cursor-pointer text-left"
                     title="Edit line item"
                   >
-                    <div className="font-medium text-slate-800">{it.description}</div>
+                    <LineItemText description={it.description} className="block font-medium text-slate-800" />
                     <div className="text-xs text-slate-400">
                       {it.quantity} {it.unit} × {formatCurrency(it.unit_price)}
                     </div>

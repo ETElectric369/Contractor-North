@@ -7,6 +7,7 @@ import { companyFromOrg } from "@/components/doc-letterhead";
 import { DocHeader, templateFor } from "@/components/doc-templates";
 import { getOrgSettings } from "@/lib/org-settings";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { lineItemParts } from "@/components/line-item-text";
 import type { Organization, Quote, QuoteLineItem } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -112,13 +113,17 @@ export default async function QuotePrintPage({
           </thead>
           <tbody>
             {lineItems.map((it) => {
-              const lines = String(it.description ?? "").split("\n");
-              const head = lines[0];
-              const subs = lines.slice(1).map((s) => s.replace(/^\s*[-•*]\s*/, "").trim()).filter(Boolean);
+              const raw = String(it.description ?? "");
+              const parts = lineItemParts(raw).map((s) => s.replace(/^\s*[-•*]\s*/, "").trim());
+              // Newline lists keep their first line as a header; a bare comma-list
+              // has no header — every part is a bullet.
+              const headerStyle = /\n/.test(raw) || parts.length <= 1;
+              const head = headerStyle ? parts[0] ?? "" : "";
+              const subs = head ? parts.slice(1) : parts.length > 1 ? parts : [];
               return (
                 <tr key={it.id} className="border-b border-slate-100 align-top [break-inside:avoid]">
                   <td className="py-1 pr-2 text-slate-800">
-                    <div>{head}</div>
+                    {head && <div>{head}</div>}
                     {subs.length > 0 && (
                       <ul className="ml-3 mt-0.5 list-disc text-[11px] text-slate-500 marker:text-slate-300">
                         {subs.map((s, i) => (
