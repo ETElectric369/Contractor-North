@@ -12,6 +12,8 @@ import {
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { DashboardGreeting } from "./dashboard-greeting";
+import { DashboardViewToggle } from "./dashboard-view-toggle";
+import { MindMap } from "@/components/mind-map";
 import { WeatherWidget } from "@/components/weather-widget";
 import { TasksWidget } from "@/components/tasks-widget";
 import { Card, CardContent } from "@/components/ui/card";
@@ -241,12 +243,28 @@ export default async function DashboardPage() {
     },
   ];
 
+  const unpaidCount = (invoiceRows.data ?? []).filter(
+    (i: any) => !["paid", "void"].includes(i.status) && Number(i.total) - Number(i.amount_paid) > 0.005,
+  ).length;
+  const mindNodes = [
+    { key: "planner", label: "My Day", href: "/planner", count: myDay.length || undefined },
+    { key: "jobs", label: "Jobs", href: "/jobs", count: activeJobs.count ?? undefined },
+    { key: "schedule", label: "Schedule", href: "/schedule" },
+    { key: "crm", label: "Customers", href: "/crm", count: customers.count ?? undefined },
+    { key: "quotes", label: "Quotes", href: "/quotes", count: openQuotes.count ?? undefined },
+    { key: "billing", label: "Money", href: "/billing", count: unpaidCount || undefined },
+  ];
+
   return (
     <div>
       <PageHeader
         title={<DashboardGreeting name={firstName} />}
         description="Your business at a glance."
       />
+
+      <DashboardViewToggle
+        map={<MindMap center={{ label: "Assistant", href: "/assistant" }} nodes={mindNodes} />}
+      >
 
       <WeatherWidget location={orgLocation} label={org?.city ?? undefined} />
 
@@ -498,6 +516,7 @@ export default async function DashboardPage() {
           </ul>
         </Card>
       </div>
+      </DashboardViewToggle>
     </div>
   );
 }
