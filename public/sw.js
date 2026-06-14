@@ -4,7 +4,7 @@
 // so a SW bug can't trap users on old code. We only cache hashed/immutable
 // static assets and an offline fallback page. API and auth requests are never
 // touched. Bump VERSION to invalidate the static cache.
-const VERSION = "cn-v1";
+const VERSION = "cn-v2";
 const STATIC_CACHE = `static-${VERSION}`;
 const PRECACHE = ["/offline", "/icon-192.png", "/icon-512.png", "/apple-touch-icon.png"];
 
@@ -68,4 +68,39 @@ self.addEventListener("fetch", (event) => {
       }),
     );
   }
+});
+
+// ── Web push ────────────────────────────────────────────────────────────────
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    data = {};
+  }
+  const title = data.title || "Contractor North";
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body: data.body || "",
+      icon: "/icon-192.png",
+      badge: "/icon-192.png",
+      data: { url: data.url || "/dashboard" },
+    }),
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = (event.notification.data && event.notification.data.url) || "/dashboard";
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+      for (const c of list) {
+        if ("focus" in c) {
+          c.navigate(url);
+          return c.focus();
+        }
+      }
+      return self.clients.openWindow(url);
+    }),
+  );
 });

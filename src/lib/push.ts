@@ -1,0 +1,112 @@
+import "server-only";
+import webpush from "web-push";
+import { createServiceClient } from "@/lib/supabase/server";
+
+const PUBLIC = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+const PRIVATE = process.env.VAPID_PRIVATE_KEY;
+const SUBJECT = process.env.VAPID_SUBJECT || "mailto:support@contractor-north.app";
+
+let vapidReady = false;
+export function pushConfigured() {
+  return !!(PUBLIC && PRIVATE);
+}
+function ensureVapid() {
+  if (!pushConfigured()) return false;
+  if (!vapidReady) {
+    webpush.setVapidDetails(SUBJECT, PUBLIC!, PRIVATE!);
+    vapidReady = true;
+  }
+  return true;
+}
+
+/** Profile ids of an org's office staff (owner/admin/office) — for staff-facing
+ *  alerts like new inquiries, accepted quotes, and paid invoices. */
+export async function orgStaffIds(orgId: string | null | undefined): Promise<string[]> {
+  if (!orgId) return [];
+  try {
+    const sb = createServiceClient();
+    const { data } = await sb
+      .from("profiles")
+      .select("id")
+      .eq("org_id", orgId)
+      .in("role", ["owner", "admin", "office"]);
+    return (data ?? []).map((p: any) => p.id);
+  } catch {
+    return [];
+  }
+}
+
+export type PushKind =
+  | "assigned"
+  | "inquiry"
+  | "quote_accepted"
+  | "invoice_paid"
+  | "day_ahead"
+  | "clock_out";
+
+// What each trigger defaults to when a user hasn't set an explicit toggle.
+const DEFAULTS: Record<PushKind, boolean> = {
+  assigned: true,
+  inquiry: true,
+  quote_accepted: true,
+  invoice_paid: true,
+  day_ahead: false,
+  clock_out: false,
+};
+
+/**
+ * Best-effort web push to a set of profiles, respecting each user's toggle for
+ * this notification kind. Never throws — safe to call (un-awaited) from any
+ * server action; a push failure must not break the underlying operation.
+ */
+export async function sendPushToProfiles(
+  profileIds: (string | null | undefined)[],
+  kind: PushKind,
+  payload: { title: string; body: string; url?: string },
+): Promise<void> {
+  try {
+    if (!ensureVapid()) return;
+    const ids = [...new Set(profileIds.filter((x): x is string => !!x))];
+    if (!ids.length) return;
+
+    const sb = createServiceClient();
+    const { data: profs } = await sb.from("profiles").select("id, push_prefs").in("id", ids);
+    const allowed = (profs ?? [])
+      .filter((p: any) => {
+        const pref = (p.push_prefs ?? {})[kind];
+        return pref === undefined ? DEFAULTS[kind] : !!pref;
+      })
+      .map((p: any) => p.id);
+    if (!allowed.length) return;
+
+    const { data: subs } = await sb
+      .from("push_subscriptions")
+      .select("id, endpoint, p256dh, auth")
+      .in("profile_id", allowed);
+    if (!subs?.length) return;
+
+    const body = JSON.stringify({
+      title: payload.title,
+      body: payload.body,
+      url: payload.url ?? "/dashboard",
+    });
+
+    await Promise.all(
+      subs.map(async (s: any) => {
+        try {
+          await webpush.sendNotification(
+            { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
+            body,
+          );
+        } catch (e: any) {
+          // Prune dead/expired subscriptions so we stop retrying them.
+          if (e?.statusCode === 404 || e?.statusCode === 410) {
+            await sb.from("push_subscriptions").delete().eq("id", s.id);
+          }
+        }
+      }),
+    );
+  } catch {
+    /* push is best-effort — never surface to the caller */
+  }
+}

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { sendPushToProfiles } from "@/lib/push";
 
 export type Result = { ok: boolean; error?: string; id?: string };
 
@@ -50,6 +51,15 @@ export async function createAppointment(formData: FormData): Promise<Result> {
     .select("id")
     .single();
   if (error) return { ok: false, error: error.message };
+
+  const assignedTo = emptyToNull(formData.get("assigned_to"));
+  if (assignedTo && assignedTo !== user.id) {
+    void sendPushToProfiles([assignedTo], "assigned", {
+      title: "New appointment assigned",
+      body: title,
+      url: "/schedule?view=appointments",
+    });
+  }
 
   revalidatePath("/appointments");
   revalidatePath("/calendar");

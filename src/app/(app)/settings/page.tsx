@@ -11,6 +11,7 @@ import { InviteManager } from "./invite-manager";
 import { DocumentDesigner } from "./document-designer";
 import { LogoUpload } from "./logo-upload";
 import { LanguageToggle } from "./language-toggle";
+import { PushSettings } from "./push-settings";
 import { DocumentSettings } from "./document-settings";
 import { SchedulingSettings } from "./scheduling-settings";
 import { PaymentMethods } from "./payment-methods";
@@ -126,6 +127,16 @@ export default async function SettingsPage({
           <div className="mb-2 text-xs text-slate-400">{t("s_languageDesc")}</div>
           <LanguageToggle current={profile?.language ?? "en"} />
         </div>
+      </Section>
+    ),
+  };
+
+  const notificationsTab = {
+    id: "notifications",
+    label: "Notifications",
+    content: (
+      <Section title="Push notifications">
+        <PushSettings initialPrefs={((profile as any)?.push_prefs ?? {}) as Record<string, boolean>} />
       </Section>
     ),
   };
@@ -359,7 +370,7 @@ export default async function SettingsPage({
       ]
     : [];
 
-  const tabs = [...adminTabs, teamTab, profileTab];
+  const tabs = [...adminTabs, teamTab, notificationsTab, profileTab];
 
   return (
     <div className="mx-auto max-w-3xl">
