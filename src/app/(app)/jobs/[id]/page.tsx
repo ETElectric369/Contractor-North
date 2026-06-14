@@ -296,6 +296,21 @@ export default async function JobDetailPage({
       ),
     },
     {
+      id: "docs",
+      label: "Docs",
+      count: docs.length,
+      content: (
+        <Card>
+          <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3 text-sm font-semibold text-slate-900">
+            <Receipt className="h-4 w-4 text-slate-400" /> Receipts &amp; documents
+          </div>
+          <CardContent className="py-5">
+            <JobDocuments orgId={j.org_id} jobId={j.id} docs={docs} />
+          </CardContent>
+        </Card>
+      ),
+    },
+    {
       id: "tasks",
       label: "Tasks",
       count: (tasks ?? []).filter((t: any) => t.status !== "done").length,
@@ -427,14 +442,6 @@ export default async function JobDetailPage({
             </CardContent>
           </Card>
 
-          <Card>
-            <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3 text-sm font-semibold text-slate-900">
-              <Receipt className="h-4 w-4 text-slate-400" /> Receipts &amp; documents
-            </div>
-            <CardContent className="py-5">
-              <JobDocuments orgId={j.org_id} jobId={j.id} docs={docs} />
-            </CardContent>
-          </Card>
         </div>
       ),
     },
