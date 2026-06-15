@@ -119,6 +119,13 @@ main {
 .cn-bloom-node {
   animation: cn-pop 0.2s ease-out both;
 }
+/* A square with chamfered (cut) corners — holds a bloom node's glass icon. */
+.cn-cut {
+  clip-path: polygon(
+    6px 0%, calc(100% - 6px) 0%, 100% 6px, 100% calc(100% - 6px),
+    calc(100% - 6px) 100%, 6px 100%, 0% calc(100% - 6px), 0% 6px
+  );
+}
 
 /* ── Print: hide UI chrome, give the document clean margins ─────────────── */
 @media print {

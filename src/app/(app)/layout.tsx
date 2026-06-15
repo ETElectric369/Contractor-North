@@ -6,7 +6,6 @@ import { GlobalVoiceButton } from "@/components/global-voice-button";
 import { GlobalQuickAdd } from "@/components/global-quick-add";
 import { CommandBar } from "@/components/command-bar";
 import { BottomNav } from "@/components/bottom-nav";
-import { MindMapOverlay } from "@/components/mind-map-overlay";
 import { billingEnabled } from "@/lib/stripe";
 import { hasActiveAccess } from "@/lib/subscription";
 import type { Profile } from "@/lib/types";
@@ -74,8 +73,7 @@ export default async function AppLayout({
       <GlobalVoiceButton lang={profile.language} />
       <GlobalQuickAdd />
       <CommandBar />
-      <BottomNav />
-      <MindMapOverlay />
+      <BottomNav role={profile.role} />
     </div>
   );
 }

@@ -131,11 +131,19 @@ export const DOCK: DockSection[] = [
       { id: "o-permits", label: "Permits", icon: Stamp, href: "/permits" },
       { id: "o-safety", label: "Safety", icon: HardHat, href: "/safety" },
       { id: "o-comply", label: "Compliance", icon: ShieldCheck, href: "/compliance" },
-      { id: "o-forms", label: "Forms", icon: ClipboardList, href: "/forms" },
-      { id: "o-handbook", label: "Handbook", icon: BookOpen, href: "/handbook" },
-      { id: "o-resources", label: "Resources", icon: BookUser, href: "/resources" },
       { id: "o-docs", label: "Employee docs", icon: IdCard, href: "/employee-docs", staffOnly: true },
-      { id: "o-tools", label: "Tools", icon: Wrench, href: "/tools" },
+    ],
+  },
+  {
+    key: "tools",
+    label: "Tools",
+    icon: Wrench,
+    href: "/tools",
+    children: [
+      { id: "tl-calc", label: "Calculators", icon: Wrench, href: "/tools" },
+      { id: "tl-forms", label: "Forms", icon: ClipboardList, href: "/forms" },
+      { id: "tl-resources", label: "Resources", icon: BookUser, href: "/resources" },
+      { id: "tl-handbook", label: "Handbook", icon: BookOpen, href: "/handbook" },
     ],
   },
   {
