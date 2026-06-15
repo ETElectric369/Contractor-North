@@ -55,9 +55,8 @@ function clamp(v: number, lo: number, hi: number) {
 const PANEL_W = 196;
 const PAD = 6;
 const HEADER = 26;
-const ROW_H = 36;
-const ROW_GAP = 3;
-const STEP = ROW_H + ROW_GAP;
+const ROW_H = 34;
+const ROW_GAP = 2;
 
 /**
  * The glass bloom: a frosted dark-glass cut-corner panel holding a section's
@@ -125,7 +124,15 @@ export function GlassBloom({
   const vw = typeof window !== "undefined" ? window.innerWidth : 1200;
   const vh = typeof window !== "undefined" ? window.innerHeight : 800;
   const n = nodes.length;
-  const listH = n * ROW_H + Math.max(0, n - 1) * ROW_GAP;
+  // Shrink the rows just enough that the whole list always fits the viewport
+  // (so you can always see every item, never a cut-off panel).
+  const availList = vh - 24 - PAD * 2 - HEADER;
+  const baseListH = n * ROW_H + Math.max(0, n - 1) * ROW_GAP;
+  const scale = baseListH > availList ? availList / baseListH : 1;
+  const rowH = Math.max(28, ROW_H * scale);
+  const gap = Math.max(1, ROW_GAP * scale);
+  const step = rowH + gap;
+  const listH = n * rowH + Math.max(0, n - 1) * gap;
   const panelH = PAD * 2 + HEADER + listH;
 
   const panelLeft =
@@ -138,8 +145,8 @@ export function GlassBloom({
       : clamp(anchor.y - panelH / 2, 8, vh - panelH - 8);
 
   const rowW = PANEL_W - PAD * 2;
-  const rowTop = (i: number) => panelTop + PAD + HEADER + i * STEP;
-  const rowCY = (i: number) => rowTop(i) + ROW_H / 2;
+  const rowTop = (i: number) => panelTop + PAD + HEADER + i * step;
+  const rowCY = (i: number) => rowTop(i) + rowH / 2;
 
   function branch(by: number) {
     const bx = panelLeft;
@@ -170,10 +177,10 @@ export function GlassBloom({
         ))}
       </svg>
 
-      {/* Backing panel — a frosted dark cut-corner box; clicking inside it never
+      {/* Backing panel — a frosted dark rounded box; clicking inside it never
           closes the bloom (only the backdrop does). */}
       <div
-        className="cn-cut-lg cn-fade absolute border border-white/15"
+        className="cn-fade absolute rounded-3xl border border-white/15"
         onMouseEnter={onEnter}
         onMouseLeave={onLeave}
         style={{
@@ -208,18 +215,18 @@ export function GlassBloom({
             <button
               key={node.id}
               onClick={() => pick(node)}
-              className="cn-fade glass-gloss absolute flex items-center gap-2 rounded-lg border border-white/70 pl-1.5 pr-2.5 text-left transition-transform hover:scale-[1.03]"
+              className="cn-fade glass-gloss absolute flex items-center gap-2 rounded-xl border border-white/70 pl-1.5 pr-2.5 text-left transition-transform hover:scale-[1.03]"
               style={{
                 left: PAD,
-                top: PAD + HEADER + i * STEP,
+                top: PAD + HEADER + i * step,
                 width: rowW,
-                height: ROW_H,
+                height: rowH,
                 animationDelay: `${i * 26}ms`,
                 background: "rgba(232, 251, 247, 0.96)",
               }}
             >
               <span
-                className="cn-cut flex h-6 w-6 shrink-0 items-center justify-center text-[color:rgb(var(--glass-ink))]"
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-[color:rgb(var(--glass-ink))]"
                 style={{ background: "rgb(var(--glass-tint) / 0.2)" }}
               >
                 {busy ? <Loader2 className="h-[15px] w-[15px] animate-spin" /> : <Icon className="h-[15px] w-[15px]" />}
