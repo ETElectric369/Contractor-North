@@ -215,8 +215,9 @@ export function GlassBloom({
             <button
               key={node.id}
               onClick={() => pick(node)}
-              className="cn-fade glass-gloss absolute flex items-center gap-2 rounded-xl border border-white/70 pl-1.5 pr-2.5 text-left transition-transform hover:scale-[1.03]"
+              className="cn-fade glass-gloss flex items-center gap-2 rounded-xl border border-white/70 pl-1.5 pr-2.5 text-left transition-transform hover:scale-[1.03]"
               style={{
+                position: "absolute", // beat .glass-gloss's position:relative
                 left: PAD,
                 top: PAD + HEADER + i * step,
                 width: rowW,
