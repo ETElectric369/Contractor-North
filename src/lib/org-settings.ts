@@ -6,6 +6,8 @@ export interface OrgSettings {
   currency: string; // ISO 4217, e.g. "USD"
   timezone: string; // IANA, e.g. "America/Los_Angeles"
   tax_number: string; // EIN / tax #
+  /** App "glass" accent (the dock/bloom tint) — chrome only; documents keep brand_color. */
+  glass_tint: string; // hex, e.g. "#1b9488" (sea-glass teal)
 
   // Documents
   quote_expiry_days: number;
@@ -52,6 +54,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   currency: "USD",
   timezone: "America/Los_Angeles",
   tax_number: "",
+  glass_tint: "#1b9488",
   quote_expiry_days: 30,
   invoice_due_days: 14,
   quote_terms: "",

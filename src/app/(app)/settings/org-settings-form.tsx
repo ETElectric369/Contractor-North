@@ -95,7 +95,20 @@ export function OrgSettingsForm({ org }: { org: Organization }) {
               defaultValue={org.brand_color}
               className="h-10 w-14 cursor-pointer rounded-lg border border-slate-300 bg-white"
             />
-            <span className="text-xs text-slate-400">Used across the app & documents</span>
+            <span className="text-xs text-slate-400">Used on your documents</span>
+          </div>
+        </div>
+        <div>
+          <Label htmlFor="glass_tint">App glass color</Label>
+          <div className="flex items-center gap-2">
+            <input
+              id="glass_tint"
+              name="glass_tint"
+              type="color"
+              defaultValue={s.glass_tint}
+              className="h-10 w-14 cursor-pointer rounded-lg border border-slate-300 bg-white"
+            />
+            <span className="text-xs text-slate-400">The dock & menu tint</span>
           </div>
         </div>
         <div>

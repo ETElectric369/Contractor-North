@@ -56,6 +56,7 @@ export async function updateOrganization(formData: FormData): Promise<Result> {
     currency: String(formData.get("currency") ?? "USD") || "USD",
     timezone: String(formData.get("timezone") ?? "America/Los_Angeles"),
     tax_number: String(formData.get("tax_number") ?? "").trim(),
+    glass_tint: String(formData.get("glass_tint") ?? "#1b9488") || "#1b9488",
   };
 
   const { error } = await supabase
