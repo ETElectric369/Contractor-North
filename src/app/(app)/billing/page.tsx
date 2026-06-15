@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 export default async function BillingPage() {
   const supabase = await createClient();
 
-  const [{ data: invoices }, { data: quotes }, { data: customers }] =
+  const [{ data: invoices }, { data: quotes }, { data: customers }, { data: jobs }] =
     await Promise.all([
       supabase
         .from("invoices")
@@ -25,6 +25,12 @@ export default async function BillingPage() {
         .order("created_at", { ascending: false })
         .limit(100),
       supabase.from("customers").select("id, name").order("name"),
+      supabase
+        .from("jobs")
+        .select("id, name, job_number, customer_id")
+        .not("status", "in", "(cancelled)")
+        .order("created_at", { ascending: false })
+        .limit(300),
     ]);
 
   const list = invoices ?? [];
@@ -39,7 +45,7 @@ export default async function BillingPage() {
   return (
     <div>
       <PageHeader title="Billing" description="Invoices and payments.">
-        <NewInvoiceButton quotes={(quotes as any) ?? []} customers={customers ?? []} />
+        <NewInvoiceButton quotes={(quotes as any) ?? []} customers={customers ?? []} jobs={(jobs as any) ?? []} />
       </PageHeader>
 
       {list.length > 0 && (
@@ -69,7 +75,7 @@ export default async function BillingPage() {
           title="No invoices yet"
           description="Turn an accepted quote into an invoice, or start a blank one."
         >
-          <NewInvoiceButton quotes={(quotes as any) ?? []} customers={customers ?? []} />
+          <NewInvoiceButton quotes={(quotes as any) ?? []} customers={customers ?? []} jobs={(jobs as any) ?? []} />
         </EmptyState>
       ) : (
         <Card className="overflow-hidden">

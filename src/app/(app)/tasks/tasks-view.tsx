@@ -3,9 +3,10 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Plus, Trash2, Flag, Briefcase, Pencil, Check, X } from "lucide-react";
+import { Plus, Trash2, Flag, Briefcase, Pencil, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input, Select } from "@/components/ui/input";
+import { Input, Label, Select } from "@/components/ui/input";
+import { Modal } from "@/components/ui/modal";
 import { Card } from "@/components/ui/card";
 import { formatDate } from "@/lib/utils";
 import { createTask, toggleTask, deleteTask, updateTask, type TaskCategory } from "./actions";
@@ -18,13 +19,19 @@ export interface ViewTask {
   priority: number;
   due_date: string | null;
   job_id: string | null;
+  assigned_to: string | null;
   jobs?: { job_number: string; name: string } | null;
+  assignee?: { full_name: string | null } | null;
 }
 
 interface JobOption {
   id: string;
   job_number: string;
   name: string;
+}
+interface Person {
+  id: string;
+  full_name: string | null;
 }
 
 const CATEGORIES: { id: TaskCategory; label: string; tone: string }[] = [
@@ -33,12 +40,21 @@ const CATEGORIES: { id: TaskCategory; label: string; tone: string }[] = [
   { id: "office", label: "Office", tone: "border-amber-200 bg-amber-50/60" },
 ];
 
+const PRIORITIES: { value: number; label: string }[] = [
+  { value: 0, label: "Normal" },
+  { value: 1, label: "High" },
+  { value: 2, label: "Urgent" },
+];
+const priorityLabel = (p: number) => PRIORITIES.find((x) => x.value === p)?.label ?? "High";
+
 /** ONE entry box for all tasks — category picked from a dropdown. */
 function NewTaskBox({
   jobs,
+  people,
   defaultCategory,
 }: {
   jobs: JobOption[];
+  people: Person[];
   defaultCategory?: TaskCategory;
 }) {
   const router = useRouter();
@@ -47,7 +63,8 @@ function NewTaskBox({
   const [category, setCategory] = useState<TaskCategory>(defaultCategory ?? "office");
   const [jobId, setJobId] = useState("");
   const [dueDate, setDueDate] = useState("");
-  const [high, setHigh] = useState(false);
+  const [priority, setPriority] = useState(0);
+  const [assignedTo, setAssignedTo] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   function add() {
@@ -59,13 +76,15 @@ function NewTaskBox({
         category,
         job_id: jobId || null,
         due_date: dueDate || null,
-        priority: high ? 1 : 0,
+        priority,
+        assigned_to: assignedTo || null,
       });
       if (!res.ok) return setError(res.error ?? "Could not save.");
       setTitle("");
       setJobId("");
       setDueDate("");
-      setHigh(false);
+      setPriority(0);
+      setAssignedTo("");
       router.refresh();
     });
   }
@@ -96,42 +115,114 @@ function NewTaskBox({
             <Plus className="h-4 w-4" /> Add
           </Button>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <Select value={jobId} onChange={(e) => setJobId(e.target.value)} className="w-52 text-xs" aria-label="Job">
+        <div className="flex flex-wrap items-center gap-2">
+          <Select value={jobId} onChange={(e) => setJobId(e.target.value)} className="w-48 text-xs" aria-label="Job">
             <option value="">No job</option>
             {jobs.map((j) => (
               <option key={j.id} value={j.id}>{j.job_number} · {j.name}</option>
             ))}
           </Select>
+          {people.length > 0 && (
+            <Select value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)} className="w-40 text-xs" aria-label="Assigned to">
+              <option value="">Unassigned</option>
+              {people.map((p) => (
+                <option key={p.id} value={p.id}>{p.full_name ?? "Unnamed"}</option>
+              ))}
+            </Select>
+          )}
           <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="w-40 text-xs" aria-label="Due date" />
-          <label className="flex items-center gap-1.5 text-xs text-slate-600">
-            <input type="checkbox" checked={high} onChange={(e) => setHigh(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand" />
-            High priority
-          </label>
+          <Select value={priority} onChange={(e) => setPriority(Number(e.target.value))} className="w-28 text-xs" aria-label="Priority">
+            {PRIORITIES.map((p) => (
+              <option key={p.value} value={p.value}>{p.label}</option>
+            ))}
+          </Select>
         </div>
       </div>
     </Card>
   );
 }
 
-function TaskRow({ t, category }: { t: ViewTask; category: TaskCategory }) {
+/** Full edit modal: title, due date, priority, and assigned person. */
+function TaskEditModal({
+  t,
+  people,
+  category,
+  open,
+  onClose,
+}: {
+  t: ViewTask;
+  people: Person[];
+  category: TaskCategory;
+  open: boolean;
+  onClose: () => void;
+}) {
   const router = useRouter();
   const [pending, start] = useTransition();
-  const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(t.title);
+  const [dueDate, setDueDate] = useState(t.due_date ?? "");
+  const [priority, setPriority] = useState(t.priority);
+  const [assignedTo, setAssignedTo] = useState(t.assigned_to ?? "");
+  const [error, setError] = useState<string | null>(null);
 
-  function saveTitle() {
-    if (!title.trim() || title.trim() === t.title) {
-      setEditing(false);
-      setTitle(t.title);
-      return;
-    }
+  function save() {
+    if (!title.trim()) return setError("Title is required.");
+    setError(null);
     start(async () => {
-      await updateTask(t.id, { title }, { category });
-      setEditing(false);
+      const res = await updateTask(
+        t.id,
+        { title, due_date: dueDate || null, priority, assigned_to: assignedTo || null },
+        { category },
+      );
+      if (!res.ok) return setError(res.error ?? "Could not save.");
+      onClose();
       router.refresh();
     });
   }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Edit task">
+      <div className="space-y-4">
+        {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+        <div>
+          <Label htmlFor="te-title">Title</Label>
+          <Input id="te-title" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label htmlFor="te-due">Due date</Label>
+            <Input id="te-due" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+          </div>
+          <div>
+            <Label htmlFor="te-pri">Priority</Label>
+            <Select id="te-pri" value={priority} onChange={(e) => setPriority(Number(e.target.value))}>
+              {PRIORITIES.map((p) => (
+                <option key={p.value} value={p.value}>{p.label}</option>
+              ))}
+            </Select>
+          </div>
+        </div>
+        <div>
+          <Label htmlFor="te-person">Assigned to</Label>
+          <Select id="te-person" value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)}>
+            <option value="">Unassigned</option>
+            {people.map((p) => (
+              <option key={p.id} value={p.id}>{p.full_name ?? "Unnamed"}</option>
+            ))}
+          </Select>
+        </div>
+        <div className="flex justify-end gap-2 pt-1">
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={save} disabled={pending}>{pending ? "Saving…" : "Save"}</Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function TaskRow({ t, people, category }: { t: ViewTask; people: Person[]; category: TaskCategory }) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const [editing, setEditing] = useState(false);
 
   return (
     <li className="flex items-start gap-3 px-4 py-2.5 text-sm">
@@ -147,35 +238,18 @@ function TaskRow({ t, category }: { t: ViewTask; category: TaskCategory }) {
         className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-brand focus:ring-brand"
       />
       <div className="min-w-0 flex-1">
-        {editing ? (
-          <div className="flex items-center gap-1.5">
-            <Input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") saveTitle();
-                if (e.key === "Escape") { setEditing(false); setTitle(t.title); }
-              }}
-              autoFocus
-              className="h-8 text-sm"
-            />
-            <button onClick={saveTitle} disabled={pending} className="rounded bg-brand p-1 text-white" aria-label="Save">
-              <Check className="h-3.5 w-3.5" />
-            </button>
-            <button onClick={() => { setEditing(false); setTitle(t.title); }} className="rounded p-1 text-slate-400 hover:bg-slate-100" aria-label="Cancel">
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        ) : (
-          <div className={t.status === "done" ? "text-slate-400 line-through" : "font-medium text-slate-900"}>
-            {t.priority > 0 && t.status !== "done" && (
-              <Flag className="mr-1 inline h-3.5 w-3.5 text-red-500" />
-            )}
-            {t.title}
-          </div>
-        )}
+        <div className={t.status === "done" ? "text-slate-400 line-through" : "font-medium text-slate-900"}>
+          {t.priority > 0 && t.status !== "done" && (
+            <Flag className={`mr-1 inline h-3.5 w-3.5 ${t.priority >= 2 ? "text-red-600" : "text-amber-500"}`} />
+          )}
+          {t.title}
+        </div>
         <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
           {t.due_date && <span>Due {formatDate(t.due_date)}</span>}
+          {t.priority > 0 && <span className={t.priority >= 2 ? "text-red-600" : "text-amber-600"}>{priorityLabel(t.priority)}</span>}
+          {t.assignee?.full_name && (
+            <span className="flex items-center gap-1"><User className="h-3 w-3" /> {t.assignee.full_name}</span>
+          )}
           {t.jobs && (
             <Link href={`/jobs/${t.job_id}`} className="flex items-center gap-1 hover:text-brand">
               <Briefcase className="h-3 w-3" /> {t.jobs.name}
@@ -183,15 +257,9 @@ function TaskRow({ t, category }: { t: ViewTask; category: TaskCategory }) {
           )}
         </div>
       </div>
-      {!editing && (
-        <button
-          onClick={() => setEditing(true)}
-          className="text-slate-300 hover:text-slate-600"
-          title="Edit"
-        >
-          <Pencil className="h-4 w-4" />
-        </button>
-      )}
+      <button onClick={() => setEditing(true)} className="text-slate-300 hover:text-slate-600" title="Edit">
+        <Pencil className="h-4 w-4" />
+      </button>
       <button
         onClick={() =>
           start(async () => {
@@ -199,11 +267,15 @@ function TaskRow({ t, category }: { t: ViewTask; category: TaskCategory }) {
             router.refresh();
           })
         }
+        disabled={pending}
         className="text-slate-300 hover:text-red-600"
         title="Delete"
       >
         <Trash2 className="h-4 w-4" />
       </button>
+      {editing && (
+        <TaskEditModal t={t} people={people} category={category} open={editing} onClose={() => setEditing(false)} />
+      )}
     </li>
   );
 }
@@ -213,11 +285,13 @@ function TaskColumn({
   label,
   tone,
   tasks,
+  people,
 }: {
   category: TaskCategory;
   label: string;
   tone: string;
   tasks: ViewTask[];
+  people: Person[];
 }) {
   const open = tasks.filter((t) => t.status !== "done");
   const done = tasks.filter((t) => t.status === "done");
@@ -233,8 +307,8 @@ function TaskColumn({
           <li className="px-4 py-6 text-center text-sm text-slate-400">No {label.toLowerCase()} tasks yet.</li>
         ) : (
           <>
-            {open.map((t) => <TaskRow key={t.id} t={t} category={category} />)}
-            {done.map((t) => <TaskRow key={t.id} t={t} category={category} />)}
+            {open.map((t) => <TaskRow key={t.id} t={t} people={people} category={category} />)}
+            {done.map((t) => <TaskRow key={t.id} t={t} people={people} category={category} />)}
           </>
         )}
       </ul>
@@ -245,16 +319,18 @@ function TaskColumn({
 export function TasksView({
   tasks,
   jobs,
+  people = [],
   category,
 }: {
   tasks: ViewTask[];
   jobs: JobOption[];
+  people?: Person[];
   category?: TaskCategory;
 }) {
   const cols = category ? CATEGORIES.filter((c) => c.id === category) : CATEGORIES;
   return (
     <div>
-      <NewTaskBox jobs={jobs} defaultCategory={category} />
+      <NewTaskBox jobs={jobs} people={people} defaultCategory={category} />
       <div className={category ? "" : "grid gap-4 lg:grid-cols-3"}>
         {cols.map((c) => (
           <TaskColumn
@@ -263,6 +339,7 @@ export function TasksView({
             label={c.label}
             tone={c.tone}
             tasks={tasks.filter((t) => t.category === c.id)}
+            people={people}
           />
         ))}
       </div>

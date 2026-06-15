@@ -116,6 +116,16 @@ export function AppointmentButton({
 
       <Modal open={open} onClose={() => setOpen(false)} title={editing ? "Edit appointment" : "New appointment"}>
         <form action={submit} className="space-y-4">
+          {/* Sticky action bar — Save/Cancel stay reachable even with the keyboard up. */}
+          <div className="sticky top-0 z-20 -mx-6 -mt-5 mb-1 flex items-center justify-end gap-2 border-b border-slate-200 bg-white px-6 py-3">
+            {editing ? (
+              <Button type="button" variant="outline" onClick={remove} disabled={pending} className="mr-auto text-red-600">
+                Delete
+              </Button>
+            ) : null}
+            <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Save"}</Button>
+          </div>
           {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
 
           <div className="grid grid-cols-2 gap-3">
@@ -185,7 +195,7 @@ export function AppointmentButton({
             <div className="grid grid-cols-2 gap-3 rounded-lg border border-brand/30 bg-brand-light/30 p-3">
               <div>
                 <Label htmlFor="ap-newname">New customer name</Label>
-                <Input id="ap-newname" name="new_customer_name" placeholder="Name" />
+                <Input id="ap-newname" name="new_customer_name" placeholder="Name" required />
               </div>
               <div>
                 <Label htmlFor="ap-newphone">Phone</Label>
@@ -208,16 +218,6 @@ export function AppointmentButton({
               Convert to job →
             </Button>
           )}
-
-          <div className="flex items-center justify-between gap-2">
-            {editing ? (
-              <Button type="button" variant="outline" onClick={remove} disabled={pending} className="text-red-600">Delete</Button>
-            ) : <span />}
-            <div className="flex gap-2">
-              <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-              <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Save"}</Button>
-            </div>
-          </div>
         </form>
       </Modal>
     </>

@@ -21,15 +21,16 @@ export default async function CategoryTasksPage({
   if (!LABELS[category]) notFound();
 
   const supabase = await createClient();
-  const [{ data: tasks }, { data: jobs }] = await Promise.all([
+  const [{ data: tasks }, { data: jobs }, { data: people }] = await Promise.all([
     supabase
       .from("tasks")
-      .select("id, title, category, status, priority, due_date, job_id, jobs(job_number, name)")
+      .select("id, title, category, status, priority, due_date, job_id, assigned_to, jobs(job_number, name), assignee:assigned_to(full_name)")
       .eq("category", category)
       .order("status", { ascending: true })
       .order("priority", { ascending: false })
       .order("due_date", { ascending: true, nullsFirst: false }),
     supabase.from("jobs").select("id, job_number, name").order("created_at", { ascending: false }).limit(100),
+    supabase.from("profiles").select("id, full_name").eq("active", true).order("full_name"),
   ]);
 
   return (
@@ -38,7 +39,7 @@ export default async function CategoryTasksPage({
         title={`${LABELS[category]} tasks`}
         description={`To-dos in your ${LABELS[category]} bucket.`}
       />
-      <TasksView tasks={(tasks ?? []) as any} jobs={jobs ?? []} category={category as TaskCategory} />
+      <TasksView tasks={(tasks ?? []) as any} jobs={jobs ?? []} people={people ?? []} category={category as TaskCategory} />
     </div>
   );
 }

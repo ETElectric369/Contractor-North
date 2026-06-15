@@ -19,13 +19,21 @@ interface CustomerOption {
   id: string;
   name: string;
 }
+interface JobOption {
+  id: string;
+  name: string;
+  job_number: string;
+  customer_id: string | null;
+}
 
 export function NewInvoiceButton({
   quotes,
   customers,
+  jobs = [],
 }: {
   quotes: QuoteOption[];
   customers: CustomerOption[];
+  jobs?: JobOption[];
 }) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<"quote" | "blank">(
@@ -33,11 +41,15 @@ export function NewInvoiceButton({
   );
   const [quoteId, setQuoteId] = useState("");
   const [customerId, setCustomerId] = useState("");
+  const [jobId, setJobId] = useState("");
   const [title, setTitle] = useState("");
   const [taxRate, setTaxRate] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const router = useRouter();
+
+  // Jobs to offer: those for the chosen customer (or all, if no customer yet).
+  const jobChoices = customerId ? jobs.filter((j) => j.customer_id === customerId) : jobs;
 
   function onCreate() {
     setError(null);
@@ -47,6 +59,7 @@ export function NewInvoiceButton({
           ? await createInvoiceFromQuote(quoteId)
           : await createBlankInvoice({
               customer_id: customerId || null,
+              job_id: jobId || null,
               title,
               tax_rate: taxRate,
             });
@@ -124,7 +137,10 @@ export function NewInvoiceButton({
                 <Select
                   id="inv-customer"
                   value={customerId}
-                  onChange={(e) => setCustomerId(e.target.value)}
+                  onChange={(e) => {
+                    setCustomerId(e.target.value);
+                    setJobId(""); // job list depends on the customer
+                  }}
                 >
                   <option value="">— None —</option>
                   {customers.map((c) => (
@@ -134,6 +150,29 @@ export function NewInvoiceButton({
                   ))}
                 </Select>
               </div>
+              {jobs.length > 0 && (
+                <div>
+                  <Label htmlFor="inv-job">Job (so the payment lands on the job)</Label>
+                  <Select
+                    id="inv-job"
+                    value={jobId}
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      setJobId(id);
+                      // Inherit the job's customer if none picked yet.
+                      const j = jobs.find((x) => x.id === id);
+                      if (j && !customerId && j.customer_id) setCustomerId(j.customer_id);
+                    }}
+                  >
+                    <option value="">— None (not tied to a job) —</option>
+                    {jobChoices.map((j) => (
+                      <option key={j.id} value={j.id}>
+                        {j.job_number} · {j.name}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label htmlFor="inv-title">Title</Label>

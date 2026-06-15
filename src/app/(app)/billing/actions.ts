@@ -227,6 +227,7 @@ export async function createInvoiceFromQuote(quoteId: string): Promise<Result> {
 
 export async function createBlankInvoice(input: {
   customer_id: string | null;
+  job_id?: string | null;
   title: string;
   tax_rate: number;
 }): Promise<Result> {
@@ -236,11 +237,29 @@ export async function createBlankInvoice(input: {
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
 
+  // If a job is chosen, inherit its customer (and a title) so the invoice is
+  // never orphaned from the job it belongs to — this is what makes the payment
+  // show up on the job's revenue/costs.
+  let customerId = input.customer_id;
+  let title = input.title;
+  if (input.job_id) {
+    const { data: job } = await supabase
+      .from("jobs")
+      .select("customer_id, name, job_number")
+      .eq("id", input.job_id)
+      .single();
+    if (job) {
+      if (!customerId) customerId = job.customer_id ?? null;
+      if (!title) title = job.name || job.job_number || "";
+    }
+  }
+
   const { data, error } = await supabase
     .from("invoices")
     .insert({
-      customer_id: input.customer_id,
-      title: input.title || null,
+      customer_id: customerId,
+      job_id: input.job_id || null,
+      title: title || null,
       tax_rate: input.tax_rate || 0,
       status: "draft",
       created_by: user.id,
@@ -250,6 +269,7 @@ export async function createBlankInvoice(input: {
   if (error) return { ok: false, error: error.message };
 
   revalidatePath("/billing");
+  if (input.job_id) revalidatePath(`/jobs/${input.job_id}`);
   return { ok: true, id: data.id };
 }
 

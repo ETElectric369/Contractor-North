@@ -12,20 +12,26 @@ function emptyToNull(v: FormDataEntryValue | null): string | null {
 }
 
 /** Resolve the customer for an appointment form: an existing id, or create a new
- *  customer on the fly from a typed name (the "+ New customer" path). */
-async function resolveCustomer(supabase: any, formData: FormData, userId: string): Promise<string | null> {
-  let customerId = emptyToNull(formData.get("customer_id"));
+ *  customer on the fly from a typed name (the "+ New customer" path). Surfaces
+ *  errors instead of silently saving an appointment with no customer. */
+async function resolveCustomer(
+  supabase: any,
+  formData: FormData,
+  userId: string,
+): Promise<{ customerId: string | null; error?: string }> {
+  const customerId = emptyToNull(formData.get("customer_id"));
   const newName = emptyToNull(formData.get("new_customer_name"));
   if (customerId === "__new__" || (!customerId && newName)) {
-    if (!newName) return null;
-    const { data: c } = await supabase
+    if (!newName) return { customerId: null, error: "Enter a name for the new customer." };
+    const { data: c, error } = await supabase
       .from("customers")
       .insert({ name: newName, phone: emptyToNull(formData.get("new_customer_phone")), created_by: userId })
       .select("id")
       .single();
-    customerId = c?.id ?? null;
+    if (error || !c) return { customerId: null, error: error?.message ?? "Could not create the new customer." };
+    return { customerId: c.id };
   }
-  return customerId;
+  return { customerId };
 }
 
 /** Combine a date + time input into an ISO timestamp at local time. */
@@ -57,7 +63,9 @@ export async function createAppointment(formData: FormData): Promise<Result> {
     emptyToNull(formData.get("ends_at_iso")) ??
     (endTime ? toIso(String(formData.get("date") ?? ""), endTime) : null);
 
-  const customerId = await resolveCustomer(supabase, formData, user.id);
+  const cust = await resolveCustomer(supabase, formData, user.id);
+  if (cust.error) return { ok: false, error: cust.error };
+  const customerId = cust.customerId;
 
   const { data, error } = await supabase
     .from("appointments")
@@ -97,7 +105,11 @@ export async function updateAppointment(id: string, formData: FormData): Promise
   } = await supabase.auth.getUser();
   const title = String(formData.get("title") ?? "").trim();
   if (!title) return { ok: false, error: "Title is required." };
-  const customerId = user ? await resolveCustomer(supabase, formData, user.id) : emptyToNull(formData.get("customer_id"));
+  const cust = user
+    ? await resolveCustomer(supabase, formData, user.id)
+    : { customerId: emptyToNull(formData.get("customer_id")) as string | null };
+  if (cust.error) return { ok: false, error: cust.error };
+  const customerId = cust.customerId;
 
   // Prefer the ISO the browser computed in the user's own timezone; fall back to
   // server-side parsing only if it's missing.
