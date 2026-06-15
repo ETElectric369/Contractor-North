@@ -41,14 +41,30 @@ export async function createInquiry(formData: FormData): Promise<Result> {
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return { ok: false, error: "Name is required." };
 
+  const fields = inquiryFields(formData);
   const { data, error } = await supabase
     .from("inquiries")
-    .insert({ name, ...inquiryFields(formData), source: "manual", status: "new", created_by: user.id })
+    .insert({ name, ...fields, source: "manual", status: "new", created_by: user.id })
     .select("id")
     .single();
   if (error) return { ok: false, error: error.message };
 
+  // A new lead auto-books a follow-up / site-visit appointment (tomorrow 9am) so
+  // it lands on the calendar instead of slipping through the cracks.
+  const followUp = new Date();
+  followUp.setDate(followUp.getDate() + 1);
+  followUp.setHours(9, 0, 0, 0);
+  await supabase.from("appointments").insert({
+    type: "appointment",
+    title: `Follow up: ${name}`,
+    starts_at: followUp.toISOString(),
+    location: fields.address,
+    notes: fields.message ?? fields.notes,
+    created_by: user.id,
+  });
+
   revalidatePath("/leads");
+  revalidatePath("/schedule");
   return { ok: true, id: data.id };
 }
 

@@ -59,8 +59,8 @@ export interface DockSection {
   children: DockNode[];
 }
 
-// The dock mirrors Erik's sketch: six glass icons down the left, each blooming
-// its line-items out over the page. Tasks drills into the three task buckets.
+// The dock follows the conversion path top-to-bottom: Sales (inquiries → quote/
+// estimate) → Jobs → Money (invoice → payment). Each icon blooms its line-items.
 export const DOCK: DockSection[] = [
   {
     key: "home",
@@ -71,18 +71,18 @@ export const DOCK: DockSection[] = [
       { id: "h-day", label: "My day", icon: Sun, href: "/planner" },
       { id: "h-assist", label: "Assistant", icon: Sparkles, href: "/assistant" },
       { id: "h-org", label: "Organize my", icon: Wand2, href: "/organize" },
-      {
-        id: "h-tasks",
-        label: "Tasks",
-        icon: ListChecks,
-        href: "/tasks",
-        children: [
-          { id: "t-ops", label: "Operations", icon: Wrench, href: "/tasks/operations" },
-          { id: "t-sales", label: "Sales", icon: TrendingUp, href: "/tasks/sales" },
-          { id: "t-office", label: "Office", icon: Building2, href: "/tasks/office" },
-        ],
-      },
       { id: "h-overview", label: "Overview", icon: LayoutDashboard, href: "/dashboard" },
+    ],
+  },
+  {
+    key: "tasks",
+    label: "Tasks",
+    icon: ListChecks,
+    href: "/tasks",
+    children: [
+      { id: "t-ops", label: "Operations", icon: Wrench, href: "/tasks/operations" },
+      { id: "t-sales", label: "Sales", icon: TrendingUp, href: "/tasks/sales" },
+      { id: "t-office", label: "Office", icon: Building2, href: "/tasks/office" },
     ],
   },
   {
@@ -98,17 +98,6 @@ export const DOCK: DockSection[] = [
     ],
   },
   {
-    key: "jobs",
-    label: "Jobs",
-    icon: Briefcase,
-    href: "/jobs",
-    children: [
-      { id: "j-prog", label: "In progress", icon: Play, href: "/jobs?status=in_progress" },
-      { id: "j-sched", label: "Scheduled", icon: CalendarDays, href: "/jobs?status=scheduled" },
-      { id: "j-all", label: "All jobs", icon: Briefcase, href: "/jobs" },
-    ],
-  },
-  {
     key: "sales",
     label: "Sales",
     icon: TrendingUp,
@@ -118,6 +107,17 @@ export const DOCK: DockSection[] = [
       { id: "sl-inq", label: "Inquiries", icon: UserPlus, href: "/leads" },
       { id: "sl-est", label: "Estimates", icon: FileText, href: "/quotes?type=estimate" },
       { id: "sl-quotes", label: "Quotes", icon: FileText, href: "/quotes?type=quote" },
+    ],
+  },
+  {
+    key: "jobs",
+    label: "Jobs",
+    icon: Briefcase,
+    href: "/jobs",
+    children: [
+      { id: "j-prog", label: "In progress", icon: Play, href: "/jobs?status=in_progress" },
+      { id: "j-sched", label: "Scheduled", icon: CalendarDays, href: "/jobs?status=scheduled" },
+      { id: "j-all", label: "All jobs", icon: Briefcase, href: "/jobs" },
     ],
   },
   {

@@ -6,6 +6,8 @@ import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { getOrgSettings } from "@/lib/org-settings";
 import { sendEmail, renderDocEmail } from "@/lib/email";
 import { sendSms } from "@/lib/sms";
+import { createWorkOrderFromQuote } from "../work-orders/actions";
+import { createMaterialListFromQuote } from "../materials/actions";
 
 function publicQuoteLink(token: string) {
   return `${process.env.NEXT_PUBLIC_SITE_URL || ""}/q/${token}`;
@@ -324,7 +326,15 @@ export async function createJobFromQuote(
   if (error) return { ok: false, error: error.message };
 
   await supabase.from("quotes").update({ job_id: job.id }).eq("id", quoteId);
+
+  // Winning a quote spins up the field paperwork — a work order + a material
+  // take-off (both idempotent) — and the job lands in the scheduler as
+  // "scheduled" (pending). Best-effort: a job is still created if these no-op.
+  await createWorkOrderFromQuote(quoteId);
+  await createMaterialListFromQuote(quoteId);
+
   revalidatePath(`/quotes/${quoteId}`);
+  revalidatePath("/schedule");
   return { ok: true, id: job.id };
 }
 
