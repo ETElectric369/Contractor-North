@@ -6,7 +6,7 @@ import { Plus, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
-import { createAppointment, updateAppointment, deleteAppointment } from "./actions";
+import { createAppointment, updateAppointment, deleteAppointment, createJobFromAppointment } from "./actions";
 
 interface Opt { id: string; label: string }
 
@@ -52,6 +52,18 @@ export function AppointmentButton({
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [newCust, setNewCust] = useState(false);
+
+  function convertToJob() {
+    if (!appointment) return;
+    setError(null);
+    start(async () => {
+      const res = await createJobFromAppointment(appointment.id);
+      if (!res.ok || !res.id) return setError(res.error ?? "Could not create job.");
+      setOpen(false);
+      router.push(`/jobs/${res.id}`);
+    });
+  }
 
   const s = appointment ? toLocal(appointment.starts_at) : { date: defaultDate ?? "", time: "08:00" };
   const e = appointment ? toLocal(appointment.ends_at) : { date: "", time: "" };
@@ -146,9 +158,15 @@ export function AppointmentButton({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label htmlFor="ap-cust">Customer</Label>
-              <Select id="ap-cust" name="customer_id" defaultValue={appointment?.customer_id ?? ""}>
+              <Select
+                id="ap-cust"
+                name="customer_id"
+                defaultValue={appointment?.customer_id ?? ""}
+                onChange={(e) => setNewCust(e.target.value === "__new__")}
+              >
                 <option value="">—</option>
                 {customers.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+                <option value="__new__">+ New customer…</option>
               </Select>
             </div>
             <div>
@@ -160,6 +178,19 @@ export function AppointmentButton({
             </div>
           </div>
 
+          {newCust && (
+            <div className="grid grid-cols-2 gap-3 rounded-lg border border-brand/30 bg-brand-light/30 p-3">
+              <div>
+                <Label htmlFor="ap-newname">New customer name</Label>
+                <Input id="ap-newname" name="new_customer_name" placeholder="Name" />
+              </div>
+              <div>
+                <Label htmlFor="ap-newphone">Phone</Label>
+                <Input id="ap-newphone" name="new_customer_phone" type="tel" placeholder="Optional" />
+              </div>
+            </div>
+          )}
+
           <div>
             <Label htmlFor="ap-loc">Location</Label>
             <Input id="ap-loc" name="location" defaultValue={appointment?.location ?? ""} placeholder="Address or site" />
@@ -168,6 +199,12 @@ export function AppointmentButton({
             <Label htmlFor="ap-notes">Notes</Label>
             <Textarea id="ap-notes" name="notes" rows={2} defaultValue={appointment?.notes ?? ""} />
           </div>
+
+          {editing && appointment && !appointment.job_id && (
+            <Button type="button" variant="outline" onClick={convertToJob} disabled={pending} className="w-full">
+              Convert to job →
+            </Button>
+          )}
 
           <div className="flex items-center justify-between gap-2">
             {editing ? (

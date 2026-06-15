@@ -11,6 +11,23 @@ function emptyToNull(v: FormDataEntryValue | null): string | null {
   return s.length ? s : null;
 }
 
+/** Resolve the customer for an appointment form: an existing id, or create a new
+ *  customer on the fly from a typed name (the "+ New customer" path). */
+async function resolveCustomer(supabase: any, formData: FormData, userId: string): Promise<string | null> {
+  let customerId = emptyToNull(formData.get("customer_id"));
+  const newName = emptyToNull(formData.get("new_customer_name"));
+  if (customerId === "__new__" || (!customerId && newName)) {
+    if (!newName) return null;
+    const { data: c } = await supabase
+      .from("customers")
+      .insert({ name: newName, phone: emptyToNull(formData.get("new_customer_phone")), created_by: userId })
+      .select("id")
+      .single();
+    customerId = c?.id ?? null;
+  }
+  return customerId;
+}
+
 /** Combine a date + time input into an ISO timestamp at local time. */
 function toIso(date: string, time: string): string | null {
   if (!date) return null;
@@ -40,6 +57,8 @@ export async function createAppointment(formData: FormData): Promise<Result> {
     emptyToNull(formData.get("ends_at_iso")) ??
     (endTime ? toIso(String(formData.get("date") ?? ""), endTime) : null);
 
+  const customerId = await resolveCustomer(supabase, formData, user.id);
+
   const { data, error } = await supabase
     .from("appointments")
     .insert({
@@ -48,7 +67,7 @@ export async function createAppointment(formData: FormData): Promise<Result> {
       starts_at: startIso,
       ends_at: endIso,
       job_id: emptyToNull(formData.get("job_id")),
-      customer_id: emptyToNull(formData.get("customer_id")),
+      customer_id: customerId,
       location: emptyToNull(formData.get("location")),
       notes: emptyToNull(formData.get("notes")),
       assigned_to: emptyToNull(formData.get("assigned_to")),
@@ -73,8 +92,12 @@ export async function createAppointment(formData: FormData): Promise<Result> {
 
 export async function updateAppointment(id: string, formData: FormData): Promise<Result> {
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   const title = String(formData.get("title") ?? "").trim();
   if (!title) return { ok: false, error: "Title is required." };
+  const customerId = user ? await resolveCustomer(supabase, formData, user.id) : emptyToNull(formData.get("customer_id"));
 
   // Prefer the ISO the browser computed in the user's own timezone; fall back to
   // server-side parsing only if it's missing.
@@ -95,7 +118,7 @@ export async function updateAppointment(id: string, formData: FormData): Promise
       starts_at: startIso,
       ends_at: endIso,
       job_id: emptyToNull(formData.get("job_id")),
-      customer_id: emptyToNull(formData.get("customer_id")),
+      customer_id: customerId,
       location: emptyToNull(formData.get("location")),
       notes: emptyToNull(formData.get("notes")),
       assigned_to: emptyToNull(formData.get("assigned_to")),
@@ -117,6 +140,43 @@ export async function setAppointmentStatus(id: string, status: string): Promise<
   if (error) return { ok: false, error: error.message };
   revalidatePath("/schedule");
   return { ok: true };
+}
+
+/** Turn an appointment (often a site-visit/estimate walk-through) into a job —
+ *  idempotent: if it already spawned one, returns that job. Inherits the
+ *  customer, title → name, location → address, and start time. */
+export async function createJobFromAppointment(appointmentId: string): Promise<Result> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  const { data: appt } = await supabase
+    .from("appointments")
+    .select("id, title, customer_id, location, job_id, starts_at")
+    .eq("id", appointmentId)
+    .maybeSingle();
+  if (!appt) return { ok: false, error: "Appointment not found." };
+  if (appt.job_id) return { ok: true, id: appt.job_id };
+
+  const { data: job, error } = await supabase
+    .from("jobs")
+    .insert({
+      name: appt.title || "Job from appointment",
+      customer_id: appt.customer_id,
+      status: "scheduled",
+      scheduled_start: appt.starts_at,
+      address: appt.location,
+      created_by: user.id,
+    })
+    .select("id")
+    .single();
+  if (error) return { ok: false, error: error.message };
+
+  await supabase.from("appointments").update({ job_id: job.id }).eq("id", appointmentId);
+  revalidatePath("/schedule");
+  return { ok: true, id: job.id };
 }
 
 export async function deleteAppointment(id: string): Promise<Result> {
