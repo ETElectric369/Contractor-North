@@ -103,8 +103,8 @@ export const DOCK: DockSection[] = [
     icon: TrendingUp,
     href: "/crm",
     children: [
-      { id: "sl-cust", label: "Customers", icon: Users, href: "/crm" },
       { id: "sl-inq", label: "Inquiries", icon: UserPlus, href: "/leads" },
+      { id: "sl-cust", label: "Customers", icon: Users, href: "/crm" },
       { id: "sl-est", label: "Estimates", icon: FileText, href: "/quotes?type=estimate" },
       { id: "sl-quotes", label: "Quotes", icon: FileText, href: "/quotes?type=quote" },
     ],

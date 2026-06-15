@@ -121,9 +121,12 @@ export function AppointmentButton({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label htmlFor="ap-type">Type</Label>
-              <Select id="ap-type" name="type" defaultValue={appointment?.type ?? "appointment"}>
-                <option value="appointment">Appointment</option>
+              <Select id="ap-type" name="type" defaultValue={appointment?.type ?? "quote"}>
+                <option value="quote">Quote / estimate a job</option>
+                <option value="meeting">Meet with client</option>
                 <option value="inspection">Inspection</option>
+                <option value="appointment">Appointment</option>
+                <option value="other">Other</option>
               </Select>
             </div>
             <div>
