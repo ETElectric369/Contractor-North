@@ -222,26 +222,30 @@ export async function addDocument(input: {
   category: string;
   file_url: string; // storage path within the 'documents' bucket
   size_bytes: number;
-}): Promise<Result> {
+}): Promise<Result & { id?: string }> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
 
-  const { error } = await supabase.from("documents").insert({
-    job_id: input.job_id,
-    name: input.name,
-    category: input.category || "Receipt",
-    kind: "other",
-    file_url: input.file_url,
-    size_bytes: input.size_bytes || null,
-    uploaded_by: user.id,
-  });
+  const { data, error } = await supabase
+    .from("documents")
+    .insert({
+      job_id: input.job_id,
+      name: input.name,
+      category: input.category || "Receipt",
+      kind: "other",
+      file_url: input.file_url,
+      size_bytes: input.size_bytes || null,
+      uploaded_by: user.id,
+    })
+    .select("id")
+    .single();
   if (error) return { ok: false, error: error.message };
 
   revalidatePath(`/jobs/${input.job_id}`);
-  return { ok: true };
+  return { ok: true, id: data?.id };
 }
 
 export async function deleteDocument(

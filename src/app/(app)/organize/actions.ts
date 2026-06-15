@@ -304,6 +304,167 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
   };
 }
 
+/** Infer a media type from a stored filename / path. */
+function mimeFromName(name: string | null | undefined): string | null {
+  const ext = String(name ?? "").toLowerCase().match(/\.([a-z0-9]+)(?:\?|$)/)?.[1];
+  switch (ext) {
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "png":
+      return "image/png";
+    case "webp":
+      return "image/webp";
+    case "gif":
+      return "image/gif";
+    case "pdf":
+      return "application/pdf";
+    default:
+      return null;
+  }
+}
+
+/**
+ * Turn a receipt already attached to a job (a `documents` row) into a job-linked
+ * itemized bill, so it shows up in the job's Costs tab and in Analytics. Claude
+ * reads the image to autopopulate the total + line items. Idempotent: re-running
+ * on a receipt that's already been billed is a no-op.
+ *
+ * This is the bridge for receipts uploaded directly on a job (Costs → Receipts &
+ * documents), which previously just stored a file and never became a cost.
+ */
+export async function billJobReceipt(documentId: string): Promise<{
+  ok: boolean;
+  error?: string;
+  already?: boolean;
+  amount?: number | null;
+  vendor?: string | null;
+  lineCount?: number;
+}> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  const { data: doc } = await supabase
+    .from("documents")
+    .select("id, name, file_url, size_bytes, job_id")
+    .eq("id", documentId)
+    .single();
+  if (!doc) return { ok: false, error: "Receipt not found." };
+  if (!doc.job_id) return { ok: false, error: "This receipt isn't attached to a job." };
+
+  // Idempotency: have we already turned this document into a bill?
+  const { data: prior } = await supabase
+    .from("organized_items")
+    .select("id, bill_id")
+    .eq("document_id", documentId)
+    .not("bill_id", "is", null)
+    .limit(1)
+    .maybeSingle();
+  if (prior?.bill_id) return { ok: true, already: true };
+
+  const mime = mimeFromName(doc.name) ?? mimeFromName(doc.file_url);
+  if (!mime) return { ok: false, error: "Use a photo (JPG/PNG) or PDF receipt." };
+  if ((doc.size_bytes ?? 0) > 8 * 1024 * 1024)
+    return { ok: false, error: "Receipt is over 8 MB — try a smaller photo." };
+
+  const { data: blob, error: dlErr } = await supabase.storage.from("documents").download(doc.file_url);
+  if (dlErr || !blob) return { ok: false, error: dlErr?.message ?? "Could not read the receipt file." };
+  const base64 = Buffer.from(await blob.arrayBuffer()).toString("base64");
+
+  const isImage = IMAGE_TYPES.includes(mime);
+  const mediaBlock: any = isImage
+    ? { type: "image", source: { type: "base64", media_type: mime, data: base64 } }
+    : { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } };
+
+  let parsed: any;
+  try {
+    const client = getAnthropic();
+    const msg = await client.messages.create({
+      model: DEFAULT_MODEL,
+      max_tokens: 1200,
+      system: `You read a purchase receipt for an electrical contractor and itemize it as a job cost.
+
+Respond with ONLY a JSON object (no prose):
+{
+  "vendor": store/supplier name or null,
+  "amount": grand total in dollars as a number (the amount actually paid), or null only if you truly cannot read it,
+  "date": "YYYY-MM-DD" printed on the receipt, or null,
+  "line_items": [{"description": item name, "quantity": number, "unit_price": price each (number), "amount": line total (number), "category": one of "Materials" | "Electrical" | "Tools" | "Fasteners" | "Lumber" | "Plumbing" | "Paint" | "Rental" | "Tax" | "Other"}],
+  "confidence": "low" | "medium" | "high"
+}
+Transcribe EVERY readable line, including tax as its own line. Use [] for line_items only if nothing is legible.`,
+      messages: [
+        {
+          role: "user",
+          content: [mediaBlock, { type: "text", text: `Filename: ${doc.name}. Read the total and itemize.` }],
+        },
+      ],
+    });
+    const text = msg.content.find((b) => b.type === "text") as { text: string } | undefined;
+    parsed = JSON.parse(extractJsonObject(text?.text ?? ""));
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? "AI could not read this receipt." };
+  }
+
+  const aiAmount = parsed.amount != null && !isNaN(Number(parsed.amount)) ? Number(parsed.amount) : null;
+  const itemDate = /^\d{4}-\d{2}-\d{2}$/.test(String(parsed.date ?? "")) ? parsed.date : null;
+  const lines = cleanLines(parsed.line_items);
+  const vendor = parsed.vendor ? String(parsed.vendor).slice(0, 200) : doc.name || "Receipt";
+  const confidence = ["low", "medium", "high"].includes(parsed.confidence) ? parsed.confidence : "medium";
+
+  // Fall back to the line-item sum if Claude couldn't read a printed grand total.
+  const lineSum = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
+  const amount = aiAmount != null ? aiAmount : lineSum > 0 ? Math.round(lineSum * 100) / 100 : null;
+  if (amount == null) {
+    return {
+      ok: false,
+      error: "Couldn't read a total on this receipt. Open it and enter the cost manually as a bill.",
+    };
+  }
+
+  const billId = await insertItemizedBill(
+    supabase,
+    {
+      job_id: doc.job_id,
+      supplier: vendor,
+      amount,
+      bill_date: itemDate,
+      category: "Receipt",
+      notes: `Receipt recorded as cost: ${doc.name}`,
+      created_by: user.id,
+    },
+    lines,
+  );
+  if (!billId) return { ok: false, error: "Could not create the bill." };
+
+  // Link record so the receipt is known to be billed (drives idempotency above).
+  await supabase.from("organized_items").insert({
+    kind: "receipt",
+    title: vendor,
+    summary: null,
+    vendor,
+    amount,
+    item_date: itemDate,
+    category: "Receipt",
+    confidence,
+    status: "filed",
+    job_id: doc.job_id,
+    document_id: documentId,
+    bill_id: billId,
+    line_items: lines.length ? lines : null,
+    file_url: doc.file_url,
+    created_by: user.id,
+  });
+
+  revalidatePath("/bills");
+  revalidatePath("/analytics");
+  revalidatePath(`/jobs/${doc.job_id}`);
+  return { ok: true, amount, vendor, lineCount: lines.length };
+}
+
 export type FileDestination =
   | { type: "job"; jobId: string }
   | { type: "overhead"; category: string }
