@@ -73,7 +73,7 @@ export default async function JobDetailPage({
     { data: tasks },
     { data: permits },
   ] = await Promise.all([
-    supabase.from("quotes").select("id, quote_number, status, total").eq("job_id", id),
+    supabase.from("quotes").select("id, quote_number, status, total, doc_type").eq("job_id", id),
     supabase.from("work_orders").select("id, wo_number, title, status").eq("job_id", id),
     supabase.from("change_orders").select("*").eq("job_id", id).order("created_at", { ascending: false }),
     supabase.from("invoices").select("id, invoice_number, status, total, amount_paid").eq("job_id", id),
@@ -491,7 +491,7 @@ export default async function JobDetailPage({
     },
     {
       id: "quotes",
-      label: "Quotes",
+      label: "Quotes & estimates",
       count: quotes?.length ?? 0,
       content: (
         <div className="space-y-3">
@@ -508,7 +508,12 @@ export default async function JobDetailPage({
             {(quotes ?? []).map((q: any) => (
               <li key={q.id}>
                 <Link href={`/quotes/${q.id}`} className="flex items-center justify-between px-5 py-3 text-sm hover:bg-slate-50">
-                  <span className="font-medium text-slate-900">{q.quote_number}</span>
+                  <span className="font-medium text-slate-900">
+                    {q.quote_number}
+                    <span className="ml-2 align-middle rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                      {(q.doc_type ?? "quote") === "estimate" ? "Est" : "Quote"}
+                    </span>
+                  </span>
                   <span className="flex items-center gap-3"><span className="text-slate-600">{formatCurrency(q.total)}</span><Badge tone={statusTone(q.status)}>{q.status}</Badge></span>
                 </Link>
               </li>
