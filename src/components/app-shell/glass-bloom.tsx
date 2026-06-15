@@ -52,12 +52,19 @@ function clamp(v: number, lo: number, hi: number) {
   return Math.min(Math.max(v, lo), Math.max(lo, hi));
 }
 
+const PANEL_W = 196;
+const PAD = 6;
+const HEADER = 26;
+const ROW_H = 36;
+const ROW_GAP = 3;
+const STEP = ROW_H + ROW_GAP;
+
 /**
- * A glass MindMeister-style bloom: curved branches grow from an anchor point
- * into individually-translucent glass nodes floating over the page. Drills into
- * hub nodes in place, runs conversion actions, or navigates. Used by the left
- * dock (`direction="right"`), the mobile bottom dock (`direction="up"`), and the
- * per-entity convert/map buttons.
+ * The glass bloom: a frosted dark-glass cut-corner panel holding a section's
+ * items as a tight list of light glass tiles, with thin sea-glass branch lines
+ * running from the dock icon to each row. Drills hubs in place, runs conversion
+ * actions, or navigates. Used by the left dock (`direction="right"`) and the
+ * mobile bottom dock (`direction="up"`, panel sits above the icon).
  */
 export function GlassBloom({
   anchor,
@@ -117,43 +124,28 @@ export function GlassBloom({
 
   const vw = typeof window !== "undefined" ? window.innerWidth : 1200;
   const vh = typeof window !== "undefined" ? window.innerHeight : 800;
-  const MAX_GAP = 42;
-  const NODE_W = 168;
+  const n = nodes.length;
+  const listH = n * ROW_H + Math.max(0, n - 1) * ROW_GAP;
+  const panelH = PAD * 2 + HEADER + listH;
 
-  // Compress the gap so the whole column always fits the viewport height (no
-  // nodes marching off the top/bottom on short or zoomed screens).
-  const count = nodes.length;
-  const gap = count > 1 ? Math.min(MAX_GAP, (vh - 160) / (count - 1)) : 0;
-  const span = (count - 1) * gap;
-  // Fan right of the anchor, unless it sits too close to the right edge — then
-  // fan left so the column stays attached to its button.
-  const fitsRight = anchor.x + 60 + NODE_W <= vw - 8;
-  const colLeft = fitsRight ? anchor.x + 60 : clamp(anchor.x - 60 - NODE_W, 8, vw - NODE_W - 8);
+  const panelLeft =
+    direction === "up"
+      ? clamp(anchor.x - PANEL_W / 2, 8, vw - PANEL_W - 8)
+      : clamp(anchor.x + 52, 8, vw - PANEL_W - 8);
+  const panelTop =
+    direction === "up"
+      ? clamp(anchor.y - 18 - panelH, 8, vh - panelH - 8)
+      : clamp(anchor.y - panelH / 2, 8, vh - panelH - 8);
 
-  const placed = nodes.map((node, i) => {
-    if (direction === "up") {
-      const left = clamp(anchor.x - NODE_W / 2, 8, vw - NODE_W - 8);
-      let firstCy = anchor.y - 74;
-      if (firstCy - span < 80) firstCy = 80 + span; // keep the topmost node on screen
-      const cy = firstCy - i * gap;
-      return { n: node, left, cy, bx: left + 18, by: cy };
-    }
-    const startC = clamp(anchor.y - span / 2, 80, vh - 80 - span);
-    const cy = startC + i * gap;
-    return { n: node, left: colLeft, cy, bx: fitsRight ? colLeft : colLeft + NODE_W, by: cy };
-  });
+  const rowW = PANEL_W - PAD * 2;
+  const rowTop = (i: number) => panelTop + PAD + HEADER + i * STEP;
+  const rowCY = (i: number) => rowTop(i) + ROW_H / 2;
 
-  function branch(bx: number, by: number) {
-    if (direction === "up") {
-      const my = anchor.y + (by - anchor.y) * 0.5;
-      return `M${anchor.x} ${anchor.y} C ${anchor.x} ${my}, ${bx} ${my}, ${bx} ${by}`;
-    }
+  function branch(by: number) {
+    const bx = panelLeft;
     const mx = anchor.x + (bx - anchor.x) * 0.5;
     return `M${anchor.x} ${anchor.y} C ${mx} ${anchor.y}, ${mx} ${by}, ${bx} ${by}`;
   }
-
-  const backLeft = clamp(anchor.x - 20, 8, vw - 200);
-  const backTop = direction === "up" ? clamp(anchor.y - 36, 8, vh - 40) : anchor.y - 13;
 
   return (
     <div className="fixed inset-0 z-[60]" role="dialog" aria-label={`${heading} menu`}>
@@ -161,13 +153,14 @@ export function GlassBloom({
         className="absolute inset-0 cursor-default"
         aria-label="Close menu"
         onClick={onClose}
-        style={{ background: "rgba(15, 23, 42, 0.14)" }}
+        style={{ background: "rgba(15, 23, 42, 0.16)" }}
       />
+
       <svg className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden="true">
-        {placed.map((p) => (
+        {nodes.map((node, i) => (
           <path
-            key={p.n.id}
-            d={branch(p.bx, p.by)}
+            key={node.id}
+            d={branch(rowCY(i))}
             fill="none"
             stroke="rgb(var(--glass-tint))"
             strokeWidth="1.5"
@@ -177,60 +170,68 @@ export function GlassBloom({
         ))}
       </svg>
 
-      <div className="absolute inset-0" style={{ pointerEvents: "none" }}>
-        {focus && (
+      {/* Backing panel — a frosted dark cut-corner box; clicking inside it never
+          closes the bloom (only the backdrop does). */}
+      <div
+        className="cn-cut-lg cn-fade absolute border border-white/15"
+        onMouseEnter={onEnter}
+        onMouseLeave={onLeave}
+        style={{
+          left: panelLeft,
+          top: panelTop,
+          width: PANEL_W,
+          height: panelH,
+          pointerEvents: "auto",
+          background: "rgba(30, 41, 59, 0.62)",
+          WebkitBackdropFilter: "blur(16px) saturate(1.3)",
+          backdropFilter: "blur(16px) saturate(1.3)",
+        }}
+      >
+        {focus ? (
           <button
             onClick={() => setPath((p) => p.slice(0, -1))}
-            onMouseEnter={onEnter}
-            onMouseLeave={onLeave}
-            className="glass glass-gloss absolute flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium text-slate-700"
-            style={{ left: backLeft, top: backTop, pointerEvents: "auto" }}
+            className="absolute left-2 right-2 top-1.5 flex h-[20px] items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-white/85"
           >
-            <ArrowLeft className="h-3.5 w-3.5" /> {heading}
+            <ArrowLeft className="h-3 w-3" /> {heading}
           </button>
+        ) : (
+          <div className="absolute left-3 right-2 top-1.5 h-[20px] text-[11px] font-semibold uppercase tracking-wide text-white/70">
+            {heading}
+          </div>
         )}
-        {placed.map((p, i) => {
-          const Icon = p.n.icon;
-          const hasKids = !!(p.n.children && p.n.children.length);
-          const busy = busyId === p.n.id;
+
+        {nodes.map((node, i) => {
+          const Icon = node.icon;
+          const hasKids = !!(node.children && node.children.length);
+          const busy = busyId === node.id;
           return (
             <button
-              key={p.n.id}
-              onClick={() => pick(p.n)}
-              onMouseEnter={onEnter}
-              onMouseLeave={onLeave}
-              className="cn-bloom-node glass-gloss absolute flex items-center gap-2 rounded-xl border border-white/70 py-1.5 pl-1.5 pr-3 text-left shadow-sm transition-transform hover:scale-[1.04]"
+              key={node.id}
+              onClick={() => pick(node)}
+              className="cn-fade glass-gloss absolute flex items-center gap-2 rounded-lg border border-white/70 pl-1.5 pr-2.5 text-left transition-transform hover:scale-[1.03]"
               style={{
-                left: p.left,
-                top: p.cy,
-                transform: "translateY(-50%)",
-                pointerEvents: "auto",
-                animationDelay: `${i * 30}ms`,
-                minWidth: 140,
-                // A clearly-tinted, near-opaque sea-glass tile so it contrasts
-                // a white page underneath and the whole tile is one solid hit
-                // target — no clicking "through" it.
-                background: "rgba(186, 230, 222, 0.97)",
-                WebkitBackdropFilter: "blur(10px) saturate(1.4)",
-                backdropFilter: "blur(10px) saturate(1.4)",
+                left: PAD,
+                top: PAD + HEADER + i * STEP,
+                width: rowW,
+                height: ROW_H,
+                animationDelay: `${i * 26}ms`,
+                background: "rgba(232, 251, 247, 0.96)",
               }}
             >
               <span
-                className="cn-cut flex h-7 w-7 shrink-0 items-center justify-center text-[color:rgb(var(--glass-ink))]"
-                style={{ background: "rgb(var(--glass-tint) / 0.18)" }}
+                className="cn-cut flex h-6 w-6 shrink-0 items-center justify-center text-[color:rgb(var(--glass-ink))]"
+                style={{ background: "rgb(var(--glass-tint) / 0.2)" }}
               >
-                {busy ? <Loader2 className="h-[17px] w-[17px] animate-spin" /> : <Icon className="h-[17px] w-[17px]" />}
+                {busy ? <Loader2 className="h-[15px] w-[15px] animate-spin" /> : <Icon className="h-[15px] w-[15px]" />}
               </span>
-              <span className="whitespace-nowrap text-[13px] font-medium text-slate-800">{p.n.label}</span>
-              {hasKids && <ChevronRight className="ml-auto h-4 w-4 text-slate-500" />}
+              <span className="flex-1 truncate text-[13px] font-medium text-slate-800">{node.label}</span>
+              {hasKids && <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" />}
             </button>
           );
         })}
+
         {err && (
-          <div
-            className="absolute rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 shadow"
-            style={{ left: clamp(anchor.x, 8, vw - 220), top: clamp(anchor.y + 12, 8, vh - 48), pointerEvents: "auto" }}
-          >
+          <div className="absolute inset-x-2 bottom-1.5 rounded bg-red-50 px-2 py-1 text-[11px] text-red-700">
             {err}
           </div>
         )}

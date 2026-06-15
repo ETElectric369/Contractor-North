@@ -1,9 +1,7 @@
 "use client";
 
-import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Menu, X, LogOut, ArrowLeft, ArrowRight, Search } from "lucide-react";
-import { Sidebar } from "./sidebar";
+import { LogOut, ArrowLeft, ArrowRight, Search } from "lucide-react";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { initials } from "@/lib/utils";
 import { signOut } from "@/app/login/actions";
@@ -11,30 +9,16 @@ import type { Profile } from "@/lib/types";
 
 export function Topbar({
   profile,
-  branding,
   lang,
-  role,
-  badges,
 }: {
   profile: Profile | null;
-  branding?: { name: string | null; logo: string | null };
   lang?: string;
-  role?: string;
-  badges?: Record<string, number>;
 }) {
-  const [open, setOpen] = useState(false);
   const router = useRouter();
 
   return (
     <>
       <header className="flex h-16 items-center justify-between gap-2 border-b border-slate-200 bg-white px-4 lg:px-6">
-        <button
-          className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 lg:hidden"
-          onClick={() => setOpen(true)}
-          aria-label="Open menu"
-        >
-          <Menu className="h-5 w-5" />
-        </button>
         <button
           className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"
           onClick={() => {
@@ -102,26 +86,6 @@ export function Topbar({
           </form>
         </div>
       </header>
-
-      {/* Mobile drawer */}
-      {open && (
-        <div className="fixed inset-0 z-50 lg:hidden">
-          <div
-            className="absolute inset-0 bg-slate-900/40"
-            onClick={() => setOpen(false)}
-          />
-          <div className="absolute inset-y-0 left-0 w-64">
-            <button
-              className="absolute -right-10 top-4 rounded-lg bg-white/90 p-2 text-slate-700"
-              onClick={() => setOpen(false)}
-              aria-label="Close menu"
-            >
-              <X className="h-5 w-5" />
-            </button>
-            <Sidebar onNavigate={() => setOpen(false)} branding={branding} lang={lang} role={role} badges={badges} />
-          </div>
-        </div>
-      )}
     </>
   );
 }

@@ -119,11 +119,26 @@ main {
 .cn-bloom-node {
   animation: cn-pop 0.2s ease-out both;
 }
+/* Entrance for directly-positioned bloom elements (no translate — they set top/left). */
+@keyframes cn-fade {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+.cn-fade {
+  animation: cn-fade 0.16s ease-out both;
+}
 /* A square with chamfered (cut) corners — holds a bloom node's glass icon. */
 .cn-cut {
   clip-path: polygon(
     6px 0%, calc(100% - 6px) 0%, 100% 6px, 100% calc(100% - 6px),
     calc(100% - 6px) 100%, 6px 100%, 0% calc(100% - 6px), 0% 6px
+  );
+}
+/* Larger chamfer for the bloom's backing panel. */
+.cn-cut-lg {
+  clip-path: polygon(
+    12px 0%, calc(100% - 12px) 0%, 100% 12px, 100% calc(100% - 12px),
+    calc(100% - 12px) 100%, 12px 100%, 0% calc(100% - 12px), 0% 12px
   );
 }
 

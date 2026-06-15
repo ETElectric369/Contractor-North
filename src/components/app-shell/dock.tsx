@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { PanelLeft } from "lucide-react";
 import { DOCK, type DockSection } from "@/lib/dock";
 import { GlassBloom } from "./glass-bloom";
 
@@ -17,12 +16,10 @@ export function Dock({
   branding,
   role,
   badges,
-  onFlip,
 }: {
   branding?: { name: string | null; logo: string | null };
   role?: string;
   badges?: Record<string, number>;
-  onFlip?: () => void;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -137,15 +134,6 @@ export function Dock({
             );
           })}
         </div>
-
-        <button
-          onClick={onFlip}
-          className="mt-1 flex flex-col items-center gap-0.5 rounded-xl px-2 py-1.5 text-[10px] text-slate-500 hover:text-slate-800"
-          title="Switch to the classic menu"
-        >
-          <PanelLeft className="h-4 w-4" />
-          Classic
-        </button>
       </aside>
 
       {active && anchor && (

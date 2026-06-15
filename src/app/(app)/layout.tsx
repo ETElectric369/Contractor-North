@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { AppNav } from "@/components/app-shell/app-nav";
+import { Dock } from "@/components/app-shell/dock";
 import { Topbar } from "@/components/app-shell/topbar";
 import { GlobalVoiceButton } from "@/components/global-voice-button";
 import { GlobalQuickAdd } from "@/components/global-quick-add";
@@ -63,9 +63,9 @@ export default async function AppLayout({
         } as React.CSSProperties
       }
     >
-      <AppNav branding={branding} lang={profile.language} role={profile.role} badges={badges} />
+      <Dock branding={branding} role={profile.role} badges={badges} />
       <div className="flex flex-1 flex-col overflow-hidden">
-        <Topbar profile={(profile as Profile) ?? null} branding={branding} lang={profile.language} role={profile.role} badges={badges} />
+        <Topbar profile={(profile as Profile) ?? null} lang={profile.language} />
         <main className="flex-1 overflow-y-auto bg-slate-50/70 p-4 pb-[calc(6rem+env(safe-area-inset-bottom))] lg:p-6 lg:pb-6">
           {children}
         </main>
