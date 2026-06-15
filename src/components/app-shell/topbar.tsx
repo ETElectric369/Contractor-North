@@ -1,9 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
-import { useRouter, usePathname } from "next/navigation";
-import { Menu, X, LogOut, ArrowLeft, ArrowRight, LayoutDashboard, ListTodo, Sparkles, Wand2, Search, Network } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Menu, X, LogOut, ArrowLeft, ArrowRight, Search } from "lucide-react";
 import { Sidebar } from "./sidebar";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { initials } from "@/lib/utils";
@@ -25,7 +24,6 @@ export function Topbar({
 }) {
   const [open, setOpen] = useState(false);
   const router = useRouter();
-  const pathname = usePathname();
 
   return (
     <>
@@ -59,41 +57,9 @@ export function Topbar({
           <ArrowRight className="h-5 w-5" />
         </button>
 
-        {/* Big one-tap destinations — solid buttons that hand themselves back
-            to the sidebar one by one as the screen narrows. */}
-        <nav className="flex flex-1 items-center justify-center gap-1.5 sm:gap-2">
-          {[
-            { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, show: "flex" },
-            { href: "/tasks", label: "Tasks", icon: ListTodo, show: "hidden min-[480px]:flex" },
-            { href: "/assistant", label: "Assistant", icon: Sparkles, show: "hidden sm:flex" },
-            { href: "/organize", label: "Organize", icon: Wand2, show: "hidden md:flex" },
-          ].map((d) => {
-            const active = pathname === d.href || pathname.startsWith(d.href + "/");
-            return (
-              <Link
-                key={d.href}
-                href={d.href}
-                className={`${d.show} items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-white shadow-sm transition-colors ${
-                  active ? "bg-brand-dark ring-2 ring-brand-light" : "bg-brand hover:bg-brand-dark"
-                }`}
-                title={d.label}
-              >
-                <d.icon className="h-4.5 w-4.5" />
-                <span className="hidden min-[560px]:inline">{d.label}</span>
-              </Link>
-            );
-          })}
-        </nav>
+        <div className="flex-1" />
 
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => window.dispatchEvent(new Event("cn:mindmap"))}
-            className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-50"
-            title="Open the navigator"
-            aria-label="Open the navigator"
-          >
-            <Network className="h-4 w-4" />
-          </button>
           <button
             onClick={() => window.dispatchEvent(new Event("cn:command"))}
             className="flex items-center gap-2 rounded-lg border border-slate-200 px-2.5 py-2 text-slate-500 hover:bg-slate-50 sm:px-3"

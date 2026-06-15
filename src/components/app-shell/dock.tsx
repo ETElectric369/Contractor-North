@@ -106,7 +106,7 @@ export function Dock({
           )}
         </button>
 
-        <div className="flex flex-1 flex-col items-center gap-1.5">
+        <div className="flex flex-1 flex-col items-center gap-0.5">
           {DOCK.map((section) => {
             const Icon = section.icon;
             const isOn = active?.key === section.key;
@@ -128,7 +128,7 @@ export function Dock({
                   if (active?.key !== section.key) open(section);
                 }}
                 onClick={() => (isOn ? go(section.href) : open(section))}
-                className={`group relative flex w-[72px] flex-col items-center gap-1 rounded-2xl px-1 py-2 transition-transform ${
+                className={`group relative flex w-[76px] flex-col items-center gap-0.5 rounded-2xl px-1 py-1 transition-transform ${
                   isOn ? "glass-tint glass-gloss scale-[1.06]" : "hover:scale-[1.06]"
                 }`}
                 title={section.label}
