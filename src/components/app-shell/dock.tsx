@@ -72,7 +72,7 @@ export function Dock({
         className="glass relative z-[70] hidden h-full w-[88px] flex-col items-center gap-1.5 border-r border-white/40 py-3 lg:flex"
       >
         <button
-          onClick={() => router.push("/dashboard")}
+          onClick={() => router.push("/planner")}
           className="mb-1 flex h-11 w-11 items-center justify-center rounded-2xl"
           aria-label={branding?.name ?? "Home"}
           title={branding?.name ?? "Contractor North"}

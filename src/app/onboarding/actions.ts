@@ -24,7 +24,7 @@ export async function createOrganization(formData: FormData) {
   }
 
   revalidatePath("/", "layout");
-  redirect("/dashboard");
+  redirect("/planner");
 }
 
 export async function acceptInvitation() {
@@ -40,5 +40,5 @@ export async function acceptInvitation() {
   }
 
   revalidatePath("/", "layout");
-  redirect("/dashboard");
+  redirect("/planner");
 }

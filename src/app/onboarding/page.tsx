@@ -25,7 +25,7 @@ export default async function OnboardingPage({
     .select("org_id")
     .eq("id", user.id)
     .maybeSingle();
-  if (profile?.org_id) redirect("/dashboard");
+  if (profile?.org_id) redirect("/planner");
 
   // Was this user invited to an existing company?
   const { data: inviteRow } = await supabase

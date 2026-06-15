@@ -180,7 +180,7 @@ export function GlassBloom({
       {/* Backing panel — a frosted dark rounded box; clicking inside it never
           closes the bloom (only the backdrop does). */}
       <div
-        className="cn-fade absolute rounded-3xl border border-white/15"
+        className="cn-fade absolute rounded-2xl border border-white/15"
         onMouseEnter={onEnter}
         onMouseLeave={onLeave}
         style={{

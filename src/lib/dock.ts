@@ -31,6 +31,9 @@ import {
   IdCard,
   Coins,
   CreditCard,
+  LayoutDashboard,
+  Bell,
+  Plug,
   type LucideIcon,
 } from "lucide-react";
 
@@ -79,6 +82,7 @@ export const DOCK: DockSection[] = [
           { id: "t-office", label: "Office", icon: Building2, href: "/tasks/office" },
         ],
       },
+      { id: "h-overview", label: "Overview", icon: LayoutDashboard, href: "/dashboard" },
     ],
   },
   {
@@ -99,11 +103,21 @@ export const DOCK: DockSection[] = [
     icon: Briefcase,
     href: "/jobs",
     children: [
-      { id: "j-all", label: "All jobs", icon: Briefcase, href: "/jobs" },
       { id: "j-prog", label: "In progress", icon: Play, href: "/jobs?status=in_progress" },
-      { id: "j-est", label: "Estimates", icon: FileText, href: "/jobs?status=estimate" },
-      { id: "j-cust", label: "Customers", icon: Users, href: "/crm" },
-      { id: "j-inq", label: "Inquiries", icon: UserPlus, href: "/leads" },
+      { id: "j-sched", label: "Scheduled", icon: CalendarDays, href: "/jobs?status=scheduled" },
+      { id: "j-all", label: "All jobs", icon: Briefcase, href: "/jobs" },
+    ],
+  },
+  {
+    key: "sales",
+    label: "Sales",
+    icon: TrendingUp,
+    href: "/crm",
+    children: [
+      { id: "sl-cust", label: "Customers", icon: Users, href: "/crm" },
+      { id: "sl-inq", label: "Inquiries", icon: UserPlus, href: "/leads" },
+      { id: "sl-est", label: "Estimates", icon: FileText, href: "/quotes?type=estimate" },
+      { id: "sl-quotes", label: "Quotes", icon: FileText, href: "/quotes?type=quote" },
     ],
   },
   {
@@ -113,7 +127,7 @@ export const DOCK: DockSection[] = [
     href: "/billing",
     children: [
       { id: "m-inv", label: "Invoices", icon: Receipt, href: "/billing" },
-      { id: "m-quotes", label: "Quotes", icon: FileText, href: "/quotes" },
+      { id: "m-pay", label: "Payments", icon: CreditCard, href: "/payments" },
       { id: "m-bills", label: "Bills & POs", icon: Wallet, href: "/bills" },
       { id: "m-price", label: "Price list", icon: Tags, href: "/price-list" },
       { id: "m-stock", label: "Inventory", icon: Boxes, href: "/inventory" },
@@ -153,9 +167,16 @@ export const DOCK: DockSection[] = [
     href: "/settings",
     children: [
       { id: "s-company", label: "Company", icon: Building2, href: "/settings?tab=company" },
+      { id: "s-financial", label: "Financial", icon: Calculator, href: "/settings?tab=financial" },
       { id: "s-docs", label: "Documents", icon: FileText, href: "/settings?tab=documents" },
+      { id: "s-sched", label: "Scheduling", icon: CalendarDays, href: "/settings?tab=scheduling" },
+      { id: "s-pay", label: "Payments", icon: CreditCard, href: "/settings?tab=payments" },
+      { id: "s-auto", label: "Automation", icon: Sparkles, href: "/settings?tab=automation" },
+      { id: "s-integ", label: "Integrations", icon: Plug, href: "/settings?tab=integrations" },
       { id: "s-team", label: "Team", icon: Users, href: "/settings?tab=team" },
-      { id: "s-billing", label: "Billing", icon: CreditCard, href: "/settings?tab=plan" },
+      { id: "s-notif", label: "Notifications", icon: Bell, href: "/settings?tab=notifications" },
+      { id: "s-plan", label: "Plan", icon: Wallet, href: "/settings?tab=plan" },
+      { id: "s-profile", label: "Profile", icon: IdCard, href: "/settings?tab=profile" },
     ],
   },
 ];

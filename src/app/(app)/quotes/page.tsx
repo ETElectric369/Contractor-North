@@ -9,18 +9,24 @@ import { formatCurrency, formatDate } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
-export default async function QuotesPage() {
+export default async function QuotesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ type?: string }>;
+}) {
+  const { type } = await searchParams;
+  const filter = type === "estimate" || type === "quote" ? type : null;
   const supabase = await createClient();
-  const { data } = await supabase
-    .from("quotes")
-    .select("*, customers(name, company_name)")
-    .order("created_at", { ascending: false });
+  let query = supabase.from("quotes").select("*, customers(name, company_name)");
+  if (filter) query = query.eq("doc_type", filter);
+  const { data } = await query.order("created_at", { ascending: false });
 
   const quotes = data ?? [];
+  const heading = filter === "estimate" ? "Estimates" : filter === "quote" ? "Quotes" : "Quotes & estimates";
 
   return (
     <div>
-      <PageHeader title="Quotes & estimates" description="Fixed-price quotes and time-&-materials estimates — toggle the type on any one.">
+      <PageHeader title={heading} description="Fixed-price quotes and time-&-materials estimates — toggle the type on any one.">
         <Link href="/quotes/new">
           <Button>
             <Plus className="h-4 w-4" /> New quote
