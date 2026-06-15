@@ -157,7 +157,12 @@ export function GlassBloom({
 
   return (
     <div className="fixed inset-0 z-[60]" role="dialog" aria-label={`${heading} menu`}>
-      <button className="absolute inset-0 cursor-default" aria-label="Close menu" onClick={onClose} />
+      <button
+        className="absolute inset-0 cursor-default"
+        aria-label="Close menu"
+        onClick={onClose}
+        style={{ background: "rgba(15, 23, 42, 0.14)" }}
+      />
       <svg className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden="true">
         {placed.map((p) => (
           <path
@@ -202,9 +207,10 @@ export function GlassBloom({
                 pointerEvents: "auto",
                 animationDelay: `${i * 30}ms`,
                 minWidth: 140,
-                // Translucent but tinted so the whole tile is a solid hit target
-                // that contrasts the page-glass — no clicking "through" it.
-                background: "rgba(225, 245, 242, 0.9)",
+                // A clearly-tinted, near-opaque sea-glass tile so it contrasts
+                // a white page underneath and the whole tile is one solid hit
+                // target — no clicking "through" it.
+                background: "rgba(186, 230, 222, 0.97)",
                 WebkitBackdropFilter: "blur(10px) saturate(1.4)",
                 backdropFilter: "blur(10px) saturate(1.4)",
               }}
