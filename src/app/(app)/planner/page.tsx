@@ -65,6 +65,26 @@ export default async function PlannerPage() {
   }
   const todayJobs = [...jobMap.values()];
 
+  // The job you're actually on right now — put it up front, with its materials.
+  const { data: curRows } = await supabase
+    .from("jobs")
+    .select("id, job_number, name, status, address, customers(name)")
+    .eq("status", "in_progress")
+    .order("scheduled_start", { ascending: false })
+    .limit(1);
+  const currentJob = (curRows ?? [])[0] as any | undefined;
+  let currentMaterials: { id: string; name: string } | null = null;
+  if (currentJob) {
+    const { data: ml } = await supabase
+      .from("material_lists")
+      .select("id, name")
+      .eq("job_id", currentJob.id)
+      .order("id", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    currentMaterials = (ml as any) ?? null;
+  }
+
   const hoursToday = (entries ?? []).reduce(
     (sum: number, e: any) =>
       e.status === "closed" && e.clock_out ? sum + hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes) : sum,
@@ -78,6 +98,44 @@ export default async function PlannerPage() {
   return (
     <div className="mx-auto max-w-3xl">
       <PageHeader title="My Day" description={niceDay} />
+
+      {/* Current job — front and center */}
+      {currentJob && (
+        <Card className="mb-4 border-brand/40 bg-brand-light/30">
+          <div className="px-5 py-4">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-brand">Current job</div>
+            <Link href={`/jobs/${currentJob.id}`} className="mt-0.5 block text-lg font-bold text-slate-900 hover:text-brand">
+              {currentJob.job_number} — {currentJob.name}
+            </Link>
+            {(currentJob.customers?.name || currentJob.address) && (
+              <div className="text-sm text-slate-500">
+                {currentJob.customers?.name ?? ""}{currentJob.address ? ` · ${currentJob.address}` : ""}
+              </div>
+            )}
+            <div className="mt-3 flex flex-wrap gap-2 text-sm font-medium">
+              <Link href={`/jobs/${currentJob.id}`} className="rounded-lg bg-brand px-3 py-1.5 text-white hover:bg-brand-dark">
+                Open job
+              </Link>
+              <Link
+                href={currentMaterials ? `/materials/${currentMaterials.id}` : `/jobs/${currentJob.id}?tab=materials`}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-slate-700 hover:bg-slate-50"
+              >
+                Materials list
+              </Link>
+              {currentJob.address && (
+                <a
+                  href={`https://maps.apple.com/?q=${encodeURIComponent(currentJob.address)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-slate-700 hover:bg-slate-50"
+                >
+                  Directions
+                </a>
+              )}
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* Quick stats */}
       <div className="mb-4 grid grid-cols-3 gap-3">
