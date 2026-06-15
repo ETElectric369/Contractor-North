@@ -33,14 +33,19 @@ export const Textarea = React.forwardRef<
     el.style.height = `${el.scrollHeight + 2}px`;
   }, []);
 
-  // Re-fit when the controlled value changes (and once on mount).
+  // Re-fit when the controlled value changes, and after layout settles on mount
+  // (a textarea mounted inside a just-opened modal reads scrollHeight = 0 until
+  // it's actually painted — defer with rAF so existing text isn't shown collapsed).
   React.useEffect(() => {
     fit();
+    const r = requestAnimationFrame(fit);
+    return () => cancelAnimationFrame(r);
   }, [fit, props.value, props.defaultValue]);
 
   return (
     <textarea
       ref={innerRef}
+      onFocus={fit}
       onInput={(e) => {
         fit();
         onInput?.(e);

@@ -64,6 +64,13 @@ export async function addMaterialItem(
   item: DraftMaterial,
 ): Promise<Result> {
   const supabase = await createClient();
+  const { data: last } = await supabase
+    .from("material_list_items")
+    .select("sort_order")
+    .eq("list_id", listId)
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
   const { error } = await supabase.from("material_list_items").insert({
     list_id: listId,
     description: item.description,
@@ -72,6 +79,7 @@ export async function addMaterialItem(
     unit: item.unit || "ea",
     vendor: item.vendor,
     est_cost: item.est_cost,
+    sort_order: ((last?.sort_order as number) ?? -1) + 1,
   });
   if (error) return { ok: false, error: error.message };
   revalidatePath(`/materials/${listId}`);

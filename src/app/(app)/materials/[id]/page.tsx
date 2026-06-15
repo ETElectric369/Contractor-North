@@ -28,12 +28,13 @@ export default async function MaterialListPage({
   if (!list) notFound();
   const l = list as any;
 
+  // material_list_items has no created_at column — ordering by it errored the
+  // whole query, so items silently never loaded. Order by sort_order only.
   const { data: items } = await supabase
     .from("material_list_items")
     .select("*")
     .eq("list_id", id)
-    .order("sort_order")
-    .order("created_at", { ascending: true });
+    .order("sort_order");
 
   return (
     <div className="mx-auto max-w-4xl">

@@ -30,6 +30,15 @@ export default async function JobsPage({
   ]);
   const jobs = (jobsData ?? []) as (Job & { customers: { name: string } | null })[];
 
+  // Default (unfiltered) view: active jobs up top, completed/invoiced sink to the
+  // bottom. Within a group the query's newest-first order is preserved (stable sort).
+  if (!status) {
+    const PRIORITY: Record<string, number> = {
+      in_progress: 0, scheduled: 1, on_hold: 2, estimate: 3, invoiced: 4, complete: 5,
+    };
+    jobs.sort((a, b) => (PRIORITY[a.status] ?? 9) - (PRIORITY[b.status] ?? 9));
+  }
+
   const STATUSES = ["estimate", "scheduled", "in_progress", "on_hold", "complete", "invoiced"];
 
   return (
