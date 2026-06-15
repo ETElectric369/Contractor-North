@@ -33,7 +33,7 @@ export default async function CustomerDetailPage({
   if (!customer) notFound();
   const c = customer as Customer;
 
-  const [{ data: jobs }, { data: quotes }, { data: invoices }, { data: pricingLevels }] = await Promise.all([
+  const [{ data: jobs }, { data: quotes }, { data: invoices }, { data: pricingLevels }, { data: credits }] = await Promise.all([
     supabase.from("jobs").select("*").eq("customer_id", id).order("created_at", { ascending: false }),
     supabase.from("quotes").select("*").eq("customer_id", id).order("created_at", { ascending: false }),
     supabase
@@ -42,7 +42,19 @@ export default async function CustomerDetailPage({
       .eq("customer_id", id)
       .order("created_at", { ascending: false }),
     supabase.from("pricing_levels").select("id, name, markup_pct").order("created_at"),
+    supabase
+      .from("customer_credits")
+      .select("amount, disposition, status")
+      .eq("customer_id", id)
+      .eq("status", "open"),
   ]);
+
+  const accountCredit = (credits ?? [])
+    .filter((x: any) => x.disposition === "credit")
+    .reduce((s: number, x: any) => s + Number(x.amount), 0);
+  const refundPending = (credits ?? [])
+    .filter((x: any) => x.disposition === "refund")
+    .reduce((s: number, x: any) => s + Number(x.amount), 0);
 
   const empty = (label: string) => (
     <p className="px-1 py-6 text-center text-sm text-slate-400">No {label} yet.</p>
@@ -187,6 +199,23 @@ export default async function CustomerDetailPage({
           />
         </div>
       </div>
+
+      {(accountCredit > 0 || refundPending > 0) && (
+        <div className="mb-4 flex flex-wrap gap-3">
+          {accountCredit > 0 && (
+            <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-2.5">
+              <div className="text-xs font-medium text-green-700">Account credit</div>
+              <div className="text-xl font-bold text-green-900">{formatCurrency(accountCredit)}</div>
+            </div>
+          )}
+          {refundPending > 0 && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5">
+              <div className="text-xs font-medium text-amber-700">Refund pending (accounting)</div>
+              <div className="text-xl font-bold text-amber-900">{formatCurrency(refundPending)}</div>
+            </div>
+          )}
+        </div>
+      )}
 
       <Tabs tabs={tabs} urlSync />
     </div>

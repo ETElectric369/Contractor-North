@@ -119,11 +119,46 @@ export async function receiveItem(
   receivedQty: number,
 ): Promise<Result> {
   const supabase = await createClient();
+  const { data: item } = await supabase
+    .from("purchase_order_items")
+    .select("received_qty, part_number, description, unit, unit_cost")
+    .eq("id", itemId)
+    .maybeSingle();
+  const oldQty = Number(item?.received_qty ?? 0);
+  const newQty = Math.max(0, receivedQty);
   const { error } = await supabase
     .from("purchase_order_items")
-    .update({ received_qty: Math.max(0, receivedQty) })
+    .update({ received_qty: newQty })
     .eq("id", itemId);
   if (error) return { ok: false, error: error.message };
+
+  // Received goods flow into stock: add the delta to the matching inventory item
+  // (by part number), creating it if it's new. Lines with no part number are
+  // skipped (nothing reliable to match on).
+  const delta = newQty - oldQty;
+  const pn = item?.part_number?.trim();
+  if (delta !== 0 && pn) {
+    const { data: inv } = await supabase
+      .from("inventory_items")
+      .select("id, quantity_on_hand")
+      .eq("part_number", pn)
+      .limit(1)
+      .maybeSingle();
+    if (inv) {
+      await supabase
+        .from("inventory_items")
+        .update({ quantity_on_hand: Number(inv.quantity_on_hand) + delta, updated_at: new Date().toISOString() })
+        .eq("id", inv.id);
+    } else if (delta > 0) {
+      await supabase.from("inventory_items").insert({
+        name: item?.description || pn,
+        part_number: pn,
+        unit: item?.unit || "ea",
+        quantity_on_hand: delta,
+        unit_cost: item?.unit_cost ?? null,
+      });
+    }
+  }
 
   // Recompute status: received if every line is fully received, else partial.
   const { data: items } = await supabase

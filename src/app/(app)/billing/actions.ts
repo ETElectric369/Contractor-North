@@ -6,6 +6,41 @@ import { sendEmail, renderDocEmail } from "@/lib/email";
 import { sendSms } from "@/lib/sms";
 import { pushInvoiceToQbo } from "@/lib/quickbooks";
 
+/** Post a credit/refund to the customer's account from an invoice. disposition
+ *  "credit" keeps it on their account; "refund" flags accounting to pay it back. */
+export async function createCustomerCredit(
+  invoiceId: string,
+  amount: number,
+  disposition: "credit" | "refund",
+  note?: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+  if (!(amount > 0)) return { ok: false, error: "Enter an amount." };
+
+  const { data: inv } = await supabase
+    .from("invoices")
+    .select("customer_id")
+    .eq("id", invoiceId)
+    .maybeSingle();
+
+  const { error } = await supabase.from("customer_credits").insert({
+    customer_id: inv?.customer_id ?? null,
+    invoice_id: invoiceId,
+    amount,
+    disposition,
+    note: note?.trim() || null,
+    created_by: user.id,
+  });
+  if (error) return { ok: false, error: error.message };
+  revalidatePath(`/billing/${invoiceId}`);
+  if (inv?.customer_id) revalidatePath(`/crm/${inv.customer_id}`);
+  return { ok: true };
+}
+
 export async function sendInvoiceToQuickbooks(
   id: string,
 ): Promise<{ ok: boolean; error?: string }> {

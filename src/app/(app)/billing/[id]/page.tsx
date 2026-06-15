@@ -8,6 +8,7 @@ import { createClient } from "@/lib/supabase/server";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { InvoiceDetail } from "./invoice-detail";
+import { CreditButton } from "./credit-button";
 import { EmailButton } from "@/components/email-button";
 import { SectionMapButton } from "@/components/section-map-button";
 import { invoiceSectionTree } from "@/lib/nav-tree";
@@ -105,6 +106,10 @@ export default async function InvoicePage({
             </a>
           )}
           <EmailButton id={inv.id} kind="invoice" />
+          <CreditButton
+            invoiceId={inv.id}
+            defaultAmount={Math.max(0, Number(inv.amount_paid) - Number(inv.total))}
+          />
           <SectionMapButton
             tree={invoiceSectionTree(inv.id, inv.invoice_number, {
               customerId: inv.customers?.id ?? null,
