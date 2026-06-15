@@ -8,13 +8,15 @@ import { AppointmentButton } from "../appointments/appointment-button";
 import { CalendarPanel } from "./calendar-panel";
 import { AppointmentsPanel } from "./appointments-panel";
 import { MapPanel } from "./map-panel";
+import { DayTimeline } from "./day-timeline";
 
 export const dynamic = "force-dynamic";
 
-// Unified "Schedule" hub: one screen with a Board / Calendar / Appointments /
-// Map view switcher (?view=). The board (default) keeps its own ?week= offset
-// and ?span=week|month sub-toggle.
+// Unified "Scheduler" hub: one screen with a Day timeline / Board / Calendar /
+// Appointments / Map view switcher (?view=). The board keeps its own ?week=
+// offset and ?span=week|month sub-toggle.
 const VIEWS = [
+  { id: "day", label: "Day", href: "/schedule?view=day" },
   { id: "board", label: "Board", href: "/schedule" },
   { id: "calendar", label: "Calendar", href: "/schedule?view=calendar" },
   { id: "appointments", label: "Appointments", href: "/schedule?view=appointments" },
@@ -24,7 +26,7 @@ const VIEWS = [
 function ScheduleFrame({ view, children }: { view: string; children: React.ReactNode }) {
   return (
     <div>
-      <PageHeader title="Schedule" description="Your jobs board, calendar, appointments and map — all in one place.">
+      <PageHeader title="Scheduler" description="Everyone's day, the jobs board, calendar, appointments and map — all in one place.">
         <div className="flex overflow-x-auto rounded-lg bg-slate-100 p-0.5 text-sm">
           {VIEWS.map((v) => (
             <Link
@@ -40,6 +42,12 @@ function ScheduleFrame({ view, children }: { view: string; children: React.React
       {children}
     </div>
   );
+}
+
+function addDays(dateStr: string, n: number) {
+  const d = new Date(`${dateStr}T12:00:00`); // noon keeps the date stable across tz/DST
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
 }
 
 function weekRange(offset: number) {
@@ -66,12 +74,65 @@ const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 export default async function SchedulePage({
   searchParams,
 }: {
-  searchParams: Promise<{ view?: string; week?: string; span?: string }>;
+  searchParams: Promise<{ view?: string; week?: string; span?: string; date?: string }>;
 }) {
   const sp = await searchParams;
-  const view = ["calendar", "appointments", "map"].includes(sp.view ?? "")
+  const view = ["day", "calendar", "appointments", "map"].includes(sp.view ?? "")
     ? (sp.view as string)
     : "board";
+
+  if (view === "day") {
+    const today = new Date().toISOString().slice(0, 10);
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(sp.date ?? "") ? (sp.date as string) : today;
+    const supabase = await createClient();
+    const [{ data: jobs }, { data: customers }, { data: members }] = await Promise.all([
+      supabase.from("jobs").select("id, job_number, name").order("created_at", { ascending: false }).limit(200),
+      supabase.from("customers").select("id, name").order("name"),
+      supabase.from("profiles").select("id, full_name").eq("active", true).order("full_name"),
+    ]);
+    const jobOpts = (jobs ?? []).map((j: any) => ({ id: j.id, label: `${j.job_number} · ${j.name}` }));
+    const custOpts = (customers ?? []).map((c: any) => ({ id: c.id, label: c.name }));
+    const staffOpts = (members ?? []).map((m: any) => ({ id: m.id, label: m.full_name ?? "Unnamed" }));
+    const label = new Date(`${date}T12:00:00`).toLocaleDateString("en-US", {
+      weekday: "long",
+      month: "short",
+      day: "numeric",
+    });
+    return (
+      <ScheduleFrame view="day">
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <Link
+            href={`/schedule?view=day&date=${addDays(date, -1)}`}
+            className="rounded-lg border border-slate-300 bg-white p-2 text-slate-600 hover:bg-slate-50"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Link>
+          {date !== today && (
+            <Link
+              href="/schedule?view=day"
+              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+            >
+              Today
+            </Link>
+          )}
+          <span className="min-w-[150px] text-center text-sm font-medium text-slate-700">
+            {date === today ? `Today · ${label}` : label}
+          </span>
+          <Link
+            href={`/schedule?view=day&date=${addDays(date, 1)}`}
+            className="rounded-lg border border-slate-300 bg-white p-2 text-slate-600 hover:bg-slate-50"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Link>
+          <div className="ml-auto flex gap-2">
+            <AppointmentButton jobs={jobOpts} customers={custOpts} staff={staffOpts} />
+            <NewJobButton customers={customers ?? []} />
+          </div>
+        </div>
+        <DayTimeline date={date} />
+      </ScheduleFrame>
+    );
+  }
 
   if (view === "calendar")
     return (
