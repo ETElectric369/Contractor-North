@@ -375,7 +375,7 @@ export default async function SettingsPage({
   return (
     <div className="mx-auto max-w-3xl">
       <PageHeader title="Settings" description="Configure every part of your business." />
-      <Tabs tabs={tabs} />
+      <Tabs tabs={tabs} urlSync />
     </div>
   );
 }

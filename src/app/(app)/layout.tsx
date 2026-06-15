@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { Sidebar } from "@/components/app-shell/sidebar";
+import { AppNav } from "@/components/app-shell/app-nav";
 import { Topbar } from "@/components/app-shell/topbar";
 import { GlobalVoiceButton } from "@/components/global-voice-button";
 import { GlobalQuickAdd } from "@/components/global-quick-add";
@@ -56,7 +56,7 @@ export default async function AppLayout({
 
   return (
     <div
-      className="flex h-dvh overflow-hidden"
+      className="app-backdrop flex h-dvh overflow-hidden"
       style={
         {
           "--color-brand": brand,
@@ -64,13 +64,10 @@ export default async function AppLayout({
         } as React.CSSProperties
       }
     >
-
-      <div className="hidden lg:block">
-        <Sidebar branding={branding} lang={profile.language} role={profile.role} badges={badges} />
-      </div>
+      <AppNav branding={branding} lang={profile.language} role={profile.role} badges={badges} />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Topbar profile={(profile as Profile) ?? null} branding={branding} lang={profile.language} role={profile.role} badges={badges} />
-        <main className="flex-1 overflow-y-auto bg-slate-50 p-4 pb-20 lg:p-6">
+        <main className="flex-1 overflow-y-auto bg-slate-50/70 p-4 pb-[calc(6rem+env(safe-area-inset-bottom))] lg:p-6 lg:pb-6">
           {children}
         </main>
       </div>

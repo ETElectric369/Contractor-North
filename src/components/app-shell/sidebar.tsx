@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, LayoutGrid } from "lucide-react";
 import { NAV } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 import { translator } from "@/lib/i18n";
@@ -14,6 +14,7 @@ export function Sidebar({
   lang,
   role,
   badges,
+  onFlip,
 }: {
   onNavigate?: () => void;
   branding?: { name: string | null; logo: string | null };
@@ -21,6 +22,8 @@ export function Sidebar({
   role?: string;
   /** href → count, shown as an attention chip (e.g. Organize My needs-review). */
   badges?: Record<string, number>;
+  /** Switch back to the new glass dock (desktop only). */
+  onFlip?: () => void;
 }) {
   const pathname = usePathname();
   const name = branding?.name || "Contractor North";
@@ -130,6 +133,14 @@ export function Sidebar({
         ))}
       </nav>
 
+      {onFlip && (
+        <button
+          onClick={onFlip}
+          className="mx-3 mb-1 flex items-center justify-center gap-2 rounded-lg border border-slate-200 py-2 text-xs font-medium text-slate-500 hover:bg-slate-50 hover:text-slate-800"
+        >
+          <LayoutGrid className="h-4 w-4" /> Glass dock
+        </button>
+      )}
       <div className="border-t border-slate-200 px-5 py-3 text-[11px] text-slate-400">
         Service · Integrity · Reliability
       </div>

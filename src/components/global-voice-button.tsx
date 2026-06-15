@@ -18,7 +18,7 @@ export function GlobalVoiceButton({ lang }: { lang?: string }) {
   const [listening, setListening] = useState(false);
   const [working, setWorking] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
-  const [pos, setPos] = useState({ x: 20, y: 76 }); // clears the mobile bottom nav
+  const [pos, setPos] = useState({ x: 20, y: 104 }); // clears the floating glass bottom nav (+ safe area)
   const modeRef = useRef<"dictate" | "command">("command");
   const lastField = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
   const recog = useRef<any>(null);

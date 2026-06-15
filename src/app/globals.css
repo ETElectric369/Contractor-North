@@ -65,6 +65,61 @@ main {
   animation: mm-bloom 0.22s ease-out both;
 }
 
+/* ── Liquid-glass skin (sea-glass teal) ─────────────────────────────────────
+   Frosted, translucent chrome with a glossy front face. The tint follows
+   --glass-tint (chrome only — quotes/invoices keep the brand color). The app
+   shell gets a soft tinted backdrop so the glass has something to refract. */
+:root {
+  --glass-tint: 27 148 136; /* sea-glass teal, space-separated rgb (fills, strokes) */
+  --glass-ink: 13 110 100; /* darker teal for text/icons — clears WCAG AA on glass */
+}
+.app-backdrop {
+  background:
+    radial-gradient(1100px 560px at 10% 6%, rgb(var(--glass-tint) / 0.16), transparent 60%),
+    radial-gradient(1000px 680px at 98% 100%, rgb(var(--glass-tint) / 0.13), transparent 55%),
+    linear-gradient(165deg, #f4f8f7, #eef4f3 58%, #e7f0ee);
+}
+.glass {
+  background: rgba(255, 255, 255, 0.55);
+  -webkit-backdrop-filter: blur(14px) saturate(1.5);
+  backdrop-filter: blur(14px) saturate(1.5);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 10px 28px -14px rgba(15, 23, 42, 0.3);
+}
+.glass-tint {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.12)),
+    rgb(var(--glass-tint) / 0.24);
+}
+/* A brighter specular sheen across the top — the "glossier front face". */
+.glass-gloss {
+  position: relative;
+  overflow: hidden;
+}
+.glass-gloss::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.78) 0%,
+    rgba(255, 255, 255, 0.2) 36%,
+    rgba(255, 255, 255, 0) 58%
+  );
+  pointer-events: none;
+}
+/* The bloom: a branch grows in from the dock icon, then the node pops. */
+@keyframes cn-pop {
+  from { opacity: 0; transform: translateY(-50%) scale(0.86); }
+  to { opacity: 1; transform: translateY(-50%) scale(1); }
+}
+.cn-bloom-node {
+  animation: cn-pop 0.2s ease-out both;
+}
+
 /* ── Print: hide UI chrome, give the document clean margins ─────────────── */
 @media print {
   .no-print {

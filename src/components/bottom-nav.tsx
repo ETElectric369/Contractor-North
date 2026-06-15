@@ -18,10 +18,10 @@ const TABS: Tab[] = [
 export function BottomNav() {
   const pathname = usePathname();
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-30 flex border-t border-slate-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden">
+    <nav className="glass fixed inset-x-2 bottom-2 z-30 flex rounded-2xl border-white/40 pb-[env(safe-area-inset-bottom)] lg:hidden">
       {TABS.map((t) => {
         const active = t.href ? pathname === t.href || pathname.startsWith(t.href + "/") : false;
-        const cls = `flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] font-medium ${active ? "text-brand" : "text-slate-500"}`;
+        const cls = `flex flex-1 flex-col items-center gap-0.5 py-2.5 text-[10px] font-medium ${active ? "text-[color:rgb(var(--glass-ink))]" : "text-slate-600"}`;
         const Icon = t.icon;
         if (t.action === "map") {
           return (
