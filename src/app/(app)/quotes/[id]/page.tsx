@@ -46,13 +46,13 @@ export default async function QuoteDetailPage({
 
   const lineItems = (items ?? []) as QuoteLineItem[];
 
-  // Has this quote already been turned into an invoice? (Drives idempotent UI.)
-  const { data: existingInv } = await supabase
-    .from("invoices")
-    .select("id")
-    .eq("quote_id", id)
-    .limit(1)
-    .maybeSingle();
+  // Has this quote already been turned into these records? (Drives idempotent UI:
+  // the map shows "View …" instead of minting a duplicate.)
+  const [{ data: existingInv }, { data: existingWo }, { data: existingMl }] = await Promise.all([
+    supabase.from("invoices").select("id").eq("quote_id", id).limit(1).maybeSingle(),
+    supabase.from("work_orders").select("id").eq("quote_id", id).limit(1).maybeSingle(),
+    supabase.from("material_lists").select("id").eq("quote_id", id).limit(1).maybeSingle(),
+  ]);
 
   // The quote's whole "neighborhood" — what it connects to AND what it can
   // become — as one map. Conversion nodes (with `run`) create the record then
@@ -69,8 +69,12 @@ export default async function QuoteDetailPage({
         : { id: "qm-job", label: "Create job", icon: "briefcase", run: createJobFromQuote.bind(null, q.id), hrefPrefix: "/jobs/" },
       ...(lineItems.length > 0
         ? [
-            { id: "qm-wo", label: "Work order", icon: "clipboardCheck", run: createWorkOrderFromQuote.bind(null, q.id), hrefPrefix: "/work-orders/" },
-            { id: "qm-ml", label: "Material list", icon: "boxes", run: createMaterialListFromQuote.bind(null, q.id), hrefPrefix: "/materials/" },
+            existingWo
+              ? { id: "qm-wo", label: "View work order", icon: "clipboardCheck", href: `/work-orders/${existingWo.id}` }
+              : { id: "qm-wo", label: "Create work order", icon: "clipboardCheck", run: createWorkOrderFromQuote.bind(null, q.id), hrefPrefix: "/work-orders/" },
+            existingMl
+              ? { id: "qm-ml", label: "View material list", icon: "boxes", href: `/materials/${existingMl.id}` }
+              : { id: "qm-ml", label: "Create material list", icon: "boxes", run: createMaterialListFromQuote.bind(null, q.id), hrefPrefix: "/materials/" },
           ]
         : []),
       { id: "qm-print", label: "Print / PDF", icon: "fileSpreadsheet", href: `/print/quote/${q.id}` },

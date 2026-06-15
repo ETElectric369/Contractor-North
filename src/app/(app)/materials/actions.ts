@@ -121,6 +121,15 @@ export async function createMaterialListFromQuote(quoteId: string): Promise<Resu
   if (qErr) return { ok: false, error: qErr.message };
   if (!quote) return { ok: false, error: "Quote not found." };
 
+  // Idempotent: one material list per quote — re-running opens the existing one.
+  const { data: existingList } = await supabase
+    .from("material_lists")
+    .select("id")
+    .eq("quote_id", quoteId)
+    .limit(1)
+    .maybeSingle();
+  if (existingList) return { ok: true, id: existingList.id };
+
   const { data: items, error: iErr } = await supabase
     .from("quote_line_items")
     .select("description, quantity, unit, unit_price, sort_order")
@@ -135,6 +144,7 @@ export async function createMaterialListFromQuote(quoteId: string): Promise<Resu
     .insert({
       name: `Materials — ${quote.quote_number}`,
       job_id: quote.job_id,
+      quote_id: quote.id,
       created_by: user.id,
     })
     .select("id")

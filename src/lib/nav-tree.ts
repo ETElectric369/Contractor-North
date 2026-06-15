@@ -153,20 +153,22 @@ export function invoiceSectionTree(
 export function workOrderSectionTree(
   woId: string,
   label: string,
-  rel: { jobId?: string | null; customerId?: string | null },
+  rel: { jobId?: string | null; customerId?: string | null; quoteId?: string | null },
 ): NavTree {
   const nodes: TreeNode[] = [{ id: "w-self", label: "This work order", icon: "clipboardCheck", href: `/work-orders/${woId}` }];
   if (rel.jobId) nodes.push({ id: "w-job", label: "Job", icon: "briefcase", href: `/jobs/${rel.jobId}` });
   if (rel.customerId) nodes.push({ id: "w-cust", label: "Customer", icon: "users", href: `/crm/${rel.customerId}` });
+  if (rel.quoteId) nodes.push({ id: "w-quote", label: "Source quote", icon: "fileText", href: `/quotes/${rel.quoteId}` });
   nodes.push({ id: "w-print", label: "Print / PDF", icon: "fileSpreadsheet", href: `/print/work-order/${woId}` });
   nodes.push({ id: "w-all", label: "All work orders", icon: "list", href: "/work-orders" });
   return { center: { label, icon: "clipboardCheck" }, nodes };
 }
 
 /** A material list's relationships as a mind-map. */
-export function materialListSectionTree(listId: string, label: string, rel: { jobId?: string | null }): NavTree {
+export function materialListSectionTree(listId: string, label: string, rel: { jobId?: string | null; quoteId?: string | null }): NavTree {
   const nodes: TreeNode[] = [{ id: "ml-self", label: "This list", icon: "boxes", href: `/materials/${listId}` }];
   if (rel.jobId) nodes.push({ id: "ml-job", label: "Job", icon: "briefcase", href: `/jobs/${rel.jobId}` });
+  if (rel.quoteId) nodes.push({ id: "ml-quote", label: "Source quote", icon: "fileText", href: `/quotes/${rel.quoteId}` });
   nodes.push({ id: "ml-all", label: "All material lists", icon: "list", href: "/materials" });
   return { center: { label, icon: "boxes" }, nodes };
 }

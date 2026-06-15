@@ -68,6 +68,16 @@ export async function createWorkOrderFromQuote(quoteId: string): Promise<Result>
   if (qErr) return { ok: false, error: qErr.message };
   if (!quote) return { ok: false, error: "Quote not found." };
 
+  // Idempotent: one work order per quote — re-running opens the existing one
+  // instead of minting a duplicate WO (mirrors createInvoiceFromQuote).
+  const { data: existing } = await supabase
+    .from("work_orders")
+    .select("id")
+    .eq("quote_id", quoteId)
+    .limit(1)
+    .maybeSingle();
+  if (existing) return { ok: true, id: existing.id };
+
   const { data: items, error: iErr } = await supabase
     .from("quote_line_items")
     .select("description, quantity, unit, sort_order")
@@ -93,6 +103,7 @@ export async function createWorkOrderFromQuote(quoteId: string): Promise<Result>
       description,
       job_id: quote.job_id,
       customer_id: quote.customer_id,
+      quote_id: quote.id,
       status: "draft",
       created_by: user.id,
     })

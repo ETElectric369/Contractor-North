@@ -67,6 +67,7 @@ export default async function WorkOrderDetailPage({
             tree={workOrderSectionTree(w.id, w.wo_number, {
               jobId: w.jobs?.id ?? null,
               customerId: w.customers?.id ?? null,
+              quoteId: (w as any).quote_id ?? null,
             })}
           />
           <WoEditButton wo={w} jobs={jobs ?? []} techs={techs ?? []} />

@@ -60,7 +60,7 @@ export default async function MaterialListPage({
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <SectionMapButton tree={materialListSectionTree(l.id, l.name, { jobId: l.jobs?.id ?? null })} />
+          <SectionMapButton tree={materialListSectionTree(l.id, l.name, { jobId: l.jobs?.id ?? null, quoteId: (l as any).quote_id ?? null })} />
           <NewPoButton
             jobs={l.jobs ? [{ id: l.jobs.id, job_number: l.jobs.job_number, name: l.jobs.name }] : []}
             lists={[{ id: l.id, name: l.name }]}
