@@ -22,6 +22,8 @@ export async function createTask(input: {
   priority?: number;
   assigned_to?: string | null;
   notes?: string | null;
+  parent_id?: string | null;
+  tags?: string[] | null;
 }): Promise<Result> {
   const supabase = await createClient();
   const {
@@ -30,6 +32,7 @@ export async function createTask(input: {
   if (!user) return { ok: false, error: "Not signed in." };
   if (!input.title.trim()) return { ok: false, error: "Title is required." };
 
+  const tags = (input.tags ?? []).map((t) => t.trim()).filter(Boolean);
   const { error } = await supabase.from("tasks").insert({
     title: input.title.trim(),
     category: input.category,
@@ -38,6 +41,8 @@ export async function createTask(input: {
     priority: input.priority ?? 0,
     assigned_to: input.assigned_to || null,
     notes: input.notes?.trim() || null,
+    parent_id: input.parent_id || null,
+    tags: tags.length ? tags : null,
     created_by: user.id,
   });
   if (error) return { ok: false, error: error.message };
@@ -72,6 +77,7 @@ export async function updateTask(
     priority?: number;
     assigned_to?: string | null;
     notes?: string | null;
+    tags?: string[] | null;
   },
   opts?: { category?: string | null; jobId?: string | null },
 ): Promise<Result> {
@@ -83,6 +89,10 @@ export async function updateTask(
   if (patch.priority !== undefined) clean.priority = patch.priority;
   if (patch.assigned_to !== undefined) clean.assigned_to = patch.assigned_to || null;
   if (patch.notes !== undefined) clean.notes = patch.notes?.trim() || null;
+  if (patch.tags !== undefined) {
+    const tags = (patch.tags ?? []).map((t) => t.trim()).filter(Boolean);
+    clean.tags = tags.length ? tags : null;
+  }
 
   const { error } = await supabase.from("tasks").update(clean).eq("id", id);
   if (error) return { ok: false, error: error.message };

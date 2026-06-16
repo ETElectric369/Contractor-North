@@ -24,7 +24,7 @@ export default async function CategoryTasksPage({
   const [{ data: tasks }, { data: jobs }, { data: people }] = await Promise.all([
     supabase
       .from("tasks")
-      .select("id, title, category, status, priority, due_date, job_id, assigned_to, jobs(job_number, name), assignee:assigned_to(full_name)")
+      .select("id, title, category, status, priority, due_date, job_id, assigned_to, parent_id, tags, jobs(job_number, name), assignee:assigned_to(full_name)")
       .eq("category", category)
       .order("status", { ascending: true })
       .order("priority", { ascending: false })

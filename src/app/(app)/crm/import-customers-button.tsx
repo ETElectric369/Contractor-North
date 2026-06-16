@@ -169,9 +169,20 @@ export function ImportCustomersButton({ csv = true, label }: { csv?: boolean; la
 
   return (
     <>
-      <Button variant="outline" onClick={() => fileRef.current?.click()}>
-        <Upload className="h-4 w-4" /> {label ?? (csv ? "Import contacts" : "Import a contact")}
-      </Button>
+      <span className="inline-flex flex-col gap-1">
+        <Button
+          variant="outline"
+          onClick={() => fileRef.current?.click()}
+          title={!csv ? "iPhone: open a contact → Share Contact → Save to Files, then pick it here" : undefined}
+        >
+          <Upload className="h-4 w-4" /> {label ?? (csv ? "Import contacts" : "Import a contact")}
+        </Button>
+        {!csv && (
+          <span className="text-[11px] text-slate-400">
+            iPhone: open a contact → Share → Save to Files, then pick the .vcf here.
+          </span>
+        )}
+      </span>
       <input
         ref={fileRef}
         type="file"

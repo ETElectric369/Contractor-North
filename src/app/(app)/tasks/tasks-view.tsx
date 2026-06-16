@@ -20,6 +20,8 @@ export interface ViewTask {
   due_date: string | null;
   job_id: string | null;
   assigned_to: string | null;
+  parent_id?: string | null;
+  tags?: string[] | null;
   jobs?: { job_number: string; name: string } | null;
   assignee?: { full_name: string | null } | null;
 }
@@ -162,6 +164,7 @@ function TaskEditModal({
   const [dueDate, setDueDate] = useState(t.due_date ?? "");
   const [priority, setPriority] = useState(t.priority);
   const [assignedTo, setAssignedTo] = useState(t.assigned_to ?? "");
+  const [tags, setTags] = useState((t.tags ?? []).join(", "));
   const [error, setError] = useState<string | null>(null);
 
   function save() {
@@ -170,7 +173,13 @@ function TaskEditModal({
     start(async () => {
       const res = await updateTask(
         t.id,
-        { title, due_date: dueDate || null, priority, assigned_to: assignedTo || null },
+        {
+          title,
+          due_date: dueDate || null,
+          priority,
+          assigned_to: assignedTo || null,
+          tags: tags.split(",").map((s) => s.trim()).filter(Boolean),
+        },
         { category },
       );
       if (!res.ok) return setError(res.error ?? "Could not save.");
@@ -214,65 +223,115 @@ function TaskEditModal({
             ))}
           </Select>
         </div>
+        <div>
+          <Label htmlFor="te-tags">Tags</Label>
+          <Input id="te-tags" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="comma, separated, tags" />
+        </div>
       </div>
     </Modal>
   );
 }
 
-export function TaskRow({ t, people, category }: { t: ViewTask; people: Person[]; category: TaskCategory }) {
+export function TaskRow({
+  t,
+  people,
+  category,
+  subtasks = [],
+}: {
+  t: ViewTask;
+  people: Person[];
+  category: TaskCategory;
+  subtasks?: ViewTask[];
+}) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [editing, setEditing] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [subTitle, setSubTitle] = useState("");
+
+  function addSub() {
+    if (!subTitle.trim()) return;
+    start(async () => {
+      await createTask({ title: subTitle, category, parent_id: t.id });
+      setSubTitle("");
+      setAdding(false);
+      router.refresh();
+    });
+  }
 
   return (
-    <li className="flex items-start gap-3 px-4 py-2.5 text-sm">
-      <input
-        type="checkbox"
-        checked={t.status === "done"}
-        onChange={(e) =>
-          start(async () => {
-            await toggleTask(t.id, e.target.checked, { category });
-            router.refresh();
-          })
-        }
-        className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-brand focus:ring-brand"
-      />
-      <div className="min-w-0 flex-1">
-        <div className={t.status === "done" ? "text-slate-400 line-through" : "font-medium text-slate-900"}>
-          {t.priority > 0 && t.status !== "done" && (
-            <Flag className={`mr-1 inline h-3.5 w-3.5 ${t.priority >= 2 ? "text-red-600" : "text-amber-500"}`} />
-          )}
-          {t.title}
+    <li className="px-4 py-2.5 text-sm">
+      <div className="flex items-start gap-3">
+        <input
+          type="checkbox"
+          checked={t.status === "done"}
+          onChange={(e) => start(async () => { await toggleTask(t.id, e.target.checked, { category }); router.refresh(); })}
+          className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-brand focus:ring-brand"
+        />
+        <div className="min-w-0 flex-1">
+          <div className={t.status === "done" ? "text-slate-400 line-through" : "font-medium text-slate-900"}>
+            {t.priority > 0 && t.status !== "done" && (
+              <Flag className={`mr-1 inline h-3.5 w-3.5 ${t.priority >= 2 ? "text-red-600" : "text-amber-500"}`} />
+            )}
+            {t.title}
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
+            {t.due_date && <span>Due {formatDate(t.due_date)}</span>}
+            {t.priority > 0 && <span className={t.priority >= 2 ? "text-red-600" : "text-amber-600"}>{priorityLabel(t.priority)}</span>}
+            {t.assignee?.full_name && (
+              <span className="flex items-center gap-1"><User className="h-3 w-3" /> {t.assignee.full_name}</span>
+            )}
+            {t.jobs && (
+              <Link href={`/jobs/${t.job_id}`} className="flex items-center gap-1 hover:text-brand">
+                <Briefcase className="h-3 w-3" /> {t.jobs.name}
+              </Link>
+            )}
+            {(t.tags ?? []).map((tag) => (
+              <span key={tag} className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-500">#{tag}</span>
+            ))}
+          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
-          {t.due_date && <span>Due {formatDate(t.due_date)}</span>}
-          {t.priority > 0 && <span className={t.priority >= 2 ? "text-red-600" : "text-amber-600"}>{priorityLabel(t.priority)}</span>}
-          {t.assignee?.full_name && (
-            <span className="flex items-center gap-1"><User className="h-3 w-3" /> {t.assignee.full_name}</span>
-          )}
-          {t.jobs && (
-            <Link href={`/jobs/${t.job_id}`} className="flex items-center gap-1 hover:text-brand">
-              <Briefcase className="h-3 w-3" /> {t.jobs.name}
-            </Link>
-          )}
-        </div>
+        <button onClick={() => setAdding((v) => !v)} className="text-slate-300 hover:text-brand" title="Add subtask">
+          <Plus className="h-4 w-4" />
+        </button>
+        <button onClick={() => setEditing(true)} className="text-slate-300 hover:text-slate-600" title="Edit">
+          <Pencil className="h-4 w-4" />
+        </button>
+        <button
+          onClick={() => start(async () => { await deleteTask(t.id, { category }); router.refresh(); })}
+          disabled={pending}
+          className="text-slate-300 hover:text-red-600"
+          title="Delete"
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
       </div>
-      <button onClick={() => setEditing(true)} className="text-slate-300 hover:text-slate-600" title="Edit">
-        <Pencil className="h-4 w-4" />
-      </button>
-      <button
-        onClick={() =>
-          start(async () => {
-            await deleteTask(t.id, { category });
-            router.refresh();
-          })
-        }
-        disabled={pending}
-        className="text-slate-300 hover:text-red-600"
-        title="Delete"
-      >
-        <Trash2 className="h-4 w-4" />
-      </button>
+
+      {(subtasks.length > 0 || adding) && (
+        <ul className="ml-7 mt-1.5 space-y-1 border-l border-slate-100 pl-3">
+          {subtasks.map((st) => (
+            <li key={st.id} className="flex items-center gap-2 text-xs">
+              <input
+                type="checkbox"
+                checked={st.status === "done"}
+                onChange={(e) => start(async () => { await toggleTask(st.id, e.target.checked, { category }); router.refresh(); })}
+                className="h-3.5 w-3.5 rounded border-slate-300 text-brand focus:ring-brand"
+              />
+              <span className={`flex-1 ${st.status === "done" ? "text-slate-400 line-through" : "text-slate-700"}`}>{st.title}</span>
+              <button onClick={() => start(async () => { await deleteTask(st.id, { category }); router.refresh(); })} className="text-slate-300 hover:text-red-600">
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </li>
+          ))}
+          {adding && (
+            <li className="flex items-center gap-2">
+              <Input value={subTitle} onChange={(e) => setSubTitle(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addSub()} placeholder="Subtask…" autoFocus className="h-7 text-xs" />
+              <button onClick={addSub} disabled={pending || !subTitle.trim()} className="rounded bg-brand px-2 py-1 text-xs font-medium text-white disabled:opacity-50">Add</button>
+            </li>
+          )}
+        </ul>
+      )}
+
       {editing && (
         <TaskEditModal t={t} people={people} category={category} open={editing} onClose={() => setEditing(false)} />
       )}
@@ -293,8 +352,20 @@ function TaskColumn({
   tasks: ViewTask[];
   people: Person[];
 }) {
-  const open = tasks.filter((t) => t.status !== "done");
-  const done = tasks.filter((t) => t.status === "done");
+  // Nest subtasks under their parent; only top-level tasks are columns rows.
+  const childrenByParent = new Map<string, ViewTask[]>();
+  for (const t of tasks) {
+    if (t.parent_id) {
+      if (!childrenByParent.has(t.parent_id)) childrenByParent.set(t.parent_id, []);
+      childrenByParent.get(t.parent_id)!.push(t);
+    }
+  }
+  const top = tasks.filter((t) => !t.parent_id);
+  const open = top.filter((t) => t.status !== "done");
+  const done = top.filter((t) => t.status === "done");
+  const row = (t: ViewTask) => (
+    <TaskRow key={t.id} t={t} people={people} category={category} subtasks={childrenByParent.get(t.id) ?? []} />
+  );
 
   return (
     <Card className={`overflow-hidden border ${tone}`}>
@@ -303,12 +374,12 @@ function TaskColumn({
         <span className="text-xs text-slate-500">{open.length} open</span>
       </div>
       <ul className="divide-y divide-slate-100 bg-white">
-        {tasks.length === 0 ? (
+        {top.length === 0 ? (
           <li className="px-4 py-6 text-center text-sm text-slate-400">No {label.toLowerCase()} tasks yet.</li>
         ) : (
           <>
-            {open.map((t) => <TaskRow key={t.id} t={t} people={people} category={category} />)}
-            {done.map((t) => <TaskRow key={t.id} t={t} people={people} category={category} />)}
+            {open.map(row)}
+            {done.map(row)}
           </>
         )}
       </ul>

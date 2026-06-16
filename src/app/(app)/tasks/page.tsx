@@ -9,7 +9,7 @@ export default async function TasksPage() {
   const [{ data: tasks }, { data: jobs }, { data: people }] = await Promise.all([
     supabase
       .from("tasks")
-      .select("id, title, category, status, priority, due_date, job_id, assigned_to, jobs(job_number, name), assignee:assigned_to(full_name)")
+      .select("id, title, category, status, priority, due_date, job_id, assigned_to, parent_id, tags, jobs(job_number, name), assignee:assigned_to(full_name)")
       .order("status", { ascending: true })
       .order("priority", { ascending: false })
       .order("due_date", { ascending: true, nullsFirst: false }),
