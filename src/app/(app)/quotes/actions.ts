@@ -292,7 +292,20 @@ export async function saveQuote(input: SaveQuoteInput) {
     if (itemsErr) return { ok: false as const, error: itemsErr.message };
   }
 
+  // A new estimate/quote spawns a sales follow-up task (best-effort).
+  await supabase.from("tasks").insert({
+    title: `Follow up on quote${input.title ? ` — ${input.title}` : ""}`,
+    category: "sales",
+    status: "open",
+    priority: 0,
+    job_id: input.job_id || null,
+    due_date: new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10),
+    created_by: user.id,
+  });
+
   revalidatePath("/quotes");
+  revalidatePath("/tasks");
+  revalidatePath("/tasks/sales");
   return { ok: true as const, id: quote.id };
 }
 

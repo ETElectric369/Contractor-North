@@ -86,6 +86,40 @@ export async function addMaterialItem(
   return { ok: true };
 }
 
+export async function updateMaterialItem(
+  itemId: string,
+  listId: string,
+  patch: Partial<DraftMaterial>,
+): Promise<Result> {
+  const supabase = await createClient();
+  const clean: Record<string, unknown> = {};
+  if (patch.description !== undefined) clean.description = patch.description.trim();
+  if (patch.part_number !== undefined) clean.part_number = patch.part_number || null;
+  if (patch.quantity !== undefined) clean.quantity = patch.quantity || 1;
+  if (patch.unit !== undefined) clean.unit = patch.unit || "ea";
+  if (patch.vendor !== undefined) clean.vendor = patch.vendor || null;
+  if (patch.est_cost !== undefined) clean.est_cost = patch.est_cost ?? null;
+  const { error } = await supabase.from("material_list_items").update(clean).eq("id", itemId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath(`/materials/${listId}`);
+  return { ok: true };
+}
+
+export async function setMaterialItemPurchased(
+  itemId: string,
+  listId: string,
+  purchased: boolean,
+): Promise<Result> {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("material_list_items")
+    .update({ purchased, purchased_at: purchased ? new Date().toISOString() : null })
+    .eq("id", itemId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath(`/materials/${listId}`);
+  return { ok: true };
+}
+
 export async function deleteMaterialItem(
   itemId: string,
   listId: string,
