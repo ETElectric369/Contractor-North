@@ -8,19 +8,26 @@ import { Modal } from "@/components/ui/modal";
 import { Input, Label } from "@/components/ui/input";
 import { createScheduleProposal, cancelScheduleProposal } from "../../schedule/actions";
 
-const fmt = (d: string) =>
-  new Date(`${d}T12:00:00`).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+type Slot = { date: string; time: string };
 
-function defaultDates(): string[] {
-  // Next three weekdays, starting tomorrow.
-  const out: string[] = [];
+const fmt = (s: Slot | string) => {
+  const date = typeof s === "string" ? s : s.date;
+  const time = typeof s === "string" ? "" : s.time;
+  const dl = new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  if (!time) return dl;
+  const tl = new Date(`2000-01-01T${time}:00`).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return `${dl} · ${tl}`;
+};
+
+function defaultSlots(): Slot[] {
+  // Next three weekdays at 8 AM, starting tomorrow.
+  const out: Slot[] = [];
   const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
   while (out.length < 3) {
     d.setDate(d.getDate() + 1);
-    if (d.getDay() !== 0 && d.getDay() !== 6) {
-      const p = (n: number) => String(n).padStart(2, "0");
-      out.push(`${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`);
-    }
+    if (d.getDay() !== 0 && d.getDay() !== 6)
+      out.push({ date: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`, time: "08:00" });
   }
   return out;
 }
@@ -33,13 +40,13 @@ export function ProposeDatesButton({
 }: {
   jobId: string;
   customerPhone?: string | null;
-  pending?: { id: string; token: string; dates: string[] } | null;
+  pending?: { id: string; token: string; dates: (string | Slot)[] } | null;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [busy, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [dates, setDates] = useState<string[]>(defaultDates());
+  const [slots, setSlots] = useState<Slot[]>(defaultSlots());
   const [timeNote, setTimeNote] = useState("");
   const [token, setToken] = useState<string | null>(pendingProposal?.token ?? null);
   const [copied, setCopied] = useState(false);
@@ -53,7 +60,7 @@ export function ProposeDatesButton({
   function create() {
     setError(null);
     start(async () => {
-      const res = await createScheduleProposal(jobId, dates, timeNote.trim() || null);
+      const res = await createScheduleProposal(jobId, slots, timeNote.trim() || null);
       if (!res.ok || !res.token) return setError(res.error ?? "Could not create the link.");
       setToken(res.token);
       router.refresh();
@@ -124,19 +131,23 @@ export function ProposeDatesButton({
           ) : (
             <>
               <p className="text-sm text-slate-600">
-                Offer up to three days. The customer gets a link, taps one, and the job lands on the
-                schedule (8&nbsp;AM start) — no phone tag.
+                Offer up to three date+time options. The customer gets a link, taps one, and the job
+                lands on the schedule — no phone tag.
               </p>
-              <div className="grid grid-cols-3 gap-2">
-                {dates.map((d, i) => (
-                  <div key={i}>
-                    <Label>Option {i + 1}</Label>
+              <div className="space-y-2">
+                {slots.map((sl, i) => (
+                  <div key={i} className="grid grid-cols-2 gap-2">
                     <Input
                       type="date"
-                      value={d}
-                      onChange={(e) =>
-                        setDates((arr) => arr.map((x, xi) => (xi === i ? e.target.value : x)))
-                      }
+                      value={sl.date}
+                      onChange={(e) => setSlots((arr) => arr.map((x, xi) => (xi === i ? { ...x, date: e.target.value } : x)))}
+                      aria-label={`Option ${i + 1} date`}
+                    />
+                    <Input
+                      type="time"
+                      value={sl.time}
+                      onChange={(e) => setSlots((arr) => arr.map((x, xi) => (xi === i ? { ...x, time: e.target.value } : x)))}
+                      aria-label={`Option ${i + 1} time`}
                     />
                   </div>
                 ))}

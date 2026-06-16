@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 
 export interface DayBlock {
@@ -12,6 +13,7 @@ export interface DayBlock {
   endIso: string | null; // null → open / ongoing (time entries)
   href: string;
   open?: boolean;
+  tentative?: boolean; // proposed appointment awaiting a customer pick
 }
 export interface DayPerson {
   id: string;
@@ -85,10 +87,13 @@ export function DayGrid({
   const now = new Date();
   const nowMin = now.getHours() * 60 + now.getMinutes();
   const isToday = localDateStr(now) === dateStr;
+  const [showPending, setShowPending] = useState(true);
 
   // Keep only blocks that start on the selected day in the viewer's timezone
   // (the server sends a generous ±window; the browser knows the real local day).
-  const onDay = blocks.filter((b) => localDateStr(new Date(b.startIso)) === dateStr);
+  const dayBlocks = blocks.filter((b) => localDateStr(new Date(b.startIso)) === dateStr);
+  const hasPending = dayBlocks.some((b) => b.tentative);
+  const onDay = dayBlocks.filter((b) => showPending || !b.tentative);
 
   // Resolve each block to local start/end minutes (open entries end at "now").
   const resolved = onDay.map((b) => {
@@ -120,9 +125,21 @@ export function DayGrid({
   const top = (min: number) => ((min - lo * 60) / 60) * ROW_H;
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-      <div className="flex min-w-max">
-        {/* Hour gutter */}
+    <div>
+      {hasPending && (
+        <label className="mb-2 flex items-center gap-2 text-xs text-slate-500">
+          <input
+            type="checkbox"
+            checked={showPending}
+            onChange={(e) => setShowPending(e.target.checked)}
+            className="h-3.5 w-3.5 rounded border-slate-300 text-brand focus:ring-brand"
+          />
+          Show pending (proposed) appointments
+        </label>
+      )}
+      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+        <div className="flex min-w-max">
+          {/* Hour gutter */}
         <div className="sticky left-0 z-10 w-12 shrink-0 border-r border-slate-100 bg-white">
           <div className="h-9 border-b border-slate-100" />
           <div className="relative" style={{ height: gridH }}>
@@ -168,7 +185,7 @@ export function DayGrid({
                     <Link
                       key={b.id}
                       href={b.href}
-                      className={`absolute overflow-hidden rounded-md px-1.5 py-1 text-[11px] leading-tight shadow-sm transition hover:z-30 hover:shadow-md ${KIND_STYLE[b.kind]}`}
+                      className={`absolute overflow-hidden rounded-md px-1.5 py-1 text-[11px] leading-tight shadow-sm transition hover:z-30 hover:shadow-md ${KIND_STYLE[b.kind]} ${b.tentative ? "border-dashed opacity-60" : ""}`}
                       style={{
                         top: top(b.startMin) + 1,
                         height: Math.max(20, top(b.endMin) - top(b.startMin) - 2),
@@ -190,6 +207,7 @@ export function DayGrid({
             </div>
           );
         })}
+        </div>
       </div>
     </div>
   );

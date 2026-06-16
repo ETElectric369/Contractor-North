@@ -85,7 +85,7 @@ export function WeekGrid({
                     <Link
                       key={b.id}
                       href={b.href}
-                      className={`block truncate rounded px-1.5 py-1 text-[10px] leading-tight ${CHIP[b.kind]}`}
+                      className={`block truncate rounded px-1.5 py-1 text-[10px] leading-tight ${CHIP[b.kind]} ${b.tentative ? "border-dashed opacity-60" : ""}`}
                       title={`${b.label}${b.sublabel ? ` — ${b.sublabel}` : ""}`}
                     >
                       <span className="font-semibold tabular-nums">

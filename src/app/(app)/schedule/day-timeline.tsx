@@ -33,7 +33,7 @@ export async function gatherBlocks(
       .lt("scheduled_start", winEndIso),
     supabase
       .from("appointments")
-      .select("id, type, title, starts_at, ends_at, assigned_to, job_id, customers(name)")
+      .select("id, type, title, starts_at, ends_at, assigned_to, job_id, status, customers(name)")
       .gte("starts_at", winStartIso)
       .lt("starts_at", winEndIso)
       .neq("status", "cancelled"),
@@ -70,6 +70,7 @@ export async function gatherBlocks(
       startIso: a.starts_at,
       endIso: a.ends_at ?? null,
       href: a.job_id ? `/jobs/${a.job_id}` : "/schedule?view=appointments",
+      tentative: a.status === "proposed",
     });
   }
 

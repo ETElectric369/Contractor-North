@@ -80,10 +80,11 @@ export async function setJobAssignee(
   return { ok: true };
 }
 
-/** Offer the customer up to 3 dates; returns the public pick-a-date token. */
+/** Offer the customer up to 3 date+time slots; returns the public pick token.
+ *  A slot with no time schedules the job at 8 AM (legacy behavior). */
 export async function createScheduleProposal(
   jobId: string,
-  dates: string[],
+  slots: { date: string; time?: string }[],
   timeNote?: string | null,
 ): Promise<Result & { token?: string }> {
   const supabase = await createClient();
@@ -92,7 +93,10 @@ export async function createScheduleProposal(
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
 
-  const clean = [...new Set(dates.filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)))].slice(0, 3);
+  const clean = slots
+    .filter((s) => /^\d{4}-\d{2}-\d{2}$/.test(s?.date ?? ""))
+    .map((s) => ({ date: s.date, time: /^\d{2}:\d{2}/.test(s.time ?? "") ? (s.time as string) : "" }))
+    .slice(0, 3);
   if (!clean.length) return { ok: false, error: "Pick at least one date." };
 
   // One pending proposal per job — replace any existing one.
