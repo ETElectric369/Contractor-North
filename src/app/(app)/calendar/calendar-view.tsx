@@ -74,6 +74,8 @@ export function CalendarView({
 }) {
   const [view, setView] = useState<View>("week");
   const [anchor, setAnchor] = useState(() => new Date());
+  // Selectable layers — one calendar, show/hide what you want on it.
+  const [layers, setLayers] = useState({ jobs: true, appts: true, time: true });
 
   const byDay = useMemo(() => {
     const m = new Map<string, { entries: CalEntry[]; jobs: CalJob[]; appts: CalAppt[] }>();
@@ -81,8 +83,8 @@ export function CalendarView({
       if (!m.has(k)) m.set(k, { entries: [], jobs: [], appts: [] });
       return m.get(k)!;
     };
-    for (const e of entries) get(dayKey(new Date(e.clock_in))).entries.push(e);
-    for (const a of appointments) get(dayKey(new Date(a.starts_at))).appts.push(a);
+    if (layers.time) for (const e of entries) get(dayKey(new Date(e.clock_in))).entries.push(e);
+    if (layers.appts) for (const a of appointments) get(dayKey(new Date(a.starts_at))).appts.push(a);
 
     // Group multi-range segments by job; a job with segments is placed only on
     // the days its ranges cover, so gaps (e.g. between two work weeks) stay empty.
@@ -111,9 +113,9 @@ export function CalendarView({
         place(new Date(j.scheduled_start), new Date(j.scheduled_end ?? j.scheduled_start));
       }
     };
-    for (const j of jobs) spanDays(j.id, (k) => get(k).jobs.push(j));
+    if (layers.jobs) for (const j of jobs) spanDays(j.id, (k) => get(k).jobs.push(j));
     return m;
-  }, [entries, jobs, segments, appointments]);
+  }, [entries, jobs, segments, appointments, layers]);
 
   function shift(dir: -1 | 1) {
     const d = new Date(anchor);
@@ -156,6 +158,28 @@ export function CalendarView({
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Selectable layers */}
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="text-slate-400">Show:</span>
+        {(
+          [
+            ["jobs", "Jobs", "bg-blue-500"],
+            ["appts", "Appointments", "bg-violet-500"],
+            ["time", "Clocked time", "bg-emerald-500"],
+          ] as const
+        ).map(([k, label, dot]) => (
+          <button
+            key={k}
+            onClick={() => setLayers((l) => ({ ...l, [k]: !l[k] }))}
+            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-medium ${
+              layers[k] ? "bg-slate-100 text-slate-700" : "text-slate-400"
+            }`}
+          >
+            <span className={`h-2 w-2 rounded-full ${layers[k] ? dot : "bg-slate-300"}`} /> {label}
+          </button>
+        ))}
       </div>
 
       {view === "month" && (
@@ -233,10 +257,10 @@ function MonthGrid({
                 {data?.appts.slice(0, 2).map((a) => (
                   <div
                     key={a.id}
-                    className={`truncate rounded px-1 text-[10px] ${a.type === "inspection" ? "bg-amber-50 text-amber-700" : "bg-purple-50 text-purple-700"}`}
-                    title={a.title}
+                    className={`truncate rounded px-1 text-[10px] ${a.type === "inspection" ? "bg-amber-50 text-amber-700" : "bg-purple-50 text-purple-700"} ${a.status === "proposed" ? "border border-dashed border-current opacity-70" : ""}`}
+                    title={a.status === "proposed" ? `${a.title} (pending pick)` : a.title}
                   >
-                    {a.type === "inspection" ? "🔍" : "📅"} {a.title}
+                    {a.status === "proposed" ? "⧗" : a.type === "inspection" ? "🔍" : "📅"} {a.title}
                   </div>
                 ))}
                 {totalHrs > 0 && (
