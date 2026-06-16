@@ -6,6 +6,8 @@ import { WeatherWidget } from "@/components/weather-widget";
 import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { hoursBetween, formatCurrency } from "@/lib/utils";
+import { getOrgSettings } from "@/lib/org-settings";
+import { todayBoundsInTz, prettyDay } from "@/lib/tz";
 import { DayClock } from "./day-clock";
 import { AppointmentButton } from "../appointments/appointment-button";
 import { TaskRow, NewTaskBox } from "../tasks/tasks-view";
@@ -21,12 +23,17 @@ export default async function PlannerPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const dayStart = new Date();
-  dayStart.setHours(0, 0, 0, 0);
-  const dayEnd = new Date(dayStart.getTime() + 86_400_000);
-  const todayStr = dayStart.toISOString().slice(0, 10);
+  // "Today" must be the business's local day, not the server's UTC day —
+  // otherwise afternoon work in the Americas falls into "tomorrow".
+  const { data: orgRow } = await supabase
+    .from("organizations")
+    .select("city, state, zip, settings")
+    .limit(1)
+    .maybeSingle();
+  const tz = getOrgSettings((orgRow as any)?.settings).timezone || "America/Los_Angeles";
+  const { dayStart, dayEnd, todayStr } = todayBoundsInTz(tz);
 
-  const [{ data: jobs }, { data: segJobs }, { data: appts }, { data: tasks }, { data: entries }] =
+  const [{ data: jobs }, { data: segJobs }, { data: appts }, { data: tasks }, { data: entries }, { data: openRows }] =
     await Promise.all([
       supabase
         .from("jobs")
@@ -57,7 +64,16 @@ export default async function PlannerPage() {
         .from("time_entries")
         .select("id, job_id, clock_in, clock_out, lunch_minutes, status")
         .eq("profile_id", user?.id ?? "")
-        .gte("clock_in", dayStart.toISOString()),
+        .gte("clock_in", dayStart.toISOString())
+        .lt("clock_in", dayEnd.toISOString()),
+      // The open entry, regardless of when it started (overnight shift, etc.).
+      supabase
+        .from("time_entries")
+        .select("id, job_id, clock_in, clock_out, lunch_minutes, status")
+        .eq("profile_id", user?.id ?? "")
+        .eq("status", "open")
+        .order("clock_in", { ascending: false })
+        .limit(1),
     ]);
 
   // Merge scheduled-today jobs + segment-today jobs (dedup).
@@ -94,8 +110,7 @@ export default async function PlannerPage() {
       e.status === "closed" && e.clock_out ? sum + hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes) : sum,
     0,
   );
-  const clockedIn = (entries ?? []).some((e: any) => e.status === "open");
-  const openEntry = (entries ?? []).find((e: any) => e.status === "open") as any | undefined;
+  const openEntry = (openRows ?? [])[0] as any | undefined;
   const findJob = (id: string) => jobMap.get(id) ?? (currentJob?.id === id ? currentJob : null);
   const openJobLabel =
     openEntry?.job_id && findJob(openEntry.job_id)
@@ -105,7 +120,7 @@ export default async function PlannerPage() {
 
   // Options for the inline add/edit controls (appointments + tasks) + the owner
   // snapshot (this page now also covers what "Overview" used to show).
-  const [{ data: customers }, { data: staff }, { data: jobOptRows }, { data: me }, leadsCount, { data: invRows }, { data: org }] =
+  const [{ data: customers }, { data: staff }, { data: jobOptRows }, { data: me }, leadsCount, { data: invRows }] =
     await Promise.all([
       supabase.from("customers").select("id, name").order("name"),
       supabase.from("profiles").select("id, full_name").eq("active", true).order("full_name"),
@@ -113,8 +128,8 @@ export default async function PlannerPage() {
       supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle(),
       supabase.from("inquiries").select("id", { count: "exact", head: true }).is("converted_at", null).neq("status", "lost"),
       supabase.from("invoices").select("total, amount_paid, status"),
-      supabase.from("organizations").select("city, state, zip").limit(1).maybeSingle(),
     ]);
+  const org = orgRow;
   const orgLocation = [(org as any)?.city, (org as any)?.state, (org as any)?.zip].filter(Boolean).join(", ") || null;
   const QUOTES = [
     "Service. Integrity. Reliability.",
@@ -125,7 +140,7 @@ export default async function PlannerPage() {
     "Safety first — go home the same way you came to work.",
     "Small daily improvements lead to stunning results.",
   ];
-  const dailyQuote = QUOTES[dayStart.getDate() % QUOTES.length];
+  const dailyQuote = QUOTES[new Date(`${todayStr}T12:00:00Z`).getUTCDate() % QUOTES.length];
   const jobOpts = (jobOptRows ?? []).map((j: any) => ({ id: j.id, label: `${j.job_number} · ${j.name}` }));
   const custOpts = (customers ?? []).map((c: any) => ({ id: c.id, label: c.name }));
   const staffOpts = (staff ?? []).map((s: any) => ({ id: s.id, label: s.full_name ?? "Unnamed" }));
@@ -136,7 +151,7 @@ export default async function PlannerPage() {
     .filter((i: any) => !["paid", "void"].includes(i.status))
     .reduce((s: number, i: any) => s + (Number(i.total) - Number(i.amount_paid)), 0);
 
-  const niceDay = dayStart.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
+  const niceDay = prettyDay(todayStr);
   const empty = (label: string) => <p className="px-5 py-6 text-center text-sm text-slate-400">{label}</p>;
 
   return (
