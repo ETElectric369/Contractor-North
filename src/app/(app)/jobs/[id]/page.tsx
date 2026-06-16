@@ -140,6 +140,8 @@ export default async function JobDetailPage({
   const {
     data: { user },
   } = await supabase.auth.getUser();
+  const { data: meRow } = await supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle();
+  const viewerIsStaff = ["owner", "admin", "office"].includes((meRow as any)?.role ?? "");
   const [{ data: techs }, { data: jobCodes }, { data: lists }, { data: org }, { data: allCustomers }] = await Promise.all([
     supabase.from("profiles").select("id, full_name, home_address").order("full_name"),
     supabase.from("job_codes").select("*").order("code"),
@@ -671,7 +673,10 @@ export default async function JobDetailPage({
         </div>
       </div>
 
-      <Tabs tabs={tabs} urlSync />
+      <Tabs
+        tabs={viewerIsStaff ? tabs : tabs.filter((t) => !["costs", "quotes", "invoices", "change-orders"].includes(t.id))}
+        urlSync
+      />
     </div>
   );
 }

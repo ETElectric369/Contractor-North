@@ -57,6 +57,8 @@ export interface DockSection {
   icon: LucideIcon;
   href: string;
   children: DockNode[];
+  /** Whole section hidden from techs (office/admin/owner only). */
+  staffOnly?: boolean;
 }
 
 // The dock follows the conversion path top-to-bottom: Sales (inquiries → quote/
@@ -101,6 +103,7 @@ export const DOCK: DockSection[] = [
     label: "Sales",
     icon: TrendingUp,
     href: "/crm",
+    staffOnly: true,
     children: [
       { id: "sl-inq", label: "Inquiries", icon: UserPlus, href: "/leads" },
       { id: "sl-cust", label: "Customers", icon: Users, href: "/crm" },
@@ -124,6 +127,7 @@ export const DOCK: DockSection[] = [
     label: "Money",
     icon: Receipt,
     href: "/billing",
+    staffOnly: true,
     children: [
       { id: "m-inv", label: "Invoices", icon: Receipt, href: "/billing" },
       { id: "m-pay", label: "Payments", icon: CreditCard, href: "/payments" },

@@ -87,7 +87,7 @@ export function Dock({
         </button>
 
         <div className="flex flex-1 flex-col items-center gap-0.5">
-          {DOCK.map((section) => {
+          {DOCK.filter((s) => isStaff || !s.staffOnly).map((section) => {
             const Icon = section.icon;
             const isOn = active?.key === section.key;
             const onRoute = pathname === section.href || pathname.startsWith(section.href + "/");

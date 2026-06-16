@@ -45,7 +45,7 @@ export function BottomNav({ role }: { role?: string }) {
   return (
     <>
       <nav className="glass fixed inset-x-2 bottom-2 z-[70] flex rounded-2xl border-white/40 px-0.5 pb-[env(safe-area-inset-bottom)] lg:hidden">
-        {DOCK.map((section) => {
+        {DOCK.filter((s) => isStaff || !s.staffOnly).map((section) => {
           const Icon = section.icon;
           const isOn = active?.key === section.key;
           const onRoute = pathname === section.href || pathname.startsWith(section.href + "/");
