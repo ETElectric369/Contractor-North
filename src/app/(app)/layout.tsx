@@ -2,8 +2,6 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { Dock } from "@/components/app-shell/dock";
 import { Topbar } from "@/components/app-shell/topbar";
-import { GlobalVoiceButton } from "@/components/global-voice-button";
-import { GlobalQuickAdd } from "@/components/global-quick-add";
 import { CommandBar } from "@/components/command-bar";
 import { BottomNav } from "@/components/bottom-nav";
 import { billingEnabled } from "@/lib/stripe";
@@ -87,8 +85,6 @@ export default async function AppLayout({
           {children}
         </main>
       </div>
-      <GlobalVoiceButton lang={profile.language} />
-      <GlobalQuickAdd />
       <CommandBar />
       <BottomNav role={profile.role} />
     </div>

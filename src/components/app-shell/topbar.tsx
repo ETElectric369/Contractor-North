@@ -3,6 +3,8 @@
 import { useRouter } from "next/navigation";
 import { LogOut, ArrowLeft, ArrowRight, Search } from "lucide-react";
 import { LanguageSwitcher } from "@/components/language-switcher";
+import { GlobalVoiceButton } from "@/components/global-voice-button";
+import { GlobalQuickAdd } from "@/components/global-quick-add";
 import { initials } from "@/lib/utils";
 import { signOut } from "@/app/login/actions";
 import type { Profile } from "@/lib/types";
@@ -25,7 +27,7 @@ export function Topbar({
             // router.back() does nothing (looks "frozen") when there's no app
             // history — e.g. you opened a link straight into a page. Fall back home.
             if (typeof window !== "undefined" && window.history.length > 1) router.back();
-            else router.push("/dashboard");
+            else router.push("/planner");
           }}
           aria-label="Go back"
           title="Back"
@@ -43,7 +45,10 @@ export function Topbar({
 
         <div className="flex-1" />
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
+          {/* Assistant (voice) + quick-add — permanent, reachable while driving. */}
+          <GlobalVoiceButton placement="topbar" lang={lang} />
+          <GlobalQuickAdd placement="topbar" />
           <button
             onClick={() => window.dispatchEvent(new Event("cn:command"))}
             className="flex items-center gap-2 rounded-lg border border-slate-200 px-2.5 py-2 text-slate-500 hover:bg-slate-50 sm:px-3"

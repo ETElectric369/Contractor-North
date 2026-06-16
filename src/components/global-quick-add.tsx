@@ -12,8 +12,9 @@ const ACTIONS = [
   { label: "Snap & file (Organize My)", href: "/organize", icon: Camera },
 ];
 
-/** Movable floating "+" — always on screen, opens quick-create shortcuts. */
-export function GlobalQuickAdd() {
+/** Quick "+" create menu. `placement="topbar"` renders an inline button with a
+ *  dropdown; the default is a movable floating FAB. */
+export function GlobalQuickAdd({ placement = "fab" }: { placement?: "fab" | "topbar" }) {
   const router = useRouter();
   const [pos, setPos] = useState({ x: 20, y: 168 }); // above the mic, clearing the floating glass bottom nav
   const [open, setOpen] = useState(false);
@@ -26,6 +27,43 @@ export function GlobalQuickAdd() {
     } catch {}
   }, []);
 
+  const items = ACTIONS.map((a) => (
+    <button
+      key={a.href}
+      onClick={() => {
+        setOpen(false);
+        router.push(a.href);
+      }}
+      className="relative z-10 flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15"
+    >
+      <a.icon className="h-4 w-4 text-[rgb(var(--glass-ink))]" /> {a.label}
+    </button>
+  ));
+
+  // Top-bar variant: inline + button with a dropdown anchored below it.
+  if (placement === "topbar") {
+    return (
+      <div className="relative">
+        <button
+          onClick={() => setOpen((v) => !v)}
+          aria-label="Quick add"
+          title="Quick add"
+          className="btn-gloss inline-flex h-10 w-10 items-center justify-center rounded-full bg-slate-900 text-white shadow-sm hover:bg-slate-700"
+        >
+          {open ? <X className="h-5 w-5" /> : <Plus className="h-5 w-5" />}
+        </button>
+        {open && (
+          <>
+            <div className="fixed inset-0 z-[80]" onClick={() => setOpen(false)} />
+            <div className="glass glass-gloss absolute right-0 top-12 z-[90] w-60 overflow-hidden rounded-2xl py-1.5 shadow-xl">
+              {items}
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
   return (
     <>
       {open && (
@@ -35,18 +73,7 @@ export function GlobalQuickAdd() {
             className="glass glass-gloss fixed z-[90] w-60 overflow-hidden rounded-2xl py-1.5 shadow-xl"
             style={{ right: pos.x, bottom: pos.y + 56 }}
           >
-            {ACTIONS.map((a) => (
-              <button
-                key={a.href}
-                onClick={() => {
-                  setOpen(false);
-                  router.push(a.href);
-                }}
-                className="relative z-10 flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15"
-              >
-                <a.icon className="h-4 w-4 text-[rgb(var(--glass-ink))]" /> {a.label}
-              </button>
-            ))}
+            {items}
           </div>
         </>
       )}

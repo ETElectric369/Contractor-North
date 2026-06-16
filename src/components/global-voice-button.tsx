@@ -12,7 +12,7 @@ import { runVoiceCommand } from "@/app/(app)/voice/actions";
  *    call the inspector", "open the scheduler", "new appointment tomorrow at 9").
  * Drag to reposition. Uses the Web Speech API.
  */
-export function GlobalVoiceButton({ lang }: { lang?: string }) {
+export function GlobalVoiceButton({ lang, placement = "fab" }: { lang?: string; placement?: "fab" | "topbar" }) {
   const router = useRouter();
   const [supported, setSupported] = useState(false);
   const [listening, setListening] = useState(false);
@@ -124,6 +124,39 @@ export function GlobalVoiceButton({ lang }: { lang?: string }) {
   if (!supported) return null;
 
   const commandMode = !listening || modeRef.current === "command";
+  const icon = working ? (
+    <Loader2 className="h-5 w-5 animate-spin" />
+  ) : listening ? (
+    <MicOff className="h-5 w-5" />
+  ) : commandMode ? (
+    <Sparkles className="h-5 w-5" />
+  ) : (
+    <Mic className="h-5 w-5" />
+  );
+
+  // Top-bar variant: a fixed, bigger "Assistant" voice-star button (no drag).
+  if (placement === "topbar") {
+    return (
+      <>
+        {status && (
+          <div className="fixed left-1/2 top-[4.5rem] z-[95] max-w-[260px] -translate-x-1/2 rounded-xl bg-slate-900/90 px-3 py-2 text-center text-xs font-medium text-white shadow-lg">
+            {status}
+          </div>
+        )}
+        <button
+          onClick={handleTap}
+          title="Tap to give a voice command, or dictate into a focused field"
+          aria-label="Assistant voice command"
+          className={`btn-gloss inline-flex h-10 items-center gap-1.5 rounded-full px-3 text-white shadow-sm transition-colors ${
+            working ? "bg-brand" : listening ? "animate-pulse bg-red-600" : "bg-brand hover:bg-brand-dark"
+          }`}
+        >
+          {icon}
+          <span className="hidden text-sm font-medium sm:inline">{listening ? "Listening…" : "Assistant"}</span>
+        </button>
+      </>
+    );
+  }
 
   return (
     <>
