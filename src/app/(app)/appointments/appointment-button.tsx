@@ -2,11 +2,30 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Pencil } from "lucide-react";
+import { Plus, Pencil, Copy, Check, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
-import { createAppointment, updateAppointment, deleteAppointment, createJobFromAppointment } from "./actions";
+import {
+  createAppointment,
+  updateAppointment,
+  deleteAppointment,
+  createJobFromAppointment,
+  createAppointmentProposal,
+} from "./actions";
+
+/** Next three weekdays at 8 AM — sensible default slots to propose. */
+function defaultSlots(): { date: string; time: string }[] {
+  const out: { date: string; time: string }[] = [];
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  while (out.length < 3) {
+    d.setDate(d.getDate() + 1);
+    if (d.getDay() !== 0 && d.getDay() !== 6)
+      out.push({ date: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`, time: "08:00" });
+  }
+  return out;
+}
 
 interface Opt { id: string; label: string }
 
@@ -53,6 +72,21 @@ export function AppointmentButton({
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [newCust, setNewCust] = useState(false);
+  // "Propose times" mode: offer the customer up to 3 date+time slots to pick.
+  const [mode, setMode] = useState<"set" | "propose">("set");
+  const [slots, setSlots] = useState(defaultSlots);
+  const [linkToken, setLinkToken] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const pickLink = linkToken && origin ? `${origin}/pick/${linkToken}` : null;
+
+  function closeAll() {
+    setOpen(false);
+    setLinkToken(null);
+    setMode("set");
+    setSlots(defaultSlots());
+  }
 
   function convertToJob() {
     if (!appointment) return;
@@ -70,6 +104,23 @@ export function AppointmentButton({
 
   function submit(formData: FormData) {
     setError(null);
+
+    // "Propose times" — create a tentative appointment + a pick-a-time link.
+    if (mode === "propose" && !editing) {
+      const clean = slots.filter((s) => /^\d{4}-\d{2}-\d{2}$/.test(s.date));
+      if (!clean.length) return setError("Add at least one date option.");
+      formData.set("slots_json", JSON.stringify(clean));
+      const first = new Date(`${clean[0].date}T${clean[0].time || "08:00"}:00`);
+      if (!isNaN(first.getTime())) formData.set("starts_at_iso", first.toISOString());
+      start(async () => {
+        const res = await createAppointmentProposal(formData);
+        if (!res.ok || !res.token) return setError(res.error ?? "Could not create the link.");
+        setLinkToken(res.token);
+        router.refresh();
+      });
+      return;
+    }
+
     // Resolve the picked date+time to ISO here in the browser, so the user's own
     // timezone is honored (the server action runs in UTC).
     const date = String(formData.get("date") ?? "");
@@ -93,6 +144,17 @@ export function AppointmentButton({
     });
   }
 
+  async function copyLink() {
+    if (!pickLink) return;
+    try {
+      await navigator.clipboard.writeText(pickLink);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* clipboard denied — link is visible to select */
+    }
+  }
+
   function remove() {
     if (!appointment) return;
     start(async () => {
@@ -114,19 +176,57 @@ export function AppointmentButton({
         </Button>
       )}
 
-      <Modal open={open} onClose={() => setOpen(false)} title={editing ? "Edit appointment" : "New appointment"}>
+      <Modal
+        open={open}
+        onClose={closeAll}
+        title={editing ? "Edit appointment" : linkToken ? "Text the customer these times" : "New appointment"}
+      >
         <form action={submit} className="space-y-4">
           {/* Sticky action bar — Save/Cancel stay reachable even with the keyboard up. */}
           <div className="sticky top-0 z-20 -mx-6 -mt-5 mb-1 flex items-center justify-end gap-2 border-b border-slate-200 bg-white px-6 py-3">
-            {editing ? (
-              <Button type="button" variant="outline" onClick={remove} disabled={pending} className="mr-auto text-red-600">
-                Delete
-              </Button>
-            ) : null}
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Save"}</Button>
+            {linkToken ? (
+              <Button type="button" onClick={closeAll}>Done</Button>
+            ) : (
+              <>
+                {editing ? (
+                  <Button type="button" variant="outline" onClick={remove} disabled={pending} className="mr-auto text-red-600">
+                    Delete
+                  </Button>
+                ) : null}
+                <Button type="button" variant="outline" onClick={closeAll}>Cancel</Button>
+                <Button type="submit" disabled={pending}>
+                  {pending ? "Saving…" : mode === "propose" ? "Create link" : "Save"}
+                </Button>
+              </>
+            )}
           </div>
           {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+
+          {linkToken && (
+            <div className="space-y-3">
+              <div className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+                Link ready — text it to the customer. The appointment confirms onto your calendar the
+                moment they tap a time.
+              </div>
+              <code className="block break-all rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-700">{pickLink}</code>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" size="sm" onClick={copyLink}>
+                  {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                  {copied ? "Copied" : "Copy link"}
+                </Button>
+                <a
+                  href={`sms:?body=${encodeURIComponent(`Hi! Pick a time that works and we'll lock it in: ${pickLink}`)}`}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-dark"
+                >
+                  <MessageSquare className="h-3.5 w-3.5" /> Text it
+                </a>
+              </div>
+            </div>
+          )}
+
+          {!linkToken && (
+          <>
+          {/* fields */}
 
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -153,20 +253,61 @@ export function AppointmentButton({
             <Input id="ap-title" name="title" defaultValue={appointment?.title ?? ""} placeholder="e.g. Rough-in inspection, estimate walk-through" required />
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <Label htmlFor="ap-date">Date</Label>
-              <Input id="ap-date" name="date" type="date" defaultValue={s.date} required />
+          {!editing && (
+            <div className="flex rounded-lg bg-slate-100 p-0.5 text-sm">
+              <button
+                type="button"
+                onClick={() => setMode("set")}
+                className={`flex-1 rounded-md px-3 py-1.5 font-medium ${mode === "set" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}
+              >
+                Set a time
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode("propose")}
+                className={`flex-1 rounded-md px-3 py-1.5 font-medium ${mode === "propose" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}
+              >
+                Propose times
+              </button>
             </div>
-            <div>
-              <Label htmlFor="ap-start">Start</Label>
-              <Input id="ap-start" name="start_time" type="time" defaultValue={s.time || "08:00"} />
+          )}
+
+          {editing || mode === "set" ? (
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <Label htmlFor="ap-date">Date</Label>
+                <Input id="ap-date" name="date" type="date" defaultValue={s.date} required />
+              </div>
+              <div>
+                <Label htmlFor="ap-start">Start</Label>
+                <Input id="ap-start" name="start_time" type="time" defaultValue={s.time || "08:00"} />
+              </div>
+              <div>
+                <Label htmlFor="ap-end">End</Label>
+                <Input id="ap-end" name="end_time" type="time" defaultValue={e.time} />
+              </div>
             </div>
-            <div>
-              <Label htmlFor="ap-end">End</Label>
-              <Input id="ap-end" name="end_time" type="time" defaultValue={e.time} />
+          ) : (
+            <div className="space-y-2 rounded-lg border border-brand/30 bg-brand-light/20 p-3">
+              <Label>Offer up to 3 times — the customer taps one</Label>
+              {slots.map((sl, i) => (
+                <div key={i} className="grid grid-cols-2 gap-2">
+                  <Input
+                    type="date"
+                    value={sl.date}
+                    onChange={(ev) => setSlots((a) => a.map((x, xi) => (xi === i ? { ...x, date: ev.target.value } : x)))}
+                    aria-label={`Option ${i + 1} date`}
+                  />
+                  <Input
+                    type="time"
+                    value={sl.time}
+                    onChange={(ev) => setSlots((a) => a.map((x, xi) => (xi === i ? { ...x, time: ev.target.value } : x)))}
+                    aria-label={`Option ${i + 1} time`}
+                  />
+                </div>
+              ))}
             </div>
-          </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -217,6 +358,8 @@ export function AppointmentButton({
             <Button type="button" variant="outline" onClick={convertToJob} disabled={pending} className="w-full">
               Convert to job →
             </Button>
+          )}
+          </>
           )}
         </form>
       </Modal>

@@ -98,6 +98,69 @@ export async function createAppointment(formData: FormData): Promise<Result> {
   return { ok: true, id: data.id };
 }
 
+/** Create a TENTATIVE appointment + a customer pick-a-time link (up to 3 date+
+ *  time options). The appointment shows as "proposed" until they tap a slot. */
+export async function createAppointmentProposal(
+  formData: FormData,
+): Promise<{ ok: boolean; error?: string; token?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  const title = String(formData.get("title") ?? "").trim();
+  if (!title) return { ok: false, error: "Title is required." };
+
+  let slots: { date: string; time: string }[] = [];
+  try {
+    const raw = JSON.parse(String(formData.get("slots_json") ?? "[]"));
+    if (Array.isArray(raw)) slots = raw;
+  } catch {
+    /* ignore */
+  }
+  slots = slots
+    .filter((s) => /^\d{4}-\d{2}-\d{2}$/.test(s?.date ?? ""))
+    .map((s) => ({ date: s.date, time: /^\d{2}:\d{2}/.test(s.time ?? "") ? s.time : "08:00" }))
+    .slice(0, 3);
+  if (!slots.length) return { ok: false, error: "Add at least one date option." };
+
+  const cust = await resolveCustomer(supabase, formData, user.id);
+  if (cust.error) return { ok: false, error: cust.error };
+
+  // First slot is the tentative time (browser-computed ISO honors the user's tz).
+  const startIso = emptyToNull(formData.get("starts_at_iso")) ?? toIso(slots[0].date, slots[0].time);
+
+  const { data: appt, error: aErr } = await supabase
+    .from("appointments")
+    .insert({
+      type: String(formData.get("type") ?? "quote"),
+      title,
+      starts_at: startIso,
+      ends_at: null,
+      job_id: emptyToNull(formData.get("job_id")),
+      customer_id: cust.customerId,
+      location: emptyToNull(formData.get("location")),
+      notes: emptyToNull(formData.get("notes")),
+      assigned_to: emptyToNull(formData.get("assigned_to")),
+      status: "proposed",
+      created_by: user.id,
+    })
+    .select("id")
+    .single();
+  if (aErr || !appt) return { ok: false, error: aErr?.message ?? "Could not create the appointment." };
+
+  const { data: prop, error: pErr } = await supabase
+    .from("schedule_proposals")
+    .insert({ appointment_id: appt.id, dates: slots, created_by: user.id })
+    .select("token")
+    .single();
+  if (pErr || !prop) return { ok: false, error: pErr?.message ?? "Could not create the pick-a-time link." };
+
+  revalidatePath("/schedule");
+  return { ok: true, token: prop.token };
+}
+
 export async function updateAppointment(id: string, formData: FormData): Promise<Result> {
   const supabase = await createClient();
   const {

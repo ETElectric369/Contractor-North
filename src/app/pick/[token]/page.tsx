@@ -21,19 +21,22 @@ export default async function PickDatePage({
     );
   }
 
+  type Slot = string | { date: string; time?: string };
   const p = data as {
     org_name: string;
     logo_url: string | null;
     brand_color: string | null;
     phone: string | null;
-    job_name: string;
+    kind: string;
+    label: string;
     address: string | null;
-    dates: string[];
-    time_note: string | null;
+    dates: Slot[];
     status: string;
     chosen_date: string | null;
+    chosen_at: string | null;
   };
   const brand = p.brand_color || "#0b57c4";
+  const hasTimes = (p.dates ?? []).some((d) => typeof d === "object");
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-10">
@@ -52,19 +55,14 @@ export default async function PickDatePage({
           )}
           <h1 className="text-xl font-bold text-slate-900">{p.org_name}</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Pick a day that works for you — we&apos;ll lock it in.
+            Pick a {hasTimes ? "time" : "day"} that works for you — we&apos;ll lock it in.
           </p>
         </div>
 
         <div className="rounded-2xl bg-white p-6 shadow-sm">
           <div className="mb-4 text-sm text-slate-600">
-            <div className="font-medium text-slate-900">{p.job_name}</div>
+            <div className="font-medium text-slate-900">{p.label}</div>
             {p.address && <div className="text-xs text-slate-400">{p.address}</div>}
-            {p.time_note && (
-              <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
-                🕒 Arrival window: {p.time_note}
-              </div>
-            )}
           </div>
           <DatePicker token={token} dates={p.dates} status={p.status} chosen={p.chosen_date} brand={brand} />
         </div>
