@@ -12,6 +12,7 @@ interface Member {
   id: string;
   full_name: string | null;
   email: string | null;
+  phone?: string | null;
   role: string;
   active: boolean;
   home_address?: string | null;
@@ -33,6 +34,7 @@ export function EditMemberButton({
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const [name, setName] = useState(member.full_name ?? "");
+  const [phone, setPhone] = useState(member.phone ?? "");
   const [homeAddress, setHomeAddress] = useState(member.home_address ?? "");
   const [role, setRole] = useState(member.role);
   const [active, setActive] = useState(member.active);
@@ -46,6 +48,7 @@ export function EditMemberButton({
     start(async () => {
       const res = await updateMember(member.id, {
         full_name: name,
+        phone,
         home_address: homeAddress,
         role: isSelf ? undefined : role,
         active: isSelf ? undefined : active,
@@ -78,9 +81,15 @@ export function EditMemberButton({
           {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
           {done && <div className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">{done}</div>}
 
-          <div>
-            <Label htmlFor="m-name">Name</Label>
-            <Input id="m-name" value={name} onChange={(e) => setName(e.target.value)} />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label htmlFor="m-name">Name</Label>
+              <Input id="m-name" value={name} onChange={(e) => setName(e.target.value)} />
+            </div>
+            <div>
+              <Label htmlFor="m-phone">Phone</Label>
+              <Input id="m-phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />
+            </div>
           </div>
           <div>
             <Label htmlFor="m-home">Home address</Label>

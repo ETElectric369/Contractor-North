@@ -171,12 +171,12 @@ export default async function SettingsPage({
                   <div className="text-sm font-medium text-slate-900">{m.full_name ?? "—"}</div>
                   <div className="text-xs text-slate-400">{m.email}</div>
                 </div>
-                {isAdmin && <MemberRate id={m.id} rate={m.hourly_rate} />}
+                {isAdmin && <MemberRate id={m.id} rate={m.hourly_rate} billRate={(m as any).bill_rate ?? null} />}
                 {!m.active && <Badge tone="red">inactive</Badge>}
                 <Badge tone={roleTone[m.role]}>{m.role}</Badge>
                 {isAdmin && (
                   <EditMemberButton
-                    member={{ id: m.id, full_name: m.full_name, email: m.email, role: m.role, active: m.active, home_address: m.home_address }}
+                    member={{ id: m.id, full_name: m.full_name, email: m.email, phone: (m as any).phone ?? null, role: m.role, active: m.active, home_address: m.home_address }}
                     isSelf={m.id === profile?.id}
                     authConfigured={adminConfigured()}
                   />

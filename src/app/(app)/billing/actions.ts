@@ -364,7 +364,7 @@ export async function importLaborIntoInvoice(invoiceId: string): Promise<Result>
   const [{ data: entries }, { data: org }] = await Promise.all([
     supabase
       .from("time_entries")
-      .select("clock_in, clock_out, lunch_minutes, status, profiles(id, full_name, hourly_rate)")
+      .select("clock_in, clock_out, lunch_minutes, status, profiles(id, full_name, hourly_rate, bill_rate)")
       .eq("job_id", inv.job_id)
       .eq("status", "closed"),
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),
@@ -382,7 +382,7 @@ export async function importLaborIntoInvoice(invoiceId: string): Promise<Result>
     const key = e.profiles?.id ?? "unknown";
     const cur = perPerson.get(key) ?? {
       name: e.profiles?.full_name ?? "Crew",
-      rate: Number(e.profiles?.hourly_rate ?? 0) || defaultRate,
+      rate: Number(e.profiles?.bill_rate ?? e.profiles?.hourly_rate ?? 0) || defaultRate,
       hours: 0,
     };
     cur.hours += hrs;

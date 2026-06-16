@@ -323,7 +323,7 @@ export async function setAvatarUrl(url: string | null): Promise<Result> {
 /** Owner/admin edits a team member's profile (name, role, active, rate). */
 export async function updateMember(
   id: string,
-  patch: { full_name?: string; role?: string; active?: boolean; hourly_rate?: number | null; home_address?: string | null },
+  patch: { full_name?: string; phone?: string; role?: string; active?: boolean; hourly_rate?: number | null; home_address?: string | null },
 ): Promise<Result> {
   const supabase = await createClient();
   const {
@@ -338,6 +338,7 @@ export async function updateMember(
 
   const clean: Record<string, unknown> = {};
   if (patch.full_name !== undefined) clean.full_name = patch.full_name.trim() || null;
+  if (patch.phone !== undefined) clean.phone = patch.phone.trim() || null;
   if (patch.role !== undefined && ["admin", "office", "tech"].includes(patch.role)) clean.role = patch.role;
   if (patch.active !== undefined) clean.active = patch.active;
   if (patch.hourly_rate !== undefined) clean.hourly_rate = patch.hourly_rate;
@@ -392,6 +393,7 @@ export async function updateMemberAuth(
 export async function updateMemberRate(
   id: string,
   hourlyRate: number | null,
+  billRate?: number | null,
 ): Promise<Result> {
   const supabase = await createClient();
   const {
@@ -401,7 +403,9 @@ export async function updateMemberRate(
   const { data: me } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
   if (!me || !["owner", "admin"].includes(me.role)) return { ok: false, error: "Not allowed." };
 
-  const { error } = await supabase.from("profiles").update({ hourly_rate: hourlyRate }).eq("id", id);
+  const patch: Record<string, unknown> = { hourly_rate: hourlyRate };
+  if (billRate !== undefined) patch.bill_rate = billRate;
+  const { error } = await supabase.from("profiles").update(patch).eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/settings");
   return { ok: true };
