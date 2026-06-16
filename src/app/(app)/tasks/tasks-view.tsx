@@ -48,7 +48,7 @@ const PRIORITIES: { value: number; label: string }[] = [
 const priorityLabel = (p: number) => PRIORITIES.find((x) => x.value === p)?.label ?? "High";
 
 /** ONE entry box for all tasks — category picked from a dropdown. */
-function NewTaskBox({
+export function NewTaskBox({
   jobs,
   people,
   defaultCategory,
@@ -219,7 +219,7 @@ function TaskEditModal({
   );
 }
 
-function TaskRow({ t, people, category }: { t: ViewTask; people: Person[]; category: TaskCategory }) {
+export function TaskRow({ t, people, category }: { t: ViewTask; people: Person[]; category: TaskCategory }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [editing, setEditing] = useState(false);

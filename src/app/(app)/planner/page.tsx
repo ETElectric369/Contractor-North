@@ -1,11 +1,14 @@
 import Link from "next/link";
-import { Briefcase, CalendarCheck, ClipboardCheck, ListTodo, MapPin } from "lucide-react";
+import { Briefcase, CalendarCheck, ClipboardCheck, ListTodo, MapPin, UserPlus, Receipt } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
+import { WeatherWidget } from "@/components/weather-widget";
 import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
-import { hoursBetween } from "@/lib/utils";
+import { hoursBetween, formatCurrency } from "@/lib/utils";
 import { DayClock } from "./day-clock";
+import { AppointmentButton } from "../appointments/appointment-button";
+import { TaskRow, NewTaskBox } from "../tasks/tasks-view";
 
 export const dynamic = "force-dynamic";
 
@@ -39,14 +42,14 @@ export default async function PlannerPage() {
         .gte("end_date", todayStr),
       supabase
         .from("appointments")
-        .select("id, type, title, starts_at, ends_at, location, status, job_id")
+        .select("id, type, title, starts_at, ends_at, location, notes, status, job_id, customer_id, assigned_to")
         .gte("starts_at", dayStart.toISOString())
         .lt("starts_at", dayEnd.toISOString())
         .neq("status", "cancelled")
         .order("starts_at"),
       supabase
         .from("tasks")
-        .select("id, title, category, priority, due_date, job_id, jobs(name)")
+        .select("id, title, category, status, priority, due_date, job_id, assigned_to, jobs(job_number, name), assignee:assigned_to(full_name)")
         .eq("status", "open")
         .lte("due_date", todayStr)
         .order("priority", { ascending: false }),
@@ -100,12 +103,50 @@ export default async function PlannerPage() {
       : null;
   const clockJobs = todayJobs.map((j: any) => ({ id: j.id, label: `${j.job_number} — ${j.name}` }));
 
+  // Options for the inline add/edit controls (appointments + tasks) + the owner
+  // snapshot (this page now also covers what "Overview" used to show).
+  const [{ data: customers }, { data: staff }, { data: jobOptRows }, { data: me }, leadsCount, { data: invRows }, { data: org }] =
+    await Promise.all([
+      supabase.from("customers").select("id, name").order("name"),
+      supabase.from("profiles").select("id, full_name").eq("active", true).order("full_name"),
+      supabase.from("jobs").select("id, job_number, name").order("created_at", { ascending: false }).limit(200),
+      supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle(),
+      supabase.from("inquiries").select("id", { count: "exact", head: true }).is("converted_at", null).neq("status", "lost"),
+      supabase.from("invoices").select("total, amount_paid, status"),
+      supabase.from("organizations").select("city, state, zip").limit(1).maybeSingle(),
+    ]);
+  const orgLocation = [(org as any)?.city, (org as any)?.state, (org as any)?.zip].filter(Boolean).join(", ") || null;
+  const QUOTES = [
+    "Service. Integrity. Reliability.",
+    "Measure twice, cut once.",
+    "Do the hard jobs first. The easy jobs will take care of themselves.",
+    "Quality means doing it right when no one is looking.",
+    "Take care of your customers and they'll take care of you.",
+    "Safety first — go home the same way you came to work.",
+    "Small daily improvements lead to stunning results.",
+  ];
+  const dailyQuote = QUOTES[dayStart.getDate() % QUOTES.length];
+  const jobOpts = (jobOptRows ?? []).map((j: any) => ({ id: j.id, label: `${j.job_number} · ${j.name}` }));
+  const custOpts = (customers ?? []).map((c: any) => ({ id: c.id, label: c.name }));
+  const staffOpts = (staff ?? []).map((s: any) => ({ id: s.id, label: s.full_name ?? "Unnamed" }));
+  const people = (staff ?? []).map((s: any) => ({ id: s.id, full_name: s.full_name }));
+  const isStaff = ["owner", "admin", "office"].includes((me as any)?.role ?? "");
+  const openInquiries = leadsCount.count ?? 0;
+  const outstanding = (invRows ?? [])
+    .filter((i: any) => !["paid", "void"].includes(i.status))
+    .reduce((s: number, i: any) => s + (Number(i.total) - Number(i.amount_paid)), 0);
+
   const niceDay = dayStart.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
   const empty = (label: string) => <p className="px-5 py-6 text-center text-sm text-slate-400">{label}</p>;
 
   return (
     <div className="mx-auto max-w-3xl">
       <PageHeader title="My Day" description={niceDay} />
+
+      <div className="mb-3">
+        <WeatherWidget location={orgLocation} label={(org as any)?.city ?? undefined} />
+      </div>
+      <p className="mb-4 text-center text-sm italic text-slate-400">&ldquo;{dailyQuote}&rdquo;</p>
 
       {/* Current job — front and center */}
       {currentJob && (
@@ -167,10 +208,37 @@ export default async function PlannerPage() {
         </Card>
       </div>
 
+      {/* Owner snapshot — what "Overview" used to surface, folded into My Day */}
+      {isStaff && (
+        <div className="mb-4 grid grid-cols-2 gap-3">
+          <Link href="/leads" className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 hover:bg-slate-50">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
+              <UserPlus className="h-4 w-4" />
+            </span>
+            <div>
+              <div className="text-lg font-bold text-slate-900">{openInquiries}</div>
+              <div className="text-xs text-slate-500">Open inquiries</div>
+            </div>
+          </Link>
+          <Link href="/billing" className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 hover:bg-slate-50">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-red-50 text-red-600">
+              <Receipt className="h-4 w-4" />
+            </span>
+            <div>
+              <div className="text-lg font-bold text-slate-900">{formatCurrency(outstanding)}</div>
+              <div className="text-xs text-slate-500">Outstanding</div>
+            </div>
+          </Link>
+        </div>
+      )}
+
       {/* Today's appointments */}
       <Card className="mb-4 overflow-hidden">
-        <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3 text-sm font-semibold text-slate-900">
-          <CalendarCheck className="h-4 w-4 text-purple-600" /> Appointments &amp; inspections
+        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
+          <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+            <CalendarCheck className="h-4 w-4 text-purple-600" /> Appointments &amp; inspections
+          </div>
+          <AppointmentButton jobs={jobOpts} customers={custOpts} staff={staffOpts} defaultDate={todayStr} />
         </div>
         <ul className="divide-y divide-slate-100">
           {(appts ?? []).map((a: any) => (
@@ -189,6 +257,23 @@ export default async function PlannerPage() {
                   </a>
                 )}
               </div>
+              <AppointmentButton
+                jobs={jobOpts}
+                customers={custOpts}
+                staff={staffOpts}
+                appointment={{
+                  id: a.id,
+                  type: a.type,
+                  title: a.title,
+                  starts_at: a.starts_at,
+                  ends_at: a.ends_at,
+                  job_id: a.job_id,
+                  customer_id: a.customer_id,
+                  location: a.location,
+                  notes: a.notes,
+                  assigned_to: a.assigned_to,
+                }}
+              />
             </li>
           ))}
           {(appts ?? []).length === 0 && empty("Nothing booked today.")}
@@ -221,24 +306,20 @@ export default async function PlannerPage() {
         </ul>
       </Card>
 
-      {/* Tasks due */}
-      <Card className="overflow-hidden">
+      {/* Tasks due — tap to toggle, edit, or delete */}
+      <Card className="mb-4 overflow-hidden">
         <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3 text-sm font-semibold text-slate-900">
           <ListTodo className="h-4 w-4 text-amber-600" /> Tasks due
         </div>
         <ul className="divide-y divide-slate-100">
           {(tasks ?? []).map((t: any) => (
-            <li key={t.id} className="flex items-center justify-between px-5 py-2.5 text-sm">
-              <span className="text-slate-800">
-                {t.title}
-                {t.jobs?.name && <span className="ml-2 text-xs text-slate-400">· {t.jobs.name}</span>}
-              </span>
-              <Badge tone="slate">{t.category}</Badge>
-            </li>
+            <TaskRow key={t.id} t={t} people={people} category={t.category} />
           ))}
           {(tasks ?? []).length === 0 && empty("Nothing due. Nice.")}
         </ul>
       </Card>
+
+      <NewTaskBox jobs={(jobOptRows ?? []) as any} people={people} />
     </div>
   );
 }

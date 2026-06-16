@@ -32,7 +32,6 @@ import {
   IdCard,
   Coins,
   CreditCard,
-  LayoutDashboard,
   Bell,
   Plug,
   type LucideIcon,
@@ -72,7 +71,6 @@ export const DOCK: DockSection[] = [
       { id: "h-day", label: "My day", icon: Sun, href: "/planner" },
       { id: "h-assist", label: "Assistant", icon: Sparkles, href: "/assistant" },
       { id: "h-org", label: "Organize my", icon: Wand2, href: "/organize" },
-      { id: "h-overview", label: "Overview", icon: LayoutDashboard, href: "/dashboard" },
     ],
   },
   {
