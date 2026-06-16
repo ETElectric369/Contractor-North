@@ -164,17 +164,23 @@ export function GlassBloom({
       />
 
       <svg className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden="true">
-        {nodes.map((node, i) => (
-          <path
-            key={node.id}
-            d={branch(rowCY(i))}
-            fill="none"
-            stroke="rgb(var(--glass-tint))"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            opacity="0.85"
-          />
-        ))}
+        <defs>
+          <filter id="cn-noodle-glow" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="2" />
+          </filter>
+        </defs>
+        {nodes.map((node, i) => {
+          const d = branch(rowCY(i));
+          // Each branch is a translucent sea-glass "noodle": a soft glow, a
+          // rounded tinted body, and a bright specular core down the middle.
+          return (
+            <g key={node.id} className="cn-fade">
+              <path d={d} fill="none" stroke="rgb(var(--glass-tint))" strokeWidth="5.5" strokeLinecap="round" opacity="0.16" filter="url(#cn-noodle-glow)" />
+              <path d={d} fill="none" stroke="rgb(var(--glass-tint))" strokeWidth="3.5" strokeLinecap="round" opacity="0.5" />
+              <path d={d} fill="none" stroke="rgba(255,255,255,0.92)" strokeWidth="1.1" strokeLinecap="round" opacity="0.85" />
+            </g>
+          );
+        })}
       </svg>
 
       {/* Backing panel — a frosted dark rounded box; clicking inside it never

@@ -32,7 +32,7 @@ export function GlobalQuickAdd() {
         <>
           <div className="fixed inset-0 z-[80]" onClick={() => setOpen(false)} />
           <div
-            className="fixed z-[90] w-60 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-xl"
+            className="glass glass-gloss fixed z-[90] w-60 overflow-hidden rounded-2xl py-1.5 shadow-xl"
             style={{ right: pos.x, bottom: pos.y + 56 }}
           >
             {ACTIONS.map((a) => (
@@ -42,9 +42,9 @@ export function GlobalQuickAdd() {
                   setOpen(false);
                   router.push(a.href);
                 }}
-                className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50"
+                className="relative z-10 flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15"
               >
-                <a.icon className="h-4 w-4 text-brand" /> {a.label}
+                <a.icon className="h-4 w-4 text-[rgb(var(--glass-ink))]" /> {a.label}
               </button>
             ))}
           </div>

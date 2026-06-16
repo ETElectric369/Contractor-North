@@ -74,10 +74,30 @@ main {
   --glass-ink: 13 110 100; /* darker teal for text/icons — clears WCAG AA on glass */
 }
 .app-backdrop {
+  /* A faint dotted "frosted glass" texture sits under everything so the glass
+     tiles have something to refract. Swappable via --app-texture later. */
   background:
+    radial-gradient(rgb(15 23 42 / 0.022) 1px, transparent 1.7px),
     radial-gradient(1100px 560px at 10% 6%, rgb(var(--glass-tint) / 0.16), transparent 60%),
     radial-gradient(1000px 680px at 98% 100%, rgb(var(--glass-tint) / 0.13), transparent 55%),
     linear-gradient(165deg, #f4f8f7, #eef4f3 58%, #e7f0ee);
+  background-size: 22px 22px, auto, auto, auto;
+}
+/* A glossy specular sheen across the top half of any button — glassier feel. */
+.btn-gloss {
+  position: relative;
+  overflow: hidden;
+}
+.btn-gloss::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 52%;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0));
 }
 .glass {
   background: rgba(255, 255, 255, 0.55);
