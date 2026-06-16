@@ -30,9 +30,9 @@ export function GlobalQuickAdd() {
     <>
       {open && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="fixed inset-0 z-[80]" onClick={() => setOpen(false)} />
           <div
-            className="fixed z-50 w-60 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-xl"
+            className="fixed z-[90] w-60 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-xl"
             style={{ right: pos.x, bottom: pos.y + 56 }}
           >
             {ACTIONS.map((a) => (

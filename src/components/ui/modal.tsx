@@ -28,7 +28,7 @@ export function Modal({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center p-3 sm:items-center">
+    <div className="fixed inset-0 z-[90] flex items-start justify-center p-3 sm:items-center">
       <div className="absolute inset-0 bg-slate-900/40" onClick={onClose} />
       {/* Cap the panel to the viewport and scroll its body, so the footer/Save
           button is always reachable on a short phone (esp. with the keyboard up). */}

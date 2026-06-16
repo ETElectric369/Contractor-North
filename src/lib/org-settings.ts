@@ -72,7 +72,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   labor_law_breaks: false,
   auto_lunch_30: false,
   timecard_supervisor_id: "",
-  payment_methods: ["Cash", "Check", "Card", "Zelle", "Venmo"],
+  payment_methods: ["Cash", "Check", "Card", "Zelle", "Venmo", "Transfer"],
   remind_quote_followup: false,
   remind_invoice_due: false,
   remind_appointments: false,

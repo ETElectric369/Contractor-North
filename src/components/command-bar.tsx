@@ -122,7 +122,7 @@ export function CommandBar() {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-start justify-center p-4 pt-[12vh]" onClick={() => setOpen(false)}>
+    <div className="fixed inset-0 z-[90] flex items-start justify-center p-4 pt-[12vh]" onClick={() => setOpen(false)}>
       <div className="absolute inset-0 bg-slate-900/40" />
       <div
         className="relative w-full max-w-xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"

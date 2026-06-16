@@ -46,6 +46,10 @@ export function EditCustomerButton({
 
       <Modal open={open} onClose={() => setOpen(false)} title="Edit customer">
         <form action={onSubmit} className="space-y-4">
+          <div className="sticky top-0 z-20 -mx-6 -mt-5 mb-1 flex items-center justify-end gap-2 border-b border-slate-200 bg-white px-6 py-3">
+            <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Save changes"}</Button>
+          </div>
           {error && (
             <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
           )}
@@ -115,14 +119,6 @@ export function EditCustomerButton({
               <Label htmlFor="notes">Notes</Label>
               <Textarea id="notes" name="notes" rows={2} defaultValue={c.notes ?? ""} />
             </div>
-          </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={pending}>
-              {pending ? "Saving…" : "Save changes"}
-            </Button>
           </div>
         </form>
       </Modal>

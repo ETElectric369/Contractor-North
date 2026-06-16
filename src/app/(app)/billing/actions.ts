@@ -494,11 +494,19 @@ export async function setInvoiceStatus(
   return { ok: true };
 }
 
+/** A "YYYY-MM-DD" date → an ISO timestamp at local noon (stable across tz). */
+function dateToIso(d?: string | null): string | undefined {
+  if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return undefined;
+  const t = new Date(`${d}T12:00:00`);
+  return isNaN(t.getTime()) ? undefined : t.toISOString();
+}
+
 export async function recordPayment(input: {
   invoice_id: string;
   amount: number;
   method: string;
   note: string;
+  paid_at?: string | null;
 }): Promise<Result> {
   const supabase = await createClient();
   const {
@@ -508,12 +516,14 @@ export async function recordPayment(input: {
   if (!input.amount || input.amount <= 0)
     return { ok: false, error: "Enter a payment amount." };
 
+  const paidAt = dateToIso(input.paid_at);
   const { error } = await supabase.from("payments").insert({
     invoice_id: input.invoice_id,
     amount: input.amount,
     method: input.method || "check",
     note: input.note || null,
     recorded_by: user.id,
+    ...(paidAt ? { paid_at: paidAt } : {}),
   });
   if (error) return { ok: false, error: error.message };
 
@@ -527,13 +537,19 @@ export async function recordPayment(input: {
 export async function updatePayment(
   paymentId: string,
   invoiceId: string,
-  patch: { amount: number; method: string; note: string },
+  patch: { amount: number; method: string; note: string; paid_at?: string | null },
 ): Promise<Result> {
   const supabase = await createClient();
   if (!patch.amount || patch.amount <= 0) return { ok: false, error: "Enter a payment amount." };
+  const paidAt = dateToIso(patch.paid_at);
   const { error } = await supabase
     .from("payments")
-    .update({ amount: patch.amount, method: patch.method || "check", note: patch.note || null })
+    .update({
+      amount: patch.amount,
+      method: patch.method || "check",
+      note: patch.note || null,
+      ...(paidAt ? { paid_at: paidAt } : {}),
+    })
     .eq("id", paymentId);
   if (error) return { ok: false, error: error.message };
   await recalcInvoice(supabase, invoiceId);

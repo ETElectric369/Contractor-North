@@ -29,6 +29,15 @@ interface TaxRateLite { id: string; name: string; rate: number; is_default: bool
 
 const sellPrice = (buy: number, markup: number) => buy * (1 + (markup || 0) / 100);
 
+/** ISO timestamp → "YYYY-MM-DD" in local time, for a <input type=date>. */
+const toDateInput = (iso?: string | null) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
+
 export function InvoiceDetail({
   invoice,
   items,
@@ -79,6 +88,7 @@ export function InvoiceDetail({
   const [payEditAmount, setPayEditAmount] = useState(0);
   const [payEditMethod, setPayEditMethod] = useState("check");
   const [payEditNote, setPayEditNote] = useState("");
+  const [payEditDate, setPayEditDate] = useState("");
 
   // edit-item state
   const [editId, setEditId] = useState<string | null>(null);
@@ -123,6 +133,7 @@ export function InvoiceDetail({
     });
   }
   const [payNote, setPayNote] = useState("");
+  const [payDate, setPayDate] = useState("");
   const [payError, setPayError] = useState<string | null>(null);
 
   function addItem() {
@@ -150,12 +161,14 @@ export function InvoiceDetail({
         amount: payAmount,
         method: payMethod,
         note: payNote,
+        paid_at: payDate,
       });
       if (!res.ok) {
         setPayError(res.error ?? "Could not record payment.");
         return;
       }
       setPayNote("");
+      setPayDate("");
       refresh();
     });
   }
@@ -396,11 +409,21 @@ export function InvoiceDetail({
                 </Select>
               </div>
             </div>
-            <Input
-              placeholder="Note (e.g. check #1042)"
-              value={payNote}
-              onChange={(e) => setPayNote(e.target.value)}
-            />
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <Label htmlFor="pay-date">Date</Label>
+                <Input id="pay-date" type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />
+              </div>
+              <div>
+                <Label htmlFor="pay-note">Note</Label>
+                <Input
+                  id="pay-note"
+                  placeholder="e.g. check #1042"
+                  value={payNote}
+                  onChange={(e) => setPayNote(e.target.value)}
+                />
+              </div>
+            </div>
             <Button className="w-full" onClick={pay} disabled={pending}>
               {pending ? "Saving…" : "Record payment"}
             </Button>
@@ -431,11 +454,12 @@ export function InvoiceDetail({
                       </Select>
                     </div>
                     <div className="flex items-center gap-2">
+                      <Input type="date" value={payEditDate} onChange={(e) => setPayEditDate(e.target.value)} className="w-40" aria-label="Payment date" />
                       <Input value={payEditNote} onChange={(e) => setPayEditNote(e.target.value)} placeholder="Note" />
                       <button
                         onClick={() =>
                           start(async () => {
-                            await updatePayment(p.id, invoice.id, { amount: payEditAmount, method: payEditMethod, note: payEditNote });
+                            await updatePayment(p.id, invoice.id, { amount: payEditAmount, method: payEditMethod, note: payEditNote, paid_at: payEditDate });
                             setPayEditId(null);
                             refresh();
                           })
@@ -471,6 +495,7 @@ export function InvoiceDetail({
                         setPayEditAmount(Number(p.amount));
                         setPayEditMethod(p.method);
                         setPayEditNote(p.note ?? "");
+                        setPayEditDate(toDateInput(p.paid_at));
                       }}
                       className="shrink-0 text-slate-400 hover:text-slate-700"
                       aria-label="Edit payment"
