@@ -182,6 +182,10 @@ function TaskEditModal({
   return (
     <Modal open={open} onClose={onClose} title="Edit task">
       <div className="space-y-4">
+        <div className="sticky top-0 z-20 -mx-6 -mt-5 mb-1 flex items-center justify-end gap-2 border-b border-slate-200 bg-white px-6 py-3">
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={save} disabled={pending}>{pending ? "Saving…" : "Save"}</Button>
+        </div>
         {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
         <div>
           <Label htmlFor="te-title">Title</Label>
@@ -209,10 +213,6 @@ function TaskEditModal({
               <option key={p.id} value={p.id}>{p.full_name ?? "Unnamed"}</option>
             ))}
           </Select>
-        </div>
-        <div className="flex justify-end gap-2 pt-1">
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={save} disabled={pending}>{pending ? "Saving…" : "Save"}</Button>
         </div>
       </div>
     </Modal>

@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { Briefcase, CalendarCheck, ClipboardCheck, Clock, ListTodo, MapPin } from "lucide-react";
+import { Briefcase, CalendarCheck, ClipboardCheck, ListTodo, MapPin } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
-import { hoursBetween, formatDuration } from "@/lib/utils";
+import { hoursBetween } from "@/lib/utils";
+import { DayClock } from "./day-clock";
 
 export const dynamic = "force-dynamic";
 
@@ -51,7 +52,7 @@ export default async function PlannerPage() {
         .order("priority", { ascending: false }),
       supabase
         .from("time_entries")
-        .select("clock_in, clock_out, lunch_minutes, status")
+        .select("id, job_id, clock_in, clock_out, lunch_minutes, status")
         .eq("profile_id", user?.id ?? "")
         .gte("clock_in", dayStart.toISOString()),
     ]);
@@ -91,6 +92,13 @@ export default async function PlannerPage() {
     0,
   );
   const clockedIn = (entries ?? []).some((e: any) => e.status === "open");
+  const openEntry = (entries ?? []).find((e: any) => e.status === "open") as any | undefined;
+  const findJob = (id: string) => jobMap.get(id) ?? (currentJob?.id === id ? currentJob : null);
+  const openJobLabel =
+    openEntry?.job_id && findJob(openEntry.job_id)
+      ? `${findJob(openEntry.job_id).job_number} — ${findJob(openEntry.job_id).name}`
+      : null;
+  const clockJobs = todayJobs.map((j: any) => ({ id: j.id, label: `${j.job_number} — ${j.name}` }));
 
   const niceDay = dayStart.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
   const empty = (label: string) => <p className="px-5 py-6 text-center text-sm text-slate-400">{label}</p>;
@@ -137,8 +145,16 @@ export default async function PlannerPage() {
         </Card>
       )}
 
+      {/* Live time clock — tick + one-tap clock in/out */}
+      <DayClock
+        open={openEntry ? { id: openEntry.id, clock_in: openEntry.clock_in, jobLabel: openJobLabel } : null}
+        closedHoursToday={hoursToday}
+        currentJobId={currentJob?.id ?? ""}
+        jobs={clockJobs}
+      />
+
       {/* Quick stats */}
-      <div className="mb-4 grid grid-cols-3 gap-3">
+      <div className="mb-4 grid grid-cols-2 gap-3">
         <Card className="flex flex-col items-center py-4">
           <Briefcase className="mb-1 h-5 w-5 text-brand" />
           <div className="text-2xl font-bold text-slate-900">{todayJobs.length}</div>
@@ -148,11 +164,6 @@ export default async function PlannerPage() {
           <CalendarCheck className="mb-1 h-5 w-5 text-purple-600" />
           <div className="text-2xl font-bold text-slate-900">{(appts ?? []).length}</div>
           <div className="text-xs text-slate-500">Appointments</div>
-        </Card>
-        <Card className="flex flex-col items-center py-4">
-          <Clock className={`mb-1 h-5 w-5 ${clockedIn ? "text-green-600" : "text-slate-400"}`} />
-          <div className="text-2xl font-bold text-slate-900">{formatDuration(hoursToday)}</div>
-          <div className="text-xs text-slate-500">{clockedIn ? "Logged · on the clock" : "Logged today"}</div>
         </Card>
       </div>
 

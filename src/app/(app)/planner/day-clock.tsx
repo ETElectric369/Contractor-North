@@ -1,0 +1,127 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Clock, Play, Square } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/input";
+import { Card } from "@/components/ui/card";
+import { clockIn, clockOut } from "../timeclock/actions";
+
+interface JobOpt {
+  id: string;
+  label: string;
+}
+
+/** Live time clock on My Day: ticks while on the clock, one tap to start/stop —
+ *  so a contractor can clock into the current job without leaving the page. */
+export function DayClock({
+  open,
+  closedHoursToday,
+  currentJobId,
+  jobs,
+}: {
+  open: { id: string; clock_in: string; jobLabel: string | null } | null;
+  closedHoursToday: number;
+  currentJobId: string;
+  jobs: JobOpt[];
+}) {
+  const router = useRouter();
+  const [now, setNow] = useState(() => Date.now());
+  const [busy, setBusy] = useState(false);
+  const [jobId, setJobId] = useState(currentJobId);
+  const [err, setErr] = useState<string | null>(null);
+
+  // Tick once a second only while on the clock.
+  useEffect(() => {
+    if (!open) return;
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [open]);
+
+  const liveMs = open ? Math.max(0, now - new Date(open.clock_in).getTime()) : 0;
+  const totalMs = closedHoursToday * 3_600_000 + liveMs;
+
+  const fmtHm = (ms: number) => {
+    const s = Math.floor(ms / 1000);
+    return `${Math.floor(s / 3600)}h ${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}m`;
+  };
+  const fmtHms = (ms: number) => {
+    const s = Math.floor(ms / 1000);
+    return `${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+  };
+
+  function run(fn: () => Promise<{ ok: boolean; error?: string }>) {
+    setErr(null);
+    setBusy(true);
+    fn()
+      .then((res) => {
+        if (!res.ok) setErr(res.error ?? "Something went wrong.");
+        else router.refresh();
+      })
+      .finally(() => setBusy(false));
+  }
+
+  return (
+    <Card className="mb-4 overflow-hidden">
+      <div className="flex items-center gap-4 px-5 py-4">
+        <span
+          className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${
+            open ? "bg-green-100 text-green-600" : "bg-slate-100 text-slate-400"
+          }`}
+        >
+          <Clock className="h-5 w-5" />
+        </span>
+        <div className="min-w-0 flex-1">
+          {open ? (
+            <>
+              <div className="text-xl font-bold tabular-nums text-slate-900">{fmtHms(liveMs)}</div>
+              <div className="truncate text-xs text-slate-500">
+                On the clock{open.jobLabel ? ` · ${open.jobLabel}` : ""} · {fmtHm(totalMs)} today
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="text-xl font-bold text-slate-900">
+                {fmtHm(totalMs)} <span className="text-sm font-normal text-slate-400">logged today</span>
+              </div>
+              {jobs.length > 0 && (
+                <Select
+                  value={jobId}
+                  onChange={(e) => setJobId(e.target.value)}
+                  className="mt-1 h-8 max-w-[230px] text-xs"
+                  aria-label="Job to clock into"
+                >
+                  <option value="">No job</option>
+                  {jobs.map((j) => (
+                    <option key={j.id} value={j.id}>{j.label}</option>
+                  ))}
+                </Select>
+              )}
+            </>
+          )}
+          {err && <div className="mt-1 text-xs text-red-600">{err}</div>}
+        </div>
+        {open ? (
+          <Button
+            variant="outline"
+            onClick={() => run(() => clockOut({ entry_id: open.id, lunch_minutes: 0, notes: "", gps: null }))}
+            disabled={busy}
+            className="shrink-0 text-red-600"
+          >
+            <Square className="h-4 w-4" /> Clock out
+          </Button>
+        ) : (
+          <Button
+            onClick={() => run(() => clockIn({ job_id: jobId || null, job_code: null, gps: null }))}
+            disabled={busy}
+            className="shrink-0"
+          >
+            <Play className="h-4 w-4" /> Clock in
+          </Button>
+        )}
+      </div>
+    </Card>
+  );
+}
