@@ -107,6 +107,24 @@ export default async function TimecardsPage({
     ? (members?.find((m: any) => m.id === supId)?.full_name ?? "—")
     : "Owner";
 
+  // Each employee's TOTAL accumulated hours, all time (not just this week).
+  const { data: allClosed } = await supabase
+    .from("time_entries")
+    .select("profile_id, clock_in, clock_out, lunch_minutes")
+    .eq("status", "closed")
+    .not("clock_out", "is", null);
+  const accumByProfile = new Map<string, number>();
+  for (const e of allClosed ?? []) {
+    accumByProfile.set(
+      e.profile_id,
+      (accumByProfile.get(e.profile_id) ?? 0) + hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes),
+    );
+  }
+  const accumList = (members ?? [])
+    .map((m: any) => ({ name: m.full_name ?? "—", hours: accumByProfile.get(m.id) ?? 0 }))
+    .filter((x: any) => x.hours > 0)
+    .sort((a: any, b: any) => b.hours - a.hours);
+
   return (
     <div>
       <PageHeader title="Timecards" description={`Review your crew's hours by week.  ·  Approver: ${approver}`}>
@@ -176,6 +194,24 @@ export default async function TimecardsPage({
                 </span>
               ))}
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {accumList.length > 0 && (
+        <Card className="mb-6">
+          <CardContent className="py-4">
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Accumulated hours · all time
+            </div>
+            <ul className="divide-y divide-slate-100">
+              {accumList.map((a: any) => (
+                <li key={a.name} className="flex items-center justify-between py-1.5 text-sm">
+                  <span className="text-slate-700">{a.name}</span>
+                  <span className="font-semibold tabular-nums text-slate-900">{formatDuration(a.hours)}</span>
+                </li>
+              ))}
+            </ul>
           </CardContent>
         </Card>
       )}

@@ -22,6 +22,7 @@ import { JobBills } from "./job-bills";
 import { JobTasks } from "./job-tasks";
 import { JobPermits } from "./job-permits";
 import { JobAddTimeEntry } from "./job-add-time";
+import { JobClockButton } from "./job-clock-button";
 import { JobStatusControl } from "./job-status-control";
 import { JobEditButton } from "./job-edit-button";
 import { JobScheduleControl } from "./job-schedule-control";
@@ -344,15 +345,18 @@ export default async function JobDetailPage({
         <Card className="overflow-hidden">
           <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3 text-sm">
             <span className="font-semibold text-slate-900">Time on this job · {formatDuration(laborHours)}</span>
-            <JobAddTimeEntry
-              jobId={j.id}
-              techs={techs ?? []}
-              jobCodes={(jobCodes ?? []) as any}
-              defaultProfileId={user?.id ?? ""}
-              companyAddress={companyAddress}
-              jobAddress={jobAddress}
-              mileageRate={mileageRate}
-            />
+            <div className="flex items-center gap-2">
+              <JobClockButton jobId={j.id} />
+              <JobAddTimeEntry
+                jobId={j.id}
+                techs={techs ?? []}
+                jobCodes={(jobCodes ?? []) as any}
+                defaultProfileId={user?.id ?? ""}
+                companyAddress={companyAddress}
+                jobAddress={jobAddress}
+                mileageRate={mileageRate}
+              />
+            </div>
           </div>
           <ul className="divide-y divide-slate-100">
             {(entries ?? []).map((e: any) => {
