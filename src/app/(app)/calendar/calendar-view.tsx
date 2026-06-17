@@ -645,9 +645,12 @@ function DayDetail({
           </h3>
         </div>
         <ul className="divide-y divide-slate-100">
-          {(data?.entries ?? []).map((e) => (
+          {(data?.entries ?? []).map((e) => {
+            const c = colorForMember(e.profile_id, members);
+            return (
             <li key={e.id} className="flex flex-wrap items-center justify-between gap-2 px-5 py-2.5 text-sm">
               <div>
+                <span className={`mr-2 inline-block h-2.5 w-2.5 shrink-0 rounded-full align-middle ${c.dot}`} />
                 <span className="font-medium text-slate-900">{e.profiles?.full_name ?? "Crew"}</span>
                 <span className="ml-2 text-slate-500">
                   {fmtTime(e.clock_in)}{e.clock_out ? ` – ${fmtTime(e.clock_out)}` : " (open)"}
@@ -661,7 +664,8 @@ function DayDetail({
               </div>
               <span className="font-medium text-slate-800">{e.clock_out ? `${hrs(e).toFixed(2)} h` : "—"}</span>
             </li>
-          ))}
+            );
+          })}
           {!data?.entries.length && <li className="px-5 py-5 text-center text-sm text-slate-400">No time logged.</li>}
         </ul>
       </Card>
