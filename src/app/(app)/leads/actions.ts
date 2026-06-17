@@ -1,15 +1,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { emptyToNull } from "@/lib/forms";
 import { createClient } from "@/lib/supabase/server";
 import { formatPhone, formatState, formatZip, titleCase } from "@/lib/utils";
 
 export type Result = { ok: boolean; error?: string; id?: string; redirect?: string };
 
-function emptyToNull(v: FormDataEntryValue | null): string | null {
-  const s = String(v ?? "").trim();
-  return s.length ? s : null;
-}
 function orNull(s: string): string | null {
   const t = s.trim();
   return t.length ? t : null;

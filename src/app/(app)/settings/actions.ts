@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { emptyToNull } from "@/lib/forms";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { formatPhone, formatState, formatZip, titleCase } from "@/lib/utils";
 
@@ -519,10 +520,6 @@ export async function deletePricingLevel(id: string): Promise<Result> {
   return { ok: true };
 }
 
-function emptyToNull(v: FormDataEntryValue | null): string | null {
-  const s = String(v ?? "").trim();
-  return s.length ? s : null;
-}
 
 function norm(s: string): string | null {
   const t = s.trim();

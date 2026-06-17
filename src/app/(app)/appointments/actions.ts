@@ -1,15 +1,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { emptyToNull, toIso } from "@/lib/forms";
 import { createClient } from "@/lib/supabase/server";
 import { sendPushToProfiles } from "@/lib/push";
 
 export type Result = { ok: boolean; error?: string; id?: string };
 
-function emptyToNull(v: FormDataEntryValue | null): string | null {
-  const s = String(v ?? "").trim();
-  return s.length ? s : null;
-}
 
 /** Resolve the customer for an appointment form: an existing id, or create a new
  *  customer on the fly from a typed name (the "+ New customer" path). Surfaces
@@ -35,12 +32,6 @@ async function resolveCustomer(
 }
 
 /** Combine a date + time input into an ISO timestamp at local time. */
-function toIso(date: string, time: string): string | null {
-  if (!date) return null;
-  const t = time && /^\d{2}:\d{2}/.test(time) ? time : "08:00";
-  const d = new Date(`${date}T${t}:00`);
-  return isNaN(d.getTime()) ? null : d.toISOString();
-}
 
 export async function createAppointment(formData: FormData): Promise<Result> {
   const supabase = await createClient();

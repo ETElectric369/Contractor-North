@@ -1,14 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { emptyToNull } from "@/lib/forms";
 import { createClient } from "@/lib/supabase/server";
 
 export type Result = { ok: boolean; error?: string; id?: string; count?: number };
 
-function emptyToNull(v: FormDataEntryValue | null): string | null {
-  const s = String(v ?? "").trim();
-  return s.length ? s : null;
-}
 
 /** Advance a yyyy-mm-dd date by one period of the given frequency. */
 function advance(date: string, frequency: string): string {

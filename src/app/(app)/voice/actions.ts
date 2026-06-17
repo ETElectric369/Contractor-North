@@ -7,6 +7,7 @@ import { getActionItems } from "@/lib/action-items/query";
 import { dispatchAction } from "@/lib/action-items/dispatch";
 import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz } from "@/lib/tz";
+import { toIso } from "@/lib/forms";
 import type { Affordance } from "@/lib/action-items/types";
 
 export type VoiceResult = { ok: boolean; message: string; navigate?: string };
@@ -38,13 +39,6 @@ function jsonFrom(text: string): any {
   const e = body.lastIndexOf("}");
   if (s === -1 || e === -1) throw new Error("no json");
   return JSON.parse(body.slice(s, e + 1));
-}
-
-function toIso(date: string, time: string): string | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
-  const t = /^\d{2}:\d{2}/.test(time) ? time : "08:00";
-  const d = new Date(`${date}T${t}:00`);
-  return isNaN(d.getTime()) ? null : d.toISOString();
 }
 
 /**

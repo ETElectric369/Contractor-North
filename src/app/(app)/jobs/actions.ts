@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { emptyToNull } from "@/lib/forms";
 import {
   createInvoiceFromQuote,
   createBlankInvoice,
@@ -95,11 +96,6 @@ export async function updateJob(
 
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return { ok: false, error: "Job name is required." };
-
-  const emptyToNull = (v: FormDataEntryValue | null) => {
-    const s = String(v ?? "").trim();
-    return s.length ? s : null;
-  };
 
   // Optionally create a customer inline (when none selected).
   let customerId = emptyToNull(formData.get("customer_id"));
