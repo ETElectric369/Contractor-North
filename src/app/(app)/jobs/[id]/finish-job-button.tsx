@@ -2,9 +2,9 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, Loader2 } from "lucide-react";
+import { CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
+import { Modal, ModalActions } from "@/components/ui/modal";
 import { finishJob } from "../actions";
 
 /** "Finish job" — quick end-of-job questions, then marks the job complete and
@@ -37,7 +37,20 @@ export function FinishJobButton({ jobId, hasQuote }: { jobId: string; hasQuote: 
         <CheckCircle2 className="h-4 w-4" /> Finish job
       </Button>
 
-      <Modal open={open} onClose={() => !pending && setOpen(false)} title="Finish this job">
+      <Modal
+        open={open}
+        onClose={() => !pending && setOpen(false)}
+        title="Finish this job"
+        footer={
+          <ModalActions
+            onCancel={() => setOpen(false)}
+            onSave={go}
+            saving={pending}
+            disabled={!timeIn || !costsIn}
+            saveLabel="Finish & invoice"
+          />
+        }
+      >
         <div className="space-y-4">
           {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
           <p className="text-sm text-slate-600">
@@ -67,14 +80,6 @@ export function FinishJobButton({ jobId, hasQuote }: { jobId: string; hasQuote: 
               <input type="checkbox" checked={importCosts} onChange={(e) => setImportCosts(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand" />
               Add materials from POs &amp; bills (at cost — adjust after)
             </label>
-          </div>
-
-          <div className="flex justify-end gap-2 pt-1">
-            <Button variant="outline" onClick={() => setOpen(false)} disabled={pending}>Cancel</Button>
-            <Button onClick={go} disabled={pending || !timeIn || !costsIn}>
-              {pending && <Loader2 className="h-4 w-4 animate-spin" />}
-              Finish &amp; draft invoice
-            </Button>
           </div>
         </div>
       </Modal>

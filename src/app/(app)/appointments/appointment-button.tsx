@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Pencil, Copy, Check, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
+import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import {
   createAppointment,
@@ -176,30 +176,32 @@ export function AppointmentButton({
         </Button>
       )}
 
-      <Modal
-        open={open}
-        onClose={closeAll}
-        title={editing ? "Edit appointment" : linkToken ? "Text the customer these times" : "New appointment"}
-      >
-        <form action={submit} className="space-y-4">
-          {/* Sticky action bar — Save/Cancel stay reachable even with the keyboard up. */}
-          <div className="sticky top-0 z-20 -mx-6 -mt-5 mb-1 flex items-center justify-end gap-2 border-b border-slate-200 bg-white px-6 py-3">
-            {linkToken ? (
+      <form action={submit}>
+        <Modal
+          open={open}
+          onClose={closeAll}
+          title={editing ? "Edit appointment" : linkToken ? "Text the customer these times" : "New appointment"}
+          footer={
+            linkToken ? (
               <Button type="button" onClick={closeAll}>Done</Button>
             ) : (
-              <>
-                {editing ? (
-                  <Button type="button" variant="outline" onClick={remove} disabled={pending} className="mr-auto text-red-600">
-                    Delete
-                  </Button>
-                ) : null}
-                <Button type="button" variant="outline" onClick={closeAll}>Cancel</Button>
-                <Button type="submit" disabled={pending}>
-                  {pending ? "Saving…" : mode === "propose" ? "Create link" : "Save"}
-                </Button>
-              </>
-            )}
-          </div>
+              <ModalActions
+                onCancel={closeAll}
+                submit
+                saving={pending}
+                saveLabel={mode === "propose" ? "Create link" : editing ? "Save changes" : "Save"}
+                extra={
+                  editing ? (
+                    <Button type="button" variant="outline" onClick={remove} disabled={pending} className="text-red-600">
+                      Delete
+                    </Button>
+                  ) : undefined
+                }
+              />
+            )
+          }
+        >
+          <div className="space-y-4">
           {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
 
           {linkToken && (
@@ -361,8 +363,9 @@ export function AppointmentButton({
           )}
           </>
           )}
-        </form>
-      </Modal>
+          </div>
+        </Modal>
+      </form>
     </>
   );
 }

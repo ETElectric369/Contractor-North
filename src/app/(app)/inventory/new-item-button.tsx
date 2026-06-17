@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
+import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label } from "@/components/ui/input";
 import { createInventoryItem } from "./actions";
 
@@ -33,8 +33,21 @@ export function NewItemButton() {
         <Plus className="h-4 w-4" /> New item
       </Button>
 
-      <Modal open={open} onClose={() => setOpen(false)} title="New inventory item">
-        <form action={onSubmit} className="space-y-4">
+      <form action={onSubmit}>
+        <Modal
+          open={open}
+          onClose={() => setOpen(false)}
+          title="New inventory item"
+          footer={
+            <ModalActions
+              onCancel={() => setOpen(false)}
+              submit
+              saving={pending}
+              saveLabel="Create item"
+            />
+          }
+        >
+          <div className="space-y-4">
           {error && (
             <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
               {error}
@@ -78,16 +91,9 @@ export function NewItemButton() {
               <Input id="location" name="location" placeholder="Warehouse, Truck 2…" />
             </div>
           </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={pending}>
-              {pending ? "Saving…" : "Add item"}
-            </Button>
           </div>
-        </form>
-      </Modal>
+        </Modal>
+      </form>
     </>
   );
 }

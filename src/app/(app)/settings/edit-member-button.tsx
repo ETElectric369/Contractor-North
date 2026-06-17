@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Pencil, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
+import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select } from "@/components/ui/input";
 import { updateMember, updateMemberAuth } from "./actions";
 
@@ -76,7 +76,20 @@ export function EditMemberButton({
         <Pencil className="h-4 w-4" />
       </button>
 
-      <Modal open={open} onClose={() => setOpen(false)} title={`Edit ${member.full_name ?? "member"}`}>
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        title={`Edit ${member.full_name ?? "member"}`}
+        footer={
+          <ModalActions
+            onCancel={() => setOpen(false)}
+            onSave={save}
+            saving={pending}
+            saveLabel="Save changes"
+            cancelLabel="Cancel"
+          />
+        }
+      >
         <div className="space-y-4">
           {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
           {done && <div className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">{done}</div>}
@@ -135,11 +148,6 @@ export function EditMemberButton({
                 </Button>
               </div>
             </div>
-          </div>
-
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setOpen(false)}>Close</Button>
-            <Button onClick={save} disabled={pending}>{pending ? "Saving…" : "Save changes"}</Button>
           </div>
         </div>
       </Modal>

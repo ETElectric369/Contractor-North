@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
+import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { saveRecurring, deleteRecurring } from "./actions";
 
@@ -65,8 +65,26 @@ export function RecurringButton({
         <Button onClick={() => setOpen(true)}><Plus className="h-4 w-4" /> New recurring</Button>
       )}
 
-      <Modal open={open} onClose={() => setOpen(false)} title={editing ? "Edit recurring" : "New recurring"}>
-        <form action={submit} className="space-y-4">
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        title={editing ? "Edit recurring" : "New recurring"}
+        footer={
+          <ModalActions
+            onCancel={() => setOpen(false)}
+            submit
+            formId="recurring-form"
+            saving={pending}
+            saveLabel="Save changes"
+            extra={
+              editing ? (
+                <Button type="button" variant="outline" onClick={remove} disabled={pending} className="text-red-600">Delete</Button>
+              ) : undefined
+            }
+          />
+        }
+      >
+        <form id="recurring-form" action={submit} className="space-y-4">
           {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
 
           <div className="grid grid-cols-2 gap-3">
@@ -129,16 +147,6 @@ export function RecurringButton({
               </div>
             </div>
           )}
-
-          <div className="flex items-center justify-between gap-2">
-            {editing ? (
-              <Button type="button" variant="outline" onClick={remove} disabled={pending} className="text-red-600">Delete</Button>
-            ) : <span />}
-            <div className="flex gap-2">
-              <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-              <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Save"}</Button>
-            </div>
-          </div>
         </form>
       </Modal>
     </>

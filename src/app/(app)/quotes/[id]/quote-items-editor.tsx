@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2, Pencil, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
+import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Card } from "@/components/ui/card";
@@ -201,7 +201,14 @@ export function QuoteItemsEditor({ quote, items }: { quote: Quote; items: QuoteL
         </Card>
       )}
 
-      <Modal open={detailsOpen} onClose={() => setDetailsOpen(false)} title="Edit quote details">
+      <Modal
+        open={detailsOpen}
+        onClose={() => setDetailsOpen(false)}
+        title="Edit quote details"
+        footer={
+          <ModalActions onCancel={() => setDetailsOpen(false)} onSave={saveDetails} saving={pending} saveLabel="Save changes" />
+        }
+      >
         <div className="space-y-4">
           {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
           <div>
@@ -221,10 +228,6 @@ export function QuoteItemsEditor({ quote, items }: { quote: Quote; items: QuoteL
           <div>
             <Label htmlFor="qd-notes">Notes</Label>
             <Textarea id="qd-notes" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setDetailsOpen(false)}>Cancel</Button>
-            <Button onClick={saveDetails} disabled={pending}>{pending ? "Saving…" : "Save changes"}</Button>
           </div>
         </div>
       </Modal>

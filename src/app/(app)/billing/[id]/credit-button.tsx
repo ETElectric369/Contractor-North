@@ -3,8 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { RotateCcw } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
+import { Modal, ModalActions } from "@/components/ui/modal";
 import { Label, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { createCustomerCredit } from "../actions";
@@ -48,7 +47,14 @@ export function CreditButton({ invoiceId, defaultAmount }: { invoiceId: string; 
       >
         <RotateCcw className="h-4 w-4" /> Credit / refund
       </button>
-      <Modal open={open} onClose={() => setOpen(false)} title="Credit / refund">
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Credit / refund"
+        footer={
+          <ModalActions onCancel={() => setOpen(false)} onSave={save} saving={pending} disabled={!(amount > 0)} saveLabel="Post credit" />
+        }
+      >
         <div className="space-y-4">
           {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
           <div>
@@ -63,10 +69,6 @@ export function CreditButton({ invoiceId, defaultAmount }: { invoiceId: string; 
           <div>
             <Label htmlFor="cr-note">Note (optional)</Label>
             <Textarea id="cr-note" rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button onClick={save} disabled={pending || !(amount > 0)}>{pending ? "Saving…" : "Post credit"}</Button>
           </div>
         </div>
       </Modal>

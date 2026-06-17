@@ -4,7 +4,7 @@ import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
+import { Modal, ModalActions } from "@/components/ui/modal";
 import { Label, Select } from "@/components/ui/input";
 import { bulkImportCustomers, type CustomerImportRow } from "./actions";
 
@@ -191,7 +191,21 @@ export function ImportCustomersButton({ csv = true, label }: { csv?: boolean; la
         onChange={onFile}
       />
 
-      <Modal open={open} onClose={() => setOpen(false)} title={csv ? "Import customers" : "Import a contact"}>
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        title={csv ? "Import customers" : "Import a contact"}
+        footer={
+          headers.length > 0 ? (
+            <ModalActions
+              onCancel={() => setOpen(false)}
+              onSave={runImport}
+              saving={pending}
+              saveLabel={`Import ${dataRows.length} rows`}
+            />
+          ) : undefined
+        }
+      >
         <div className="space-y-4">
           {msg && <div className="rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-700">{msg}</div>}
           {headers.length > 0 && (
@@ -221,12 +235,6 @@ export function ImportCustomersButton({ csv = true, label }: { csv?: boolean; la
                     </Select>
                   </div>
                 ))}
-              </div>
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setOpen(false)}>Close</Button>
-                <Button onClick={runImport} disabled={pending}>
-                  {pending ? "Importing…" : `Import ${dataRows.length} rows`}
-                </Button>
               </div>
             </>
           )}

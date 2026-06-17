@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
+import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { createManualEntry } from "./actions";
@@ -109,7 +109,19 @@ export function AddEntryButton({
         <Plus className="h-4 w-4" /> Add entry
       </Button>
 
-      <Modal open={open} onClose={() => setOpen(false)} title="Add past timecard entry">
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Add past timecard entry"
+        footer={
+          <ModalActions
+            onCancel={() => setOpen(false)}
+            onSave={submit}
+            saving={pending}
+            saveLabel="Add entry"
+          />
+        }
+      >
         <div className="space-y-4">
           {error && (
             <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
@@ -185,15 +197,6 @@ export function AddEntryButton({
           <div>
             <Label htmlFor="m-notes">Notes</Label>
             <Textarea id="m-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
-          </div>
-
-          <div className="flex justify-end gap-2 pt-1">
-            <Button variant="outline" onClick={() => setOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={submit} disabled={pending}>
-              {pending ? "Saving…" : "Add entry"}
-            </Button>
           </div>
         </div>
       </Modal>

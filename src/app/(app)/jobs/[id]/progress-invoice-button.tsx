@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Percent } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
+import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label } from "@/components/ui/input";
 import { createProgressInvoice } from "../../recurring/actions";
 
@@ -30,7 +30,14 @@ export function ProgressInvoiceButton({ jobId }: { jobId: string }) {
       <Button variant="outline" onClick={() => setOpen(true)}>
         <Percent className="h-3.5 w-3.5" /> Progress invoice
       </Button>
-      <Modal open={open} onClose={() => setOpen(false)} title="Progress payment">
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Progress payment"
+        footer={
+          <ModalActions onCancel={() => setOpen(false)} onSave={go} saving={pending} saveLabel="Create invoice" />
+        }
+      >
         <div className="space-y-4">
           {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
           <p className="text-sm text-slate-600">Invoice a percentage of this job&apos;s quoted total now — for deposits or milestone billing.</p>
@@ -45,10 +52,6 @@ export function ProgressInvoiceButton({ jobId }: { jobId: string }) {
                 <button key={p} type="button" onClick={() => setPct(p)} className="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600 hover:bg-slate-200">{p}%</button>
               ))}
             </div>
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button onClick={go} disabled={pending}>{pending ? "Creating…" : "Create invoice"}</Button>
           </div>
         </div>
       </Modal>

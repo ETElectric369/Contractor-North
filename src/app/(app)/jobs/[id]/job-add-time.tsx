@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
+import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { drivingDistanceMiles } from "@/lib/google-maps";
@@ -106,7 +106,19 @@ export function JobAddTimeEntry({
       <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
         <Plus className="h-3.5 w-3.5" /> Add time entry
       </Button>
-      <Modal open={open} onClose={() => setOpen(false)} title="Add time entry">
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Add time entry"
+        footer={
+          <ModalActions
+            onCancel={() => setOpen(false)}
+            onSave={save}
+            saving={pending}
+            saveLabel="Save entry"
+          />
+        }
+      >
         <div className="space-y-4">
           {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -171,10 +183,6 @@ export function JobAddTimeEntry({
           <div>
             <Label htmlFor="at-notes">Notes</Label>
             <Textarea id="at-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button onClick={save} disabled={pending}>{pending ? "Saving…" : "Save entry"}</Button>
           </div>
         </div>
       </Modal>

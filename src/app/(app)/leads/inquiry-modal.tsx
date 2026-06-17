@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
+import { Modal, ModalActions } from "@/components/ui/modal";
 import { InquiryFields } from "./inquiry-fields";
 import { createInquiry, updateInquiry } from "./actions";
 import type { Inquiry } from "@/lib/types";
@@ -42,18 +42,26 @@ export function InquiryModal({ inquiry, mode = "new" }: { inquiry?: Inquiry; mod
         </Button>
       )}
 
-      <Modal open={open} onClose={() => setOpen(false)} title={editing ? "Edit inquiry" : "New inquiry"}>
-        <form action={onSubmit} className="space-y-4">
-          {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-          <InquiryFields inquiry={inquiry} />
-          <div className="flex justify-end gap-2 pt-2">
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button type="submit" disabled={pending}>
-              {pending ? "Saving…" : editing ? "Save changes" : "Create inquiry"}
-            </Button>
+      <form action={onSubmit}>
+        <Modal
+          open={open}
+          onClose={() => setOpen(false)}
+          title={editing ? "Edit inquiry" : "New inquiry"}
+          footer={
+            <ModalActions
+              onCancel={() => setOpen(false)}
+              submit
+              saving={pending}
+              saveLabel={editing ? "Save changes" : "Create inquiry"}
+            />
+          }
+        >
+          <div className="space-y-4">
+            {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+            <InquiryFields inquiry={inquiry} />
           </div>
-        </form>
-      </Modal>
+        </Modal>
+      </form>
     </>
   );
 }

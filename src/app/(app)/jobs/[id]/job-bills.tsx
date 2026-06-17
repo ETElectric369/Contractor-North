@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Badge } from "@/components/ui/badge";
+import { Modal, ModalActions } from "@/components/ui/modal";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { createBill, setBillStatus, deleteBill } from "../actions";
 
@@ -66,8 +67,21 @@ export function JobBills({ jobId, bills }: { jobId: string; bills: Bill[] }) {
         </Button>
       </div>
 
-      {adding && (
-        <div className="mb-3 space-y-3 rounded-lg border border-slate-200 p-3">
+      <Modal
+        open={adding}
+        onClose={() => setAdding(false)}
+        title="Add bill"
+        footer={
+          <ModalActions
+            onCancel={() => setAdding(false)}
+            onSave={add}
+            saving={pending}
+            disabled={!supplier.trim()}
+            saveLabel="Save changes"
+          />
+        }
+      >
+        <div className="space-y-3">
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div className="grid grid-cols-2 gap-3">
             <div className="col-span-2">
@@ -94,14 +108,8 @@ export function JobBills({ jobId, bills }: { jobId: string; bills: Bill[] }) {
               </Select>
             </div>
           </div>
-          <div className="flex justify-end gap-2">
-            <Button size="sm" variant="outline" onClick={() => setAdding(false)}>Cancel</Button>
-            <Button size="sm" onClick={add} disabled={pending || !supplier.trim()}>
-              {pending ? "Saving…" : "Save bill"}
-            </Button>
-          </div>
         </div>
-      )}
+      </Modal>
 
       {bills.length === 0 ? (
         <p className="py-4 text-center text-sm text-slate-400">No supplier bills yet.</p>

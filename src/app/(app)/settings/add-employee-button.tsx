@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { UserPlus, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
+import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { createEmployee } from "./actions";
@@ -64,7 +64,22 @@ export function AddEmployeeButton({ configured }: { configured: boolean }) {
         <UserPlus className="h-4 w-4" /> Add employee
       </Button>
 
-      <Modal open={open} onClose={reset} title="Add an employee (no email invite)">
+      <Modal
+        open={open}
+        onClose={reset}
+        title="Add an employee (no email invite)"
+        footer={
+          done ? undefined : (
+            <ModalActions
+              onCancel={reset}
+              onSave={save}
+              saving={pending}
+              disabled={!configured || !name.trim() || !email.includes("@")}
+              saveLabel="Create employee"
+            />
+          )
+        }
+      >
         {done ? (
           <div className="space-y-4">
             <div className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">{done}</div>
@@ -118,12 +133,6 @@ export function AddEmployeeButton({ configured }: { configured: boolean }) {
                 <Label htmlFor="emp-rate">Billable rate ($/hr)</Label>
                 <NumberInput id="emp-rate" value={rate} onValueChange={setRate} />
               </div>
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={reset}>Cancel</Button>
-              <Button onClick={save} disabled={pending || !configured || !name.trim() || !email.includes("@")}>
-                {pending ? "Creating…" : "Create employee"}
-              </Button>
             </div>
           </div>
         )}

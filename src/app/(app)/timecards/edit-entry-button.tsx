@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
+import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { updateTimeEntry, deleteTimeEntry } from "../timeclock/actions";
@@ -119,7 +119,29 @@ export function EditEntryButton({
         <Pencil className="h-3.5 w-3.5" />
       </button>
 
-      <Modal open={open} onClose={() => setOpen(false)} title="Edit time entry">
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Edit time entry"
+        footer={
+          <ModalActions
+            onCancel={() => setOpen(false)}
+            onSave={save}
+            saving={pending}
+            saveLabel="Save changes"
+            extra={
+              <Button
+                variant="ghost"
+                onClick={remove}
+                disabled={pending}
+                className="text-red-600 hover:bg-red-50"
+              >
+                <Trash2 className="h-4 w-4" /> Delete
+              </Button>
+            }
+          />
+        }
+      >
         <div className="space-y-4">
           {error && (
             <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
@@ -181,19 +203,6 @@ export function EditEntryButton({
           <div>
             <Label htmlFor="e-notes">Notes</Label>
             <Textarea id="e-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
-          </div>
-          <div className="flex items-center justify-between pt-1">
-            <Button variant="ghost" onClick={remove} disabled={pending} className="text-red-600 hover:bg-red-50">
-              <Trash2 className="h-4 w-4" /> Delete
-            </Button>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setOpen(false)}>
-                Cancel
-              </Button>
-              <Button onClick={save} disabled={pending}>
-                {pending ? "Saving…" : "Save"}
-              </Button>
-            </div>
           </div>
         </div>
       </Modal>

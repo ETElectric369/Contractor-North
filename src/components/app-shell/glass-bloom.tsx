@@ -144,14 +144,20 @@ export function GlassBloom({
       ? clamp(anchor.y - 18 - panelH, 8, vh - panelH - 8)
       : clamp(anchor.y - panelH / 2, 8, vh - panelH - 8);
 
-  const rowW = PANEL_W - PAD * 2;
   const rowTop = (i: number) => panelTop + PAD + HEADER + i * step;
   const rowCY = (i: number) => rowTop(i) + rowH / 2;
 
+  // Where the branch noodles START. The panel is clamped to stay on-screen, so
+  // for an edge icon it no longer sits directly over/under the icon — if the
+  // noodles kept starting at the raw icon x they'd fan sideways and the menu
+  // looks "off-center." Start them from the panel's own span instead, so they
+  // meet the panel where it actually is. (The icon still glows underneath.)
+  const branchX = clamp(anchor.x, panelLeft + 16, panelLeft + PANEL_W - 16);
+
   function branch(by: number) {
     const bx = panelLeft;
-    const mx = anchor.x + (bx - anchor.x) * 0.5;
-    return `M${anchor.x} ${anchor.y} C ${mx} ${anchor.y}, ${mx} ${by}, ${bx} ${by}`;
+    const mx = branchX + (bx - branchX) * 0.5;
+    return `M${branchX} ${anchor.y} C ${mx} ${anchor.y}, ${mx} ${by}, ${bx} ${by}`;
   }
 
   return (
@@ -195,7 +201,7 @@ export function GlassBloom({
           width: PANEL_W,
           height: panelH,
           pointerEvents: "auto",
-          background: "rgba(30, 41, 59, 0.62)",
+          background: "rgba(44, 56, 76, 0.6)",
           WebkitBackdropFilter: "blur(16px) saturate(1.3)",
           backdropFilter: "blur(16px) saturate(1.3)",
         }}
@@ -224,9 +230,12 @@ export function GlassBloom({
               className="cn-fade glass-gloss flex items-center gap-2 rounded-xl border border-white/70 pl-1.5 pr-2.5 text-left transition-transform hover:scale-[1.03]"
               style={{
                 position: "absolute", // beat .glass-gloss's position:relative
+                // left AND right (not a fixed width) → the tile is symmetric
+                // inside the panel regardless of its border, so the green tiles
+                // sit dead-center instead of drifting to the right.
                 left: PAD,
+                right: PAD,
                 top: PAD + HEADER + i * step,
-                width: rowW,
                 height: rowH,
                 animationDelay: `${i * 26}ms`,
                 background: "rgba(232, 251, 247, 0.96)",

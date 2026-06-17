@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
+import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Textarea, Select } from "@/components/ui/input";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { StateSelect } from "@/components/ui/state-select";
@@ -61,12 +61,16 @@ export function JobEditButton({
         <Pencil className="h-4 w-4" /> Edit job
       </Button>
 
-      <Modal open={open} onClose={() => setOpen(false)} title="Edit job">
-        <form action={onSubmit} className="space-y-4">
-          <div className="sticky top-0 z-20 -mx-6 -mt-5 mb-1 flex items-center justify-end gap-2 border-b border-slate-200 bg-white px-6 py-3">
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Save changes"}</Button>
-          </div>
+      <form action={onSubmit}>
+        <Modal
+          open={open}
+          onClose={() => setOpen(false)}
+          title="Edit job"
+          footer={
+            <ModalActions onCancel={() => setOpen(false)} submit saving={pending} saveLabel="Save changes" />
+          }
+        >
+          <div className="space-y-4">
           {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
 
           <div>
@@ -166,9 +170,9 @@ export function JobEditButton({
             <Label htmlFor="ej-desc">Description</Label>
             <Textarea id="ej-desc" name="description" rows={3} defaultValue={job.description ?? ""} />
           </div>
-
-        </form>
-      </Modal>
+          </div>
+        </Modal>
+      </form>
     </>
   );
 }

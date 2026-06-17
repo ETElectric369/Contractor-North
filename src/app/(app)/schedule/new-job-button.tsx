@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
+import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { createJob } from "./actions";
@@ -56,8 +56,21 @@ export function NewJobButton({
         <Plus className="h-4 w-4" /> New job
       </Button>
 
-      <Modal open={open} onClose={() => setOpen(false)} title="New job">
-        <form action={onSubmit} className="space-y-4">
+      <form action={onSubmit}>
+        <Modal
+          open={open}
+          onClose={() => setOpen(false)}
+          title="New job"
+          footer={
+            <ModalActions
+              onCancel={() => setOpen(false)}
+              submit
+              saving={pending}
+              saveLabel="Create job"
+            />
+          }
+        >
+          <div className="space-y-4">
           {error && (
             <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
               {error}
@@ -140,16 +153,9 @@ export function NewJobButton({
             <Label htmlFor="description">Description</Label>
             <Textarea id="description" name="description" rows={2} />
           </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={pending}>
-              {pending ? "Saving…" : "Create job"}
-            </Button>
           </div>
-        </form>
-      </Modal>
+        </Modal>
+      </form>
     </>
   );
 }

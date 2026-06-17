@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
+import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select } from "@/components/ui/input";
 import { createPurchaseOrder } from "./actions";
 
@@ -56,7 +56,19 @@ export function NewPoButton({
         <Plus className="h-4 w-4" /> New PO
       </Button>
 
-      <Modal open={open} onClose={() => setOpen(false)} title="New purchase order">
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        title="New purchase order"
+        footer={
+          <ModalActions
+            onCancel={() => setOpen(false)}
+            onSave={onCreate}
+            saving={pending}
+            saveLabel="Create PO"
+          />
+        }
+      >
         <div className="space-y-4">
           {error && (
             <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -93,14 +105,6 @@ export function NewPoButton({
             <p className="mt-1 text-xs text-slate-400">
               Pulls every item from the chosen take-off straight onto this PO.
             </p>
-          </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="outline" onClick={() => setOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={onCreate} disabled={pending}>
-              {pending ? "Creating…" : "Create PO"}
-            </Button>
           </div>
         </div>
       </Modal>

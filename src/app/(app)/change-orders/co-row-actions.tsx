@@ -3,8 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Pencil, Trash2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
+import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { updateChangeOrder, deleteChangeOrder } from "./actions";
@@ -62,34 +61,39 @@ export function CoRowActions({
         <Trash2 className="h-4 w-4" />
       </button>
 
-      <Modal open={open} onClose={() => setOpen(false)} title={`Edit ${co.co_number}`}>
-        <form action={onSubmit} className="space-y-4">
-          {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-          <div>
-            <Label htmlFor="co-desc">Description *</Label>
-            <Textarea id="co-desc" name="description" rows={3} required defaultValue={co.description} />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
+      <form action={onSubmit}>
+        <Modal
+          open={open}
+          onClose={() => setOpen(false)}
+          title={`Edit ${co.co_number}`}
+          footer={
+            <ModalActions onCancel={() => setOpen(false)} submit saving={pending} saveLabel="Save changes" />
+          }
+        >
+          <div className="space-y-4">
+            {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
             <div>
-              <Label htmlFor="co-amount">Amount</Label>
-              <NumberInput id="co-amount" value={amount} onValueChange={setAmount} />
+              <Label htmlFor="co-desc">Description *</Label>
+              <Textarea id="co-desc" name="description" rows={3} required defaultValue={co.description} />
             </div>
-            <div>
-              <Label htmlFor="co-job">Job</Label>
-              <Select id="co-job" name="job_id" defaultValue={co.job_id ?? ""}>
-                <option value="">— None —</option>
-                {jobs.map((j) => (
-                  <option key={j.id} value={j.id}>{j.job_number} — {j.name}</option>
-                ))}
-              </Select>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="co-amount">Amount</Label>
+                <NumberInput id="co-amount" value={amount} onValueChange={setAmount} />
+              </div>
+              <div>
+                <Label htmlFor="co-job">Job</Label>
+                <Select id="co-job" name="job_id" defaultValue={co.job_id ?? ""}>
+                  <option value="">— None —</option>
+                  {jobs.map((j) => (
+                    <option key={j.id} value={j.id}>{j.job_number} — {j.name}</option>
+                  ))}
+                </Select>
+              </div>
             </div>
           </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Save changes"}</Button>
-          </div>
-        </form>
-      </Modal>
+        </Modal>
+      </form>
     </>
   );
 }

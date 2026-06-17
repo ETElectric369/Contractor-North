@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
+import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select } from "@/components/ui/input";
 import { formatCurrency } from "@/lib/utils";
 import { createInvoiceFromQuote, createBlankInvoice } from "./actions";
@@ -78,7 +78,20 @@ export function NewInvoiceButton({
         <Plus className="h-4 w-4" /> New invoice
       </Button>
 
-      <Modal open={open} onClose={() => setOpen(false)} title="New invoice">
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        title="New invoice"
+        footer={
+          <ModalActions
+            onCancel={() => setOpen(false)}
+            onSave={onCreate}
+            saving={pending}
+            disabled={mode === "quote" && !quoteId}
+            saveLabel="Create invoice"
+          />
+        }
+      >
         <div className="space-y-4">
           {error && (
             <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -197,18 +210,6 @@ export function NewInvoiceButton({
               </div>
             </>
           )}
-
-          <div className="flex justify-end gap-2 pt-1">
-            <Button variant="outline" onClick={() => setOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              onClick={onCreate}
-              disabled={pending || (mode === "quote" && !quoteId)}
-            >
-              {pending ? "Creating…" : "Create invoice"}
-            </Button>
-          </div>
         </div>
       </Modal>
     </>

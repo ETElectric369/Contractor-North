@@ -6,7 +6,7 @@ import Link from "next/link";
 import { Plus, Trash2, Flag, Briefcase, Pencil, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
-import { Modal } from "@/components/ui/modal";
+import { Modal, ModalActions } from "@/components/ui/modal";
 import { Card } from "@/components/ui/card";
 import { formatDate } from "@/lib/utils";
 import { createTask, toggleTask, deleteTask, updateTask, type TaskCategory } from "./actions";
@@ -189,12 +189,13 @@ function TaskEditModal({
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Edit task">
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Edit task"
+      footer={<ModalActions onCancel={onClose} onSave={save} saving={pending} saveLabel="Save changes" />}
+    >
       <div className="space-y-4">
-        <div className="sticky top-0 z-20 -mx-6 -mt-5 mb-1 flex items-center justify-end gap-2 border-b border-slate-200 bg-white px-6 py-3">
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={save} disabled={pending}>{pending ? "Saving…" : "Save"}</Button>
-        </div>
         {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
         <div>
           <Label htmlFor="te-title">Title</Label>
@@ -326,7 +327,7 @@ export function TaskRow({
           {adding && (
             <li className="flex items-center gap-2">
               <Input value={subTitle} onChange={(e) => setSubTitle(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addSub()} placeholder="Subtask…" autoFocus className="h-7 text-xs" />
-              <button onClick={addSub} disabled={pending || !subTitle.trim()} className="rounded bg-brand px-2 py-1 text-xs font-medium text-white disabled:opacity-50">Add</button>
+              <Button size="sm" onClick={addSub} disabled={pending || !subTitle.trim()} className="h-7 px-2.5 text-xs">Add</Button>
             </li>
           )}
         </ul>

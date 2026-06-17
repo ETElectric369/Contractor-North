@@ -3,8 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Pencil, Trash2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
+import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label } from "@/components/ui/input";
 import { updateInventoryItem, deleteInventoryItem } from "./actions";
 import type { InventoryItem } from "@/lib/types";
@@ -56,8 +55,21 @@ export function ItemActions({ item }: { item: InventoryItem }) {
         </button>
       </div>
 
-      <Modal open={open} onClose={() => setOpen(false)} title="Edit item">
-        <form action={onSubmit} className="space-y-4">
+      <form action={onSubmit}>
+        <Modal
+          open={open}
+          onClose={() => setOpen(false)}
+          title="Edit item"
+          footer={
+            <ModalActions
+              onCancel={() => setOpen(false)}
+              submit
+              saving={pending}
+              saveLabel="Save changes"
+            />
+          }
+        >
+          <div className="space-y-4">
           {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
           <div className="grid grid-cols-2 gap-3">
             <div className="col-span-2">
@@ -93,12 +105,9 @@ export function ItemActions({ item }: { item: InventoryItem }) {
               <Input id="ii-loc" name="location" defaultValue={item.location ?? ""} />
             </div>
           </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Save changes"}</Button>
           </div>
-        </form>
-      </Modal>
+        </Modal>
+      </form>
     </>
   );
 }

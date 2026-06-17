@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronDown, Loader2 } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
+import { Modal, ModalActions } from "@/components/ui/modal";
 import { Label, Select } from "@/components/ui/input";
 import { convertInquiry } from "./actions";
 
@@ -86,7 +86,19 @@ export function ConvertMenu({
         )}
       </div>
 
-      <Modal open={!!target} onClose={() => !busy && setTarget(null)} title={target ? `Convert to ${LABELS[target]}` : ""}>
+      <Modal
+        open={!!target}
+        onClose={() => !busy && setTarget(null)}
+        title={target ? `Convert to ${LABELS[target]}` : ""}
+        footer={
+          <ModalActions
+            onCancel={() => setTarget(null)}
+            onSave={run}
+            saving={busy}
+            saveLabel={target === "customer" ? "Convert" : `Continue to ${target ? LABELS[target] : ""}`}
+          />
+        }
+      >
         <div className="space-y-4">
           {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
           <p className="text-sm text-slate-600">
@@ -112,13 +124,6 @@ export function ConvertMenu({
                 </Select>
               </div>
             )}
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setTarget(null)} disabled={busy}>Cancel</Button>
-            <Button onClick={run} disabled={busy}>
-              {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-              {target === "customer" ? "Convert" : `Continue to ${target ? LABELS[target] : ""}`}
-            </Button>
           </div>
         </div>
       </Modal>

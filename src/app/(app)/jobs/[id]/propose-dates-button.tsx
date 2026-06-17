@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarPlus, Copy, MessageSquare, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
+import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label } from "@/components/ui/input";
 import { createScheduleProposal, cancelScheduleProposal } from "../../schedule/actions";
 
@@ -95,7 +95,21 @@ export function ProposeDatesButton({
         {pendingProposal ? "Dates offered…" : "Propose dates"}
       </Button>
 
-      <Modal open={open} onClose={() => setOpen(false)} title="Let the customer pick a date">
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Let the customer pick a date"
+        footer={
+          token ? undefined : (
+            <ModalActions
+              onCancel={() => setOpen(false)}
+              onSave={create}
+              saving={busy}
+              saveLabel="Create link"
+            />
+          )
+        }
+      >
         <div className="space-y-4">
           {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
 
@@ -161,12 +175,6 @@ export function ProposeDatesButton({
                   onChange={(e) => setTimeNote(e.target.value)}
                 />
                 <p className="mt-1 text-xs text-slate-400">Shown to the customer with every date option.</p>
-              </div>
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-                <Button onClick={create} disabled={busy}>
-                  {busy ? "Creating…" : "Create link"}
-                </Button>
               </div>
             </>
           )}

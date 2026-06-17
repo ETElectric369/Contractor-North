@@ -211,6 +211,32 @@ export async function createMaterialListFromQuote(quoteId: string): Promise<Resu
   return { ok: true, id: list.id };
 }
 
+/** Tolerant parse of a JSON array the model emitted: strips any code fences,
+ *  isolates the outermost [...], and — if the model was cut off by the token
+ *  limit mid-array — salvages the rows it did finish rather than failing whole. */
+function parseDraftArray(raw: string): unknown[] {
+  let s = raw.replace(/```(?:json)?/gi, "").trim();
+  const start = s.indexOf("[");
+  if (start === -1) throw new Error("No items in response.");
+  const end = s.lastIndexOf("]");
+  if (end > start) {
+    try {
+      return JSON.parse(s.slice(start, end + 1));
+    } catch {
+      /* fall through to salvage */
+    }
+  }
+  // Salvage: take everything up to the last complete object and close the array.
+  s = s.slice(start);
+  const lastObj = s.lastIndexOf("}");
+  if (lastObj === -1) throw new Error("Couldn't read the material list — try again.");
+  try {
+    return JSON.parse(s.slice(0, lastObj + 1) + "]");
+  } catch {
+    throw new Error("Couldn't read the material list — try again.");
+  }
+}
+
 /** Ask Claude to build an electrical material take-off from a scope of work. */
 export async function generateMaterialDraft(
   scope: string,
@@ -223,19 +249,21 @@ export async function generateMaterialDraft(
       model: DEFAULT_MODEL,
       max_tokens: 2000,
       system:
-        'You are a material estimator for an electrical contractor (CED supply). Given a scope of work, output a JSON array of material take-off items. Each item: {"description": string, "part_number": string|null, "quantity": number, "unit": string (ea/ft/box/roll/lot), "vendor": string|null, "est_cost": number|null (per-unit USD, rough)}. Include wire, conduit, fittings, breakers, devices, boxes, etc. as appropriate. Respond with ONLY the JSON array.',
-      messages: [{ role: "user", content: scope }],
+        'You are a material estimator for an electrical contractor (CED supply). Given a scope of work, output a JSON array of material take-off items. Each item: {"description": string, "part_number": string|null, "quantity": number, "unit": string (ea/ft/box/roll/lot), "vendor": string|null, "est_cost": number|null (per-unit USD, rough)}. Include wire, conduit, fittings, breakers, devices, boxes, etc. as appropriate. Respond with ONLY the JSON array — no prose, no code fences.',
+      // Prefill the assistant turn with "[" so the model is forced to begin the
+      // JSON array immediately (no preamble, no ```json fence). We prepend it back
+      // before parsing. This eliminates the "No JSON array in response" failures.
+      messages: [
+        { role: "user", content: scope },
+        { role: "assistant", content: "[" },
+      ],
     });
 
     const block = msg.content.find((b) => b.type === "text") as
       | { text: string }
       | undefined;
-    const text = block?.text ?? "";
-    const start = text.indexOf("[");
-    const end = text.lastIndexOf("]");
-    if (start === -1 || end === -1) throw new Error("No JSON array in response.");
-
-    const items = (JSON.parse(text.slice(start, end + 1)) as DraftMaterial[]).map(
+    const raw = "[" + (block?.text ?? "");
+    const items = (parseDraftArray(raw) as DraftMaterial[]).map(
       (i) => ({
         description: String(i.description ?? ""),
         part_number: i.part_number ? String(i.part_number) : null,
