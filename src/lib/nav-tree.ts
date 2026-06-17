@@ -98,28 +98,6 @@ export const NAV_TREE: NavTree = {
   ],
 };
 
-/** A job's tabs as a mind-map; each leaf deep-links to that tab (?tab=). */
-export function jobSectionTree(jobId: string, jobLabel: string): NavTree {
-  const tab = (t: string) => `/jobs/${jobId}?tab=${t}`;
-  return {
-    center: { label: jobLabel, icon: "briefcase" },
-    nodes: [
-      { id: "t-job", label: "Overview", icon: "briefcase", href: tab("job") },
-      { id: "t-quotes", label: "Quotes", icon: "fileText", href: tab("quotes") },
-      { id: "t-invoices", label: "Invoices", icon: "receipt", href: tab("invoices") },
-      { id: "t-wos", label: "Work orders", icon: "clipboardCheck", href: tab("wos") },
-      { id: "t-co", label: "Change orders", icon: "fileText", href: tab("change-orders") },
-      { id: "t-materials", label: "Materials", icon: "boxes", href: tab("materials") },
-      { id: "t-appts", label: "Appointments", icon: "calendar", href: tab("appointments") },
-      { id: "t-time", label: "Time", icon: "clock", href: tab("time") },
-      { id: "t-photos", label: "Photos", icon: "list", href: tab("photos") },
-      { id: "t-docs", label: "Docs", icon: "fileSpreadsheet", href: tab("docs") },
-      { id: "t-tasks", label: "Tasks", icon: "listCheck", href: tab("tasks") },
-      { id: "t-costs", label: "Costs", icon: "calculator", href: tab("costs") },
-    ],
-  };
-}
-
 /** A quote's relationships as a mind-map (linear page → related records). */
 export function quoteSectionTree(
   quoteId: string,

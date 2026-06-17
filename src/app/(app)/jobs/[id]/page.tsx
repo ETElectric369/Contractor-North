@@ -5,8 +5,6 @@ import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { Tabs, type TabDef } from "@/components/tabs";
-import { SectionMapButton } from "@/components/section-map-button";
-import { jobSectionTree } from "@/lib/nav-tree";
 import {
   formatCurrency,
   formatDate,
@@ -669,7 +667,6 @@ export default async function JobDetailPage({
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <SectionMapButton tree={jobSectionTree(j.id, j.name)} />
           {j.status !== "complete" && j.status !== "invoiced" && j.status !== "cancelled" && (
             <>
               <ProposeDatesButton
