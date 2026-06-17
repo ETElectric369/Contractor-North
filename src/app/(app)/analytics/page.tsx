@@ -19,7 +19,7 @@ export default async function AnalyticsPage() {
     data: { user },
   } = await supabase.auth.getUser();
   const { data: me } = await supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle();
-  if (!me || !["owner", "admin", "office"].includes(me.role)) redirect("/dashboard");
+  if (!me || !["owner", "admin", "office"].includes(me.role)) redirect("/planner");
 
   const yearAgo = new Date();
   yearAgo.setMonth(yearAgo.getMonth() - 11);

@@ -157,7 +157,7 @@ export async function rescheduleJob(
   const { error } = await supabase.from("jobs").update(patch).eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/schedule");
-  revalidatePath("/calendar");
+  revalidatePath("/schedule");
   revalidatePath(`/jobs/${id}`);
   return { ok: true };
 }
@@ -208,7 +208,7 @@ export async function setJobScheduleRanges(
   }
 
   revalidatePath("/schedule");
-  revalidatePath("/calendar");
+  revalidatePath("/schedule");
   revalidatePath("/jobs");
   revalidatePath(`/jobs/${jobId}`);
 

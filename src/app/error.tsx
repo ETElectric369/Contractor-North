@@ -29,7 +29,7 @@ export default function Error({
       </p>
       <div className="mt-5 flex gap-2">
         <Button onClick={reset}>Try again</Button>
-        <Link href="/dashboard">
+        <Link href="/planner">
           <Button variant="outline">Dashboard</Button>
         </Link>
       </div>

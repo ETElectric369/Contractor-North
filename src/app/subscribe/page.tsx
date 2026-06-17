@@ -37,7 +37,7 @@ export default async function SubscribePage({
 
   // If billing is off or access is fine, no need to be here.
   if (!billingEnabled || (org && hasActiveAccess(org as Organization))) {
-    redirect("/dashboard");
+    redirect("/planner");
   }
 
   const isAdmin = profile.role === "owner" || profile.role === "admin";

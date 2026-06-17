@@ -12,7 +12,7 @@ export default function NotFound() {
       <p className="mt-1 max-w-sm text-sm text-slate-500">
         We couldn't find that page.
       </p>
-      <Link href="/dashboard" className="mt-5">
+      <Link href="/planner" className="mt-5">
         <Button>Back to dashboard</Button>
       </Link>
     </div>

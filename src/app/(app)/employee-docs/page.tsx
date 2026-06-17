@@ -15,7 +15,7 @@ export default async function EmployeeDocsPage() {
     .select("org_id, role")
     .eq("id", user?.id ?? "")
     .maybeSingle();
-  if (!me || !["owner", "admin", "office"].includes(me.role)) redirect("/dashboard");
+  if (!me || !["owner", "admin", "office"].includes(me.role)) redirect("/planner");
 
   const [{ data: employees }, { data: docRows }] = await Promise.all([
     supabase.from("profiles").select("id, full_name").order("full_name"),

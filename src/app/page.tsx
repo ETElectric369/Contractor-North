@@ -54,7 +54,7 @@ export default async function Home() {
           </div>
           <div className="flex items-center gap-2">
             {signedIn ? (
-              <Link href="/dashboard">
+              <Link href="/planner">
                 <Button>
                   Open app <ArrowRight className="h-4 w-4" />
                 </Button>
@@ -87,7 +87,7 @@ export default async function Home() {
             billing — built for electrical contractors, powered by AI.
           </p>
           <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-            <Link href={signedIn ? "/dashboard" : "/login?mode=signup"}>
+            <Link href={signedIn ? "/planner" : "/login?mode=signup"}>
               <Button size="lg" className="bg-white text-brand hover:bg-slate-100">
                 {signedIn ? "Open the app" : "Get started free"}
                 <ArrowRight className="h-4 w-4" />
@@ -154,7 +154,7 @@ export default async function Home() {
               )}
             </ul>
           </div>
-          <Link href={signedIn ? "/dashboard" : "/login?mode=signup"}>
+          <Link href={signedIn ? "/planner" : "/login?mode=signup"}>
             <Button size="lg">
               {signedIn ? "Open the app" : "Create your account"}
               <ArrowRight className="h-4 w-4" />

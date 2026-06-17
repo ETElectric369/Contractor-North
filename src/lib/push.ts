@@ -88,7 +88,7 @@ export async function sendPushToProfiles(
     const body = JSON.stringify({
       title: payload.title,
       body: payload.body,
-      url: payload.url ?? "/dashboard",
+      url: payload.url ?? "/planner",
     });
 
     await Promise.all(

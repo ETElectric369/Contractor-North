@@ -9,7 +9,7 @@ export type TaskCategory = "sales" | "operations" | "office";
 
 function revalidateTaskViews(category?: string | null, jobId?: string | null) {
   revalidatePath("/tasks");
-  revalidatePath("/dashboard");
+  revalidatePath("/planner");
   if (category) revalidatePath(`/tasks/${category}`);
   if (jobId) revalidatePath(`/jobs/${jobId}`);
 }

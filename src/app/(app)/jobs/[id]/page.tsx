@@ -651,7 +651,7 @@ export default async function JobDetailPage({
   return (
     <div className="mx-auto max-w-5xl">
       <div className="mb-4 flex items-center gap-1.5 text-sm text-slate-500">
-        <Link href="/dashboard" className="hover:text-slate-800"><Home className="h-4 w-4" /></Link>
+        <Link href="/planner" className="hover:text-slate-800"><Home className="h-4 w-4" /></Link>
         <ChevronRight className="h-3.5 w-3.5 text-slate-300" />
         <Link href="/jobs" className="hover:text-slate-800">Jobs</Link>
         <ChevronRight className="h-3.5 w-3.5 text-slate-300" />

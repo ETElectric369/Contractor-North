@@ -21,7 +21,7 @@ export type NavTree = {
 };
 
 export const NAV_TREE: NavTree = {
-  center: { label: "Home", icon: "home", href: "/dashboard" },
+  center: { label: "Home", icon: "home", href: "/planner" },
   nodes: [
     {
       id: "myday",
@@ -97,20 +97,6 @@ export const NAV_TREE: NavTree = {
     { id: "organize", label: "Organize", icon: "wand", href: "/organize" },
   ],
 };
-
-/** A quote's relationships as a mind-map (linear page → related records). */
-export function quoteSectionTree(
-  quoteId: string,
-  label: string,
-  rel: { customerId?: string | null; jobId?: string | null },
-): NavTree {
-  const nodes: TreeNode[] = [{ id: "q-self", label: "This quote", icon: "fileText", href: `/quotes/${quoteId}` }];
-  if (rel.customerId) nodes.push({ id: "q-cust", label: "Customer", icon: "users", href: `/crm/${rel.customerId}` });
-  if (rel.jobId) nodes.push({ id: "q-job", label: "Job", icon: "briefcase", href: `/jobs/${rel.jobId}` });
-  nodes.push({ id: "q-print", label: "Print / PDF", icon: "fileSpreadsheet", href: `/print/quote/${quoteId}` });
-  nodes.push({ id: "q-all", label: "All quotes", icon: "list", href: "/quotes" });
-  return { center: { label, icon: "fileText" }, nodes };
-}
 
 /** An invoice's relationships as a mind-map. */
 export function invoiceSectionTree(

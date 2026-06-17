@@ -39,7 +39,6 @@ export async function createCompliance(input: ComplianceInput): Promise<Result> 
     .insert({ ...clean(input), created_by: user.id });
   if (error) return { ok: false, error: error.message };
   revalidatePath("/compliance");
-  revalidatePath("/dashboard");
   return { ok: true };
 }
 
@@ -49,7 +48,6 @@ export async function updateCompliance(id: string, input: ComplianceInput): Prom
   const { error } = await supabase.from("compliance_items").update(clean(input)).eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/compliance");
-  revalidatePath("/dashboard");
   return { ok: true };
 }
 
@@ -58,6 +56,5 @@ export async function deleteCompliance(id: string): Promise<Result> {
   const { error } = await supabase.from("compliance_items").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/compliance");
-  revalidatePath("/dashboard");
   return { ok: true };
 }

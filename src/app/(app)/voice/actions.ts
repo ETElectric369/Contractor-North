@@ -12,12 +12,11 @@ import type { Affordance } from "@/lib/action-items/types";
 export type VoiceResult = { ok: boolean; message: string; navigate?: string };
 
 const ROUTES: Record<string, string> = {
-  "/dashboard": "Dashboard",
   "/planner": "My Day",
   "/jobs": "Jobs",
   "/schedule": "Scheduler",
-  "/calendar": "Calendar",
-  "/appointments": "Appointments",
+  "/schedule?view=calendar": "Calendar",
+  "/schedule?view=appointments": "Appointments",
   "/crm": "Customers",
   "/quotes": "Quotes",
   "/billing": "Invoices",
@@ -28,7 +27,7 @@ const ROUTES: Record<string, string> = {
   "/materials": "Material Lists",
   "/organize": "Organize My",
   "/activity": "Activity",
-  "/map": "Map",
+  "/schedule?view=map": "Map",
   "/settings": "Settings",
 };
 
@@ -147,9 +146,8 @@ Team members (for assign): ${teamList}`,
       const type = p.type === "inspection" ? "inspection" : "appointment";
       const { error } = await supabase.from("appointments").insert({ type, title, starts_at: startIso, status: "scheduled", created_by: user.id });
       if (error) return { ok: false, message: error.message };
-      revalidatePath("/appointments");
-      revalidatePath("/calendar");
-      return { ok: true, message: speak, navigate: "/appointments" };
+      revalidatePath("/schedule");
+      return { ok: true, message: speak, navigate: "/schedule?view=appointments" };
     }
 
     if (intent === "create_customer") {

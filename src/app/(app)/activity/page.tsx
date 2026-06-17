@@ -50,7 +50,7 @@ export default async function ActivityPage() {
   for (const j of jobs.data ?? []) items.push({ when: j.created_at as string, icon: "job", text: `Job created — ${j.job_number} ${j.name}`, href: `/jobs/${j.id}` });
   for (const q of quotes.data ?? []) items.push({ when: q.created_at as string, icon: "quote", text: `Quote ${q.quote_number} (${q.status})`, href: `/quotes/${q.id}` });
   for (const iv of invoices.data ?? []) items.push({ when: iv.created_at as string, icon: "invoice", text: `Invoice ${iv.invoice_number} (${iv.status})`, href: `/billing/${iv.id}` });
-  for (const a of appts.data ?? []) items.push({ when: a.created_at as string, icon: "appt", text: `${a.type === "inspection" ? "Inspection" : "Appointment"} booked — ${a.title}`, href: `/appointments` });
+  for (const a of appts.data ?? []) items.push({ when: a.created_at as string, icon: "appt", text: `${a.type === "inspection" ? "Inspection" : "Appointment"} booked — ${a.title}`, href: `/schedule?view=appointments` });
   for (const t of (tasks.data ?? []) as any[]) if (t.completed_at) items.push({ when: t.completed_at, icon: "task", text: `Task done — ${t.title}` });
   for (const e of (times.data ?? []) as any[]) {
     if (!e.clock_out) continue;
