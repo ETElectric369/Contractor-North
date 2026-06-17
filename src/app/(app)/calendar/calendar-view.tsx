@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronLeft, ChevronRight, Clock, Briefcase, X } from "lucide-react";
@@ -87,6 +87,7 @@ export function CalendarView({
   members = [],
   workStart = 8,
   workEnd = 17,
+  now,
 }: {
   entries: CalEntry[];
   jobs: CalJob[];
@@ -96,11 +97,23 @@ export function CalendarView({
   members?: CalMember[];
   workStart?: number;
   workEnd?: number;
+  /** Server's "now" (ISO) — keeps SSR and first client render in sync. */
+  now: string;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [view, setView] = useState<View>("week");
-  const [anchor, setAnchor] = useState(() => new Date());
+  // Seed date state from the SERVER clock so SSR and hydration agree (no flash /
+  // hydration warning on the "today" highlight), then correct to the user's
+  // actual local day on mount.
+  const [anchor, setAnchor] = useState(() => new Date(now));
+  const [today, setToday] = useState(() => new Date(now));
+  useEffect(() => {
+    const d = new Date();
+    setToday(d);
+    setAnchor(d);
+  }, []);
+  const todayK = dayKey(today);
   // Selectable layers — one calendar, show/hide what you want on it.
   const [layers, setLayers] = useState({ jobs: true, appts: true, time: true });
   // The "armed" unscheduled job: tap a chip to arm, then tap an open day to place
@@ -285,8 +298,8 @@ export function CalendarView({
           )}
         </div>
 
-      {view === "month" && <MonthGrid anchor={anchor} byDay={byDay} onPick={handlePick} arming={!!armed} members={members} />}
-      {view === "week" && <WeekGrid anchor={anchor} byDay={byDay} onPick={handlePick} workStart={workStart} workEnd={workEnd} members={members} />}
+      {view === "month" && <MonthGrid anchor={anchor} byDay={byDay} onPick={handlePick} arming={!!armed} members={members} todayK={todayK} />}
+      {view === "week" && <WeekGrid anchor={anchor} byDay={byDay} onPick={handlePick} workStart={workStart} workEnd={workEnd} members={members} todayK={todayK} />}
       {view === "day" && (
         <DayDetail
           date={anchor}
@@ -313,16 +326,17 @@ function MonthGrid({
   onPick,
   arming = false,
   members,
+  todayK,
 }: {
   anchor: Date;
   byDay: Map<string, { entries: CalEntry[]; jobs: CalJob[]; appts: CalAppt[] }>;
   onPick: (d: Date) => void;
   arming?: boolean;
   members: CalMember[];
+  todayK: string;
 }) {
   const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
   const start = startOfWeek(first);
-  const todayK = dayKey(new Date());
   const cells: Date[] = [];
   for (let i = 0; i < 42; i++) {
     const d = new Date(start);
@@ -428,6 +442,7 @@ function WeekGrid({
   workStart,
   workEnd,
   members,
+  todayK,
 }: {
   anchor: Date;
   byDay: Map<string, { entries: CalEntry[]; jobs: CalJob[]; appts: CalAppt[] }>;
@@ -435,6 +450,7 @@ function WeekGrid({
   workStart: number;
   workEnd: number;
   members: CalMember[];
+  todayK: string;
 }) {
   const start = startOfWeek(anchor);
   const days: Date[] = [];
@@ -443,7 +459,6 @@ function WeekGrid({
     d.setDate(d.getDate() + i);
     days.push(d);
   }
-  const todayK = dayKey(new Date());
   const hours = Array.from({ length: WORK_HOURS }, (_, i) => WORK_START + i);
 
   /** Clamp a start/end span into THIS day's workday window. */

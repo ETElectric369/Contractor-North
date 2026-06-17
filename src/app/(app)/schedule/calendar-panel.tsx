@@ -113,6 +113,7 @@ export async function CalendarPanel() {
         members={members}
         workStart={workStart}
         workEnd={workEnd}
+        now={new Date().toISOString()}
       />
     </div>
   );

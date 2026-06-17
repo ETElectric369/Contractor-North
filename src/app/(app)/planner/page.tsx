@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { hoursBetween, formatCurrency } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
+import { toJobOptions, toCustomerOptions, toStaffOptions } from "@/lib/schedule-options";
 import { todayBoundsInTz, prettyDay, tzDayStartUtc } from "@/lib/tz";
 import { DayClock } from "./day-clock";
 import { getActionItems } from "@/lib/action-items/query";
@@ -161,9 +162,9 @@ export default async function PlannerPage() {
     "Small daily improvements lead to stunning results.",
   ];
   const dailyQuote = QUOTES[new Date(`${todayStr}T12:00:00Z`).getUTCDate() % QUOTES.length];
-  const jobOpts = (jobOptRows ?? []).map((j: any) => ({ id: j.id, label: `${j.job_number} · ${j.name}` }));
-  const custOpts = (customers ?? []).map((c: any) => ({ id: c.id, label: c.name }));
-  const staffOpts = (staff ?? []).map((s: any) => ({ id: s.id, label: s.full_name ?? "Unnamed" }));
+  const jobOpts = toJobOptions(jobOptRows);
+  const custOpts = toCustomerOptions(customers);
+  const staffOpts = toStaffOptions(staff);
   const people = (staff ?? []).map((s: any) => ({ id: s.id, full_name: s.full_name }));
   const isStaff = ["owner", "admin", "office"].includes((me as any)?.role ?? "");
   // The unified "Needs action" inbox — one list across tasks, jobs to schedule,

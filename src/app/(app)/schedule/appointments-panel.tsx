@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { MapPin, ClipboardCheck, CalendarClock } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { getSchedulePickerOptions } from "@/lib/schedule-options";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AppointmentButton, type ApptValue } from "../appointments/appointment-button";
@@ -17,21 +18,15 @@ export async function AppointmentsPanel() {
   const startToday = new Date();
   startToday.setHours(0, 0, 0, 0);
 
-  const [{ data: appts }, { data: jobs }, { data: customers }, { data: staff }] = await Promise.all([
+  const [{ data: appts }, { jobOpts, custOpts, staffOpts }] = await Promise.all([
     supabase
       .from("appointments")
       .select("id, type, title, starts_at, ends_at, location, notes, status, job_id, customer_id, assigned_to, jobs(job_number, name), customers(name), profiles!appointments_assigned_to_fkey(full_name)")
       .gte("starts_at", startToday.toISOString())
       .neq("status", "cancelled")
       .order("starts_at"),
-    supabase.from("jobs").select("id, job_number, name").order("created_at", { ascending: false }).limit(200),
-    supabase.from("customers").select("id, name").order("name"),
-    supabase.from("profiles").select("id, full_name").eq("active", true).order("full_name"),
+    getSchedulePickerOptions(supabase),
   ]);
-
-  const jobOpts = (jobs ?? []).map((j: any) => ({ id: j.id, label: `${j.job_number} · ${j.name}` }));
-  const custOpts = (customers ?? []).map((c: any) => ({ id: c.id, label: c.name }));
-  const staffOpts = (staff ?? []).map((s: any) => ({ id: s.id, label: s.full_name ?? "Unnamed" }));
 
   // Group by day.
   const byDay = new Map<string, any[]>();

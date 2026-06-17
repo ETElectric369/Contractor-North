@@ -119,17 +119,43 @@ export async function createAppointmentProposal(
   const cust = await resolveCustomer(supabase, formData, user.id);
   if (cust.error) return { ok: false, error: cust.error };
 
+  const apptType = String(formData.get("type") ?? "quote");
+  const jobId = emptyToNull(formData.get("job_id"));
+
+  // De-dupe: re-proposing the same appointment used to spawn a fresh tentative
+  // row + live link every time, orphaning the old ones. Cancel any still-pending
+  // proposal (and its 'proposed' appointment) for the same context first.
+  const dedupKey = jobId
+    ? { col: "job_id" as const, val: jobId }
+    : cust.customerId
+      ? { col: "customer_id" as const, val: cust.customerId }
+      : null;
+  if (dedupKey) {
+    const { data: prior } = await supabase
+      .from("appointments")
+      .select("id")
+      .eq("status", "proposed")
+      .eq("type", apptType)
+      .eq("title", title)
+      .eq(dedupKey.col, dedupKey.val);
+    const priorIds = (prior ?? []).map((a: any) => a.id);
+    if (priorIds.length) {
+      await supabase.from("schedule_proposals").update({ status: "cancelled" }).in("appointment_id", priorIds).eq("status", "pending");
+      await supabase.from("appointments").update({ status: "cancelled", updated_at: new Date().toISOString() }).in("id", priorIds);
+    }
+  }
+
   // First slot is the tentative time (browser-computed ISO honors the user's tz).
   const startIso = emptyToNull(formData.get("starts_at_iso")) ?? toIso(slots[0].date, slots[0].time);
 
   const { data: appt, error: aErr } = await supabase
     .from("appointments")
     .insert({
-      type: String(formData.get("type") ?? "quote"),
+      type: apptType,
       title,
       starts_at: startIso,
       ends_at: null,
-      job_id: emptyToNull(formData.get("job_id")),
+      job_id: jobId,
       customer_id: cust.customerId,
       location: emptyToNull(formData.get("location")),
       notes: emptyToNull(formData.get("notes")),
