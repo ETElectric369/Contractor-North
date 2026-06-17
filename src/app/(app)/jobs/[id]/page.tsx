@@ -4,7 +4,7 @@ import { Home, ChevronRight, MapPin, Calendar, Receipt, Plus, Printer } from "lu
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
-import { Tabs } from "@/components/tabs";
+import { Tabs, type TabDef } from "@/components/tabs";
 import { SectionMapButton } from "@/components/section-map-button";
 import { jobSectionTree } from "@/lib/nav-tree";
 import {
@@ -44,6 +44,27 @@ import { getOrgSettings } from "@/lib/org-settings";
 import type { Customer } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+
+// In-page nav order, grouped frequency-of-use then role. The six a tech touches
+// every visit stay visible; everything financial/closeout collapses into "More".
+const JOB_TAB_ORDER = [
+  "job", "tasks", "photos", "time", "appointments", "notes",
+  "docs", "permits", "materials", "quotes", "costs", "invoices", "change-orders", "wos",
+];
+const JOB_PRIMARY = new Set(["job", "tasks", "photos", "time", "appointments", "notes"]);
+const JOB_STAFF_ONLY = new Set(["costs", "quotes", "invoices", "change-orders"]);
+
+/** Order the job tabs and tag each with its tier + staff-gating, so <Tabs> shows
+ *  6 primary tabs + a "More" menu and hides money tabs from techs itself. */
+function arrangeJobTabs(tabs: TabDef[]): TabDef[] {
+  return [...tabs]
+    .sort((a, b) => JOB_TAB_ORDER.indexOf(a.id) - JOB_TAB_ORDER.indexOf(b.id))
+    .map((t) => ({
+      ...t,
+      tier: JOB_PRIMARY.has(t.id) ? ("primary" as const) : ("overflow" as const),
+      staffOnly: JOB_STAFF_ONLY.has(t.id),
+    }));
+}
 
 export default async function JobDetailPage({
   params,
@@ -202,7 +223,7 @@ export default async function JobDetailPage({
   const tabs = [
     {
       id: "job",
-      label: "Job",
+      label: "Overview",
       content: (
         <div className="space-y-4">
           <Card>
@@ -497,7 +518,7 @@ export default async function JobDetailPage({
     },
     {
       id: "quotes",
-      label: "Quotes & estimates",
+      label: "Quotes",
       count: quotes?.length ?? 0,
       content: (
         <div className="space-y-3">
@@ -562,7 +583,7 @@ export default async function JobDetailPage({
     },
     {
       id: "change-orders",
-      label: "Change Orders",
+      label: "Change orders",
       count: changeOrders?.length ?? 0,
       content: (
         <div className="space-y-3">
@@ -604,7 +625,7 @@ export default async function JobDetailPage({
     },
     {
       id: "wos",
-      label: "Work Orders",
+      label: "Work orders",
       count: workOrders?.length ?? 0,
       content: (
         <div className="space-y-3">
@@ -673,10 +694,7 @@ export default async function JobDetailPage({
         </div>
       </div>
 
-      <Tabs
-        tabs={viewerIsStaff ? tabs : tabs.filter((t) => !["costs", "quotes", "invoices", "change-orders"].includes(t.id))}
-        urlSync
-      />
+      <Tabs tabs={arrangeJobTabs(tabs)} viewerIsStaff={viewerIsStaff} urlSync />
     </div>
   );
 }

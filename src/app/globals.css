@@ -32,6 +32,15 @@ body {
   scrollbar-color: #cbd5e1 transparent;
 }
 
+/* Fully hide the scrollbar (e.g. the tab strip, which has its own edge-fade
+   affordance instead). */
+.scrollbar-none {
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
 /* ── Mobile polish ────────────────────────────────────────────────────────
    iOS Safari zooms the whole page when a focused input's font-size is under
    16px ("screen resizes for the keyboard"). Keep inputs ≥16px on phones. */
