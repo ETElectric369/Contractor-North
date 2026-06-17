@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { toggleTask, updateTask, deleteTask } from "@/app/(app)/tasks/actions";
-import { rescheduleJob, setJobAssignee } from "@/app/(app)/schedule/actions";
+import { setJobScheduleRanges, setJobAssignee } from "@/app/(app)/schedule/actions";
 import { markInquiryContacted, deleteInquiry, convertInquiry } from "@/app/(app)/leads/actions";
 import { setAppointmentStatus } from "@/app/(app)/appointments/actions";
 import { archiveItem } from "@/app/(app)/organize/actions";
@@ -33,7 +33,9 @@ export async function dispatchAction(input: {
     else if (kind === "appointment") res = await setAppointmentStatus(id, "completed");
   } else if (verb === "schedule" || verb === "snooze") {
     if (!date) return { ok: false, error: "Pick a date." };
-    if (kind === "job_to_schedule") res = await rescheduleJob(id, new Date(`${date}T08:00:00`).toISOString());
+    // Route through the canonical writer: a single picked day becomes a one-day
+    // range (timezone-correct, advances status, never wipes multi-range data).
+    if (kind === "job_to_schedule") res = await setJobScheduleRanges(id, [{ start: date, end: date }]);
     else if (kind === "task" || kind === "work_order") res = await updateTask(id, { due_date: date });
     else if (kind === "inquiry") res = await markInquiryContacted(id, date);
   } else if (verb === "assign") {

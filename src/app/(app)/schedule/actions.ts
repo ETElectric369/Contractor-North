@@ -3,8 +3,34 @@
 import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
 import { createClient } from "@/lib/supabase/server";
+import { getOrgSettings } from "@/lib/org-settings";
+import { tzLocalHourUtc } from "@/lib/tz";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type Result = { ok: boolean; error?: string; id?: string };
+
+// Work-day window the scheduler blocks off for a dated (all-day) job.
+const DAY_START_HOUR = 8; // 8 AM local
+const DAY_END_HOUR = 16; // 4 PM local
+
+/** The org's IANA timezone (default America/Los_Angeles). Server actions run in
+ *  UTC, so any "8 AM local" instant must be built against this — never via a
+ *  bare `new Date("…T08:00")`, which the server parses as UTC. */
+async function orgTimezone(supabase: SupabaseClient): Promise<string> {
+  const { data } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+  return getOrgSettings((data as any)?.settings).timezone;
+}
+
+/** Advance an early-stage job to "scheduled" once it has a date — without ever
+ *  downgrading a job that's already further along (in_progress, complete, …).
+ *  The conditional `.in()` means non-early jobs are simply left untouched. */
+async function advanceToScheduled(supabase: SupabaseClient, id: string): Promise<void> {
+  await supabase
+    .from("jobs")
+    .update({ status: "scheduled" })
+    .eq("id", id)
+    .in("status", ["lead", "quoted", "estimate"]);
+}
 
 export async function createJob(formData: FormData): Promise<Result> {
   const supabase = await createClient();
@@ -135,36 +161,10 @@ export async function setJobSchedule(
   };
   const { error } = await supabase.from("jobs").update(patch).eq("id", id);
   if (error) return { ok: false, error: error.message };
+  // Giving a job a date moves it onto the schedule — advance early-stage status.
+  if (startIso) await advanceToScheduled(supabase, id);
   revalidatePath("/schedule");
   revalidatePath("/jobs");
-  revalidatePath(`/jobs/${id}`);
-  return { ok: true };
-}
-
-/** Reschedule a job (ISO string from the client, or null to clear). A single
- *  date here collapses the job back to one window, so clear any multi-range
- *  segments to keep the calendar/scheduler consistent. */
-export async function rescheduleJob(
-  id: string,
-  startIso: string | null,
-): Promise<Result> {
-  const supabase = await createClient();
-  // Clearing segments is best-effort: if the table isn't there yet (migration
-  // 0040 not applied), the error is ignored and single-window rescheduling
-  // still works.
-  await supabase.from("job_schedule_segments").delete().eq("job_id", id);
-  const patch: Record<string, unknown> = { scheduled_start: startIso };
-  if (startIso) {
-    // Give the day a real end (8h ≈ 8am→4pm) so the calendar block has width
-    // instead of collapsing to a single point.
-    patch.scheduled_end = new Date(new Date(startIso).getTime() + 8 * 3600_000).toISOString();
-    patch.status = "scheduled";
-  } else {
-    patch.scheduled_end = null;
-  }
-  const { error } = await supabase.from("jobs").update(patch).eq("id", id);
-  if (error) return { ok: false, error: error.message };
-  revalidatePath("/schedule");
   revalidatePath(`/jobs/${id}`);
   return { ok: true };
 }
@@ -193,15 +193,21 @@ export async function setJobScheduleRanges(
 
   // Mirror the overall window onto the job FIRST — this is what every legacy
   // reader uses, and it must succeed even if the segments table isn't there.
+  // Build the 8am–4pm window in the ORG timezone (this runs server-side in UTC,
+  // so a bare `new Date("…T08:00")` would store 8am UTC = ~midnight Pacific and
+  // disagree with the client-side writers — the root of the "wrong time" bug).
+  const tz = await orgTimezone(supabase);
   const minStart = clean.length ? clean[0].start : null;
   const maxEnd = clean.length ? clean.reduce((m, r) => (r.end > m ? r.end : m), clean[0].end) : null;
   const patch: Record<string, unknown> = {
-    scheduled_start: minStart ? new Date(`${minStart}T08:00:00`).toISOString() : null,
-    scheduled_end: maxEnd ? new Date(`${maxEnd}T16:00:00`).toISOString() : null,
+    scheduled_start: minStart ? tzLocalHourUtc(minStart, DAY_START_HOUR, tz).toISOString() : null,
+    scheduled_end: maxEnd ? tzLocalHourUtc(maxEnd, DAY_END_HOUR, tz).toISOString() : null,
     updated_at: new Date().toISOString(),
   };
   const { error } = await supabase.from("jobs").update(patch).eq("id", jobId);
   if (error) return { ok: false, error: error.message };
+  // A scheduled date advances early-stage status (consistent with the other writers).
+  if (minStart) await advanceToScheduled(supabase, jobId);
 
   // Replace segments wholesale. If the table is missing (migration 0040 not yet
   // applied) a single range is already fully saved via the mirror above; only
@@ -218,8 +224,13 @@ export async function setJobScheduleRanges(
   revalidatePath("/jobs");
   revalidatePath(`/jobs/${jobId}`);
 
+  // Surface ANY segment-write failure (not just multi-range) so the editor
+  // never silently shows a stale range while the mirror moved underneath it.
   if (!segOk && clean.length > 1) {
     return { ok: false, error: "Multiple date ranges need a quick database update (migration 0040). The first range was saved." };
+  }
+  if (!segOk && clean.length === 1) {
+    return { ok: false, error: "Couldn't save the date range — please try again. The job's overall window was updated." };
   }
   return { ok: true };
 }

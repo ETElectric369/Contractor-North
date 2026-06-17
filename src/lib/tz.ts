@@ -38,6 +38,13 @@ export function tzDayStartUtc(ymd: string, tz: string): Date {
   return new Date(guess.getTime() - tzOffsetMs(tz, guess));
 }
 
+/** UTC instant for "YYYY-MM-DD" at local clock `hour` (0–23, may be fractional)
+ *  in the given timezone. Lets server actions store "8 AM local" without the
+ *  bare-string `new Date("…T08:00")` trap (which parses as the server's UTC). */
+export function tzLocalHourUtc(ymd: string, hour: number, tz: string): Date {
+  return new Date(tzDayStartUtc(ymd, tz).getTime() + hour * 3_600_000);
+}
+
 /** Day boundaries (as UTC instants) + the date string for "today" in tz. */
 export function todayBoundsInTz(tz: string): { dayStart: Date; dayEnd: Date; todayStr: string } {
   const todayStr = todayStrInTz(tz);

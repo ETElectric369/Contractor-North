@@ -150,8 +150,10 @@ export function CalendarView({
         d.setHours(0, 0, 0, 0);
         const last = new Date(endD);
         last.setHours(0, 0, 0, 0);
+        // Backstop against a runaway loop; sized above the widest fetch window
+        // so legitimate long jobs aren't silently clipped.
         let guard = 0;
-        while (d <= last && guard++ < 45) {
+        while (d <= last && guard++ < 540) {
           push(dayKey(d));
           d.setDate(d.getDate() + 1);
         }
@@ -363,17 +365,20 @@ function MonthGrid({
                 {d.getDate()}
               </div>
               <div className="mt-0.5 space-y-0.5">
-                {data?.jobs.slice(0, 2).map((j) => (
-                  <Link
-                    key={j.id}
-                    href={`/jobs/${j.id}`}
-                    onClick={(e) => e.stopPropagation()}
-                    className="block truncate rounded bg-blue-50 px-1 text-[10px] text-blue-700 hover:bg-blue-100"
-                    title={`${j.job_number} — ${j.name} (open job)`}
-                  >
-                    {j.name}
-                  </Link>
-                ))}
+                {data?.jobs.slice(0, 2).map((j) => {
+                  const c = colorForMember(j.assigned_to?.[0], members);
+                  return (
+                    <Link
+                      key={j.id}
+                      href={`/jobs/${j.id}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className={`block truncate rounded px-1 text-[10px] hover:opacity-80 ${c.bg} ${c.text}`}
+                      title={`${j.job_number} — ${j.name} (open job)`}
+                    >
+                      {j.name}
+                    </Link>
+                  );
+                })}
                 {(data?.jobs.length ?? 0) > 2 && (
                   <div className="text-[10px] text-slate-400">+{data!.jobs.length - 2} more</div>
                 )}
@@ -459,10 +464,13 @@ function WeekGrid({
 
   // Scheduled jobs are date-based; show each one as a block over the configured
   // work day (e.g. 9–5) within the visible window — not the whole 6a–7p grid.
+  // Clamp into [6a,7p]; if org hours are inverted or fall entirely outside the
+  // window, fall back to a sane block so jobs never disappear from the week.
   const jobBlock = (() => {
-    const from = Math.max(workStart, WORK_START);
-    const to = Math.min(workEnd, WORK_END);
-    if (to <= from) return null;
+    const lo = Math.min(workStart, workEnd);
+    const hi = Math.max(workStart, workEnd);
+    const from = Math.min(Math.max(lo, WORK_START), WORK_END - 1);
+    const to = Math.max(Math.min(hi, WORK_END), from + 1);
     return { top: (from - WORK_START) * ROW_PX, height: Math.max(22, (to - from) * ROW_PX) };
   })();
 
@@ -510,16 +518,17 @@ function WeekGrid({
                       if (!j.scheduled_start || !jobBlock) return null;
                       // Split width when several jobs land on the same day so they don't stack.
                       const w = 100 / arr.length;
+                      const c = colorForMember(j.assigned_to?.[0], members);
                       return (
                         <Link
                           key={j.id}
                           href={`/jobs/${j.id}`}
-                          className="absolute z-10 overflow-hidden rounded-md border border-blue-300 bg-blue-100/90 px-1 py-0.5 text-[10px] leading-tight text-blue-900 shadow-sm hover:bg-blue-200"
+                          className={`absolute z-10 overflow-hidden rounded-md border px-1 py-0.5 text-[10px] leading-tight shadow-sm hover:opacity-80 ${c.border} ${c.bg} ${c.text}`}
                           style={{ ...jobBlock, left: `${ji * w}%`, width: `calc(${w}% - 2px)` }}
                           title={`${j.job_number} — ${j.name} (open job)`}
                         >
                           <span className="font-semibold">{j.name}</span>
-                          <span className="block text-[9px] text-blue-700/80">{j.job_number}</span>
+                          <span className="block text-[9px] opacity-70">{j.job_number}</span>
                         </Link>
                       );
                     })}

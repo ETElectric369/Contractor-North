@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { User } from "lucide-react";
 import { Select } from "@/components/ui/input";
 import { Badge, statusTone } from "@/components/ui/badge";
+import { colorForMember } from "@/lib/employee-color";
 import { setJobAssignee, setJobSchedule } from "./actions";
 
 interface Member {
@@ -32,6 +33,7 @@ export function JobScheduleCard({
   const router = useRouter();
   const [pending, start] = useTransition();
   const assignee = job.assigned_to?.[0] ?? "";
+  const color = colorForMember(assignee || null, members);
   const time = job.scheduled_start
     ? new Date(job.scheduled_start).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
     : "";
@@ -39,7 +41,8 @@ export function JobScheduleCard({
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-2.5 text-xs shadow-sm">
       <div className="flex items-start justify-between gap-1">
-        <Link href={`/jobs/${job.id}`} className="font-medium text-slate-900 hover:text-brand">
+        <Link href={`/jobs/${job.id}`} className="flex items-center gap-1.5 font-medium text-slate-900 hover:text-brand">
+          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${color.dot}`} />
           {job.name}
         </Link>
         <Badge tone={statusTone(job.status)}>{job.status.replace("_", " ")}</Badge>
@@ -78,8 +81,8 @@ export function JobScheduleCard({
         className="mt-1.5 h-7 w-full rounded-md border border-slate-200 px-2 text-xs text-slate-600"
         onChange={(e) => {
           const v = e.target.value;
-          // Canonical writer: sets the day window WITHOUT silently deleting any
-          // multi-range segments (rescheduleJob wiped them).
+          // Canonical writer: sets the day window (timezone-correct, advances
+          // status). Single-day write here intentionally collapses to one window.
           start(async () => {
             if (v) {
               await setJobSchedule(

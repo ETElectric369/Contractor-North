@@ -204,6 +204,15 @@ export async function setAppointmentStatus(id: string, status: string): Promise<
     .update({ status, updated_at: new Date().toISOString() })
     .eq("id", id);
   if (error) return { ok: false, error: error.message };
+  // Cancelling/completing an appointment kills any live "pick a time" link, so a
+  // customer tap can't resurrect a closed appointment.
+  if (status === "cancelled" || status === "completed") {
+    await supabase
+      .from("schedule_proposals")
+      .update({ status: "cancelled" })
+      .eq("appointment_id", id)
+      .eq("status", "pending");
+  }
   revalidatePath("/schedule");
   return { ok: true };
 }
