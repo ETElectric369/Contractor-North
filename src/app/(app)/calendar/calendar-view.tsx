@@ -227,12 +227,12 @@ export function CalendarView({
         ))}
       </div>
 
-      {/* "To schedule" rail — tap a job to arm it, then tap an open day to place it. */}
-      {unscheduled.length > 0 && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-2">
-          <div className="mb-1.5 flex items-center justify-between px-1 text-xs">
-            <span className="font-semibold text-amber-700">To schedule · {unscheduled.length}</span>
-            {armedJob ? (
+      {/* "To schedule" rail — always shown (discoverable); tap a job to arm it,
+          then tap an open day to place it. */}
+      <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-2">
+        <div className="mb-1.5 flex items-center justify-between px-1 text-xs">
+          <span className="font-semibold text-amber-700">To schedule · {unscheduled.length}</span>
+          {unscheduled.length === 0 ? null : armedJob ? (
               <span className="flex items-center gap-1 text-amber-700">
                 Tap an open day to place <span className="font-medium">{armedJob.name}</span>
                 <button onClick={() => setArmed(null)} className="rounded p-0.5 hover:bg-amber-100" aria-label="Cancel">
@@ -243,8 +243,11 @@ export function CalendarView({
               <span className="text-slate-400">Tap a job, then tap a day</span>
             )}
           </div>
-          <div className="flex gap-1.5 overflow-x-auto pb-1">
-            {unscheduled.map((j) => (
+          {unscheduled.length === 0 ? (
+            <p className="px-1 py-1 text-xs text-slate-400">Nothing waiting — jobs created without a date land here to drop onto the calendar.</p>
+          ) : (
+            <div className="flex gap-1.5 overflow-x-auto pb-1">
+              {unscheduled.map((j) => (
               <button
                 key={j.id}
                 onClick={() => setArmed(armed === j.id ? null : j.id)}
@@ -258,10 +261,10 @@ export function CalendarView({
                 <div className="max-w-[160px] truncate font-medium text-slate-800">{j.name}</div>
                 <div className="truncate text-[11px] text-slate-400">{j.customer ?? j.job_number}</div>
               </button>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
-      )}
 
       {view === "month" && <MonthGrid anchor={anchor} byDay={byDay} onPick={handlePick} arming={!!armed} />}
       {view === "week" && <WeekGrid anchor={anchor} byDay={byDay} onPick={handlePick} workStart={workStart} workEnd={workEnd} />}

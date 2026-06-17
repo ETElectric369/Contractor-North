@@ -177,31 +177,32 @@ export function AppointmentButton({
         </Button>
       )}
 
-      <form action={submit}>
-        <Modal
-          open={open}
-          onClose={closeAll}
-          title={editing ? "Edit appointment" : linkToken ? "Text the customer these times" : "New appointment"}
-          footer={
-            linkToken ? (
-              <ModalActions onCancel={closeAll} onSave={closeAll} saveLabel="Done" hideCancel />
-            ) : (
-              <ModalActions
-                onCancel={closeAll}
-                submit
-                saving={pending}
-                saveLabel={mode === "propose" ? "Create link" : editing ? "Save changes" : "Save"}
-                extra={
-                  editing ? (
-                    <Button type="button" variant="outline" onClick={remove} disabled={pending} className="text-red-600">
-                      Delete
-                    </Button>
-                  ) : undefined
-                }
-              />
-            )
-          }
-        >
+      <Modal
+        open={open}
+        onClose={closeAll}
+        title={editing ? "Edit appointment" : linkToken ? "Text the customer these times" : "New appointment"}
+        footer={
+          linkToken ? (
+            <ModalActions onCancel={closeAll} onSave={closeAll} saveLabel="Done" hideCancel />
+          ) : (
+            <ModalActions
+              onCancel={closeAll}
+              submit
+              formId="appt-form"
+              saving={pending}
+              saveLabel={mode === "propose" ? "Create link" : "Save appointment"}
+              extra={
+                editing ? (
+                  <Button type="button" variant="outline" onClick={remove} disabled={pending} className="text-red-600">
+                    Delete
+                  </Button>
+                ) : undefined
+              }
+            />
+          )
+        }
+      >
+        <form id="appt-form" action={submit}>
           <div className="space-y-4">
           {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
 
@@ -358,8 +359,8 @@ export function AppointmentButton({
           </>
           )}
           </div>
-        </Modal>
-      </form>
+        </form>
+      </Modal>
     </>
   );
 }

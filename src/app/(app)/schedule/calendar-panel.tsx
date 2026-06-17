@@ -48,12 +48,14 @@ export async function CalendarPanel() {
         .gte("starts_at", from)
         .lte("starts_at", to)
         .neq("status", "cancelled"),
-      // Jobs with no date yet — the "To schedule" rail.
+      // Jobs with no date yet — the "To schedule" rail. Any still-open job
+      // missing a date (not just estimate/scheduled) — excludes only pre-sale
+      // leads/quotes and finished/cancelled jobs.
       supabase
         .from("jobs")
         .select("id, job_number, name, customers(name)")
         .is("scheduled_start", null)
-        .in("status", ["estimate", "scheduled"])
+        .not("status", "in", "(lead,quoted,complete,cancelled,invoiced)")
         .order("created_at", { ascending: false })
         .limit(40),
       supabase.from("organizations").select("settings").limit(1).maybeSingle(),
