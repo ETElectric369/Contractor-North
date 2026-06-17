@@ -27,7 +27,7 @@ export async function CalendarPanel() {
     await Promise.all([
       supabase
         .from("time_entries")
-        .select("id, clock_in, clock_out, lunch_minutes, status, job_code, job_id, profiles(full_name), jobs(job_number, name)")
+        .select("id, profile_id, clock_in, clock_out, lunch_minutes, status, job_code, job_id, profiles(full_name), jobs(job_number, name)")
         .gte("clock_in", from)
         .lte("clock_in", to)
         .order("clock_in"),

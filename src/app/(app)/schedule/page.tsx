@@ -17,9 +17,10 @@ export const dynamic = "force-dynamic";
 // Unified "Scheduler" hub: one screen with a Day timeline / Board / Calendar /
 // Appointments / Map view switcher (?view=). The board keeps its own ?week=
 // offset and ?span=week|month sub-toggle.
+// The Calendar IS the scheduling surface (month/week/day inside it, color-coded
+// per employee). The old standalone "Day/Week" crew timelines ("everyone's day")
+// are retired from the tabs; ?view=day/week still resolve for any old links.
 const VIEWS = [
-  { id: "day", label: "Day", href: "/schedule?view=day" },
-  { id: "week", label: "Week", href: "/schedule?view=week" },
   { id: "calendar", label: "Calendar", href: "/schedule" },
   { id: "appointments", label: "Appointments", href: "/schedule?view=appointments" },
   { id: "map", label: "Map", href: "/schedule?view=map" },
@@ -28,7 +29,7 @@ const VIEWS = [
 function ScheduleFrame({ view, children }: { view: string; children: React.ReactNode }) {
   return (
     <div>
-      <PageHeader title="Scheduler" description="Everyone's day, the jobs board, calendar, appointments and map — all in one place." />
+      <PageHeader title="Scheduler" description="Calendar, appointments and map — colour-coded by person, all in one place." />
       <TabBar items={VIEWS} activeId={view} />
       {children}
     </div>

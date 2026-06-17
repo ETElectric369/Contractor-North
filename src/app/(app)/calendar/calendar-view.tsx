@@ -10,9 +10,11 @@ import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { setJobSchedule } from "../schedule/actions";
 import { JobScheduleCard } from "../schedule/job-schedule-card";
+import { colorForMember, initialsOf, firstNameOf } from "@/lib/employee-color";
 
 export interface CalEntry {
   id: string;
+  profile_id: string;
   clock_in: string;
   clock_out: string | null;
   lunch_minutes: number;
@@ -227,6 +229,21 @@ export function CalendarView({
         ))}
       </div>
 
+      {/* Crew legend — read the calendar's per-person colors off this. */}
+      {members.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 text-xs">
+          <span className="text-slate-400">Crew:</span>
+          {members.map((m) => {
+            const c = colorForMember(m.id, members);
+            return (
+              <span key={m.id} className="inline-flex items-center gap-1 rounded-full bg-slate-50 px-2 py-0.5 text-slate-600">
+                <span className={`h-2 w-2 rounded-full ${c.dot}`} /> {firstNameOf(m.full_name)}
+              </span>
+            );
+          })}
+        </div>
+      )}
+
       {/* "To schedule" rail — always shown (discoverable); tap a job to arm it,
           then tap an open day to place it. */}
       <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-2">
@@ -266,8 +283,8 @@ export function CalendarView({
           )}
         </div>
 
-      {view === "month" && <MonthGrid anchor={anchor} byDay={byDay} onPick={handlePick} arming={!!armed} />}
-      {view === "week" && <WeekGrid anchor={anchor} byDay={byDay} onPick={handlePick} workStart={workStart} workEnd={workEnd} />}
+      {view === "month" && <MonthGrid anchor={anchor} byDay={byDay} onPick={handlePick} arming={!!armed} members={members} />}
+      {view === "week" && <WeekGrid anchor={anchor} byDay={byDay} onPick={handlePick} workStart={workStart} workEnd={workEnd} members={members} />}
       {view === "day" && (
         <DayDetail
           date={anchor}
@@ -293,11 +310,13 @@ function MonthGrid({
   byDay,
   onPick,
   arming = false,
+  members,
 }: {
   anchor: Date;
   byDay: Map<string, { entries: CalEntry[]; jobs: CalJob[]; appts: CalAppt[] }>;
   onPick: (d: Date) => void;
   arming?: boolean;
+  members: CalMember[];
 }) {
   const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
   const start = startOfWeek(first);
@@ -320,7 +339,16 @@ function MonthGrid({
         {cells.map((d, i) => {
           const k = dayKey(d);
           const data = byDay.get(k);
-          const totalHrs = data ? data.entries.reduce((s, e) => s + hrs(e), 0) : 0;
+          // Hours per person on this day (drives the per-employee colored chips).
+          const perPerson = (() => {
+            const m = new Map<string, { name: string | null; hrs: number }>();
+            for (const e of data?.entries ?? []) {
+              const cur = m.get(e.profile_id) ?? { name: e.profiles?.full_name ?? null, hrs: 0 };
+              cur.hrs += hrs(e);
+              m.set(e.profile_id, cur);
+            }
+            return [...m.entries()].filter(([, v]) => v.hrs > 0);
+          })();
           const inMonth = d.getMonth() === anchor.getMonth();
           const isOpen = (data?.jobs.length ?? 0) === 0;
           return (
@@ -358,10 +386,17 @@ function MonthGrid({
                     {a.status === "proposed" ? "⧗" : a.type === "inspection" ? "🔍" : "📅"} {a.title}
                   </div>
                 ))}
-                {totalHrs > 0 && (
-                  <div className="truncate rounded bg-green-50 px-1 text-[10px] text-green-700">
-                    ⏱ {totalHrs.toFixed(1)}h
-                  </div>
+                {perPerson.slice(0, 3).map(([pid, v]) => {
+                  const c = colorForMember(pid, members);
+                  return (
+                    <div key={pid} className={`flex items-center gap-1 truncate rounded px-1 text-[10px] ${c.bg} ${c.text}`}>
+                      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${c.dot}`} />
+                      {initialsOf(v.name)} {v.hrs.toFixed(1)}h
+                    </div>
+                  );
+                })}
+                {perPerson.length > 3 && (
+                  <div className="px-1 text-[10px] text-slate-400">+{perPerson.length - 3} more</div>
                 )}
               </div>
             </div>
@@ -387,12 +422,14 @@ function WeekGrid({
   onPick,
   workStart,
   workEnd,
+  members,
 }: {
   anchor: Date;
   byDay: Map<string, { entries: CalEntry[]; jobs: CalJob[]; appts: CalAppt[] }>;
   onPick: (d: Date) => void;
   workStart: number;
   workEnd: number;
+  members: CalMember[];
 }) {
   const start = startOfWeek(anchor);
   const days: Date[] = [];
@@ -489,15 +526,16 @@ function WeekGrid({
                     {data?.entries.map((e) => {
                       const seg = segment(d, e.clock_in, e.clock_out, 1);
                       if (!seg) return null;
+                      const c = colorForMember(e.profile_id, members);
                       return (
                         <div
                           key={e.id}
-                          className="absolute right-0.5 z-20 w-[46%] overflow-hidden rounded-md border border-green-300 bg-green-100/90 px-1 py-0.5 text-[9px] leading-tight text-green-900"
+                          className={`absolute right-0.5 z-20 w-[46%] overflow-hidden rounded-md border px-1 py-0.5 text-[9px] leading-tight ${c.border} ${c.bg} ${c.text}`}
                           style={seg}
                           title={`${e.profiles?.full_name ?? "Crew"} · ${fmtTime(e.clock_in)}${e.clock_out ? `–${fmtTime(e.clock_out)} · ${hrs(e).toFixed(2)} h` : " (open)"}`}
                         >
-                          <span className="font-semibold">{e.profiles?.full_name?.split(" ")[0] ?? "Crew"}</span>
-                          <span className="block text-[8px] text-green-700/90">{e.clock_out ? `${hrs(e).toFixed(1)}h` : "open"}</span>
+                          <span className="font-semibold">{firstNameOf(e.profiles?.full_name)}</span>
+                          <span className="block text-[8px] opacity-80">{e.clock_out ? `${hrs(e).toFixed(1)}h` : "open"}</span>
                         </div>
                       );
                     })}
