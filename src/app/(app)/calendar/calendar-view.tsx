@@ -9,6 +9,7 @@ import { SegmentedControl } from "@/components/ui/segmented";
 import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { setJobSchedule } from "../schedule/actions";
+import { JobScheduleCard } from "../schedule/job-schedule-card";
 
 export interface CalEntry {
   id: string;
@@ -29,6 +30,13 @@ export interface CalJob {
   status: string;
   scheduled_start: string | null;
   scheduled_end: string | null;
+  assigned_to?: string[] | null;
+  customers?: { name: string } | null;
+}
+
+export interface CalMember {
+  id: string;
+  full_name: string | null;
 }
 
 export interface CalSegment {
@@ -74,6 +82,7 @@ export function CalendarView({
   segments = [],
   appointments = [],
   unscheduled = [],
+  members = [],
   workStart = 8,
   workEnd = 17,
 }: {
@@ -82,6 +91,7 @@ export function CalendarView({
   segments?: CalSegment[];
   appointments?: CalAppt[];
   unscheduled?: CalUnscheduled[];
+  members?: CalMember[];
   workStart?: number;
   workEnd?: number;
 }) {
@@ -256,7 +266,13 @@ export function CalendarView({
       {view === "month" && <MonthGrid anchor={anchor} byDay={byDay} onPick={handlePick} arming={!!armed} />}
       {view === "week" && <WeekGrid anchor={anchor} byDay={byDay} onPick={handlePick} workStart={workStart} workEnd={workEnd} />}
       {view === "day" && (
-        <DayDetail date={anchor} data={byDay.get(dayKey(anchor))} canPlace={!!armed} onPlace={() => handlePick(anchor)} />
+        <DayDetail
+          date={anchor}
+          data={byDay.get(dayKey(anchor))}
+          members={members}
+          canPlace={!!armed}
+          onPlace={() => handlePick(anchor)}
+        />
       )}
     </div>
   );
@@ -511,11 +527,13 @@ function WeekGrid({
 function DayDetail({
   date,
   data,
+  members = [],
   canPlace = false,
   onPlace,
 }: {
   date: Date;
   data?: { entries: CalEntry[]; jobs: CalJob[]; appts: CalAppt[] };
+  members?: CalMember[];
   canPlace?: boolean;
   onPlace?: () => void;
 }) {
@@ -534,17 +552,26 @@ function DayDetail({
           <Briefcase className="h-4 w-4 text-brand" />
           <h3 className="text-sm font-semibold text-slate-900">Scheduled jobs</h3>
         </div>
-        <ul className="divide-y divide-slate-100">
+        <div className="grid gap-2 p-3 sm:grid-cols-2">
           {(data?.jobs ?? []).map((j) => (
-            <li key={j.id}>
-              <Link href={`/jobs/${j.id}`} className="flex items-center justify-between px-5 py-3 text-sm hover:bg-slate-50">
-                <span className="font-medium text-slate-900">{j.job_number} — {j.name}</span>
-                <Badge tone={statusTone(j.status)}>{j.status.replace("_", " ")}</Badge>
-              </Link>
-            </li>
+            <JobScheduleCard
+              key={j.id}
+              job={{
+                id: j.id,
+                name: j.name,
+                job_number: j.job_number,
+                status: j.status,
+                scheduled_start: j.scheduled_start,
+                assigned_to: j.assigned_to ?? null,
+                customers: j.customers ?? null,
+              }}
+              members={members}
+            />
           ))}
-          {!data?.jobs.length && <li className="px-5 py-5 text-center text-sm text-slate-400">Nothing scheduled.</li>}
-        </ul>
+          {!data?.jobs.length && (
+            <div className="col-span-full py-5 text-center text-sm text-slate-400">Nothing scheduled.</div>
+          )}
+        </div>
       </Card>
 
       {(data?.appts.length ?? 0) > 0 && (

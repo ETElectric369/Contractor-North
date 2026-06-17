@@ -33,7 +33,7 @@ export async function CalendarPanel() {
         .order("clock_in"),
       supabase
         .from("jobs")
-        .select("id, job_number, name, status, scheduled_start, scheduled_end")
+        .select("id, job_number, name, status, scheduled_start, scheduled_end, assigned_to, customers(name)")
         .gte("scheduled_start", from)
         .lte("scheduled_start", to)
         .order("scheduled_start"),
@@ -59,6 +59,13 @@ export async function CalendarPanel() {
       supabase.from("organizations").select("settings").limit(1).maybeSingle(),
     ]);
 
+  const { data: memberRows } = await supabase
+    .from("profiles")
+    .select("id, full_name")
+    .eq("active", true)
+    .order("full_name");
+  const members = (memberRows ?? []) as { id: string; full_name: string | null }[];
+
   const unscheduled = (unschedRows ?? []).map((j: any) => ({
     id: j.id,
     job_number: j.job_number,
@@ -79,6 +86,7 @@ export async function CalendarPanel() {
         segments={(segments ?? []) as unknown as CalSegment[]}
         appointments={(appointments ?? []) as unknown as CalAppt[]}
         unscheduled={unscheduled}
+        members={members}
         workStart={workStart}
         workEnd={workEnd}
       />
