@@ -30,6 +30,7 @@ export default async function PickDatePage({
     kind: string;
     label: string;
     address: string | null;
+    time_note: string | null;
     dates: Slot[];
     status: string;
     chosen_date: string | null;
@@ -64,6 +65,14 @@ export default async function PickDatePage({
             <div className="font-medium text-slate-900">{p.label}</div>
             {p.address && <div className="text-xs text-slate-400">{p.address}</div>}
           </div>
+          {p.time_note && (
+            <div
+              className="mb-4 rounded-xl px-3 py-2 text-sm font-medium"
+              style={{ background: `${brand}14`, color: brand }}
+            >
+              Arrival window: {p.time_note}
+            </div>
+          )}
           <DatePicker token={token} dates={p.dates} status={p.status} chosen={p.chosen_date} brand={brand} />
         </div>
 

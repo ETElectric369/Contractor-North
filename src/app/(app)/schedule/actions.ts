@@ -154,10 +154,16 @@ export async function rescheduleJob(
   // still works.
   await supabase.from("job_schedule_segments").delete().eq("job_id", id);
   const patch: Record<string, unknown> = { scheduled_start: startIso };
-  if (startIso) patch.status = "scheduled";
+  if (startIso) {
+    // Give the day a real end (8h ≈ 8am→4pm) so the calendar block has width
+    // instead of collapsing to a single point.
+    patch.scheduled_end = new Date(new Date(startIso).getTime() + 8 * 3600_000).toISOString();
+    patch.status = "scheduled";
+  } else {
+    patch.scheduled_end = null;
+  }
   const { error } = await supabase.from("jobs").update(patch).eq("id", id);
   if (error) return { ok: false, error: error.message };
-  revalidatePath("/schedule");
   revalidatePath("/schedule");
   revalidatePath(`/jobs/${id}`);
   return { ok: true };
@@ -208,7 +214,6 @@ export async function setJobScheduleRanges(
     segOk = !insErr;
   }
 
-  revalidatePath("/schedule");
   revalidatePath("/schedule");
   revalidatePath("/jobs");
   revalidatePath(`/jobs/${jobId}`);
