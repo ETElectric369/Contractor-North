@@ -89,9 +89,9 @@ export const DOCK: DockSection[] = [
     key: "time",
     label: "Time",
     icon: Clock,
-    href: "/schedule",
+    href: "/timeclock", // everyone can clock in; the office-only Scheduler is a child
     children: [
-      { id: "tm-sched", label: "Scheduler", icon: CalendarDays, href: "/schedule" },
+      { id: "tm-sched", label: "Scheduler", icon: CalendarDays, href: "/schedule", staffOnly: true },
       { id: "tm-clock", label: "Timeclock", icon: Play, href: "/timeclock" },
       { id: "tm-cards", label: "Timecards", icon: CalendarClock, href: "/timecards", staffOnly: true },
     ],

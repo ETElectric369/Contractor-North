@@ -58,7 +58,7 @@ export const NAV: NavSection[] = [
       { label: "Dashboard", href: "/planner", icon: LayoutDashboard },
       { label: "My Day", href: "/planner", icon: Sun },
       { label: "Jobs", href: "/jobs", icon: Briefcase },
-      { label: "Schedule", href: "/schedule", icon: CalendarDays },
+      { label: "Schedule", href: "/schedule", icon: CalendarDays, staffOnly: true },
       { label: "Assistant", href: "/assistant", icon: Sparkles },
       { label: "Organize My…", href: "/organize", icon: Wand2 },
       { label: "Tasks", href: "/tasks", icon: ListTodo },

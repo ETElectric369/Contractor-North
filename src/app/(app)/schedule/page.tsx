@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { TabBar } from "@/components/tabs";
 import { CalendarPanel } from "./calendar-panel";
@@ -33,6 +34,23 @@ export default async function SchedulePage({
   searchParams: Promise<{ view?: string }>;
 }) {
   const sp = await searchParams;
+
+  // Office-only surface: the calendar shows org-wide appointments + crew
+  // schedules. Techs land here from no nav link, but guard direct URLs too —
+  // RLS would otherwise hand them a confusing half-empty view. Send them to My Day.
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const { data: me } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user?.id ?? "")
+    .maybeSingle();
+  if (!me || !["owner", "admin", "office"].includes(me.role)) {
+    redirect("/planner");
+  }
+
   // Retired crew-timeline views: send old bookmarks to the live calendar.
   if (sp.view === "day" || sp.view === "week") redirect("/schedule");
 
