@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { User } from "lucide-react";
 import { Select } from "@/components/ui/input";
 import { Badge, statusTone } from "@/components/ui/badge";
-import { setJobAssignee, rescheduleJob } from "./actions";
+import { setJobAssignee, setJobSchedule } from "./actions";
 
 interface Member {
   id: string;
@@ -78,9 +78,18 @@ export function JobScheduleCard({
         className="mt-1.5 h-7 w-full rounded-md border border-slate-200 px-2 text-xs text-slate-600"
         onChange={(e) => {
           const v = e.target.value;
-          const iso = v ? new Date(`${v}T08:00`).toISOString() : null;
+          // Canonical writer: sets the day window WITHOUT silently deleting any
+          // multi-range segments (rescheduleJob wiped them).
           start(async () => {
-            await rescheduleJob(job.id, iso);
+            if (v) {
+              await setJobSchedule(
+                job.id,
+                new Date(`${v}T08:00`).toISOString(),
+                new Date(`${v}T16:00`).toISOString(),
+              );
+            } else {
+              await setJobSchedule(job.id, null, null);
+            }
             router.refresh();
           });
         }}

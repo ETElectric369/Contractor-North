@@ -1,12 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, Clock, Briefcase } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ChevronLeft, ChevronRight, Clock, Briefcase, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented";
 import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
+import { setJobSchedule } from "../schedule/actions";
 
 export interface CalEntry {
   id: string;
@@ -45,6 +47,14 @@ export interface CalAppt {
   job_id: string | null;
 }
 
+/** A job with no date yet — shown in the "To schedule" rail. */
+export interface CalUnscheduled {
+  id: string;
+  job_number: string;
+  name: string;
+  customer: string | null;
+}
+
 type View = "month" | "week" | "day";
 
 const dayKey = (d: Date) => {
@@ -63,6 +73,7 @@ export function CalendarView({
   jobs,
   segments = [],
   appointments = [],
+  unscheduled = [],
   workStart = 8,
   workEnd = 17,
 }: {
@@ -70,13 +81,38 @@ export function CalendarView({
   jobs: CalJob[];
   segments?: CalSegment[];
   appointments?: CalAppt[];
+  unscheduled?: CalUnscheduled[];
   workStart?: number;
   workEnd?: number;
 }) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
   const [view, setView] = useState<View>("week");
   const [anchor, setAnchor] = useState(() => new Date());
   // Selectable layers — one calendar, show/hide what you want on it.
   const [layers, setLayers] = useState({ jobs: true, appts: true, time: true });
+  // The "armed" unscheduled job: tap a chip to arm, then tap an open day to place
+  // it there (the one canonical scheduling gesture).
+  const [armed, setArmed] = useState<string | null>(null);
+  const armedJob = armed ? unscheduled.find((u) => u.id === armed) : null;
+
+  function handlePick(d: Date) {
+    if (armed) {
+      const ymd = dayKey(d);
+      start(async () => {
+        await setJobSchedule(
+          armed,
+          new Date(`${ymd}T08:00`).toISOString(),
+          new Date(`${ymd}T16:00`).toISOString(),
+        );
+        setArmed(null);
+        router.refresh();
+      });
+      return;
+    }
+    setAnchor(d);
+    setView("day");
+  }
 
   const byDay = useMemo(() => {
     const m = new Map<string, { entries: CalEntry[]; jobs: CalJob[]; appts: CalAppt[] }>();
@@ -181,11 +217,47 @@ export function CalendarView({
         ))}
       </div>
 
-      {view === "month" && (
-        <MonthGrid anchor={anchor} byDay={byDay} onPick={(d) => { setAnchor(d); setView("day"); }} />
+      {/* "To schedule" rail — tap a job to arm it, then tap an open day to place it. */}
+      {unscheduled.length > 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-2">
+          <div className="mb-1.5 flex items-center justify-between px-1 text-xs">
+            <span className="font-semibold text-amber-700">To schedule · {unscheduled.length}</span>
+            {armedJob ? (
+              <span className="flex items-center gap-1 text-amber-700">
+                Tap an open day to place <span className="font-medium">{armedJob.name}</span>
+                <button onClick={() => setArmed(null)} className="rounded p-0.5 hover:bg-amber-100" aria-label="Cancel">
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </span>
+            ) : (
+              <span className="text-slate-400">Tap a job, then tap a day</span>
+            )}
+          </div>
+          <div className="flex gap-1.5 overflow-x-auto pb-1">
+            {unscheduled.map((j) => (
+              <button
+                key={j.id}
+                onClick={() => setArmed(armed === j.id ? null : j.id)}
+                disabled={pending}
+                className={`shrink-0 rounded-lg border px-2.5 py-1.5 text-left text-xs transition-colors ${
+                  armed === j.id
+                    ? "border-amber-500 bg-amber-100 ring-1 ring-amber-400"
+                    : "border-slate-200 bg-white hover:border-amber-300"
+                }`}
+              >
+                <div className="max-w-[160px] truncate font-medium text-slate-800">{j.name}</div>
+                <div className="truncate text-[11px] text-slate-400">{j.customer ?? j.job_number}</div>
+              </button>
+            ))}
+          </div>
+        </div>
       )}
-      {view === "week" && <WeekGrid anchor={anchor} byDay={byDay} onPick={(d) => { setAnchor(d); setView("day"); }} workStart={workStart} workEnd={workEnd} />}
-      {view === "day" && <DayDetail date={anchor} data={byDay.get(dayKey(anchor))} />}
+
+      {view === "month" && <MonthGrid anchor={anchor} byDay={byDay} onPick={handlePick} arming={!!armed} />}
+      {view === "week" && <WeekGrid anchor={anchor} byDay={byDay} onPick={handlePick} workStart={workStart} workEnd={workEnd} />}
+      {view === "day" && (
+        <DayDetail date={anchor} data={byDay.get(dayKey(anchor))} canPlace={!!armed} onPlace={() => handlePick(anchor)} />
+      )}
     </div>
   );
 }
@@ -201,10 +273,12 @@ function MonthGrid({
   anchor,
   byDay,
   onPick,
+  arming = false,
 }: {
   anchor: Date;
   byDay: Map<string, { entries: CalEntry[]; jobs: CalJob[]; appts: CalAppt[] }>;
   onPick: (d: Date) => void;
+  arming?: boolean;
 }) {
   const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
   const start = startOfWeek(first);
@@ -229,11 +303,14 @@ function MonthGrid({
           const data = byDay.get(k);
           const totalHrs = data ? data.entries.reduce((s, e) => s + hrs(e), 0) : 0;
           const inMonth = d.getMonth() === anchor.getMonth();
+          const isOpen = (data?.jobs.length ?? 0) === 0;
           return (
             <div
               key={i}
               onClick={() => onPick(d)}
-              className={`min-h-[72px] cursor-pointer border-b border-r border-slate-100 p-1 text-left align-top hover:bg-slate-50 ${inMonth ? "" : "bg-slate-50/60 text-slate-300"}`}
+              className={`min-h-[72px] cursor-pointer border-b border-r border-slate-100 p-1 text-left align-top hover:bg-slate-50 ${
+                inMonth ? "" : "bg-slate-50/60 text-slate-300"
+              } ${arming && inMonth ? (isOpen ? "bg-emerald-50/70 ring-1 ring-inset ring-emerald-300" : "bg-amber-50/40") : ""}`}
             >
               <div className={`text-xs ${k === todayK ? "inline-flex h-5 w-5 items-center justify-center rounded-full bg-brand font-semibold text-white" : "text-slate-500"}`}>
                 {d.getDate()}
@@ -431,9 +508,27 @@ function WeekGrid({
   );
 }
 
-function DayDetail({ date, data }: { date: Date; data?: { entries: CalEntry[]; jobs: CalJob[]; appts: CalAppt[] } }) {
+function DayDetail({
+  date,
+  data,
+  canPlace = false,
+  onPlace,
+}: {
+  date: Date;
+  data?: { entries: CalEntry[]; jobs: CalJob[]; appts: CalAppt[] };
+  canPlace?: boolean;
+  onPlace?: () => void;
+}) {
   return (
     <div className="space-y-4">
+      {canPlace && (
+        <button
+          onClick={onPlace}
+          className="w-full rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2.5 text-sm font-medium text-emerald-700 hover:bg-emerald-100"
+        >
+          Schedule the armed job on {date.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}
+        </button>
+      )}
       <Card>
         <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3">
           <Briefcase className="h-4 w-4 text-brand" />

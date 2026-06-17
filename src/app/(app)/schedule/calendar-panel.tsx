@@ -23,7 +23,7 @@ export async function CalendarPanel() {
   const from = new Date(Date.now() - 60 * 86400_000).toISOString();
   const to = new Date(Date.now() + 60 * 86400_000).toISOString();
 
-  const [{ data: entries }, { data: jobs }, { data: segments }, { data: appointments }, { data: org }] =
+  const [{ data: entries }, { data: jobs }, { data: segments }, { data: appointments }, { data: unschedRows }, { data: org }] =
     await Promise.all([
       supabase
         .from("time_entries")
@@ -48,8 +48,23 @@ export async function CalendarPanel() {
         .gte("starts_at", from)
         .lte("starts_at", to)
         .neq("status", "cancelled"),
+      // Jobs with no date yet — the "To schedule" rail.
+      supabase
+        .from("jobs")
+        .select("id, job_number, name, customers(name)")
+        .is("scheduled_start", null)
+        .in("status", ["estimate", "scheduled"])
+        .order("created_at", { ascending: false })
+        .limit(40),
       supabase.from("organizations").select("settings").limit(1).maybeSingle(),
     ]);
+
+  const unscheduled = (unschedRows ?? []).map((j: any) => ({
+    id: j.id,
+    job_number: j.job_number,
+    name: j.name,
+    customer: j.customers?.name ?? null,
+  }));
 
   // Scheduled jobs block off the configured work day (e.g. 9–5), not the whole grid.
   const s = getOrgSettings((org as any)?.settings);
@@ -63,6 +78,7 @@ export async function CalendarPanel() {
         jobs={(jobs ?? []) as unknown as CalJob[]}
         segments={(segments ?? []) as unknown as CalSegment[]}
         appointments={(appointments ?? []) as unknown as CalAppt[]}
+        unscheduled={unscheduled}
         workStart={workStart}
         workEnd={workEnd}
       />
