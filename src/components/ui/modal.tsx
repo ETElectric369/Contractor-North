@@ -88,6 +88,7 @@ export function ModalActions({
   submit = false,
   formId,
   extra,
+  hideCancel = false,
 }: {
   onCancel: () => void;
   onSave?: () => void;
@@ -100,13 +101,17 @@ export function ModalActions({
   formId?: string;
   /** Optional extra control rendered at the far left (e.g. a Delete button). */
   extra?: React.ReactNode;
+  /** Single-button footer (e.g. an acknowledge "Done") — no Cancel. */
+  hideCancel?: boolean;
 }) {
   return (
     <>
       {extra && <div className="mr-auto">{extra}</div>}
-      <Button type="button" variant="outline" onClick={onCancel} disabled={saving}>
-        {cancelLabel}
-      </Button>
+      {!hideCancel && (
+        <Button type="button" variant="outline" onClick={onCancel} disabled={saving}>
+          {cancelLabel}
+        </Button>
+      )}
       <Button
         type={submit ? "submit" : "button"}
         form={submit ? formId : undefined}

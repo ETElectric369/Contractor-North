@@ -2,6 +2,8 @@ import Link from "next/link";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
+import { TabBar } from "@/components/tabs";
+import { SegmentedControl } from "@/components/ui/segmented";
 import { NewJobButton } from "./new-job-button";
 import { JobScheduleCard } from "./job-schedule-card";
 import { AppointmentButton } from "../appointments/appointment-button";
@@ -28,19 +30,8 @@ const VIEWS = [
 function ScheduleFrame({ view, children }: { view: string; children: React.ReactNode }) {
   return (
     <div>
-      <PageHeader title="Scheduler" description="Everyone's day, the jobs board, calendar, appointments and map — all in one place.">
-        <div className="flex overflow-x-auto rounded-lg bg-slate-100 p-0.5 text-sm">
-          {VIEWS.map((v) => (
-            <Link
-              key={v.id}
-              href={v.href}
-              className={`whitespace-nowrap rounded-md px-3 py-1 font-medium ${view === v.id ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}
-            >
-              {v.label}
-            </Link>
-          ))}
-        </div>
-      </PageHeader>
+      <PageHeader title="Scheduler" description="Everyone's day, the jobs board, calendar, appointments and map — all in one place." />
+      <TabBar items={VIEWS} activeId={view} />
       {children}
     </div>
   );
@@ -353,10 +344,13 @@ export default async function SchedulePage({
   return (
     <ScheduleFrame view="board">
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <div className="flex rounded-lg bg-slate-100 p-0.5 text-sm">
-          <Link href="/schedule" className={`rounded-md px-3 py-1 font-medium ${!isMonth ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}>Week</Link>
-          <Link href="/schedule?span=month" className={`rounded-md px-3 py-1 font-medium ${isMonth ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}>Month</Link>
-        </div>
+        <SegmentedControl
+          activeId={isMonth ? "month" : "week"}
+          items={[
+            { id: "week", label: "Week", href: "/schedule" },
+            { id: "month", label: "Month", href: "/schedule?span=month" },
+          ]}
+        />
         <Link href={`/schedule?${baseQ}week=${offset - 1}`} className="rounded-lg border border-slate-300 bg-white p-2 text-slate-600 hover:bg-slate-50">
           <ChevronLeft className="h-4 w-4" />
         </Link>

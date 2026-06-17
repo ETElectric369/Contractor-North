@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Pencil, Copy, Check, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { SegmentedControl } from "@/components/ui/segmented";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import {
@@ -183,7 +184,7 @@ export function AppointmentButton({
           title={editing ? "Edit appointment" : linkToken ? "Text the customer these times" : "New appointment"}
           footer={
             linkToken ? (
-              <Button type="button" onClick={closeAll}>Done</Button>
+              <ModalActions onCancel={closeAll} onSave={closeAll} saveLabel="Done" hideCancel />
             ) : (
               <ModalActions
                 onCancel={closeAll}
@@ -256,22 +257,15 @@ export function AppointmentButton({
           </div>
 
           {!editing && (
-            <div className="flex rounded-lg bg-slate-100 p-0.5 text-sm">
-              <button
-                type="button"
-                onClick={() => setMode("set")}
-                className={`flex-1 rounded-md px-3 py-1.5 font-medium ${mode === "set" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}
-              >
-                Set a time
-              </button>
-              <button
-                type="button"
-                onClick={() => setMode("propose")}
-                className={`flex-1 rounded-md px-3 py-1.5 font-medium ${mode === "propose" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}
-              >
-                Propose times
-              </button>
-            </div>
+            <SegmentedControl
+              stretch
+              activeId={mode}
+              onSelect={(id) => setMode(id as typeof mode)}
+              items={[
+                { id: "set", label: "Set a time" },
+                { id: "propose", label: "Propose times" },
+              ]}
+            />
           )}
 
           {editing || mode === "set" ? (

@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, Clock, Briefcase } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { SegmentedControl } from "@/components/ui/segmented";
 import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 
@@ -147,17 +148,15 @@ export function CalendarView({
           </Button>
           <span className="ml-2 text-sm font-semibold text-slate-900">{title}</span>
         </div>
-        <div className="flex gap-1 rounded-lg bg-slate-100 p-0.5">
-          {(["month", "week", "day"] as View[]).map((v) => (
-            <button
-              key={v}
-              onClick={() => setView(v)}
-              className={`rounded-md px-3 py-1 text-sm font-medium capitalize ${view === v ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}
-            >
-              {v}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl
+          activeId={view}
+          onSelect={(id) => setView(id as View)}
+          items={[
+            { id: "month", label: "Month" },
+            { id: "week", label: "Week" },
+            { id: "day", label: "Day" },
+          ]}
+        />
       </div>
 
       {/* Selectable layers */}
