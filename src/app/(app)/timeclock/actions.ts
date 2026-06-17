@@ -50,7 +50,21 @@ export async function clockIn(input: {
     };
   }
 
+  // Clocking into a job means work has started — promote it to in_progress.
+  // Only from pre-work states (never un-complete/-cancel a finished job), and
+  // never let a blocked update (e.g. RLS) fail the clock-in itself.
+  if (input.job_id) {
+    await supabase
+      .from("jobs")
+      .update({ status: "in_progress" })
+      .eq("id", input.job_id)
+      .in("status", ["scheduled", "on_hold", "quoted", "lead"]);
+    revalidatePath(`/jobs/${input.job_id}`);
+    revalidatePath("/jobs");
+  }
+
   revalidatePath("/timeclock");
+  revalidatePath("/planner");
   return { ok: true };
 }
 
@@ -217,6 +231,42 @@ export async function deleteTimeEntry(id: string): Promise<ClockResult> {
   if (error) return { ok: false, error: error.message };
   revalidatePath("/timecards");
   revalidatePath("/timeclock");
+  return { ok: true };
+}
+
+/** Copy a finished entry to a new one (same person/job/code/times) so a repeat
+ *  day can be logged in one tap, then tweaked. Open entries can't be duplicated. */
+export async function duplicateTimeEntry(id: string): Promise<ClockResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  const { data: e, error: readErr } = await supabase
+    .from("time_entries")
+    .select("profile_id, clock_in, clock_out, lunch_minutes, miles, job_id, job_code, notes, status")
+    .eq("id", id)
+    .single();
+  if (readErr || !e) return { ok: false, error: readErr?.message ?? "Entry not found." };
+  if (e.status !== "closed" || !e.clock_out) {
+    return { ok: false, error: "Clock out the entry before duplicating it." };
+  }
+
+  const { error } = await supabase.from("time_entries").insert({
+    profile_id: e.profile_id,
+    clock_in: e.clock_in,
+    clock_out: e.clock_out,
+    lunch_minutes: e.lunch_minutes,
+    miles: e.miles,
+    job_id: e.job_id,
+    job_code: e.job_code,
+    notes: e.notes,
+    status: "closed",
+    source: "manual",
+  });
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/timecards");
   return { ok: true };
 }
 

@@ -310,7 +310,10 @@ export function TaskRow({
 
       {(subtasks.length > 0 || adding) && (
         <ul className="ml-7 mt-1.5 space-y-1 border-l border-slate-100 pl-3">
-          {subtasks.map((st) => (
+          {/* checked items sink to the bottom (stable within each group) */}
+          {[...subtasks]
+            .sort((a, b) => (a.status === "done" ? 1 : 0) - (b.status === "done" ? 1 : 0))
+            .map((st) => (
             <li key={st.id} className="flex items-center gap-2 text-xs">
               <input
                 type="checkbox"

@@ -15,6 +15,7 @@ import {
 import { getOrgSettings } from "@/lib/org-settings";
 import { AddEntryButton } from "../timeclock/add-entry-button";
 import { EditEntryButton } from "./edit-entry-button";
+import { DuplicateEntryButton } from "./duplicate-entry-button";
 import type { JobCode } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -273,6 +274,7 @@ export default async function TimecardsPage({
                           <span className="font-medium text-slate-800">
                             {h != null ? formatDuration(h) : "—"}
                           </span>
+                          {e.status === "closed" && <DuplicateEntryButton id={e.id} />}
                           <EditEntryButton
                             entry={e}
                             jobCodes={(jobCodes ?? []) as JobCode[]}

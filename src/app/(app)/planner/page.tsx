@@ -7,7 +7,7 @@ import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { hoursBetween, formatCurrency } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
-import { todayBoundsInTz, prettyDay } from "@/lib/tz";
+import { todayBoundsInTz, prettyDay, tzDayStartUtc } from "@/lib/tz";
 import { DayClock } from "./day-clock";
 import { AppointmentButton } from "../appointments/appointment-button";
 import { TaskRow, NewTaskBox } from "../tasks/tasks-view";
@@ -110,6 +110,24 @@ export default async function PlannerPage() {
       e.status === "closed" && e.clock_out ? sum + hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes) : sum,
     0,
   );
+
+  // This week's logged hours (payroll week = Sunday → today, in the org tz), so
+  // My Day shows a day total AND a running week total.
+  const dow = new Date(`${todayStr}T00:00:00Z`).getUTCDay(); // 0 = Sunday
+  const weekStartDate = new Date(`${todayStr}T00:00:00Z`);
+  weekStartDate.setUTCDate(weekStartDate.getUTCDate() - dow);
+  const weekStartUtc = tzDayStartUtc(weekStartDate.toISOString().slice(0, 10), tz);
+  const { data: weekEntries } = await supabase
+    .from("time_entries")
+    .select("clock_in, clock_out, lunch_minutes, status")
+    .eq("profile_id", user?.id ?? "")
+    .gte("clock_in", weekStartUtc.toISOString())
+    .lt("clock_in", dayEnd.toISOString());
+  const hoursWeek = (weekEntries ?? []).reduce(
+    (sum: number, e: any) =>
+      e.status === "closed" && e.clock_out ? sum + hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes) : sum,
+    0,
+  );
   const openEntry = (openRows ?? [])[0] as any | undefined;
   const findJob = (id: string) => jobMap.get(id) ?? (currentJob?.id === id ? currentJob : null);
   const openJobLabel =
@@ -205,6 +223,7 @@ export default async function PlannerPage() {
       <DayClock
         open={openEntry ? { id: openEntry.id, clock_in: openEntry.clock_in, jobLabel: openJobLabel } : null}
         closedHoursToday={hoursToday}
+        closedHoursWeek={hoursWeek}
         currentJobId={currentJob?.id ?? ""}
         jobs={clockJobs}
       />

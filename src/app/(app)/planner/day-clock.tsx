@@ -18,11 +18,13 @@ interface JobOpt {
 export function DayClock({
   open,
   closedHoursToday,
+  closedHoursWeek,
   currentJobId,
   jobs,
 }: {
   open: { id: string; clock_in: string; jobLabel: string | null } | null;
   closedHoursToday: number;
+  closedHoursWeek: number;
   currentJobId: string;
   jobs: JobOpt[];
 }) {
@@ -42,6 +44,8 @@ export function DayClock({
 
   const liveMs = open ? Math.max(0, now - new Date(open.clock_in).getTime()) : 0;
   const totalMs = closedHoursToday * 3_600_000 + liveMs;
+  // The open entry started today, so its live time is also part of this week.
+  const totalWeekMs = closedHoursWeek * 3_600_000 + liveMs;
 
   const fmtHm = (ms: number) => {
     const s = Math.floor(ms / 1000);
@@ -78,13 +82,16 @@ export function DayClock({
             <>
               <div className="text-xl font-bold tabular-nums text-slate-900">{fmtHms(liveMs)}</div>
               <div className="truncate text-xs text-slate-500">
-                On the clock{open.jobLabel ? ` · ${open.jobLabel}` : ""} · {fmtHm(totalMs)} today
+                On the clock{open.jobLabel ? ` · ${open.jobLabel}` : ""} · {fmtHm(totalMs)} today · {fmtHm(totalWeekMs)} week
               </div>
             </>
           ) : (
             <>
               <div className="text-xl font-bold text-slate-900">
-                {fmtHm(totalMs)} <span className="text-sm font-normal text-slate-400">logged today</span>
+                {fmtHm(totalMs)} <span className="text-sm font-normal text-slate-400">today</span>
+                <span className="ml-2 text-sm font-normal text-slate-400">·</span>
+                <span className="ml-2 text-base font-semibold text-slate-600">{fmtHm(totalWeekMs)}</span>{" "}
+                <span className="text-sm font-normal text-slate-400">this week</span>
               </div>
               {jobs.length > 0 && (
                 <Select

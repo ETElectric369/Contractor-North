@@ -36,7 +36,11 @@ function devicePosition(): Promise<{ lat: number; lng: number } | null> {
     navigator.geolocation.getCurrentPosition(
       (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
       () => resolve(null),
-      { timeout: 5000, maximumAge: 10 * 60 * 1000 },
+      // Low accuracy = a fast network/cell fix (we only need the city, not
+      // street-level), a generous timeout so a cold GPS doesn't fall back to the
+      // shop's city, and accept a recent cached fix. Was timing out at 5s and
+      // showing the org location (Chilcoot) instead of where the crew actually is.
+      { enableHighAccuracy: false, timeout: 12000, maximumAge: 30 * 60 * 1000 },
     );
   });
 }
