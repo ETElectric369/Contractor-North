@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Briefcase, CalendarCheck, ClipboardCheck, ListTodo, MapPin, UserPlus, Receipt } from "lucide-react";
+import { Briefcase, CalendarCheck, ClipboardCheck, MapPin, UserPlus, Receipt } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { WeatherWidget } from "@/components/weather-widget";
@@ -9,8 +9,10 @@ import { hoursBetween, formatCurrency } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
 import { todayBoundsInTz, prettyDay, tzDayStartUtc } from "@/lib/tz";
 import { DayClock } from "./day-clock";
+import { getActionItems } from "@/lib/action-items/query";
+import { ActionList } from "@/components/action-items/action-list";
 import { AppointmentButton } from "../appointments/appointment-button";
-import { TaskRow, NewTaskBox } from "../tasks/tasks-view";
+import { NewTaskBox } from "../tasks/tasks-view";
 
 export const dynamic = "force-dynamic";
 
@@ -164,6 +166,9 @@ export default async function PlannerPage() {
   const staffOpts = (staff ?? []).map((s: any) => ({ id: s.id, label: s.full_name ?? "Unnamed" }));
   const people = (staff ?? []).map((s: any) => ({ id: s.id, full_name: s.full_name }));
   const isStaff = ["owner", "admin", "office"].includes((me as any)?.role ?? "");
+  // The unified "Needs action" inbox — one list across tasks, jobs to schedule,
+  // inquiries, appointments to finish, and captures to file.
+  const actionItems = await getActionItems({ todayStr, isStaff, userId: user?.id ?? "" });
   const openInquiries = leadsCount.count ?? 0;
   const outstanding = (invRows ?? [])
     .filter((i: any) => !["paid", "void"].includes(i.status))
@@ -227,6 +232,22 @@ export default async function PlannerPage() {
         currentJobId={currentJob?.id ?? ""}
         jobs={clockJobs}
       />
+
+      {/* Needs action — the one unified inbox (tasks, jobs to schedule,
+          inquiries, appointments to finish, captures to file). */}
+      {actionItems.length > 0 && (
+        <Card className="mb-4 overflow-hidden">
+          <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
+            <h2 className="text-sm font-semibold text-slate-900">Needs action</h2>
+            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">
+              {actionItems.length}
+            </span>
+          </div>
+          <div className="p-3">
+            <ActionList items={actionItems} />
+          </div>
+        </Card>
+      )}
 
       {/* Quick stats */}
       <div className="mb-4 grid grid-cols-2 gap-3">
@@ -340,19 +361,8 @@ export default async function PlannerPage() {
         </ul>
       </Card>
 
-      {/* Tasks due — tap to toggle, edit, or delete */}
-      <Card className="mb-4 overflow-hidden">
-        <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3 text-sm font-semibold text-slate-900">
-          <ListTodo className="h-4 w-4 text-amber-600" /> Tasks due
-        </div>
-        <ul className="divide-y divide-slate-100">
-          {(tasks ?? []).map((t: any) => (
-            <TaskRow key={t.id} t={t} people={people} category={t.category} />
-          ))}
-          {(tasks ?? []).length === 0 && empty("Nothing due. Nice.")}
-        </ul>
-      </Card>
-
+      {/* Tasks due now live in the unified "Needs action" inbox above; this just
+          keeps a quick add-a-task box on My Day. */}
       <NewTaskBox jobs={(jobOptRows ?? []) as any} people={people} />
     </div>
   );
