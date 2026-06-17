@@ -43,13 +43,14 @@ import type { Customer } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-// In-page nav order, grouped frequency-of-use then role. The six a tech touches
+// In-page nav order, grouped frequency-of-use then role. The tabs a tech touches
 // every visit stay visible; everything financial/closeout collapses into "More".
+// Materials rides up front (2nd) — it's a daily-use take-off list.
 const JOB_TAB_ORDER = [
-  "job", "tasks", "photos", "time", "appointments", "notes",
-  "docs", "permits", "materials", "quotes", "costs", "invoices", "change-orders", "wos",
+  "job", "materials", "tasks", "photos", "time", "appointments", "notes",
+  "docs", "permits", "quotes", "costs", "invoices", "change-orders", "wos",
 ];
-const JOB_PRIMARY = new Set(["job", "tasks", "photos", "time", "appointments", "notes"]);
+const JOB_PRIMARY = new Set(["job", "materials", "tasks", "photos", "time", "appointments", "notes"]);
 const JOB_STAFF_ONLY = new Set(["costs", "quotes", "invoices", "change-orders"]);
 
 /** Order the job tabs and tag each with its tier + staff-gating, so <Tabs> shows
