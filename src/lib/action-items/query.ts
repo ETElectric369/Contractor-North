@@ -2,6 +2,51 @@ import { createClient } from "@/lib/supabase/server";
 import type { ActionItem, ActionKind } from "./types";
 import { AFFORDANCES } from "./types";
 
+/** Cheap count of the "Needs action" inbox for the dock Home badge — count-only
+ *  queries (head:true), mirroring getActionItems' filters. Runs on every page. */
+export async function getActionItemsCount(ctx: {
+  todayStr: string;
+  isStaff: boolean;
+  userId: string;
+}): Promise<number> {
+  const { todayStr, isStaff, userId } = ctx;
+  const supabase = await createClient();
+  const endOfToday = `${todayStr}T23:59:59`;
+  const n = async (q: any): Promise<number> => {
+    const { count } = await q;
+    return count ?? 0;
+  };
+
+  let taskQ = supabase
+    .from("tasks")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "open")
+    .lte("due_date", todayStr);
+  if (!isStaff) taskQ = taskQ.eq("assigned_to", userId);
+
+  let apptQ = supabase
+    .from("appointments")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "scheduled")
+    .lte("starts_at", endOfToday);
+  if (!isStaff) apptQ = apptQ.eq("assigned_to", userId);
+
+  const parts = await Promise.all([
+    n(taskQ),
+    n(apptQ),
+    isStaff
+      ? n(supabase.from("jobs").select("id", { count: "exact", head: true }).is("scheduled_start", null).in("status", ["estimate", "scheduled"]))
+      : 0,
+    isStaff
+      ? n(supabase.from("inquiries").select("id", { count: "exact", head: true }).in("status", ["new", "contacted"]).is("converted_at", null))
+      : 0,
+    isStaff
+      ? n(supabase.from("organized_items").select("id", { count: "exact", head: true }).eq("status", "needs_review"))
+      : 0,
+  ]);
+  return parts.reduce((a, b) => a + b, 0);
+}
+
 const ORGANIZE_LABEL: Record<string, string> = {
   receipt: "Receipt to file",
   note: "Note to review",

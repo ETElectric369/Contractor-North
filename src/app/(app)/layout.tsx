@@ -7,6 +7,8 @@ import { BottomNav } from "@/components/bottom-nav";
 import { billingEnabled } from "@/lib/stripe";
 import { hasActiveAccess } from "@/lib/subscription";
 import { getOrgSettings } from "@/lib/org-settings";
+import { getActionItemsCount } from "@/lib/action-items/query";
+import { todayStrInTz } from "@/lib/tz";
 import type { Profile } from "@/lib/types";
 
 /** "#1b9488" → "27 148 136" (the space-separated rgb our --glass-tint expects). */
@@ -59,12 +61,16 @@ export default async function AppLayout({
   // The glass tint is a separate per-org chrome accent (documents keep brand_color).
   const glassTint = hexToRgbTriplet(getOrgSettings((org as any)?.settings).glass_tint);
 
-  // Attention counts surfaced as sidebar badges.
-  const { count: organizeCount } = await supabase
-    .from("organized_items")
-    .select("id", { count: "exact", head: true })
-    .eq("status", "needs_review");
-  const badges = { "/organize": organizeCount ?? 0 };
+  // The unified "Needs action" inbox count, surfaced on the dock Home icon (it
+  // already includes the organize/needs-review captures, so no separate badge).
+  const tz = getOrgSettings((org as any)?.settings).timezone || "America/Los_Angeles";
+  const isStaff = ["owner", "admin", "office"].includes(profile.role);
+  const needsAction = await getActionItemsCount({
+    todayStr: todayStrInTz(tz),
+    isStaff,
+    userId: user.id,
+  });
+  const badges = { "/planner": needsAction };
 
   return (
     <div

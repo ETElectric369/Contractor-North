@@ -244,7 +244,7 @@ export default async function PlannerPage() {
             </span>
           </div>
           <div className="p-3">
-            <ActionList items={actionItems} />
+            <ActionList items={actionItems} people={people} />
           </div>
         </Card>
       )}

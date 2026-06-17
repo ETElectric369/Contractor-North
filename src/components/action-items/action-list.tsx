@@ -2,10 +2,10 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarPlus, Clock3, X, ChevronRight, Check } from "lucide-react";
+import { CalendarPlus, Clock3, X, ChevronRight, Check, UserPlus, ArrowRightLeft } from "lucide-react";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
-import { Input, Label } from "@/components/ui/input";
+import { Input, Label, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { dispatchAction } from "@/lib/action-items/dispatch";
 import { KIND_META, sortActionItems, type ActionItem, type Affordance } from "@/lib/action-items/types";
@@ -41,9 +41,11 @@ function prettyWhen(when: string | null | undefined): string | null {
  */
 export function ActionList({
   items,
+  people = [],
   emptyLabel = "All caught up.",
 }: {
   items: ActionItem[];
+  people?: { id: string; full_name: string | null }[];
   emptyLabel?: string;
 }) {
   const router = useRouter();
@@ -54,12 +56,20 @@ export function ActionList({
   const [dating, setDating] = useState<{ item: ActionItem; verb: "schedule" | "snooze" } | null>(null);
   const [dateVal, setDateVal] = useState("");
   const [savingDate, setSavingDate] = useState(false);
+  const [assigning, setAssigning] = useState<ActionItem | null>(null);
+  const [assigneeVal, setAssigneeVal] = useState("");
+  const [savingAssign, setSavingAssign] = useState(false);
+  const [converting, setConverting] = useState<ActionItem | null>(null);
 
   const visible = sortActionItems(
     items.filter((i) => !removedIds.has(i.id)).map((i) => ({ ...i, done: i.done || doneIds.has(i.id) })),
   );
 
-  async function run(item: ActionItem, verb: Affordance, payload?: { date?: string }) {
+  async function run(
+    item: ActionItem,
+    verb: Affordance,
+    payload?: { date?: string; assignee?: string; target?: "customer" | "quote" | "estimate" | "job" },
+  ) {
     setError(null);
     setBusyId(item.id);
     const res = await dispatchAction({ kind: item.kind, id: item.id, verb, payload });
@@ -95,6 +105,22 @@ export function ActionList({
     const ok = await run(it, dating.verb, { date: dateVal });
     setSavingDate(false);
     if (ok) setDating(null);
+  }
+  function openAssign(item: ActionItem) {
+    setAssigneeVal("");
+    setAssigning(item);
+  }
+  async function saveAssign() {
+    if (!assigning) return;
+    setSavingAssign(true);
+    const ok = await run(assigning, "assign", { assignee: assigneeVal || undefined });
+    setSavingAssign(false);
+    if (ok) setAssigning(null);
+  }
+  async function doConvert(item: ActionItem, target: "customer" | "quote" | "estimate" | "job") {
+    setRemovedIds((s) => new Set(s).add(item.id)); // converted → leaves the inbox
+    const ok = await run(item, "convert", { target });
+    if (ok) setConverting(null);
   }
 
   if (visible.length === 0) {
@@ -149,6 +175,16 @@ export function ActionList({
                   <CalendarPlus className="h-4 w-4" />
                 </button>
               )}
+              {can("assign") && (
+                <button onClick={() => openAssign(item)} disabled={busyId === item.id} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-brand" title="Assign to someone">
+                  <UserPlus className="h-4 w-4" />
+                </button>
+              )}
+              {can("convert") && (
+                <button onClick={() => setConverting(item)} disabled={busyId === item.id} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-brand" title="Convert">
+                  <ArrowRightLeft className="h-4 w-4" />
+                </button>
+              )}
               {can("snooze") && (
                 <button onClick={() => openDate(item, "snooze")} disabled={busyId === item.id} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Snooze to a later date">
                   <Clock3 className="h-4 w-4" />
@@ -191,6 +227,44 @@ export function ActionList({
             <Button type="button" size="sm" variant="outline" onClick={() => setDateVal(ymd(new Date()))}>Today</Button>
             <Button type="button" size="sm" variant="outline" onClick={() => setDateVal(ymd(new Date(Date.now() + 86_400_000)))}>Tomorrow</Button>
             <Button type="button" size="sm" variant="outline" onClick={() => setDateVal(ymd(new Date(Date.now() + 7 * 86_400_000)))}>+1 week</Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={!!assigning}
+        onClose={() => setAssigning(null)}
+        title="Assign to"
+        size="sm"
+        footer={
+          <ModalActions onCancel={() => setAssigning(null)} onSave={saveAssign} saving={savingAssign} saveLabel="Assign" />
+        }
+      >
+        <div>
+          <Label htmlFor="ai-assignee">Person</Label>
+          <Select id="ai-assignee" value={assigneeVal} onChange={(e) => setAssigneeVal(e.target.value)}>
+            <option value="">— Unassigned —</option>
+            {people.map((p) => (
+              <option key={p.id} value={p.id}>{p.full_name ?? "Unnamed"}</option>
+            ))}
+          </Select>
+        </div>
+      </Modal>
+
+      <Modal open={!!converting} onClose={() => setConverting(null)} title="Convert inquiry" size="sm">
+        <div className="space-y-3">
+          <p className="text-sm text-slate-500">Turn this inquiry into:</p>
+          <div className="grid grid-cols-2 gap-2">
+            {([
+              ["estimate", "Estimate"],
+              ["quote", "Quote"],
+              ["job", "Job"],
+              ["customer", "Customer"],
+            ] as const).map(([t, label]) => (
+              <Button key={t} type="button" variant="outline" onClick={() => converting && doConvert(converting, t)}>
+                {label}
+              </Button>
+            ))}
           </div>
         </div>
       </Modal>

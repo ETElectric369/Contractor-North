@@ -2,11 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 import { toggleTask, updateTask, deleteTask } from "@/app/(app)/tasks/actions";
-import { rescheduleJob } from "@/app/(app)/schedule/actions";
-import { markInquiryContacted, deleteInquiry } from "@/app/(app)/leads/actions";
+import { rescheduleJob, setJobAssignee } from "@/app/(app)/schedule/actions";
+import { markInquiryContacted, deleteInquiry, convertInquiry } from "@/app/(app)/leads/actions";
 import { setAppointmentStatus } from "@/app/(app)/appointments/actions";
 import { archiveItem } from "@/app/(app)/organize/actions";
 import type { ActionKind, Affordance } from "./types";
+
+type ConvertTarget = "customer" | "quote" | "estimate" | "job";
 
 type Result = { ok: boolean; error?: string };
 
@@ -19,7 +21,7 @@ export async function dispatchAction(input: {
   kind: ActionKind;
   id: string;
   verb: Affordance;
-  payload?: { date?: string };
+  payload?: { date?: string; assignee?: string; target?: ConvertTarget };
 }): Promise<Result> {
   const { kind, id, verb, payload } = input;
   const date = payload?.date;
@@ -34,6 +36,12 @@ export async function dispatchAction(input: {
     if (kind === "job_to_schedule") res = await rescheduleJob(id, new Date(`${date}T08:00:00`).toISOString());
     else if (kind === "task" || kind === "work_order") res = await updateTask(id, { due_date: date });
     else if (kind === "inquiry") res = await markInquiryContacted(id, date);
+  } else if (verb === "assign") {
+    const assignee = payload?.assignee || null;
+    if (kind === "task" || kind === "work_order") res = await updateTask(id, { assigned_to: assignee });
+    else if (kind === "job_to_schedule") res = await setJobAssignee(id, assignee ?? "");
+  } else if (verb === "convert") {
+    if (kind === "inquiry") res = await convertInquiry(id, (payload?.target as ConvertTarget) || "estimate");
   } else if (verb === "dismiss") {
     if (kind === "task" || kind === "work_order") res = await deleteTask(id);
     else if (kind === "inquiry") res = await deleteInquiry(id);

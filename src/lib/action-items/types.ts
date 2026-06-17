@@ -47,10 +47,10 @@ export const KIND_META: Record<ActionKind, { label: string; tone: "slate" | "blu
 // by both the UI (<ActionList>) and (later) the voice registry. (Assign/Convert
 // land in a follow-up step with inline pickers.)
 export const AFFORDANCES: Record<ActionKind, Affordance[]> = {
-  task: ["do", "schedule", "snooze", "dismiss", "open"],
-  work_order: ["do", "schedule", "dismiss", "open"],
-  job_to_schedule: ["schedule", "open"],
-  inquiry: ["do", "schedule", "snooze", "dismiss", "open"],
+  task: ["do", "schedule", "assign", "snooze", "dismiss", "open"],
+  work_order: ["do", "schedule", "assign", "dismiss", "open"],
+  job_to_schedule: ["schedule", "assign", "open"],
+  inquiry: ["do", "schedule", "convert", "snooze", "dismiss", "open"],
   appointment: ["do", "dismiss", "open"],
   organize: ["dismiss", "open"],
 };
