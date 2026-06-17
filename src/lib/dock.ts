@@ -14,7 +14,6 @@ import {
   Users,
   UserPlus,
   CalendarDays,
-  Calendar,
   Play,
   FileText,
   Wallet,
@@ -92,8 +91,7 @@ export const DOCK: DockSection[] = [
     icon: Clock,
     href: "/schedule",
     children: [
-      { id: "tm-sched", label: "Scheduler", icon: CalendarDays, href: "/schedule?view=day" },
-      { id: "tm-cal", label: "Calendar", icon: Calendar, href: "/schedule?view=calendar" },
+      { id: "tm-sched", label: "Scheduler", icon: CalendarDays, href: "/schedule" },
       { id: "tm-clock", label: "Timeclock", icon: Play, href: "/timeclock" },
       { id: "tm-cards", label: "Timecards", icon: CalendarClock, href: "/timecards", staffOnly: true },
     ],
