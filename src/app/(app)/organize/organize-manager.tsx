@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { Tabs } from "@/components/tabs";
 import { CameraCapture } from "@/components/camera-capture";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { prepareImageForUpload } from "@/lib/image-prep";
@@ -83,7 +84,6 @@ export function OrganizeManager({
   const router = useRouter();
   const [pending, start] = useTransition();
   const [uploads, setUploads] = useState<UploadState[]>([]);
-  const [view, setView] = useState<"attention" | "archive">("attention");
   const [showCamera, setShowCamera] = useState(false);
   const [listening, setListening] = useState(false);
   const [aiBusy, setAiBusy] = useState<string | null>(null);
@@ -424,37 +424,40 @@ export function OrganizeManager({
         )}
       </Card>
 
-      {/* View toggle */}
-      <div className="flex gap-2">
-        <button
-          onClick={() => setView("attention")}
-          className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium ${view === "attention" ? "bg-amber-500 text-white" : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"}`}
-        >
-          <AlertCircle className="h-3.5 w-3.5" /> Needs attention ({tray.length})
-        </button>
-        <button
-          onClick={() => setView("archive")}
-          className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium ${view === "archive" ? "bg-brand text-white" : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"}`}
-        >
-          <Archive className="h-3.5 w-3.5" /> Archive ({archived.length})
-        </button>
-      </div>
-
-      {view === "attention" ? (
-        tray.length === 0 ? (
-          <p className="py-10 text-center text-sm text-slate-400">All caught up — nothing needs your attention. 🎉</p>
-        ) : (
-          <ul className="space-y-3">
-            {tray.map((item) => <li key={item.id}><AttentionCard item={item} /></li>)}
-          </ul>
-        )
-      ) : archived.length === 0 ? (
-        <p className="py-10 text-center text-sm text-slate-400">Nothing filed yet.</p>
-      ) : (
-        <ul className="space-y-2">
-          {archived.map((item) => <li key={item.id}><ArchiveCard item={item} /></li>)}
-        </ul>
-      )}
+      <Tabs
+        urlSync
+        paramKey="view"
+        tabs={[
+          {
+            id: "attention",
+            label: "Needs attention",
+            count: tray.length,
+            icon: <AlertCircle className="h-4 w-4" />,
+            content:
+              tray.length === 0 ? (
+                <p className="py-10 text-center text-sm text-slate-400">All caught up — nothing needs your attention. 🎉</p>
+              ) : (
+                <ul className="space-y-3">
+                  {tray.map((item) => <li key={item.id}><AttentionCard item={item} /></li>)}
+                </ul>
+              ),
+          },
+          {
+            id: "archive",
+            label: "Archive",
+            count: archived.length,
+            icon: <Archive className="h-4 w-4" />,
+            content:
+              archived.length === 0 ? (
+                <p className="py-10 text-center text-sm text-slate-400">Nothing filed yet.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {archived.map((item) => <li key={item.id}><ArchiveCard item={item} /></li>)}
+                </ul>
+              ),
+          },
+        ]}
+      />
 
       {showCamera && (
         <CameraCapture

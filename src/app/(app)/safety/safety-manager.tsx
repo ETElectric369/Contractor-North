@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Tabs } from "@/components/tabs";
 import { formatDate } from "@/lib/utils";
 import { addSafetyRecord, deleteSafetyRecord } from "./actions";
 
@@ -42,8 +43,44 @@ export function SafetyManager({
   jobs: JobOpt[];
   records: Rec[];
 }) {
+  const incidents = records.filter((r) => r.kind === "incident");
+  const toolbox = records.filter((r) => r.kind === "toolbox");
+  return (
+    <Tabs
+      urlSync
+      paramKey="kind"
+      tabs={[
+        {
+          id: "incident",
+          label: "Incidents",
+          count: incidents.length,
+          icon: <AlertTriangle className="h-4 w-4" />,
+          content: <SafetyPanel kind="incident" employees={employees} jobs={jobs} records={incidents} />,
+        },
+        {
+          id: "toolbox",
+          label: "Toolbox talks",
+          count: toolbox.length,
+          icon: <Users className="h-4 w-4" />,
+          content: <SafetyPanel kind="toolbox" employees={employees} jobs={jobs} records={toolbox} />,
+        },
+      ]}
+    />
+  );
+}
+
+function SafetyPanel({
+  kind,
+  employees,
+  jobs,
+  records,
+}: {
+  kind: "incident" | "toolbox";
+  employees: Person[];
+  jobs: JobOpt[];
+  records: Rec[];
+}) {
   const router = useRouter();
-  const [tab, setTab] = useState<"incident" | "toolbox">("incident");
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -56,22 +93,21 @@ export function SafetyManager({
   const [attendees, setAttendees] = useState("");
   const [description, setDescription] = useState("");
 
-  const incidents = records.filter((r) => r.kind === "incident");
-  const toolbox = records.filter((r) => r.kind === "toolbox");
+  const isIncident = kind === "incident";
 
   function add() {
     setError(null);
     if (!title.trim()) return setError("Title is required.");
     start(async () => {
       const res = await addSafetyRecord({
-        kind: tab,
+        kind,
         record_date: date,
         title,
-        profile_id: tab === "incident" ? profileId || null : null,
-        job_id: tab === "incident" ? jobId || null : null,
-        severity: tab === "incident" ? severity : null,
-        recordable: tab === "incident" ? recordable : false,
-        attendees: tab === "toolbox" ? attendees : null,
+        profile_id: isIncident ? profileId || null : null,
+        job_id: isIncident ? jobId || null : null,
+        severity: isIncident ? severity : null,
+        recordable: isIncident ? recordable : false,
+        attendees: isIncident ? null : attendees,
         description,
       });
       if (!res.ok) return setError(res.error ?? "Could not save.");
@@ -80,25 +116,14 @@ export function SafetyManager({
     });
   }
 
-  const tabBtn = (id: typeof tab, label: string, n: number) => (
-    <button onClick={() => setTab(id)} className={`flex-1 rounded-md px-3 py-1.5 font-medium ${tab === id ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}>
-      {label} ({n})
-    </button>
-  );
-
   return (
     <div className="space-y-4">
-      <div className="flex gap-1 rounded-lg bg-slate-100 p-1 text-sm">
-        {tabBtn("incident", "Incidents", incidents.length)}
-        {tabBtn("toolbox", "Toolbox talks", toolbox.length)}
-      </div>
-
       <Card className="space-y-3 p-4">
         {error && <p className="text-sm text-red-600">{error}</p>}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <div><Label htmlFor="s-date">Date</Label><Input id="s-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div>
-          <div className="col-span-2 sm:col-span-3"><Label htmlFor="s-title">{tab === "incident" ? "What happened *" : "Topic *"}</Label><Input id="s-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={tab === "incident" ? "e.g. Cut hand on conduit" : "e.g. Ladder safety"} /></div>
-          {tab === "incident" ? (
+          <div className="col-span-2 sm:col-span-3"><Label htmlFor="s-title">{isIncident ? "What happened *" : "Topic *"}</Label><Input id="s-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={isIncident ? "e.g. Cut hand on conduit" : "e.g. Ladder safety"} /></div>
+          {isIncident ? (
             <>
               <div><Label htmlFor="s-emp">Employee</Label><Select id="s-emp" value={profileId} onChange={(e) => setProfileId(e.target.value)}><option value="">—</option>{employees.map((e) => <option key={e.id} value={e.id}>{e.full_name ?? "Unnamed"}</option>)}</Select></div>
               <div><Label htmlFor="s-job">Job</Label><Select id="s-job" value={jobId} onChange={(e) => setJobId(e.target.value)}><option value="">—</option>{jobs.map((j) => <option key={j.id} value={j.id}>{j.job_number} · {j.name}</option>)}</Select></div>
@@ -109,16 +134,16 @@ export function SafetyManager({
             <div className="col-span-2 sm:col-span-4"><Label htmlFor="s-att">Attendees</Label><Input id="s-att" value={attendees} onChange={(e) => setAttendees(e.target.value)} placeholder="Names of crew present" /></div>
           )}
         </div>
-        <div><Label htmlFor="s-desc">{tab === "incident" ? "Details / corrective action" : "Notes"}</Label><Textarea id="s-desc" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} /></div>
-        <div className="flex justify-end"><Button size="sm" onClick={add} disabled={pending || !title.trim()}><Plus className="h-3.5 w-3.5" /> Add {tab === "incident" ? "incident" : "talk"}</Button></div>
+        <div><Label htmlFor="s-desc">{isIncident ? "Details / corrective action" : "Notes"}</Label><Textarea id="s-desc" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} /></div>
+        <div className="flex justify-end"><Button size="sm" onClick={add} disabled={pending || !title.trim()}><Plus className="h-3.5 w-3.5" /> Add {isIncident ? "incident" : "talk"}</Button></div>
       </Card>
 
       <ul className="space-y-2">
-        {(tab === "incident" ? incidents : toolbox).map((r) => (
+        {records.map((r) => (
           <li key={r.id}>
             <Card className="p-4">
               <div className="flex items-start gap-3">
-                {tab === "incident" ? <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" /> : <Users className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />}
+                {isIncident ? <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" /> : <Users className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />}
                 <div className="min-w-0 flex-1">
                   <div className="font-medium text-slate-900">{r.title}</div>
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-400">
@@ -138,8 +163,8 @@ export function SafetyManager({
             </Card>
           </li>
         ))}
-        {(tab === "incident" ? incidents : toolbox).length === 0 && (
-          <li className="py-8 text-center text-sm text-slate-400">{tab === "incident" ? "No incidents logged — keep it that way." : "No toolbox talks logged yet."}</li>
+        {records.length === 0 && (
+          <li className="py-8 text-center text-sm text-slate-400">{isIncident ? "No incidents logged — keep it that way." : "No toolbox talks logged yet."}</li>
         )}
       </ul>
     </div>

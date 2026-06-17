@@ -10,6 +10,7 @@ import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { Tabs } from "@/components/tabs";
 import { CameraCapture } from "@/components/camera-capture";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { createBill, setBillStatus, deleteBill, addDocument, deleteDocument } from "../jobs/actions";
@@ -170,22 +171,17 @@ export function BillsReceipts({
     if (fileRef.current) fileRef.current.value = "";
   }
 
-  const tabBtn = (id: typeof tab, label: string) => (
-    <button
-      onClick={() => setTab(id)}
-      className={`flex-1 rounded-md px-3 py-1.5 font-medium ${tab === id ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}
-    >
-      {label}
-    </button>
-  );
-
   return (
     <div>
-      <div className="mb-4 flex gap-1 rounded-lg bg-slate-100 p-1 text-sm">
-        {tabBtn("po", `Purchase Orders (${pos.length})`)}
-        {tabBtn("bills", `Bills (${bills.length})`)}
-        {tabBtn("receipts", `Receipts (${docs.length})`)}
-      </div>
+      <Tabs
+        activeId={tab}
+        onChange={(id) => setTab(id as "po" | "bills" | "receipts")}
+        tabs={[
+          { id: "po", label: "Purchase orders", count: pos.length },
+          { id: "bills", label: "Bills", count: bills.length },
+          { id: "receipts", label: "Receipts", count: docs.length },
+        ]}
+      />
 
       {tab === "po" && (
         <Card className="p-4">

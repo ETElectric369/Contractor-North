@@ -15,7 +15,9 @@ export interface TabDef {
   /** "overflow" tabs collapse into the "More" menu; "primary" stays visible.
    *  If no tab sets a tier, the strip auto-overflows past `maxVisible`. */
   tier?: "primary" | "overflow";
-  content: React.ReactNode;
+  /** Optional — omit in controlled "strip-only" mode where the page renders the
+   *  panels itself (e.g. a large form heavy view). */
+  content?: React.ReactNode;
 }
 
 /**
@@ -31,14 +33,23 @@ export function Tabs({
   paramKey = "tab",
   viewerIsStaff = true,
   maxVisible = 6,
+  activeId,
+  onChange,
 }: {
   tabs: TabDef[];
   urlSync?: boolean;
   paramKey?: string;
   viewerIsStaff?: boolean;
   maxVisible?: number;
+  /** Controlled mode: the page owns the active id (and usually renders the
+   *  panels itself). Pass both to take control; urlSync is ignored. */
+  activeId?: string;
+  onChange?: (id: string) => void;
 }) {
   const shown = tabs.filter((t) => !t.staffOnly || viewerIsStaff);
+  if (activeId !== undefined) {
+    return <TabView tabs={shown} activeId={activeId} onSelect={onChange ?? (() => {})} maxVisible={maxVisible} />;
+  }
   if (urlSync) return <UrlSyncedTabs tabs={shown} paramKey={paramKey} maxVisible={maxVisible} />;
   return <StatefulTabs tabs={shown} maxVisible={maxVisible} />;
 }
@@ -106,7 +117,7 @@ function TabView({
         <ScrollStrip tabs={strip} activeId={current?.id} onSelect={onSelect} />
         {overflow.length > 0 && <MoreMenu tabs={overflow} activeId={current?.id} onSelect={onSelect} />}
       </div>
-      <div>{current?.content}</div>
+      {current?.content != null && <div>{current.content}</div>}
     </div>
   );
 }
