@@ -38,6 +38,10 @@ export function PwaRegister() {
           const check = () => {
             reg.update().catch(() => {});
           };
+          // Check for a freshly-deployed build IMMEDIATELY on load (not only
+          // after 60s / on focus) — so reopening the PWA after a deploy picks up
+          // the new service worker right away instead of running stale code.
+          check();
           interval = setInterval(check, 60_000);
           onFocus = check;
           window.addEventListener("focus", onFocus);

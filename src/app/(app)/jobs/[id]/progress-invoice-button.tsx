@@ -6,6 +6,7 @@ import { Percent } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label } from "@/components/ui/input";
+import { SegmentedControl } from "@/components/ui/segmented";
 import { createProgressInvoice } from "../../recurring/actions";
 
 /** Bill a percentage of the job's quoted total as a progress-payment invoice. */
@@ -47,10 +48,17 @@ export function ProgressInvoiceButton({ jobId }: { jobId: string }) {
               <Input id="pct" type="number" min={1} max={100} value={pct} onChange={(e) => setPct(Number(e.target.value))} className="w-24" />
               <span className="text-sm text-slate-500">%</span>
             </div>
-            <div className="mt-2 flex gap-1">
-              {[25, 33, 50, 100].map((p) => (
-                <button key={p} type="button" onClick={() => setPct(p)} className="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600 hover:bg-slate-200">{p}%</button>
-              ))}
+            <div className="mt-2">
+              <SegmentedControl
+                activeId={String(pct)}
+                onSelect={(id) => setPct(Number(id))}
+                items={[
+                  { id: "25", label: "25%" },
+                  { id: "33", label: "33%" },
+                  { id: "50", label: "50%" },
+                  { id: "100", label: "100%" },
+                ]}
+              />
             </div>
           </div>
         </div>
