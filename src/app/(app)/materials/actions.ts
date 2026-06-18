@@ -134,6 +134,17 @@ export async function deleteMaterialItem(
   return { ok: true };
 }
 
+export async function renameMaterialList(listId: string, name: string): Promise<Result> {
+  const supabase = await createClient();
+  const clean = name.trim();
+  if (!clean) return { ok: false, error: "Name is required." };
+  const { error } = await supabase.from("material_lists").update({ name: clean }).eq("id", listId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath(`/materials/${listId}`);
+  revalidatePath("/materials");
+  return { ok: true };
+}
+
 export async function deleteMaterialList(listId: string): Promise<Result> {
   const supabase = await createClient();
   const { error } = await supabase

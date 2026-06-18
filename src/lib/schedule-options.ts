@@ -4,10 +4,10 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-export type PickerOption = { id: string; label: string };
+export type PickerOption = { id: string; label: string; address?: string | null };
 
 export const toJobOptions = (rows: any[] | null | undefined): PickerOption[] =>
-  (rows ?? []).map((j) => ({ id: j.id, label: `${j.job_number} · ${j.name}` }));
+  (rows ?? []).map((j) => ({ id: j.id, label: `${j.job_number} · ${j.name}`, address: j.address ?? null }));
 export const toCustomerOptions = (rows: any[] | null | undefined): PickerOption[] =>
   (rows ?? []).map((c) => ({ id: c.id, label: c.name }));
 export const toStaffOptions = (rows: any[] | null | undefined): PickerOption[] =>
@@ -17,7 +17,7 @@ export const toStaffOptions = (rows: any[] | null | undefined): PickerOption[] =
  *  callers that don't already have the rows on hand. */
 export async function getSchedulePickerOptions(supabase: SupabaseClient) {
   const [{ data: jobs }, { data: customers }, { data: staff }] = await Promise.all([
-    supabase.from("jobs").select("id, job_number, name").order("created_at", { ascending: false }).limit(200),
+    supabase.from("jobs").select("id, job_number, name, address").order("created_at", { ascending: false }).limit(200),
     supabase.from("customers").select("id, name").order("name"),
     supabase.from("profiles").select("id, full_name").eq("active", true).order("full_name"),
   ]);

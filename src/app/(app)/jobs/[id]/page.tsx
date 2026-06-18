@@ -171,7 +171,7 @@ export default async function JobDetailPage({
   ]);
   const thisJobOpt = [{ id: j.id, job_number: j.job_number, name: j.name }];
   // Appointment button takes {id,label} option lists.
-  const apptJobOpts = [{ id: j.id, label: `${j.job_number} · ${j.name}` }];
+  const apptJobOpts = [{ id: j.id, label: `${j.job_number} · ${j.name}`, address: [j.address, j.city, j.state, j.zip].filter(Boolean).join(", ") || null }];
   const apptCustOpts = (allCustomers ?? []).map((c: any) => ({ id: c.id, label: c.name }));
   const apptStaffOpts = (techs ?? []).map((t: any) => ({ id: t.id, label: t.full_name ?? "Unnamed" }));
   const companyAddress = [org?.address_line1, org?.city, org?.state, org?.zip].filter(Boolean).join(", ");

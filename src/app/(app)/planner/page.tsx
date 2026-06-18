@@ -156,7 +156,7 @@ export default async function PlannerPage() {
     await Promise.all([
       supabase.from("customers").select("id, name").order("name"),
       supabase.from("profiles").select("id, full_name").eq("active", true).order("full_name"),
-      supabase.from("jobs").select("id, job_number, name").order("created_at", { ascending: false }).limit(200),
+      supabase.from("jobs").select("id, job_number, name, address").order("created_at", { ascending: false }).limit(200),
       supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle(),
       supabase.from("inquiries").select("id", { count: "exact", head: true }).is("converted_at", null).neq("status", "lost"),
       supabase.from("invoices").select("total, amount_paid, status"),

@@ -28,7 +28,7 @@ function defaultSlots(): { date: string; time: string }[] {
   return out;
 }
 
-interface Opt { id: string; label: string }
+interface Opt { id: string; label: string; address?: string | null }
 
 export interface ApptValue {
   id: string;
@@ -73,6 +73,8 @@ export function AppointmentButton({
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [newCust, setNewCust] = useState(false);
+  // Location is controlled so picking a job can auto-fill it from the job address.
+  const [location, setLocation] = useState(appointment?.location ?? "");
   // "Propose times" mode: offer the customer up to 3 date+time slots to pick.
   const [mode, setMode] = useState<"set" | "propose">("set");
   const [slots, setSlots] = useState(defaultSlots);
@@ -322,7 +324,16 @@ export function AppointmentButton({
             </div>
             <div>
               <Label htmlFor="ap-job">Job</Label>
-              <Select id="ap-job" name="job_id" defaultValue={appointment?.job_id ?? ""}>
+              <Select
+                id="ap-job"
+                name="job_id"
+                defaultValue={appointment?.job_id ?? ""}
+                onChange={(e) => {
+                  // Auto-fill the location from the job's address when it's empty.
+                  const job = jobs.find((j) => j.id === e.target.value);
+                  if (job?.address && !location.trim()) setLocation(job.address);
+                }}
+              >
                 <option value="">—</option>
                 {jobs.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
               </Select>
@@ -344,7 +355,7 @@ export function AppointmentButton({
 
           <div>
             <Label htmlFor="ap-loc">Location</Label>
-            <Input id="ap-loc" name="location" defaultValue={appointment?.location ?? ""} placeholder="Address or site" />
+            <Input id="ap-loc" name="location" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Address or site" />
           </div>
           <div>
             <Label htmlFor="ap-notes">Notes</Label>

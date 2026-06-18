@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { formatDate } from "@/lib/utils";
 import { ItemEditor } from "./item-editor";
 import { DeleteListButton } from "./delete-list-button";
+import { RenameListButton } from "./rename-list-button";
 import { NewPoButton } from "../../purchasing/new-po-button";
 import { SectionMapButton } from "@/components/section-map-button";
 import { materialListSectionTree } from "@/lib/nav-tree";
@@ -47,7 +48,10 @@ export default async function MaterialListPage({
 
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">{l.name}</h1>
+          <div className="flex items-center gap-1.5">
+            <h1 className="text-2xl font-bold text-slate-900">{l.name}</h1>
+            <RenameListButton listId={l.id} name={l.name} />
+          </div>
           <div className="mt-1 flex items-center gap-3 text-sm text-slate-400">
             <span>Created {formatDate(l.created_at)}</span>
             {l.jobs && (

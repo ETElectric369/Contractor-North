@@ -7,7 +7,7 @@ import { GlassBloom, resolveNavTree } from "./app-shell/glass-bloom";
 
 /** Blooms a specific entity's relationships + conversions out of this button as
  *  the glass MindMeister map (same bloom the dock uses). */
-export function SectionMapButton({ tree, label = "Map" }: { tree: NavTree; label?: string }) {
+export function SectionMapButton({ tree, label = "Connections" }: { tree: NavTree; label?: string }) {
   const btnRef = useRef<HTMLButtonElement | null>(null);
   const [anchor, setAnchor] = useState<{ x: number; y: number } | null>(null);
   const { title, nodes } = resolveNavTree(tree);
@@ -37,7 +37,7 @@ export function SectionMapButton({ tree, label = "Map" }: { tree: NavTree; label
         ref={btnRef}
         onClick={toggle}
         className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-        title="Open this as a map"
+        title="See how this connects"
       >
         <Network className="h-4 w-4" /> {label}
       </button>

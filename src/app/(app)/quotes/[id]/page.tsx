@@ -106,7 +106,7 @@ export default async function QuoteDetailPage({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <EmailButton id={q.id} kind="quote" />
-          <SectionMapButton tree={quoteMap} label="Convert / map" />
+          <SectionMapButton tree={quoteMap} label="Convert / connect" />
           <StatusControl id={q.id} status={q.status} />
           <DeleteButton
             run={deleteQuote.bind(null, q.id)}
