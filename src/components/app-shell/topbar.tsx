@@ -68,15 +68,18 @@ export function Topbar({
               {profile?.role ?? "user"}
             </div>
           </div>
+          {/* Avatar is decorative on a phone (the name is already hidden < sm) and
+              its width was pushing Sign out off the right edge at 375px, making it
+              unreachable. Show it from sm up only. */}
           {profile?.avatar_url ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={profile.avatar_url}
               alt=""
-              className="h-9 w-9 rounded-full object-cover"
+              className="hidden h-9 w-9 rounded-full object-cover sm:block"
             />
           ) : (
-            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-brand text-sm font-semibold text-white">
+            <div className="hidden h-9 w-9 items-center justify-center rounded-full bg-brand text-sm font-semibold text-white sm:flex">
               {initials(profile?.full_name)}
             </div>
           )}
