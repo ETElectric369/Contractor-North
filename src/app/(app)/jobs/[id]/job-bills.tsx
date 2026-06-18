@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { createBill, setBillStatus, deleteBill } from "../actions";
+import { executeAction } from "@/lib/actions/execute";
 
 interface Bill {
   id: string;
@@ -24,6 +25,7 @@ export function JobBills({ jobId, bills }: { jobId: string; bills: Bill[] }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [adding, setAdding] = useState(false);
+  const [editBill, setEditBill] = useState<Bill | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [supplier, setSupplier] = useState("");
@@ -135,6 +137,9 @@ export function JobBills({ jobId, bills }: { jobId: string; bills: Bill[] }) {
               >
                 <Badge tone={b.status === "paid" ? "green" : "amber"}>{b.status}</Badge>
               </button>
+              <button onClick={() => setEditBill(b)} className="text-slate-400 hover:text-brand" title="Edit">
+                <Pencil className="h-4 w-4" />
+              </button>
               <button
                 onClick={() =>
                   start(async () => {
@@ -151,6 +156,79 @@ export function JobBills({ jobId, bills }: { jobId: string; bills: Bill[] }) {
           ))}
         </ul>
       )}
+
+      {editBill && (
+        <JobBillEditModal key={editBill.id} bill={editBill} onClose={() => setEditBill(null)} />
+      )}
     </div>
+  );
+}
+
+/** Edit a supplier bill. Routes through the unified Action Registry
+ *  (executeAction → "bill.update") — the same capability the AI agent calls. */
+function JobBillEditModal({ bill, onClose }: { bill: Bill; onClose: () => void }) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const [supplier, setSupplier] = useState(bill.supplier);
+  const [billNumber, setBillNumber] = useState(bill.bill_number ?? "");
+  const [amount, setAmount] = useState(Number(bill.amount));
+  const [status, setStatus] = useState(bill.status);
+  const [billDate, setBillDate] = useState(bill.bill_date ?? "");
+  const [error, setError] = useState<string | null>(null);
+
+  function save() {
+    if (!supplier.trim()) return setError("Supplier is required.");
+    setError(null);
+    start(async () => {
+      const res = await executeAction("bill.update", {
+        id: bill.id,
+        supplier,
+        bill_number: billNumber,
+        amount,
+        status,
+        bill_date: billDate || null,
+      });
+      if (!res.ok) return setError(res.error ?? "Could not save.");
+      onClose();
+      router.refresh();
+    });
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Edit bill"
+      footer={<ModalActions onCancel={onClose} onSave={save} saving={pending} disabled={!supplier.trim()} saveLabel="Save changes" />}
+    >
+      <div className="space-y-3">
+        {error && <p className="text-sm text-red-600">{error}</p>}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="col-span-2">
+            <Label htmlFor="be-supplier">Supplier *</Label>
+            <Input id="be-supplier" value={supplier} onChange={(e) => setSupplier(e.target.value)} autoFocus />
+          </div>
+          <div>
+            <Label htmlFor="be-num">Bill #</Label>
+            <Input id="be-num" value={billNumber} onChange={(e) => setBillNumber(e.target.value)} />
+          </div>
+          <div>
+            <Label htmlFor="be-amt">Amount</Label>
+            <NumberInput id="be-amt" value={amount} onValueChange={setAmount} />
+          </div>
+          <div>
+            <Label htmlFor="be-date">Bill date</Label>
+            <Input id="be-date" type="date" value={billDate} onChange={(e) => setBillDate(e.target.value)} />
+          </div>
+          <div>
+            <Label htmlFor="be-status">Status</Label>
+            <Select id="be-status" value={status} onChange={(e) => setStatus(e.target.value)}>
+              <option value="unpaid">Unpaid</option>
+              <option value="paid">Paid</option>
+            </Select>
+          </div>
+        </div>
+      </div>
+    </Modal>
   );
 }

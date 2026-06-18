@@ -179,6 +179,40 @@ export async function createBill(input: {
   return { ok: true };
 }
 
+export async function updateBill(
+  id: string,
+  patch: {
+    supplier?: string;
+    bill_number?: string | null;
+    amount?: number;
+    status?: string;
+    bill_date?: string | null;
+    notes?: string | null;
+    category?: string | null;
+    job_id?: string | null;
+  },
+): Promise<Result> {
+  const supabase = await createClient();
+  const clean: Record<string, unknown> = {};
+  if (patch.supplier !== undefined) {
+    if (!patch.supplier.trim()) return { ok: false, error: "Supplier is required." };
+    clean.supplier = patch.supplier.trim();
+  }
+  if (patch.bill_number !== undefined) clean.bill_number = patch.bill_number?.trim() || null;
+  if (patch.amount !== undefined) clean.amount = patch.amount || 0;
+  if (patch.status !== undefined) clean.status = patch.status;
+  if (patch.bill_date !== undefined) clean.bill_date = patch.bill_date || null;
+  if (patch.notes !== undefined) clean.notes = patch.notes?.trim() || null;
+  if (patch.category !== undefined) clean.category = patch.category ?? null;
+  if (patch.job_id !== undefined) clean.job_id = patch.job_id || null;
+
+  const { data, error } = await supabase.from("bills").update(clean).eq("id", id).select("job_id").maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if ((data as any)?.job_id) revalidatePath(`/jobs/${(data as any).job_id}`);
+  revalidatePath("/bills");
+  return { ok: true };
+}
+
 export async function setBillStatus(
   id: string,
   status: string,
