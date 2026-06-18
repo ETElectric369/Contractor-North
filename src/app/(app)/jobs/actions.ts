@@ -38,6 +38,7 @@ export async function createInvoiceForJob(
     .maybeSingle();
   return createBlankInvoice({
     customer_id: job?.customer_id ?? null,
+    job_id: jobId, // keep the job link so the invoice can pull Labor/Materials
     title: job?.name ?? "",
     tax_rate: 0,
   });

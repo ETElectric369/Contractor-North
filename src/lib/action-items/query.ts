@@ -123,11 +123,12 @@ export async function getActionItems(ctx: {
   const items: ActionItem[] = [];
 
   for (const t of (tasksR.data ?? []) as any[]) {
-    const kind: ActionKind = t.job_id ? "work_order" : "task";
+    // A task is a task — even when it belongs to a job. (Previously a job_id
+    // mislabeled it as a "work order" and stripped its snooze affordance.)
     const job = t.jobs;
     items.push({
       id: t.id,
-      kind,
+      kind: "task",
       title: t.title,
       subtitle: job ? `${job.job_number} · ${job.name}` : t.category,
       who: t.assignee?.full_name ?? null,
@@ -135,7 +136,7 @@ export async function getActionItems(ctx: {
       urgency: clamp(Number(t.priority) || 0),
       done: false,
       href: t.job_id ? `/jobs/${t.job_id}` : `/tasks/${t.category}`,
-      affordances: AFFORDANCES[kind],
+      affordances: AFFORDANCES.task,
     });
   }
 
@@ -181,7 +182,7 @@ export async function getActionItems(ctx: {
       when: a.starts_at,
       urgency: 0,
       done: false,
-      href: a.job_id ? `/jobs/${a.job_id}` : "/schedule?view=calendar",
+      href: a.job_id ? `/jobs/${a.job_id}` : "/schedule",
       affordances: AFFORDANCES.appointment,
     });
   }

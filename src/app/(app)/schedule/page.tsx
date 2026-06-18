@@ -51,8 +51,11 @@ export default async function SchedulePage({
     redirect("/planner");
   }
 
-  // Retired crew-timeline views: send old bookmarks to the live calendar.
-  if (sp.view === "day" || sp.view === "week") redirect("/schedule");
+  // Retired crew-timeline views + the redundant explicit ?view=calendar all
+  // canonicalize to the bare /schedule URL — otherwise /schedule and
+  // /schedule?view=calendar are two identical-looking history entries and the
+  // Back/Forward arrows appear to ping-pong between them.
+  if (sp.view === "day" || sp.view === "week" || sp.view === "calendar") redirect("/schedule");
 
   const view = ["calendar", "appointments", "map"].includes(sp.view ?? "") ? (sp.view as string) : "calendar";
 

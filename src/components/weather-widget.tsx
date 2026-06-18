@@ -29,6 +29,29 @@ function writeCache(loc: string, c: { lat: number; lng: number }) {
   }
 }
 
+// Remember the LAST good device-GPS fix. Without this, a successful GPS read was
+// never cached while the org-city geocode (Chilcoot) was — so any single flaky
+// GPS miss on iOS PWA dropped straight to Chilcoot and stuck there.
+function writeGps(c: { lat: number; lng: number }) {
+  try {
+    localStorage.setItem("gps:last", JSON.stringify({ ...c, ts: Date.now() }));
+  } catch {
+    /* ignore */
+  }
+}
+function readGps(maxAgeMs = 12 * 60 * 60 * 1000): { lat: number; lng: number } | null {
+  try {
+    const raw = localStorage.getItem("gps:last");
+    if (!raw) return null;
+    const v = JSON.parse(raw);
+    if (typeof v?.lat !== "number" || typeof v?.lng !== "number" || typeof v?.ts !== "number") return null;
+    if (Date.now() - v.ts > maxAgeMs) return null;
+    return { lat: v.lat, lng: v.lng };
+  } catch {
+    return null;
+  }
+}
+
 /** Device GPS position (resolves null on denial/timeout — never throws). */
 function devicePosition(): Promise<{ lat: number; lng: number } | null> {
   return new Promise((resolve) => {
@@ -63,7 +86,18 @@ export function WeatherWidget({ location, label }: { location: string | null; la
       try {
         // Prefer the device's real location — the crew isn't always at the shop.
         let coords = await devicePosition();
-        if (coords) setUsedGps(true);
+        if (coords) {
+          setUsedGps(true);
+          writeGps(coords); // make a good fix sticky so a later miss won't drop to Chilcoot
+        }
+        // A recent cached GPS fix beats the shop's city when live GPS misses.
+        if (!coords) {
+          const last = readGps();
+          if (last) {
+            coords = last;
+            setUsedGps(true);
+          }
+        }
         if (!coords && location) coords = readCache(location);
         if (!coords && location) {
           await loadGoogleMaps(key);

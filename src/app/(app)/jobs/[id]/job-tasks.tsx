@@ -2,12 +2,13 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Flag } from "lucide-react";
+import { Plus, Trash2, Flag, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Modal, ModalActions } from "@/components/ui/modal";
 import { formatDate } from "@/lib/utils";
-import { createTask, toggleTask, deleteTask, type TaskCategory } from "../../tasks/actions";
+import { createTask, toggleTask, deleteTask, updateTask, type TaskCategory } from "../../tasks/actions";
 
 interface Task {
   id: string;
@@ -26,6 +27,7 @@ export function JobTasks({ jobId, tasks }: { jobId: string; tasks: Task[] }) {
   const [category, setCategory] = useState<TaskCategory>("operations");
   const [high, setHigh] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [editTask, setEditTask] = useState<Task | null>(null);
 
   const open = tasks.filter((t) => t.status !== "done");
   const done = tasks.filter((t) => t.status === "done");
@@ -75,6 +77,13 @@ export function JobTasks({ jobId, tasks }: { jobId: string; tasks: Task[] }) {
           )}
         </div>
         <Badge tone="slate">{t.category}</Badge>
+        <button
+          onClick={() => setEditTask(t)}
+          className="text-slate-400 hover:text-brand"
+          title="Edit"
+        >
+          <Pencil className="h-4 w-4" />
+        </button>
         <button
           onClick={() =>
             start(async () => {
@@ -138,6 +147,72 @@ export function JobTasks({ jobId, tasks }: { jobId: string; tasks: Task[] }) {
           {done.map(row)}
         </ul>
       )}
+
+      {editTask && (
+        <JobTaskEditModal key={editTask.id} task={editTask} jobId={jobId} onClose={() => setEditTask(null)} />
+      )}
     </div>
+  );
+}
+
+/** Edit a job task's title / due date / area / priority. Uses updateTask's
+ *  partial patch, so it never touches the assignee or tags set elsewhere. */
+function JobTaskEditModal({ task, jobId, onClose }: { task: Task; jobId: string; onClose: () => void }) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const [title, setTitle] = useState(task.title);
+  const [dueDate, setDueDate] = useState(task.due_date ?? "");
+  const [category, setCategory] = useState<TaskCategory>((task.category as TaskCategory) ?? "operations");
+  const [high, setHigh] = useState(task.priority > 0);
+  const [error, setError] = useState<string | null>(null);
+
+  function save() {
+    if (!title.trim()) return setError("Title is required.");
+    setError(null);
+    start(async () => {
+      const res = await updateTask(
+        task.id,
+        { title, due_date: dueDate || null, category, priority: high ? 1 : 0 },
+        { jobId },
+      );
+      if (!res.ok) return setError(res.error ?? "Could not save.");
+      onClose();
+      router.refresh();
+    });
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Edit task"
+      footer={<ModalActions onCancel={onClose} onSave={save} saving={pending} saveLabel="Save changes" />}
+    >
+      <div className="space-y-4">
+        {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+        <div>
+          <Label htmlFor="jte-title">Title</Label>
+          <Input id="jte-title" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label htmlFor="jte-due">Due date</Label>
+            <Input id="jte-due" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+          </div>
+          <div>
+            <Label htmlFor="jte-cat">Area</Label>
+            <Select id="jte-cat" value={category} onChange={(e) => setCategory(e.target.value as TaskCategory)}>
+              <option value="sales">Sales</option>
+              <option value="operations">Operations</option>
+              <option value="office">Office</option>
+            </Select>
+          </div>
+        </div>
+        <label className="flex items-center gap-2 text-sm text-slate-600">
+          <input type="checkbox" checked={high} onChange={(e) => setHigh(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand" />
+          High priority
+        </label>
+      </div>
+    </Modal>
   );
 }

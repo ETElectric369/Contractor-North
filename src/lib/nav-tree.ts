@@ -50,8 +50,7 @@ export const NAV_TREE: NavTree = {
       label: "Schedule",
       icon: "calendar",
       children: [
-        { id: "s-board", label: "Board", icon: "layoutBoard", href: "/schedule" },
-        { id: "s-cal", label: "Calendar", icon: "calendar", href: "/schedule?view=calendar" },
+        { id: "s-cal", label: "Calendar", icon: "calendar", href: "/schedule" },
         { id: "s-appt", label: "Appointments", icon: "clipboardCheck", href: "/schedule?view=appointments" },
         { id: "s-map", label: "Map", icon: "map", href: "/schedule?view=map" },
       ],
