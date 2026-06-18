@@ -48,7 +48,7 @@ export const dynamic = "force-dynamic";
 // Materials rides up front (2nd) — it's a daily-use take-off list.
 const JOB_TAB_ORDER = [
   "job", "materials", "tasks", "photos", "time", "appointments", "notes",
-  "docs", "permits", "quotes", "costs", "invoices", "change-orders", "wos",
+  "permits", "quotes", "costs", "invoices", "change-orders", "wos",
 ];
 const JOB_PRIMARY = new Set(["job", "materials", "tasks", "photos", "time", "appointments", "notes"]);
 const JOB_STAFF_ONLY = new Set(["costs", "quotes", "invoices", "change-orders"]);
@@ -321,21 +321,6 @@ export default async function JobDetailPage({
       ),
     },
     {
-      id: "docs",
-      label: "Docs",
-      count: docs.length,
-      content: (
-        <Card>
-          <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3 text-sm font-semibold text-slate-900">
-            <Receipt className="h-4 w-4 text-slate-400" /> Receipts &amp; documents
-          </div>
-          <CardContent className="py-5">
-            <JobDocuments orgId={j.org_id} jobId={j.id} docs={docs} />
-          </CardContent>
-        </Card>
-      ),
-    },
-    {
       id: "tasks",
       label: "Tasks",
       count: (tasks ?? []).filter((t: any) => t.status !== "done").length,
@@ -471,6 +456,17 @@ export default async function JobDetailPage({
             <div className="border-b border-slate-100 px-5 py-3 text-sm font-semibold text-slate-900">Supplier bills</div>
             <CardContent className="py-5">
               <JobBills jobId={j.id} bills={(bills ?? []) as any} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3 text-sm font-semibold text-slate-900">
+              <Receipt className="h-4 w-4 text-slate-400" /> Receipts &amp; documents
+            </div>
+            <CardContent className="py-5">
+              {/* Photograph or upload a receipt right here in Costs — receipts
+                  tagged Receipt/Bill auto-post as a job cost. */}
+              <JobDocuments orgId={j.org_id} jobId={j.id} docs={docs} />
             </CardContent>
           </Card>
 
