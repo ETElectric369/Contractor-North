@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Briefcase, CalendarCheck, ClipboardCheck, MapPin, UserPlus, Receipt } from "lucide-react";
+import { Briefcase, CalendarCheck, ClipboardCheck, MapPin, UserPlus, Receipt, Navigation } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { WeatherWidget } from "@/components/weather-widget";
@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { hoursBetween, formatCurrency } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
+import { navUrl } from "@/lib/maps";
 import { toJobOptions, toCustomerOptions, toStaffOptions } from "@/lib/schedule-options";
 import { todayBoundsInTz, prettyDay, tzDayStartUtc } from "@/lib/tz";
 import { DayClock } from "./day-clock";
@@ -108,6 +109,16 @@ export default async function PlannerPage() {
     currentMaterials = (ml as any) ?? null;
   }
 
+  // The next stop on today's route — the soonest remaining job that isn't the
+  // one you're already on. This is the "I'm in the truck, where to?" answer,
+  // which used to show nothing until a job was manually marked in-progress.
+  const nextJob = todayJobs
+    .filter((j: any) => j.id !== currentJob?.id && j.status !== "complete" && j.status !== "cancelled")
+    .sort((a: any, b: any) => (a.time ?? "~").localeCompare(b.time ?? "~"))[0] as any | undefined;
+  const nextTime = nextJob?.time
+    ? new Date(nextJob.time).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+    : null;
+
   const hoursToday = (entries ?? []).reduce(
     (sum: number, e: any) =>
       e.status === "closed" && e.clock_out ? sum + hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes) : sum,
@@ -200,27 +211,59 @@ export default async function PlannerPage() {
                 {currentJob.customers?.name ?? ""}{currentJob.address ? ` · ${currentJob.address}` : ""}
               </div>
             )}
-            <div className="mt-3 flex flex-wrap gap-2 text-sm font-medium">
-              <Link href={`/jobs/${currentJob.id}`} className="rounded-lg bg-brand px-3 py-1.5 text-white hover:bg-brand-dark">
-                Open job
-              </Link>
-              <Link
-                href={currentMaterials ? `/materials/${currentMaterials.id}` : `/jobs/${currentJob.id}?tab=materials`}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-slate-700 hover:bg-slate-50"
-              >
-                Materials list
-              </Link>
+            <div className="mt-3 space-y-2 text-sm font-medium">
               {currentJob.address && (
                 <a
-                  href={`https://maps.apple.com/?q=${encodeURIComponent(currentJob.address)}`}
+                  href={navUrl(currentJob.address)}
                   target="_blank"
                   rel="noreferrer"
-                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-slate-700 hover:bg-slate-50"
+                  className="flex min-h-[52px] items-center justify-center gap-2 rounded-xl bg-brand text-base text-white shadow-sm hover:bg-brand-dark"
                 >
-                  Directions
+                  <Navigation className="h-5 w-5" /> Navigate
                 </a>
               )}
+              <div className="flex gap-2">
+                <Link href={`/jobs/${currentJob.id}`} className="flex min-h-[44px] flex-1 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50">
+                  Open job
+                </Link>
+                <Link
+                  href={currentMaterials ? `/materials/${currentMaterials.id}` : `/jobs/${currentJob.id}?tab=materials`}
+                  className="flex min-h-[44px] flex-1 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                >
+                  Materials
+                </Link>
+              </div>
             </div>
+          </div>
+        </Card>
+      )}
+
+      {/* Next stop — so "where am I going next" is answered at a glance, with a
+          one-tap turn-by-turn handoff, even before a job is marked in-progress. */}
+      {nextJob && (
+        <Card className="mb-4">
+          <div className="px-5 py-4">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              Next up{nextTime ? ` · ${nextTime}` : ""}
+            </div>
+            <Link href={`/jobs/${nextJob.id}`} className="mt-0.5 block text-base font-bold text-slate-900 hover:text-brand">
+              {nextJob.job_number} — {nextJob.name}
+            </Link>
+            {(nextJob.customers?.name || nextJob.address) && (
+              <div className="text-sm text-slate-500">
+                {nextJob.customers?.name ?? ""}{nextJob.address ? ` · ${nextJob.address}` : ""}
+              </div>
+            )}
+            {nextJob.address && (
+              <a
+                href={navUrl(nextJob.address)}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-3 flex min-h-[48px] items-center justify-center gap-2 rounded-xl bg-brand text-base font-medium text-white shadow-sm hover:bg-brand-dark"
+              >
+                <Navigation className="h-5 w-5" /> Navigate
+              </a>
+            )}
           </div>
         </Card>
       )}
@@ -308,7 +351,7 @@ export default async function PlannerPage() {
                   <span className="truncate text-sm font-medium text-slate-900">{a.title}</span>
                 </div>
                 {a.location && (
-                  <a href={`https://maps.apple.com/?q=${encodeURIComponent(a.location)}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-xs text-brand hover:underline">
+                  <a href={navUrl(a.location)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-xs text-brand hover:underline">
                     <MapPin className="h-3 w-3" /> {a.location}
                   </a>
                 )}

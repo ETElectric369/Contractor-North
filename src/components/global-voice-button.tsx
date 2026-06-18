@@ -49,6 +49,26 @@ export function GlobalVoiceButton({ lang, placement = "fab" }: { lang?: string; 
     window.setTimeout(() => setStatus((s) => (s === msg ? null : s)), ms);
   }
 
+  // Read the result aloud so a driver never has to look at the screen — the
+  // server already returns a driver-friendly sentence.
+  function speak(msg: string) {
+    try {
+      const synth = window.speechSynthesis;
+      if (!synth || !msg) return;
+      synth.cancel();
+      synth.speak(new SpeechSynthesisUtterance(msg));
+    } catch {
+      /* TTS unsupported — the toast still shows */
+    }
+  }
+  function buzz(pattern: number | number[]) {
+    try {
+      navigator.vibrate?.(pattern);
+    } catch {
+      /* no haptics — ignore */
+    }
+  }
+
   function insert(text: string) {
     const el = lastField.current;
     if (!el) return;
@@ -72,10 +92,15 @@ export function GlobalVoiceButton({ lang, placement = "fab" }: { lang?: string; 
     try {
       const res = await runVoiceCommand(transcript);
       flash(res.message);
+      speak(res.message);
+      buzz(30); // short confirm pulse
       if (res.navigate) router.push(res.navigate);
       router.refresh();
     } catch {
-      flash("Sorry — that didn't work.");
+      const err = "Sorry — that didn't work.";
+      flash(err);
+      speak(err);
+      buzz([40, 40, 40]); // error pattern
     } finally {
       setWorking(false);
     }

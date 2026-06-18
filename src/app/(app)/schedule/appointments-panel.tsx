@@ -2,6 +2,7 @@ import Link from "next/link";
 import { MapPin, ClipboardCheck, CalendarClock } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getSchedulePickerOptions } from "@/lib/schedule-options";
+import { navUrl } from "@/lib/maps";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AppointmentButton, type ApptValue } from "../appointments/appointment-button";
@@ -75,7 +76,7 @@ export async function AppointmentsPanel() {
                             {a.jobs && <Link href={`/jobs/${a.job_id}`} className="text-brand hover:underline">{a.jobs.job_number} {a.jobs.name}</Link>}
                             {a.profiles?.full_name && <span>· {a.profiles.full_name}</span>}
                             {a.location && (
-                              <a href={`https://maps.apple.com/?q=${encodeURIComponent(a.location)}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-brand hover:underline">
+                              <a href={navUrl(a.location)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-brand hover:underline">
                                 <MapPin className="h-3 w-3" /> {a.location}
                               </a>
                             )}
