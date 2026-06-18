@@ -135,7 +135,9 @@ export async function getActionItems(ctx: {
       when: t.due_date,
       urgency: clamp(Number(t.priority) || 0),
       done: false,
-      href: t.job_id ? `/jobs/${t.job_id}` : `/tasks/${t.category}`,
+      // Land ON the task, not the job's front page: deep-link to the job's Tasks
+      // tab (or the category list for a standalone task) so a tap opens the item.
+      href: t.job_id ? `/jobs/${t.job_id}?tab=tasks` : `/tasks/${t.category}`,
       affordances: AFFORDANCES.task,
     });
   }
@@ -182,7 +184,9 @@ export async function getActionItems(ctx: {
       when: a.starts_at,
       urgency: 0,
       done: false,
-      href: a.job_id ? `/jobs/${a.job_id}` : "/schedule",
+      // Open the appointment where it lives: the job's Appointments tab, else the
+      // schedule's appointments view — not the job overview / bare calendar.
+      href: a.job_id ? `/jobs/${a.job_id}?tab=appointments` : "/schedule?view=appointments",
       affordances: AFFORDANCES.appointment,
     });
   }

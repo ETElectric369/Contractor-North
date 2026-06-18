@@ -87,11 +87,18 @@ export function DayClock({
             </>
           ) : (
             <>
-              <div className="text-xl font-bold text-slate-900">
-                {fmtHm(totalMs)} <span className="text-sm font-normal text-slate-400">today</span>
-                <span className="ml-2 text-sm font-normal text-slate-400">·</span>
-                <span className="ml-2 text-base font-semibold text-slate-600">{fmtHm(totalWeekMs)}</span>{" "}
-                <span className="text-sm font-normal text-slate-400">this week</span>
+              {/* Two stat units that never break apart: each "value + label" is
+                  nowrap, so on a narrow phone they stack cleanly (0h 00m today /
+                  19h 40m this week) instead of orphaning "this week". */}
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+                <span className="whitespace-nowrap">
+                  <span className="text-xl font-bold text-slate-900">{fmtHm(totalMs)}</span>
+                  <span className="ml-1.5 text-xs font-normal text-slate-400">today</span>
+                </span>
+                <span className="whitespace-nowrap">
+                  <span className="text-base font-semibold text-slate-600">{fmtHm(totalWeekMs)}</span>
+                  <span className="ml-1.5 text-xs font-normal text-slate-400">this week</span>
+                </span>
               </div>
               {jobs.length > 0 && (
                 <Select

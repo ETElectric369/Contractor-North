@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Cloud } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { Cloud, MapPin } from "lucide-react";
 import { loadGoogleMaps } from "@/lib/google-maps";
 
 interface WeatherData {
@@ -79,6 +79,48 @@ export function WeatherWidget({ location, label }: { location: string | null; la
   const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
   const [usedGps, setUsedGps] = useState(false);
 
+  // Fetch current conditions for a known lat/lng. Returns false on failure so the
+  // caller can decide whether to fall back.
+  const fetchWeatherFor = useCallback(
+    async (coords: { lat: number; lng: number }): Promise<boolean> => {
+      if (!key) return false;
+      try {
+        const url =
+          `https://weather.googleapis.com/v1/currentConditions:lookup?key=${key}` +
+          `&location.latitude=${coords.lat}&location.longitude=${coords.lng}&unitsSystem=IMPERIAL`;
+        const r = await fetch(url);
+        if (!r.ok) return false;
+        const w = await r.json();
+        setData({
+          tempF: Math.round(w.temperature?.degrees ?? 0),
+          feelsF: Math.round(w.feelsLikeTemperature?.degrees ?? 0),
+          description: w.weatherCondition?.description?.text ?? "—",
+          iconUri: w.weatherCondition?.iconBaseUri ? `${w.weatherCondition.iconBaseUri}.png` : "",
+          humidity: w.relativeHumidity,
+          windMph: w.wind?.speed?.value != null ? Math.round(w.wind.speed.value) : undefined,
+        });
+        setStatus("ok");
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [key],
+  );
+
+  // User-gesture location request. On iOS the home-screen PWA frequently ignores
+  // an on-mount geolocation call (separate permission scope from Safari, no user
+  // gesture) and sticks on the org city — but a call made directly from a tap
+  // prompts reliably. So this is the recovery path out of "Chilcoot".
+  const locate = useCallback(async () => {
+    const coords = await devicePosition();
+    if (!coords) return;
+    setUsedGps(true);
+    writeGps(coords);
+    setStatus("loading");
+    await fetchWeatherFor(coords);
+  }, [fetchWeatherFor]);
+
   useEffect(() => {
     if (!key) return;
     let cancelled = false;
@@ -110,22 +152,8 @@ export function WeatherWidget({ location, label }: { location: string | null; la
           writeCache(location, coords);
         }
         if (!coords) throw new Error("no location");
-        const url =
-          `https://weather.googleapis.com/v1/currentConditions:lookup?key=${key}` +
-          `&location.latitude=${coords.lat}&location.longitude=${coords.lng}&unitsSystem=IMPERIAL`;
-        const r = await fetch(url);
-        if (!r.ok) throw new Error("weather");
-        const w = await r.json();
         if (cancelled) return;
-        setData({
-          tempF: Math.round(w.temperature?.degrees ?? 0),
-          feelsF: Math.round(w.feelsLikeTemperature?.degrees ?? 0),
-          description: w.weatherCondition?.description?.text ?? "—",
-          iconUri: w.weatherCondition?.iconBaseUri ? `${w.weatherCondition.iconBaseUri}.png` : "",
-          humidity: w.relativeHumidity,
-          windMph: w.wind?.speed?.value != null ? Math.round(w.wind.speed.value) : undefined,
-        });
-        setStatus("ok");
+        if (!(await fetchWeatherFor(coords))) throw new Error("weather");
       } catch {
         if (!cancelled) setStatus("error");
       }
@@ -133,7 +161,7 @@ export function WeatherWidget({ location, label }: { location: string | null; la
     return () => {
       cancelled = true;
     };
-  }, [key, location]);
+  }, [key, location, fetchWeatherFor]);
 
   // Not configured → render nothing (keeps dashboard clean).
   if (!key || status === "error") return null;
@@ -159,7 +187,23 @@ export function WeatherWidget({ location, label }: { location: string | null; la
               Feels like {data.feelsF}°
               {data.windMph != null ? ` · Wind ${data.windMph} mph` : ""}
               {data.humidity != null ? ` · Humidity ${data.humidity}%` : ""}
-              {usedGps ? " · Your location" : label ? ` · ${label}` : ""}
+              {usedGps ? (
+                " · Your location"
+              ) : (
+                <>
+                  {label ? ` · ${label} · ` : " · "}
+                  {/* Not on GPS → offer a one-tap fix. Tapping calls geolocation
+                      inside a user gesture, which iOS PWAs honor when the on-mount
+                      call was ignored. */}
+                  <button
+                    type="button"
+                    onClick={locate}
+                    className="inline-flex items-center gap-0.5 font-medium text-sky-600 hover:text-sky-700"
+                  >
+                    <MapPin className="h-3 w-3" /> Use my location
+                  </button>
+                </>
+              )}
             </div>
           </>
         )}
