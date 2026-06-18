@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { Button } from "./button";
+import { lockBodyForModal, unlockBodyForModal } from "./modal-lock";
 
 export function Modal({
   open,
@@ -22,24 +24,30 @@ export function Modal({
   footer?: React.ReactNode;
   size?: "sm" | "md" | "lg" | "xl";
 }) {
+  // Render via a portal to <body> so the dialog escapes any ancestor stacking
+  // context (the glass app-shell) — otherwise its z-index can't beat the fixed
+  // bottom nav on iOS and the Save button hides behind it.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
-    document.body.style.overflow = "hidden";
+    lockBodyForModal();
     return () => {
       window.removeEventListener("keydown", onKey);
-      document.body.style.overflow = "";
+      unlockBodyForModal();
     };
   }, [open, onClose]);
 
-  if (!open) return null;
+  if (!open || !mounted) return null;
 
   const maxW =
     size === "sm" ? "max-w-sm" : size === "md" ? "max-w-md" : size === "xl" ? "max-w-2xl" : "max-w-lg";
 
-  return (
-    <div className="fixed inset-0 z-[90] flex items-start justify-center p-3 sm:items-center">
+  return createPortal(
+    <div className="fixed inset-0 z-[120] flex items-start justify-center p-3 sm:items-center">
       <div className="absolute inset-0 bg-slate-900/40" onClick={onClose} />
       {/* Cap the panel to the viewport: the HEADER and FOOTER are fixed (shrink-0)
           and only the middle BODY scrolls, so the action row is always reachable
@@ -57,12 +65,13 @@ export function Modal({
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">{children}</div>
         {footer && (
-          <div className="flex shrink-0 items-center justify-end gap-2 rounded-b-2xl border-t border-slate-100 bg-white px-6 py-3">
+          <div className="flex shrink-0 items-center justify-end gap-2 rounded-b-2xl border-t border-slate-100 bg-white px-6 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
             {footer}
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Camera, X, RotateCcw, Check, Loader2 } from "lucide-react";
+import { useModalLock } from "./ui/modal-lock";
 
 /**
  * Opens the device camera (webcam on desktop, rear camera on phones) via
@@ -20,6 +21,7 @@ export function CameraCapture({
   const [shot, setShot] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  useModalLock(true); // hide the bottom nav so it can't cover Capture / Use photo
 
   useEffect(() => {
     let cancelled = false;
@@ -85,7 +87,7 @@ export function CameraCapture({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 p-4">
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-900/70 p-4">
       <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-xl">
         <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
           <span className="flex items-center gap-2 text-sm font-semibold text-slate-900">

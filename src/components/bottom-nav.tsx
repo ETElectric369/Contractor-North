@@ -49,7 +49,7 @@ export function BottomNav({ role }: { role?: string }) {
         // Safari stops letting it drift/jump during momentum & rubber-band scroll
         // ("bottom menu bar moves up out of place when scrolling sometimes").
         style={{ transform: "translateZ(0)", WebkitBackfaceVisibility: "hidden" }}
-        className="glass fixed inset-x-2 bottom-2 z-[70] flex rounded-2xl border-white/40 px-0.5 pb-[env(safe-area-inset-bottom)] lg:hidden"
+        className="app-bottom-nav glass fixed inset-x-2 bottom-2 z-[70] flex rounded-2xl border-white/40 px-0.5 pb-[env(safe-area-inset-bottom)] lg:hidden"
       >
         {DOCK.filter((s) => isStaff || !s.staffOnly).map((section) => {
           const Icon = section.icon;

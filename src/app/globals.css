@@ -82,6 +82,13 @@ main {
   --glass-tint: 27 148 136; /* sea-glass teal, space-separated rgb (fills, strokes) */
   --glass-ink: 13 110 100; /* darker teal for text/icons — clears WCAG AA on glass */
 }
+/* When any modal/overlay is open, hide the fixed mobile bottom nav so it can
+   never cover a dialog's Save button (the nav's backdrop-filter + translateZ
+   created a stacking context that beat the modal on iOS). */
+body.modal-open .app-bottom-nav {
+  display: none !important;
+}
+
 .app-backdrop {
   /* A faint dotted "frosted glass" texture sits under everything so the glass
      tiles have something to refract. Swappable via --app-texture later. */
