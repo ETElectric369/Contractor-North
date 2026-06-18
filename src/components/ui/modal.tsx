@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { createPortal } from "react-dom";
+import { useEffect } from "react";
 import { X } from "lucide-react";
 import { Button } from "./button";
 import { lockBodyForModal, unlockBodyForModal } from "./modal-lock";
@@ -24,12 +23,11 @@ export function Modal({
   footer?: React.ReactNode;
   size?: "sm" | "md" | "lg" | "xl";
 }) {
-  // Render via a portal to <body> so the dialog escapes any ancestor stacking
-  // context (the glass app-shell) — otherwise its z-index can't beat the fixed
-  // bottom nav on iOS and the Save button hides behind it.
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-
+  // Rendered IN-PLACE (not portaled). While open, <body> gets `modal-open`, which
+  // hides the fixed mobile bottom nav (globals.css) so it can't cover the Save
+  // button. NOTE: do NOT portal this to <body> — many callers wrap the <Modal> in
+  // a <form>, and portaling moves the fields + Save button out of that form, so
+  // Save silently does nothing. The nav-hide alone fixes the original bug.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -41,12 +39,12 @@ export function Modal({
     };
   }, [open, onClose]);
 
-  if (!open || !mounted) return null;
+  if (!open) return null;
 
   const maxW =
     size === "sm" ? "max-w-sm" : size === "md" ? "max-w-md" : size === "xl" ? "max-w-2xl" : "max-w-lg";
 
-  return createPortal(
+  return (
     <div className="fixed inset-0 z-[120] flex items-start justify-center p-3 sm:items-center">
       <div className="absolute inset-0 bg-slate-900/40" onClick={onClose} />
       {/* Cap the panel to the viewport: the HEADER and FOOTER are fixed (shrink-0)
@@ -70,8 +68,7 @@ export function Modal({
           </div>
         )}
       </div>
-    </div>,
-    document.body,
+    </div>
   );
 }
 
