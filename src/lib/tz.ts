@@ -45,6 +45,16 @@ export function tzLocalHourUtc(ymd: string, hour: number, tz: string): Date {
   return new Date(tzDayStartUtc(ymd, tz).getTime() + hour * 3_600_000);
 }
 
+/** UTC ISO for "YYYY-MM-DD" + "HH:MM" interpreted in the given timezone. The
+ *  timezone-safe server replacement for `new Date(`${date}T${time}`).toISOString()`
+ *  (which parses as the SERVER's UTC, storing the wrong instant). */
+export function tzDateTimeUtc(ymd: string, hm: string, tz: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return null;
+  const m = /^(\d{1,2}):(\d{2})/.exec(hm ?? "");
+  const hours = m ? Number(m[1]) + Number(m[2]) / 60 : 8; // default 8 AM
+  return tzLocalHourUtc(ymd, hours, tz).toISOString();
+}
+
 /** Day boundaries (as UTC instants) + the date string for "today" in tz. */
 export function todayBoundsInTz(tz: string): { dayStart: Date; dayEnd: Date; todayStr: string } {
   const todayStr = todayStrInTz(tz);

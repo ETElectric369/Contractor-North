@@ -1,9 +1,28 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { emptyToNull, toIso } from "@/lib/forms";
+import { emptyToNull } from "@/lib/forms";
 import { createClient } from "@/lib/supabase/server";
 import { sendPushToProfiles } from "@/lib/push";
+import { getOrgSettings } from "@/lib/org-settings";
+import { tzDateTimeUtc } from "@/lib/tz";
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+/** The browser-computed ISO if present; otherwise build the instant in the ORG
+ *  timezone — NEVER the server's UTC (the bare-string parse stored the wrong
+ *  hour when starts_at_iso was missing). */
+async function resolveIso(
+  supabase: SupabaseClient,
+  browserIso: string | null,
+  date: string,
+  time: string,
+): Promise<string | null> {
+  if (browserIso) return browserIso;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const { data } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+  const tz = getOrgSettings((data as any)?.settings).timezone;
+  return tzDateTimeUtc(date, time || "08:00", tz);
+}
 
 export type Result = { ok: boolean; error?: string; id?: string };
 
@@ -43,16 +62,15 @@ export async function createAppointment(formData: FormData): Promise<Result> {
   const title = String(formData.get("title") ?? "").trim();
   if (!title) return { ok: false, error: "Title is required." };
 
-  // Prefer the ISO the browser computed in the user's own timezone; fall back to
-  // server-side parsing only if it's missing.
-  const startIso =
-    emptyToNull(formData.get("starts_at_iso")) ??
-    toIso(String(formData.get("date") ?? ""), String(formData.get("start_time") ?? ""));
+  // Prefer the ISO the browser computed in the user's own timezone; the fallback
+  // builds the instant in the ORG timezone (never the server's UTC).
+  const apptDate = String(formData.get("date") ?? "");
+  const startIso = await resolveIso(supabase, emptyToNull(formData.get("starts_at_iso")), apptDate, String(formData.get("start_time") ?? ""));
   if (!startIso) return { ok: false, error: "Pick a date." };
   const endTime = String(formData.get("end_time") ?? "");
   const endIso =
     emptyToNull(formData.get("ends_at_iso")) ??
-    (endTime ? toIso(String(formData.get("date") ?? ""), endTime) : null);
+    (endTime ? await resolveIso(supabase, null, apptDate, endTime) : null);
 
   const cust = await resolveCustomer(supabase, formData, user.id);
   if (cust.error) return { ok: false, error: cust.error };
@@ -146,7 +164,7 @@ export async function createAppointmentProposal(
   }
 
   // First slot is the tentative time (browser-computed ISO honors the user's tz).
-  const startIso = emptyToNull(formData.get("starts_at_iso")) ?? toIso(slots[0].date, slots[0].time);
+  const startIso = await resolveIso(supabase, emptyToNull(formData.get("starts_at_iso")), slots[0].date, slots[0].time);
 
   const { data: appt, error: aErr } = await supabase
     .from("appointments")
@@ -191,16 +209,15 @@ export async function updateAppointment(id: string, formData: FormData): Promise
   if (cust.error) return { ok: false, error: cust.error };
   const customerId = cust.customerId;
 
-  // Prefer the ISO the browser computed in the user's own timezone; fall back to
-  // server-side parsing only if it's missing.
-  const startIso =
-    emptyToNull(formData.get("starts_at_iso")) ??
-    toIso(String(formData.get("date") ?? ""), String(formData.get("start_time") ?? ""));
+  // Prefer the ISO the browser computed in the user's own timezone; the fallback
+  // builds the instant in the ORG timezone (never the server's UTC).
+  const apptDate = String(formData.get("date") ?? "");
+  const startIso = await resolveIso(supabase, emptyToNull(formData.get("starts_at_iso")), apptDate, String(formData.get("start_time") ?? ""));
   if (!startIso) return { ok: false, error: "Pick a date." };
   const endTime = String(formData.get("end_time") ?? "");
   const endIso =
     emptyToNull(formData.get("ends_at_iso")) ??
-    (endTime ? toIso(String(formData.get("date") ?? ""), endTime) : null);
+    (endTime ? await resolveIso(supabase, null, apptDate, endTime) : null);
 
   const { error } = await supabase
     .from("appointments")
