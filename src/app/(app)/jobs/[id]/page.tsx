@@ -21,6 +21,7 @@ import { JobTasks } from "./job-tasks";
 import { JobPermits } from "./job-permits";
 import { JobAddTimeEntry } from "./job-add-time";
 import { JobClockButton } from "./job-clock-button";
+import { EditEntryButton } from "../../timecards/edit-entry-button";
 import { JobStatusControl } from "./job-status-control";
 import { JobEditButton } from "./job-edit-button";
 import { JobScheduleControl } from "./job-schedule-control";
@@ -101,7 +102,7 @@ export default async function JobDetailPage({
     supabase.from("purchase_orders").select("id, po_number, vendor, status, total").eq("job_id", id),
     supabase
       .from("time_entries")
-      .select("id, clock_in, clock_out, lunch_minutes, miles, status, job_code, rate_override, profiles(full_name, hourly_rate), time_allocations(id, hours, job_code)")
+      .select("id, profile_id, clock_in, clock_out, lunch_minutes, miles, status, job_id, job_code, notes, rate_override, profiles(full_name, hourly_rate), job:job_id(job_number, name), time_allocations(id, hours, job_code)")
       .eq("job_id", id)
       .order("clock_in", { ascending: false }),
     supabase
@@ -162,12 +163,13 @@ export default async function JobDetailPage({
   } = await supabase.auth.getUser();
   const { data: meRow } = await supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle();
   const viewerIsStaff = ["owner", "admin", "office"].includes((meRow as any)?.role ?? "");
-  const [{ data: techs }, { data: jobCodes }, { data: lists }, { data: org }, { data: allCustomers }] = await Promise.all([
+  const [{ data: techs }, { data: jobCodes }, { data: lists }, { data: org }, { data: allCustomers }, { data: allJobs }] = await Promise.all([
     supabase.from("profiles").select("id, full_name, home_address").order("full_name"),
     supabase.from("job_codes").select("*").order("code"),
     supabase.from("material_lists").select("id, name").order("created_at", { ascending: false }).limit(100),
     supabase.from("organizations").select("address_line1, city, state, zip, settings").limit(1).maybeSingle(),
     supabase.from("customers").select("id, name").order("name"),
+    supabase.from("jobs").select("id, job_number, name").order("created_at", { ascending: false }).limit(100),
   ]);
   const thisJobOpt = [{ id: j.id, job_number: j.job_number, name: j.name }];
   // Appointment button takes {id,label} option lists.
@@ -376,7 +378,16 @@ export default async function JobDetailPage({
                     <span className="ml-2 text-slate-500">{e.profiles?.full_name ?? "—"}</span>
                     {e.job_code && <Badge tone="slate" className="ml-2">{e.job_code}</Badge>}
                   </div>
-                  <span className="font-medium text-slate-800">{h != null ? formatDuration(h) : "open"}</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-medium text-slate-800">{h != null ? formatDuration(h) : "open"}</span>
+                    <EditEntryButton
+                      entry={e}
+                      jobCodes={(jobCodes ?? []) as any}
+                      jobs={allJobs ?? []}
+                      members={(techs ?? []) as any}
+                      isStaff={viewerIsStaff}
+                    />
+                  </div>
                 </li>
               );
             })}

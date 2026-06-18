@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
@@ -68,7 +69,7 @@ export default async function TimeclockPage() {
   // else sees their own. Editable inline.
   let recentQ = supabase
     .from("time_entries")
-    .select("*, profiles:profile_id(full_name)")
+    .select("*, profiles:profile_id(full_name), job:job_id(job_number, name)")
     .gte("clock_in", weekAgo)
     .order("clock_in", { ascending: false })
     .limit(60);
@@ -165,7 +166,12 @@ export default async function TimeclockPage() {
                   {e.clock_out ? formatDateTime(e.clock_out) : <Badge tone="green">{t("tc_open")}</Badge>}
                 </td>
                 <td className="px-3 py-2.5">
-                  {e.job_code ? <Badge tone="slate">{e.job_code}</Badge> : "—"}
+                  {e.job && (
+                    <Link href={`/jobs/${e.job_id}`} className="mr-1 font-medium text-brand hover:underline">
+                      {e.job.job_number}
+                    </Link>
+                  )}
+                  {e.job_code ? <Badge tone="slate">{e.job_code}</Badge> : e.job ? null : "—"}
                   {e.source === "manual" && <Badge tone="amber" className="ml-1">manual</Badge>}
                 </td>
                 <td className="px-3 py-2.5 text-right text-slate-500">{e.lunch_minutes}m</td>
@@ -173,7 +179,7 @@ export default async function TimeclockPage() {
                   {e.clock_out ? formatDuration(hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes)) : "—"}
                 </td>
                 <td className="px-5 py-2.5 text-right">
-                  <EditEntryButton entry={e} jobCodes={(codesRes.data ?? []) as JobCode[]} members={members ?? []} isStaff={isStaff} />
+                  <EditEntryButton entry={e} jobCodes={(codesRes.data ?? []) as JobCode[]} jobs={jobsRes.data ?? []} members={members ?? []} isStaff={isStaff} />
                 </td>
               </tr>
             ))}

@@ -69,7 +69,7 @@ export default async function TimecardsPage({
   const { data: entries } = await supabase
     .from("time_entries")
     .select(
-      "id, profile_id, clock_in, clock_out, lunch_minutes, miles, job_code, status, notes, source, profiles:profile_id(full_name), time_allocations(job_code, hours, description)",
+      "id, profile_id, clock_in, clock_out, lunch_minutes, miles, job_id, job_code, status, notes, source, profiles:profile_id(full_name), job:job_id(job_number, name), time_allocations(job_code, hours, description)",
     )
     .gte("clock_in", start.toISOString())
     .lt("clock_in", end.toISOString())
@@ -256,6 +256,11 @@ export default async function TimecardsPage({
                           {e.clock_out ? formatDateTime(e.clock_out) : (
                             <Badge tone="green">open</Badge>
                           )}
+                          {e.job && (
+                            <Link href={`/jobs/${e.job_id}`} className="ml-2 font-medium text-brand hover:underline">
+                              {e.job.job_number} · {e.job.name}
+                            </Link>
+                          )}
                           {e.job_code && (
                             <Badge tone="slate" className="ml-2">
                               {e.job_code}
@@ -278,6 +283,7 @@ export default async function TimecardsPage({
                           <EditEntryButton
                             entry={e}
                             jobCodes={(jobCodes ?? []) as JobCode[]}
+                            jobs={jobs ?? []}
                             members={members ?? []}
                             isStaff
                           />

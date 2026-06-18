@@ -15,15 +15,24 @@ interface Entry {
   clock_in: string;
   clock_out: string | null;
   lunch_minutes: number;
+  job_id?: string | null;
   job_code: string | null;
   notes: string | null;
   miles?: number;
   profile_id?: string;
   profiles?: { full_name: string | null } | null;
+  // The entry's current job (joined), so we can keep it as an option even when
+  // it's older than the recent-jobs list and would otherwise vanish on save.
+  job?: { job_number: string; name: string } | null;
 }
 interface Member {
   id: string;
   full_name: string | null;
+}
+interface JobOption {
+  id: string;
+  job_number: string;
+  name: string;
 }
 
 function parts(iso: string | null) {
@@ -39,11 +48,13 @@ function parts(iso: string | null) {
 export function EditEntryButton({
   entry,
   jobCodes,
+  jobs = [],
   members = [],
   isStaff = false,
 }: {
   entry: Entry;
   jobCodes: JobCode[];
+  jobs?: JobOption[];
   members?: Member[];
   isStaff?: boolean;
 }) {
@@ -58,6 +69,7 @@ export function EditEntryButton({
   const [date, setDate] = useState(inP.date);
   const [startT, setStartT] = useState(inP.time);
   const [endT, setEndT] = useState(outP.time || inP.time);
+  const [jobId, setJobId] = useState(entry.job_id ?? "");
   const [jobCode, setJobCode] = useState(entry.job_code ?? "");
   const [lunchTaken, setLunchTaken] = useState((entry.lunch_minutes ?? 0) >= 30);
   const [breaksTaken, setBreaksTaken] = useState(true);
@@ -88,6 +100,7 @@ export function EditEntryButton({
         clock_in: ci.toISOString(),
         clock_out: co.toISOString(),
         lunch_minutes: lunchTaken ? 30 : 0,
+        job_id: jobId || null,
         job_code: jobCode || null,
         notes,
         miles,
@@ -174,6 +187,24 @@ export function EditEntryButton({
               <Label htmlFor="e-end">End</Label>
               <Input id="e-end" type="time" value={endT} onChange={(e) => setEndT(e.target.value)} />
             </div>
+          </div>
+          <div>
+            <Label htmlFor="e-job">Job</Label>
+            <Select id="e-job" value={jobId} onChange={(e) => setJobId(e.target.value)}>
+              <option value="">— No job —</option>
+              {/* Keep the entry's current job selectable even if it's older than
+                  the recent-jobs list, so saving never silently clears it. */}
+              {entry.job_id && !jobs.some((j) => j.id === entry.job_id) && (
+                <option value={entry.job_id}>
+                  {entry.job ? `${entry.job.job_number} · ${entry.job.name}` : "Current job"}
+                </option>
+              )}
+              {jobs.map((j) => (
+                <option key={j.id} value={j.id}>
+                  {j.job_number} · {j.name}
+                </option>
+              ))}
+            </Select>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>

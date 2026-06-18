@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { clockIn, clockOut } from "../timeclock/actions";
+import { ClockStartPicker } from "../timeclock/clock-start-picker";
 
 interface JobOpt {
   id: string;
@@ -32,6 +33,7 @@ export function DayClock({
   const [now, setNow] = useState(() => Date.now());
   const [busy, setBusy] = useState(false);
   const [jobId, setJobId] = useState(currentJobId);
+  const [startAt, setStartAt] = useState(""); // "" = now; otherwise a chosen ISO
   const [err, setErr] = useState<string | null>(null);
 
   // Tick once a second only while on the clock.
@@ -113,6 +115,9 @@ export function DayClock({
                   ))}
                 </Select>
               )}
+              <div className="mt-1.5">
+                <ClockStartPicker onChange={(iso) => setStartAt(iso ?? "")} />
+              </div>
             </>
           )}
           {err && <div className="mt-1 text-xs text-red-600">{err}</div>}
@@ -128,7 +133,7 @@ export function DayClock({
           </Button>
         ) : (
           <Button
-            onClick={() => run(() => clockIn({ job_id: jobId || null, job_code: null, gps: null }))}
+            onClick={() => run(() => clockIn({ job_id: jobId || null, job_code: null, gps: null, clock_in_at: startAt || null }))}
             disabled={busy}
             className="shrink-0"
           >

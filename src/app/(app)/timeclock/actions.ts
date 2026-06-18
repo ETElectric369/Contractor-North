@@ -18,15 +18,17 @@ export async function clockIn(input: {
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
 
-  // Allow backdating the start (never into the future, capped at 12h ago).
+  // Allow starting the shift at any time the user picks — never into the future
+  // (small skew allowed), and floored at 31 days back so a fat-fingered year
+  // can't create a monstrous open shift.
   let clockInIso = new Date().toISOString();
   let backdated = false;
   if (input.clock_in_at) {
     const d = new Date(input.clock_in_at);
     const ms = d.getTime();
-    if (!isNaN(ms) && ms <= Date.now() + 60_000 && ms >= Date.now() - 12 * 3_600_000) {
+    if (!isNaN(ms) && ms <= Date.now() + 60_000 && ms >= Date.now() - 31 * 86_400_000) {
       clockInIso = d.toISOString();
-      backdated = true;
+      backdated = Math.abs(ms - Date.now()) > 60_000;
     }
   }
 
@@ -190,6 +192,7 @@ export async function updateTimeEntry(input: {
   clock_in: string;
   clock_out: string;
   lunch_minutes: number;
+  job_id?: string | null; // assign / reassign the entry to a job (null clears it)
   job_code: string | null;
   notes: string;
   miles?: number;
@@ -212,7 +215,23 @@ export async function updateTimeEntry(input: {
     miles: input.miles ?? 0,
     status: "closed",
   };
+  // Only touch job_id when the caller sent the field, so older callers that omit
+  // it don't accidentally null out an entry's job. `null` explicitly clears it.
+  if (input.job_id !== undefined) patch.job_id = input.job_id;
   if (input.profile_id) patch.profile_id = input.profile_id;
+
+  // If the job is changing, grab the previous job first so we can refresh BOTH
+  // the old and new job pages (their Time tab + labor totals), not just the
+  // timecard lists — otherwise a reassigned entry lingers on the old job.
+  let oldJobId: string | null = null;
+  if (input.job_id !== undefined) {
+    const { data: prev } = await supabase
+      .from("time_entries")
+      .select("job_id")
+      .eq("id", input.id)
+      .maybeSingle();
+    oldJobId = (prev as { job_id: string | null } | null)?.job_id ?? null;
+  }
 
   const { error } = await supabase
     .from("time_entries")
@@ -222,6 +241,12 @@ export async function updateTimeEntry(input: {
 
   revalidatePath("/timecards");
   revalidatePath("/timeclock");
+  if (input.job_id !== undefined) {
+    for (const jid of new Set([oldJobId, input.job_id].filter(Boolean) as string[])) {
+      revalidatePath(`/jobs/${jid}`);
+    }
+    revalidatePath("/jobs");
+  }
   return { ok: true };
 }
 
