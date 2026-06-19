@@ -33,6 +33,9 @@ export interface OrgSettings {
   labor_law_breaks: boolean; // require break confirmation at clock-out (CA)
   auto_lunch_30: boolean; // auto-apply 30-min unpaid lunch on shifts > 5h
   timecard_supervisor_id: string; // who approves timecards ("" = org owner)
+  /** Payroll cadence + the anchor date a biweekly/weekly cycle counts from. */
+  pay_schedule: "weekly" | "biweekly" | "semimonthly" | "monthly";
+  pay_anchor: string; // "YYYY-MM-DD" — start of a reference pay period
 
   // Payments
   payment_methods: string[];
@@ -72,6 +75,9 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   labor_law_breaks: false,
   auto_lunch_30: false,
   timecard_supervisor_id: "",
+  pay_schedule: "biweekly",
+  pay_anchor: "2026-01-05", // a Monday; biweekly cycles cascade from here
+
   payment_methods: ["Cash", "Check", "Card", "Zelle", "Venmo", "Transfer"],
   remind_quote_followup: false,
   remind_invoice_due: false,

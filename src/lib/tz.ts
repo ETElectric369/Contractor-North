@@ -93,6 +93,36 @@ export function formatDateTz(value: string | Date | null | undefined, tz: string
   });
 }
 
+/** The current pay period [start, end) as date strings, for a schedule + anchor.
+ *  `end` is exclusive (the next period's start), so filter clock_in >= start AND
+ *  clock_in < end. weekly/biweekly cascade from the anchor; semimonthly splits
+ *  the month at the 16th; monthly is the calendar month. */
+export function payPeriodBounds(
+  schedule: "weekly" | "biweekly" | "semimonthly" | "monthly",
+  anchorYmd: string,
+  ymd: string,
+): { start: string; end: string } {
+  const d = (s: string) => new Date(`${s}T00:00:00Z`);
+  const fmt = (dt: Date) => dt.toISOString().slice(0, 10);
+  const addDays = (dt: Date, n: number) => new Date(dt.getTime() + n * 86_400_000);
+  const today = d(/^\d{4}-\d{2}-\d{2}$/.test(ymd) ? ymd : "2026-01-01");
+  if (schedule === "monthly") {
+    const y = today.getUTCFullYear(), m = today.getUTCMonth();
+    return { start: fmt(new Date(Date.UTC(y, m, 1))), end: fmt(new Date(Date.UTC(y, m + 1, 1))) };
+  }
+  if (schedule === "semimonthly") {
+    const y = today.getUTCFullYear(), m = today.getUTCMonth();
+    return today.getUTCDate() <= 15
+      ? { start: fmt(new Date(Date.UTC(y, m, 1))), end: fmt(new Date(Date.UTC(y, m, 16))) }
+      : { start: fmt(new Date(Date.UTC(y, m, 16))), end: fmt(new Date(Date.UTC(y, m + 1, 1))) };
+  }
+  const len = schedule === "weekly" ? 7 : 14;
+  const anchor = d(/^\d{4}-\d{2}-\d{2}$/.test(anchorYmd) ? anchorYmd : "2026-01-05");
+  const elapsedDays = Math.floor((today.getTime() - anchor.getTime()) / 86_400_000);
+  const start = addDays(anchor, Math.floor(elapsedDays / len) * len);
+  return { start: fmt(start), end: fmt(addDays(start, len)) };
+}
+
 /** Pretty "Weekday, Month D" label for a "YYYY-MM-DD", tz-stable. */
 export function prettyDay(ymd: string): string {
   return new Date(`${ymd}T12:00:00Z`).toLocaleDateString("en-US", {

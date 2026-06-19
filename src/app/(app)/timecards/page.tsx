@@ -7,12 +7,13 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
   formatDuration,
+  formatDate,
   formatCurrency,
   hoursBetween,
   initials,
 } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
-import { formatDateTimeTz } from "@/lib/tz";
+import { formatDateTimeTz, payPeriodBounds, tzDayStartUtc, todayStrInTz } from "@/lib/tz";
 import { AddEntryButton } from "../timeclock/add-entry-button";
 import { EditEntryButton } from "./edit-entry-button";
 import { DuplicateEntryButton } from "./duplicate-entry-button";
@@ -129,6 +130,23 @@ export default async function TimecardsPage({
     .filter((x: any) => x.hours > 0)
     .sort((a: any, b: any) => b.hours - a.hours);
 
+  // Hours in the CURRENT pay period (payroll view), per employee.
+  const settings = getOrgSettings((org as any)?.settings);
+  const period = payPeriodBounds(settings.pay_schedule, settings.pay_anchor, todayStrInTz(tz));
+  const periodStartMs = tzDayStartUtc(period.start, tz).getTime();
+  const periodEndMs = tzDayStartUtc(period.end, tz).getTime();
+  const periodByProfile = new Map<string, number>();
+  for (const e of allClosed ?? []) {
+    const t = new Date(e.clock_in).getTime();
+    if (t >= periodStartMs && t < periodEndMs)
+      periodByProfile.set(e.profile_id, (periodByProfile.get(e.profile_id) ?? 0) + hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes));
+  }
+  const periodList = (members ?? [])
+    .map((m: any) => ({ name: m.full_name ?? "—", hours: periodByProfile.get(m.id) ?? 0 }))
+    .filter((x: any) => x.hours > 0)
+    .sort((a: any, b: any) => b.hours - a.hours);
+  const periodLabel = `${formatDate(period.start)} – ${formatDate(new Date(new Date(`${period.end}T00:00:00Z`).getTime() - 86_400_000))}`;
+
   return (
     <div>
       <PageHeader title="Timecards" description={`Review your crew's hours by week.  ·  Approver: ${approver}`}>
@@ -201,6 +219,29 @@ export default async function TimecardsPage({
           </CardContent>
         </Card>
       )}
+
+      <Card className="mb-6">
+        <CardContent className="py-4">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Hours this pay period
+            </span>
+            <span className="text-xs text-slate-500">{periodLabel}</span>
+          </div>
+          {periodList.length === 0 ? (
+            <p className="text-sm text-slate-400">No hours logged this pay period yet.</p>
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {periodList.map((a: any) => (
+                <li key={a.name} className="flex items-center justify-between py-1.5 text-sm">
+                  <span className="text-slate-700">{a.name}</span>
+                  <span className="font-semibold tabular-nums text-slate-900">{formatDuration(a.hours)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
 
       {accumList.length > 0 && (
         <Card className="mb-6">
