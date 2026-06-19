@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Briefcase } from "lucide-react";
+import { ArrowLeft, Briefcase, ListChecks } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { formatDate } from "@/lib/utils";
 import { ItemEditor } from "./item-editor";
@@ -66,6 +66,12 @@ export default async function MaterialListPage({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <SectionMapButton tree={materialListSectionTree(l.id, l.name, { jobId: l.jobs?.id ?? null, quoteId: (l as any).quote_id ?? null })} />
+          <Link
+            href={`/print/material-list/${l.id}`}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            <ListChecks className="h-4 w-4" /> Pick list
+          </Link>
           <NewPoButton
             jobs={l.jobs ? [{ id: l.jobs.id, job_number: l.jobs.job_number, name: l.jobs.name }] : []}
             lists={[{ id: l.id, name: l.name }]}
