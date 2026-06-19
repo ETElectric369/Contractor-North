@@ -32,16 +32,24 @@ export async function POST(req: Request) {
     invoiceId: string | undefined,
     orgId: string | undefined,
     amount: number,
+    eventId: string,
   ) {
     if (!invoiceId || !orgId || amount <= 0) return;
     // org_id is set explicitly (the set_org_id trigger has no auth context here).
-    await supabase.from("payments").insert({
+    // Idempotency: stripe_event_id is UNIQUE, so a retried webhook (Stripe resends
+    // the SAME event.id on timeout) fails the insert and we stop — no double pay.
+    const { error: insErr } = await supabase.from("payments").insert({
       invoice_id: invoiceId,
       org_id: orgId,
       amount,
       method: "card",
       note: "Online payment",
+      stripe_event_id: eventId,
     });
+    if (insErr) {
+      if ((insErr as { code?: string }).code === "23505") return; // already recorded this event
+      throw new Error(insErr.message);
+    }
     const { data: pays } = await supabase
       .from("payments")
       .select("amount")
@@ -98,6 +106,7 @@ export async function POST(req: Request) {
           session.metadata.invoice_id,
           session.metadata.org_id,
           (session.amount_total ?? 0) / 100,
+          event.id,
         );
       } else if (session.subscription) {
         const sub = await getStripe().subscriptions.retrieve(
