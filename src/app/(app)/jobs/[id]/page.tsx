@@ -40,6 +40,7 @@ import { DeleteButton } from "@/components/delete-button";
 import { EditCustomerButton } from "../../crm/[id]/edit-customer-button";
 import { createInvoiceForJob, deleteJob } from "../actions";
 import { getOrgSettings } from "@/lib/org-settings";
+import { computeJobLaborBilling, fetchJobLaborRows } from "@/lib/labor-billing";
 import { formatDateTz } from "@/lib/tz";
 import type { Customer } from "@/lib/types";
 
@@ -187,18 +188,14 @@ export default async function JobDetailPage({
   // (bill rate) — the latter feeds the estimate-vs-actual draw tracking.
   let laborCost = 0;
   let laborHours = 0;
-  let billableLabor = 0;
   for (const e of entries ?? []) {
     // Per-entry pay rate: an explicit override (e.g. supervisor rate) wins,
     // otherwise the person's default profile rate.
     const rate = Number((e as any).rate_override ?? (e as any).profiles?.hourly_rate ?? 0);
-    // Charge rate: the person's bill_rate, falling back to their pay rate.
-    const billRate = Number((e as any).profiles?.bill_rate ?? (e as any).profiles?.hourly_rate ?? 0);
     if ((e as any).time_allocations?.length) {
       for (const a of (e as any).time_allocations) {
         laborHours += Number(a.hours ?? 0);
         laborCost += Number(a.hours ?? 0) * rate;
-        billableLabor += Number(a.hours ?? 0) * billRate;
       }
       continue;
     }
@@ -206,16 +203,21 @@ export default async function JobDetailPage({
       const h = hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes);
       laborHours += h;
       laborCost += h * rate;
-      billableLabor += h * billRate;
     }
   }
   const materialCost = (pos ?? []).reduce((s: number, p: any) => s + Number(p.total ?? 0), 0);
   const billsCost = (bills ?? []).reduce((s: number, b: any) => s + Number(b.amount ?? 0), 0);
-  // Billable work to date = labor at charge rate + materials with the markup
-  // applied (what a progress/final draw would actually invoice). For T&M jobs
-  // this is the number that tells you whether you're tracking to the estimate.
+  // Billable work to date — computed with the SAME shared helpers importLabor/
+  // importCosts bill with, so the "are we on track" panel reconciles with the
+  // invoice. fetchJobLaborRows also captures cross-job hours allocated here.
   const materialMarkup = getOrgSettings((org as any)?.settings).material_markup_percent;
-  const billableMaterials = Math.round((materialCost + billsCost) * (1 + materialMarkup / 100) * 100) / 100;
+  const defaultLaborRate = Number(((org as any)?.settings ?? {}).default_labor_rate ?? 0);
+  const laborRows = await fetchJobLaborRows(supabase, id);
+  const billableLabor = computeJobLaborBilling(laborRows.jobEntries, laborRows.jobAllocs, defaultLaborRate).total;
+  const mk = (cost: number) => Math.round(cost * (1 + materialMarkup / 100) * 100) / 100;
+  const billableMaterials =
+    (pos ?? []).reduce((s: number, p: any) => (Number(p.total ?? 0) > 0 ? s + mk(Number(p.total)) : s), 0) +
+    (bills ?? []).reduce((s: number, b: any) => (Number(b.amount ?? 0) > 0 ? s + mk(Number(b.amount)) : s), 0);
   const workedToDate = Math.round((billableLabor + billableMaterials) * 100) / 100;
   const totalMiles = (entries ?? []).reduce((s: number, e: any) => s + Number(e.miles ?? 0), 0);
   const mileageCost = totalMiles * mileageRate;

@@ -1,11 +1,13 @@
-import { hoursBetween } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
+import { computeJobLaborBilling, fetchJobLaborRows } from "@/lib/labor-billing";
 
 export type JobProgressFinancials = {
   /** Sum of the job's quotes — the agreed estimate (a cap on fixed-price, a
    *  reference on Time & Material). */
   estimate: number;
-  /** Billable work to date: labor at charge (bill) rate + materials with markup. */
+  /** Billable work to date: labor at charge (bill) rate + materials with markup.
+   *  Computed the SAME way importLabor/importCosts bill, so it reconciles to the
+   *  penny with the labor/material lines that actually land on the invoice. */
   workToDate: number;
   /** Invoices actually sent to the customer (non-void, non-draft). */
   invoiced: number;
@@ -16,18 +18,16 @@ export type JobProgressFinancials = {
 };
 
 /** Compute a job's progress-billing financials — the numbers behind the progress
- *  report summary that rides on a deposit/progress/final draw. Mirrors the job
- *  page's costing so the two never disagree. */
+ *  report summary on a deposit/progress/final draw. Uses the SAME shared
+ *  computations as importLaborIntoInvoice / importCostsIntoInvoice so the panel's
+ *  "work to date" equals the sum of the lines that get billed. */
 export async function jobProgressFinancials(supabase: any, jobId: string): Promise<JobProgressFinancials> {
-  const [{ data: job }, { data: quotes }, { data: invoices }, { data: entries }, { data: pos }, { data: bills }, { data: org }] =
+  const [{ data: job }, { data: quotes }, { data: invoices }, labor, { data: pos }, { data: bills }, { data: org }] =
     await Promise.all([
       supabase.from("jobs").select("billing_type").eq("id", jobId).maybeSingle(),
       supabase.from("quotes").select("total").eq("job_id", jobId),
       supabase.from("invoices").select("total, status, amount_paid").eq("job_id", jobId),
-      supabase
-        .from("time_entries")
-        .select("clock_in, clock_out, lunch_minutes, status, profiles(hourly_rate, bill_rate), time_allocations(hours)")
-        .eq("job_id", jobId),
+      fetchJobLaborRows(supabase, jobId),
       supabase.from("purchase_orders").select("total").eq("job_id", jobId),
       supabase.from("bills").select("amount").eq("job_id", jobId),
       supabase.from("organizations").select("settings").maybeSingle(),
@@ -44,22 +44,18 @@ export async function jobProgressFinancials(supabase: any, jobId: string): Promi
     0,
   );
 
-  let billableLabor = 0;
-  for (const e of entries ?? []) {
-    const billRate = Number((e as any).profiles?.bill_rate ?? (e as any).profiles?.hourly_rate ?? 0);
-    if ((e as any).time_allocations?.length) {
-      for (const a of (e as any).time_allocations) billableLabor += Number(a.hours ?? 0) * billRate;
-      continue;
-    }
-    if (e.status === "closed" && e.clock_out) {
-      billableLabor += hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes) * billRate;
-    }
-  }
-  const materialCost =
-    (pos ?? []).reduce((s: number, p: any) => s + Number(p.total ?? 0), 0) +
-    (bills ?? []).reduce((s: number, b: any) => s + Number(b.amount ?? 0), 0);
+  // Labor: the exact helper importLaborIntoInvoice uses (per-person, quarter-hour,
+  // default-rate fallback) — so the panel can't diverge from the billed lines.
+  const defaultRate = Number(((org as any)?.settings ?? {}).default_labor_rate ?? 0);
+  const { total: billableLabor } = computeJobLaborBilling(labor.jobEntries, labor.jobAllocs, defaultRate);
+
+  // Materials: marked up PER ROW exactly like importCostsIntoInvoice (cost > 0 only).
   const markup = getOrgSettings((org as any)?.settings).material_markup_percent;
-  const workToDate = Math.round((billableLabor + materialCost * (1 + markup / 100)) * 100) / 100;
+  const mk = (cost: number) => Math.round(cost * (1 + markup / 100) * 100) / 100;
+  const billableMaterials =
+    (pos ?? []).reduce((s: number, p: any) => (Number(p.total ?? 0) > 0 ? s + mk(Number(p.total)) : s), 0) +
+    (bills ?? []).reduce((s: number, b: any) => (Number(b.amount ?? 0) > 0 ? s + mk(Number(b.amount)) : s), 0);
+  const workToDate = Math.round((billableLabor + billableMaterials) * 100) / 100;
 
   return { estimate, workToDate, invoiced, collected, billingType };
 }
