@@ -45,6 +45,7 @@ export function InvoiceDetail({
   priceItems = [],
   taxRates = [],
   paymentMethods = [],
+  materialMarkup = 0,
 }: {
   invoice: Invoice;
   items: InvoiceItem[];
@@ -52,6 +53,7 @@ export function InvoiceDetail({
   priceItems?: PriceItemLite[];
   taxRates?: TaxRateLite[];
   paymentMethods?: string[];
+  materialMarkup?: number;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -73,6 +75,7 @@ export function InvoiceDetail({
 
   // import state
   const [importMsg, setImportMsg] = useState<string | null>(null);
+  const [markup, setMarkup] = useState(materialMarkup); // material markup % for the costs import
   function runImport(fn: (id: string) => Promise<{ ok: boolean; error?: string }>, label: string) {
     setImportMsg(null);
     start(async () => {
@@ -241,9 +244,13 @@ export function InvoiceDetail({
                 <Button size="sm" variant="outline" onClick={() => runImport(importLaborIntoInvoice, "Labor")} disabled={pending}>
                   Labor from timecards
                 </Button>
-                <Button size="sm" variant="outline" onClick={() => runImport(importCostsIntoInvoice, "Materials")} disabled={pending}>
-                  Materials from costs
-                </Button>
+                <div className="flex items-center gap-1.5">
+                  <Button size="sm" variant="outline" onClick={() => runImport((id) => importCostsIntoInvoice(id, markup), "Materials")} disabled={pending}>
+                    Materials from costs
+                  </Button>
+                  <NumberInput value={markup} onValueChange={setMarkup} className="h-8 w-14 text-center text-sm" aria-label="Material markup percent" />
+                  <span className="text-xs text-slate-400">% markup</span>
+                </div>
               </>
             )}
             {importMsg && <span className="text-xs text-slate-500">{importMsg}</span>}

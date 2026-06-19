@@ -54,7 +54,8 @@ export default async function InvoicePage({
       supabase.from("tax_rates").select("id, name, rate, is_default").order("created_at"),
       supabase.from("organizations").select("settings").limit(1).maybeSingle(),
     ]);
-  const paymentMethods = getOrgSettings((org as any)?.settings).payment_methods;
+  const orgSettings = getOrgSettings((org as any)?.settings);
+  const paymentMethods = orgSettings.payment_methods;
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -140,6 +141,7 @@ export default async function InvoicePage({
         priceItems={(priceItems ?? []) as any}
         taxRates={(taxRates ?? []) as any}
         paymentMethods={paymentMethods}
+        materialMarkup={orgSettings.material_markup_percent}
       />
     </div>
   );

@@ -448,9 +448,10 @@ export async function importLaborIntoInvoice(invoiceId: string): Promise<Result>
   return { ok: true };
 }
 
-/** Import materials from the job's costs: purchase orders + supplier bills
- *  (at cost — adjust pricing on the lines afterwards). */
-export async function importCostsIntoInvoice(invoiceId: string): Promise<Result> {
+/** Import materials from the job's costs: purchase orders + supplier bills,
+ *  marked up by `markupPercent` (so they bill at sell price, not cost — the
+ *  contractor doesn't do the math by hand). Each line stays editable after. */
+export async function importCostsIntoInvoice(invoiceId: string, markupPercent = 0): Promise<Result> {
   const supabase = await createClient();
   const { data: inv } = await supabase
     .from("invoices")
@@ -464,13 +465,16 @@ export async function importCostsIntoInvoice(invoiceId: string): Promise<Result>
     supabase.from("bills").select("supplier, bill_number, amount").eq("job_id", inv.job_id),
   ]);
 
+  // Mark up cost → sell price. Markup is NOT shown on the line (customers don't
+  // see your margin); only the price reflects it.
+  const mark = (cost: number) => Math.round(cost * (1 + (Number(markupPercent) || 0) / 100) * 100) / 100;
   const rows: { description: string; unit_price: number }[] = [];
   for (const p of pos ?? []) {
-    if (Number(p.total) > 0) rows.push({ description: `Materials — ${p.vendor} (PO ${p.po_number})`, unit_price: Number(p.total) });
+    if (Number(p.total) > 0) rows.push({ description: `Materials — ${p.vendor} (PO ${p.po_number})`, unit_price: mark(Number(p.total)) });
   }
   for (const b of bills ?? []) {
     if (Number(b.amount) > 0)
-      rows.push({ description: `Materials — ${b.supplier}${b.bill_number ? ` (bill #${b.bill_number})` : ""}`, unit_price: Number(b.amount) });
+      rows.push({ description: `Materials — ${b.supplier}${b.bill_number ? ` (bill #${b.bill_number})` : ""}`, unit_price: mark(Number(b.amount)) });
   }
   if (!rows.length) return { ok: false, error: "No purchase orders or bills on this job yet." };
 

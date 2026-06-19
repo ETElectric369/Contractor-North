@@ -20,6 +20,7 @@ export interface OrgSettings {
   // Financial
   default_labor_rate: number;
   mileage_rate: number; // $ per mile (e.g. IRS standard rate)
+  material_markup_percent: number; // default markup applied when importing job costs to an invoice
   /** Free-text "how we quote" playbook injected into AI quote drafts + assistant. */
   quote_playbook: string;
   /** Employee handbook text (simple #/## headings + paragraphs). */
@@ -66,6 +67,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   deposit_percent: 0,
   default_labor_rate: 0,
   mileage_rate: 0.7,
+  material_markup_percent: 25,
   quote_playbook: "",
   employee_handbook: "",
   work_day_start: "08:00",
