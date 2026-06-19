@@ -303,7 +303,33 @@ async function nextSortOrder(supabase: any, invoiceId: string): Promise<number> 
   return (data?.sort_order ?? -1) + 1;
 }
 
-/** Import the linked job's quote line items into this invoice (appends). */
+/** Replace this invoice's previously-imported rows for a given source with a
+ *  fresh set, so re-importing REFRESHES the lines (current total) instead of
+ *  duplicating them. Inserts the new rows before deleting the old ones, so a
+ *  failed insert can't wipe them. Hand-entered rows (import_source null) are
+ *  never touched. */
+async function replaceImportedItems(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  invoiceId: string,
+  source: string,
+  rows: Array<{ description: string; quantity: number; unit: string; unit_price: number }>,
+): Promise<{ error?: string }> {
+  const { data: old } = await supabase
+    .from("invoice_items")
+    .select("id")
+    .eq("invoice_id", invoiceId)
+    .eq("import_source", source);
+  const oldIds = ((old ?? []) as { id: string }[]).map((r) => r.id);
+  let sort = await nextSortOrder(supabase, invoiceId);
+  const { error } = await supabase.from("invoice_items").insert(
+    rows.map((r) => ({ invoice_id: invoiceId, import_source: source, sort_order: sort++, ...r })),
+  );
+  if (error) return { error: error.message };
+  if (oldIds.length) await supabase.from("invoice_items").delete().in("id", oldIds);
+  return {};
+}
+
+/** Import the linked job's quote line items into this invoice (idempotent). */
 export async function importQuoteItemsIntoInvoice(invoiceId: string): Promise<Result> {
   const supabase = await createClient();
   const { data: inv } = await supabase
@@ -333,18 +359,18 @@ export async function importQuoteItemsIntoInvoice(invoiceId: string): Promise<Re
     .order("sort_order");
   if (!items?.length) return { ok: false, error: "The quote has no line items." };
 
-  let sort = await nextSortOrder(supabase, invoiceId);
-  const { error } = await supabase.from("invoice_items").insert(
+  const rep = await replaceImportedItems(
+    supabase,
+    invoiceId,
+    "quote",
     items.map((it: any) => ({
-      invoice_id: invoiceId,
       description: it.description,
-      quantity: it.quantity,
+      quantity: Number(it.quantity),
       unit: it.unit,
-      unit_price: it.unit_price,
-      sort_order: sort++,
+      unit_price: Number(it.unit_price),
     })),
   );
-  if (error) return { ok: false, error: error.message };
+  if (rep.error) return { ok: false, error: rep.error };
   await recalcInvoice(supabase, invoiceId);
   revalidatePath(`/billing/${invoiceId}`);
   return { ok: true };
@@ -390,17 +416,18 @@ export async function importLaborIntoInvoice(invoiceId: string): Promise<Result>
   }
   if (perPerson.size === 0) return { ok: false, error: "No billable hours found." };
 
-  let sort = await nextSortOrder(supabase, invoiceId);
-  const rows = [...perPerson.values()].map((p) => ({
-    invoice_id: invoiceId,
-    description: `Labor — ${p.name}`,
-    quantity: Math.round(p.hours * 4) / 4, // quarter-hour rounding
-    unit: "hr",
-    unit_price: p.rate,
-    sort_order: sort++,
-  }));
-  const { error } = await supabase.from("invoice_items").insert(rows);
-  if (error) return { ok: false, error: error.message };
+  const rep = await replaceImportedItems(
+    supabase,
+    invoiceId,
+    "labor",
+    [...perPerson.values()].map((p) => ({
+      description: `Labor — ${p.name}`,
+      quantity: Math.round(p.hours * 4) / 4, // quarter-hour rounding
+      unit: "hr",
+      unit_price: p.rate,
+    })),
+  );
+  if (rep.error) return { ok: false, error: rep.error };
   await recalcInvoice(supabase, invoiceId);
   revalidatePath(`/billing/${invoiceId}`);
   return { ok: true };
@@ -432,18 +459,13 @@ export async function importCostsIntoInvoice(invoiceId: string): Promise<Result>
   }
   if (!rows.length) return { ok: false, error: "No purchase orders or bills on this job yet." };
 
-  let sort = await nextSortOrder(supabase, invoiceId);
-  const { error } = await supabase.from("invoice_items").insert(
-    rows.map((r) => ({
-      invoice_id: invoiceId,
-      description: r.description,
-      quantity: 1,
-      unit: "lot",
-      unit_price: r.unit_price,
-      sort_order: sort++,
-    })),
+  const rep = await replaceImportedItems(
+    supabase,
+    invoiceId,
+    "costs",
+    rows.map((r) => ({ description: r.description, quantity: 1, unit: "lot", unit_price: r.unit_price })),
   );
-  if (error) return { ok: false, error: error.message };
+  if (rep.error) return { ok: false, error: rep.error };
   await recalcInvoice(supabase, invoiceId);
   revalidatePath(`/billing/${invoiceId}`);
   return { ok: true };
