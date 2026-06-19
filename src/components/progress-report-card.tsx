@@ -21,7 +21,7 @@ export function ProgressReportCard({
   const isTM = billingType === "tm";
 
   const rows: { label: string; value: number; sub?: string; strong?: boolean; top?: boolean }[] = [
-    { label: isTM ? "Contract estimate" : "Contract", value: estimate },
+    { label: isTM ? "Estimate amount" : "Contract", value: estimate },
     { label: "Work completed to date", value: workToDate, sub: estimate > 0 ? `${pct}%` : undefined },
     { label: "Received to date", value: received },
     { label: "This payment request", value: thisAmount, strong: true, top: true },
