@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 export default async function BillingPage() {
   const supabase = await createClient();
 
-  const [{ data: invoices }, { data: quotes }, { data: customers }, { data: jobs }] =
+  const [{ data: invoices }, { data: quotes }, { data: customers }, { data: jobs }, { data: refunds }] =
     await Promise.all([
       supabase
         .from("invoices")
@@ -31,16 +31,19 @@ export default async function BillingPage() {
         .not("status", "in", "(cancelled)")
         .order("created_at", { ascending: false })
         .limit(300),
+      supabase.from("customer_credits").select("amount").eq("disposition", "refund"),
     ]);
 
   const list = invoices ?? [];
   const outstanding = list
     .filter((i: any) => !["paid", "void"].includes(i.status))
     .reduce((s: number, i: any) => s + (Number(i.total) - Number(i.amount_paid)), 0);
-  const collected = list.reduce(
-    (s: number, i: any) => s + Number(i.amount_paid ?? 0),
-    0,
-  );
+  // Collected = cash actually kept: amount paid on NON-void invoices, less refunds.
+  const refundsTotal = (refunds ?? []).reduce((s: number, r: any) => s + Number(r.amount ?? 0), 0);
+  const collected =
+    list
+      .filter((i: any) => i.status !== "void")
+      .reduce((s: number, i: any) => s + Number(i.amount_paid ?? 0), 0) - refundsTotal;
 
   return (
     <div>

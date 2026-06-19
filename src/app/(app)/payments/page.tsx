@@ -11,22 +11,32 @@ export const dynamic = "force-dynamic";
  *  which previously lived only inside each invoice. */
 export default async function PaymentsPage() {
   const supabase = await createClient();
-  const { data } = await supabase
-    .from("payments")
-    .select("id, amount, method, note, paid_at, invoices(id, invoice_number, customers(name))")
-    .order("paid_at", { ascending: false })
-    .limit(500);
+  const [{ data }, { data: refunds }] = await Promise.all([
+    supabase
+      .from("payments")
+      .select("id, amount, method, note, paid_at, invoices(id, invoice_number, status, customers(name))")
+      .order("paid_at", { ascending: false })
+      .limit(500),
+    supabase.from("customer_credits").select("amount, created_at").eq("disposition", "refund"),
+  ]);
 
-  const payments = (data ?? []) as any[];
+  // A voided invoice means the money was reversed (Erik's rule), so drop its
+  // payments from the ledger. Keep payments with no invoice link.
+  const payments = ((data ?? []) as any[]).filter((p) => (p.invoices?.status ?? "") !== "void");
+  const refundList = (refunds ?? []) as any[];
 
-  // This-month + all-time totals for a quick read.
+  // This-month + all-time totals — net of refunds (money actually kept).
   const monthStart = new Date();
   monthStart.setDate(1);
   monthStart.setHours(0, 0, 0, 0);
-  const total = payments.reduce((s, p) => s + Number(p.amount ?? 0), 0);
-  const monthTotal = payments
-    .filter((p) => new Date(p.paid_at) >= monthStart)
-    .reduce((s, p) => s + Number(p.amount ?? 0), 0);
+  const refundTotal = refundList.reduce((s, r) => s + Number(r.amount ?? 0), 0);
+  const refundMonth = refundList
+    .filter((r) => new Date(r.created_at) >= monthStart)
+    .reduce((s, r) => s + Number(r.amount ?? 0), 0);
+  const total = payments.reduce((s, p) => s + Number(p.amount ?? 0), 0) - refundTotal;
+  const monthTotal =
+    payments.filter((p) => new Date(p.paid_at) >= monthStart).reduce((s, p) => s + Number(p.amount ?? 0), 0) -
+    refundMonth;
 
   return (
     <div>

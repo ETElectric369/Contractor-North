@@ -25,9 +25,9 @@ export default async function AnalyticsPage() {
   yearAgo.setMonth(yearAgo.getMonth() - 11);
   yearAgo.setDate(1);
 
-  const [{ data: payments }, { data: invoices }, { data: quotes }, { data: jobs }, { data: entries }, { data: pos }, { data: bills }] =
+  const [{ data: payments }, { data: invoices }, { data: quotes }, { data: jobs }, { data: entries }, { data: pos }, { data: bills }, { data: refunds }] =
     await Promise.all([
-      supabase.from("payments").select("amount, paid_at").gte("paid_at", yearAgo.toISOString()),
+      supabase.from("payments").select("amount, paid_at, invoices(status)").gte("paid_at", yearAgo.toISOString()),
       supabase.from("invoices").select("id, invoice_number, job_id, status, total, amount_paid, due_date, created_at, customers(name)"),
       supabase.from("quotes").select("status, total"),
       supabase.from("jobs").select("id, job_number, name, status").order("created_at", { ascending: false }).limit(100),
@@ -38,6 +38,7 @@ export default async function AnalyticsPage() {
         .not("job_id", "is", null),
       supabase.from("purchase_orders").select("job_id, total"),
       supabase.from("bills").select("job_id, amount, category"),
+      supabase.from("customer_credits").select("amount, created_at").eq("disposition", "refund").gte("created_at", yearAgo.toISOString()),
     ]);
 
   // ── Revenue by month (collected payments, last 12 months) ────────────────
@@ -48,12 +49,17 @@ export default async function AnalyticsPage() {
     months.push(monthKey(d));
   }
   const revByMonth = new Map<string, number>(months.map((m) => [m, 0]));
-  for (const p of payments ?? []) {
+  for (const p of (payments ?? []) as any[]) {
+    // Voided invoice → money reversed (Erik's rule); don't count its payments.
+    if (p.invoices?.status === "void") continue;
     const k = monthKey(new Date(p.paid_at));
     if (revByMonth.has(k)) revByMonth.set(k, revByMonth.get(k)! + Number(p.amount));
   }
   const maxRev = Math.max(1, ...revByMonth.values());
-  const collected12 = [...revByMonth.values()].reduce((s, v) => s + v, 0);
+  // Net refunds out of the headline (money actually kept); the bars stay the
+  // gross cash-in trend.
+  const refunds12 = ((refunds ?? []) as any[]).reduce((s, r) => s + Number(r.amount ?? 0), 0);
+  const collected12 = [...revByMonth.values()].reduce((s, v) => s + v, 0) - refunds12;
 
   // ── A/R aging ─────────────────────────────────────────────────────────────
   const openInvoices = (invoices ?? []).filter((i: any) => !["paid", "void", "draft"].includes(i.status));
@@ -102,10 +108,12 @@ export default async function AnalyticsPage() {
   for (const p of (pos ?? []) as any[]) add(p.job_id, Number(p.total));
   for (const b of (bills ?? []) as any[]) add(b.job_id, Number(b.amount));
 
+  // Revenue per job = CASH COLLECTED (amount_paid on non-void invoices), not the
+  // sum of invoice totals — otherwise a progress invoice + the final double-count.
   const revenueByJob = new Map<string, number>();
   for (const i of (invoices ?? []) as any[]) {
-    if (i.job_id && !["void", "draft"].includes(i.status))
-      revenueByJob.set(i.job_id, (revenueByJob.get(i.job_id) ?? 0) + Number(i.total));
+    if (i.job_id && i.status !== "void")
+      revenueByJob.set(i.job_id, (revenueByJob.get(i.job_id) ?? 0) + Number(i.amount_paid ?? 0));
   }
   const jobRows = ((jobs ?? []) as any[])
     .map((j) => {
@@ -226,7 +234,7 @@ export default async function AnalyticsPage() {
 
       <Card>
         <div className="border-b border-slate-100 px-5 py-3 text-sm font-semibold text-slate-900">
-          Job profitability (invoiced − labor − materials − bills)
+          Job profitability (collected − labor − materials − bills)
         </div>
         <ul className="divide-y divide-slate-100">
           {jobRows.map((j) => (

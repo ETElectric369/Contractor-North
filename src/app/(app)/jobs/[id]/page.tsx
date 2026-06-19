@@ -204,9 +204,22 @@ export default async function JobDetailPage({
   const billsCost = (bills ?? []).reduce((s: number, b: any) => s + Number(b.amount ?? 0), 0);
   const totalMiles = (entries ?? []).reduce((s: number, e: any) => s + Number(e.miles ?? 0), 0);
   const mileageCost = totalMiles * mileageRate;
+  // Revenue = CASH COLLECTED on this job (Erik's rule): the amount actually paid
+  // on the job's non-void invoices, net of refunds — NOT the sum of invoice/quote
+  // totals (which double-counts a progress invoice + the final). invoiced/quoted
+  // stay for context only.
   const invoiced = (invoices ?? []).reduce((s: number, i: any) => s + Number(i.total ?? 0), 0);
   const quoted = (quotes ?? []).reduce((s: number, q: any) => s + Number(q.total ?? 0), 0);
-  const revenue = invoiced > 0 ? invoiced : quoted;
+  const collected = (invoices ?? []).reduce(
+    (s: number, i: any) => (i.status !== "void" ? s + Number(i.amount_paid ?? 0) : s),
+    0,
+  );
+  const invoiceIds = (invoices ?? []).map((i: any) => i.id);
+  const { data: refundRows } = invoiceIds.length
+    ? await supabase.from("customer_credits").select("amount").eq("disposition", "refund").in("invoice_id", invoiceIds)
+    : { data: [] as any[] };
+  const jobRefunds = (refundRows ?? []).reduce((s: number, r: any) => s + Number(r.amount ?? 0), 0);
+  const revenue = Math.max(0, collected - jobRefunds);
   const profit = revenue - laborCost - materialCost - billsCost - mileageCost;
   const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
 
