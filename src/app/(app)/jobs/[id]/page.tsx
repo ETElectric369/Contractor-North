@@ -40,6 +40,7 @@ import { DeleteButton } from "@/components/delete-button";
 import { EditCustomerButton } from "../../crm/[id]/edit-customer-button";
 import { createInvoiceForJob, deleteJob } from "../actions";
 import { getOrgSettings } from "@/lib/org-settings";
+import { formatDateTz } from "@/lib/tz";
 import type { Customer } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -179,6 +180,7 @@ export default async function JobDetailPage({
   const companyAddress = [org?.address_line1, org?.city, org?.state, org?.zip].filter(Boolean).join(", ");
   const jobAddress = [j.address, j.city, j.state, j.zip].filter(Boolean).join(", ");
   const mileageRate = getOrgSettings((org as any)?.settings).mileage_rate;
+  const tz = getOrgSettings((org as any)?.settings).timezone; // business tz for time-entry dates
 
   // Costing
   let laborCost = 0;
@@ -387,7 +389,7 @@ export default async function JobDetailPage({
               return (
                 <li key={e.id} className="flex items-center justify-between px-5 py-2.5 text-sm">
                   <div>
-                    <span className="text-slate-700">{formatDate(e.clock_in)}</span>
+                    <span className="text-slate-700">{formatDateTz(e.clock_in, tz)}</span>
                     <span className="ml-2 text-slate-500">{e.profiles?.full_name ?? "—"}</span>
                     {e.job_code && <Badge tone="slate" className="ml-2">{e.job_code}</Badge>}
                   </div>

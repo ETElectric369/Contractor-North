@@ -63,6 +63,36 @@ export function todayBoundsInTz(tz: string): { dayStart: Date; dayEnd: Date; tod
   return { dayStart, dayEnd, todayStr };
 }
 
+/** Display an instant in the ORG timezone — the tz-correct twins of
+ *  formatDate/formatDateTime in lib/utils.ts. Those use the runtime tz, so on the
+ *  UTC Vercel server they print UTC (e.g. a 6 PM Pacific clock-out shows as 1 AM
+ *  the next day), disagreeing with client-rendered times. Use these for any
+ *  server-rendered timestamp that must read in the business's local time. */
+export function formatDateTimeTz(value: string | Date | null | undefined, tz: string): string {
+  if (!value) return "—";
+  const d = typeof value === "string" ? new Date(value) : value;
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: tz,
+  });
+}
+
+export function formatDateTz(value: string | Date | null | undefined, tz: string): string {
+  if (!value) return "—";
+  const d = typeof value === "string" ? new Date(value) : value;
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: tz,
+  });
+}
+
 /** Pretty "Weekday, Month D" label for a "YYYY-MM-DD", tz-stable. */
 export function prettyDay(ymd: string): string {
   return new Date(`${ymd}T12:00:00Z`).toLocaleDateString("en-US", {

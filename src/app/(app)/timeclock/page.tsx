@@ -7,7 +7,8 @@ import { TimeclockPanel } from "./timeclock-panel";
 import { getOrgSettings } from "@/lib/org-settings";
 import { AddEntryButton } from "./add-entry-button";
 import { EditEntryButton } from "../timecards/edit-entry-button";
-import { formatDateTime, hoursBetween, formatDuration } from "@/lib/utils";
+import { hoursBetween, formatDuration } from "@/lib/utils";
+import { formatDateTimeTz } from "@/lib/tz";
 import { translator } from "@/lib/i18n";
 import type { JobCode, TimeEntry } from "@/lib/types";
 
@@ -161,9 +162,9 @@ export default async function TimeclockPage() {
                 {isStaff && (
                   <td className="px-5 py-2.5 font-medium text-slate-700">{e.profiles?.full_name ?? "—"}</td>
                 )}
-                <td className="px-5 py-2.5 text-slate-700">{formatDateTime(e.clock_in)}</td>
+                <td className="px-5 py-2.5 text-slate-700">{formatDateTimeTz(e.clock_in, orgSettings.timezone)}</td>
                 <td className="px-3 py-2.5 text-slate-500">
-                  {e.clock_out ? formatDateTime(e.clock_out) : <Badge tone="green">{t("tc_open")}</Badge>}
+                  {e.clock_out ? formatDateTimeTz(e.clock_out, orgSettings.timezone) : <Badge tone="green">{t("tc_open")}</Badge>}
                 </td>
                 <td className="px-3 py-2.5">
                   {e.job && (

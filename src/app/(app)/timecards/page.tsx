@@ -7,12 +7,12 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
   formatDuration,
-  formatDateTime,
   formatCurrency,
   hoursBetween,
   initials,
 } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
+import { formatDateTimeTz } from "@/lib/tz";
 import { AddEntryButton } from "../timeclock/add-entry-button";
 import { EditEntryButton } from "./edit-entry-button";
 import { DuplicateEntryButton } from "./duplicate-entry-button";
@@ -63,6 +63,9 @@ export default async function TimecardsPage({
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),
   ]);
   const mileageRate = getOrgSettings((org as any)?.settings).mileage_rate;
+  // Render times in the BUSINESS timezone, not the UTC server's, so the list
+  // matches the (browser-local) edit modal instead of being hours off.
+  const tz = getOrgSettings((org as any)?.settings).timezone;
 
   const { start, end } = weekRange(offset);
 
@@ -251,9 +254,9 @@ export default async function TimecardsPage({
                     <li key={e.id} className="px-5 py-3">
                       <div className="flex items-center justify-between text-sm">
                         <div className="text-slate-700">
-                          {formatDateTime(e.clock_in)}
+                          {formatDateTimeTz(e.clock_in, tz)}
                           {" → "}
-                          {e.clock_out ? formatDateTime(e.clock_out) : (
+                          {e.clock_out ? formatDateTimeTz(e.clock_out, tz) : (
                             <Badge tone="green">open</Badge>
                           )}
                           {e.job && (
