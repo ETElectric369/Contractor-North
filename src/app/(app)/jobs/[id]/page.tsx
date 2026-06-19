@@ -220,6 +220,14 @@ export default async function JobDetailPage({
     (s: number, i: any) => (i.status !== "void" ? s + Number(i.amount_paid ?? 0) : s),
     0,
   );
+  // Open invoices (non-void, balance still owed) — targets for "record a payment".
+  const openInvoices = (invoices ?? [])
+    .filter((i: any) => i.status !== "void" && Number(i.total ?? 0) - Number(i.amount_paid ?? 0) > 0.005)
+    .map((i: any) => ({
+      id: i.id,
+      number: i.invoice_number,
+      balance: Math.round((Number(i.total ?? 0) - Number(i.amount_paid ?? 0)) * 100) / 100,
+    }));
   const invoiceIds = (invoices ?? []).map((i: any) => i.id);
   const { data: refundRows } = invoiceIds.length
     ? await supabase.from("customer_credits").select("amount").eq("disposition", "refund").in("invoice_id", invoiceIds)
@@ -583,7 +591,7 @@ export default async function JobDetailPage({
       content: (
         <div className="space-y-3">
           <div className="flex justify-end gap-2">
-            <ProgressInvoiceButton jobId={j.id} contract={quoted} billed={billedToDate} />
+            <ProgressInvoiceButton jobId={j.id} contract={quoted} invoiced={billedToDate} paid={collected} openInvoices={openInvoices} />
             <ConvertButton
               label="Create invoice"
               run={createInvoiceForJob.bind(null, j.id)}
