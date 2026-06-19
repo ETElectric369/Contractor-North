@@ -56,7 +56,15 @@ export function GlobalQuickAdd({ placement = "fab" }: { placement?: "fab" | "top
         {open && (
           <>
             <div className="fixed inset-0 z-[80]" onClick={() => setOpen(false)} />
-            <div className="glass glass-gloss absolute right-0 top-12 z-[90] w-60 overflow-hidden rounded-2xl py-1.5 shadow-xl">
+            {/* Anchored to the VIEWPORT, not the button: the topbar can scroll/
+                offset, which dragged an absolute menu up behind the bar so "New
+                task" was unreachable. position is set INLINE because .glass-gloss
+                forces position:relative (for its ::before sheen), which would
+                override a Tailwind `fixed`. top 4.5rem clears the 4rem header. */}
+            <div
+              style={{ position: "fixed", top: "4.5rem", right: "0.5rem" }}
+              className="glass glass-gloss z-[90] w-60 overflow-hidden rounded-2xl py-1.5 shadow-xl"
+            >
               {items}
             </div>
           </>
