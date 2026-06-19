@@ -25,11 +25,12 @@ export default async function CustomerDetailPage({
   const { id } = await params;
   const supabase = await createClient();
 
-  const { data: customer } = await supabase
+  const { data: customer, error: customerErr } = await supabase
     .from("customers")
     .select("*")
     .eq("id", id)
     .maybeSingle();
+  if (customerErr) throw customerErr; // a real failure shouldn't masquerade as 404
   if (!customer) notFound();
   const c = customer as Customer;
 

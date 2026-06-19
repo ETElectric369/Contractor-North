@@ -21,12 +21,13 @@ export default async function PurchaseOrderPage({
   const { id } = await params;
   const supabase = await createClient();
 
-  const { data: po } = await supabase
+  const { data: po, error: poErr } = await supabase
     .from("purchase_orders")
     .select("*, jobs(id, job_number, name)")
     .eq("id", id)
     .maybeSingle();
 
+  if (poErr) throw poErr; // a real failure shouldn't masquerade as 404
   if (!po) notFound();
   const p = po as PurchaseOrder & { jobs: any };
 

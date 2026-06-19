@@ -29,12 +29,13 @@ export default async function QuoteDetailPage({
   const { id } = await params;
   const supabase = await createClient();
 
-  const { data: quote } = await supabase
+  const { data: quote, error: quoteErr } = await supabase
     .from("quotes")
     .select("*, customers(*)")
     .eq("id", id)
     .maybeSingle();
 
+  if (quoteErr) throw quoteErr; // a real failure shouldn't masquerade as 404
   if (!quote) notFound();
   const q = quote as Quote & { customers: any };
 

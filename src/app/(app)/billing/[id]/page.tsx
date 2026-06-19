@@ -27,12 +27,13 @@ export default async function InvoicePage({
   const { id } = await params;
   const supabase = await createClient();
 
-  const { data: invoice } = await supabase
+  const { data: invoice, error: invoiceErr } = await supabase
     .from("invoices")
     .select("*, customers(id, name), quotes(id, quote_number)")
     .eq("id", id)
     .maybeSingle();
 
+  if (invoiceErr) throw invoiceErr; // a real failure shouldn't masquerade as 404
   if (!invoice) notFound();
   const inv = invoice as Invoice & { customers: any; quotes: any };
 

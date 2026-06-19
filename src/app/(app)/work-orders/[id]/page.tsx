@@ -22,7 +22,7 @@ export default async function WorkOrderDetailPage({
   const { id } = await params;
   const supabase = await createClient();
 
-  const { data: wo } = await supabase
+  const { data: wo, error: woErr } = await supabase
     .from("work_orders")
     .select(
       "*, jobs(id, job_number, name), customers(id, name), assignee:assigned_to(full_name)",
@@ -30,6 +30,7 @@ export default async function WorkOrderDetailPage({
     .eq("id", id)
     .maybeSingle();
 
+  if (woErr) throw woErr; // a real failure shouldn't masquerade as 404
   if (!wo) notFound();
   const w = wo as any;
 

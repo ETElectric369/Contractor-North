@@ -75,11 +75,12 @@ export default async function JobDetailPage({
   const { id } = await params;
   const supabase = await createClient();
 
-  const { data: job } = await supabase
+  const { data: job, error: jobErr } = await supabase
     .from("jobs")
     .select("*, customers(*)")
     .eq("id", id)
     .maybeSingle();
+  if (jobErr) throw jobErr; // a real failure shouldn't masquerade as 404
   if (!job) notFound();
   const j = job as any;
 
