@@ -60,12 +60,15 @@ export function AppointmentButton({
   staff,
   appointment,
   defaultDate,
+  compact = false,
 }: {
   jobs: Opt[];
   customers: Opt[];
   staff: Opt[];
   appointment?: ApptValue;
   defaultDate?: string;
+  /** Tight card-header variant: small button that stays on one line. */
+  compact?: boolean;
 }) {
   const router = useRouter();
   const editing = !!appointment;
@@ -174,8 +177,8 @@ export function AppointmentButton({
           <Pencil className="h-4 w-4" />
         </button>
       ) : (
-        <Button onClick={() => setOpen(true)}>
-          <Plus className="h-4 w-4" /> New appointment
+        <Button onClick={() => setOpen(true)} size={compact ? "sm" : undefined} className="shrink-0 whitespace-nowrap">
+          <Plus className="h-4 w-4" /> New Appointment
         </Button>
       )}
 

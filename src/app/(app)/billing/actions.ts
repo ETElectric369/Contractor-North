@@ -387,34 +387,49 @@ export async function importLaborIntoInvoice(invoiceId: string): Promise<Result>
     .maybeSingle();
   if (!inv?.job_id) return { ok: false, error: "This invoice isn't linked to a job." };
 
-  const [{ data: entries }, { data: org }] = await Promise.all([
+  // Bill the EXACT time on THIS job (Erik's rule), not gross per person:
+  //  (1) every time-allocation tagged to this job — the hours a worker split to
+  //      it, even from a shift clocked primarily into another job; plus
+  //  (2) entries clocked into this job that were NOT split → their gross hours.
+  // (1) already accounts for split entries, so (2) skips any entry with allocations.
+  const [{ data: jobEntries }, { data: jobAllocs }, { data: org }] = await Promise.all([
     supabase
       .from("time_entries")
-      .select("clock_in, clock_out, lunch_minutes, status, profiles(id, full_name, hourly_rate, bill_rate)")
+      .select("clock_in, clock_out, lunch_minutes, profiles(id, full_name, hourly_rate, bill_rate), time_allocations(id)")
       .eq("job_id", inv.job_id)
       .eq("status", "closed"),
+    supabase
+      .from("time_allocations")
+      .select("hours, time_entries!inner(status, profiles(id, full_name, hourly_rate, bill_rate))")
+      .eq("job_id", inv.job_id)
+      .eq("time_entries.status", "closed"),
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),
   ]);
-  if (!entries?.length) return { ok: false, error: "No closed time entries on this job yet." };
 
   const defaultRate = Number(((org as any)?.settings ?? {}).default_labor_rate ?? 0);
   const perPerson = new Map<string, { name: string; rate: number; hours: number }>();
-  for (const e of entries as any[]) {
-    if (!e.clock_out) continue;
-    const hrs =
-      (new Date(e.clock_out).getTime() - new Date(e.clock_in).getTime()) / 3_600_000 -
-      (e.lunch_minutes ?? 0) / 60;
-    if (hrs <= 0) continue;
-    const key = e.profiles?.id ?? "unknown";
+  const addHours = (prof: any, hrs: number) => {
+    if (!(hrs > 0)) return;
+    const key = prof?.id ?? "unknown";
     const cur = perPerson.get(key) ?? {
-      name: e.profiles?.full_name ?? "Crew",
-      rate: Number(e.profiles?.bill_rate ?? e.profiles?.hourly_rate ?? 0) || defaultRate,
+      name: prof?.full_name ?? "Crew",
+      rate: Number(prof?.bill_rate ?? prof?.hourly_rate ?? 0) || defaultRate,
       hours: 0,
     };
     cur.hours += hrs;
     perPerson.set(key, cur);
+  };
+  // (1) exact hours allocated to this job (handles split shifts)
+  for (const a of (jobAllocs ?? []) as any[]) addHours(a.time_entries?.profiles, Number(a.hours ?? 0));
+  // (2) un-split entries on this job → gross hours
+  for (const e of (jobEntries ?? []) as any[]) {
+    if ((e.time_allocations?.length ?? 0) > 0 || !e.clock_out) continue;
+    addHours(
+      e.profiles,
+      (new Date(e.clock_out).getTime() - new Date(e.clock_in).getTime()) / 3_600_000 - (e.lunch_minutes ?? 0) / 60,
+    );
   }
-  if (perPerson.size === 0) return { ok: false, error: "No billable hours found." };
+  if (perPerson.size === 0) return { ok: false, error: "No billable hours on this job yet." };
 
   const rep = await replaceImportedItems(
     supabase,

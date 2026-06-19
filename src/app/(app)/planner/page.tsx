@@ -337,7 +337,7 @@ export default async function PlannerPage() {
           <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
             <CalendarCheck className="h-4 w-4 text-purple-600" /> Appointments &amp; inspections
           </div>
-          <AppointmentButton jobs={jobOpts} customers={custOpts} staff={staffOpts} defaultDate={todayStr} />
+          <AppointmentButton jobs={jobOpts} customers={custOpts} staff={staffOpts} defaultDate={todayStr} compact />
         </div>
         <ul className="divide-y divide-slate-100">
           {(appts ?? []).map((a: any) => (
