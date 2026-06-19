@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
 import { createClient } from "@/lib/supabase/server";
+import { requireStaff } from "@/lib/staff-guard";
 
 export type Result = { ok: boolean; error?: string; id?: string; count?: number };
 
@@ -166,19 +167,30 @@ export async function createProgressInvoice(
   jobId: string,
   input: { kind?: "deposit" | "progress" | "final"; mode: "percent" | "fixed"; value: number },
 ): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const kind = input.kind ?? "progress";
 
   const { data: job } = await supabase.from("jobs").select("customer_id, name").eq("id", jobId).maybeSingle();
   if (!job) return { ok: false, error: "Job not found." };
 
-  // Estimate = quoted total; billed-to-date = the job's non-void invoices.
+  // H3/M6: at most one draft draw per job at a time — a second would over-bill.
+  const { data: existingDraft } = await supabase.from("invoices").select("invoice_number")
+    .eq("job_id", jobId).eq("status", "draft").in("invoice_kind", ["deposit", "progress", "final"]).limit(1).maybeSingle();
+  if (existingDraft) {
+    return { ok: false, error: `Draft ${(existingDraft as any).invoice_number} is still open on this job — send or delete it before creating another draw.` };
+  }
+
+  // Estimate = quoted total; billed-to-date = the job's SENT invoices (non-void,
+  // non-draft — a draft draw isn't a real bill; matches the job page + modal so
+  // the "% of remaining" base can't diverge by an outstanding draft).
   const [{ data: quotes }, { data: invoices }] = await Promise.all([
     supabase.from("quotes").select("total").eq("job_id", jobId),
     supabase.from("invoices").select("total, status").eq("job_id", jobId),
   ]);
   const estimate = (quotes ?? []).reduce((s: number, q: any) => s + Number(q.total ?? 0), 0);
-  const billed = (invoices ?? []).reduce((s: number, i: any) => (i.status !== "void" ? s + Number(i.total ?? 0) : s), 0);
+  const billed = (invoices ?? []).reduce((s: number, i: any) => (i.status !== "void" && i.status !== "draft" ? s + Number(i.total ?? 0) : s), 0);
   const remaining = Math.max(0, estimate - billed);
 
   const titleFor: Record<string, string> = { deposit: "Deposit", progress: "Progress payment", final: "Final invoice" };
@@ -196,6 +208,7 @@ export async function createProgressInvoice(
     label = title;
   }
   if (!(amount > 0)) return { ok: false, error: "Enter an amount above $0." };
+  if (amount > 9_999_999) return { ok: false, error: "That amount is too large." };
 
   const { data: inv, error } = await supabase
     .from("invoices")

@@ -291,7 +291,7 @@ export function ProgressInvoiceButton({
                 <div>
                   <Label htmlFor="pct">Percent of remaining estimate ({formatCurrency(remainingToEstimate)})</Label>
                   <div className="flex items-center gap-2">
-                    <Input id="pct" type="number" min={1} max={100} value={pct} onChange={(e) => setPct(Number(e.target.value))} className="w-24" />
+                    <Input id="pct" type="number" min={1} max={100} value={pct} onChange={(e) => setPct(Math.max(1, Math.min(100, Number(e.target.value) || 0)))} className="w-24" />
                     <span className="text-sm text-slate-500">%</span>
                   </div>
                   <div className="mt-2">

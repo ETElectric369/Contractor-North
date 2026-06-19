@@ -233,7 +233,12 @@ export function InvoiceDetail({
           </div>
         )}
 
-        {(invoice.job_id || (invoice as any).quote_id) && (
+        {/* Re-import is hidden on deposit/progress/final DRAWS: a draw is itemized
+            at creation with a frozen "Less previous billings" credit, so a manual
+            re-import would desync that credit and mis-bill. To refresh a draw,
+            delete and recreate it (it re-imports + recomputes the credit). */}
+        {(invoice.job_id || (invoice as any).quote_id) &&
+          !["deposit", "progress", "final"].includes((invoice as any).invoice_kind ?? "") && (
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50/60 px-3 py-2.5">
             <span className="text-xs font-medium text-slate-500">Import:</span>
             <Button size="sm" variant="outline" onClick={() => runImport(importQuoteItemsIntoInvoice, "Quote items")} disabled={pending}>

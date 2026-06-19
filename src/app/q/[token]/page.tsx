@@ -15,7 +15,7 @@ export async function generateMetadata({ params }: { params: Promise<{ token: st
   const { token } = await params;
   const supabase = await createClient();
   const { data } = await supabase.rpc("public_quote", { p_token: token });
-  const q = data as any;
+  const q = (data as any)?.quote;
   const label = (q?.doc_type ?? "quote") === "estimate" ? "Estimate" : "Quote";
   return { title: docTitle(q ? `${label} ${q.quote_number}` : "Quote") };
 }

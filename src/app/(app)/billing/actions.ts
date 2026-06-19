@@ -6,6 +6,7 @@ import { sendEmail, renderDocEmail } from "@/lib/email";
 import { sendSms } from "@/lib/sms";
 import { pushInvoiceToQbo } from "@/lib/quickbooks";
 import { getOrgSettings } from "@/lib/org-settings";
+import { requireStaff } from "@/lib/staff-guard";
 
 /** Post a credit/refund to the customer's account from an invoice. disposition
  *  "credit" keeps it on their account; "refund" flags accounting to pay it back. */
@@ -15,26 +16,27 @@ export async function createCustomerCredit(
   disposition: "credit" | "refund",
   note?: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   if (!(amount > 0)) return { ok: false, error: "Enter an amount." };
 
+  // M2: bail if the invoice isn't visible to this org (cross-org id → null under
+  // RLS) instead of inserting an orphan credit with customer_id:null.
   const { data: inv } = await supabase
     .from("invoices")
     .select("customer_id")
     .eq("id", invoiceId)
     .maybeSingle();
+  if (!inv) return { ok: false, error: "Invoice not found." };
 
   const { error } = await supabase.from("customer_credits").insert({
-    customer_id: inv?.customer_id ?? null,
+    customer_id: inv.customer_id ?? null,
     invoice_id: invoiceId,
     amount,
     disposition,
     note: note?.trim() || null,
-    created_by: user.id,
+    created_by: ctx.userId,
   });
   if (error) return { ok: false, error: error.message };
   revalidatePath(`/billing/${invoiceId}`);
@@ -278,7 +280,13 @@ export async function addInvoiceItem(
   invoiceId: string,
   item: { description: string; quantity: number; unit: string; unit_price: number },
 ): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  if (Math.abs((item.quantity || 1) * (item.unit_price || 0)) > 9_999_999_999)
+    return { ok: false, error: "That amount is too large." };
+  const { data: inv } = await supabase.from("invoices").select("id").eq("id", invoiceId).maybeSingle();
+  if (!inv) return { ok: false, error: "Invoice not found." };
   const { error } = await supabase.from("invoice_items").insert({
     invoice_id: invoiceId,
     description: item.description,
@@ -500,17 +508,22 @@ export async function createProgressReportInvoice(
   jobId: string,
   kind: "progress" | "final",
 ): Promise<Result> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
 
-  const [{ data: job }, { data: org }] = await Promise.all([
+  const [{ data: job }, { data: org }, { data: existingDraft }] = await Promise.all([
     supabase.from("jobs").select("customer_id, name").eq("id", jobId).maybeSingle(),
     supabase.from("organizations").select("settings").maybeSingle(),
+    supabase.from("invoices").select("invoice_number").eq("job_id", jobId).eq("status", "draft")
+      .in("invoice_kind", ["deposit", "progress", "final"]).limit(1).maybeSingle(),
   ]);
   if (!job) return { ok: false, error: "Job not found." };
+  // H3/M6: at most one draft draw per job — a second would re-import and re-bill
+  // the whole job, double-charging once both are sent.
+  if (existingDraft) {
+    return { ok: false, error: `Draft ${(existingDraft as any).invoice_number} is still open on this job — send or delete it before creating another draw.` };
+  }
   const markup = getOrgSettings((org as any)?.settings).material_markup_percent;
 
   const { data: inv, error } = await supabase
@@ -534,17 +547,15 @@ export async function createProgressReportInvoice(
   await importLaborIntoInvoice(inv.id);
   await importCostsIntoInvoice(inv.id, markup);
 
-  // Bail if there's nothing logged yet — an empty draft minus a deposit credit
-  // would go negative.
   const { data: afterImport } = await supabase.from("invoices").select("total").eq("id", inv.id).maybeSingle();
-  if (Number(afterImport?.total ?? 0) <= 0.005) {
+  const importedTotal = Number(afterImport?.total ?? 0);
+  if (importedTotal <= 0.005) {
     await supabase.from("invoices").delete().eq("id", inv.id);
     return { ok: false, error: "No labor or materials are logged on this job yet to bill." };
   }
 
   // Credit prior billings actually SENT to the customer (deposit + earlier sent
-  // draws) so they only pay for work since the last bill. Drafts are excluded —
-  // an unsent work-in-progress draw isn't a real bill yet.
+  // draws; drafts and void excluded) so they only pay for work since the last bill.
   const { data: priorInvs } = await supabase
     .from("invoices")
     .select("total, status")
@@ -554,12 +565,20 @@ export async function createProgressReportInvoice(
     (s: number, i: any) => (i.status !== "void" && i.status !== "draft" ? s + Number(i.total ?? 0) : s),
     0,
   );
-  if (priorBilled > 0.005) {
+  // H1: a draw must never go negative. If prior billings already cover the work
+  // logged so far, there's nothing new to bill — drop the draft. Otherwise credit
+  // AT MOST the imported work so the balance floors at $0, never below.
+  if (priorBilled > 0.005 && importedTotal - priorBilled <= 0.005) {
+    await supabase.from("invoices").delete().eq("id", inv.id);
+    return { ok: false, error: "Prior billings already cover the work logged so far — nothing new to bill yet." };
+  }
+  const credit = Math.min(priorBilled, importedTotal);
+  if (credit > 0.005) {
     await addInvoiceItem(inv.id, {
       description: "Less previous billings (deposit & prior draws)",
       quantity: 1,
       unit: "lot",
-      unit_price: -(Math.round(priorBilled * 100) / 100),
+      unit_price: -(Math.round(credit * 100) / 100),
     });
   }
 
@@ -627,13 +646,17 @@ export async function recordPayment(input: {
   note: string;
   paid_at?: string | null;
 }): Promise<Result> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   if (!input.amount || input.amount <= 0)
     return { ok: false, error: "Enter a payment amount." };
+  if (input.amount > 9_999_999) return { ok: false, error: "That amount is too large." };
+
+  // M2: confirm the invoice is visible to this org (a cross-org id returns null
+  // under the org-scoped read policy) before recording a payment against it.
+  const { data: inv } = await supabase.from("invoices").select("id").eq("id", input.invoice_id).maybeSingle();
+  if (!inv) return { ok: false, error: "Invoice not found." };
 
   const paidAt = dateToIso(input.paid_at);
   const { error } = await supabase.from("payments").insert({
@@ -641,7 +664,7 @@ export async function recordPayment(input: {
     amount: input.amount,
     method: input.method || "check",
     note: input.note || null,
-    recorded_by: user.id,
+    recorded_by: ctx.userId,
     ...(paidAt ? { paid_at: paidAt } : {}),
   });
   if (error) return { ok: false, error: error.message };
@@ -658,8 +681,11 @@ export async function updatePayment(
   invoiceId: string,
   patch: { amount: number; method: string; note: string; paid_at?: string | null },
 ): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   if (!patch.amount || patch.amount <= 0) return { ok: false, error: "Enter a payment amount." };
+  if (patch.amount > 9_999_999) return { ok: false, error: "That amount is too large." };
   const paidAt = dateToIso(patch.paid_at);
   const { error } = await supabase
     .from("payments")
@@ -679,7 +705,9 @@ export async function updatePayment(
 
 /** Remove a recorded payment (typo'd entry etc.) and recompute the invoice. */
 export async function deletePayment(paymentId: string, invoiceId: string): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { error } = await supabase.from("payments").delete().eq("id", paymentId);
   if (error) return { ok: false, error: error.message };
   await recalcInvoice(supabase, invoiceId);
@@ -691,7 +719,9 @@ export async function deletePayment(paymentId: string, invoiceId: string): Promi
 /** Delete an invoice — only while no payments are recorded against it
  *  (paid history must stay; void those instead). */
 export async function deleteInvoice(id: string): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { count } = await supabase
     .from("payments")
     .select("id", { count: "exact", head: true })

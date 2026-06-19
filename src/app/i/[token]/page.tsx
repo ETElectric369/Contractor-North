@@ -15,7 +15,7 @@ export async function generateMetadata({ params }: { params: Promise<{ token: st
   const { token } = await params;
   const supabase = await createClient();
   const { data } = await supabase.rpc("public_invoice", { p_token: token });
-  const inv = data as any;
+  const inv = (data as any)?.invoice;
   return { title: docTitle(inv ? `Invoice ${inv.invoice_number}` : "Invoice") };
 }
 
