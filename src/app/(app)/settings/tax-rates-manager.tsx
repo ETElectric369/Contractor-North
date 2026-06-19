@@ -43,6 +43,7 @@ export function TaxRatesManager({
 
   const [laborRate, setLaborRate] = useState(settings.default_labor_rate);
   const [mileageRate, setMileageRate] = useState(settings.mileage_rate);
+  const [materialMarkup, setMaterialMarkup] = useState(settings.material_markup_percent);
   const [savedLabor, setSavedLabor] = useState(false);
 
   const [levelName, setLevelName] = useState("");
@@ -132,9 +133,13 @@ export function TaxRatesManager({
             <Label htmlFor="fin-mileage">Mileage rate ($/mi)</Label>
             <NumberInput id="fin-mileage" value={mileageRate} onValueChange={setMileageRate} />
           </div>
+          <div className="w-44">
+            <Label htmlFor="fin-markup">Materials markup (%)</Label>
+            <NumberInput id="fin-markup" value={materialMarkup} onValueChange={setMaterialMarkup} />
+          </div>
           <Button
             size="sm"
-            onClick={() => start(async () => { await updateOrgSettings({ default_labor_rate: laborRate, mileage_rate: mileageRate }); setSavedLabor(true); setTimeout(() => setSavedLabor(false), 2000); })}
+            onClick={() => start(async () => { await updateOrgSettings({ default_labor_rate: laborRate, mileage_rate: mileageRate, material_markup_percent: materialMarkup }); setSavedLabor(true); setTimeout(() => setSavedLabor(false), 2000); })}
             disabled={pending}
           >
             Save

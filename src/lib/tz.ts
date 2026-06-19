@@ -123,6 +123,23 @@ export function payPeriodBounds(
   return { start: fmt(start), end: fmt(addDays(start, len)) };
 }
 
+/** The pay period `offset` cycles before the one containing `todayYmd` (0 =
+ *  current). Walks back one period at a time so it's correct for every schedule
+ *  (incl. variable-length semimonthly/monthly). */
+export function payPeriodForOffset(
+  schedule: "weekly" | "biweekly" | "semimonthly" | "monthly",
+  anchorYmd: string,
+  todayYmd: string,
+  offset: number,
+): { start: string; end: string } {
+  let p = payPeriodBounds(schedule, anchorYmd, todayYmd);
+  for (let i = 0; i < offset; i++) {
+    const prevDay = new Date(new Date(`${p.start}T00:00:00Z`).getTime() - 86_400_000).toISOString().slice(0, 10);
+    p = payPeriodBounds(schedule, anchorYmd, prevDay);
+  }
+  return p;
+}
+
 /** Pretty "Weekday, Month D" label for a "YYYY-MM-DD", tz-stable. */
 export function prettyDay(ymd: string): string {
   return new Date(`${ymd}T12:00:00Z`).toLocaleDateString("en-US", {
