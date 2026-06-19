@@ -11,13 +11,22 @@ type Period = "month" | "quarter" | "ytd" | "year";
 
 function rangeFor(period: Period) {
   const now = new Date();
-  const start = new Date(now.getFullYear(), 0, 1);
-  if (period === "month") start.setMonth(now.getMonth());
-  else if (period === "quarter") start.setMonth(Math.floor(now.getMonth() / 3) * 3);
-  else if (period === "year") start.setFullYear(now.getFullYear() - 1, 0, 1);
-  // ytd → Jan 1 this year (default)
-  const end = period === "year" ? new Date(now.getFullYear(), 0, 1) : new Date(now.getFullYear() + 1, 0, 1);
-  return { start, end };
+  const y = now.getFullYear();
+  // Each period is a half-open [start, end) window. The bug was a fixed
+  // end = Jan 1 next year for month/quarter, so "this month" actually reported
+  // the whole year — wrong sales-tax totals. Snap end to the period boundary.
+  if (period === "month") {
+    return { start: new Date(y, now.getMonth(), 1), end: new Date(y, now.getMonth() + 1, 1) };
+  }
+  if (period === "quarter") {
+    const q = Math.floor(now.getMonth() / 3) * 3;
+    return { start: new Date(y, q, 1), end: new Date(y, q + 3, 1) };
+  }
+  if (period === "year") {
+    return { start: new Date(y - 1, 0, 1), end: new Date(y, 0, 1) };
+  }
+  // ytd → Jan 1 this year through now (next-year boundary keeps today included)
+  return { start: new Date(y, 0, 1), end: new Date(y + 1, 0, 1) };
 }
 
 const LABELS: Record<Period, string> = {

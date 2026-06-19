@@ -94,14 +94,42 @@ async function insertItemizedBill(
   return data.id;
 }
 
-/** Pull a JSON object out of a Claude reply (tolerates ```json fences). */
+/** Pull a JSON object out of a Claude reply (tolerates ```json fences and a
+ *  trailing comma before a closing bracket — a common model slip). */
 function extractJsonObject(text: string): string {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
   const body = fenced ? fenced[1] : text;
   const start = body.indexOf("{");
   const end = body.lastIndexOf("}");
   if (start === -1 || end === -1) throw new Error("No JSON in AI reply");
-  return body.slice(start, end + 1);
+  return body.slice(start, end + 1).replace(/,(\s*[}\]])/g, "$1");
+}
+
+/**
+ * Parse a JSON object from an AI reply, healing the two failure modes we hit on
+ * real receipts: (1) a long supplier invoice truncated mid-array, and (2) an
+ * UNESCAPED double-quote inside a transcribed line (inch marks like 6" or 1/2"),
+ * which breaks the string and yields 'Expected "," or "]" after array element'.
+ * Try a direct parse; if it throws, ask the model to repair it into strict JSON
+ * and parse that. Only throws a friendly error if both attempts fail.
+ */
+async function parseAiJson(client: ReturnType<typeof getAnthropic>, raw: string): Promise<any> {
+  try {
+    return JSON.parse(extractJsonObject(raw));
+  } catch {
+    /* fall through to one repair round-trip */
+  }
+  const fix = await client.messages.create({
+    model: DEFAULT_MODEL,
+    max_tokens: 4096,
+    system:
+      "You repair malformed JSON. Output ONLY one valid, complete JSON object — no prose, no code fences. " +
+      'Escape every double-quote that appears INSIDE a string value (inch marks: write 6\\" not 6"). ' +
+      "If the input was cut off, close the open arrays and objects. Never invent or drop data.",
+    messages: [{ role: "user", content: `Repair this into valid JSON:\n\n${raw}` }],
+  });
+  const t = fix.content.find((b) => b.type === "text") as { text: string } | undefined;
+  return JSON.parse(extractJsonObject(t?.text ?? ""));
 }
 
 /**
@@ -154,7 +182,7 @@ export async function analyzeAndFile(input: {
     const client = getAnthropic();
     const msg = await client.messages.create({
       model: DEFAULT_MODEL,
-      max_tokens: 1200,
+      max_tokens: 4096,
       system: `You file paperwork for an electrical contractor. Look at the upload and classify it.
 
 Respond with ONLY a JSON object (no prose):
@@ -173,7 +201,7 @@ Respond with ONLY a JSON object (no prose):
   "confidence": "low" | "medium" | "high"
 }
 
-Rules: never guess a job_id — only match when something on the paper points to it. A gas-station or convenience receipt is overhead (Fuel). Generic supply-house receipts with no job reference are "unsure", not overhead.
+Rules: never guess a job_id — only match when something on the paper points to it. A gas-station or convenience receipt is overhead (Fuel). Generic supply-house receipts with no job reference are "unsure", not overhead. In every "description", write inches as the word in (e.g. "6 in EMT", not 6") and never put a raw double-quote character inside a JSON string.
 
 Jobs you may match against (id — label):
 ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
@@ -185,7 +213,7 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
       ],
     });
     const text = msg.content.find((b) => b.type === "text") as { text: string } | undefined;
-    parsed = JSON.parse(extractJsonObject(text?.text ?? ""));
+    parsed = await parseAiJson(client, text?.text ?? "");
   } catch (e: any) {
     return { ok: false, error: e?.message ?? "AI could not read this file." };
   }
@@ -384,7 +412,7 @@ export async function billJobReceipt(documentId: string): Promise<{
     const client = getAnthropic();
     const msg = await client.messages.create({
       model: DEFAULT_MODEL,
-      max_tokens: 1200,
+      max_tokens: 4096,
       system: `You read a purchase receipt for an electrical contractor and itemize it as a job cost.
 
 Respond with ONLY a JSON object (no prose):
@@ -395,7 +423,8 @@ Respond with ONLY a JSON object (no prose):
   "line_items": [{"description": item name, "quantity": number, "unit_price": price each (number), "amount": line total (number), "category": one of "Materials" | "Electrical" | "Tools" | "Fasteners" | "Lumber" | "Plumbing" | "Paint" | "Rental" | "Tax" | "Other"}],
   "confidence": "low" | "medium" | "high"
 }
-Transcribe EVERY readable line, including tax as its own line. Use [] for line_items only if nothing is legible.`,
+Transcribe EVERY readable line, including tax as its own line. Use [] for line_items only if nothing is legible.
+In every "description", write inches as the word in (e.g. "6 in EMT", not 6") and never put a raw double-quote character inside a JSON string.`,
       messages: [
         {
           role: "user",
@@ -404,7 +433,7 @@ Transcribe EVERY readable line, including tax as its own line. Use [] for line_i
       ],
     });
     const text = msg.content.find((b) => b.type === "text") as { text: string } | undefined;
-    parsed = JSON.parse(extractJsonObject(text?.text ?? ""));
+    parsed = await parseAiJson(client, text?.text ?? "");
   } catch (e: any) {
     return { ok: false, error: e?.message ?? "AI could not read this receipt." };
   }
@@ -666,7 +695,7 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
       ],
     });
     const block = msg.content.find((b) => b.type === "text") as { text: string } | undefined;
-    parsed = JSON.parse(extractJsonObject(block?.text ?? ""));
+    parsed = await parseAiJson(client, block?.text ?? "");
   } catch (e: any) {
     return {
       ok: false,

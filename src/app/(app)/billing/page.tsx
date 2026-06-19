@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Receipt } from "lucide-react";
+import { Receipt, Banknote } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
@@ -45,7 +45,17 @@ export default async function BillingPage() {
   return (
     <div>
       <PageHeader title="Billing" description="Invoices and payments.">
-        <NewInvoiceButton quotes={(quotes as any) ?? []} customers={customers ?? []} jobs={(jobs as any) ?? []} />
+        <div className="flex items-center gap-2">
+          {/* The page is "invoices AND payments" — but payments live on their own
+              screen, so link there explicitly (field feedback: "where's the link?"). */}
+          <Link
+            href="/payments"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            <Banknote className="h-4 w-4" /> Payments
+          </Link>
+          <NewInvoiceButton quotes={(quotes as any) ?? []} customers={customers ?? []} jobs={(jobs as any) ?? []} />
+        </div>
       </PageHeader>
 
       {list.length > 0 && (
@@ -58,14 +68,16 @@ export default async function BillingPage() {
               <div className="text-xs text-slate-500">Outstanding</div>
             </CardContent>
           </Card>
-          <Card>
-            <CardContent className="py-4">
-              <div className="text-2xl font-bold text-slate-900">
-                {formatCurrency(collected)}
-              </div>
-              <div className="text-xs text-slate-500">Collected (all time)</div>
-            </CardContent>
-          </Card>
+          <Link href="/payments" className="block transition hover:opacity-80">
+            <Card>
+              <CardContent className="py-4">
+                <div className="text-2xl font-bold text-slate-900">
+                  {formatCurrency(collected)}
+                </div>
+                <div className="text-xs text-slate-500">Collected (all time) · view payments →</div>
+              </CardContent>
+            </Card>
+          </Link>
         </div>
       )}
 
