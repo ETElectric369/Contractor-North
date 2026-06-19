@@ -15,6 +15,8 @@ import { invoiceSectionTree } from "@/lib/nav-tree";
 import { DeleteButton } from "@/components/delete-button";
 import { deleteInvoice } from "../actions";
 import { getOrgSettings } from "@/lib/org-settings";
+import { jobProgressFinancials } from "@/lib/job-financials";
+import { ProgressReportCard } from "@/components/progress-report-card";
 import type { Invoice, InvoiceItem, Payment } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -56,6 +58,12 @@ export default async function InvoicePage({
     ]);
   const orgSettings = getOrgSettings((org as any)?.settings);
   const paymentMethods = orgSettings.payment_methods;
+
+  // A deposit/progress/final invoice on a job carries a progress-report summary
+  // so the payment request doubles as a running-balance statement.
+  const drawKind = (inv as any).invoice_kind as string | undefined;
+  const isDraw = !!(inv as any).job_id && ["deposit", "progress", "final"].includes(drawKind ?? "");
+  const fin = isDraw ? await jobProgressFinancials(supabase, (inv as any).job_id) : null;
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -133,6 +141,18 @@ export default async function InvoicePage({
           />
         </div>
       </div>
+
+      {fin && (
+        <div className="mb-6">
+          <ProgressReportCard
+            estimate={fin.estimate}
+            workToDate={fin.workToDate}
+            received={Math.max(0, Math.round((fin.collected - Number(inv.amount_paid ?? 0)) * 100) / 100)}
+            thisAmount={Number(inv.total ?? 0)}
+            billingType={fin.billingType}
+          />
+        </div>
+      )}
 
       <InvoiceDetail
         invoice={inv}

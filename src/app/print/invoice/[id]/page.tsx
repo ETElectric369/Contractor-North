@@ -6,6 +6,8 @@ import { PrintButton } from "@/components/print-button";
 import { companyFromOrg } from "@/components/doc-letterhead";
 import { DocHeader, templateFor } from "@/components/doc-templates";
 import { getOrgSettings } from "@/lib/org-settings";
+import { jobProgressFinancials } from "@/lib/job-financials";
+import { ProgressReportCard } from "@/components/progress-report-card";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { LineItemText } from "@/components/line-item-text";
 import type { Invoice, InvoiceItem, Organization, Payment } from "@/lib/types";
@@ -54,6 +56,12 @@ export default async function InvoicePrintPage({
   const pays = (payments ?? []) as Payment[];
   const balance = Number(inv.total) - Number(inv.amount_paid);
   const c = inv.customers;
+
+  // A deposit/progress/final invoice on a job prints a progress-report summary so
+  // the payment request also shows the running balance.
+  const drawKind = (inv as any).invoice_kind as string | undefined;
+  const isDraw = !!(inv as any).job_id && ["deposit", "progress", "final"].includes(drawKind ?? "");
+  const fin = isDraw ? await jobProgressFinancials(supabase, (inv as any).job_id) : null;
 
   return (
     <div className="min-h-screen bg-slate-100 py-8 print:bg-white print:py-0">
@@ -173,6 +181,18 @@ export default async function InvoicePrintPage({
             </div>
           </div>
         </div>
+
+        {fin && (
+          <div className="mt-6">
+            <ProgressReportCard
+              estimate={fin.estimate}
+              workToDate={fin.workToDate}
+              received={Math.max(0, Math.round((fin.collected - Number(inv.amount_paid ?? 0)) * 100) / 100)}
+              thisAmount={Number(inv.total ?? 0)}
+              billingType={fin.billingType}
+            />
+          </div>
+        )}
 
         {pays.length > 0 && (
           <div className="mt-8 border-t border-slate-200 pt-4">

@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { sendEmail, renderDocEmail } from "@/lib/email";
 import { sendSms } from "@/lib/sms";
 import { pushInvoiceToQbo } from "@/lib/quickbooks";
+import { getOrgSettings } from "@/lib/org-settings";
 
 /** Post a credit/refund to the customer's account from an invoice. disposition
  *  "credit" keeps it on their account; "refund" flags accounting to pay it back. */
@@ -488,6 +489,83 @@ export async function importCostsIntoInvoice(invoiceId: string, markupPercent = 
   await recalcInvoice(supabase, invoiceId);
   revalidatePath(`/billing/${invoiceId}`);
   return { ok: true };
+}
+
+/** Create a progress/final DRAW that doubles as a progress report: itemizes all
+ *  actual labor (at bill rate) + materials (with markup) to date, then credits
+ *  prior billings (deposit + earlier draws) so the balance due is just the new
+ *  work since the last bill — the standard cumulative (AIA-style) progress format.
+ *  The single invoice shows the customer the running tally AND the amount owed. */
+export async function createProgressReportInvoice(
+  jobId: string,
+  kind: "progress" | "final",
+): Promise<Result> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  const [{ data: job }, { data: org }] = await Promise.all([
+    supabase.from("jobs").select("customer_id, name").eq("id", jobId).maybeSingle(),
+    supabase.from("organizations").select("settings").maybeSingle(),
+  ]);
+  if (!job) return { ok: false, error: "Job not found." };
+  const markup = getOrgSettings((org as any)?.settings).material_markup_percent;
+
+  const { data: inv, error } = await supabase
+    .from("invoices")
+    .insert({
+      customer_id: job.customer_id,
+      job_id: jobId,
+      status: "draft",
+      title: kind === "final" ? "Final invoice" : "Progress payment",
+      invoice_kind: kind,
+      tax_rate: 0,
+      subtotal: 0,
+      tax: 0,
+      total: 0,
+    })
+    .select("id")
+    .single();
+  if (error) return { ok: false, error: error.message };
+
+  // Itemize the actual work to date (labor at bill rate + materials with markup).
+  await importLaborIntoInvoice(inv.id);
+  await importCostsIntoInvoice(inv.id, markup);
+
+  // Bail if there's nothing logged yet — an empty draft minus a deposit credit
+  // would go negative.
+  const { data: afterImport } = await supabase.from("invoices").select("total").eq("id", inv.id).maybeSingle();
+  if (Number(afterImport?.total ?? 0) <= 0.005) {
+    await supabase.from("invoices").delete().eq("id", inv.id);
+    return { ok: false, error: "No labor or materials are logged on this job yet to bill." };
+  }
+
+  // Credit prior billings actually SENT to the customer (deposit + earlier sent
+  // draws) so they only pay for work since the last bill. Drafts are excluded —
+  // an unsent work-in-progress draw isn't a real bill yet.
+  const { data: priorInvs } = await supabase
+    .from("invoices")
+    .select("total, status")
+    .eq("job_id", jobId)
+    .neq("id", inv.id);
+  const priorBilled = (priorInvs ?? []).reduce(
+    (s: number, i: any) => (i.status !== "void" && i.status !== "draft" ? s + Number(i.total ?? 0) : s),
+    0,
+  );
+  if (priorBilled > 0.005) {
+    await addInvoiceItem(inv.id, {
+      description: "Less previous billings (deposit & prior draws)",
+      quantity: 1,
+      unit: "lot",
+      unit_price: -(Math.round(priorBilled * 100) / 100),
+    });
+  }
+
+  revalidatePath(`/jobs/${jobId}`);
+  revalidatePath("/billing");
+  return { ok: true, id: inv.id };
 }
 
 export async function updateInvoiceItem(

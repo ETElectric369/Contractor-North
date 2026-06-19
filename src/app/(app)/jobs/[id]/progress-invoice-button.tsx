@@ -10,7 +10,7 @@ import { NumberInput } from "@/components/ui/number-input";
 import { SegmentedControl } from "@/components/ui/segmented";
 import { formatCurrency } from "@/lib/utils";
 import { createProgressInvoice } from "../../recurring/actions";
-import { recordPayment } from "../../billing/actions";
+import { recordPayment, createProgressReportInvoice } from "../../billing/actions";
 
 type OpenInvoice = { id: string; number: string; balance: number };
 type DrawKind = "deposit" | "progress" | "final";
@@ -51,11 +51,12 @@ export function ProgressInvoiceButton({
 
   // New-invoice (draw) state
   const [kind, setKindState] = useState<DrawKind>("progress");
-  const [billMode, setBillMode] = useState<"percent" | "fixed">("percent");
+  const [billMode, setBillMode] = useState<"percent" | "fixed" | "actuals">(isTM ? "actuals" : "percent");
   const [pct, setPct] = useState(50);
   const [fixed, setFixed] = useState(0);
   const newAmount =
     billMode === "percent" ? Math.round((remainingToEstimate * pct) / 100 * 100) / 100 : Math.round((fixed || 0) * 100) / 100;
+  const showActuals = isTM && (kind === "progress" || kind === "final");
 
   function setKind(k: DrawKind) {
     setKindState(k);
@@ -63,9 +64,12 @@ export function ProgressInvoiceButton({
     if (k === "deposit") {
       setBillMode("fixed");
       setFixed(0);
+    } else if (isTM) {
+      // T&M progress/final default to billing the actual work to date.
+      setBillMode("actuals");
     } else if (k === "final") {
       setBillMode("fixed");
-      setFixed(isTM ? unbilledWork : remainingToEstimate);
+      setFixed(remainingToEstimate);
     } else {
       setBillMode("percent");
       setPct(50);
@@ -88,7 +92,12 @@ export function ProgressInvoiceButton({
     if (inv) setPayAmount(inv.balance);
   }
 
-  const canSave = mode === "payment" ? payAmount > 0 && !!payInvoice : newAmount > 0;
+  const canSave =
+    mode === "payment"
+      ? payAmount > 0 && !!payInvoice
+      : billMode === "actuals"
+        ? worked > 0
+        : newAmount > 0;
 
   function go() {
     setError(null);
@@ -100,7 +109,10 @@ export function ProgressInvoiceButton({
         setOpen(false);
         router.refresh();
       } else {
-        const res = await createProgressInvoice(jobId, { kind, mode: billMode, value: billMode === "percent" ? pct : fixed });
+        const res =
+          billMode === "actuals"
+            ? await createProgressReportInvoice(jobId, kind === "deposit" ? "progress" : kind)
+            : await createProgressInvoice(jobId, { kind, mode: billMode, value: billMode === "percent" ? pct : fixed });
         if (!res.ok || !res.id) return setError(res.error ?? "Could not create the invoice.");
         router.push(`/billing/${res.id}`);
       }
@@ -242,14 +254,40 @@ export function ProgressInvoiceButton({
 
               <SegmentedControl
                 activeId={billMode}
-                onSelect={(id) => setBillMode(id as "percent" | "fixed")}
-                items={[
-                  { id: "percent", label: "% of remaining" },
-                  { id: "fixed", label: "Fixed amount" },
-                ]}
+                onSelect={(id) => setBillMode(id as "percent" | "fixed" | "actuals")}
+                items={
+                  showActuals
+                    ? [
+                        { id: "actuals", label: "Actual T&M" },
+                        { id: "percent", label: "% of est." },
+                        { id: "fixed", label: "Fixed" },
+                      ]
+                    : [
+                        { id: "percent", label: "% of remaining" },
+                        { id: "fixed", label: "Fixed amount" },
+                      ]
+                }
               />
 
-              {billMode === "percent" ? (
+              {billMode === "actuals" ? (
+                <div className="space-y-1 rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2.5 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Work to date (labor + materials)</span>
+                    <span className="font-medium text-slate-800">{formatCurrency(worked)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Less previously billed</span>
+                    <span className="font-medium text-slate-500">−{formatCurrency(invoiced)}</span>
+                  </div>
+                  <div className="flex justify-between border-t border-slate-200 pt-1">
+                    <span className="font-medium text-slate-700">Due this {kind === "final" ? "final" : "draw"}</span>
+                    <span className="font-bold text-brand">{formatCurrency(unbilledWork)}</span>
+                  </div>
+                  <p className="pt-1 text-xs text-slate-400">
+                    Builds an itemized progress report — all labor + materials to date, less the deposit — a statement you can send as the payment request.
+                  </p>
+                </div>
+              ) : billMode === "percent" ? (
                 <div>
                   <Label htmlFor="pct">Percent of remaining estimate ({formatCurrency(remainingToEstimate)})</Label>
                   <div className="flex items-center gap-2">
@@ -288,12 +326,11 @@ export function ProgressInvoiceButton({
                 </div>
               )}
 
-              <div className="rounded-lg bg-brand/5 px-3 py-2 text-sm">
-                New {kind} invoice: <span className="font-bold text-slate-900">{formatCurrency(newAmount)}</span>
-                {kind === "final" && isTM && (
-                  <span className="text-slate-500"> · then import labor & materials on the invoice for the itemized total</span>
-                )}
-              </div>
+              {billMode !== "actuals" && (
+                <div className="rounded-lg bg-brand/5 px-3 py-2 text-sm">
+                  New {kind} invoice: <span className="font-bold text-slate-900">{formatCurrency(newAmount)}</span>
+                </div>
+              )}
             </div>
           )}
         </div>

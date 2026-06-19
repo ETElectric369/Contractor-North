@@ -225,9 +225,13 @@ export default async function JobDetailPage({
   // stay for context only.
   const invoiced = (invoices ?? []).reduce((s: number, i: any) => s + Number(i.total ?? 0), 0);
   const quoted = (quotes ?? []).reduce((s: number, q: any) => s + Number(q.total ?? 0), 0);
-  // Billed-to-date for progress payments = non-void invoice totals (drafts count
-  // so you don't re-bill a milestone already drafted).
-  const billedToDate = (invoices ?? []).reduce((s: number, i: any) => (i.status !== "void" ? s + Number(i.total ?? 0) : s), 0);
+  // Billed-to-date for progress payments = invoices actually SENT to the customer
+  // (non-void, non-draft). A draft is a work-in-progress draw, not a real bill, so
+  // it doesn't count toward "invoiced" or the deposit credit on a progress report.
+  const billedToDate = (invoices ?? []).reduce(
+    (s: number, i: any) => (i.status !== "void" && i.status !== "draft" ? s + Number(i.total ?? 0) : s),
+    0,
+  );
   const collected = (invoices ?? []).reduce(
     (s: number, i: any) => (i.status !== "void" ? s + Number(i.amount_paid ?? 0) : s),
     0,
