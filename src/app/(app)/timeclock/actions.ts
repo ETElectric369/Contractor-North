@@ -106,11 +106,17 @@ export async function clockOut(input: {
 
   if (error) return { ok: false, error: error.message };
 
-  // Replace any existing allocations for this entry with the submitted set.
+  // Replace any existing allocations with the submitted set. INSERT the new rows
+  // BEFORE deleting the old ones, so a failed insert can't wipe the entry's
+  // allocations (the JS client has no multi-statement transaction).
   const allocations = (input.allocations ?? []).filter(
     (a) => a.hours > 0 || a.description.trim() || a.job_id || a.job_code,
   );
-  await supabase.from("time_allocations").delete().eq("time_entry_id", input.entry_id);
+  const { data: oldAllocs } = await supabase
+    .from("time_allocations")
+    .select("id")
+    .eq("time_entry_id", input.entry_id);
+  const oldIds = (oldAllocs ?? []).map((a: { id: string }) => a.id);
   if (allocations.length) {
     const rows = allocations.map((a, idx) => ({
       time_entry_id: input.entry_id,
@@ -123,6 +129,7 @@ export async function clockOut(input: {
     const { error: allocErr } = await supabase.from("time_allocations").insert(rows);
     if (allocErr) return { ok: false, error: allocErr.message };
   }
+  if (oldIds.length) await supabase.from("time_allocations").delete().in("id", oldIds);
 
   revalidatePath("/timeclock");
   return { ok: true };

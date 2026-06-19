@@ -40,8 +40,10 @@ export function QuoteItemsEditor({ quote, items }: { quote: Quote; items: QuoteL
 
   function addItem() {
     if (!desc.trim()) return;
+    setError(null);
     start(async () => {
-      await addQuoteItem(quote.id, { description: desc.trim(), quantity: qty, unit: "ea", unit_price: price });
+      const res = await addQuoteItem(quote.id, { description: desc.trim(), quantity: qty, unit: "ea", unit_price: price });
+      if (!res.ok) return setError(res.error ?? "Couldn't add the item.");
       setDesc("");
       setQty(1);
       setPrice(0);
@@ -58,8 +60,10 @@ export function QuoteItemsEditor({ quote, items }: { quote: Quote; items: QuoteL
 
   function saveEdit() {
     if (!editId) return;
+    setError(null);
     start(async () => {
-      await updateQuoteItem(editId, quote.id, { description: editDesc, quantity: editQty, unit_price: editPrice });
+      const res = await updateQuoteItem(editId, quote.id, { description: editDesc, quantity: editQty, unit_price: editPrice });
+      if (!res.ok) return setError(res.error ?? "Couldn't save the item.");
       setEditId(null);
       refresh();
     });
@@ -92,6 +96,9 @@ export function QuoteItemsEditor({ quote, items }: { quote: Quote; items: QuoteL
             <Pencil className="h-3.5 w-3.5" /> Edit details
           </Button>
         </div>
+        {error && !detailsOpen && (
+          <div className="mx-5 mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
+        )}
         <ul className="divide-y divide-slate-100">
           {items.map((it) =>
             editId === it.id ? (
@@ -143,7 +150,7 @@ export function QuoteItemsEditor({ quote, items }: { quote: Quote; items: QuoteL
                   <Pencil className="h-4 w-4" />
                 </button>
                 <button
-                  onClick={() => start(async () => { await deleteQuoteItem(it.id, quote.id); refresh(); })}
+                  onClick={() => start(async () => { setError(null); const res = await deleteQuoteItem(it.id, quote.id); if (!res.ok) return setError(res.error ?? "Couldn't remove the item."); refresh(); })}
                   disabled={pending}
                   className="shrink-0 text-slate-500 hover:text-red-600"
                   aria-label="Remove"
