@@ -70,6 +70,7 @@ export async function createJob(formData: FormData): Promise<Result> {
       customer_id: customerId,
       description: emptyToNull(formData.get("description")),
       status: String(formData.get("status") ?? "estimate"),
+      billing_type: String(formData.get("billing_type") ?? "fixed"),
       address: emptyToNull(formData.get("address")),
       scheduled_start: start ? new Date(start).toISOString() : null,
       created_by: user.id,

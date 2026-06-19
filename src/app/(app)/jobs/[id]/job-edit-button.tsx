@@ -170,6 +170,15 @@ export function JobEditButton({
             <Label htmlFor="ej-desc">Description</Label>
             <Textarea id="ej-desc" name="description" rows={3} defaultValue={job.description ?? ""} />
           </div>
+
+          <div>
+            <Label htmlFor="ej-billing">Billing</Label>
+            <Select id="ej-billing" name="billing_type" defaultValue={(job as any).billing_type ?? "fixed"}>
+              <option value="fixed">Fixed price</option>
+              <option value="tm">Time &amp; Material</option>
+            </Select>
+            <p className="mt-1 text-xs text-slate-400">Time &amp; Material bills actual labor + materials; the estimate is a reference, not a cap.</p>
+          </div>
           </div>
         </Modal>
       </form>
