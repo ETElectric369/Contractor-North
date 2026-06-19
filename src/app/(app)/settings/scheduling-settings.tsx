@@ -22,6 +22,8 @@ export function SchedulingSettings({
   const [method, setMethod] = useState(settings.time_tracking_method);
   const [autoLunch, setAutoLunch] = useState(settings.auto_lunch_30);
   const [supervisor, setSupervisor] = useState(settings.timecard_supervisor_id);
+  const [paySchedule, setPaySchedule] = useState(settings.pay_schedule);
+  const [payAnchor, setPayAnchor] = useState(settings.pay_anchor);
   const [pending, startT] = useTransition();
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,6 +39,8 @@ export function SchedulingSettings({
         time_tracking_method: method,
         auto_lunch_30: autoLunch,
         timecard_supervisor_id: supervisor,
+        pay_schedule: paySchedule,
+        pay_anchor: payAnchor,
       });
       if (!res.ok) return setError(res.error ?? "Could not save.");
       setDone(true);
@@ -96,6 +100,32 @@ export function SchedulingSettings({
           ))}
         </Select>
         <p className="text-xs text-slate-400">Who reviews &amp; approves timecards. Defaults to the owner.</p>
+      </div>
+
+      <div className="space-y-3 border-t border-slate-100 pt-4">
+        <div className="text-sm font-medium text-slate-700">Payroll</div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label htmlFor="pay-sched">Pay period</Label>
+            <Select id="pay-sched" value={paySchedule} onChange={(e) => setPaySchedule(e.target.value as any)}>
+              <option value="weekly">Weekly</option>
+              <option value="biweekly">Every 2 weeks (biweekly)</option>
+              <option value="semimonthly">Twice a month (1st &amp; 16th)</option>
+              <option value="monthly">Monthly</option>
+            </Select>
+          </div>
+          {(paySchedule === "weekly" || paySchedule === "biweekly") && (
+            <div>
+              <Label htmlFor="pay-anchor">A period start date</Label>
+              <Input id="pay-anchor" type="date" value={payAnchor} onChange={(e) => setPayAnchor(e.target.value)} />
+            </div>
+          )}
+        </div>
+        <p className="text-xs text-slate-400">
+          Sets the boundaries for &ldquo;hours this pay period&rdquo; and payroll runs. We report gross
+          hours, pay &amp; mileage in the export — tax deductions &amp; withholdings stay with your
+          accountant / payroll service.
+        </p>
       </div>
 
       <div className="flex items-center gap-3">
