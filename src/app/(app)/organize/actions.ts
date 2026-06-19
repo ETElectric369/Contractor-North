@@ -62,6 +62,12 @@ function cleanLines(raw: any): BillLine[] {
     .slice(0, 100);
 }
 
+/** A store receipt is already paid; a supplier bill/invoice is still owed. New
+ *  uploads default to UNPAID so an owed bill is never silently marked paid. */
+function billStatusFor(category: string | null | undefined): "paid" | "unpaid" {
+  return /bill|invoice/i.test(category || "") ? "unpaid" : "paid";
+}
+
 /** Insert a bill plus its line items (an itemized receipt → billable cost). */
 async function insertItemizedBill(
   supabase: any,
@@ -75,8 +81,9 @@ async function insertItemizedBill(
     created_by: string;
   },
   lines: BillLine[],
+  status: "paid" | "unpaid" = "unpaid",
 ): Promise<string | null> {
-  const { data, error } = await supabase.from("bills").insert({ ...bill, status: "paid" }).select("id").single();
+  const { data, error } = await supabase.from("bills").insert({ ...bill, status }).select("id").single();
   if (error || !data) return null;
   if (lines.length) {
     await supabase.from("bill_line_items").insert(
@@ -277,12 +284,14 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
       supabase,
       { job_id: jobId, supplier: vendor, amount, bill_date: itemDate, category, notes: `Receipt filed by Organize My: ${title}`, created_by: user.id },
       lines,
+      billStatusFor(category),
     );
   } else if (destination === "overhead") {
     billId = await insertItemizedBill(
       supabase,
       { job_id: null, supplier: vendor, amount, bill_date: itemDate, category: overheadCategory, notes: `Filed by Organize My: ${title}`, created_by: user.id },
       lines,
+      billStatusFor(overheadCategory),
     );
   }
 
@@ -466,6 +475,7 @@ In every "description", write inches as the word in (e.g. "6 in EMT", not 6") an
       created_by: user.id,
     },
     lines,
+    "paid", // this flow reads a purchase receipt (already paid at the store)
   );
   if (!billId) return { ok: false, error: "Could not create the bill." };
 
@@ -549,6 +559,7 @@ export async function fileItem(id: string, dest: FileDestination): Promise<Resul
         supabase,
         { job_id: dest.jobId, supplier: item.vendor ?? item.title, amount: item.amount, bill_date: item.item_date, category: "Receipt", notes: `Receipt filed by Organize My: ${item.title}`, created_by: user.id },
         lines,
+        billStatusFor(item.category),
       );
     }
   } else if (dest.type === "overhead") {
@@ -557,6 +568,7 @@ export async function fileItem(id: string, dest: FileDestination): Promise<Resul
       supabase,
       { job_id: null, supplier: item.vendor ?? item.title, amount: item.amount ?? 0, bill_date: item.item_date, category: dest.category, notes: `Filed by Organize My: ${item.title}`, created_by: user.id },
       lines,
+      billStatusFor(dest.category),
     );
   } else if (dest.type === "petty_cash") {
     category = "Petty cash";

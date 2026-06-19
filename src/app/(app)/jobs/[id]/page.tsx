@@ -213,6 +213,9 @@ export default async function JobDetailPage({
   // stay for context only.
   const invoiced = (invoices ?? []).reduce((s: number, i: any) => s + Number(i.total ?? 0), 0);
   const quoted = (quotes ?? []).reduce((s: number, q: any) => s + Number(q.total ?? 0), 0);
+  // Billed-to-date for progress payments = non-void invoice totals (drafts count
+  // so you don't re-bill a milestone already drafted).
+  const billedToDate = (invoices ?? []).reduce((s: number, i: any) => (i.status !== "void" ? s + Number(i.total ?? 0) : s), 0);
   const collected = (invoices ?? []).reduce(
     (s: number, i: any) => (i.status !== "void" ? s + Number(i.amount_paid ?? 0) : s),
     0,
@@ -580,7 +583,7 @@ export default async function JobDetailPage({
       content: (
         <div className="space-y-3">
           <div className="flex justify-end gap-2">
-            <ProgressInvoiceButton jobId={j.id} />
+            <ProgressInvoiceButton jobId={j.id} contract={quoted} billed={billedToDate} />
             <ConvertButton
               label="Create invoice"
               run={createInvoiceForJob.bind(null, j.id)}

@@ -157,19 +157,39 @@ export async function generateDue(): Promise<Result> {
   return { ok: true, count };
 }
 
-/** Progress payment: invoice a percentage of the job's quoted total. */
-export async function createProgressInvoice(jobId: string, percent: number): Promise<Result> {
+/** Progress payment: bill either a % of the REMAINING balance (contract minus
+ *  what's already been billed) or a fixed $ amount — so milestone billing tracks
+ *  prior invoices instead of re-billing the whole contract each time. */
+export async function createProgressInvoice(
+  jobId: string,
+  input: { mode: "percent" | "fixed"; value: number },
+): Promise<Result> {
   const supabase = await createClient();
-  const pct = Math.max(1, Math.min(100, Math.round(Number(percent) || 0)));
 
   const { data: job } = await supabase.from("jobs").select("customer_id, name").eq("id", jobId).maybeSingle();
   if (!job) return { ok: false, error: "Job not found." };
 
-  const { data: quotes } = await supabase.from("quotes").select("total").eq("job_id", jobId);
-  const base = (quotes ?? []).reduce((s: number, q: any) => s + Number(q.total ?? 0), 0);
-  if (base <= 0) return { ok: false, error: "No quoted total to bill against — add a quote first, or invoice manually." };
+  // Contract = quoted total; billed-to-date = the job's non-void invoices.
+  const [{ data: quotes }, { data: invoices }] = await Promise.all([
+    supabase.from("quotes").select("total").eq("job_id", jobId),
+    supabase.from("invoices").select("total, status").eq("job_id", jobId),
+  ]);
+  const contract = (quotes ?? []).reduce((s: number, q: any) => s + Number(q.total ?? 0), 0);
+  const billed = (invoices ?? []).reduce((s: number, i: any) => (i.status !== "void" ? s + Number(i.total ?? 0) : s), 0);
+  const remaining = Math.max(0, contract - billed);
 
-  const amount = Math.round((base * pct) / 100 * 100) / 100;
+  let amount: number;
+  let label: string;
+  if (input.mode === "percent") {
+    const pct = Math.max(0, Math.min(100, Number(input.value) || 0));
+    if (contract <= 0) return { ok: false, error: "Add a quote to bill a percentage — or bill a fixed amount." };
+    amount = Math.round((remaining * pct) / 100 * 100) / 100;
+    label = `Progress payment — ${pct}% of remaining balance`;
+  } else {
+    amount = Math.round((Number(input.value) || 0) * 100) / 100;
+    label = "Progress payment";
+  }
+  if (!(amount > 0)) return { ok: false, error: "Enter an amount above $0." };
 
   const { data: inv, error } = await supabase
     .from("invoices")
@@ -177,7 +197,7 @@ export async function createProgressInvoice(jobId: string, percent: number): Pro
       customer_id: job.customer_id,
       job_id: jobId,
       status: "draft",
-      title: `Progress payment — ${pct}%`,
+      title: "Progress payment",
       tax_rate: 0,
       subtotal: amount,
       tax: 0,
@@ -189,7 +209,7 @@ export async function createProgressInvoice(jobId: string, percent: number): Pro
 
   const { error: liErr } = await supabase.from("invoice_items").insert({
     invoice_id: inv.id,
-    description: `Progress payment — ${pct}% of contract ($${base.toFixed(2)})`,
+    description: label,
     quantity: 1,
     unit_price: amount,
     sort_order: 0,
