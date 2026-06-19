@@ -10,9 +10,18 @@ import { jobProgressFinancials } from "@/lib/job-financials";
 import { ProgressReportCard } from "@/components/progress-report-card";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { LineItemText } from "@/components/line-item-text";
+import { docTitle } from "@/lib/doc-title";
+import type { Metadata } from "next";
 import type { Invoice, InvoiceItem, Organization, Payment } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  const supabase = await createClient();
+  const { data } = await supabase.from("invoices").select("invoice_number, customers(name)").eq("id", id).maybeSingle();
+  return { title: docTitle(data ? `Invoice ${(data as any).invoice_number}` : "Invoice", (data as any)?.customers?.name) };
+}
 
 export default async function InvoicePrintPage({
   params,

@@ -5,9 +5,19 @@ import { companyFromOrg } from "@/components/doc-letterhead";
 import { DocHeader, templateFor } from "@/components/doc-templates";
 import { billingEnabled } from "@/lib/stripe";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { docTitle } from "@/lib/doc-title";
+import type { Metadata } from "next";
 import type { Organization } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata({ params }: { params: Promise<{ token: string }> }): Promise<Metadata> {
+  const { token } = await params;
+  const supabase = await createClient();
+  const { data } = await supabase.rpc("public_invoice", { p_token: token });
+  const inv = data as any;
+  return { title: docTitle(inv ? `Invoice ${inv.invoice_number}` : "Invoice") };
+}
 
 export default async function PublicInvoicePage({
   params,

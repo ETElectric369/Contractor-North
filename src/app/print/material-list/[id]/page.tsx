@@ -6,9 +6,18 @@ import { PrintButton } from "@/components/print-button";
 import { companyFromOrg } from "@/components/doc-letterhead";
 import { DocHeader, templateFor } from "@/components/doc-templates";
 import { formatDate } from "@/lib/utils";
+import { docTitle } from "@/lib/doc-title";
+import type { Metadata } from "next";
 import type { Organization } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  const supabase = await createClient();
+  const { data } = await supabase.from("material_lists").select("name").eq("id", id).maybeSingle();
+  return { title: docTitle("Materials", (data as any)?.name) };
+}
 
 /** A materials pick list with NO prices — for the field crew to pull/buy, or to
  *  send a supplier for a quote, without exposing cost or markup. */

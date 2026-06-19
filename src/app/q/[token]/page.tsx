@@ -5,9 +5,20 @@ import { companyFromOrg } from "@/components/doc-letterhead";
 import { DocHeader, templateFor } from "@/components/doc-templates";
 import { PublicQuoteAccept } from "./accept";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { docTitle } from "@/lib/doc-title";
+import type { Metadata } from "next";
 import type { Organization } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata({ params }: { params: Promise<{ token: string }> }): Promise<Metadata> {
+  const { token } = await params;
+  const supabase = await createClient();
+  const { data } = await supabase.rpc("public_quote", { p_token: token });
+  const q = data as any;
+  const label = (q?.doc_type ?? "quote") === "estimate" ? "Estimate" : "Quote";
+  return { title: docTitle(q ? `${label} ${q.quote_number}` : "Quote") };
+}
 
 export default async function PublicQuotePage({
   params,

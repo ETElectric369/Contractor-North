@@ -6,9 +6,18 @@ import { PrintButton } from "@/components/print-button";
 import { companyFromOrg } from "@/components/doc-letterhead";
 import { DocHeader, templateFor } from "@/components/doc-templates";
 import { formatDateTime, formatDate } from "@/lib/utils";
+import { docTitle } from "@/lib/doc-title";
+import type { Metadata } from "next";
 import type { Organization } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  const supabase = await createClient();
+  const { data } = await supabase.from("work_orders").select("wo_number, jobs(name)").eq("id", id).maybeSingle();
+  return { title: docTitle(data ? `Work Order ${(data as any).wo_number}` : "Work Order", (data as any)?.jobs?.name) };
+}
 
 export default async function WorkOrderPrintPage({
   params,

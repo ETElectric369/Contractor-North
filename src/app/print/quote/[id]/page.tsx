@@ -8,9 +8,19 @@ import { DocHeader, templateFor } from "@/components/doc-templates";
 import { getOrgSettings } from "@/lib/org-settings";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { lineItemParts } from "@/components/line-item-text";
+import { docTitle } from "@/lib/doc-title";
+import type { Metadata } from "next";
 import type { Organization, Quote, QuoteLineItem } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  const supabase = await createClient();
+  const { data } = await supabase.from("quotes").select("quote_number, doc_type, customers(name)").eq("id", id).maybeSingle();
+  const label = ((data as any)?.doc_type ?? "quote") === "estimate" ? "Estimate" : "Quote";
+  return { title: docTitle(data ? `${label} ${(data as any).quote_number}` : "Quote", (data as any)?.customers?.name) };
+}
 
 export default async function QuotePrintPage({
   params,

@@ -4,9 +4,17 @@ import QRCode from "qrcode";
 import { createClient } from "@/lib/supabase/server";
 import { PrintButton } from "@/components/print-button";
 import { getOrgSettings } from "@/lib/org-settings";
+import { docTitle } from "@/lib/doc-title";
+import type { Metadata } from "next";
 import type { Organization } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata(): Promise<Metadata> {
+  const supabase = await createClient();
+  const { data } = await supabase.from("organizations").select("name").limit(1).maybeSingle();
+  return { title: docTitle("Business cards", (data as any)?.name) };
+}
 
 /** Printable business cards: 8-up on letter for cutting, QR → inquiry page. */
 export default async function BusinessCardPage() {
