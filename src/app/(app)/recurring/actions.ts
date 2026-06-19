@@ -157,37 +157,43 @@ export async function generateDue(): Promise<Result> {
   return { ok: true, count };
 }
 
-/** Progress payment: bill either a % of the REMAINING balance (contract minus
- *  what's already been billed) or a fixed $ amount — so milestone billing tracks
- *  prior invoices instead of re-billing the whole contract each time. */
+/** Create a billing DRAW on a job — a deposit, progress payment or final invoice.
+ *  Bills either a % of the REMAINING estimate (estimate minus what's already been
+ *  invoiced) or a fixed $ amount, and tags the invoice with its draw kind so
+ *  deposits / progress / final all flow through one path and never re-bill what's
+ *  already invoiced. */
 export async function createProgressInvoice(
   jobId: string,
-  input: { mode: "percent" | "fixed"; value: number },
+  input: { kind?: "deposit" | "progress" | "final"; mode: "percent" | "fixed"; value: number },
 ): Promise<Result> {
   const supabase = await createClient();
+  const kind = input.kind ?? "progress";
 
   const { data: job } = await supabase.from("jobs").select("customer_id, name").eq("id", jobId).maybeSingle();
   if (!job) return { ok: false, error: "Job not found." };
 
-  // Contract = quoted total; billed-to-date = the job's non-void invoices.
+  // Estimate = quoted total; billed-to-date = the job's non-void invoices.
   const [{ data: quotes }, { data: invoices }] = await Promise.all([
     supabase.from("quotes").select("total").eq("job_id", jobId),
     supabase.from("invoices").select("total, status").eq("job_id", jobId),
   ]);
-  const contract = (quotes ?? []).reduce((s: number, q: any) => s + Number(q.total ?? 0), 0);
+  const estimate = (quotes ?? []).reduce((s: number, q: any) => s + Number(q.total ?? 0), 0);
   const billed = (invoices ?? []).reduce((s: number, i: any) => (i.status !== "void" ? s + Number(i.total ?? 0) : s), 0);
-  const remaining = Math.max(0, contract - billed);
+  const remaining = Math.max(0, estimate - billed);
+
+  const titleFor: Record<string, string> = { deposit: "Deposit", progress: "Progress payment", final: "Final invoice" };
+  const title = titleFor[kind] ?? "Progress payment";
 
   let amount: number;
   let label: string;
   if (input.mode === "percent") {
     const pct = Math.max(0, Math.min(100, Number(input.value) || 0));
-    if (contract <= 0) return { ok: false, error: "Add a quote to bill a percentage — or bill a fixed amount." };
+    if (estimate <= 0) return { ok: false, error: "Add a quote/estimate to bill a percentage — or bill a fixed amount." };
     amount = Math.round((remaining * pct) / 100 * 100) / 100;
-    label = `Progress payment — ${pct}% of remaining balance`;
+    label = `${title} — ${pct}% of remaining estimate`;
   } else {
     amount = Math.round((Number(input.value) || 0) * 100) / 100;
-    label = "Progress payment";
+    label = title;
   }
   if (!(amount > 0)) return { ok: false, error: "Enter an amount above $0." };
 
@@ -197,7 +203,8 @@ export async function createProgressInvoice(
       customer_id: job.customer_id,
       job_id: jobId,
       status: "draft",
-      title: "Progress payment",
+      title,
+      invoice_kind: kind,
       tax_rate: 0,
       subtotal: amount,
       tax: 0,

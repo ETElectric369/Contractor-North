@@ -100,11 +100,11 @@ export default async function JobDetailPage({
     supabase.from("quotes").select("id, quote_number, status, total, doc_type").eq("job_id", id),
     supabase.from("work_orders").select("id, wo_number, title, status").eq("job_id", id),
     supabase.from("change_orders").select("*").eq("job_id", id).order("created_at", { ascending: false }),
-    supabase.from("invoices").select("id, invoice_number, status, total, amount_paid").eq("job_id", id),
+    supabase.from("invoices").select("id, invoice_number, status, total, amount_paid, invoice_kind").eq("job_id", id),
     supabase.from("purchase_orders").select("id, po_number, vendor, status, total").eq("job_id", id),
     supabase
       .from("time_entries")
-      .select("id, profile_id, clock_in, clock_out, lunch_minutes, miles, status, job_id, job_code, notes, rate_override, profiles(full_name, hourly_rate), job:job_id(job_number, name), time_allocations(id, hours, job_code)")
+      .select("id, profile_id, clock_in, clock_out, lunch_minutes, miles, status, job_id, job_code, notes, rate_override, profiles(full_name, hourly_rate, bill_rate), job:job_id(job_number, name), time_allocations(id, hours, job_code)")
       .eq("job_id", id)
       .order("clock_in", { ascending: false }),
     supabase
@@ -183,28 +183,40 @@ export default async function JobDetailPage({
   const mileageRate = getOrgSettings((org as any)?.settings).mileage_rate;
   const tz = getOrgSettings((org as any)?.settings).timezone; // business tz for time-entry dates
 
-  // Costing
+  // Costing. laborCost = what we PAY (pay rate); billableLabor = what we CHARGE
+  // (bill rate) — the latter feeds the estimate-vs-actual draw tracking.
   let laborCost = 0;
   let laborHours = 0;
+  let billableLabor = 0;
   for (const e of entries ?? []) {
     // Per-entry pay rate: an explicit override (e.g. supervisor rate) wins,
     // otherwise the person's default profile rate.
     const rate = Number((e as any).rate_override ?? (e as any).profiles?.hourly_rate ?? 0);
+    // Charge rate: the person's bill_rate, falling back to their pay rate.
+    const billRate = Number((e as any).profiles?.bill_rate ?? (e as any).profiles?.hourly_rate ?? 0);
     if ((e as any).time_allocations?.length) {
-      for (const a of (e as any).time_allocations)
+      for (const a of (e as any).time_allocations) {
         laborHours += Number(a.hours ?? 0);
-      for (const a of (e as any).time_allocations)
         laborCost += Number(a.hours ?? 0) * rate;
+        billableLabor += Number(a.hours ?? 0) * billRate;
+      }
       continue;
     }
     if (e.status === "closed" && e.clock_out) {
       const h = hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes);
       laborHours += h;
       laborCost += h * rate;
+      billableLabor += h * billRate;
     }
   }
   const materialCost = (pos ?? []).reduce((s: number, p: any) => s + Number(p.total ?? 0), 0);
   const billsCost = (bills ?? []).reduce((s: number, b: any) => s + Number(b.amount ?? 0), 0);
+  // Billable work to date = labor at charge rate + materials with the markup
+  // applied (what a progress/final draw would actually invoice). For T&M jobs
+  // this is the number that tells you whether you're tracking to the estimate.
+  const materialMarkup = getOrgSettings((org as any)?.settings).material_markup_percent;
+  const billableMaterials = Math.round((materialCost + billsCost) * (1 + materialMarkup / 100) * 100) / 100;
+  const workedToDate = Math.round((billableLabor + billableMaterials) * 100) / 100;
   const totalMiles = (entries ?? []).reduce((s: number, e: any) => s + Number(e.miles ?? 0), 0);
   const mileageCost = totalMiles * mileageRate;
   // Revenue = CASH COLLECTED on this job (Erik's rule): the amount actually paid
@@ -591,7 +603,7 @@ export default async function JobDetailPage({
       content: (
         <div className="space-y-3">
           <div className="flex justify-end gap-2">
-            <ProgressInvoiceButton jobId={j.id} contract={quoted} invoiced={billedToDate} paid={collected} openInvoices={openInvoices} />
+            <ProgressInvoiceButton jobId={j.id} billingType={(j as any).billing_type ?? "fixed"} estimate={quoted} worked={workedToDate} invoiced={billedToDate} paid={collected} openInvoices={openInvoices} />
             <ConvertButton
               label="Create invoice"
               run={createInvoiceForJob.bind(null, j.id)}

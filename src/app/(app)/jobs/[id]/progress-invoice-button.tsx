@@ -13,41 +13,64 @@ import { createProgressInvoice } from "../../recurring/actions";
 import { recordPayment } from "../../billing/actions";
 
 type OpenInvoice = { id: string; number: string; balance: number };
+type DrawKind = "deposit" | "progress" | "final";
 
-/** Progress payment hub for a job. Shows the full money picture and lets you
- *  either RECORD A PAYMENT against an open invoice (one-invoice + installments)
- *  or bill a NEW progress invoice for the un-invoiced contract (per-milestone).
- *  Owner picks per job — both flows live here so prior payments are always shown. */
+/** Progress payment hub for a job. Shows the full money picture (estimate vs
+ *  actual work, invoiced, paid, balance) and runs every billing flow through one
+ *  path: RECORD A PAYMENT against an open invoice, or create a billing DRAW
+ *  (deposit / progress / final). On a Time & Material job the estimate is a
+ *  reference, not a cap — "work to date" tells you if you're tracking over. */
 export function ProgressInvoiceButton({
   jobId,
-  contract = 0,
+  billingType = "fixed",
+  estimate = 0,
+  worked = 0,
   invoiced = 0,
   paid = 0,
   openInvoices = [],
 }: {
   jobId: string;
-  contract?: number;
+  billingType?: "fixed" | "tm";
+  estimate?: number;
+  worked?: number;
   invoiced?: number;
   paid?: number;
   openInvoices?: OpenInvoice[];
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const isTM = billingType === "tm";
 
   const balanceDue = Math.max(0, Math.round((invoiced - paid) * 100) / 100);
-  const uninvoiced = Math.max(0, Math.round((contract - invoiced) * 100) / 100);
+  const remainingToEstimate = Math.max(0, Math.round((estimate - invoiced) * 100) / 100);
+  const unbilledWork = Math.max(0, Math.round((worked - invoiced) * 100) / 100);
 
-  // Collect when money is owed; otherwise bill a new invoice.
   const [mode, setMode] = useState<"payment" | "invoice">(
     balanceDue > 0 && openInvoices.length ? "payment" : "invoice",
   );
 
-  // New-invoice state
+  // New-invoice (draw) state
+  const [kind, setKindState] = useState<DrawKind>("progress");
   const [billMode, setBillMode] = useState<"percent" | "fixed">("percent");
   const [pct, setPct] = useState(50);
   const [fixed, setFixed] = useState(0);
   const newAmount =
-    billMode === "percent" ? Math.round((uninvoiced * pct) / 100 * 100) / 100 : Math.round((fixed || 0) * 100) / 100;
+    billMode === "percent" ? Math.round((remainingToEstimate * pct) / 100 * 100) / 100 : Math.round((fixed || 0) * 100) / 100;
+
+  function setKind(k: DrawKind) {
+    setKindState(k);
+    // Smart defaults per draw kind.
+    if (k === "deposit") {
+      setBillMode("fixed");
+      setFixed(0);
+    } else if (k === "final") {
+      setBillMode("fixed");
+      setFixed(isTM ? unbilledWork : remainingToEstimate);
+    } else {
+      setBillMode("percent");
+      setPct(50);
+    }
+  }
 
   // Payment state
   const [payInvoice, setPayInvoice] = useState(openInvoices[0]?.id ?? "");
@@ -77,12 +100,29 @@ export function ProgressInvoiceButton({
         setOpen(false);
         router.refresh();
       } else {
-        const res = await createProgressInvoice(jobId, { mode: billMode, value: billMode === "percent" ? pct : fixed });
+        const res = await createProgressInvoice(jobId, { kind, mode: billMode, value: billMode === "percent" ? pct : fixed });
         if (!res.ok || !res.id) return setError(res.error ?? "Could not create the invoice.");
         router.push(`/billing/${res.id}`);
       }
     });
   }
+
+  // The money picture — adapts to fixed-price vs Time & Material.
+  const stats: { label: string; value: number; tone?: string }[] = isTM
+    ? [
+        { label: "Estimate", value: estimate },
+        { label: "Work to date", value: worked, tone: "text-slate-900" },
+        { label: "Invoiced", value: invoiced },
+        { label: "Paid", value: paid, tone: "text-emerald-600" },
+        { label: "Balance due", value: balanceDue, tone: "text-brand" },
+        { label: "Left to est.", value: remainingToEstimate },
+      ]
+    : [
+        { label: "Contract", value: estimate },
+        { label: "Invoiced", value: invoiced },
+        { label: "Paid", value: paid, tone: "text-emerald-600" },
+        { label: "Balance due", value: balanceDue, tone: "text-brand" },
+      ];
 
   return (
     <>
@@ -98,7 +138,7 @@ export function ProgressInvoiceButton({
             onCancel={() => setOpen(false)}
             onSave={go}
             saving={pending}
-            saveLabel={mode === "payment" ? "Record payment" : "Create invoice"}
+            saveLabel={mode === "payment" ? "Record payment" : `Create ${kind === "deposit" ? "deposit" : kind === "final" ? "final invoice" : "invoice"}`}
             disabled={!canSave}
           />
         }
@@ -106,25 +146,19 @@ export function ProgressInvoiceButton({
         <div className="space-y-4">
           {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
 
-          {/* The full money picture — prior payments are always visible here. */}
-          <div className="grid grid-cols-2 gap-x-3 gap-y-3 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-3 text-center sm:grid-cols-4 sm:gap-2">
-            <div>
-              <div className="text-[11px] text-slate-400">Contract</div>
-              <div className="text-sm font-semibold text-slate-800">{formatCurrency(contract)}</div>
-            </div>
-            <div>
-              <div className="text-[11px] text-slate-400">Invoiced</div>
-              <div className="text-sm font-semibold text-slate-800">{formatCurrency(invoiced)}</div>
-            </div>
-            <div>
-              <div className="text-[11px] text-slate-400">Paid</div>
-              <div className="text-sm font-semibold text-emerald-600">{formatCurrency(paid)}</div>
-            </div>
-            <div>
-              <div className="text-[11px] text-slate-400">Balance due</div>
-              <div className="text-sm font-semibold text-brand">{formatCurrency(balanceDue)}</div>
-            </div>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-3 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-3 text-center sm:grid-cols-3">
+            {stats.map((s) => (
+              <div key={s.label}>
+                <div className="text-[11px] text-slate-400">{s.label}</div>
+                <div className={`text-sm font-semibold ${s.tone ?? "text-slate-800"}`}>{formatCurrency(s.value)}</div>
+              </div>
+            ))}
           </div>
+          {isTM && worked > estimate && estimate > 0 && (
+            <p className="-mt-1 text-xs text-amber-600">
+              Work to date is {formatCurrency(worked - estimate)} over the estimate — the final captures the agreed overage.
+            </p>
+          )}
 
           <SegmentedControl
             activeId={mode}
@@ -193,6 +227,19 @@ export function ProgressInvoiceButton({
             )
           ) : (
             <div className="space-y-3">
+              <div>
+                <Label>Draw type</Label>
+                <SegmentedControl
+                  activeId={kind}
+                  onSelect={(id) => setKind(id as DrawKind)}
+                  items={[
+                    { id: "deposit", label: "Deposit" },
+                    { id: "progress", label: "Progress" },
+                    { id: "final", label: "Final" },
+                  ]}
+                />
+              </div>
+
               <SegmentedControl
                 activeId={billMode}
                 onSelect={(id) => setBillMode(id as "percent" | "fixed")}
@@ -201,9 +248,10 @@ export function ProgressInvoiceButton({
                   { id: "fixed", label: "Fixed amount" },
                 ]}
               />
+
               {billMode === "percent" ? (
                 <div>
-                  <Label htmlFor="pct">Percent of remaining contract ({formatCurrency(uninvoiced)})</Label>
+                  <Label htmlFor="pct">Percent of remaining estimate ({formatCurrency(remainingToEstimate)})</Label>
                   <div className="flex items-center gap-2">
                     <Input id="pct" type="number" min={1} max={100} value={pct} onChange={(e) => setPct(Number(e.target.value))} className="w-24" />
                     <span className="text-sm text-slate-500">%</span>
@@ -225,12 +273,25 @@ export function ProgressInvoiceButton({
                 <div>
                   <Label htmlFor="fixed">Invoice amount ($)</Label>
                   <NumberInput id="fixed" value={fixed} onValueChange={setFixed} className="w-40" />
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {remainingToEstimate > 0 && (
+                      <button type="button" onClick={() => setFixed(remainingToEstimate)} className="rounded-full border border-slate-300 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-50">
+                        To estimate ({formatCurrency(remainingToEstimate)})
+                      </button>
+                    )}
+                    {isTM && unbilledWork > 0 && (
+                      <button type="button" onClick={() => setFixed(unbilledWork)} className="rounded-full border border-slate-300 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-50">
+                        Work to date ({formatCurrency(unbilledWork)})
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
+
               <div className="rounded-lg bg-brand/5 px-3 py-2 text-sm">
-                New invoice: <span className="font-bold text-slate-900">{formatCurrency(newAmount)}</span>
-                {uninvoiced === 0 && billMode === "percent" && (
-                  <span className="text-amber-600"> · contract fully invoiced — use a fixed amount for extras</span>
+                New {kind} invoice: <span className="font-bold text-slate-900">{formatCurrency(newAmount)}</span>
+                {kind === "final" && isTM && (
+                  <span className="text-slate-500"> · then import labor & materials on the invoice for the itemized total</span>
                 )}
               </div>
             </div>
