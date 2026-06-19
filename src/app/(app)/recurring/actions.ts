@@ -24,11 +24,9 @@ function advance(date: string, frequency: string): string {
 }
 
 export async function saveRecurring(formData: FormData, id?: string): Promise<Result> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
 
   const kind = String(formData.get("kind") ?? "job");
   const title = String(formData.get("title") ?? "").trim();
@@ -54,7 +52,7 @@ export async function saveRecurring(formData: FormData, id?: string): Promise<Re
     const { error } = await supabase.from("recurring_templates").update(row).eq("id", id);
     if (error) return { ok: false, error: error.message };
   } else {
-    const { error } = await supabase.from("recurring_templates").insert({ ...row, created_by: user.id });
+    const { error } = await supabase.from("recurring_templates").insert({ ...row, created_by: ctx.userId });
     if (error) return { ok: false, error: error.message };
   }
   revalidatePath("/recurring");
@@ -62,7 +60,9 @@ export async function saveRecurring(formData: FormData, id?: string): Promise<Re
 }
 
 export async function setRecurringActive(id: string, active: boolean): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { error } = await supabase.from("recurring_templates").update({ active }).eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/recurring");
@@ -70,7 +70,9 @@ export async function setRecurringActive(id: string, active: boolean): Promise<R
 }
 
 export async function deleteRecurring(id: string): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { error } = await supabase.from("recurring_templates").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/recurring");
@@ -113,14 +115,12 @@ async function runTemplate(supabase: any, t: any, userId: string): Promise<boole
 }
 
 export async function generateOne(id: string): Promise<Result> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { data: t } = await supabase.from("recurring_templates").select("*").eq("id", id).maybeSingle();
   if (!t) return { ok: false, error: "Template not found." };
-  const ok = await runTemplate(supabase, t, user.id);
+  const ok = await runTemplate(supabase, t, ctx.userId);
   if (!ok) return { ok: false, error: "Could not generate." };
   revalidatePath("/recurring");
   revalidatePath(t.kind === "job" ? "/jobs" : "/bills");
@@ -129,11 +129,9 @@ export async function generateOne(id: string): Promise<Result> {
 
 /** Generate every active template that is due (next_date on or before today). */
 export async function generateDue(): Promise<Result> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const today = new Date().toISOString().slice(0, 10);
   const { data: due } = await supabase
     .from("recurring_templates")
@@ -146,7 +144,7 @@ export async function generateDue(): Promise<Result> {
     let guard = 0;
     let cur = { ...t };
     while (cur.next_date <= today && guard++ < 24) {
-      const ok = await runTemplate(supabase, cur, user.id);
+      const ok = await runTemplate(supabase, cur, ctx.userId);
       if (!ok) break;
       cur = { ...cur, next_date: advance(cur.next_date, cur.frequency) };
       count++;

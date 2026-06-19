@@ -71,7 +71,9 @@ function publicInvoiceLink(token: string) {
 export async function textInvoice(
   id: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { data: invoice } = await supabase
     .from("invoices")
     .select("invoice_number, total, amount_paid, status, public_token, customers(name, phone)")
@@ -99,7 +101,9 @@ export async function textInvoice(
 export async function emailInvoice(
   id: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
 
   const { data: invoice } = await supabase
     .from("invoices")
@@ -163,11 +167,9 @@ export type Result = { ok: boolean; error?: string; id?: string };
 
 /** Convert an accepted (or any) quote into a draft invoice, copying line items. */
 export async function createInvoiceFromQuote(quoteId: string): Promise<Result> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
 
   const { data: quote, error: qErr } = await supabase
     .from("quotes")
@@ -199,7 +201,7 @@ export async function createInvoiceFromQuote(quoteId: string): Promise<Result> {
       tax: quote.tax,
       total: quote.total,
       status: "draft",
-      created_by: user.id,
+      created_by: ctx.userId,
     })
     .select("id")
     .single();
@@ -234,11 +236,9 @@ export async function createBlankInvoice(input: {
   title: string;
   tax_rate: number;
 }): Promise<Result> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
 
   // If a job is chosen, inherit its customer (and a title) so the invoice is
   // never orphaned from the job it belongs to — this is what makes the payment
@@ -265,7 +265,7 @@ export async function createBlankInvoice(input: {
       title: title || null,
       tax_rate: input.tax_rate || 0,
       status: "draft",
-      created_by: user.id,
+      created_by: ctx.userId,
     })
     .select("id")
     .single();
@@ -340,7 +340,9 @@ async function replaceImportedItems(
 
 /** Import the linked job's quote line items into this invoice (idempotent). */
 export async function importQuoteItemsIntoInvoice(invoiceId: string): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { data: inv } = await supabase
     .from("invoices")
     .select("id, job_id, quote_id")
@@ -388,7 +390,9 @@ export async function importQuoteItemsIntoInvoice(invoiceId: string): Promise<Re
 /** Import labor from the job's closed time entries: one line per person,
  *  hours × their hourly rate (falls back to the org default labor rate). */
 export async function importLaborIntoInvoice(invoiceId: string): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { data: inv } = await supabase
     .from("invoices")
     .select("id, job_id")
@@ -461,7 +465,9 @@ export async function importLaborIntoInvoice(invoiceId: string): Promise<Result>
  *  marked up by `markupPercent` (so they bill at sell price, not cost — the
  *  contractor doesn't do the math by hand). Each line stays editable after. */
 export async function importCostsIntoInvoice(invoiceId: string, markupPercent = 0): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { data: inv } = await supabase
     .from("invoices")
     .select("id, job_id")
@@ -592,7 +598,9 @@ export async function updateInvoiceItem(
   invoiceId: string,
   item: { description: string; quantity: number; unit_price: number },
 ): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   if (!item.description.trim()) return { ok: false, error: "Description is required." };
   const { error } = await supabase
     .from("invoice_items")
@@ -612,7 +620,9 @@ export async function deleteInvoiceItem(
   itemId: string,
   invoiceId: string,
 ): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { error } = await supabase.from("invoice_items").delete().eq("id", itemId);
   if (error) return { ok: false, error: error.message };
   await recalcInvoice(supabase, invoiceId);
@@ -624,7 +634,9 @@ export async function setInvoiceStatus(
   id: string,
   status: string,
 ): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { error } = await supabase.from("invoices").update({ status }).eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/billing");
@@ -740,7 +752,9 @@ export async function setInvoiceTaxRate(
   invoiceId: string,
   ratePercent: number,
 ): Promise<{ ok: boolean; error?: string }> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const rate = Number.isFinite(ratePercent) ? ratePercent / 100 : 0;
   const { error } = await supabase.from("invoices").update({ tax_rate: rate }).eq("id", invoiceId);
   if (error) return { ok: false, error: error.message };
