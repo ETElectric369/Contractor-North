@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
 import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
+import { drawAmount } from "@/lib/invoice-math";
 
 export type Result = { ok: boolean; error?: string; id?: string; count?: number };
 
@@ -197,12 +198,12 @@ export async function createProgressInvoice(
   let amount: number;
   let label: string;
   if (input.mode === "percent") {
-    const pct = Math.max(0, Math.min(100, Number(input.value) || 0));
     if (estimate <= 0) return { ok: false, error: "Add a quote/estimate to bill a percentage — or bill a fixed amount." };
-    amount = Math.round((remaining * pct) / 100 * 100) / 100;
+    const pct = Math.max(0, Math.min(100, Number(input.value) || 0));
+    amount = drawAmount("percent", pct, remaining);
     label = `${title} — ${pct}% of remaining estimate`;
   } else {
-    amount = Math.round((Number(input.value) || 0) * 100) / 100;
+    amount = drawAmount("fixed", Number(input.value) || 0, remaining);
     label = title;
   }
   if (!(amount > 0)) return { ok: false, error: "Enter an amount above $0." };

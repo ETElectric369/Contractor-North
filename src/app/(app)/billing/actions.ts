@@ -8,6 +8,7 @@ import { pushInvoiceToQbo } from "@/lib/quickbooks";
 import { getOrgSettings } from "@/lib/org-settings";
 import { requireStaff } from "@/lib/staff-guard";
 import { computeJobLaborBilling, fetchJobLaborRows } from "@/lib/labor-billing";
+import { recalcTotals, resolveDrawCredit } from "@/lib/invoice-math";
 
 /** Post a credit/refund to the customer's account from an invoice. disposition
  *  "credit" keeps it on their account; "refund" flags accounting to pay it back. */
@@ -522,13 +523,9 @@ export async function createProgressReportInvoice(
 
   const { data: afterImport } = await supabase.from("invoices").select("total").eq("id", inv.id).maybeSingle();
   const importedTotal = Number(afterImport?.total ?? 0);
-  if (importedTotal <= 0.005) {
-    await supabase.from("invoices").delete().eq("id", inv.id);
-    return { ok: false, error: "No labor or materials are logged on this job yet to bill." };
-  }
 
-  // Credit prior billings actually SENT to the customer (deposit + earlier sent
-  // draws; drafts and void excluded) so they only pay for work since the last bill.
+  // Prior billings actually SENT to the customer (deposit + earlier sent draws;
+  // drafts and void excluded) so they only pay for work since the last bill.
   const { data: priorInvs } = await supabase
     .from("invoices")
     .select("total, status")
@@ -538,20 +535,27 @@ export async function createProgressReportInvoice(
     (s: number, i: any) => (i.status !== "void" && i.status !== "draft" ? s + Number(i.total ?? 0) : s),
     0,
   );
-  // H1: a draw must never go negative. If prior billings already cover the work
-  // logged so far, there's nothing new to bill — drop the draft. Otherwise credit
-  // AT MOST the imported work so the balance floors at $0, never below.
-  if (priorBilled > 0.005 && importedTotal - priorBilled <= 0.005) {
+
+  // H1: a draw must never go negative. The pure, unit-tested resolveDrawCredit
+  // decides whether to bail (nothing logged / prior billings already cover it) or
+  // how much to credit (floored so the balance never drops below $0).
+  const decision = resolveDrawCredit(importedTotal, priorBilled);
+  if (!decision.ok) {
     await supabase.from("invoices").delete().eq("id", inv.id);
-    return { ok: false, error: "Prior billings already cover the work logged so far — nothing new to bill yet." };
+    return {
+      ok: false,
+      error:
+        decision.reason === "no-work"
+          ? "No labor or materials are logged on this job yet to bill."
+          : "Prior billings already cover the work logged so far — nothing new to bill yet.",
+    };
   }
-  const credit = Math.min(priorBilled, importedTotal);
-  if (credit > 0.005) {
+  if (decision.credit > 0.005) {
     await addInvoiceItem(inv.id, {
       description: "Less previous billings (deposit & prior draws)",
       quantity: 1,
       unit: "lot",
-      unit_price: -(Math.round(credit * 100) / 100),
+      unit_price: -decision.credit,
     });
   }
 
@@ -738,20 +742,12 @@ async function recalcInvoice(supabase: any, invoiceId: string) {
     supabase.from("invoices").select("tax_rate, status").eq("id", invoiceId).single(),
   ]);
 
-  const subtotal =
-    items?.reduce((s: number, i: any) => s + Number(i.line_total ?? 0), 0) ?? 0;
-  const taxRate = Number(inv?.tax_rate ?? 0);
-  const tax = Math.round(subtotal * taxRate * 100) / 100;
-  const total = Math.round((subtotal + tax) * 100) / 100;
-  const amountPaid =
-    pays?.reduce((s: number, p: any) => s + Number(p.amount ?? 0), 0) ?? 0;
-
-  let status = inv?.status ?? "draft";
-  if (status !== "void") {
-    if (amountPaid >= total && total > 0) status = "paid";
-    else if (amountPaid > 0) status = "partial";
-    else if (status === "paid" || status === "partial") status = "sent";
-  }
+  const { subtotal, tax, total, amountPaid, status } = recalcTotals(
+    (items ?? []).map((i: any) => Number(i.line_total ?? 0)),
+    (pays ?? []).map((p: any) => Number(p.amount ?? 0)),
+    Number(inv?.tax_rate ?? 0),
+    inv?.status ?? "draft",
+  );
 
   await supabase
     .from("invoices")
