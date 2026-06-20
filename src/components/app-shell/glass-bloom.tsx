@@ -147,12 +147,18 @@ export function GlassBloom({
   const rowTop = (i: number) => panelTop + PAD + HEADER + i * step;
   const rowCY = (i: number) => rowTop(i) + rowH / 2;
 
-  // Where the branch noodles START. The panel is clamped to stay on-screen, so
-  // for an edge icon it no longer sits directly over/under the icon — if the
-  // noodles kept starting at the raw icon x they'd fan sideways and the menu
-  // looks "off-center." Start them from the panel's own span instead, so they
-  // meet the panel where it actually is. (The icon still glows underneath.)
-  const branchX = clamp(anchor.x, panelLeft + 16, panelLeft + PANEL_W - 16);
+  // Where the branch noodles START.
+  //  • direction "up" (bottom dock): the panel sits ABOVE the icon and is clamped
+  //    horizontally to stay on-screen, so for an edge icon it's no longer directly
+  //    over the icon — starting the noodles from the panel's own span keeps the
+  //    menu from looking off-center.
+  //  • direction "right" (sidebar dock): the panel sits to the RIGHT of the icon,
+  //    so the icon's x is LEFT of the panel — clamping it into the panel span
+  //    collapsed every noodle to a ~16px stub hidden at the panel edge (the
+  //    "noodles are gone on the sidebar" bug). Start at the icon's actual x so the
+  //    noodle curves from the icon across to the panel.
+  const branchX =
+    direction === "up" ? clamp(anchor.x, panelLeft + 16, panelLeft + PANEL_W - 16) : anchor.x;
 
   function branch(by: number) {
     const bx = panelLeft;
