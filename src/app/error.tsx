@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import Link from "next/link";
 import { AlertTriangle } from "lucide-react";
+import * as Sentry from "@sentry/nextjs";
 import { Button } from "@/components/ui/button";
 
 export default function Error({
@@ -13,8 +14,8 @@ export default function Error({
   reset: () => void;
 }) {
   useEffect(() => {
-    // Surface to the console; wire to an error tracker (Sentry) later.
     console.error(error);
+    Sentry.captureException(error); // no-op until a DSN is configured
   }, [error]);
 
   return (
