@@ -7,6 +7,7 @@ import { ChevronLeft, ChevronRight, Check, Download, Undo2 } from "lucide-react"
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { formatCurrency, formatDuration } from "@/lib/utils";
+import { payLine } from "@/lib/payroll-math";
 import { markPeriodPaid, unmarkPeriodPaid } from "./actions";
 
 // Format a calendar date STRING without a timezone shift — date-only strings
@@ -45,9 +46,9 @@ export function PayrollView({
   const endInclusive = new Date(new Date(`${period.end}T00:00:00Z`).getTime() - 86_400_000).toISOString().slice(0, 10);
   const label = `${fmtYmd(period.start)} – ${fmtYmd(endInclusive)}`;
 
-  const gross = (r: Row) => Math.round(r.unpaidHours * r.rate * 100) / 100;
-  const mileagePay = (r: Row) => Math.round(r.unpaidMiles * mileageRate * 100) / 100;
-  const total = (r: Row) => gross(r) + mileagePay(r);
+  const gross = (r: Row) => payLine(r.unpaidHours, r.rate, r.unpaidMiles, mileageRate).gross;
+  const mileagePay = (r: Row) => payLine(r.unpaidHours, r.rate, r.unpaidMiles, mileageRate).mileagePay;
+  const total = (r: Row) => payLine(r.unpaidHours, r.rate, r.unpaidMiles, mileageRate).total;
 
   const payable = rows.filter((r) => r.unpaidHours > 0);
   const totals = {
@@ -74,10 +75,9 @@ export function PayrollView({
     const lines = rows.map((r) => {
       const paid = r.unpaidHours === 0 && r.paidHours > 0;
       const hrs = paid ? r.paidHours : r.unpaidHours;
-      const g = Math.round(hrs * r.rate * 100) / 100;
       const mi = paid ? r.paidMiles : r.unpaidMiles;
-      const milePay = Math.round(mi * mileageRate * 100) / 100;
-      return [r.name, hrs.toFixed(2), r.rate.toFixed(2), g.toFixed(2), mi.toFixed(1), milePay.toFixed(2), (g + milePay).toFixed(2), paid ? "Paid" : "Unpaid"];
+      const { gross: g, mileagePay: milePay, total: t } = payLine(hrs, r.rate, mi, mileageRate);
+      return [r.name, hrs.toFixed(2), r.rate.toFixed(2), g.toFixed(2), mi.toFixed(1), milePay.toFixed(2), t.toFixed(2), paid ? "Paid" : "Unpaid"];
     });
     const csv = [
       [`Payroll — ${label}`],
