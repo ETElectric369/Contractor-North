@@ -1,5 +1,7 @@
 import { getStripe } from "@/lib/stripe";
 import { createServiceClient } from "@/lib/supabase/server";
+import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
+import { formatCurrency } from "@/lib/utils";
 import type Stripe from "stripe";
 
 export const runtime = "nodejs";
@@ -56,7 +58,7 @@ export async function POST(req: Request) {
       .eq("invoice_id", invoiceId);
     const { data: inv } = await supabase
       .from("invoices")
-      .select("total, status")
+      .select("total, status, invoice_number, customers(name)")
       .eq("id", invoiceId)
       .single();
     const paid =
@@ -70,6 +72,16 @@ export async function POST(req: Request) {
       .from("invoices")
       .update({ amount_paid: paid, status })
       .eq("id", invoiceId);
+
+    // A customer paid online — ping office staff (no recorder to exclude).
+    // Awaited (not fire-and-forget): a serverless function can freeze right after
+    // responding to Stripe, killing an un-awaited push. sendPush never throws.
+    const cust = (inv as any)?.customers?.name as string | undefined;
+    await sendPushToProfiles(await orgStaffIds(orgId), "invoice_paid", {
+      title: "Payment received",
+      body: `${formatCurrency(amount)} paid online on ${inv?.invoice_number || "an invoice"}${cust ? ` — ${cust}` : ""}`,
+      url: `/billing/${invoiceId}`,
+    });
   }
 
   async function syncSubscription(sub: Stripe.Subscription) {

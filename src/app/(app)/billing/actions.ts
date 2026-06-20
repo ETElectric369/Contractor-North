@@ -9,6 +9,8 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { requireStaff } from "@/lib/staff-guard";
 import { computeJobLaborBilling, fetchJobLaborRows } from "@/lib/labor-billing";
 import { recalcTotals, resolveDrawCredit, shouldBlockStandardImport } from "@/lib/invoice-math";
+import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
+import { formatCurrency } from "@/lib/utils";
 
 /** Post a credit/refund to the customer's account from an invoice. disposition
  *  "credit" keeps it on their account; "refund" flags accounting to pay it back. */
@@ -721,7 +723,11 @@ export async function recordPayment(input: {
 
   // M2: confirm the invoice is visible to this org (a cross-org id returns null
   // under the org-scoped read policy) before recording a payment against it.
-  const { data: inv } = await supabase.from("invoices").select("id").eq("id", input.invoice_id).maybeSingle();
+  const { data: inv } = await supabase
+    .from("invoices")
+    .select("id, org_id, invoice_number, customers(name)")
+    .eq("id", input.invoice_id)
+    .maybeSingle();
   if (!inv) return { ok: false, error: "Invoice not found." };
 
   const paidAt = dateToIso(input.paid_at);
@@ -736,6 +742,17 @@ export async function recordPayment(input: {
   if (error) return { ok: false, error: error.message };
 
   await recalcInvoice(supabase, input.invoice_id);
+  // Cash-in ping to the OTHER office staff (the recorder already knows).
+  const cust = (inv as any).customers?.name as string | undefined;
+  void sendPushToProfiles(
+    (await orgStaffIds(inv.org_id)).filter((id) => id !== ctx.userId),
+    "invoice_paid",
+    {
+      title: "Payment recorded",
+      body: `${formatCurrency(input.amount)} on ${inv.invoice_number || "an invoice"}${cust ? ` — ${cust}` : ""}`,
+      url: `/billing/${input.invoice_id}`,
+    },
+  );
   revalidatePath(`/billing/${input.invoice_id}`);
   revalidatePath("/billing");
   return { ok: true };

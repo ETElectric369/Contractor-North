@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Check, Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { notifyQuoteAccepted } from "./actions";
 
 export function PublicQuoteAccept({
   token,
@@ -31,6 +32,7 @@ export function PublicQuoteAccept({
     }
     setDone(true);
     setBusy(false);
+    void notifyQuoteAccepted(token); // fire-and-forget office ping (best-effort)
   }
 
   if (done) {

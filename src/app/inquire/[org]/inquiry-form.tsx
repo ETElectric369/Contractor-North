@@ -4,6 +4,7 @@ import { useState } from "react";
 import { CheckCircle2, Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
+import { notifyNewInquiry } from "./actions";
 
 export function InquiryForm({ org, brandColor }: { org: string; brandColor: string }) {
   const [name, setName] = useState("");
@@ -41,6 +42,7 @@ export function InquiryForm({ org, brandColor }: { org: string; brandColor: stri
       });
       if (rpcErr) throw rpcErr;
       setDone(true);
+      void notifyNewInquiry(org); // fire-and-forget office ping (best-effort)
     } catch (err: any) {
       setError(err?.message ?? "Something went wrong. Please call us instead.");
     } finally {
