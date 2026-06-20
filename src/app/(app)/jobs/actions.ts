@@ -57,6 +57,25 @@ export async function finishJob(
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
 
+  // A draw-billed job is finished with a Final draw, not a standard invoice. Mark it
+  // complete without creating a conflicting standard invoice (H4), and hand back the
+  // latest draw so the UI lands on the job's billing instead of a dead-end.
+  const { data: draws } = await supabase
+    .from("invoices")
+    .select("id")
+    .eq("job_id", jobId)
+    .neq("status", "void")
+    .in("invoice_kind", ["deposit", "progress", "final"])
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (draws && draws.length) {
+    const { error } = await supabase.from("jobs").update({ status: "complete" }).eq("id", jobId);
+    if (error) return { ok: false, error: error.message };
+    revalidatePath(`/jobs/${jobId}`);
+    revalidatePath("/jobs");
+    return { ok: true, id: draws[0].id };
+  }
+
   const inv = await createInvoiceForJob(jobId);
   if (!inv.ok || !inv.id) return { ok: false, error: inv.error ?? "Could not create the invoice." };
 

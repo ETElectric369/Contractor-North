@@ -190,6 +190,11 @@ export async function createInvoiceFromQuote(quoteId: string): Promise<Result> {
     .maybeSingle();
   if (existingInv) return { ok: true, id: existingInv.id };
 
+  // H4: a job already on the draw path can't also be billed by a standard invoice
+  // carrying the full quoted amount (no import step would ever credit the draws).
+  const drawBlock = await blockStandardCreateOnDrawJob(supabase, quote.job_id);
+  if (drawBlock) return drawBlock;
+
   const { data: invoice, error } = await supabase
     .from("invoices")
     .insert({
@@ -242,6 +247,10 @@ export async function createBlankInvoice(input: {
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
 
+  // H4: a job already on the draw path is billed by draws, not a standard invoice.
+  const drawBlock = await blockStandardCreateOnDrawJob(supabase, input.job_id);
+  if (drawBlock) return drawBlock;
+
   // If a job is chosen, inherit its customer (and a title) so the invoice is
   // never orphaned from the job it belongs to — this is what makes the payment
   // show up on the job's revenue/costs.
@@ -287,8 +296,16 @@ export async function addInvoiceItem(
   const supabase = ctx.supabase;
   if (Math.abs((item.quantity || 1) * (item.unit_price || 0)) > 9_999_999_999)
     return { ok: false, error: "That amount is too large." };
-  const { data: inv } = await supabase.from("invoices").select("id").eq("id", invoiceId).maybeSingle();
+  const { data: inv } = await supabase
+    .from("invoices")
+    .select("id, job_id, invoice_kind")
+    .eq("id", invoiceId)
+    .maybeSingle();
   if (!inv) return { ok: false, error: "Invoice not found." };
+  if (inv.job_id) {
+    const conflict = await standardInvoiceOnDrawJob(supabase, inv, invoiceId);
+    if (conflict) return conflict; // H4: can't add billable lines to a standard invoice on a draw job
+  }
   const { error } = await supabase.from("invoice_items").insert({
     invoice_id: invoiceId,
     description: item.description,
@@ -347,10 +364,14 @@ export async function importQuoteItemsIntoInvoice(invoiceId: string): Promise<Re
   const supabase = ctx.supabase;
   const { data: inv } = await supabase
     .from("invoices")
-    .select("id, job_id, quote_id")
+    .select("id, job_id, quote_id, invoice_kind")
     .eq("id", invoiceId)
     .maybeSingle();
   if (!inv) return { ok: false, error: "Invoice not found." };
+  if (inv.job_id) {
+    const conflict = await standardInvoiceOnDrawJob(supabase, inv, invoiceId);
+    if (conflict) return conflict; // H4: don't re-bill quoted scope onto a standard invoice on a draw job
+  }
 
   let quoteId = inv.quote_id;
   if (!quoteId && inv.job_id) {
@@ -389,30 +410,65 @@ export async function importQuoteItemsIntoInvoice(invoiceId: string): Promise<Re
   return { ok: true };
 }
 
-/** Import labor from the job's closed time entries: one line per person,
- *  hours × their hourly rate (falls back to the org default labor rate). */
-/** H4 guard: a job billed via progress draws (deposit/progress/final) must use ONE
- *  billing path. Block importing labor/materials onto a STANDARD invoice for such a
- *  job — that double-bills the work the draws already cover. Returns an error
- *  Result when blocked, else null. (A draw invoice itself is fine: that's the path.) */
-async function standardInvoiceOnDrawJob(supabase: any, inv: any, invoiceId: string): Promise<Result | null> {
-  if ((inv?.invoice_kind ?? "standard") !== "standard") return null;
-  const { data: draws } = await supabase
+// ── H4: one billing path per job ────────────────────────────────────────────
+// A job billed via progress draws (deposit/progress/final) must NOT also be billed
+// on a standard invoice — that double-bills the work the draws already cover. The
+// guard lives at every chokepoint that puts billable content on a standard invoice
+// (import labor/materials/quote-items, manual line add, create-from-quote/blank), so
+// no single door is left open. A draw invoice itself is never blocked: it IS the path.
+
+/** The job's active draw (deposit/progress/final, non-void) if any — the signal that
+ *  the job is on the draw path. Excludes `excludeInvoiceId` (the invoice being acted
+ *  on, so a draw never blocks itself). Returns the row (id/status/invoice_number). */
+async function activeDrawOnJob(supabase: any, jobId: string, excludeInvoiceId?: string): Promise<any | null> {
+  let q = supabase
     .from("invoices")
-    .select("id")
-    .eq("job_id", inv.job_id)
-    .neq("id", invoiceId)
+    .select("id, status, invoice_number")
+    .eq("job_id", jobId)
     .neq("status", "void")
     .in("invoice_kind", ["deposit", "progress", "final"])
     .limit(1);
-  return shouldBlockStandardImport(inv?.invoice_kind, !!(draws && draws.length))
-    ? {
-        ok: false,
-        error:
-          "This job is billed with progress draws — add a progress/final draw instead of importing labor/materials onto a standard invoice.",
-      }
-    : null;
+  if (excludeInvoiceId) q = q.neq("id", excludeInvoiceId);
+  const { data } = await q;
+  return data && data.length ? data[0] : null;
 }
+
+/** The H4 block message, pointing at the correct next action: a DRAFT draw must be
+ *  sent/deleted (a 2nd draft is itself blocked, so "add a draw" would be a dead-end);
+ *  a sent draw means the user should add a draw rather than bill standard. */
+function drawConflictError(draw: any): Result {
+  if (draw && draw.status === "draft") {
+    const label = draw.invoice_number ? `Draft ${draw.invoice_number}` : "A draft draw";
+    return {
+      ok: false,
+      error: `${label} is still open on this job — send or delete that draw instead of billing on a standard invoice.`,
+    };
+  }
+  return {
+    ok: false,
+    error: "This job is billed with progress draws — add a progress/final draw instead of billing on a standard invoice.",
+  };
+}
+
+/** Guard the IMPORT / ADD-content paths: block when the target is a STANDARD invoice
+ *  on a job that already has an active draw. Returns an error Result, else null. */
+async function standardInvoiceOnDrawJob(supabase: any, inv: any, invoiceId: string): Promise<Result | null> {
+  if ((inv?.invoice_kind ?? "standard") !== "standard") return null;
+  const draw = await activeDrawOnJob(supabase, inv.job_id, invoiceId);
+  return shouldBlockStandardImport(inv?.invoice_kind, !!draw) ? drawConflictError(draw) : null;
+}
+
+/** Guard standard-invoice CREATION for a job: block making a new standard invoice for
+ *  a job already on the draw path (createInvoiceFromQuote embeds the full quoted amount
+ *  at creation, so the content guards never see it). Returns an error Result, else null. */
+async function blockStandardCreateOnDrawJob(supabase: any, jobId: string | null | undefined): Promise<Result | null> {
+  if (!jobId) return null;
+  const draw = await activeDrawOnJob(supabase, jobId);
+  return draw ? drawConflictError(draw) : null;
+}
+
+/** Import labor from the job's closed time entries: one line per person,
+ *  hours × their hourly rate (falls back to the org default labor rate). */
 
 export async function importLaborIntoInvoice(invoiceId: string): Promise<Result> {
   const ctx = await requireStaff();

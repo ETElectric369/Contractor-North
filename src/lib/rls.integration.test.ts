@@ -69,4 +69,29 @@ d("RLS multi-tenant isolation invariant", () => {
     expect(rows.length).toBe(2);
     for (const r of rows) expect(r.prosecdef).toBe(true);
   });
+
+  // The org_id-scoped checks above are blind to user-scoped tables (no org_id column,
+  // e.g. conversations/messages keyed by auth.uid()). These two checks cover them.
+  it("no RLS-enabled table is left policy-less (RLS on + 0 policies = locked-out or misconfigured)", async () => {
+    const { rows } = await client.query(`
+      select c.relname as tbl
+      from pg_class c join pg_namespace n on n.oid=c.relnamespace
+      where n.nspname='public' and c.relkind='r' and c.relrowsecurity
+        and (select count(*) from pg_policies p where p.schemaname='public' and p.tablename=c.relname)=0`);
+    expect(rows.map((r: any) => r.tbl)).toEqual([]);
+  });
+
+  it("user-scoped tables (conversations, messages) are RLS-protected even without org_id", async () => {
+    const { rows } = await client.query(`
+      select c.relname as tbl, c.relrowsecurity as rls_on,
+        (select count(*) from pg_policies p where p.schemaname='public' and p.tablename=c.relname) as policies
+      from pg_class c join pg_namespace n on n.oid=c.relnamespace
+      where n.nspname='public' and c.relkind='r' and c.relname in ('conversations','messages')`);
+    for (const t of ["conversations", "messages"]) {
+      const r = rows.find((x: any) => x.tbl === t);
+      expect(r, `${t} table should exist`).toBeTruthy();
+      expect(r.rls_on).toBe(true);
+      expect(Number(r.policies)).toBeGreaterThan(0);
+    }
+  });
 });
