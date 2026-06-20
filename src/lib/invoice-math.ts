@@ -66,6 +66,13 @@ export function drawAmount(mode: "percent" | "fixed", value: number, remaining: 
   return Math.max(0, cents(fin(value)));
 }
 
+/** H4: a STANDARD invoice on a job already billed via progress draws would
+ *  double-bill the work the draws cover — block importing labor/materials onto it.
+ *  (A draw invoice IS the billing path, so it's never blocked.) */
+export function shouldBlockStandardImport(invoiceKind: string | null | undefined, hasOtherDraws: boolean): boolean {
+  return (invoiceKind ?? "standard") === "standard" && hasOtherDraws;
+}
+
 /** Progress-report summary for a draw: % of the estimate completed (0 when there's
  *  no estimate — never divides by zero) and the balance left after this request
  *  (0 without an estimate, so it can't show a misleading negative). All finite. */

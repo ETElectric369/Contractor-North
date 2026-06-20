@@ -8,7 +8,7 @@ import { pushInvoiceToQbo } from "@/lib/quickbooks";
 import { getOrgSettings } from "@/lib/org-settings";
 import { requireStaff } from "@/lib/staff-guard";
 import { computeJobLaborBilling, fetchJobLaborRows } from "@/lib/labor-billing";
-import { recalcTotals, resolveDrawCredit } from "@/lib/invoice-math";
+import { recalcTotals, resolveDrawCredit, shouldBlockStandardImport } from "@/lib/invoice-math";
 
 /** Post a credit/refund to the customer's account from an invoice. disposition
  *  "credit" keeps it on their account; "refund" flags accounting to pay it back. */
@@ -391,16 +391,41 @@ export async function importQuoteItemsIntoInvoice(invoiceId: string): Promise<Re
 
 /** Import labor from the job's closed time entries: one line per person,
  *  hours × their hourly rate (falls back to the org default labor rate). */
+/** H4 guard: a job billed via progress draws (deposit/progress/final) must use ONE
+ *  billing path. Block importing labor/materials onto a STANDARD invoice for such a
+ *  job — that double-bills the work the draws already cover. Returns an error
+ *  Result when blocked, else null. (A draw invoice itself is fine: that's the path.) */
+async function standardInvoiceOnDrawJob(supabase: any, inv: any, invoiceId: string): Promise<Result | null> {
+  if ((inv?.invoice_kind ?? "standard") !== "standard") return null;
+  const { data: draws } = await supabase
+    .from("invoices")
+    .select("id")
+    .eq("job_id", inv.job_id)
+    .neq("id", invoiceId)
+    .neq("status", "void")
+    .in("invoice_kind", ["deposit", "progress", "final"])
+    .limit(1);
+  return shouldBlockStandardImport(inv?.invoice_kind, !!(draws && draws.length))
+    ? {
+        ok: false,
+        error:
+          "This job is billed with progress draws — add a progress/final draw instead of importing labor/materials onto a standard invoice.",
+      }
+    : null;
+}
+
 export async function importLaborIntoInvoice(invoiceId: string): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
   const { data: inv } = await supabase
     .from("invoices")
-    .select("id, job_id")
+    .select("id, job_id, invoice_kind")
     .eq("id", invoiceId)
     .maybeSingle();
   if (!inv?.job_id) return { ok: false, error: "This invoice isn't linked to a job." };
+  const conflict = await standardInvoiceOnDrawJob(supabase, inv, invoiceId);
+  if (conflict) return conflict;
 
   // Bill the EXACT time on this job via the shared labor-billing helper (so the
   // billed lines reconcile to the penny with the progress-report "work to date").
@@ -438,10 +463,12 @@ export async function importCostsIntoInvoice(invoiceId: string, markupPercent = 
   const supabase = ctx.supabase;
   const { data: inv } = await supabase
     .from("invoices")
-    .select("id, job_id")
+    .select("id, job_id, invoice_kind")
     .eq("id", invoiceId)
     .maybeSingle();
   if (!inv?.job_id) return { ok: false, error: "This invoice isn't linked to a job." };
+  const conflict = await standardInvoiceOnDrawJob(supabase, inv, invoiceId);
+  if (conflict) return conflict;
 
   const [{ data: pos }, { data: bills }] = await Promise.all([
     supabase.from("purchase_orders").select("po_number, vendor, total").eq("job_id", inv.job_id),

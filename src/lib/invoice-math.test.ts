@@ -1,5 +1,20 @@
 import { describe, it, expect } from "vitest";
-import { recalcTotals, resolveDrawCredit, drawAmount, progressSummary } from "@/lib/invoice-math";
+import { recalcTotals, resolveDrawCredit, drawAmount, progressSummary, shouldBlockStandardImport } from "@/lib/invoice-math";
+
+describe("shouldBlockStandardImport (H4 — one billing path per job)", () => {
+  it("blocks importing onto a STANDARD invoice when the job has draws", () => {
+    expect(shouldBlockStandardImport("standard", true)).toBe(true);
+    expect(shouldBlockStandardImport(null, true)).toBe(true); // null kind = standard
+  });
+  it("allows a standard invoice when the job has NO draws", () => {
+    expect(shouldBlockStandardImport("standard", false)).toBe(false);
+  });
+  it("never blocks a draw invoice (it IS the billing path)", () => {
+    expect(shouldBlockStandardImport("progress", true)).toBe(false);
+    expect(shouldBlockStandardImport("final", true)).toBe(false);
+    expect(shouldBlockStandardImport("deposit", true)).toBe(false);
+  });
+});
 
 describe("recalcTotals", () => {
   it("sums lines, applies tax, sums payments", () => {
