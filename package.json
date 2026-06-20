@@ -9,6 +9,8 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "db:push": "node scripts/run-migrations.mjs --verify"
   },
   "dependencies": {
@@ -41,6 +43,7 @@
     "pg": "^8.21.0",
     "postcss": "^8.5.1",
     "tailwindcss": "^4.0.0",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "vitest": "^4.1.9"
   }
 }
