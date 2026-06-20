@@ -12,7 +12,10 @@ const currency = new Intl.NumberFormat("en-US", {
 });
 
 export function formatCurrency(value: number | null | undefined) {
-  return currency.format(Number(value ?? 0));
+  const n = Number(value ?? 0);
+  // A NaN/Infinity slipping in would render "$NaN"/"$∞" on a customer-facing
+  // payment request — coerce non-finite to 0.
+  return currency.format(Number.isFinite(n) ? n : 0);
 }
 
 export function formatDate(value: string | Date | null | undefined) {
@@ -44,7 +47,10 @@ export function hoursBetween(
 ) {
   const s = new Date(start).getTime();
   const e = new Date(end).getTime();
-  const ms = Math.max(0, e - s - lunchMinutes * 60_000);
+  if (!Number.isFinite(s) || !Number.isFinite(e)) return 0; // bad timestamp → 0, not NaN
+  // A negative lunch would ADD payable time; clamp to >= 0. Non-numeric → 0.
+  const lunch = Math.max(0, Number(lunchMinutes) || 0);
+  const ms = Math.max(0, e - s - lunch * 60_000);
   return Math.round((ms / 3_600_000) * 100) / 100;
 }
 

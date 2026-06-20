@@ -1,24 +1,36 @@
 /** Pure money math for invoices/draws, extracted from the server actions so it can
- *  be unit-tested without a database. The actions do the DB I/O around these. */
+ *  be unit-tested without a database. The actions do the DB I/O around these.
+ *  Inputs come from the DB / JSONB / free-edit UI, so every numeric input is run
+ *  through `fin` — a single NaN/Infinity/null must never poison a money total. */
+
+/** Coerce to a finite number, else 0. */
+const fin = (x: unknown): number => {
+  const n = Number(x);
+  return Number.isFinite(n) ? n : 0;
+};
+const cents = (n: number) => Math.round(n * 100) / 100;
 
 /** Recompute an invoice's rollup from its line totals + payments. Negative line
- *  items (e.g. a "Less previous billings" credit) flow through naturally. Status
- *  auto-advances paid/partial/sent but never disturbs a voided invoice. */
+ *  items (a "Less previous billings" credit) flow through naturally. Amounts are
+ *  rounded to cents so float dust (0.01 + 2.01 summing to 2.0199…) can't leave a
+ *  fully-paid invoice stuck "partial". Status never disturbs a voided invoice. */
 export function recalcTotals(
   lineTotals: number[],
   paymentAmounts: number[],
   taxRate: number,
   currentStatus: string,
 ): { subtotal: number; tax: number; total: number; amountPaid: number; status: string } {
-  const subtotal = lineTotals.reduce((s, n) => s + Number(n ?? 0), 0);
-  const rate = Number(taxRate ?? 0);
-  const tax = Math.round(subtotal * rate * 100) / 100;
-  const total = Math.round((subtotal + tax) * 100) / 100;
-  const amountPaid = paymentAmounts.reduce((s, n) => s + Number(n ?? 0), 0);
+  const subtotal = cents(lineTotals.reduce((s, n) => s + fin(n), 0));
+  const tax = cents(subtotal * fin(taxRate));
+  const total = cents(subtotal + tax);
+  const amountPaid = cents(paymentAmounts.reduce((s, n) => s + fin(n), 0));
 
   let status = currentStatus ?? "draft";
   if (status !== "void") {
-    if (amountPaid >= total && total > 0) status = "paid";
+    if (total <= 0.005) {
+      // A $0 / credit-memo invoice is settled once it has left draft; a $0 draft stays draft.
+      if (status !== "draft") status = "paid";
+    } else if (amountPaid + 0.005 >= total) status = "paid";
     else if (amountPaid > 0) status = "partial";
     else if (status === "paid" || status === "partial") status = "sent";
   }
@@ -27,38 +39,44 @@ export function recalcTotals(
 
 /** Decide the prior-billings credit on an Actual-T&M draw so the draw can never go
  *  negative. importedTotal = labor+materials just itemized; priorBilled = sum of
- *  prior SENT (non-void, non-draft) billings on the job.
- *  - importedTotal ~0 → nothing logged to bill ("no-work").
+ *  prior SENT billings on the job (floored at 0 — a negative/NaN prior is treated
+ *  as no prior so it can never ADD money to the invoice).
+ *  - importedTotal ~0 (or non-finite) → nothing to bill ("no-work").
  *  - prior already covers the work → nothing new to bill ("covered").
  *  - otherwise → credit at most the imported work so the balance floors at $0. */
 export function resolveDrawCredit(
   importedTotal: number,
   priorBilled: number,
 ): { ok: true; credit: number } | { ok: false; reason: "no-work" | "covered" } {
-  if (importedTotal <= 0.005) return { ok: false, reason: "no-work" };
-  if (priorBilled > 0.005 && importedTotal - priorBilled <= 0.005) return { ok: false, reason: "covered" };
-  return { ok: true, credit: Math.round(Math.min(priorBilled, importedTotal) * 100) / 100 };
+  const work = fin(importedTotal);
+  const prior = Math.max(0, fin(priorBilled));
+  if (work <= 0.005) return { ok: false, reason: "no-work" };
+  if (prior > 0.005 && work - prior <= 0.005) return { ok: false, reason: "covered" };
+  return { ok: true, credit: cents(Math.max(0, Math.min(prior, work))) };
 }
 
 /** The dollar amount a deposit/progress draw bills: a % of the remaining estimate,
- *  or a fixed $. Percent is clamped 0-100. */
+ *  or a fixed $. Floored at $0 and finite — a draw never bills a negative/NaN. */
 export function drawAmount(mode: "percent" | "fixed", value: number, remaining: number): number {
+  const rem = Math.max(0, fin(remaining));
   if (mode === "percent") {
-    const pct = Math.max(0, Math.min(100, Number(value) || 0));
-    return Math.round((remaining * pct) / 100 * 100) / 100;
+    const pct = Math.max(0, Math.min(100, fin(value)));
+    return Math.max(0, cents((rem * pct) / 100));
   }
-  return Math.round((Number(value) || 0) * 100) / 100;
+  return Math.max(0, cents(fin(value)));
 }
 
 /** Progress-report summary for a draw: % of the estimate completed (0 when there's
- *  no estimate — never divides by zero) and the balance left after this request. */
+ *  no estimate — never divides by zero) and the balance left after this request
+ *  (0 without an estimate, so it can't show a misleading negative). All finite. */
 export function progressSummary(
   estimate: number,
   workToDate: number,
   received: number,
   thisAmount: number,
 ): { pctComplete: number; balance: number } {
-  const pctComplete = estimate > 0 ? Math.round((workToDate / estimate) * 100) : 0;
-  const balance = Math.round((estimate - received - thisAmount) * 100) / 100;
+  const est = fin(estimate);
+  const pctComplete = est > 0 ? Math.round((fin(workToDate) / est) * 100) : 0;
+  const balance = est > 0 ? cents(est - fin(received) - fin(thisAmount)) : 0;
   return { pctComplete, balance };
 }

@@ -105,7 +105,12 @@ export function payPeriodBounds(
   const d = (s: string) => new Date(`${s}T00:00:00Z`);
   const fmt = (dt: Date) => dt.toISOString().slice(0, 10);
   const addDays = (dt: Date, n: number) => new Date(dt.getTime() + n * 86_400_000);
-  const today = d(/^\d{4}-\d{2}-\d{2}$/.test(ymd) ? ymd : "2026-01-01");
+  // Validate the REAL date, not just the shape: a regex-passing but invalid date
+  // (month 13, "2026-02-30") would make fmt()/toISOString throw RangeError and 500
+  // the timecards + payroll pages. Fall back to the safe defaults instead.
+  const validYmd = (s: string, fb: string) =>
+    typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(d(s).getTime()) ? s : fb;
+  const today = d(validYmd(ymd, "2026-01-01"));
   if (schedule === "monthly") {
     const y = today.getUTCFullYear(), m = today.getUTCMonth();
     return { start: fmt(new Date(Date.UTC(y, m, 1))), end: fmt(new Date(Date.UTC(y, m + 1, 1))) };
@@ -117,7 +122,7 @@ export function payPeriodBounds(
       : { start: fmt(new Date(Date.UTC(y, m, 16))), end: fmt(new Date(Date.UTC(y, m + 1, 1))) };
   }
   const len = schedule === "weekly" ? 7 : 14;
-  const anchor = d(/^\d{4}-\d{2}-\d{2}$/.test(anchorYmd) ? anchorYmd : "2026-01-05");
+  const anchor = d(validYmd(anchorYmd, "2026-01-05"));
   const elapsedDays = Math.floor((today.getTime() - anchor.getTime()) / 86_400_000);
   const start = addDays(anchor, Math.floor(elapsedDays / len) * len);
   return { start: fmt(start), end: fmt(addDays(start, len)) };
@@ -132,8 +137,11 @@ export function payPeriodForOffset(
   todayYmd: string,
   offset: number,
 ): { start: string; end: string } {
+  // Clamp to a sane non-negative integer so a non-finite/huge offset can't hang
+  // the loop (520 ~= 20 years of biweekly periods).
+  const steps = Math.max(0, Math.min(520, Math.floor(Number(offset) || 0)));
   let p = payPeriodBounds(schedule, anchorYmd, todayYmd);
-  for (let i = 0; i < offset; i++) {
+  for (let i = 0; i < steps; i++) {
     const prevDay = new Date(new Date(`${p.start}T00:00:00Z`).getTime() - 86_400_000).toISOString().slice(0, 10);
     p = payPeriodBounds(schedule, anchorYmd, prevDay);
   }

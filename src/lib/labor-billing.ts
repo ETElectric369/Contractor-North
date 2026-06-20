@@ -20,31 +20,37 @@ export function computeJobLaborBilling(
   jobAllocs: any[],
   defaultRate: number,
 ): { lines: LaborLine[]; total: number } {
-  const perPerson = new Map<string, { name: string; rate: number; hours: number }>();
+  const rawDefault = Number(defaultRate);
+  const def = Number.isFinite(rawDefault) && rawDefault > 0 ? rawDefault : 0;
+  // Track the best REAL rate seen for a person (NOT frozen on first-seen — the alloc
+  // and entry queries can carry different rate snapshots). Key on id, falling back
+  // to name so two distinct rate-less workers don't collapse into one bucket.
+  const perPerson = new Map<string, { name: string; realRate: number; hours: number }>();
   const addHours = (prof: any, hrs: number) => {
     if (!(hrs > 0)) return;
-    const key = prof?.id ?? "unknown";
-    const cur = perPerson.get(key) ?? {
-      name: prof?.full_name ?? "Crew",
-      rate: Number(prof?.bill_rate ?? prof?.hourly_rate ?? 0) || defaultRate,
-      hours: 0,
-    };
-    cur.hours += hrs;
-    perPerson.set(key, cur);
+    const key = String(prof?.id ?? prof?.full_name ?? "unknown");
+    const raw = Number(prof?.bill_rate ?? prof?.hourly_rate ?? 0);
+    const realRate = Number.isFinite(raw) && raw > 0 ? raw : 0; // 0 = no usable rate on this snapshot
+    const cur = perPerson.get(key);
+    if (cur) {
+      cur.hours += hrs;
+      if (realRate > cur.realRate) cur.realRate = realRate;
+    } else {
+      perPerson.set(key, { name: prof?.full_name ?? "Crew", realRate, hours: hrs });
+    }
   };
   // (1) exact hours allocated to this job (handles split shifts)
   for (const a of jobAllocs ?? []) addHours(a.time_entries?.profiles, Number(a.hours ?? 0));
   // (2) un-split closed entries on this job → gross hours
   for (const e of jobEntries ?? []) {
     if ((e.time_allocations?.length ?? 0) > 0 || !e.clock_out) continue;
-    addHours(
-      e.profiles,
-      (new Date(e.clock_out).getTime() - new Date(e.clock_in).getTime()) / 3_600_000 - (e.lunch_minutes ?? 0) / 60,
-    );
+    const lunch = Math.max(0, Number(e.lunch_minutes) || 0); // a negative lunch can't add billable time
+    addHours(e.profiles, (new Date(e.clock_out).getTime() - new Date(e.clock_in).getTime()) / 3_600_000 - lunch / 60);
   }
   const lines: LaborLine[] = [...perPerson.entries()].map(([personId, p]) => {
+    const rate = p.realRate > 0 ? p.realRate : def; // default rate only if no real rate anywhere
     const quantity = Math.round(p.hours * 4) / 4; // quarter-hour
-    return { personId, name: p.name, rate: p.rate, rawHours: p.hours, quantity, amount: Math.round(quantity * p.rate * 100) / 100 };
+    return { personId, name: p.name, rate, rawHours: p.hours, quantity, amount: Math.round(quantity * rate * 100) / 100 };
   });
   const total = Math.round(lines.reduce((s, l) => s + l.amount, 0) * 100) / 100;
   return { lines, total };
