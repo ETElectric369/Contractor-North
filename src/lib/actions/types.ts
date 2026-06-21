@@ -17,6 +17,7 @@ export type ActionResult = {
 /** Resolved caller context, built once per execute() call. */
 export type ActionCtx = {
   userId: string | null;
+  orgId: string | null;
   role: string | null;
   isStaff: boolean;
 };
@@ -24,6 +25,13 @@ export type ActionCtx = {
 export type ActionAuth = "any" | "staff" | "owner";
 export type ActionEffect = "read" | "write";
 export type ActionConfirm = "destructive" | "financial";
+
+/** Risk tier (agent-security framework §3):
+ *  0 = read (safe), 1 = reversible single-record write (optimistic + undo),
+ *  2 = money / PII / billing-affecting (confirm + fresh step-up re-auth),
+ *  3 = delete/export another subscriber's data or move money out (human-only).
+ *  Derived from effect+confirm via actionRisk() unless set explicitly. */
+export type ActionRisk = 0 | 1 | 2 | 3;
 
 export interface ActionDef<I = any> {
   /** Canonical id, e.g. "bill.update", "task.complete". group.verb. */
@@ -42,6 +50,9 @@ export interface ActionDef<I = any> {
   effect: ActionEffect;
   /** Forces a confirm step for the agent / a confirm modal in the UI. */
   confirm?: ActionConfirm;
+  /** Risk tier (0-3). Optional — actionRisk() derives a safe default from
+   *  effect+confirm. Set explicitly to escalate (e.g. a tier-3 human-only action). */
+  risk?: ActionRisk;
   /** The implementation — wraps an existing server action. */
   handler: (input: I, ctx: ActionCtx) => Promise<ActionResult>;
 }

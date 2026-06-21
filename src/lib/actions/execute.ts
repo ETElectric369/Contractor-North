@@ -1,33 +1,86 @@
 "use server";
 
 import { REGISTRY } from "./registry";
+import { actionRisk } from "./risk";
 import { buildActionCtx } from "./context";
-import type { ActionResult } from "./types";
+import { createClient } from "@/lib/supabase/server";
+import type { ActionCtx, ActionDef, ActionResult } from "./types";
+
+type ActionSource = "ui" | "voice" | "agent";
+
+/**
+ * Append a best-effort audit row for a WRITE action (framework Pillar 6). Reads are
+ * not logged (high-volume, low audit value). Records ONLY the input keys + a record
+ * id — never PII or secret values. Never throws: auditing must not break the action.
+ */
+async function logAction(
+  def: ActionDef,
+  ctx: ActionCtx,
+  source: ActionSource,
+  input: unknown,
+  result: ActionResult,
+): Promise<void> {
+  if (def.effect !== "write") return;
+  try {
+    const supabase = await createClient();
+    const obj = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+    await supabase.from("agent_audit_log").insert({
+      org_id: ctx.orgId,
+      user_id: ctx.userId,
+      action: def.name,
+      risk: actionRisk(def),
+      effect: def.effect,
+      ok: result.ok,
+      error: result.ok ? null : (result.error ?? "").slice(0, 500) || null,
+      input_summary: { keys: Object.keys(obj), id: (obj as { id?: unknown }).id ?? null },
+      source,
+    });
+  } catch {
+    /* audit is best-effort — never surface to the caller */
+  }
+}
 
 /**
  * The ONE write entrypoint for the whole app. Look up the named action, build the
  * caller context server-side (never client-trusted), enforce the per-action role
- * gate, validate the input against the action's Zod schema, then run its handler.
- * UI buttons, voice, and (later) the Claude chat tool-loop all call this by name.
+ * gate, validate the input against the action's Zod schema, run its handler, and
+ * append an audit row. UI buttons, voice, and (later) the Claude chat tool-loop all
+ * call this by name — `opts.source` records which surface invoked it.
  */
-export async function executeAction(name: string, rawInput: unknown): Promise<ActionResult> {
+export async function executeAction(
+  name: string,
+  rawInput: unknown,
+  opts?: { source?: ActionSource },
+): Promise<ActionResult> {
+  const source = opts?.source ?? "ui";
   const def = REGISTRY[name];
   if (!def) return { ok: false, error: `Unknown action: ${name}` };
 
   // Context is always resolved server-side so a client can't spoof its role.
   const ctx = await buildActionCtx();
   if (!ctx.userId) return { ok: false, error: "Not signed in." };
-  if (def.auth === "staff" && !ctx.isStaff) return { ok: false, error: "This action is staff-only." };
-  if (def.auth === "owner" && ctx.role !== "owner") return { ok: false, error: "This action is owner-only." };
+  if (def.auth === "staff" && !ctx.isStaff) {
+    const denied: ActionResult = { ok: false, error: "This action is staff-only." };
+    await logAction(def, ctx, source, rawInput, denied);
+    return denied;
+  }
+  if (def.auth === "owner" && ctx.role !== "owner") {
+    const denied: ActionResult = { ok: false, error: "This action is owner-only." };
+    await logAction(def, ctx, source, rawInput, denied);
+    return denied;
+  }
 
   const parsed = def.input.safeParse(rawInput);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
   }
 
+  let result: ActionResult;
   try {
-    return await def.handler(parsed.data, ctx);
+    result = await def.handler(parsed.data, ctx);
   } catch (e: any) {
-    return { ok: false, error: e?.message ?? "Action failed." };
+    result = { ok: false, error: e?.message ?? "Action failed." };
   }
+  await logAction(def, ctx, source, parsed.data, result);
+  return result;
 }

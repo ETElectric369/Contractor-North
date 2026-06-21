@@ -23,3 +23,5 @@ export function listActions(filter?: { effect?: "read" | "write"; group?: string
     (a) => (!filter?.effect || a.effect === filter.effect) && (!filter?.group || a.group === filter.group),
   );
 }
+
+export { actionRisk } from "./risk";

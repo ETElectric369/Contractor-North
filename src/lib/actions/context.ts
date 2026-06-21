@@ -10,10 +10,16 @@ export async function buildActionCtx(): Promise<ActionCtx> {
     data: { user },
   } = await supabase.auth.getUser();
   let role: string | null = null;
+  let orgId: string | null = null;
   if (user) {
-    const { data } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
+    const { data } = await supabase
+      .from("profiles")
+      .select("role, org_id")
+      .eq("id", user.id)
+      .maybeSingle();
     role = (data as any)?.role ?? null;
+    orgId = (data as any)?.org_id ?? null;
   }
   const isStaff = role === "owner" || role === "admin" || role === "office";
-  return { userId: user?.id ?? null, role, isStaff };
+  return { userId: user?.id ?? null, orgId, role, isStaff };
 }

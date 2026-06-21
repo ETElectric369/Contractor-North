@@ -29,6 +29,7 @@ import {
   BookOpen,
   FileSpreadsheet,
   ScanLine,
+  ScrollText,
   Settings,
   type LucideIcon,
 } from "lucide-react";
@@ -100,6 +101,7 @@ export const NAV: NavSection[] = [
       { label: "Timeclock", href: "/timeclock", icon: Clock },
       { label: "Timecards", href: "/timecards", icon: CalendarClock, staffOnly: true },
       { label: "Tools", href: "/tools", icon: Wrench },
+      { label: "Activity audit", href: "/audit", icon: ScrollText, staffOnly: true },
       { label: "Settings", href: "/settings", icon: Settings },
       { label: "Plans & LiDAR", href: "/plans", icon: ScanLine, comingSoon: true },
     ],
