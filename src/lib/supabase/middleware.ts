@@ -13,6 +13,7 @@ const PUBLIC_PATHS = [
   "/api/pay",
   "/api/stripe",
   "/api/timeclock",
+  "/api/automations",
   "/api/health",
   "/_next",
   "/favicon",
