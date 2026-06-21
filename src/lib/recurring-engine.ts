@@ -1,24 +1,10 @@
 import "server-only";
 import { reportError } from "@/lib/observe";
+import { advance } from "@/lib/automations-math";
 
 /** The recurring jobs/expenses generation engine, extracted so BOTH the in-app
  *  "Generate" buttons (user client, RLS-scoped to one org) and the daily cron
  *  (service client, all orgs) run the exact same logic. */
-
-/** Advance a yyyy-mm-dd date by one period of the given frequency. */
-export function advance(date: string, frequency: string): string {
-  const d = new Date(`${date}T12:00:00`);
-  switch (frequency) {
-    case "weekly": d.setDate(d.getDate() + 7); break;
-    case "biweekly": d.setDate(d.getDate() + 14); break;
-    case "monthly": d.setMonth(d.getMonth() + 1); break;
-    case "quarterly": d.setMonth(d.getMonth() + 3); break;
-    case "yearly": d.setFullYear(d.getFullYear() + 1); break;
-    default: d.setMonth(d.getMonth() + 1);
-  }
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
 
 /** Create one occurrence (a job or an expense bill) from a template and advance
  *  its next_date. org_id is set EXPLICITLY from the template: under the service

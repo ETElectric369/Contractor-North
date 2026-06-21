@@ -2,6 +2,7 @@ import "server-only";
 import { sendEmail, renderReminderEmail, money } from "@/lib/email";
 import { todayStrInTz } from "@/lib/tz";
 import { reportError } from "@/lib/observe";
+import { reminderSuppressed } from "@/lib/automations-math";
 
 /** The opt-in customer-reminder engine (run by the daily automations cron). For each
  *  org that has turned a reminder toggle ON, find what's due, send a branded email,
@@ -44,11 +45,9 @@ export async function sendDueReminders(supabase: any): Promise<Counts> {
         .eq("kind", kind)
         .eq("entity_id", entityId)
         .order("sent_at", { ascending: false });
-      if (error) return true;
-      const rows = data ?? [];
-      if (rows.length >= cap) return true;
-      if (rows.length && now - new Date(rows[0].sent_at).getTime() < withinDays * DAY) return true;
-      return false;
+      if (error) return true; // fail closed: can't verify -> don't risk re-sending
+      const sentMs = (data ?? []).map((r: any) => new Date(r.sent_at).getTime());
+      return reminderSuppressed(sentMs, withinDays, cap, now);
     }
     // Returns whether the dedup row actually persisted. A failed write is logged (so
     // the silent resend it would cause is diagnosable) and NOT counted as success.
