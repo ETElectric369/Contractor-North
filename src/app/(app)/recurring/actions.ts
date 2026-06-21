@@ -5,24 +5,9 @@ import { emptyToNull } from "@/lib/forms";
 import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
 import { drawAmount } from "@/lib/invoice-math";
+import { runTemplate, generateDueTemplates } from "@/lib/recurring-engine";
 
 export type Result = { ok: boolean; error?: string; id?: string; count?: number };
-
-
-/** Advance a yyyy-mm-dd date by one period of the given frequency. */
-function advance(date: string, frequency: string): string {
-  const d = new Date(`${date}T12:00:00`);
-  switch (frequency) {
-    case "weekly": d.setDate(d.getDate() + 7); break;
-    case "biweekly": d.setDate(d.getDate() + 14); break;
-    case "monthly": d.setMonth(d.getMonth() + 1); break;
-    case "quarterly": d.setMonth(d.getMonth() + 3); break;
-    case "yearly": d.setFullYear(d.getFullYear() + 1); break;
-    default: d.setMonth(d.getMonth() + 1);
-  }
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
 
 export async function saveRecurring(formData: FormData, id?: string): Promise<Result> {
   const ctx = await requireStaff();
@@ -80,41 +65,6 @@ export async function deleteRecurring(id: string): Promise<Result> {
   return { ok: true };
 }
 
-/** Create one occurrence from a template (a job or an expense bill) and advance
- *  its next_date. Used by the "Generate" buttons and generateDue(). */
-async function runTemplate(supabase: any, t: any, userId: string): Promise<boolean> {
-  if (t.kind === "job") {
-    const start = new Date(`${t.next_date}T08:00:00`).toISOString();
-    const { error } = await supabase.from("jobs").insert({
-      name: t.title,
-      customer_id: t.customer_id,
-      description: t.description,
-      status: "scheduled",
-      scheduled_start: start,
-      scheduled_end: new Date(`${t.next_date}T16:00:00`).toISOString(),
-      created_by: userId,
-    });
-    if (error) return false;
-  } else {
-    const { error } = await supabase.from("bills").insert({
-      job_id: null,
-      supplier: t.vendor || t.title,
-      amount: t.amount ?? 0,
-      status: "unpaid",
-      bill_date: t.next_date,
-      category: t.category,
-      notes: `Recurring expense: ${t.title}`,
-      created_by: userId,
-    });
-    if (error) return false;
-  }
-  await supabase
-    .from("recurring_templates")
-    .update({ next_date: advance(t.next_date, t.frequency), last_generated_at: new Date().toISOString() })
-    .eq("id", t.id);
-  return true;
-}
-
 export async function generateOne(id: string): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -133,24 +83,7 @@ export async function generateDue(): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
-  const today = new Date().toISOString().slice(0, 10);
-  const { data: due } = await supabase
-    .from("recurring_templates")
-    .select("*")
-    .eq("active", true)
-    .lte("next_date", today);
-  let count = 0;
-  for (const t of due ?? []) {
-    // Catch up if a template is several periods overdue (cap to avoid runaways).
-    let guard = 0;
-    let cur = { ...t };
-    while (cur.next_date <= today && guard++ < 24) {
-      const ok = await runTemplate(supabase, cur, ctx.userId);
-      if (!ok) break;
-      cur = { ...cur, next_date: advance(cur.next_date, cur.frequency) };
-      count++;
-    }
-  }
+  const count = await generateDueTemplates(supabase, ctx.userId);
   revalidatePath("/recurring");
   revalidatePath("/jobs");
   revalidatePath("/bills");
