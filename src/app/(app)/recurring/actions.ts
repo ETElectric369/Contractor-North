@@ -5,6 +5,7 @@ import { emptyToNull } from "@/lib/forms";
 import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
 import { drawAmount } from "@/lib/invoice-math";
+import { standardBillingBlockerOnJob, standardBillingConflictError } from "@/lib/billing-guards";
 import { runTemplate, generateDueTemplates } from "@/lib/recurring-engine";
 
 export type Result = { ok: boolean; error?: string; id?: string; count?: number };
@@ -113,6 +114,12 @@ export async function createProgressInvoice(
   if (existingDraft) {
     return { ok: false, error: `Draft ${(existingDraft as any).invoice_number} is still open on this job — send or delete it before creating another draw.` };
   }
+
+  // H4 (reverse): don't open a draw on a job that's already being billed on a standard
+  // invoice carrying content — the draw would re-bill the same work (here, a % of the
+  // estimate on top of the standard invoice's lines). Mirrors the forward import guard.
+  const stdBlocker = await standardBillingBlockerOnJob(supabase, jobId);
+  if (stdBlocker) return standardBillingConflictError(stdBlocker);
 
   // Estimate = quoted total; billed-to-date = the job's SENT invoices (non-void,
   // non-draft — a draft draw isn't a real bill; matches the job page + modal so

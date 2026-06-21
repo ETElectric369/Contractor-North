@@ -99,6 +99,25 @@ d("billing draw invariants (DB integration)", () => {
         [job.id],
       );
       expect(openDrafts.map((r: any) => r.id)).toContain(draft.id);
+
+      // 5. H4 reverse (standardBillingBlockerOnJob): a non-void STANDARD invoice that
+      //    CARRIES content must block creating a draw. A blank standard invoice (no
+      //    lines, $0) carries nothing, so it must NOT block.
+      const reverseBlockerSql =
+        `select i.id from invoices i where i.job_id=$1 and i.invoice_kind='standard' and i.status<>'void'
+           and (coalesce(i.total,0) > 0.005
+                or exists (select 1 from invoice_items it where it.invoice_id = i.id))`;
+      // TEST-INV-2 is still a blank ($0, no lines) standard invoice → not a blocker yet.
+      const { rows: blankBlockers } = await client.query(reverseBlockerSql, [job.id]);
+      expect(blankBlockers.length).toBe(0);
+      // Add a billable line to the standard invoice → it now blocks a new draw.
+      await client.query(
+        `insert into invoice_items (org_id, invoice_id, description, quantity, unit_price)
+         values ($1,$2,'Labor — Sam',10,95)`,
+        [orgId, std.id],
+      );
+      const { rows: contentBlockers } = await client.query(reverseBlockerSql, [job.id]);
+      expect(contentBlockers.map((r: any) => r.id)).toContain(std.id);
     } finally {
       await client.query("rollback");
     }

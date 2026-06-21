@@ -73,6 +73,21 @@ export function shouldBlockStandardImport(invoiceKind: string | null | undefined
   return (invoiceKind ?? "standard") === "standard" && hasOtherDraws;
 }
 
+/** H4, the REVERSE direction: a job already being billed on a STANDARD invoice that
+ *  CARRIES CONTENT (line items / a non-zero total) must NOT also get a progress draw —
+ *  the draw re-bills the same labor / materials / scope, double-charging the customer.
+ *  The mirror of shouldBlockStandardImport: that one blocks standard content when a
+ *  draw exists; this one blocks a draw when standard content exists. A blank standard
+ *  invoice (no lines, $0) carries nothing yet, so it never blocks. */
+export function isStandardBillingBlocker(
+  invoiceKind: string | null | undefined,
+  total: number,
+  lineItemCount: number,
+): boolean {
+  const isStandard = (invoiceKind ?? "standard") === "standard";
+  return isStandard && (fin(total) > 0.005 || fin(lineItemCount) > 0);
+}
+
 /** Progress-report summary for a draw: % of the estimate completed (0 when there's
  *  no estimate — never divides by zero) and the balance left after this request
  *  (0 without an estimate, so it can't show a misleading negative). All finite. */

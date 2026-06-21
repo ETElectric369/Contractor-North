@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { recalcTotals, resolveDrawCredit, drawAmount, progressSummary, shouldBlockStandardImport } from "@/lib/invoice-math";
+import { recalcTotals, resolveDrawCredit, drawAmount, progressSummary, shouldBlockStandardImport, isStandardBillingBlocker } from "@/lib/invoice-math";
 
 describe("shouldBlockStandardImport (H4 — one billing path per job)", () => {
   it("blocks importing onto a STANDARD invoice when the job has draws", () => {
@@ -13,6 +13,31 @@ describe("shouldBlockStandardImport (H4 — one billing path per job)", () => {
     expect(shouldBlockStandardImport("progress", true)).toBe(false);
     expect(shouldBlockStandardImport("final", true)).toBe(false);
     expect(shouldBlockStandardImport("deposit", true)).toBe(false);
+  });
+});
+
+describe("isStandardBillingBlocker (H4 reverse — block a draw on a standard-billed job)", () => {
+  it("blocks a draw when a STANDARD invoice already carries a non-zero total", () => {
+    expect(isStandardBillingBlocker("standard", 5000, 0)).toBe(true);
+    expect(isStandardBillingBlocker(null, 5000, 0)).toBe(true); // null kind = standard
+  });
+  it("blocks a draw when a STANDARD invoice carries line items even at $0 total", () => {
+    expect(isStandardBillingBlocker("standard", 0, 2)).toBe(true);
+  });
+  it("does NOT block on a blank standard invoice (no lines, $0) — nothing billed yet", () => {
+    expect(isStandardBillingBlocker("standard", 0, 0)).toBe(false);
+  });
+  it("never blocks because of a DRAW invoice (draws are the billing path, not a blocker)", () => {
+    expect(isStandardBillingBlocker("deposit", 5000, 3)).toBe(false);
+    expect(isStandardBillingBlocker("progress", 5000, 3)).toBe(false);
+    expect(isStandardBillingBlocker("final", 5000, 3)).toBe(false);
+  });
+  it("treats float-dust / non-finite totals as no content (a poisoned total can't false-block)", () => {
+    expect(isStandardBillingBlocker("standard", 0.004, 0)).toBe(false);
+    expect(isStandardBillingBlocker("standard", NaN, 0)).toBe(false);
+    expect(isStandardBillingBlocker("standard", Infinity, 0)).toBe(false);
+    // ...but real line items still block even when the total is non-finite.
+    expect(isStandardBillingBlocker("standard", NaN, 1)).toBe(true);
   });
 });
 

@@ -9,6 +9,7 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { requireStaff } from "@/lib/staff-guard";
 import { computeJobLaborBilling, fetchJobLaborRows } from "@/lib/labor-billing";
 import { recalcTotals, resolveDrawCredit, shouldBlockStandardImport } from "@/lib/invoice-math";
+import { standardBillingBlockerOnJob, standardBillingConflictError } from "@/lib/billing-guards";
 import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
 import { formatCurrency } from "@/lib/utils";
 
@@ -573,6 +574,10 @@ export async function createProgressReportInvoice(
   if (existingDraft) {
     return { ok: false, error: `Draft ${(existingDraft as any).invoice_number} is still open on this job — send or delete it before creating another draw.` };
   }
+  // H4 (reverse): if a standard invoice already bills this job's labor/materials, a
+  // draw here would re-import and double-bill the same work. Block before creating it.
+  const stdBlocker = await standardBillingBlockerOnJob(supabase, jobId);
+  if (stdBlocker) return standardBillingConflictError(stdBlocker);
   const markup = getOrgSettings((org as any)?.settings).material_markup_percent;
 
   const { data: inv, error } = await supabase
