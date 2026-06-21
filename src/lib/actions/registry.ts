@@ -1,4 +1,5 @@
 import type { ActionDef } from "./types";
+import { roleCanRun } from "./perms";
 import { billActions } from "./entities/bill";
 import { taskActions } from "./entities/task";
 import { inquiryActions } from "./entities/inquiry";
@@ -25,3 +26,15 @@ export function listActions(filter?: { effect?: "read" | "write"; group?: string
 }
 
 export { actionRisk } from "./risk";
+export { roleCanRun };
+
+/** Least privilege (Pillar 2): the actions a given role may run — the set a surface
+ *  (command bar / voice / the agent tool-loop) is allowed to even OFFER. Optionally
+ *  narrow to writes/reads or a group. The role gate uses the SAME roleCanRun()
+ *  predicate that execute() enforces, so the offer and the gate stay in lockstep. */
+export function actionsForRole(
+  role: string | null | undefined,
+  filter?: { effect?: "read" | "write"; group?: string },
+): ActionDef[] {
+  return listActions(filter).filter((a) => roleCanRun(role, a.auth));
+}

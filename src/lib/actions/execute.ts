@@ -2,6 +2,7 @@
 
 import { REGISTRY } from "./registry";
 import { actionRisk } from "./risk";
+import { roleCanRun } from "./perms";
 import { buildActionCtx } from "./context";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionCtx, ActionDef, ActionResult } from "./types";
@@ -59,13 +60,13 @@ export async function executeAction(
   // Context is always resolved server-side so a client can't spoof its role.
   const ctx = await buildActionCtx();
   if (!ctx.userId) return { ok: false, error: "Not signed in." };
-  if (def.auth === "staff" && !ctx.isStaff) {
-    const denied: ActionResult = { ok: false, error: "This action is staff-only." };
-    await logAction(def, ctx, source, rawInput, denied);
-    return denied;
-  }
-  if (def.auth === "owner" && ctx.role !== "owner") {
-    const denied: ActionResult = { ok: false, error: "This action is owner-only." };
+  // Same predicate that filters the offer (actionsForRole) gates execution here —
+  // least privilege can't drift between what's shown and what's allowed.
+  if (!roleCanRun(ctx.role, def.auth)) {
+    const denied: ActionResult = {
+      ok: false,
+      error: def.auth === "owner" ? "This action is owner-only." : "This action is staff-only.",
+    };
     await logAction(def, ctx, source, rawInput, denied);
     return denied;
   }
