@@ -19,7 +19,6 @@ export type ActionCtx = {
   userId: string | null;
   orgId: string | null;
   role: string | null;
-  isStaff: boolean;
 };
 
 export type ActionAuth = "any" | "staff" | "owner";

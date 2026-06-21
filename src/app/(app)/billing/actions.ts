@@ -12,6 +12,7 @@ import { recalcTotals, resolveDrawCredit, shouldBlockStandardImport } from "@/li
 import { standardBillingBlockerOnJob, standardBillingConflictError } from "@/lib/billing-guards";
 import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
 import { formatCurrency } from "@/lib/utils";
+import { reportError } from "@/lib/observe";
 
 /** Post a credit/refund to the customer's account from an invoice. disposition
  *  "credit" keeps it on their account; "refund" flags accounting to pay it back. */
@@ -346,7 +347,13 @@ async function replaceImportedItems(
     rows.map((r) => ({ invoice_id: invoiceId, import_source: source, sort_order: sort++, ...r })),
   );
   if (error) return { error: error.message };
-  if (oldIds.length) await supabase.from("invoice_items").delete().in("id", oldIds);
+  if (oldIds.length) {
+    // Insert-then-delete (so a failed insert can't wipe the old lines). But if THIS
+    // delete fails, the old + new lines both remain — a double-billed import. Report
+    // it so the duplicate is caught instead of silently inflating the invoice.
+    const { error: delErr } = await supabase.from("invoice_items").delete().in("id", oldIds);
+    if (delErr) reportError("replaceImportedItems-delete", delErr, { invoiceId, source });
+  }
   return {};
 }
 
@@ -866,8 +873,11 @@ async function recalcInvoice(supabase: any, invoiceId: string) {
     inv?.status ?? "draft",
   );
 
-  await supabase
+  const { error } = await supabase
     .from("invoices")
     .update({ subtotal, tax, total, amount_paid: amountPaid, status })
     .eq("id", invoiceId);
+  // If this silently fails the invoice shows stale totals/status (wrong balance,
+  // wrong paid state) — surface it rather than letting the money figures drift.
+  if (error) reportError("recalcInvoice", error, { invoiceId });
 }

@@ -20,6 +20,7 @@ export async function buildActionCtx(): Promise<ActionCtx> {
     role = (data as any)?.role ?? null;
     orgId = (data as any)?.org_id ?? null;
   }
-  const isStaff = role === "owner" || role === "admin" || role === "office";
-  return { userId: user?.id ?? null, orgId, role, isStaff };
+  // Role gating goes through roleCanRun(role, auth) in execute() — no separate
+  // isStaff flag needed.
+  return { userId: user?.id ?? null, orgId, role };
 }
