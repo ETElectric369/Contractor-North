@@ -1,4 +1,5 @@
 import "server-only";
+import { reportError } from "@/lib/observe";
 
 /** The recurring jobs/expenses generation engine, extracted so BOTH the in-app
  *  "Generate" buttons (user client, RLS-scoped to one org) and the daily cron
@@ -37,7 +38,7 @@ export async function runTemplate(supabase: any, t: any, userId: string | null):
       scheduled_end: new Date(`${t.next_date}T16:00:00`).toISOString(),
       created_by: userId,
     });
-    if (error) return false;
+    if (error) { reportError("recurring-template", error, { templateId: t.id, kind: t.kind }); return false; }
   } else {
     const { error } = await supabase.from("bills").insert({
       org_id: t.org_id,
@@ -50,7 +51,7 @@ export async function runTemplate(supabase: any, t: any, userId: string | null):
       notes: `Recurring expense: ${t.title}`,
       created_by: userId,
     });
-    if (error) return false;
+    if (error) { reportError("recurring-template", error, { templateId: t.id, kind: t.kind }); return false; }
   }
   await supabase
     .from("recurring_templates")

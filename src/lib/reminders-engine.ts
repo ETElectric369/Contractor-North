@@ -1,6 +1,7 @@
 import "server-only";
 import { sendEmail, renderReminderEmail, money } from "@/lib/email";
 import { todayStrInTz } from "@/lib/tz";
+import { reportError } from "@/lib/observe";
 
 /** The opt-in customer-reminder engine (run by the daily automations cron). For each
  *  org that has turned a reminder toggle ON, find what's due, send a branded email,
@@ -56,7 +57,8 @@ export async function sendDueReminders(supabase: any): Promise<Counts> {
         .from("reminder_log")
         .insert({ org_id: org.id, kind, entity_id: entityId, channel: "email" });
       if (error) {
-        console.error(`[reminders] reminder_log insert failed org=${org.id} kind=${kind} entity=${entityId}: ${error.message}`);
+        // A failed dedup write would silently re-send next run — make it visible.
+        reportError("reminders-log", error, { orgId: org.id, kind, entityId });
         return false;
       }
       return true;

@@ -1,6 +1,7 @@
 import "server-only";
 import webpush from "web-push";
 import { createServiceClient } from "@/lib/supabase/server";
+import { reportError } from "@/lib/observe";
 
 const PUBLIC = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
 const PRIVATE = process.env.VAPID_PRIVATE_KEY;
@@ -106,7 +107,8 @@ export async function sendPushToProfiles(
         }
       }),
     );
-  } catch {
-    /* push is best-effort — never surface to the caller */
+  } catch (e) {
+    // A whole-batch failure (VAPID/config) is systematic, not an expected dead sub.
+    reportError("push", e);
   }
 }

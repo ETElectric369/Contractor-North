@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { formatPhone, formatState, formatZip, titleCase } from "@/lib/utils";
+import { reportError } from "@/lib/observe";
 
 export async function disconnectQuickbooks(): Promise<Result> {
   const supabase = await createClient();
@@ -291,8 +292,8 @@ export async function syncScheduleToGoogle(): Promise<Result & { synced?: number
         await supabase.from("jobs").update({ google_event_id: eventId }).eq("id", j.id);
       }
       synced++;
-    } catch {
-      /* keep going — report what synced */
+    } catch (e) {
+      reportError("gcal-sync", e, { jobId: j.id }); // keep going, but don't vanish silently
     }
   }
   revalidatePath("/settings");

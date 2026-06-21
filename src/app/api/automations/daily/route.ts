@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { generateDueTemplates } from "@/lib/recurring-engine";
 import { sendDueReminders } from "@/lib/reminders-engine";
+import { reportError } from "@/lib/observe";
 
 export const runtime = "nodejs";
 
@@ -35,12 +36,14 @@ export async function GET(request: Request) {
     result.recurring_generated = await generateDueTemplates(supabase, null);
   } catch (e: any) {
     result.recurring_error = e?.message ?? "failed";
+    reportError("cron-recurring", e);
   }
   try {
     // Opt-in only: sends nothing for an org whose reminder toggles are off.
     result.reminders = await sendDueReminders(supabase);
   } catch (e: any) {
     result.reminders_error = e?.message ?? "failed";
+    reportError("cron-reminders", e);
   }
 
   return NextResponse.json(result);
