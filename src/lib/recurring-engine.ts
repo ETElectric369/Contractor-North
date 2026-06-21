@@ -39,10 +39,14 @@ export async function runTemplate(supabase: any, t: any, userId: string | null):
     });
     if (error) { reportError("recurring-template", error, { templateId: t.id, kind: t.kind }); return false; }
   }
-  await supabase
+  // Critical: if this advance silently fails, the occurrence was already created but
+  // next_date stays in the past, so the NEXT cron run re-generates it — a duplicate
+  // job/payable. Surface the failure so the duplicate is caught instead of invisible.
+  const { error: advErr } = await supabase
     .from("recurring_templates")
     .update({ next_date: advance(t.next_date, t.frequency), last_generated_at: new Date().toISOString() })
     .eq("id", t.id);
+  if (advErr) reportError("recurring-advance", advErr, { templateId: t.id, kind: t.kind });
   return true;
 }
 
