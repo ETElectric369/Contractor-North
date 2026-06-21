@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { gcalAuthorizeUrl, gcalConfigured } from "@/lib/google-calendar";
 import { createClient } from "@/lib/supabase/server";
+import { newOAuthState, setOAuthState } from "@/lib/oauth-state";
 
 export const runtime = "nodejs";
 
@@ -19,5 +20,8 @@ export async function GET() {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.redirect(`${site}/login`);
 
-  return NextResponse.redirect(gcalAuthorizeUrl());
+  const state = newOAuthState();
+  const res = NextResponse.redirect(gcalAuthorizeUrl(state));
+  setOAuthState(res, "google", state);
+  return res;
 }

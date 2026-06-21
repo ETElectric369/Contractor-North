@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { gcalExchangeCode } from "@/lib/google-calendar";
 import { createClient } from "@/lib/supabase/server";
+import { verifyOAuthState } from "@/lib/oauth-state";
 
 export const runtime = "nodejs";
 
@@ -8,6 +9,10 @@ export const runtime = "nodejs";
 export async function GET(req: Request) {
   const site = process.env.NEXT_PUBLIC_SITE_URL || "";
   const { searchParams } = new URL(req.url);
+  // CSRF: the returned state must match the cookie set at connect-time, or this
+  // callback is a forged/injected code (binding an attacker's account to the org).
+  const fail = NextResponse.redirect(`${site}/settings?gcal=denied`);
+  if (!(await verifyOAuthState(fail, "google", searchParams.get("state")))) return fail;
   const code = searchParams.get("code");
   if (!code) return NextResponse.redirect(`${site}/settings?gcal=error`);
 

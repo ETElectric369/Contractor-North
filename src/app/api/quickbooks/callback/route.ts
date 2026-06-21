@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { exchangeCode } from "@/lib/quickbooks";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { verifyOAuthState } from "@/lib/oauth-state";
 
 export const runtime = "nodejs";
 
@@ -8,6 +9,10 @@ export const runtime = "nodejs";
 export async function GET(req: Request) {
   const site = process.env.NEXT_PUBLIC_SITE_URL || "";
   const { searchParams } = new URL(req.url);
+  // CSRF: the returned state must match the cookie set at connect-time, or this is a
+  // forged code (binding an attacker's QuickBooks realm to the signed-in user's org).
+  const fail = NextResponse.redirect(`${site}/settings?qbo=denied`);
+  if (!(await verifyOAuthState(fail, "quickbooks", searchParams.get("state")))) return fail;
   const code = searchParams.get("code");
   const realmId = searchParams.get("realmId");
   if (!code || !realmId) {

@@ -14,7 +14,7 @@ export function gcalConfigured(): boolean {
   return Boolean(process.env.GOOGLE_OAUTH_CLIENT_ID && process.env.GOOGLE_OAUTH_CLIENT_SECRET);
 }
 
-export function gcalAuthorizeUrl(): string {
+export function gcalAuthorizeUrl(state: string): string {
   const p = new URLSearchParams({
     client_id: process.env.GOOGLE_OAUTH_CLIENT_ID!,
     redirect_uri: redirectUri(),
@@ -22,6 +22,7 @@ export function gcalAuthorizeUrl(): string {
     scope: SCOPE,
     access_type: "offline", // we need a refresh token
     prompt: "consent",
+    state, // CSRF nonce — verified on the callback
   });
   return `${AUTH_URL}?${p}`;
 }

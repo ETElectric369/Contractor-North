@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { authorizeUrl, qboConfigured } from "@/lib/quickbooks";
 import { createClient } from "@/lib/supabase/server";
+import { newOAuthState, setOAuthState } from "@/lib/oauth-state";
 
 export const runtime = "nodejs";
 
@@ -19,5 +20,8 @@ export async function GET() {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.redirect(`${site}/login`);
 
-  return NextResponse.redirect(authorizeUrl("qbo"));
+  const state = newOAuthState();
+  const res = NextResponse.redirect(authorizeUrl(state));
+  setOAuthState(res, "quickbooks", state);
+  return res;
 }

@@ -631,12 +631,18 @@ export async function createProgressReportInvoice(
     };
   }
   if (decision.credit > 0.005) {
-    await addInvoiceItem(inv.id, {
+    // Stamp it import_source:"draw_credit" so it's tamper-evident — deleting/editing
+    // this negative line would wipe the prior-billings offset and re-bill the deposit,
+    // so updateInvoiceItem/deleteInvoiceItem refuse to touch it. (org_id via trigger.)
+    await supabase.from("invoice_items").insert({
+      invoice_id: inv.id,
       description: "Less previous billings (deposit & prior draws)",
       quantity: 1,
       unit: "lot",
       unit_price: -decision.credit,
+      import_source: "draw_credit",
     });
+    await recalcInvoice(supabase, inv.id);
   }
 
   revalidatePath(`/jobs/${jobId}`);
@@ -653,6 +659,7 @@ export async function updateInvoiceItem(
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
   if (!item.description.trim()) return { ok: false, error: "Description is required." };
+  if (await isProtectedCreditLine(supabase, itemId)) return CREDIT_LINE_LOCKED;
   const { error } = await supabase
     .from("invoice_items")
     .update({
@@ -674,11 +681,26 @@ export async function deleteInvoiceItem(
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  if (await isProtectedCreditLine(supabase, itemId)) return CREDIT_LINE_LOCKED;
   const { error } = await supabase.from("invoice_items").delete().eq("id", itemId);
   if (error) return { ok: false, error: error.message };
   await recalcInvoice(supabase, invoiceId);
   revalidatePath(`/billing/${invoiceId}`);
   return { ok: true };
+}
+
+/** The auto-calculated "less previous billings" draw credit is tamper-evident: it
+ *  carries import_source:"draw_credit". Editing or deleting it would wipe the
+ *  prior-billings offset and re-bill the customer for the deposit + earlier draws,
+ *  so the item mutations refuse it. */
+const CREDIT_LINE_LOCKED: Result = {
+  ok: false,
+  error:
+    "That's the automatic “less previous billings” credit — it can't be edited or deleted, since it's what keeps this draw from re-billing the deposit and prior draws.",
+};
+async function isProtectedCreditLine(supabase: any, itemId: string): Promise<boolean> {
+  const { data } = await supabase.from("invoice_items").select("import_source").eq("id", itemId).maybeSingle();
+  return data?.import_source === "draw_credit";
 }
 
 export async function setInvoiceStatus(
