@@ -51,18 +51,8 @@ export async function createCustomerCredit(
 export async function sendInvoiceToQuickbooks(
   id: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  const { data: me } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user?.id ?? "")
-    .maybeSingle();
-  if (!me || !["owner", "admin", "office"].includes(me.role)) {
-    return { ok: false, error: "Not allowed." };
-  }
+  const ctx = await requireStaff(); // was duplicated inline auth — use the one guard
+  if ("error" in ctx) return { ok: false, error: ctx.error };
   const res = await pushInvoiceToQbo(id);
   if (res.ok) revalidatePath(`/billing/${id}`);
   return { ok: res.ok, error: res.error };
