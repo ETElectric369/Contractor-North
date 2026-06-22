@@ -2,6 +2,7 @@ import { getStripe } from "@/lib/stripe";
 import { createServiceClient } from "@/lib/supabase/server";
 import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
 import { formatCurrency } from "@/lib/utils";
+import { paidStatus } from "@/lib/invoice-math";
 import type Stripe from "stripe";
 
 export const runtime = "nodejs";
@@ -62,12 +63,10 @@ export async function POST(req: Request) {
       .eq("id", invoiceId)
       .single();
     const paid =
-      (pays ?? []).reduce((s: number, p: any) => s + Number(p.amount ?? 0), 0);
-    let status = inv?.status ?? "sent";
-    if (status !== "void") {
-      const total = Number(inv?.total ?? 0);
-      status = paid >= total && total > 0 ? "paid" : paid > 0 ? "partial" : status;
-    }
+      Math.round((pays ?? []).reduce((s: number, p: any) => s + Number(p.amount ?? 0), 0) * 100) / 100;
+    // Cents-tolerant status (shared with recalcTotals) — a raw `paid >= total` float
+    // compare used to leave a fully-paid online customer "partial" and then dunned.
+    const status = paidStatus(Number(inv?.total ?? 0), paid, inv?.status ?? "sent");
     await supabase
       .from("invoices")
       .update({ amount_paid: paid, status })

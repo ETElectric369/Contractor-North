@@ -10,6 +10,24 @@ const fin = (x: unknown): number => {
 };
 const cents = (n: number) => Math.round(n * 100) / 100;
 
+/** The status implied by a total vs amount paid — cents-tolerant (+0.005) so float
+ *  dust (0.01 + 2.01 = 2.0199…) can't leave a fully-paid invoice stuck "partial".
+ *  Shared by recalcTotals AND the Stripe webhook so online + manual payments agree.
+ *  Never disturbs a voided invoice. */
+export function paidStatus(total: number, amountPaid: number, currentStatus?: string): string {
+  let status = currentStatus ?? "draft";
+  if (status === "void") return status;
+  const t = cents(fin(total));
+  const paid = cents(fin(amountPaid));
+  if (t <= 0.005) {
+    // A $0 / credit-memo invoice is settled once it has left draft; a $0 draft stays draft.
+    if (status !== "draft") status = "paid";
+  } else if (paid + 0.005 >= t) status = "paid";
+  else if (paid > 0) status = "partial";
+  else if (status === "paid" || status === "partial") status = "sent";
+  return status;
+}
+
 /** Recompute an invoice's rollup from its line totals + payments. Negative line
  *  items (a "Less previous billings" credit) flow through naturally. Amounts are
  *  rounded to cents so float dust (0.01 + 2.01 summing to 2.0199…) can't leave a
@@ -24,16 +42,7 @@ export function recalcTotals(
   const tax = cents(subtotal * fin(taxRate));
   const total = cents(subtotal + tax);
   const amountPaid = cents(paymentAmounts.reduce((s, n) => s + fin(n), 0));
-
-  let status = currentStatus ?? "draft";
-  if (status !== "void") {
-    if (total <= 0.005) {
-      // A $0 / credit-memo invoice is settled once it has left draft; a $0 draft stays draft.
-      if (status !== "draft") status = "paid";
-    } else if (amountPaid + 0.005 >= total) status = "paid";
-    else if (amountPaid > 0) status = "partial";
-    else if (status === "paid" || status === "partial") status = "sent";
-  }
+  const status = paidStatus(total, amountPaid, currentStatus);
   return { subtotal, tax, total, amountPaid, status };
 }
 

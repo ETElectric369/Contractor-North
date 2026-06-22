@@ -1,5 +1,25 @@
 import { describe, it, expect } from "vitest";
-import { recalcTotals, resolveDrawCredit, drawAmount, progressSummary, shouldBlockStandardImport, isStandardBillingBlocker, groupInvoiceLines } from "@/lib/invoice-math";
+import { recalcTotals, resolveDrawCredit, drawAmount, progressSummary, shouldBlockStandardImport, isStandardBillingBlocker, groupInvoiceLines, paidStatus } from "@/lib/invoice-math";
+
+describe("paidStatus (shared by recalcTotals + the Stripe webhook)", () => {
+  it("marks PAID with float dust — the webhook bug (was stuck 'partial')", () => {
+    // online payment of 99.99999 against a 100.00 invoice
+    expect(paidStatus(100, 99.99999999, "sent")).toBe("paid");
+    expect(paidStatus(2.02, 0.01 + 2.01, "sent")).toBe("paid");
+  });
+  it("partial when under, paid when at/over", () => {
+    expect(paidStatus(100, 40, "sent")).toBe("partial");
+    expect(paidStatus(100, 100, "sent")).toBe("paid");
+    expect(paidStatus(100, 120, "sent")).toBe("paid");
+  });
+  it("never disturbs a voided invoice", () => {
+    expect(paidStatus(100, 100, "void")).toBe("void");
+  });
+  it("a $0 invoice that's left draft is settled; a $0 draft stays draft", () => {
+    expect(paidStatus(0, 0, "sent")).toBe("paid");
+    expect(paidStatus(0, 0, "draft")).toBe("draft");
+  });
+});
 
 describe("groupInvoiceLines (progress-report labor/material breakdown)", () => {
   it("groups by import_source into labor/materials/credits/other with subtotals", () => {
