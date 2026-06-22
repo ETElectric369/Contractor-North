@@ -58,7 +58,7 @@ export default async function PrelimNoticePage({ params }: { params: Promise<{ j
       address: l?.owner_address || [cu?.address, csz(cu)].filter(Boolean).join(", ") || undefined,
     },
     hiredBy: { name: l?.hired_by_name || cu?.name || undefined },
-    gc: l?.gc_name ? { name: l.gc_name } : undefined,
+    gc: l?.gc_name ? { name: l.gc_name, address: l?.gc_address || undefined } : undefined,
     lender: l?.lender_name ? { name: l.lender_name, address: l?.lender_address || undefined } : undefined,
     propertyAddress: [j.address, csz(j)].filter(Boolean).join(", ") || undefined,
     description: j.description || undefined,

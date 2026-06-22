@@ -47,6 +47,11 @@ export function LienInsuranceCard({
   // render a day early west of UTC — material for a legal deadline. Anchor to local noon.
   const fd = (v?: string | null) => (v ? formatDate(`${v}T12:00:00`) : "");
 
+  // §8200(e): a direct contractor owes a Preliminary Notice only to a construction lender,
+  // if any. A sub (has a GC above it) always owes one; a direct contractor with no lender
+  // owes none — so don't surface a mandatory deadline that doesn't apply.
+  const prelimRequired = !!lien?.gc_name || !!lien?.lender_name;
+
   function deadlineLine(label: string, deadline: string | null, daysLeft: number | null, done: boolean, urgent: boolean, doneLabel: string) {
     if (done) return <span className="text-emerald-600">{doneLabel}</span>;
     if (deadline == null) return <span className="text-slate-400">{label}: add a date</span>;
@@ -72,7 +77,11 @@ export function LienInsuranceCard({
           </div>
           {lien ? (
             <div className="mt-1.5 space-y-0.5 text-sm">
-              <div>{deadlineLine("Preliminary notice", s.prelimDeadline, s.prelimDaysLeft, s.prelimDone, s.prelimUrgent, `Prelim notice served ${fd(lien.prelim_sent_at)}`)}</div>
+              <div>
+                {prelimRequired
+                  ? deadlineLine("Preliminary notice", s.prelimDeadline, s.prelimDaysLeft, s.prelimDone, s.prelimUrgent, `Prelim notice served ${fd(lien.prelim_sent_at)}`)
+                  : <span className="text-slate-400">No preliminary notice required (direct contractor, no construction lender).</span>}
+              </div>
               <div>{deadlineLine("Record lien", s.lienDeadline, s.lienDaysLeft, s.lienDone, s.lienUrgent, `Lien recorded ${fd(lien.lien_recorded_at)}`)}</div>
               {!s.lienDone && (
                 <div className="text-xs text-slate-400">
@@ -127,6 +136,7 @@ function LienEditor({ jobId, lien, defaults, onClose, onSaved }: { jobId: string
     owner_address: lien?.owner_address ?? defaults.ownerAddress ?? "",
     hired_by_name: lien?.hired_by_name ?? defaults.ownerName ?? "",
     gc_name: lien?.gc_name ?? "",
+    gc_address: lien?.gc_address ?? "",
     lender_name: lien?.lender_name ?? "",
     lender_address: lien?.lender_address ?? "",
     estimated_amount: lien?.estimated_amount ?? defaults.estimatedAmount ?? 0,
@@ -162,6 +172,9 @@ function LienEditor({ jobId, lien, defaults, onClose, onSaved }: { jobId: string
           <div><Label htmlFor="l-gc">Direct/GC (if sub)</Label><Input id="l-gc" value={f.gc_name ?? ""} onChange={(e) => set({ gc_name: e.target.value })} /></div>
           <div><Label htmlFor="l-est">Estimated $</Label><NumberInput id="l-est" value={Number(f.estimated_amount) || 0} onValueChange={(n) => set({ estimated_amount: n })} /></div>
         </div>
+        {f.gc_name ? (
+          <div><Label htmlFor="l-gca">GC address (you must serve them)</Label><Input id="l-gca" value={f.gc_address ?? ""} onChange={(e) => set({ gc_address: e.target.value })} /></div>
+        ) : null}
         <div className="grid grid-cols-2 gap-3">
           <div><Label htmlFor="l-len">Lender (if any)</Label><Input id="l-len" value={f.lender_name ?? ""} onChange={(e) => set({ lender_name: e.target.value })} /></div>
           <div><Label htmlFor="l-lena">Lender address</Label><Input id="l-lena" value={f.lender_address ?? ""} onChange={(e) => set({ lender_address: e.target.value })} /></div>

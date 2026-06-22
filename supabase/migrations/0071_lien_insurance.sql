@@ -13,6 +13,7 @@ create table if not exists public.lien_records (
   owner_address        text,
   hired_by_name        text,                      -- §8102(a)(6): the person who contracted with the claimant
   gc_name              text,                      -- the direct/general contractor (when CN is a sub)
+  gc_address           text,                      -- a sub must be able to SERVE the direct contractor
   noc_recorded         boolean not null default false,  -- owner recorded a Notice of Completion/Cessation -> shorter window
   lender_name          text,
   lender_address       text,
@@ -43,6 +44,7 @@ create table if not exists public.insurance_claims (
 
 -- idempotent for DBs created before these columns were added
 alter table public.lien_records add column if not exists hired_by_name text;
+alter table public.lien_records add column if not exists gc_address text;
 alter table public.lien_records add column if not exists noc_recorded boolean not null default false;
 
 create index if not exists lien_records_org_idx on public.lien_records(org_id, job_id);

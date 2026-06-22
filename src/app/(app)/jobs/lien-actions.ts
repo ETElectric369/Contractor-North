@@ -12,6 +12,7 @@ export type LienInput = {
   owner_address?: string | null;
   hired_by_name?: string | null;
   gc_name?: string | null;
+  gc_address?: string | null;
   lender_name?: string | null;
   lender_address?: string | null;
   estimated_amount?: number | null;
@@ -48,6 +49,7 @@ export async function upsertLienRecord(jobId: string, input: LienInput): Promise
     owner_address: d(input.owner_address),
     hired_by_name: d(input.hired_by_name),
     gc_name: d(input.gc_name),
+    gc_address: d(input.gc_address),
     lender_name: d(input.lender_name),
     lender_address: d(input.lender_address),
     estimated_amount: input.estimated_amount != null && Number(input.estimated_amount) > 0 ? Number(input.estimated_amount) : null,

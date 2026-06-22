@@ -34,7 +34,11 @@ const OWNER_WARNING =
 
 function party(label: string, p?: PrelimParty | null): string {
   if (!p || (!p.name && !p.address)) return `${label}: (unknown — fill in before serving)`;
-  return `${label}: ${[p.name, p.address].filter(Boolean).join(", ")}`;
+  // A party that must be SERVED needs an address; flag a name-only line so it isn't
+  // mistaken for complete (e.g. a sub must serve the direct contractor at an address).
+  const name = p.name || "(name — fill in)";
+  const addr = p.address || "(address — fill in before serving)";
+  return `${label}: ${name}, ${addr}`;
 }
 
 /** Build the Preliminary Notice text. Deterministic — same inputs, same notice. */
