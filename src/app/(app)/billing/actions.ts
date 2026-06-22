@@ -117,6 +117,12 @@ export async function emailInvoice(
     supabase.from("organizations").select("name, brand_color, phone, email").maybeSingle(),
   ]);
 
+  // Never email an empty invoice — e.g. a job finished with nothing billable would
+  // otherwise send the customer a blank $0 invoice. Caught here so it protects every
+  // caller (manual "Send" and the auto-invoice-on-completion path alike).
+  if (!items || items.length === 0)
+    return { ok: false, error: "This invoice has no line items to send." };
+
   const balance = Number(invoice.total) - Number(invoice.amount_paid);
   const html = renderDocEmail({
     docType: "Invoice",

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Receipt, Banknote } from "lucide-react";
+import { Receipt, Banknote, Send } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 export default async function BillingPage() {
   const supabase = await createClient();
 
-  const [{ data: invoices }, { data: quotes }, { data: customers }, { data: jobs }, { data: refunds }] =
+  const [{ data: invoices }, { data: quotes }, { data: customers }, { data: jobs }, { data: refunds }, { data: toInvoice }] =
     await Promise.all([
       supabase
         .from("invoices")
@@ -32,6 +32,17 @@ export default async function BillingPage() {
         .order("created_at", { ascending: false })
         .limit(300),
       supabase.from("customer_credits").select("amount").eq("disposition", "refund"),
+      // "To be invoiced": standard draft invoices sitting on a finished job — created
+      // at job-finish but not yet sent (the hold-for-review queue). Excludes draws
+      // (deposit/progress/final), which are sent through their own progress-report flow.
+      supabase
+        .from("invoices")
+        .select("id, invoice_number, total, customers(name), jobs!inner(name, status)")
+        .eq("status", "draft")
+        .eq("invoice_kind", "standard")
+        .eq("jobs.status", "complete")
+        .order("created_at", { ascending: false })
+        .limit(50),
     ]);
 
   const list = invoices ?? [];
@@ -60,6 +71,38 @@ export default async function BillingPage() {
           <NewInvoiceButton quotes={(quotes as any) ?? []} customers={customers ?? []} jobs={(jobs as any) ?? []} />
         </div>
       </PageHeader>
+
+      {(toInvoice ?? []).length > 0 && (
+        <Card className="mb-4 border-amber-200 bg-amber-50/40">
+          <CardContent className="py-4">
+            <div className="mb-1 flex items-center gap-2 text-sm font-semibold text-amber-800">
+              <Send className="h-4 w-4" /> To be invoiced · {(toInvoice ?? []).length}
+            </div>
+            <p className="mb-3 text-xs text-amber-700">
+              Finished jobs with a draft invoice waiting to be reviewed and sent.
+            </p>
+            <ul className="divide-y divide-amber-100 overflow-hidden rounded-lg border border-amber-100 bg-white">
+              {(toInvoice ?? []).map((inv: any) => (
+                <li key={inv.id}>
+                  <Link
+                    href={`/billing/${inv.id}`}
+                    className="flex items-center justify-between gap-3 px-4 py-2.5 hover:bg-amber-50"
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-slate-900">{inv.customers?.name ?? "—"}</div>
+                      <div className="truncate text-xs text-slate-500">{inv.jobs?.name ?? inv.invoice_number}</div>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-3">
+                      <span className="text-sm font-medium text-slate-900">{formatCurrency(inv.total)}</span>
+                      <span className="text-xs font-medium text-brand">Review &amp; send →</span>
+                    </div>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
 
       {list.length > 0 && (
         <div className="mb-4 grid grid-cols-2 gap-4 sm:max-w-md">

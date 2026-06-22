@@ -9,6 +9,7 @@ import { NumberInput } from "@/components/ui/number-input";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { LineItemText } from "@/components/line-item-text";
+import { CostBreakdown } from "@/components/cost-breakdown";
 import type { Invoice, InvoiceItem, Payment } from "@/lib/types";
 import {
   addInvoiceItem,
@@ -352,6 +353,7 @@ export function InvoiceDetail({
       <div className="space-y-6">
         <Card>
           <CardContent className="space-y-2 py-5 text-sm">
+            <CostBreakdown items={items} className="mb-1" />
             <div className="flex justify-between text-slate-600">
               <span>Subtotal</span>
               <span>{formatCurrency(invoice.subtotal)}</span>

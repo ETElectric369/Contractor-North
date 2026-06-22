@@ -8,6 +8,7 @@ import {
   createBlankInvoice,
   importLaborIntoInvoice,
   importCostsIntoInvoice,
+  emailInvoice,
 } from "../billing/actions";
 
 export type Result = { ok: boolean; error?: string };
@@ -49,8 +50,8 @@ export async function createInvoiceForJob(
  *  and materials from POs/bills. Returns the invoice id for review. */
 export async function finishJob(
   jobId: string,
-  opts: { importLabor: boolean; importCosts: boolean },
-): Promise<{ ok: boolean; error?: string; id?: string }> {
+  opts: { importLabor: boolean; importCosts: boolean; sendInvoice?: boolean },
+): Promise<{ ok: boolean; error?: string; id?: string; sent?: boolean }> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -86,9 +87,19 @@ export async function finishJob(
   const { error } = await supabase.from("jobs").update({ status: "complete" }).eq("id", jobId);
   if (error) return { ok: false, error: error.message };
 
+  // Auto-invoice: when asked, email the draft to the customer now. Best-effort —
+  // if they have no email (emailInvoice returns an error), the invoice simply stays
+  // a draft and surfaces in the "To be invoiced" queue for manual review/send.
+  let sent = false;
+  if (opts.sendInvoice) {
+    const mailed = await emailInvoice(inv.id);
+    sent = mailed.ok;
+  }
+
   revalidatePath(`/jobs/${jobId}`);
   revalidatePath("/jobs");
-  return { ok: true, id: inv.id };
+  revalidatePath("/billing");
+  return { ok: true, id: inv.id, sent };
 }
 
 /** Delete a job after warning about linked records (quotes/invoices keep

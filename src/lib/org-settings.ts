@@ -46,6 +46,12 @@ export interface OrgSettings {
   remind_invoice_due: boolean;
   remind_appointments: boolean;
 
+  // Billing automation
+  // When a job is finished, auto-email the draft invoice to the customer.
+  // false = hold for review in the "To be invoiced" queue (the safe default);
+  // true = send automatically. Always overridable per-job at the finish step.
+  auto_send_invoice_on_complete: boolean;
+
   // Public inquiry splash page
   splash_headline: string;
   splash_tagline: string;
@@ -84,6 +90,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   remind_quote_followup: false,
   remind_invoice_due: false,
   remind_appointments: false,
+  auto_send_invoice_on_complete: false,
   splash_headline: "",
   splash_tagline: "",
   splash_bg_url: "",

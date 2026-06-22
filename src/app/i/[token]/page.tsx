@@ -6,6 +6,7 @@ import { DocHeader, templateFor } from "@/components/doc-templates";
 import { billingEnabled } from "@/lib/stripe";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { docTitle } from "@/lib/doc-title";
+import { CostBreakdown } from "@/components/cost-breakdown";
 import type { Metadata } from "next";
 import type { Organization } from "@/lib/types";
 
@@ -122,6 +123,10 @@ export default async function PublicInvoicePage({
             ))}
           </tbody>
         </table>
+        </div>
+
+        <div className="mt-4 flex justify-end">
+          <CostBreakdown items={items} className="w-64" />
         </div>
 
         <div className="mt-4 flex justify-end">

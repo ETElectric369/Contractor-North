@@ -21,6 +21,7 @@ export function AutomationSettings({ settings }: { settings: OrgSettings }) {
   const [followup, setFollowup] = useState(settings.remind_quote_followup);
   const [invoiceDue, setInvoiceDue] = useState(settings.remind_invoice_due);
   const [appts, setAppts] = useState(settings.remind_appointments);
+  const [autoSend, setAutoSend] = useState(settings.auto_send_invoice_on_complete);
   const [, start] = useTransition();
 
   function set(patch: Record<string, boolean>) {
@@ -28,6 +29,7 @@ export function AutomationSettings({ settings }: { settings: OrgSettings }) {
   }
 
   const rows: { label: string; desc: string; on: boolean; set: (v: boolean) => void; key: string }[] = [
+    { label: "Auto-send invoice when a job is finished", desc: "Email the draft invoice to the customer the moment a job is marked complete. Off = hold it in “To be invoiced” for review. Overridable per-job at the finish step.", on: autoSend, set: setAutoSend, key: "auto_send_invoice_on_complete" },
     { label: "Quote follow-ups", desc: "Auto email/SMS nudges on quotes that haven't been accepted.", on: followup, set: setFollowup, key: "remind_quote_followup" },
     { label: "Invoice payment reminders", desc: "Remind customers about due & overdue invoices.", on: invoiceDue, set: setInvoiceDue, key: "remind_invoice_due" },
     { label: "Appointment confirmations & reminders", desc: "Confirm and remind customers about scheduled visits.", on: appts, set: setAppts, key: "remind_appointments" },

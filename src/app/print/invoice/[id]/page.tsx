@@ -10,6 +10,7 @@ import { jobProgressFinancials } from "@/lib/job-financials";
 import { ProgressReportCard } from "@/components/progress-report-card";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { LineItemText } from "@/components/line-item-text";
+import { CostBreakdown } from "@/components/cost-breakdown";
 import { docTitle } from "@/lib/doc-title";
 import type { Metadata } from "next";
 import type { Invoice, InvoiceItem, Organization, Payment } from "@/lib/types";
@@ -164,6 +165,11 @@ export default async function InvoicePrintPage({
             ))}
           </tbody>
         </table>
+
+        {/* Labor / Materials breakdown (progress reports & job invoices) */}
+        <div className="mt-4 flex justify-end">
+          <CostBreakdown items={lineItems} className="w-64" />
+        </div>
 
         {/* Totals */}
         <div className="mt-4 flex justify-end">

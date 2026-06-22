@@ -102,3 +102,54 @@ export function progressSummary(
   const balance = est > 0 ? cents(est - fin(received) - fin(thisAmount)) : 0;
   return { pctComplete, balance };
 }
+
+export type InvoiceLine = { description?: string | null; line_total?: number | null; import_source?: string | null };
+export type LineBreakdown = {
+  labor: { lines: InvoiceLine[]; subtotal: number };
+  materials: { lines: InvoiceLine[]; subtotal: number };
+  credits: { lines: InvoiceLine[]; subtotal: number };
+  other: { lines: InvoiceLine[]; subtotal: number };
+  /** True when there are labor OR material lines — i.e. worth showing the split. */
+  hasBreakdown: boolean;
+};
+
+/** Group an invoice's line items into Labor / Materials / Credits / Other with a
+ *  subtotal for each — so a progress report can show "Labor $X, Materials $Y" at a
+ *  glance instead of a flat list. Keys off import_source ("labor"/"costs" from the
+ *  importers, "draw_credit" for the prior-billings credit); a negative non-imported
+ *  line is treated as a credit/adjustment, everything else as Other. Display-only —
+ *  the real invoice total still comes from recalcTotals. */
+export function groupInvoiceLines(items: InvoiceLine[]): LineBreakdown {
+  const g: LineBreakdown = {
+    labor: { lines: [], subtotal: 0 },
+    materials: { lines: [], subtotal: 0 },
+    credits: { lines: [], subtotal: 0 },
+    other: { lines: [], subtotal: 0 },
+    hasBreakdown: false,
+  };
+  for (const it of items ?? []) {
+    const src = it.import_source;
+    const desc = it.description ?? "";
+    const amt = fin(it.line_total);
+    // Prefer import_source; fall back to the importer's exact "Labor — " / "Materials — "
+    // prefix (em dash + space) so the breakdown also works on surfaces (e.g. the public
+    // RPC) that don't expose import_source — but tight enough that a hand-typed
+    // "Labor - extra hour" isn't mistaken for imported labor. Only the genuine
+    // prior-billings credit goes to `credits`; other negatives (manual discounts /
+    // adjustments) stay in `other`, never mislabeled as "Less previous billings".
+    const bucket: keyof LineBreakdown =
+      src === "labor" || /^labor — /i.test(desc)
+        ? "labor"
+        : src === "costs" || /^materials — /i.test(desc)
+          ? "materials"
+          : src === "draw_credit" || /less previous billings/i.test(desc)
+            ? "credits"
+            : "other";
+    (g[bucket] as { lines: InvoiceLine[]; subtotal: number }).lines.push(it);
+    (g[bucket] as { lines: InvoiceLine[]; subtotal: number }).subtotal = cents(
+      (g[bucket] as { lines: InvoiceLine[]; subtotal: number }).subtotal + amt,
+    );
+  }
+  g.hasBreakdown = g.labor.lines.length > 0 || g.materials.lines.length > 0;
+  return g;
+}

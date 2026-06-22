@@ -727,7 +727,14 @@ export default async function JobDetailPage({
                 customerPhone={j.customers?.phone}
                 pending={(pendingProposal as any) ?? null}
               />
-              <FinishJobButton jobId={j.id} hasQuote={(quotes ?? []).length > 0} />
+              <FinishJobButton
+                jobId={j.id}
+                hasQuote={(quotes ?? []).length > 0}
+                defaultSendInvoice={getOrgSettings((org as any)?.settings).auto_send_invoice_on_complete}
+                isDrawBilled={(invoices ?? []).some(
+                  (i: any) => ["deposit", "progress", "final"].includes(i.invoice_kind) && i.status !== "void",
+                )}
+              />
             </>
           )}
           <JobEditButton job={j} customers={allCustomers ?? []} techs={techs ?? []} />

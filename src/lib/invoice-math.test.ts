@@ -1,5 +1,60 @@
 import { describe, it, expect } from "vitest";
-import { recalcTotals, resolveDrawCredit, drawAmount, progressSummary, shouldBlockStandardImport, isStandardBillingBlocker } from "@/lib/invoice-math";
+import { recalcTotals, resolveDrawCredit, drawAmount, progressSummary, shouldBlockStandardImport, isStandardBillingBlocker, groupInvoiceLines } from "@/lib/invoice-math";
+
+describe("groupInvoiceLines (progress-report labor/material breakdown)", () => {
+  it("groups by import_source into labor/materials/credits/other with subtotals", () => {
+    const g = groupInvoiceLines([
+      { description: "Labor — John", line_total: 4000, import_source: "labor" },
+      { description: "Labor — Mia", line_total: 2037.5, import_source: "labor" },
+      { description: "Materials — ABC", line_total: 5290.37, import_source: "costs" },
+      { description: "Less previous billings", line_total: -10000, import_source: "draw_credit" },
+      { description: "Trip charge", line_total: 75, import_source: null },
+    ]);
+    expect(g.labor.subtotal).toBeCloseTo(6037.5, 2);
+    expect(g.labor.lines.length).toBe(2);
+    expect(g.materials.subtotal).toBeCloseTo(5290.37, 2);
+    expect(g.credits.subtotal).toBeCloseTo(-10000, 2);
+    expect(g.other.subtotal).toBe(75);
+    expect(g.hasBreakdown).toBe(true);
+  });
+  it("keeps a manual discount in 'other' — never mislabeled as 'Less previous billings'", () => {
+    // Only the genuine draw credit (draw_credit source / matching description) is a
+    // prior-billings credit; a hand-entered negative is an adjustment, stays in other.
+    const g = groupInvoiceLines([{ description: "Discount", line_total: -50, import_source: null }]);
+    expect(g.credits.subtotal).toBe(0);
+    expect(g.other.subtotal).toBe(-50);
+    expect(g.hasBreakdown).toBe(false); // no labor/materials -> no split worth showing
+  });
+  it("routes the genuine draw credit to credits by description even without a source", () => {
+    const g = groupInvoiceLines([{ description: "Less previous billings (deposit & prior draws)", line_total: -10000 }]);
+    expect(g.credits.subtotal).toBe(-10000);
+  });
+  it("hasBreakdown is false for a plain manual invoice (no imported labor/materials)", () => {
+    const g = groupInvoiceLines([{ description: "Service call", line_total: 200, import_source: null }]);
+    expect(g.hasBreakdown).toBe(false);
+    expect(g.other.subtotal).toBe(200);
+  });
+  it("does NOT treat a hand-typed 'Labor - extra' (hyphen, no source) as imported labor", () => {
+    const g = groupInvoiceLines([{ description: "Labor - extra hour", line_total: 90, import_source: null }]);
+    expect(g.labor.lines.length).toBe(0);
+    expect(g.other.subtotal).toBe(90);
+    expect(g.hasBreakdown).toBe(false);
+  });
+  it("coerces bad amounts to 0 and handles empty", () => {
+    expect(groupInvoiceLines([]).hasBreakdown).toBe(false);
+    const g = groupInvoiceLines([{ description: "x", line_total: NaN as any, import_source: "labor" }]);
+    expect(g.labor.subtotal).toBe(0);
+  });
+  it("falls back to the description prefix when import_source is absent (public view)", () => {
+    const g = groupInvoiceLines([
+      { description: "Labor — John", line_total: 4000 }, // no import_source
+      { description: "Materials — ABC", line_total: 1000 },
+    ]);
+    expect(g.labor.subtotal).toBe(4000);
+    expect(g.materials.subtotal).toBe(1000);
+    expect(g.hasBreakdown).toBe(true);
+  });
+});
 
 describe("shouldBlockStandardImport (H4 — one billing path per job)", () => {
   it("blocks importing onto a STANDARD invoice when the job has draws", () => {
