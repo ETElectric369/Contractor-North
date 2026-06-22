@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs } from "@/components/tabs";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { EditCustomerButton } from "./edit-customer-button";
+import { PortalLinkButton } from "./portal-link-button";
 import { DeleteButton } from "@/components/delete-button";
 import { SectionMapButton } from "@/components/section-map-button";
 import { customerSectionTree } from "@/lib/nav-tree";
@@ -193,6 +194,7 @@ export default async function CustomerDetailPage({
               <Plus className="h-4 w-4" /> New quote
             </Button>
           </Link>
+          <PortalLinkButton customerId={c.id} portalToken={(customer as any).portal_token} hasEmail={!!(customer as any).email} />
           <DeleteButton
             run={deleteCustomer.bind(null, c.id)}
             confirmText={`Delete ${c.name}? This only works when no jobs, quotes, or invoices reference them.`}

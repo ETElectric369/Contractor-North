@@ -4,8 +4,44 @@ import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
 import { createClient } from "@/lib/supabase/server";
 import { formatPhone, formatState, formatZip, titleCase } from "@/lib/utils";
+import { requireStaff } from "@/lib/staff-guard";
+import { sendEmail, renderReminderEmail } from "@/lib/email";
 
 export type ActionResult = { ok: boolean; error?: string; id?: string };
+
+/** Email the customer their passwordless portal link (invoices, contracts, quotes,
+ *  project status). The link is their unguessable portal_token — bookmark, no login. */
+export async function emailPortalLink(customerId: string): Promise<ActionResult> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const { data: c } = await supabase
+    .from("customers")
+    .select("name, email, portal_token")
+    .eq("id", customerId)
+    .maybeSingle();
+  if (!c) return { ok: false, error: "Customer not found." };
+  if (!c.email) return { ok: false, error: "This customer has no email address." };
+
+  const { data: org } = await supabase.from("organizations").select("name, brand_color, phone, email").maybeSingle();
+  // Always an absolute origin so the emailed link is clickable even if the env var is unset.
+  const site = process.env.NEXT_PUBLIC_SITE_URL || "https://contractor-north.vercel.app";
+  const link = `${site}/portal/${c.portal_token}`;
+  const html = renderReminderEmail({
+    company: { name: org?.name ?? "Contractor North", brand: org?.brand_color ?? "#0b57c4", phone: org?.phone, email: org?.email },
+    customerName: c.name,
+    heading: "Your customer portal",
+    message: "Here's your private link to view your invoices, contracts, quotes, and project status anytime — no password needed. Bookmark it for easy access.",
+    cta: { label: "Open my portal", link },
+  });
+  const res = await sendEmail({
+    to: c.email,
+    subject: `Your ${org?.name ?? "customer"} portal`.trim(),
+    html,
+    replyTo: org?.email ?? undefined,
+  });
+  return res.ok ? { ok: true } : res;
+}
 
 export async function createCustomer(formData: FormData): Promise<ActionResult> {
   const supabase = await createClient();
