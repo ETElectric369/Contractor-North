@@ -9,7 +9,10 @@ export type ActionKind =
   | "job_to_schedule" // a job with no date yet
   | "inquiry" // a new/uncontacted lead
   | "appointment" // a scheduled appt awaiting completion
-  | "organize"; // a capture (receipt/note/doc) needing a filing decision
+  | "organize" // a capture (receipt/note/doc) needing a filing decision
+  | "invoice_overdue" // a sent/partial invoice past its due date (A/R)
+  | "lien_deadline" // a lien prelim/recording deadline coming due or past
+  | "contract_unsigned"; // a contract sent but not yet signed
 
 /** The canonical verbs. Each maps to an existing server action in dispatch.ts. */
 export type Affordance =
@@ -41,6 +44,9 @@ export const KIND_META: Record<ActionKind, { label: string; tone: "slate" | "blu
   inquiry: { label: "Inquiry", tone: "green" },
   appointment: { label: "Appointment", tone: "blue" },
   organize: { label: "To file", tone: "slate" },
+  invoice_overdue: { label: "Overdue invoice", tone: "amber" },
+  lien_deadline: { label: "Lien deadline", tone: "amber" },
+  contract_unsigned: { label: "Unsigned contract", tone: "blue" },
 };
 
 // The affordance matrix — which verbs each kind exposes. THE contract, consumed
@@ -53,6 +59,11 @@ export const AFFORDANCES: Record<ActionKind, Affordance[]> = {
   inquiry: ["do", "schedule", "convert", "snooze", "dismiss", "open"],
   appointment: ["do", "dismiss", "open"],
   organize: ["dismiss", "open"],
+  // Money/legal items drill into their own surface to act (record a payment, serve a
+  // notice, chase a signature) — no generic "do"/"dismiss" that would mislabel them.
+  invoice_overdue: ["open"],
+  lien_deadline: ["open"],
+  contract_unsigned: ["open"],
 };
 
 /**

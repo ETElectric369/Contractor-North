@@ -1,50 +1,23 @@
 import { createClient } from "@/lib/supabase/server";
 import type { ActionItem, ActionKind } from "./types";
 import { AFFORDANCES } from "./types";
+import { lienStatus } from "@/lib/lien-math";
+import { formatCurrency } from "@/lib/utils";
 
-/** Cheap count of the "Needs action" inbox for the dock Home badge — count-only
- *  queries (head:true), mirroring getActionItems' filters. Runs on every page. */
+/**
+ * Count for the dock Home badge. Derived from the SAME projection as the inbox so
+ * the badge can never disagree with the list it summarizes — a parallel set of
+ * count-only queries inevitably drifts from the list's per-row filters (a paid-but-
+ * status-lagging invoice, the §8200(e) prelim-required gate, the NOC-shortened lien
+ * window), producing a "phantom badge" that never clears. The fetches are capped and
+ * RLS-scoped; correctness of the badge is worth the bounded row payload.
+ */
 export async function getActionItemsCount(ctx: {
   todayStr: string;
   isStaff: boolean;
   userId: string;
 }): Promise<number> {
-  const { todayStr, isStaff, userId } = ctx;
-  const supabase = await createClient();
-  const endOfToday = `${todayStr}T23:59:59`;
-  const n = async (q: any): Promise<number> => {
-    const { count } = await q;
-    return count ?? 0;
-  };
-
-  let taskQ = supabase
-    .from("tasks")
-    .select("id", { count: "exact", head: true })
-    .eq("status", "open")
-    .lte("due_date", todayStr);
-  if (!isStaff) taskQ = taskQ.eq("assigned_to", userId);
-
-  let apptQ = supabase
-    .from("appointments")
-    .select("id", { count: "exact", head: true })
-    .eq("status", "scheduled")
-    .lte("starts_at", endOfToday);
-  if (!isStaff) apptQ = apptQ.eq("assigned_to", userId);
-
-  const parts = await Promise.all([
-    n(taskQ),
-    n(apptQ),
-    isStaff
-      ? n(supabase.from("jobs").select("id", { count: "exact", head: true }).is("scheduled_start", null).in("status", ["estimate", "scheduled"]))
-      : 0,
-    isStaff
-      ? n(supabase.from("inquiries").select("id", { count: "exact", head: true }).in("status", ["new", "contacted"]).is("converted_at", null))
-      : 0,
-    isStaff
-      ? n(supabase.from("organized_items").select("id", { count: "exact", head: true }).eq("status", "needs_review"))
-      : 0,
-  ]);
-  return parts.reduce((a, b) => a + b, 0);
+  return (await getActionItems(ctx)).length;
 }
 
 const ORGANIZE_LABEL: Record<string, string> = {
@@ -79,7 +52,7 @@ export async function getActionItems(ctx: {
 
   const empty = Promise.resolve({ data: [] as any[] });
 
-  const [tasksR, jobsR, inqR, apptR, orgR] = await Promise.all([
+  const [tasksR, jobsR, inqR, apptR, orgR, invR, conR, lienR] = await Promise.all([
     taskQ,
     // Unscheduled jobs — staff only (the "resting place" for things needing a date).
     isStaff
@@ -117,6 +90,34 @@ export async function getActionItems(ctx: {
           .eq("status", "needs_review")
           .order("created_at", { ascending: false })
           .limit(50)
+      : empty,
+    // Money/legal — staff only. Overdue invoices (A/R) past their due date.
+    isStaff
+      ? supabase
+          .from("invoices")
+          .select("id, invoice_number, total, amount_paid, due_date, status, customers(name)")
+          .in("status", ["sent", "partial", "overdue"])
+          .not("due_date", "is", null)
+          .lt("due_date", todayStr)
+          .order("due_date", { ascending: true })
+          .limit(50)
+      : empty,
+    // Contracts sent to the customer but not yet signed (chase the signature).
+    isStaff
+      ? supabase
+          .from("contracts")
+          .select("id, contract_number, status, job_id, jobs(job_number, name)")
+          .eq("status", "sent")
+          .order("created_at", { ascending: true })
+          .limit(50)
+      : empty,
+    // Lien records with a still-open deadline; urgency computed per-row below.
+    isStaff
+      ? supabase
+          .from("lien_records")
+          .select("id, job_id, first_furnished_date, completion_date, prelim_sent_at, lien_recorded_at, noc_recorded, gc_name, lender_name, jobs(job_number, name)")
+          .or("prelim_sent_at.is.null,lien_recorded_at.is.null")
+          .limit(100)
       : empty,
   ]);
 
@@ -203,6 +204,79 @@ export async function getActionItems(ctx: {
       done: false,
       href: "/organize",
       affordances: AFFORDANCES.organize,
+    });
+  }
+
+  // Overdue invoices (A/R) — the money the business is owed past its due date.
+  for (const inv of (invR.data ?? []) as any[]) {
+    const balance = Number(inv.total ?? 0) - Number(inv.amount_paid ?? 0);
+    if (balance < 0.005) continue; // effectively paid; status just lagging
+    const daysOver = Math.floor((Date.parse(todayStr) - Date.parse(inv.due_date)) / 86_400_000);
+    items.push({
+      id: inv.id,
+      kind: "invoice_overdue",
+      title: `${inv.invoice_number} · ${formatCurrency(balance)} due`,
+      subtitle: inv.customers?.name ?? null,
+      who: null,
+      when: inv.due_date,
+      urgency: daysOver > 14 ? 2 : 1,
+      done: false,
+      href: `/billing/${inv.id}`,
+      affordances: AFFORDANCES.invoice_overdue,
+    });
+  }
+
+  // Contracts sent but not yet signed — chase the signature to lock the deal.
+  for (const cont of (conR.data ?? []) as any[]) {
+    const job = cont.jobs;
+    items.push({
+      id: cont.id,
+      kind: "contract_unsigned",
+      title: cont.contract_number ? `Contract ${cont.contract_number} unsigned` : "Contract unsigned",
+      subtitle: job ? `${job.job_number} · ${job.name}` : "Awaiting signature",
+      who: null,
+      when: null,
+      urgency: 1,
+      done: false,
+      href: `/jobs/${cont.job_id}?tab=invoices`,
+      affordances: AFFORDANCES.contract_unsigned,
+    });
+  }
+
+  // Lien deadlines coming due or past — surface only the pressing one per job.
+  for (const l of (lienR.data ?? []) as any[]) {
+    const st = lienStatus({
+      firstFurnishedDate: l.first_furnished_date,
+      completionDate: l.completion_date,
+      prelimSentAt: l.prelim_sent_at,
+      lienRecordedAt: l.lien_recorded_at,
+      nocRecorded: l.noc_recorded,
+      isSubcontractor: !!l.gc_name,
+      today: todayStr,
+    });
+    const prelimRequired = !!l.gc_name || !!l.lender_name; // §8200(e): direct contractor owes prelim only to a lender
+    const candidates: { label: string; when: string | null; daysLeft: number | null; urgent: boolean }[] = [];
+    if (prelimRequired && !st.prelimDone && st.prelimDeadline)
+      candidates.push({ label: "Preliminary notice", when: st.prelimDeadline, daysLeft: st.prelimDaysLeft, urgent: st.prelimUrgent });
+    if (!st.lienDone && st.lienDeadline)
+      candidates.push({ label: "Record lien", when: st.lienDeadline, daysLeft: st.lienDaysLeft, urgent: st.lienUrgent });
+    const due = candidates.filter((c) => c.urgent || (c.daysLeft != null && c.daysLeft < 0));
+    if (!due.length) continue;
+    due.sort((a, b) => (a.daysLeft ?? 0) - (b.daysLeft ?? 0));
+    const top = due[0];
+    const job = l.jobs;
+    const pastDue = top.daysLeft != null && top.daysLeft < 0;
+    items.push({
+      id: l.id,
+      kind: "lien_deadline",
+      title: `${top.label} ${pastDue ? "past due" : "due soon"}`,
+      subtitle: job ? `${job.job_number} · ${job.name}` : null,
+      who: null,
+      when: top.when,
+      urgency: 2,
+      done: false,
+      href: `/jobs/${l.job_id}?tab=invoices`,
+      affordances: AFFORDANCES.lien_deadline,
     });
   }
 
