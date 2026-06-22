@@ -8,6 +8,7 @@ import { setDocTemplateFor } from "./actions";
 const DOC_TYPES = [
   { key: "quote", label: "Quotes & estimates" },
   { key: "invoice", label: "Invoices" },
+  { key: "contract", label: "Contracts" },
   { key: "change_order", label: "Change orders" },
   { key: "work_order", label: "Work orders" },
 ];

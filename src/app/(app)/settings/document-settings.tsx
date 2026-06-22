@@ -14,6 +14,7 @@ export function DocumentSettings({ settings }: { settings: OrgSettings }) {
   const [deposit, setDeposit] = useState(settings.deposit_percent);
   const [quoteTerms, setQuoteTerms] = useState(settings.quote_terms);
   const [invoiceTerms, setInvoiceTerms] = useState(settings.invoice_terms);
+  const [contractTerms, setContractTerms] = useState(settings.contract_terms);
   const [footer, setFooter] = useState(settings.document_footer);
   const [pending, start] = useTransition();
   const [done, setDone] = useState(false);
@@ -29,6 +30,7 @@ export function DocumentSettings({ settings }: { settings: OrgSettings }) {
         deposit_percent: deposit,
         quote_terms: quoteTerms,
         invoice_terms: invoiceTerms,
+        contract_terms: contractTerms,
         document_footer: footer,
       });
       if (!res.ok) return setError(res.error ?? "Could not save.");
@@ -61,6 +63,10 @@ export function DocumentSettings({ settings }: { settings: OrgSettings }) {
       <div>
         <Label htmlFor="ds-iterms">Default invoice terms</Label>
         <Textarea id="ds-iterms" rows={2} value={invoiceTerms} onChange={(e) => setInvoiceTerms(e.target.value)} placeholder="e.g. Payment due within 14 days. 1.5% monthly late fee." />
+      </div>
+      <div>
+        <Label htmlFor="ds-cterms">Default contract terms</Label>
+        <Textarea id="ds-cterms" rows={4} value={contractTerms} onChange={(e) => setContractTerms(e.target.value)} placeholder="The standard terms section of your service contracts (payment, change orders, warranty, cancellation, governing law)." />
       </div>
       <div>
         <Label htmlFor="ds-footer">Document footer</Label>

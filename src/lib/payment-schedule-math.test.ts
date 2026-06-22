@@ -1,5 +1,22 @@
 import { describe, it, expect } from "vitest";
-import { milestoneAmount, milestoneKind, scheduleStatus, defaultSchedule } from "@/lib/payment-schedule-math";
+import { milestoneAmount, milestoneKind, scheduleStatus, defaultSchedule, contractTotalFromQuotes } from "@/lib/payment-schedule-math";
+
+describe("contractTotalFromQuotes (shared contract-base rule)", () => {
+  it("uses the accepted quote(s) when any are accepted (ignores a superseded draft/revision)", () => {
+    const t = contractTotalFromQuotes([
+      { total: 40000, status: "accepted" },
+      { total: 38000, status: "draft" },
+    ]);
+    expect(t).toBe(40000);
+  });
+  it("sums all quotes only when none are accepted yet", () => {
+    expect(contractTotalFromQuotes([{ total: 10000, status: "sent" }])).toBe(10000);
+  });
+  it("handles empty + bad totals", () => {
+    expect(contractTotalFromQuotes([])).toBe(0);
+    expect(contractTotalFromQuotes([{ total: NaN as any, status: "accepted" }])).toBe(0);
+  });
+});
 
 describe("milestoneAmount", () => {
   it("computes percent of contract", () => {

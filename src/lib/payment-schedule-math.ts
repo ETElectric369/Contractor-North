@@ -22,6 +22,17 @@ export type Milestone = {
   billed_amount?: number | null;
 };
 
+/** Contract total for a job = the agreed amount. Prefer the accepted quote(s); only
+ *  if none are accepted yet fall back to the sum of all quotes (so a revised quote
+ *  doesn't double the contract once one is accepted). One rule, shared by the job
+ *  page, billing actions, and contract generation so they never diverge. */
+export function contractTotalFromQuotes(quotes: { total?: number | null; status?: string | null }[]): number {
+  const all = quotes ?? [];
+  const accepted = all.filter((q) => q.status === "accepted");
+  const base = accepted.length ? accepted : all;
+  return cents(base.reduce((s, q) => s + fin(q.total), 0));
+}
+
 /** The $ a milestone bills: percent of the contract when a percent is set, else the
  *  fixed amount. Always finite, never negative. */
 export function milestoneAmount(m: Milestone, contractTotal: number): number {

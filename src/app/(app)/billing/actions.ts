@@ -10,7 +10,7 @@ import { requireStaff } from "@/lib/staff-guard";
 import { computeJobLaborBilling, fetchJobLaborRows } from "@/lib/labor-billing";
 import { recalcTotals, resolveDrawCredit, shouldBlockStandardImport } from "@/lib/invoice-math";
 import { standardBillingBlockerOnJob, standardBillingConflictError } from "@/lib/billing-guards";
-import { scheduleStatus, type Milestone } from "@/lib/payment-schedule-math";
+import { scheduleStatus, contractTotalFromQuotes, type Milestone } from "@/lib/payment-schedule-math";
 import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
 import { formatCurrency } from "@/lib/utils";
 import { reportError } from "@/lib/observe";
@@ -675,16 +675,10 @@ export async function createProgressReportInvoice(
 
 // ── Payment schedule (Fixed-Bid "payment structure") ────────────────────────────
 
-/** Contract total for a job = the agreed amount. Prefer the accepted quote(s); only
- *  if none are accepted yet fall back to the sum of all quotes — so a revised quote
- *  (original + revision) doesn't double the contract once one is accepted. Keep this
- *  in lockstep with the `contractTotal` the job page hands the schedule card. */
+/** Contract total for a job = the agreed amount (shared rule — see contractTotalFromQuotes). */
 async function jobContractTotal(supabase: any, jobId: string): Promise<number> {
   const { data: quotes } = await supabase.from("quotes").select("total, status").eq("job_id", jobId);
-  const all = quotes ?? [];
-  const accepted = all.filter((q: any) => q.status === "accepted");
-  const base = accepted.length ? accepted : all;
-  return base.reduce((s: number, q: any) => s + Number(q.total ?? 0), 0);
+  return contractTotalFromQuotes((quotes ?? []) as any);
 }
 
 /** Replace a job's payment schedule. Only allowed before any milestone has been

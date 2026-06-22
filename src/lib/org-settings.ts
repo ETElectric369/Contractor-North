@@ -14,6 +14,7 @@ export interface OrgSettings {
   invoice_due_days: number;
   quote_terms: string;
   invoice_terms: string;
+  contract_terms: string;
   document_footer: string;
   deposit_percent: number;
 
@@ -69,6 +70,8 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   invoice_due_days: 14,
   quote_terms: "",
   invoice_terms: "",
+  contract_terms:
+    "1. Payment is due per the schedule above. 2. Any change to the scope of work will be handled by a written change order. 3. Contractor warrants workmanship for one (1) year from completion. 4. Either party may cancel in writing before work begins; deposits cover materials and scheduling already committed. 5. This agreement is governed by the laws of the state where the work is performed.",
   document_footer: "",
   deposit_percent: 0,
   default_labor_rate: 0,
