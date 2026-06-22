@@ -12,6 +12,13 @@ export const metadata: Metadata = {
     "AI-powered field service platform for electrical contractors — CRM, quoting, scheduling, work orders, and timeclock.",
   appleWebApp: { capable: true, statusBarStyle: "default", title: "North" },
   icons: { apple: "/apple-touch-icon.png" },
+  other: {
+    // Next 15's `appleWebApp.capable` now emits only the modern `mobile-web-app-capable`.
+    // OLDER iOS still needs the legacy `apple-mobile-web-app-capable` to launch an
+    // installed PWA standalone — without it, the home-screen app opens inside Safari
+    // with the browser controls (what Brian's older iPhone showed).
+    "apple-mobile-web-app-capable": "yes",
+  },
 };
 
 export const viewport: Viewport = {
