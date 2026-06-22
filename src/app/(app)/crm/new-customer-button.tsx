@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useTransition, useEffect } from "react";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
@@ -19,6 +19,20 @@ export function NewCustomerButton() {
   const [state, setState] = useState("");
   const [zip, setZip] = useState("");
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
+
+  // Open straight from the quick-add menu's "New customer" (/crm?new=1), then strip
+  // the param so a refresh or back-button doesn't reopen the form.
+  useEffect(() => {
+    if (searchParams.get("new") !== "1") return;
+    setOpen(true);
+    const params = new URLSearchParams(Array.from(searchParams.entries()));
+    params.delete("new");
+    const qs = params.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function onSubmit(formData: FormData) {
     setError(null);

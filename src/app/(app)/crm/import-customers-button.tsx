@@ -203,6 +203,11 @@ export function ImportCustomersButton({ csv = true, label }: { csv?: boolean; la
               saving={pending}
               saveLabel={`Import ${dataRows.length} rows`}
             />
+          ) : msg ? (
+            // A VCF import (or any info/error message) clears the headers, so the
+            // mapping footer is gone — without this the result modal had only an X
+            // and looked broken ("import does not work"). Give it a clear Done.
+            <ModalActions onCancel={() => setOpen(false)} onSave={() => setOpen(false)} saveLabel="Done" hideCancel />
           ) : undefined
         }
       >

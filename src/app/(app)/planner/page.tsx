@@ -7,7 +7,7 @@ import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { hoursBetween, formatCurrency } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
-import { navUrl } from "@/lib/maps";
+import { NavLink } from "@/components/nav-link";
 import { toJobOptions, toCustomerOptions, toStaffOptions } from "@/lib/schedule-options";
 import { todayBoundsInTz, prettyDay, tzDayStartUtc } from "@/lib/tz";
 import { DayClock } from "./day-clock";
@@ -213,14 +213,12 @@ export default async function PlannerPage() {
             )}
             <div className="mt-3 space-y-2 text-sm font-medium">
               {currentJob.address && (
-                <a
-                  href={navUrl(currentJob.address)}
-                  target="_blank"
-                  rel="noreferrer"
+                <NavLink
+                  address={currentJob.address}
                   className="flex min-h-[52px] items-center justify-center gap-2 rounded-xl bg-brand text-base text-white shadow-sm hover:bg-brand-dark"
                 >
                   <Navigation className="h-5 w-5" /> Navigate
-                </a>
+                </NavLink>
               )}
               <div className="flex gap-2">
                 <Link href={`/jobs/${currentJob.id}`} className="flex min-h-[44px] flex-1 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50">
@@ -255,14 +253,12 @@ export default async function PlannerPage() {
               </div>
             )}
             {nextJob.address && (
-              <a
-                href={navUrl(nextJob.address)}
-                target="_blank"
-                rel="noreferrer"
+              <NavLink
+                address={nextJob.address}
                 className="mt-3 flex min-h-[48px] items-center justify-center gap-2 rounded-xl bg-brand text-base font-medium text-white shadow-sm hover:bg-brand-dark"
               >
                 <Navigation className="h-5 w-5" /> Navigate
-              </a>
+              </NavLink>
             )}
           </div>
         </Card>
@@ -351,9 +347,9 @@ export default async function PlannerPage() {
                   <span className="truncate text-sm font-medium text-slate-900">{a.title}</span>
                 </div>
                 {a.location && (
-                  <a href={navUrl(a.location)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-xs text-brand hover:underline">
+                  <NavLink address={a.location} className="inline-flex items-center gap-0.5 text-xs text-brand hover:underline">
                     <MapPin className="h-3 w-3" /> {a.location}
-                  </a>
+                  </NavLink>
                 )}
               </div>
               <AppointmentButton

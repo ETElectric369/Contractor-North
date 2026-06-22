@@ -154,7 +154,7 @@ export function customerSectionTree(custId: string, custLabel: string): NavTree 
   return {
     center: { label: custLabel, icon: "users" },
     nodes: [
-      { id: "cd", label: "Details", icon: "users", href: tab("details") },
+      // "Details" is the default tab you already land on — a node for it did nothing.
       { id: "cj", label: "Jobs", icon: "briefcase", href: tab("jobs") },
       { id: "cq", label: "Quotes", icon: "fileText", href: tab("quotes") },
       { id: "ci", label: "Invoices", icon: "receipt", href: tab("invoices") },

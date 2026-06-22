@@ -2,10 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, ListTodo, Briefcase, CalendarPlus, FileText, Receipt, Camera, X } from "lucide-react";
+import { Plus, ListTodo, Briefcase, CalendarPlus, FileText, Receipt, Camera, UserPlus, X } from "lucide-react";
 
 const ACTIONS = [
   { label: "New task", href: "/tasks", icon: ListTodo },
+  { label: "New customer", href: "/crm?new=1", icon: UserPlus },
   { label: "New job", href: "/jobs", icon: Briefcase },
   { label: "New appointment", href: "/schedule?view=appointments", icon: CalendarPlus },
   { label: "New quote / estimate", href: "/quotes/new", icon: FileText },

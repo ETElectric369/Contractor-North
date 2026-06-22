@@ -11,6 +11,7 @@ import { InviteManager } from "./invite-manager";
 import { DocumentDesigner } from "./document-designer";
 import { LogoUpload } from "./logo-upload";
 import { LanguageToggle } from "./language-toggle";
+import { MapsProviderToggle } from "./maps-provider-toggle";
 import { PushSettings } from "./push-settings";
 import { DocumentSettings } from "./document-settings";
 import { SchedulingSettings } from "./scheduling-settings";
@@ -126,6 +127,10 @@ export default async function SettingsPage({
           <div className="text-sm font-medium text-slate-700">{t("s_language")}</div>
           <div className="mb-2 text-xs text-slate-400">{t("s_languageDesc")}</div>
           <LanguageToggle current={profile?.language ?? "en"} />
+        </div>
+        <div className="mt-5 border-t border-slate-100 pt-4">
+          <div className="mb-1 text-sm font-medium text-slate-700">Navigation app</div>
+          <MapsProviderToggle />
         </div>
       </Section>
     ),
