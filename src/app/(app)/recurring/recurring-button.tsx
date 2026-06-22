@@ -21,6 +21,8 @@ export interface RecurringValue {
   amount: number | null;
   category: string | null;
   vendor: string | null;
+  tax_rate?: number | null;
+  auto_send?: boolean | null;
 }
 
 export function RecurringButton({
@@ -92,6 +94,7 @@ export function RecurringButton({
               <Label htmlFor="r-kind">Type</Label>
               <Select id="r-kind" name="kind" value={kind} onChange={(e) => setKind(e.target.value)}>
                 <option value="job">Recurring job</option>
+                <option value="invoice">Recurring invoice</option>
                 <option value="expense">Recurring expense</option>
               </Select>
             </div>
@@ -109,7 +112,7 @@ export function RecurringButton({
 
           <div>
             <Label htmlFor="r-title">Title</Label>
-            <Input id="r-title" name="title" defaultValue={template?.title ?? ""} placeholder={kind === "job" ? "e.g. Monthly maintenance — Acme" : "e.g. Shop rent"} required />
+            <Input id="r-title" name="title" defaultValue={template?.title ?? ""} placeholder={kind === "job" ? "e.g. Monthly maintenance — Acme" : kind === "invoice" ? "e.g. Monthly service agreement" : "e.g. Shop rent"} required />
           </div>
 
           <div>
@@ -130,6 +133,30 @@ export function RecurringButton({
                 <Label htmlFor="r-desc">Description</Label>
                 <Textarea id="r-desc" name="description" rows={2} defaultValue={template?.description ?? ""} />
               </div>
+            </>
+          ) : kind === "invoice" ? (
+            <>
+              <div>
+                <Label htmlFor="r-icust">Customer</Label>
+                <Select id="r-icust" name="customer_id" defaultValue={template?.customer_id ?? ""} required>
+                  <option value="">—</option>
+                  {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </Select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label htmlFor="r-iamt">Amount</Label>
+                  <Input id="r-iamt" name="amount" type="number" step="0.01" min="0" defaultValue={template?.amount ?? ""} required />
+                </div>
+                <div>
+                  <Label htmlFor="r-itax">Tax (%)</Label>
+                  <Input id="r-itax" name="tax_pct" type="number" step="0.001" min="0" defaultValue={(template as { tax_rate?: number } | undefined)?.tax_rate ? Number((template as { tax_rate?: number }).tax_rate) * 100 : ""} placeholder="0" />
+                </div>
+              </div>
+              <label className="flex items-start gap-2 text-sm text-slate-700">
+                <input type="checkbox" name="auto_send" defaultChecked={(template as { auto_send?: boolean } | undefined)?.auto_send ?? false} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand" />
+                <span>Email it to the customer automatically each time<span className="block text-xs text-slate-500">Off = generated as a draft for you to review and send.</span></span>
+              </label>
             </>
           ) : (
             <div className="grid grid-cols-3 gap-3">

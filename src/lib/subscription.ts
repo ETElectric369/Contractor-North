@@ -21,3 +21,16 @@ export function hasActiveAccess(
   }
   return false;
 }
+
+/** Orgs the paywall NEVER blocks, regardless of subscription/trial state — the
+ *  operator's own "house" org(s). Set COMPED_ORG_IDS (comma-separated). This is why
+ *  enabling Stripe can never again lock the owner out of their own app. */
+export function isCompedOrg(orgId: string | null | undefined): boolean {
+  if (!orgId) return false;
+  const id = orgId.trim().toLowerCase();
+  return (process.env.COMPED_ORG_IDS || "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean)
+    .includes(id);
+}

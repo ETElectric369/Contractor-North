@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { Zap, LogOut } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { billingEnabled } from "@/lib/stripe";
-import { hasActiveAccess } from "@/lib/subscription";
+import { hasActiveAccess, isCompedOrg } from "@/lib/subscription";
 import { startCheckout } from "@/app/(app)/settings/billing-actions";
 import { signOut } from "@/app/login/actions";
 import { Button } from "@/components/ui/button";
@@ -35,8 +35,8 @@ export default async function SubscribePage({
     .eq("id", profile.org_id)
     .maybeSingle();
 
-  // If billing is off or access is fine, no need to be here.
-  if (!billingEnabled || (org && hasActiveAccess(org as Organization))) {
+  // If billing is off, the org is comped, or access is fine, no need to be here.
+  if (!billingEnabled || isCompedOrg(profile.org_id) || (org && hasActiveAccess(org as Organization))) {
     redirect("/planner");
   }
 

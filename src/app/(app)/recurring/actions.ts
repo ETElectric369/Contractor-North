@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
 import { drawAmount } from "@/lib/invoice-math";
 import { standardBillingBlockerOnJob, standardBillingConflictError } from "@/lib/billing-guards";
-import { runTemplate, generateDueTemplates } from "@/lib/recurring-engine";
+import { runTemplate, runInvoiceTemplate, generateDueTemplates } from "@/lib/recurring-engine";
 
 export type Result = { ok: boolean; error?: string; id?: string; count?: number };
 
@@ -22,17 +22,31 @@ export async function saveRecurring(formData: FormData, id?: string): Promise<Re
   if (!/^\d{4}-\d{2}-\d{2}$/.test(nextDate)) return { ok: false, error: "Pick a next date." };
 
   const amountRaw = String(formData.get("amount") ?? "").trim();
+  const taxRaw = String(formData.get("tax_pct") ?? "").trim();
+  const customerId = kind === "job" || kind === "invoice" ? emptyToNull(formData.get("customer_id")) : null;
+  if (kind === "invoice") {
+    if (!customerId) return { ok: false, error: "Pick a customer for the recurring invoice." };
+    if (!amountRaw || !(Number(amountRaw) > 0)) return { ok: false, error: "Enter the invoice amount." };
+  }
+  // The customer must belong to the caller's org — the user client's RLS enforces it,
+  // so a forged foreign customer_id resolves to nothing and is rejected.
+  if (customerId) {
+    const { data: cust } = await supabase.from("customers").select("id").eq("id", customerId).maybeSingle();
+    if (!cust) return { ok: false, error: "That customer isn't in your account." };
+  }
   const row = {
     kind,
     title,
     frequency: String(formData.get("frequency") ?? "monthly"),
     next_date: nextDate,
     active: true,
-    customer_id: kind === "job" ? emptyToNull(formData.get("customer_id")) : null,
+    customer_id: customerId,
     description: kind === "job" ? emptyToNull(formData.get("description")) : null,
-    amount: kind === "expense" && amountRaw ? Number(amountRaw) : null,
+    amount: (kind === "expense" || kind === "invoice") && amountRaw ? Number(amountRaw) : null,
     category: kind === "expense" ? emptyToNull(formData.get("category")) : null,
     vendor: kind === "expense" ? emptyToNull(formData.get("vendor")) : null,
+    tax_rate: kind === "invoice" && taxRaw ? Math.max(0, Number(taxRaw)) / 100 : 0,
+    auto_send: kind === "invoice" ? formData.get("auto_send") === "on" : false,
   };
 
   if (id) {
@@ -72,10 +86,14 @@ export async function generateOne(id: string): Promise<Result> {
   const supabase = ctx.supabase;
   const { data: t } = await supabase.from("recurring_templates").select("*").eq("id", id).maybeSingle();
   if (!t) return { ok: false, error: "Template not found." };
-  const ok = await runTemplate(supabase, t, ctx.userId);
-  if (!ok) return { ok: false, error: "Could not generate." };
+  const today = new Date().toISOString().slice(0, 10);
+  const ok =
+    t.kind === "invoice"
+      ? await runInvoiceTemplate(supabase, t, ctx.userId, today)
+      : await runTemplate(supabase, t, ctx.userId);
+  if (!ok) return { ok: false, error: t.kind === "invoice" ? "Already generated for this period." : "Could not generate." };
   revalidatePath("/recurring");
-  revalidatePath(t.kind === "job" ? "/jobs" : "/bills");
+  revalidatePath(t.kind === "job" ? "/jobs" : t.kind === "invoice" ? "/billing" : "/bills");
   return { ok: true };
 }
 

@@ -5,7 +5,7 @@ import { Topbar } from "@/components/app-shell/topbar";
 import { CommandBar } from "@/components/command-bar";
 import { BottomNav } from "@/components/bottom-nav";
 import { billingEnabled } from "@/lib/stripe";
-import { hasActiveAccess } from "@/lib/subscription";
+import { hasActiveAccess, isCompedOrg } from "@/lib/subscription";
 import { getOrgSettings } from "@/lib/org-settings";
 import { getActionItemsCount } from "@/lib/action-items/query";
 import { todayStrInTz } from "@/lib/tz";
@@ -51,7 +51,8 @@ export default async function AppLayout({
     .maybeSingle();
 
   // Billing gate (only when Stripe is configured): trial expired & not subscribed.
-  if (billingEnabled && org && !hasActiveAccess(org as any)) {
+  // The operator's own house org (COMPED_ORG_IDS) is never paywalled.
+  if (billingEnabled && org && !hasActiveAccess(org as any) && !isCompedOrg(profile.org_id)) {
     redirect("/subscribe");
   }
 

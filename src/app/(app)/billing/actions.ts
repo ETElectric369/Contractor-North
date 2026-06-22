@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { sendEmail, renderDocEmail } from "@/lib/email";
+import { deliverInvoiceEmail } from "@/lib/invoice-email";
 import { sendSms } from "@/lib/sms";
 import { pushInvoiceToQbo } from "@/lib/quickbooks";
 import { getOrgSettings } from "@/lib/org-settings";
@@ -100,70 +100,9 @@ export async function emailInvoice(
 ): Promise<{ ok: boolean; error?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
-  const supabase = ctx.supabase;
-
-  const { data: invoice } = await supabase
-    .from("invoices")
-    .select("*, customers(name, email)")
-    .eq("id", id)
-    .maybeSingle();
-  if (!invoice) return { ok: false, error: "Invoice not found." };
-  const customer = (invoice as any).customers;
-  if (!customer?.email)
-    return { ok: false, error: "This customer has no email address." };
-  const link = publicInvoiceLink((invoice as any).public_token);
-
-  const [{ data: items }, { data: org }] = await Promise.all([
-    supabase.from("invoice_items").select("*").eq("invoice_id", id).order("sort_order"),
-    supabase.from("organizations").select("name, brand_color, phone, email").maybeSingle(),
-  ]);
-
-  // Never email an empty invoice — e.g. a job finished with nothing billable would
-  // otherwise send the customer a blank $0 invoice. Caught here so it protects every
-  // caller (manual "Send" and the auto-invoice-on-completion path alike).
-  if (!items || items.length === 0)
-    return { ok: false, error: "This invoice has no line items to send." };
-
-  const balance = Number(invoice.total) - Number(invoice.amount_paid);
-  const html = renderDocEmail({
-    docType: "Invoice",
-    number: invoice.invoice_number,
-    company: {
-      name: org?.name ?? "Contractor North",
-      brand: org?.brand_color ?? "#0b57c4",
-      phone: org?.phone,
-      email: org?.email,
-    },
-    customerName: customer.name,
-    title: invoice.title,
-    items: (items ?? []).map((i: any) => ({
-      description: i.description,
-      quantity: i.quantity,
-      unit: i.unit,
-      price: i.unit_price,
-      total: i.line_total,
-    })),
-    subtotal: invoice.subtotal,
-    tax: invoice.tax,
-    total: invoice.total,
-    balance,
-    notes: invoice.notes,
-    link,
-  });
-
-  const res = await sendEmail({
-    to: customer.email,
-    subject: `Invoice ${invoice.invoice_number} from ${org?.name ?? "us"}`,
-    html,
-    replyTo: org?.email ?? undefined,
-  });
-  if (!res.ok) return res;
-
-  if (invoice.status === "draft") {
-    await supabase.from("invoices").update({ status: "sent" }).eq("id", id);
-  }
-  revalidatePath(`/billing/${id}`);
-  return { ok: true };
+  const res = await deliverInvoiceEmail(ctx.supabase, id);
+  if (res.ok) revalidatePath(`/billing/${id}`);
+  return res;
 }
 
 export type Result = { ok: boolean; error?: string; id?: string };
