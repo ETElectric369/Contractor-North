@@ -28,6 +28,7 @@ import { JobScheduleControl } from "./job-schedule-control";
 import { FinishJobButton } from "./finish-job-button";
 import { PaymentScheduleCard } from "./payment-schedule-card";
 import { ContractCard } from "./contract-card";
+import { LienInsuranceCard } from "./lien-insurance-card";
 import { contractTotalFromQuotes } from "@/lib/payment-schedule-math";
 import { ProposeDatesButton } from "./propose-dates-button";
 import { ProgressInvoiceButton } from "./progress-invoice-button";
@@ -95,6 +96,8 @@ export default async function JobDetailPage({
     { data: invoices },
     { data: paymentMilestones },
     { data: contractRows },
+    { data: lienRecord },
+    { data: insuranceClaim },
     { data: pos },
     { data: entries },
     { data: docRows },
@@ -109,6 +112,8 @@ export default async function JobDetailPage({
     supabase.from("invoices").select("id, invoice_number, status, total, amount_paid, invoice_kind").eq("job_id", id),
     supabase.from("payment_milestones").select("id, sort_order, label, percent, amount, status, invoice_id, billed_amount").eq("job_id", id).order("sort_order"),
     supabase.from("contracts").select("id, status, contract_number, title, body, public_token, signed_name, signed_at").eq("job_id", id).neq("status", "void").order("created_at", { ascending: false }).limit(1),
+    supabase.from("lien_records").select("*").eq("job_id", id).maybeSingle(),
+    supabase.from("insurance_claims").select("*").eq("job_id", id).maybeSingle(),
     supabase.from("purchase_orders").select("id, po_number, vendor, status, total").eq("job_id", id),
     supabase
       .from("time_entries")
@@ -646,6 +651,16 @@ export default async function JobDetailPage({
             {(!invoices || invoices.length === 0) && empty("invoices")}
           </ul>
           </Card>
+          <LienInsuranceCard
+            jobId={j.id}
+            lien={(lienRecord as any) ?? null}
+            insurance={(insuranceClaim as any) ?? null}
+            defaults={{
+              ownerName: (j.customers as any)?.name ?? undefined,
+              ownerAddress: [(j.customers as any)?.address, [(j.customers as any)?.city, (j.customers as any)?.state].filter(Boolean).join(", "), (j.customers as any)?.zip].filter(Boolean).join(" ").trim() || undefined,
+              estimatedAmount: contractTotal,
+            }}
+          />
         </div>
       ),
     },
