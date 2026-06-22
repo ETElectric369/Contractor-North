@@ -24,7 +24,7 @@ export default async function TimeclockPage() {
 
   const { data: prof } = await supabase
     .from("profiles")
-    .select("language, role")
+    .select("language, role, home_address")
     .eq("id", user?.id ?? "")
     .maybeSingle();
   const lang = prof?.language ?? "en";
@@ -49,7 +49,7 @@ export default async function TimeclockPage() {
     supabase.from("job_codes").select("*").eq("active", true).order("code"),
     supabase
       .from("jobs")
-      .select("id, job_number, name")
+      .select("id, job_number, name, address, city, state, zip")
       .in("status", ["scheduled", "in_progress", "estimate"])
       .order("created_at", { ascending: false })
       .limit(50),
@@ -108,6 +108,8 @@ export default async function TimeclockPage() {
             jobs={jobsRes.data ?? []}
             lang={lang}
             autoLunch={orgSettings.auto_lunch_30}
+            homeAddress={(prof as any)?.home_address ?? ""}
+            mileageRate={orgSettings.mileage_rate ?? 0}
           />
         </div>
 

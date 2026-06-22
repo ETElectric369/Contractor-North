@@ -83,6 +83,7 @@ export async function clockOut(input: {
   notes: string;
   gps: GeoPoint | null;
   auto?: boolean;
+  miles?: number;
   allocations?: JobAllocationInput[];
 }): Promise<ClockResult> {
   const supabase = await createClient();
@@ -100,6 +101,9 @@ export async function clockOut(input: {
       gps_out: input.gps,
       status: "closed",
       source: input.auto ? "auto_gps" : undefined,
+      // Only set miles when the clock-out captured them, so we never overwrite an
+      // existing value with 0.
+      ...(input.miles != null && input.miles > 0 ? { miles: input.miles } : {}),
     })
     .eq("id", input.entry_id)
     .eq("profile_id", user.id);

@@ -19,6 +19,7 @@ import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { hoursBetween, formatDuration } from "@/lib/utils";
 import { translator } from "@/lib/i18n";
+import { drivingDistanceMiles } from "@/lib/google-maps";
 import type { GeoPoint, JobCode, TimeEntry } from "@/lib/types";
 import { clockIn, clockOut } from "./actions";
 import { ClockStartPicker } from "./clock-start-picker";
@@ -35,6 +36,10 @@ interface JobOption {
   id: string;
   job_number: string;
   name: string;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip?: string | null;
 }
 
 function getGps(): Promise<GeoPoint | null> {
@@ -59,12 +64,16 @@ export function TimeclockPanel({
   jobs,
   lang,
   autoLunch = false,
+  homeAddress = "",
+  mileageRate = 0,
 }: {
   openEntry: TimeEntry | null;
   jobCodes: JobCode[];
   jobs: JobOption[];
   lang?: string;
   autoLunch?: boolean;
+  homeAddress?: string;
+  mileageRate?: number;
 }) {
   const t = translator(lang);
   const [error, setError] = useState<string | null>(null);
@@ -79,6 +88,8 @@ export function TimeclockPanel({
   const [lunchTaken, setLunchTaken] = useState(false);
   const [notes, setNotes] = useState(openEntry?.notes ?? "");
   const [allocations, setAllocations] = useState<AllocRow[]>([]);
+  const [miles, setMiles] = useState(0);
+  const [calcingMiles, setCalcingMiles] = useState(false);
 
   // labor-law break confirmation
   const [breaksTaken, setBreaksTaken] = useState(false);
@@ -166,6 +177,26 @@ export function TimeclockPanel({
     if (autoLunch && requiredMeal) setLunchTaken(true);
   }, [autoLunch, requiredMeal]);
 
+  // Round-trip miles from the tech's home to the job being closed — the everyday
+  // clock-out never captured mileage before (only manual entries did), so it was
+  // missing on most timecards.
+  function jobAddressForMiles(): string {
+    const id = allocations.find((a) => a.job_id)?.job_id || openEntry?.job_id || "";
+    const j = jobs.find((x) => x.id === id);
+    return j ? [j.address, j.city, j.state, j.zip].filter(Boolean).join(", ").trim() : "";
+  }
+  function autoMiles() {
+    const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+    const jobAddr = jobAddressForMiles();
+    if (!key || !homeAddress || !jobAddr) return;
+    setCalcingMiles(true);
+    drivingDistanceMiles(key, homeAddress, jobAddr)
+      .then((oneWay) => {
+        if (oneWay != null) setMiles(Math.round(oneWay * 2 * 10) / 10); // round trip
+      })
+      .finally(() => setCalcingMiles(false));
+  }
+
   function doClockOut() {
     if (!openEntry) return;
     setError(null);
@@ -176,6 +207,7 @@ export function TimeclockPanel({
         lunch_minutes: lunchToUse,
         notes,
         gps,
+        miles,
         allocations: allocations.map((a) => ({
           job_id: a.job_id || null,
           job_code: a.job_code || null,
@@ -308,6 +340,24 @@ export function TimeclockPanel({
                 </div>
               </div>
             )}
+          </div>
+
+          {/* Mileage — round-trip home → job, captured right on clock-out (it used
+              to only exist on manual entries, so most timecards had none). */}
+          <div>
+            <Label className="mb-1 flex items-center gap-1">
+              <MapPin className="h-4 w-4 text-slate-400" /> Miles
+              {mileageRate > 0 && miles > 0 ? <span className="text-slate-400">· ${(miles * mileageRate).toFixed(2)}</span> : null}
+            </Label>
+            <div className="flex items-center gap-2">
+              <NumberInput value={miles} onValueChange={setMiles} className="h-9 w-24" />
+              <span className="text-xs text-slate-400">round trip</span>
+              {!!(homeAddress && jobAddressForMiles() && process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY) && (
+                <Button type="button" size="sm" variant="outline" onClick={autoMiles} disabled={calcingMiles} title="Round trip: home ↔ job">
+                  {calcingMiles ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MapPin className="h-3.5 w-3.5" />} Auto
+                </Button>
+              )}
+            </div>
           </div>
 
           <div>
