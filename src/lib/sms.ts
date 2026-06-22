@@ -1,12 +1,22 @@
 import "server-only";
 
-/** True when Twilio is configured. */
+/** Twilio auth: prefer a scoped, revocable API Key (TWILIO_API_KEY_SID +
+ *  TWILIO_API_KEY_SECRET) over the full-access account Auth Token. The request URL
+ *  always uses the Account SID regardless of which credential authenticates. */
+function twilioAuth(): { sid: string; user: string; pass: string } | null {
+  const sid = process.env.TWILIO_ACCOUNT_SID;
+  const keySid = process.env.TWILIO_API_KEY_SID;
+  const keySecret = process.env.TWILIO_API_KEY_SECRET;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  if (!sid) return null;
+  if (keySid && keySecret) return { sid, user: keySid, pass: keySecret };
+  if (authToken) return { sid, user: sid, pass: authToken };
+  return null;
+}
+
+/** True when Twilio is configured (a credential pair + a from-number). */
 export function smsConfigured(): boolean {
-  return Boolean(
-    process.env.TWILIO_ACCOUNT_SID &&
-      process.env.TWILIO_AUTH_TOKEN &&
-      process.env.TWILIO_FROM_NUMBER,
-  );
+  return Boolean(twilioAuth() && process.env.TWILIO_FROM_NUMBER);
 }
 
 /**
@@ -18,21 +28,20 @@ export async function sendSms(
   body: string,
 ): Promise<boolean> {
   if (!to) return false;
-  const sid = process.env.TWILIO_ACCOUNT_SID;
-  const token = process.env.TWILIO_AUTH_TOKEN;
+  const auth = twilioAuth();
   const from = process.env.TWILIO_FROM_NUMBER;
-  if (!sid || !token || !from) {
+  if (!auth || !from) {
     console.log(`[sms] (Twilio not configured) would text ${to}: ${body}`);
     return false;
   }
 
   const res = await fetch(
-    `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`,
+    `https://api.twilio.com/2010-04-01/Accounts/${auth.sid}/Messages.json`,
     {
       method: "POST",
       headers: {
         Authorization:
-          "Basic " + Buffer.from(`${sid}:${token}`).toString("base64"),
+          "Basic " + Buffer.from(`${auth.user}:${auth.pass}`).toString("base64"),
         "Content-Type": "application/x-www-form-urlencoded",
       },
       body: new URLSearchParams({ To: to, From: from, Body: body }),

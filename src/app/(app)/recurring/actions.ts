@@ -108,6 +108,13 @@ export async function createProgressInvoice(
   const { data: job } = await supabase.from("jobs").select("customer_id, name").eq("id", jobId).maybeSingle();
   if (!job) return { ok: false, error: "Job not found." };
 
+  // Mutual exclusion: a job billing on a payment schedule must draw via "Request next
+  // payment" (the milestone path), not this %/fixed draw — else it double-bills.
+  const { data: sched } = await supabase
+    .from("payment_milestones").select("id").eq("job_id", jobId).limit(1).maybeSingle();
+  if (sched)
+    return { ok: false, error: "This job bills on a payment schedule — use “Request next payment” from the schedule instead." };
+
   // H3/M6: at most one draft draw per job at a time — a second would over-bill.
   const { data: existingDraft } = await supabase.from("invoices").select("invoice_number")
     .eq("job_id", jobId).eq("status", "draft").in("invoice_kind", ["deposit", "progress", "final"]).limit(1).maybeSingle();
@@ -164,7 +171,12 @@ export async function createProgressInvoice(
     })
     .select("id")
     .single();
-  if (error) return { ok: false, error: error.message };
+  if (error) {
+    // Partial unique index (one open draft draw per job) backstops a double-submit race.
+    if ((error as any).code === "23505")
+      return { ok: false, error: "A draft draw is already open on this job — send or delete it before creating another." };
+    return { ok: false, error: error.message };
+  }
 
   const { error: liErr } = await supabase.from("invoice_items").insert({
     invoice_id: inv.id,

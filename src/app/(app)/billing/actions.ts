@@ -10,6 +10,7 @@ import { requireStaff } from "@/lib/staff-guard";
 import { computeJobLaborBilling, fetchJobLaborRows } from "@/lib/labor-billing";
 import { recalcTotals, resolveDrawCredit, shouldBlockStandardImport } from "@/lib/invoice-math";
 import { standardBillingBlockerOnJob, standardBillingConflictError } from "@/lib/billing-guards";
+import { scheduleStatus, type Milestone } from "@/lib/payment-schedule-math";
 import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
 import { formatCurrency } from "@/lib/utils";
 import { reportError } from "@/lib/observe";
@@ -575,13 +576,18 @@ export async function createProgressReportInvoice(
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
 
-  const [{ data: job }, { data: org }, { data: existingDraft }] = await Promise.all([
+  const [{ data: job }, { data: org }, { data: existingDraft }, { data: sched }] = await Promise.all([
     supabase.from("jobs").select("customer_id, name").eq("id", jobId).maybeSingle(),
     supabase.from("organizations").select("settings").maybeSingle(),
     supabase.from("invoices").select("invoice_number").eq("job_id", jobId).eq("status", "draft")
       .in("invoice_kind", ["deposit", "progress", "final"]).limit(1).maybeSingle(),
+    supabase.from("payment_milestones").select("id").eq("job_id", jobId).limit(1).maybeSingle(),
   ]);
   if (!job) return { ok: false, error: "Job not found." };
+  // Mutual exclusion: a job billing on a payment schedule must draw via "Request next
+  // payment" (the milestone path), not this ad-hoc work-to-date draw.
+  if (sched)
+    return { ok: false, error: "This job bills on a payment schedule — use “Request next payment” from the schedule instead." };
   // H3/M6: at most one draft draw per job — a second would re-import and re-bill
   // the whole job, double-charging once both are sent.
   if (existingDraft) {
@@ -608,7 +614,11 @@ export async function createProgressReportInvoice(
     })
     .select("id")
     .single();
-  if (error) return { ok: false, error: error.message };
+  if (error) {
+    if ((error as any).code === "23505")
+      return { ok: false, error: "A draft draw is already open on this job — send or delete it before creating another." };
+    return { ok: false, error: error.message };
+  }
 
   // Itemize the actual work to date (labor at bill rate + materials with markup).
   await importLaborIntoInvoice(inv.id);
@@ -656,6 +666,189 @@ export async function createProgressReportInvoice(
       import_source: "draw_credit",
     });
     await recalcInvoice(supabase, inv.id);
+  }
+
+  revalidatePath(`/jobs/${jobId}`);
+  revalidatePath("/billing");
+  return { ok: true, id: inv.id };
+}
+
+// ── Payment schedule (Fixed-Bid "payment structure") ────────────────────────────
+
+/** Contract total for a job = the agreed amount. Prefer the accepted quote(s); only
+ *  if none are accepted yet fall back to the sum of all quotes — so a revised quote
+ *  (original + revision) doesn't double the contract once one is accepted. Keep this
+ *  in lockstep with the `contractTotal` the job page hands the schedule card. */
+async function jobContractTotal(supabase: any, jobId: string): Promise<number> {
+  const { data: quotes } = await supabase.from("quotes").select("total, status").eq("job_id", jobId);
+  const all = quotes ?? [];
+  const accepted = all.filter((q: any) => q.status === "accepted");
+  const base = accepted.length ? accepted : all;
+  return base.reduce((s: number, q: any) => s + Number(q.total ?? 0), 0);
+}
+
+/** Replace a job's payment schedule. Only allowed before any milestone has been
+ *  billed (a draw drafted against it) — once billing starts the schedule is locked. */
+export async function setPaymentSchedule(
+  jobId: string,
+  milestones: { label: string; percent?: number | null; amount?: number | null }[],
+): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+
+  // Org guard: the job must be visible to this caller (RLS) before we attach a schedule.
+  const { data: job } = await supabase.from("jobs").select("id").eq("id", jobId).maybeSingle();
+  if (!job) return { ok: false, error: "Job not found." };
+
+  // Mutual exclusion: a payment schedule and the ad-hoc draw path can't both bill a
+  // job. Refuse to attach a schedule once ANY draw exists on the job.
+  const { data: draw } = await supabase
+    .from("invoices")
+    .select("invoice_number")
+    .eq("job_id", jobId)
+    .neq("status", "void")
+    .in("invoice_kind", ["deposit", "progress", "final"])
+    .limit(1)
+    .maybeSingle();
+  if (draw)
+    return { ok: false, error: "This job already has draws — a payment schedule can only be set before any billing starts." };
+
+  const { data: existing } = await supabase
+    .from("payment_milestones")
+    .select("id, invoice_id")
+    .eq("job_id", jobId);
+  if ((existing ?? []).some((m: any) => m.invoice_id))
+    return { ok: false, error: "Billing has already started on this schedule — manage the remaining draws from Billing." };
+
+  if ((existing ?? []).length) await supabase.from("payment_milestones").delete().eq("job_id", jobId);
+
+  const rows = (milestones ?? [])
+    .map((m, i) => ({
+      job_id: jobId,
+      sort_order: i,
+      label: (m.label || `Payment ${i + 1}`).slice(0, 80),
+      percent: m.percent != null && Number(m.percent) > 0 ? Number(m.percent) : null,
+      amount: m.amount != null && Number(m.amount) > 0 ? Number(m.amount) : null,
+    }))
+    .filter((m) => m.percent != null || m.amount != null);
+  if (!rows.length) {
+    revalidatePath(`/jobs/${jobId}`);
+    return { ok: true };
+  }
+
+  const { error } = await supabase.from("payment_milestones").insert(rows); // org_id via trigger
+  if (error) return { ok: false, error: error.message };
+  revalidatePath(`/jobs/${jobId}`);
+  return { ok: true };
+}
+
+/** Request the next payment per the job's structure:
+ *  Fixed Bid with a schedule → draft the next milestone draw;
+ *  otherwise (T&M, or fixed with no schedule) → bill the work logged since the last bill. */
+export async function requestNextPayment(jobId: string): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+
+  const { data: job } = await supabase
+    .from("jobs")
+    .select("billing_type, customer_id")
+    .eq("id", jobId)
+    .maybeSingle();
+  if (!job) return { ok: false, error: "Job not found." };
+
+  const { data: milestones } = await supabase
+    .from("payment_milestones")
+    .select("*")
+    .eq("job_id", jobId)
+    .order("sort_order");
+
+  const isFixed = (job as any).billing_type !== "tm";
+  if (isFixed && (milestones ?? []).length) {
+    const contract = await jobContractTotal(supabase, jobId);
+    const status = scheduleStatus((milestones ?? []) as Milestone[], contract);
+    if (!status.next) return { ok: false, error: "Every scheduled payment has already been billed." };
+    return createMilestoneDraw(supabase, jobId, (job as any).customer_id ?? null, status);
+  }
+  // T&M (or fixed without a schedule): bill the work logged since the last bill.
+  return createProgressReportInvoice(jobId, "progress");
+}
+
+/** Internal: draft one milestone draw — a single fixed line at the milestone's $,
+ *  linked back to the milestone. No prior-billings credit: milestones partition the
+ *  contract, so each draw is its own slice (unlike the work-to-date progress draw). */
+async function createMilestoneDraw(
+  supabase: any,
+  jobId: string,
+  customerId: string | null,
+  status: ReturnType<typeof scheduleStatus>,
+): Promise<Result> {
+  const next = status.next;
+  if (!next) return { ok: false, error: "Every scheduled payment has already been billed." };
+  if (!(next.dollars > 0))
+    return { ok: false, error: "That payment is $0 — set the contract total (a quote) or a fixed amount on the schedule first." };
+
+  // H3: at most one draft draw open per job.
+  const { data: existingDraft } = await supabase
+    .from("invoices")
+    .select("invoice_number")
+    .eq("job_id", jobId)
+    .eq("status", "draft")
+    .in("invoice_kind", ["deposit", "progress", "final"])
+    .limit(1)
+    .maybeSingle();
+  if (existingDraft)
+    return { ok: false, error: `Draft ${(existingDraft as any).invoice_number} is still open on this job — send or delete it before requesting the next payment.` };
+
+  // H4 (reverse): a standard invoice already billing this job's work blocks a draw.
+  const stdBlocker = await standardBillingBlockerOnJob(supabase, jobId);
+  if (stdBlocker) return standardBillingConflictError(stdBlocker);
+
+  const count = status.rows.length;
+  const payNum = next.index + 1;
+  const { data: inv, error } = await supabase
+    .from("invoices")
+    .insert({
+      customer_id: customerId,
+      job_id: jobId,
+      status: "draft",
+      title: next.label || (next.kind === "final" ? "Final payment" : next.kind === "deposit" ? "Deposit" : "Progress payment"),
+      invoice_kind: next.kind,
+      tax_rate: 0,
+      subtotal: 0,
+      tax: 0,
+      total: 0,
+    })
+    .select("id")
+    .single();
+  if (error) {
+    // The partial unique index (one open draft draw per job) backstops a double-submit
+    // race that slips past the SELECT above — surface the friendly message, not raw SQL.
+    if ((error as any).code === "23505")
+      return { ok: false, error: "A draft draw is already open on this job — send or delete it before requesting the next payment." };
+    return { ok: false, error: error.message };
+  }
+
+  const pctNote = Number(next.percent) > 0 ? ` (${Number(next.percent)}% of contract)` : "";
+  await supabase.from("invoice_items").insert({
+    invoice_id: inv.id,
+    description: `${next.label || "Payment"} — payment ${payNum} of ${count}${pctNote}`,
+    quantity: 1,
+    unit: "lot",
+    unit_price: next.dollars,
+    import_source: "milestone",
+  });
+  await recalcInvoice(supabase, inv.id);
+
+  // Link the milestone to the draw (this is what marks it "billed"; deleting the draft
+  // nulls the FK and re-offers it). Reported, never silently desynced.
+  if (next.id) {
+    const { error: mErr } = await supabase
+      .from("payment_milestones")
+      .update({ status: "billed", invoice_id: inv.id, billed_amount: next.dollars })
+      .eq("id", next.id);
+    if (mErr) reportError("createMilestoneDraw.link", mErr, { jobId, milestoneId: next.id });
   }
 
   revalidatePath(`/jobs/${jobId}`);
@@ -725,6 +918,16 @@ export async function setInvoiceStatus(
   const supabase = ctx.supabase;
   const { error } = await supabase.from("invoices").update({ status }).eq("id", id);
   if (error) return { ok: false, error: error.message };
+  // Voiding a milestone draw re-opens its milestone — the FK only auto-clears on
+  // delete, not void — so "Request next payment" offers that slice again and the
+  // schedule's billed-to-date stops counting a cancelled draw.
+  if (status === "void") {
+    const { error: mErr } = await supabase
+      .from("payment_milestones")
+      .update({ status: "pending", invoice_id: null, billed_amount: null })
+      .eq("invoice_id", id);
+    if (mErr) reportError("setInvoiceStatus.unlinkMilestone", mErr, { invoiceId: id });
+  }
   revalidatePath("/billing");
   revalidatePath(`/billing/${id}`);
   return { ok: true };
@@ -842,6 +1045,12 @@ export async function deleteInvoice(id: string): Promise<Result> {
   if (count && count > 0) {
     return { ok: false, error: "This invoice has recorded payments — delete those first or mark the invoice void." };
   }
+  // Keep the milestone reset symmetric with void: the FK nulls invoice_id on delete,
+  // but clear the status/snapshot too so no stale 'billed' row lingers.
+  await supabase
+    .from("payment_milestones")
+    .update({ status: "pending", billed_amount: null })
+    .eq("invoice_id", id);
   const { error } = await supabase.from("invoices").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/billing");

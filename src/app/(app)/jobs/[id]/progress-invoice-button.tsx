@@ -28,6 +28,7 @@ export function ProgressInvoiceButton({
   invoiced = 0,
   paid = 0,
   openInvoices = [],
+  scheduleActive = false,
 }: {
   jobId: string;
   billingType?: "fixed" | "tm";
@@ -36,6 +37,9 @@ export function ProgressInvoiceButton({
   invoiced?: number;
   paid?: number;
   openInvoices?: OpenInvoice[];
+  /** True when the job uses a payment schedule — draws come from there, so this
+   *  button is restricted to recording payments (prevents a parallel draw path). */
+  scheduleActive?: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -46,7 +50,7 @@ export function ProgressInvoiceButton({
   const unbilledWork = Math.max(0, Math.round((worked - invoiced) * 100) / 100);
 
   const [mode, setMode] = useState<"payment" | "invoice">(
-    balanceDue > 0 && openInvoices.length ? "payment" : "invoice",
+    scheduleActive || (balanceDue > 0 && openInvoices.length) ? "payment" : "invoice",
   );
 
   // New-invoice (draw) state
@@ -172,14 +176,20 @@ export function ProgressInvoiceButton({
             </p>
           )}
 
-          <SegmentedControl
-            activeId={mode}
-            onSelect={(id) => setMode(id as "payment" | "invoice")}
-            items={[
-              { id: "payment", label: "Record a payment" },
-              { id: "invoice", label: "New invoice" },
-            ]}
-          />
+          {scheduleActive ? (
+            <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+              This job bills on a payment schedule — create draws with <strong>Request next payment</strong> above. Use this to record a customer&apos;s payment.
+            </p>
+          ) : (
+            <SegmentedControl
+              activeId={mode}
+              onSelect={(id) => setMode(id as "payment" | "invoice")}
+              items={[
+                { id: "payment", label: "Record a payment" },
+                { id: "invoice", label: "New invoice" },
+              ]}
+            />
+          )}
 
           {mode === "payment" ? (
             openInvoices.length === 0 ? (

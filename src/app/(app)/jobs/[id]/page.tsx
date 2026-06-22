@@ -26,6 +26,7 @@ import { JobStatusControl } from "./job-status-control";
 import { JobEditButton } from "./job-edit-button";
 import { JobScheduleControl } from "./job-schedule-control";
 import { FinishJobButton } from "./finish-job-button";
+import { PaymentScheduleCard } from "./payment-schedule-card";
 import { ProposeDatesButton } from "./propose-dates-button";
 import { ProgressInvoiceButton } from "./progress-invoice-button";
 import { NewWorkOrderButton } from "../../work-orders/new-wo-button";
@@ -90,6 +91,7 @@ export default async function JobDetailPage({
     { data: workOrders },
     { data: changeOrders },
     { data: invoices },
+    { data: paymentMilestones },
     { data: pos },
     { data: entries },
     { data: docRows },
@@ -102,6 +104,7 @@ export default async function JobDetailPage({
     supabase.from("work_orders").select("id, wo_number, title, status").eq("job_id", id),
     supabase.from("change_orders").select("*").eq("job_id", id).order("created_at", { ascending: false }),
     supabase.from("invoices").select("id, invoice_number, status, total, amount_paid, invoice_kind").eq("job_id", id),
+    supabase.from("payment_milestones").select("id, sort_order, label, percent, amount, status, invoice_id, billed_amount").eq("job_id", id).order("sort_order"),
     supabase.from("purchase_orders").select("id, po_number, vendor, status, total").eq("job_id", id),
     supabase
       .from("time_entries")
@@ -227,6 +230,14 @@ export default async function JobDetailPage({
   // stay for context only.
   const invoiced = (invoices ?? []).reduce((s: number, i: any) => s + Number(i.total ?? 0), 0);
   const quoted = (quotes ?? []).reduce((s: number, q: any) => s + Number(q.total ?? 0), 0);
+  // Contract base for the payment schedule = the accepted quote(s); fall back to all
+  // quotes only when none are accepted yet. Kept in lockstep with jobContractTotal in
+  // billing/actions.ts so the card's dollars match what "Request next payment" bills.
+  const acceptedQuotes = (quotes ?? []).filter((q: any) => q.status === "accepted");
+  const contractTotal = (acceptedQuotes.length ? acceptedQuotes : (quotes ?? [])).reduce(
+    (s: number, q: any) => s + Number(q.total ?? 0),
+    0,
+  );
   // Billed-to-date for progress payments = invoices actually SENT to the customer
   // (non-void, non-draft). A draft is a work-in-progress draw, not a real bill, so
   // it doesn't count toward "invoiced" or the deposit credit on a progress report.
@@ -608,8 +619,15 @@ export default async function JobDetailPage({
       count: invoices?.length ?? 0,
       content: (
         <div className="space-y-3">
+          <PaymentScheduleCard
+            jobId={j.id}
+            billingType={(j as any).billing_type ?? "fixed"}
+            contractTotal={contractTotal}
+            depositPercent={getOrgSettings((org as any)?.settings).deposit_percent}
+            milestones={(paymentMilestones as any) ?? []}
+          />
           <div className="flex justify-end gap-2">
-            <ProgressInvoiceButton jobId={j.id} billingType={(j as any).billing_type ?? "fixed"} estimate={quoted} worked={workedToDate} invoiced={billedToDate} paid={collected} openInvoices={openInvoices} />
+            <ProgressInvoiceButton jobId={j.id} billingType={(j as any).billing_type ?? "fixed"} estimate={quoted} worked={workedToDate} invoiced={billedToDate} paid={collected} openInvoices={openInvoices} scheduleActive={((paymentMilestones as any) ?? []).length > 0} />
             <ConvertButton
               label="Create invoice"
               run={createInvoiceForJob.bind(null, j.id)}
