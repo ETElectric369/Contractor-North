@@ -21,7 +21,9 @@ export const dynamic = "force-dynamic";
 
 const fmtTime = (iso: string) => formatTime(iso);
 
-export default async function PlannerPage() {
+export default async function PlannerPage({ searchParams }: { searchParams: Promise<{ view?: string }> }) {
+  const { view: viewRaw } = await searchParams;
+  const view = viewRaw === "week" ? "week" : "day";
   const supabase = await createClient();
   const {
     data: { user },
@@ -225,6 +227,60 @@ export default async function PlannerPage() {
   const nextAgenda = futureAgenda.slice(0, 2);
   const laterAgenda = [...futureAgenda.slice(2), ...untimedAgenda];
 
+  // Week view: the same agenda widened to this week (Sun–Sat), grouped by day.
+  const weekDayGroups: { dayStr: string; label: string; items: Agenda[] }[] = [];
+  if (view === "week") {
+    const weekEndDate = new Date(weekStartDate);
+    weekEndDate.setUTCDate(weekEndDate.getUTCDate() + 7);
+    const weekEndUtc = tzDayStartUtc(weekEndDate.toISOString().slice(0, 10), tz);
+    const [{ data: wJobs }, { data: wAppts }] = await Promise.all([
+      supabase
+        .from("jobs")
+        .select("id, job_number, name, status, address, scheduled_start, customers(name)")
+        .gte("scheduled_start", weekStartUtc.toISOString())
+        .lt("scheduled_start", weekEndUtc.toISOString())
+        .order("scheduled_start"),
+      supabase
+        .from("appointments")
+        .select("id, type, title, starts_at, location, job_id, status")
+        .gte("starts_at", weekStartUtc.toISOString())
+        .lt("starts_at", weekEndUtc.toISOString())
+        .neq("status", "cancelled")
+        .order("starts_at"),
+    ]);
+    const weekItems: Agenda[] = [
+      ...((wJobs ?? []) as any[]).map((j) => ({
+        key: `wj-${j.id}`,
+        kind: "job" as const,
+        time: j.scheduled_start,
+        title: `${j.job_number} — ${j.name}`,
+        sub: [j.customers?.name, j.address].filter(Boolean).join(" · ") || null,
+        address: j.address ?? null,
+        href: `/jobs/${j.id}`,
+        status: j.status,
+      })),
+      ...((wAppts ?? []) as any[]).map((a) => ({
+        key: `wa-${a.id}`,
+        kind: "appt" as const,
+        time: a.starts_at,
+        title: a.title,
+        sub: a.location ?? null,
+        address: a.location ?? null,
+        href: a.job_id ? `/jobs/${a.job_id}` : "/schedule?view=appointments",
+        apptType: a.type,
+      })),
+    ]
+      .filter((i) => i.time)
+      .sort((a, b) => (a.time as string).localeCompare(b.time as string));
+    const tzDayOf = (iso: string) => new Date(iso).toLocaleDateString("en-CA", { timeZone: tz });
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(weekStartDate);
+      d.setUTCDate(d.getUTCDate() + i);
+      const dayStr = d.toISOString().slice(0, 10);
+      weekDayGroups.push({ dayStr, label: prettyDay(dayStr), items: weekItems.filter((it) => tzDayOf(it.time as string) === dayStr) });
+    }
+  }
+
   const navBtnCls =
     "inline-flex shrink-0 items-center gap-1 rounded-lg border border-brand/30 bg-brand-light/40 px-2.5 py-1.5 text-xs font-medium text-brand hover:bg-brand-light";
   const agendaRows = (items: Agenda[]) =>
@@ -253,6 +309,20 @@ export default async function PlannerPage() {
   return (
     <div className="mx-auto max-w-3xl">
       <PageHeader title="My Day" description={niceDay} />
+
+      <div className="mb-3 flex gap-1">
+        {(["day", "week"] as const).map((v) => (
+          <Link
+            key={v}
+            href={`/planner?view=${v}`}
+            className={`rounded-lg px-3.5 py-1.5 text-sm font-medium ${
+              view === v ? "bg-brand text-white shadow-sm" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+            }`}
+          >
+            {v === "day" ? "Day" : "Week"}
+          </Link>
+        ))}
+      </div>
 
       <div className="mb-3">
         <WeatherWidget location={orgLocation} label={(org as any)?.city ?? undefined} />
@@ -301,34 +371,66 @@ export default async function PlannerPage() {
         </Card>
       )}
 
-      {/* Coming up today — one chronological agenda (Next, then Later): jobs +
-          appointments interleaved by time. Tasks live in "Needs action" below. */}
-      <Card className="mb-4 overflow-hidden">
-        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
-          <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-            <CalendarCheck className="h-4 w-4 text-brand" /> Coming up today
+      {view === "week" ? (
+        /* Week view — the agenda grouped by day (Sun–Sat), today highlighted. */
+        <Card className="mb-4 overflow-hidden">
+          <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+              <CalendarCheck className="h-4 w-4 text-brand" /> This week
+            </div>
+            <AppointmentButton jobs={jobOpts} customers={custOpts} staff={staffOpts} defaultDate={todayStr} compact />
           </div>
-          <AppointmentButton jobs={jobOpts} customers={custOpts} staff={staffOpts} defaultDate={todayStr} compact />
-        </div>
-        {nextAgenda.length === 0 && laterAgenda.length === 0 ? (
-          empty("Nothing left on the schedule today.")
-        ) : (
-          <>
-            {nextAgenda.length > 0 && (
-              <>
-                <div className="bg-slate-50/70 px-5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-brand">Next</div>
-                <ul className="divide-y divide-slate-100">{agendaRows(nextAgenda)}</ul>
-              </>
-            )}
-            {laterAgenda.length > 0 && (
-              <>
-                <div className="bg-slate-50/70 px-5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Later</div>
-                <ul className="divide-y divide-slate-100">{agendaRows(laterAgenda)}</ul>
-              </>
-            )}
-          </>
-        )}
-      </Card>
+          {weekDayGroups.every((d) => d.items.length === 0) ? (
+            empty("Nothing scheduled this week.")
+          ) : (
+            weekDayGroups.map((d) => (
+              <div key={d.dayStr}>
+                <div
+                  className={`px-5 py-1.5 text-[11px] font-semibold uppercase tracking-wide ${
+                    d.dayStr === todayStr ? "bg-brand-light/40 text-brand" : "bg-slate-50/70 text-slate-400"
+                  }`}
+                >
+                  {d.label}{d.dayStr === todayStr ? " · Today" : ""}
+                </div>
+                {d.items.length > 0 ? (
+                  <ul className="divide-y divide-slate-100">{agendaRows(d.items)}</ul>
+                ) : (
+                  <p className="px-5 py-2 text-xs text-slate-300">Open</p>
+                )}
+              </div>
+            ))
+          )}
+        </Card>
+      ) : (
+        /* Day view — one chronological agenda (Next, then Later): jobs +
+           appointments interleaved by time. Tasks live in "Needs action" below. */
+        <Card className="mb-4 overflow-hidden">
+          <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+              <CalendarCheck className="h-4 w-4 text-brand" /> Coming up today
+            </div>
+            <AppointmentButton jobs={jobOpts} customers={custOpts} staff={staffOpts} defaultDate={todayStr} compact />
+          </div>
+          {nextAgenda.length === 0 && laterAgenda.length === 0 ? (
+            empty("Nothing left on the schedule today.")
+          ) : (
+            <>
+              {nextAgenda.length > 0 && (
+                <>
+                  <div className="bg-slate-50/70 px-5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-brand">Next</div>
+                  <ul className="divide-y divide-slate-100">{agendaRows(nextAgenda)}</ul>
+                </>
+              )}
+              {laterAgenda.length > 0 && (
+                <>
+                  <div className="bg-slate-50/70 px-5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Later</div>
+                  <ul className="divide-y divide-slate-100">{agendaRows(laterAgenda)}</ul>
+                </>
+              )}
+            </>
+          )}
+        </Card>
+      )}
 
       {/* Live time clock — tick + one-tap clock in/out */}
       <DayClock
