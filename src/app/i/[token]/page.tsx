@@ -76,6 +76,7 @@ export default async function PublicInvoicePage({
         dueDate={inv.due_date}
         title={inv.title}
         billingLabel={invoiceTypeLabel(inv.billing_type, inv.invoice_kind)}
+        description={inv.description}
         customer={c}
         items={items}
         subtotal={inv.subtotal}

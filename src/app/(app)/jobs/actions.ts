@@ -34,13 +34,14 @@ export async function createInvoiceForJob(
 
   const { data: job } = await supabase
     .from("jobs")
-    .select("customer_id, name")
+    .select("customer_id, name, description")
     .eq("id", jobId)
     .maybeSingle();
   return createBlankInvoice({
     customer_id: job?.customer_id ?? null,
     job_id: jobId, // keep the job link so the invoice can pull Labor/Materials
     title: job?.name ?? "",
+    description: (job as any)?.description ?? null, // scope shown above the line items
     tax_rate: 0,
   });
 }

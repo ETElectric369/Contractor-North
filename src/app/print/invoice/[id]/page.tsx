@@ -76,6 +76,7 @@ export default async function InvoicePrintPage({ params }: { params: Promise<{ i
         dueDate={inv.due_date}
         title={inv.title}
         billingLabel={billingLabel}
+        description={(inv as any).description}
         customer={inv.customers}
         items={lineItems as any}
         subtotal={inv.subtotal}

@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2, Pencil, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input, Label, Select } from "@/components/ui/input";
+import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
@@ -17,6 +17,7 @@ import {
   deleteInvoiceItem,
   setInvoiceStatus,
   setInvoiceTaxRate,
+  setInvoiceDescription,
   recordPayment,
   importQuoteItemsIntoInvoice,
   importLaborIntoInvoice,
@@ -61,6 +62,19 @@ export function InvoiceDetail({
   const refresh = () => router.refresh();
 
   const balance = Number(invoice.total) - Number(invoice.amount_paid);
+
+  // invoice description (scope shown above the line items)
+  const [descr, setDescr] = useState((invoice as any).description ?? "");
+  const [descrSaved, setDescrSaved] = useState(false);
+  const descrDirty = descr !== ((invoice as any).description ?? "");
+  function saveDescr() {
+    setDescrSaved(false);
+    start(async () => {
+      await setInvoiceDescription(invoice.id, descr);
+      setDescrSaved(true);
+      setTimeout(() => setDescrSaved(false), 2000);
+    });
+  }
 
   // add-item state
   const [desc, setDesc] = useState("");
@@ -238,6 +252,24 @@ export function InvoiceDetail({
             at creation with a frozen "Less previous billings" credit, so a manual
             re-import would desync that credit and mis-bill. To refresh a draw,
             delete and recreate it (it re-imports + recomputes the credit). */}
+        {/* Description / scope — printed above the line items on the invoice. */}
+        <div className="rounded-xl border border-slate-200 bg-white p-3">
+          <Label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">Description (above line items)</Label>
+          <Textarea
+            value={descr}
+            onChange={(e) => setDescr(e.target.value)}
+            placeholder="Scope of work — shows above the line items on the invoice."
+            className="min-h-[60px]"
+          />
+          <div className="mt-2 flex items-center gap-2">
+            <Button size="sm" onClick={saveDescr} disabled={pending || !descrDirty}>
+              {descrSaved ? <Check className="h-3.5 w-3.5" /> : null}
+              {descrSaved ? "Saved" : "Save"}
+            </Button>
+            {descrDirty && !pending && <span className="text-xs text-slate-400">Unsaved</span>}
+          </div>
+        </div>
+
         {(invoice.job_id || (invoice as any).quote_id) &&
           !["deposit", "progress", "final"].includes((invoice as any).invoice_kind ?? "") && (
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50/60 px-3 py-2.5">

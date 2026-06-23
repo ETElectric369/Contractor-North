@@ -40,6 +40,7 @@ export function InvoiceDocument({
   dueDate,
   title,
   billingLabel,
+  description,
   customer,
   items,
   subtotal,
@@ -60,6 +61,7 @@ export function InvoiceDocument({
   dueDate?: string | Date | null;
   title?: string | null;
   billingLabel?: string | null;
+  description?: string | null;
   customer: InvoiceDocCustomer;
   items: InvoiceDocItem[];
   subtotal: number;
@@ -132,6 +134,11 @@ export function InvoiceDocument({
         </div>
       )}
       {title && <div className={`${billingLabel ? "mt-3" : "mt-5"} text-base font-semibold text-slate-900`}>{title}</div>}
+
+      {/* Scope / description — above the line items. */}
+      {description && (
+        <p className={`${title ? "mt-1.5" : "mt-5"} whitespace-pre-wrap text-sm text-slate-600`}>{description}</p>
+      )}
 
       {/* Line items */}
       <div className="mt-4 overflow-x-auto">

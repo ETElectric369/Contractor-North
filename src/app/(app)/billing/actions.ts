@@ -181,6 +181,7 @@ export async function createBlankInvoice(input: {
   customer_id: string | null;
   job_id?: string | null;
   title: string;
+  description?: string | null;
   tax_rate: number;
 }): Promise<Result> {
   const ctx = await requireStaff();
@@ -214,6 +215,7 @@ export async function createBlankInvoice(input: {
       customer_id: customerId,
       job_id: input.job_id || null,
       title: title || null,
+      description: input.description ?? null,
       tax_rate: input.tax_rate || 0,
       status: "draft",
       created_by: ctx.userId,
@@ -1002,6 +1004,22 @@ export async function setInvoiceTaxRate(
   const { error } = await supabase.from("invoices").update({ tax_rate: rate }).eq("id", invoiceId);
   if (error) return { ok: false, error: error.message };
   await recalcInvoice(supabase, invoiceId);
+  revalidatePath(`/billing/${invoiceId}`);
+  return { ok: true };
+}
+
+/** Edit the invoice's description (the scope shown above the line items). */
+export async function setInvoiceDescription(
+  invoiceId: string,
+  description: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { error } = await ctx.supabase
+    .from("invoices")
+    .update({ description: description.trim() || null })
+    .eq("id", invoiceId);
+  if (error) return { ok: false, error: error.message };
   revalidatePath(`/billing/${invoiceId}`);
   return { ok: true };
 }
