@@ -19,11 +19,15 @@ const DEFAULT_TRIGGER =
  * THE one "add a cost" everywhere — supplier + amount + category + an optional
  * receipt photo (the camera on mobile), scoped to a job or to overhead. Wraps
  * createBill (a cost = a bill) plus addDocument for the photo, so every surface
- * logs a cost the same way. Drop it anywhere; pass `jobId` to pre-scope it, or
- * `jobs` to show a picker, and `className` to match the surrounding buttons.
+ * logs a cost the same way.
  *
- * The cost is saved first; the photo is attached after. If the photo fails to
- * upload we never silently drop it — the modal stays open with a notice and a
+ * Drop it anywhere: pass `jobId` to pre-scope it, or `jobs` for a picker. If
+ * neither `orgId` nor `jobs` is supplied (e.g. the global + menu), it self-loads
+ * the org id and the job list on open. `onOpen` lets a host (a dropdown) close
+ * itself when the modal opens.
+ *
+ * The cost is saved first; the photo is attached after. A photo that fails to
+ * upload is never silently dropped — the modal stays open with a notice and a
  * one-tap retry (the cost is already safe).
  */
 export function QuickCostButton({
@@ -32,12 +36,19 @@ export function QuickCostButton({
   jobs,
   label = "Add cost",
   className,
+  onOpen,
+  onClose,
 }: {
-  orgId: string;
+  orgId?: string;
   jobId?: string;
   jobs?: { id: string; label: string }[];
   label?: string;
   className?: string;
+  /** Fired when the modal OPENS. Do NOT unmount this component here (it would kill
+   *  the modal) — use it for side effects only. */
+  onOpen?: () => void;
+  /** Fired when the modal CLOSES — e.g. a host dropdown closes itself then. */
+  onClose?: () => void;
 }) {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -53,7 +64,12 @@ export function QuickCostButton({
   const [warn, setWarn] = useState<string | null>(null);
   // The cost row is saved; only the photo may still be pending (retry mode).
   const [costSaved, setCostSaved] = useState(false);
+  // Self-loaded context when not passed in (global + menu use).
+  const [autoOrg, setAutoOrg] = useState("");
+  const [autoJobs, setAutoJobs] = useState<{ id: string; label: string }[] | null>(null);
 
+  const effectiveOrg = orgId || autoOrg;
+  const pickerJobs = jobs ?? autoJobs ?? undefined;
   const targetJob = jobId ?? job;
 
   function reset() {
@@ -69,9 +85,36 @@ export function QuickCostButton({
     if (fileRef.current) fileRef.current.value = "";
   }
 
+  async function openModal() {
+    reset();
+    onOpen?.();
+    setOpen(true);
+    // Self-load context when dropped somewhere without it (e.g. the global + menu).
+    if (!orgId && !autoOrg) {
+      const supabase = createClient();
+      const { data } = await supabase.from("organizations").select("id").limit(1).maybeSingle();
+      if ((data as any)?.id) setAutoOrg((data as any).id);
+    }
+    if (!jobId && !jobs && !autoJobs) {
+      const supabase = createClient();
+      const { data } = await supabase
+        .from("jobs")
+        .select("id, job_number, name")
+        .order("created_at", { ascending: false })
+        .limit(200);
+      if (data) setAutoJobs((data as any[]).map((j) => ({ id: j.id, label: `${j.job_number} · ${j.name}` })));
+    }
+  }
+
+  function closeModal() {
+    setOpen(false);
+    onClose?.();
+  }
+
   function finishOk() {
     setOpen(false);
     reset();
+    onClose?.();
     router.refresh();
   }
 
@@ -79,11 +122,11 @@ export function QuickCostButton({
    *  so the caller can tell the user instead of swallowing it. */
   async function attachReceipt(forJob: string): Promise<boolean> {
     if (!receipt) return true;
-    if (!orgId) return false;
+    if (!effectiveOrg) return false;
     try {
       const supabase = createClient();
       const safe = (receipt.name || "receipt.jpg").replace(/[^a-zA-Z0-9._-]/g, "_");
-      const path = `${orgId}/${forJob}/${Date.now()}-${safe}`;
+      const path = `${effectiveOrg}/${forJob}/${Date.now()}-${safe}`;
       const { error: upErr } = await supabase.storage.from("documents").upload(path, receipt, { upsert: false });
       if (upErr) return false;
       const res = await addDocument({ job_id: forJob, name: receipt.name || "Receipt", category: "Receipt", file_url: path, size_bytes: receipt.size });
@@ -133,14 +176,14 @@ export function QuickCostButton({
 
   return (
     <>
-      <button type="button" className={className ?? DEFAULT_TRIGGER} onClick={() => { reset(); setOpen(true); }}>
+      <button type="button" className={className ?? DEFAULT_TRIGGER} onClick={openModal}>
         <Wallet className="h-4 w-4" /> {label}
       </button>
       <Modal
         open={open}
-        onClose={() => setOpen(false)}
+        onClose={closeModal}
         title="Add a cost"
-        footer={<ModalActions onCancel={() => setOpen(false)} onSave={onSave} saving={pending} saveLabel={costSaved ? "Retry photo" : "Save cost"} />}
+        footer={<ModalActions onCancel={closeModal} onSave={onSave} saving={pending} saveLabel={costSaved ? "Retry photo" : "Save cost"} />}
       >
         <div className="space-y-4">
           <div>
@@ -157,12 +200,12 @@ export function QuickCostButton({
               <Input id="qc-date" type="date" value={billDate} onChange={(e) => setBillDate(e.target.value)} />
             </div>
           </div>
-          {!jobId && jobs && jobs.length > 0 && (
+          {!jobId && pickerJobs && pickerJobs.length > 0 && (
             <div>
               <Label htmlFor="qc-job">Job</Label>
               <Select id="qc-job" value={job} onChange={(e) => setJob(e.target.value)} disabled={costSaved}>
                 <option value="">Overhead (no job)</option>
-                {jobs.map((j) => (
+                {pickerJobs.map((j) => (
                   <option key={j.id} value={j.id}>{j.label}</option>
                 ))}
               </Select>
