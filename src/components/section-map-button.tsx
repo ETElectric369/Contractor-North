@@ -5,9 +5,18 @@ import { Network } from "lucide-react";
 import type { NavTree } from "@/lib/nav-tree";
 import { GlassBloom, resolveNavTree } from "./app-shell/glass-bloom";
 
-/** Blooms a specific entity's relationships + conversions out of this button as
- *  the glass MindMeister map (same bloom the dock uses). */
-export function SectionMapButton({ tree, label = "Connections" }: { tree: NavTree; label?: string }) {
+/** Blooms a specific entity's actions + relationships out of this button as the
+ *  glass MindMeister map (same bloom the dock uses). Verbs run via executeAction;
+ *  staff-only verbs hide when isStaff is false. */
+export function SectionMapButton({
+  tree,
+  label = "Actions",
+  isStaff = true,
+}: {
+  tree: NavTree;
+  label?: string;
+  isStaff?: boolean;
+}) {
   const btnRef = useRef<HTMLButtonElement | null>(null);
   const [anchor, setAnchor] = useState<{ x: number; y: number } | null>(null);
   const { title, nodes } = resolveNavTree(tree);
@@ -47,6 +56,7 @@ export function SectionMapButton({ tree, label = "Connections" }: { tree: NavTre
           title={title}
           rootNodes={nodes}
           direction="right"
+          isStaff={isStaff}
           onClose={() => setAnchor(null)}
         />
       )}

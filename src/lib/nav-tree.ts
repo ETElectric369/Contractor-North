@@ -13,6 +13,12 @@ export type TreeNode = {
    *  hrefPrefix + the returned id. Lets the map *do* things, not just go places. */
   run?: () => Promise<{ ok: boolean; id?: string; error?: string }>;
   hrefPrefix?: string;
+  /** Serializable one-click action — runs this registry action via executeAction,
+   *  then navigates to `href` (if set) or refreshes. Unlike `run`, a descriptor
+   *  CAN be built in a server component (functions can't cross to the client bloom). */
+  action?: { name: string; input?: Record<string, unknown> };
+  /** Hide from non-staff viewers (financial verbs). */
+  staffOnly?: boolean;
 };
 
 export type NavTree = {
@@ -148,16 +154,46 @@ export function purchaseOrderSectionTree(
   return { center: { label, icon: "wallet" }, nodes };
 }
 
-/** A customer's tabs as a mind-map; each leaf deep-links to that tab (?tab=). */
+/** A customer's actions as a mind-map: each verb lands on the tab whose "New …"
+ *  button creates the record (the customer is already in scope there). The plain
+ *  tab list is right there in the page's tab bar, so the menu leads with verbs. */
 export function customerSectionTree(custId: string, custLabel: string): NavTree {
   const tab = (t: string) => `/crm/${custId}?tab=${t}`;
   return {
     center: { label: custLabel, icon: "users" },
     nodes: [
-      // "Details" is the default tab you already land on — a node for it did nothing.
-      { id: "cj", label: "Jobs", icon: "briefcase", href: tab("jobs") },
-      { id: "cq", label: "Quotes", icon: "fileText", href: tab("quotes") },
-      { id: "ci", label: "Invoices", icon: "receipt", href: tab("invoices") },
+      { id: "c-newjob", label: "New job", icon: "briefcase", href: tab("jobs") },
+      { id: "c-newquote", label: "New quote", icon: "fileText", href: tab("quotes"), staffOnly: true },
+      { id: "c-newinv", label: "New invoice", icon: "receipt", href: tab("invoices"), staffOnly: true },
     ],
   };
+}
+
+/** A job's hub actions + relationships as a mind-map. Verbs first (DO things — one
+ *  real one-click "Clock in here", plus deep-links to the tab whose form does the
+ *  rest), then the related records. The financial verbs are staff-gated. */
+export function jobSectionTree(
+  jobId: string,
+  label: string,
+  rel: { customerId?: string | null; jobCode?: string | null },
+): NavTree {
+  const tab = (t: string) => `/jobs/${jobId}?tab=${t}`;
+  const nodes: TreeNode[] = [
+    {
+      id: "jb-clockin",
+      label: "Clock in here",
+      icon: "play",
+      action: { name: "time.clockIn", input: { job_id: jobId, job_code: rel.jobCode ?? null } },
+      href: "/timeclock",
+    },
+    { id: "jb-cost", label: "Add a cost", icon: "wallet", href: tab("costs"), staffOnly: true },
+    { id: "jb-time", label: "Log time", icon: "clock", href: tab("time") },
+    { id: "jb-quote", label: "New quote", icon: "fileText", href: tab("quotes"), staffOnly: true },
+    { id: "jb-inv", label: "New invoice", icon: "receipt", href: tab("invoices"), staffOnly: true },
+    { id: "jb-appt", label: "Schedule a visit", icon: "clipboardCheck", href: tab("appointments") },
+    { id: "jb-photo", label: "Add photos", icon: "wand", href: tab("photos") },
+  ];
+  if (rel.customerId) nodes.push({ id: "jb-cust", label: "Customer", icon: "users", href: `/crm/${rel.customerId}` });
+  nodes.push({ id: "jb-all", label: "All jobs", icon: "list", href: "/jobs" });
+  return { center: { label, icon: "briefcase" }, nodes };
 }

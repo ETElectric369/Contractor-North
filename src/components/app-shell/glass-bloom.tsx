@@ -10,9 +10,11 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { NavTree, TreeNode } from "@/lib/nav-tree";
+import { executeAction } from "@/lib/actions/execute";
 
 /** A node in a glass bloom. `children` drills in place; `run` performs a server
- *  action then navigates to hrefPrefix + the returned id; `href` navigates. */
+ *  action then navigates to hrefPrefix + the returned id; `action` runs a registry
+ *  action by name (then href/refresh); `href` navigates. */
 export type BloomNode = {
   id: string;
   label: string;
@@ -20,6 +22,7 @@ export type BloomNode = {
   href?: string;
   run?: () => Promise<{ ok: boolean; id?: string; error?: string }>;
   hrefPrefix?: string;
+  action?: { name: string; input?: Record<string, unknown> };
   children?: BloomNode[];
   staffOnly?: boolean;
 };
@@ -43,6 +46,8 @@ export function resolveNavTree(tree: NavTree): { title: string; nodes: BloomNode
       href: n.href,
       run: n.run,
       hrefPrefix: n.hrefPrefix,
+      action: n.action,
+      staffOnly: n.staffOnly,
       children: n.children ? conv(n.children) : undefined,
     }));
   return { title: tree.center.label, nodes: conv(tree.nodes) };
@@ -101,8 +106,15 @@ export function GlassBloom({
     setBusyId(n.id);
     setErr(null);
     try {
-      const res = await n.run!();
-      if (res.ok && res.id && n.hrefPrefix) return go(`${n.hrefPrefix}${res.id}`);
+      // `action` (serializable registry descriptor) → ActionResult has no id, so
+      // navigate to the node's own href or just refresh. `run` (a closure) may
+      // return a new id to deep-link to via hrefPrefix.
+      const res = n.action
+        ? await executeAction(n.action.name, n.action.input ?? {})
+        : await n.run!();
+      if (!n.action && res.ok && (res as { id?: string }).id && n.hrefPrefix) {
+        return go(`${n.hrefPrefix}${(res as { id?: string }).id}`);
+      }
       if (res.ok) {
         if (n.href) return go(n.href);
         router.refresh();
@@ -117,7 +129,7 @@ export function GlassBloom({
   }
   function pick(n: BloomNode) {
     if (n.children && n.children.length) setPath((p) => [...p, n]);
-    else if (n.run) runAction(n);
+    else if (n.run || n.action) runAction(n);
     else if (n.href) go(n.href);
   }
 
