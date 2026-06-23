@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Plus, Trash2, Upload, Camera, Loader2, FileText } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
@@ -80,7 +80,11 @@ export function BillsReceipts({
   docs: DocRow[];
 }) {
   const router = useRouter();
-  const [tab, setTab] = useState<"po" | "bills" | "receipts">("po");
+  // Open straight to a tab from a deep link (the quick-add "New cost" → ?tab=bills).
+  const spTab = useSearchParams().get("tab");
+  const [tab, setTab] = useState<"po" | "bills" | "receipts">(
+    spTab === "bills" || spTab === "receipts" ? spTab : "po",
+  );
   const [pending, start] = useTransition();
 
   // ── Bills add form ──

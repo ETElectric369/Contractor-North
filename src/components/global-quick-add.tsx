@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, ListTodo, Briefcase, CalendarPlus, FileText, Receipt, Camera, UserPlus, X } from "lucide-react";
+import { Plus, ListTodo, Briefcase, CalendarPlus, FileText, Receipt, Camera, UserPlus, Wallet, X } from "lucide-react";
 
 const ACTIONS = [
   { label: "New task", href: "/tasks", icon: ListTodo },
@@ -11,6 +11,7 @@ const ACTIONS = [
   { label: "New appointment", href: "/schedule?view=appointments", icon: CalendarPlus },
   { label: "New quote / estimate", href: "/quotes/new", icon: FileText },
   { label: "New invoice", href: "/billing", icon: Receipt },
+  { label: "New cost / expense", href: "/bills?tab=bills", icon: Wallet },
   { label: "Snap & file (Organize My)", href: "/organize", icon: Camera },
 ];
 
