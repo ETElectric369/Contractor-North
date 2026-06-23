@@ -57,6 +57,7 @@ export function QuickCostButton({
   const [amount, setAmount] = useState(0);
   const [billDate, setBillDate] = useState("");
   const [category, setCategory] = useState("Materials");
+  const [paid, setPaid] = useState(false);
   const [job, setJob] = useState(jobId ?? "");
   const [receipt, setReceipt] = useState<File | null>(null);
   const [pending, start] = useTransition();
@@ -77,6 +78,7 @@ export function QuickCostButton({
     setAmount(0);
     setBillDate("");
     setCategory("Materials");
+    setPaid(false);
     setJob(jobId ?? "");
     setReceipt(null);
     setError(null);
@@ -155,7 +157,7 @@ export function QuickCostButton({
         supplier: supplier.trim(),
         bill_number: "",
         amount,
-        status: "unpaid",
+        status: paid ? "paid" : "unpaid",
         bill_date: billDate || null,
         notes: "",
         category,
@@ -219,6 +221,10 @@ export function QuickCostButton({
               ))}
             </Select>
           </div>
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input type="checkbox" checked={paid} onChange={(e) => setPaid(e.target.checked)} className="h-4 w-4 rounded border-slate-300" disabled={costSaved} />
+            Already paid (cash / card) — skip the bill
+          </label>
           <div>
             <Label>Receipt photo</Label>
             <input
