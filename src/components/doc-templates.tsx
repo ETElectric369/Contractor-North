@@ -24,14 +24,14 @@ function ContactBlock({ co, accent, onColor = false }: { co: CompanyInfo; accent
   const contact = onColor ? "rgba(255,255,255,0.9)" : "#475569";
   const strong = onColor ? "#ffffff" : "#0f172a";
   return (
-    <div className="mt-2 text-[11px] leading-relaxed">
+    <div className="mt-1.5 flex flex-wrap items-start gap-x-4 gap-y-1 text-[11px] leading-snug">
       {b.address.length > 0 && (
         <div className="space-y-0.5" style={{ color: muted }}>
           {b.address.map((l, i) => <div key={i}>{l}</div>)}
         </div>
       )}
       {(b.contact.length > 0 || b.license) && (
-        <div className="mt-2 space-y-0.5 border-l-2 pl-2.5" style={{ borderColor: accent }}>
+        <div className="space-y-0.5 border-l-2 pl-3" style={{ borderColor: accent }}>
           {b.contact.map((l, i) => <div key={i} style={{ color: contact }}>{l}</div>)}
           {b.license && <div style={{ color: strong, fontWeight: 600 }}>{b.license}</div>}
         </div>
