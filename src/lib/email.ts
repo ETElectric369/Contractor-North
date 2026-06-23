@@ -123,10 +123,10 @@ export function renderDocEmail(input: {
  * drift from the print/portal view (that was the recurring "print ≠ email" bug).
  */
 export function renderInvoiceNoticeEmail(input: {
-  company: { name: string; brand: string; phone?: string | null; email?: string | null };
-  /** The stacked letterhead lines (address / city-state-zip / phone / email / license)
-   *  — same companyLines() the printed document uses, so the email header matches. */
-  addressLines?: string[];
+  company: { name: string; brand: string; tagline?: string | null; phone?: string | null; email?: string | null };
+  /** The grouped letterhead (same companyBlock() the printed document uses) — address,
+   *  then phone/email behind a brand accent rule, then the license. Keeps email == print. */
+  letterhead?: { address: string[]; contact: string[]; license: string | null };
   customerName: string;
   number: string;
   title?: string | null;
@@ -136,14 +136,17 @@ export function renderInvoiceNoticeEmail(input: {
 }): string {
   const c = safeColor(input.company.brand);
   const due = input.balance > 0;
-  const contact =
-    input.addressLines && input.addressLines.length
-      ? input.addressLines.map((l) => `<div style="font-size:12px;color:#64748b">${escape(l)}</div>`).join("")
-      : `<div style="font-size:12px;color:#64748b">${[input.company.phone, input.company.email].filter(Boolean).map(escape).join(" · ")}</div>`;
+  const lh = input.letterhead;
+  const line = (s: string, style: string) => `<div style="font-size:12px;${style}">${escape(s)}</div>`;
+  const contact = lh
+    ? `${lh.address.length ? `<div style="line-height:1.5">${lh.address.map((l) => line(l, "color:#64748b")).join("")}</div>` : ""}` +
+      `${lh.contact.length || lh.license ? `<div style="border-left:2px solid ${c};padding-left:9px;margin-top:7px;line-height:1.5">${lh.contact.map((l) => line(l, "color:#475569")).join("")}${lh.license ? line(lh.license, "color:#0f172a;font-weight:600") : ""}</div>` : ""}`
+    : `<div style="font-size:12px;color:#64748b">${[input.company.phone, input.company.email].filter(Boolean).map(escape).join(" · ")}</div>`;
   return `
   <div style="font-family:ui-sans-serif,system-ui,Arial,sans-serif;max-width:560px;margin:0 auto;color:#0f172a">
     <div style="border-bottom:3px solid ${c};padding-bottom:12px;margin-bottom:16px">
-      <div style="font-size:20px;font-weight:700;margin-bottom:2px">${escape(input.company.name)}</div>
+      <div style="font-size:20px;font-weight:700">${escape(input.company.name)}</div>
+      ${input.company.tagline ? `<div style="font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:#94a3b8;margin-bottom:6px">${escape(input.company.tagline)}</div>` : `<div style="height:6px"></div>`}
       ${contact}
     </div>
     <p style="font-size:14px;margin:0 0 8px">Hi ${escape(input.customerName)},</p>

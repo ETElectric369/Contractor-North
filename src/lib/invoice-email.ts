@@ -1,7 +1,7 @@
 import "server-only";
 import { sendEmail, renderInvoiceNoticeEmail } from "@/lib/email";
 import { companyFromOrg } from "@/components/doc-letterhead";
-import { companyLines } from "@/lib/company-lines";
+import { companyBlock } from "@/lib/company-lines";
 
 /**
  * Render + send an invoice email to the customer and mark a draft "sent".
@@ -45,10 +45,11 @@ export async function deliverInvoiceEmail(
     company: {
       name: org?.name ?? "Contractor North",
       brand: org?.brand_color ?? "#0b57c4",
+      tagline: co.tagline,
       phone: org?.phone,
       email: org?.email,
     },
-    addressLines: companyLines(co),
+    letterhead: companyBlock(co),
     customerName: customer.name,
     number: invoice.invoice_number,
     title: invoice.title,
