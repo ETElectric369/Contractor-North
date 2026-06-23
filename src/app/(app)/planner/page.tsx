@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Briefcase, CalendarCheck, ClipboardCheck, MapPin, UserPlus, Receipt, Navigation } from "lucide-react";
+import { Briefcase, CalendarCheck, UserPlus, Receipt, Navigation } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { WeatherWidget } from "@/components/weather-widget";
@@ -108,14 +108,6 @@ export default async function PlannerPage() {
     currentMaterials = (ml as any) ?? null;
   }
 
-  // The next stop on today's route — the soonest remaining job that isn't the
-  // one you're already on. This is the "I'm in the truck, where to?" answer,
-  // which used to show nothing until a job was manually marked in-progress.
-  const nextJob = todayJobs
-    .filter((j: any) => j.id !== currentJob?.id && j.status !== "complete" && j.status !== "cancelled")
-    .sort((a: any, b: any) => (a.time ?? "~").localeCompare(b.time ?? "~"))[0] as any | undefined;
-  const nextTime = nextJob?.time ? formatTime(nextJob.time) : null;
-
   const hoursToday = (entries ?? []).reduce(
     (sum: number, e: any) =>
       e.status === "closed" && e.clock_out ? sum + hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes) : sum,
@@ -186,6 +178,77 @@ export default async function PlannerPage() {
   const niceDay = prettyDay(todayStr);
   const empty = (label: string) => <p className="px-5 py-6 text-center text-sm text-slate-400">{label}</p>;
 
+  // ── Agenda (Now / Next / Later) ─────────────────────────────────────────────
+  // One chronological stream of the day — timed jobs + appointments. (Tasks live in
+  // the "Needs action" inbox above, so they're not duplicated here.) The job you're
+  // ON is the "Now" hero card; the rest groups into Next (soonest) and Later.
+  type Agenda = {
+    key: string;
+    kind: "job" | "appt";
+    time: string | null;
+    title: string;
+    sub: string | null;
+    address: string | null;
+    href: string;
+    status?: string;
+    apptType?: string;
+  };
+  const agenda: Agenda[] = [
+    ...todayJobs
+      .filter((j: any) => j.id !== currentJob?.id)
+      .map((j: any) => ({
+        key: `j-${j.id}`,
+        kind: "job" as const,
+        time: j.time,
+        title: `${j.job_number} — ${j.name}`,
+        sub: [j.customers?.name, j.address].filter(Boolean).join(" · ") || null,
+        address: j.address ?? null,
+        href: `/jobs/${j.id}`,
+        status: j.status,
+      })),
+    ...(appts ?? []).map((a: any) => ({
+      key: `a-${a.id}`,
+      kind: "appt" as const,
+      time: a.starts_at,
+      title: a.title,
+      sub: a.location ?? null,
+      address: a.location ?? null,
+      href: a.job_id ? `/jobs/${a.job_id}` : "/schedule?view=appointments",
+      apptType: a.type,
+    })),
+  ];
+  const nowMs = Date.now();
+  const timedAgenda = agenda.filter((i) => i.time).sort((a, b) => (a.time as string).localeCompare(b.time as string));
+  const untimedAgenda = agenda.filter((i) => !i.time);
+  const futureAgenda = timedAgenda.filter((i) => new Date(i.time as string).getTime() > nowMs);
+  const nextAgenda = futureAgenda.slice(0, 2);
+  const laterAgenda = [...futureAgenda.slice(2), ...untimedAgenda];
+
+  const navBtnCls =
+    "inline-flex shrink-0 items-center gap-1 rounded-lg border border-brand/30 bg-brand-light/40 px-2.5 py-1.5 text-xs font-medium text-brand hover:bg-brand-light";
+  const agendaRows = (items: Agenda[]) =>
+    items.map((i) => (
+      <li key={i.key} className="flex items-center gap-3 px-5 py-3">
+        <div className="w-14 shrink-0 text-sm font-medium text-slate-700">{i.time ? fmtTime(i.time) : "—"}</div>
+        <Link href={i.href} className="min-w-0 flex-1 hover:opacity-80">
+          <div className="flex items-center gap-2">
+            {i.kind === "appt" ? (
+              <Badge tone={i.apptType === "inspection" ? "amber" : "blue"}>{i.apptType}</Badge>
+            ) : i.status ? (
+              <Badge tone={statusTone(i.status)}>{i.status.replace("_", " ")}</Badge>
+            ) : null}
+            <span className="truncate text-sm font-medium text-slate-900">{i.title}</span>
+          </div>
+          {i.sub && <div className="truncate text-xs text-slate-400">{i.sub}</div>}
+        </Link>
+        {i.address && (
+          <NavLink address={i.address} className={navBtnCls}>
+            <Navigation className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Navigate</span>
+          </NavLink>
+        )}
+      </li>
+    ));
+
   return (
     <div className="mx-auto max-w-3xl">
       <PageHeader title="My Day" description={niceDay} />
@@ -195,11 +258,12 @@ export default async function PlannerPage() {
       </div>
       <p className="mb-4 text-center text-sm italic text-slate-400">&ldquo;{dailyQuote}&rdquo;</p>
 
-      {/* Current job — front and center */}
+      {/* NOW — the job you're on, front and center. Buttons share one size so the
+          Navigate button no longer towers over Open / Materials. */}
       {currentJob && (
         <Card className="mb-4 border-brand/40 bg-brand-light/30">
           <div className="px-5 py-4">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-brand">Current job</div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-brand">Now</div>
             <Link href={`/jobs/${currentJob.id}`} className="mt-0.5 block text-lg font-bold text-slate-900 hover:text-brand">
               {currentJob.job_number} — {currentJob.name}
             </Link>
@@ -208,58 +272,57 @@ export default async function PlannerPage() {
                 {currentJob.customers?.name ?? ""}{currentJob.address ? ` · ${currentJob.address}` : ""}
               </div>
             )}
-            <div className="mt-3 space-y-2 text-sm font-medium">
+            <div className="mt-3 flex gap-2 text-sm font-medium">
               {currentJob.address && (
                 <NavLink
                   address={currentJob.address}
-                  className="flex min-h-[52px] items-center justify-center gap-2 rounded-xl bg-brand text-base text-white shadow-sm hover:bg-brand-dark"
+                  className="flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-lg bg-brand text-white shadow-sm hover:bg-brand-dark"
                 >
-                  <Navigation className="h-5 w-5" /> Navigate
+                  <Navigation className="h-4 w-4" /> Navigate
                 </NavLink>
               )}
-              <div className="flex gap-2">
-                <Link href={`/jobs/${currentJob.id}`} className="flex min-h-[44px] flex-1 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50">
-                  Open job
-                </Link>
-                <Link
-                  href={currentMaterials ? `/materials/${currentMaterials.id}` : `/jobs/${currentJob.id}?tab=materials`}
-                  className="flex min-h-[44px] flex-1 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
-                >
-                  Materials
-                </Link>
-              </div>
+              <Link href={`/jobs/${currentJob.id}`} className="flex min-h-[44px] flex-1 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50">
+                Open
+              </Link>
+              <Link
+                href={currentMaterials ? `/materials/${currentMaterials.id}` : `/jobs/${currentJob.id}?tab=materials`}
+                className="flex min-h-[44px] flex-1 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+              >
+                Materials
+              </Link>
             </div>
           </div>
         </Card>
       )}
 
-      {/* Next stop — so "where am I going next" is answered at a glance, with a
-          one-tap turn-by-turn handoff, even before a job is marked in-progress. */}
-      {nextJob && (
-        <Card className="mb-4">
-          <div className="px-5 py-4">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-              Next up{nextTime ? ` · ${nextTime}` : ""}
-            </div>
-            <Link href={`/jobs/${nextJob.id}`} className="mt-0.5 block text-base font-bold text-slate-900 hover:text-brand">
-              {nextJob.job_number} — {nextJob.name}
-            </Link>
-            {(nextJob.customers?.name || nextJob.address) && (
-              <div className="text-sm text-slate-500">
-                {nextJob.customers?.name ?? ""}{nextJob.address ? ` · ${nextJob.address}` : ""}
-              </div>
-            )}
-            {nextJob.address && (
-              <NavLink
-                address={nextJob.address}
-                className="mt-3 flex min-h-[48px] items-center justify-center gap-2 rounded-xl bg-brand text-base font-medium text-white shadow-sm hover:bg-brand-dark"
-              >
-                <Navigation className="h-5 w-5" /> Navigate
-              </NavLink>
-            )}
+      {/* Coming up today — one chronological agenda (Next, then Later): jobs +
+          appointments interleaved by time. Tasks live in "Needs action" below. */}
+      <Card className="mb-4 overflow-hidden">
+        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
+          <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+            <CalendarCheck className="h-4 w-4 text-brand" /> Coming up today
           </div>
-        </Card>
-      )}
+          <AppointmentButton jobs={jobOpts} customers={custOpts} staff={staffOpts} defaultDate={todayStr} compact />
+        </div>
+        {nextAgenda.length === 0 && laterAgenda.length === 0 ? (
+          empty("Nothing left on the schedule today.")
+        ) : (
+          <>
+            {nextAgenda.length > 0 && (
+              <>
+                <div className="bg-slate-50/70 px-5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-brand">Next</div>
+                <ul className="divide-y divide-slate-100">{agendaRows(nextAgenda)}</ul>
+              </>
+            )}
+            {laterAgenda.length > 0 && (
+              <>
+                <div className="bg-slate-50/70 px-5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Later</div>
+                <ul className="divide-y divide-slate-100">{agendaRows(laterAgenda)}</ul>
+              </>
+            )}
+          </>
+        )}
+      </Card>
 
       {/* Live time clock — tick + one-tap clock in/out */}
       <DayClock
@@ -323,80 +386,6 @@ export default async function PlannerPage() {
           </Link>
         </div>
       )}
-
-      {/* Today's appointments */}
-      <Card className="mb-4 overflow-hidden">
-        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
-          <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-            <CalendarCheck className="h-4 w-4 text-purple-600" /> Appointments &amp; inspections
-          </div>
-          <AppointmentButton jobs={jobOpts} customers={custOpts} staff={staffOpts} defaultDate={todayStr} compact />
-        </div>
-        <ul className="divide-y divide-slate-100">
-          {(appts ?? []).map((a: any) => (
-            <li key={a.id} className="flex items-start gap-3 px-5 py-3">
-              <div className="w-14 shrink-0 text-sm font-medium text-slate-700">{fmtTime(a.starts_at)}</div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <Badge tone={a.type === "inspection" ? "amber" : "blue"}>
-                    {a.type === "inspection" ? <ClipboardCheck className="mr-1 inline h-3 w-3" /> : null}{a.type}
-                  </Badge>
-                  <span className="truncate text-sm font-medium text-slate-900">{a.title}</span>
-                </div>
-                {a.location && (
-                  <NavLink address={a.location} className="inline-flex items-center gap-0.5 text-xs text-brand hover:underline">
-                    <MapPin className="h-3 w-3" /> {a.location}
-                  </NavLink>
-                )}
-              </div>
-              <AppointmentButton
-                jobs={jobOpts}
-                customers={custOpts}
-                staff={staffOpts}
-                appointment={{
-                  id: a.id,
-                  type: a.type,
-                  title: a.title,
-                  starts_at: a.starts_at,
-                  ends_at: a.ends_at,
-                  job_id: a.job_id,
-                  customer_id: a.customer_id,
-                  location: a.location,
-                  notes: a.notes,
-                  assigned_to: a.assigned_to,
-                }}
-              />
-            </li>
-          ))}
-          {(appts ?? []).length === 0 && empty("Nothing booked today.")}
-        </ul>
-      </Card>
-
-      {/* Today's jobs */}
-      <Card className="mb-4 overflow-hidden">
-        <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3 text-sm font-semibold text-slate-900">
-          <Briefcase className="h-4 w-4 text-brand" /> Jobs today
-        </div>
-        <ul className="divide-y divide-slate-100">
-          {todayJobs.map((j: any) => (
-            <li key={j.id}>
-              <Link href={`/jobs/${j.id}`} className="flex items-start gap-3 px-5 py-3 hover:bg-slate-50">
-                <div className="w-14 shrink-0 text-sm font-medium text-slate-700">{j.time ? fmtTime(j.time) : "—"}</div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="truncate text-sm font-medium text-slate-900">{j.job_number} — {j.name}</span>
-                    <Badge tone={statusTone(j.status)}>{j.status.replace("_", " ")}</Badge>
-                  </div>
-                  <div className="text-xs text-slate-400">
-                    {j.customers?.name ?? ""}{j.address ? ` · ${j.address}` : ""}
-                  </div>
-                </div>
-              </Link>
-            </li>
-          ))}
-          {todayJobs.length === 0 && empty("No jobs scheduled today.")}
-        </ul>
-      </Card>
 
       {/* Tasks due now live in the unified "Needs action" inbox above; this just
           keeps a quick add-a-task box on My Day. */}
