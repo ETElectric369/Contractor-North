@@ -11,6 +11,7 @@ export interface DraftMaterial {
   unit: string;
   vendor: string | null;
   est_cost: number | null;
+  is_tool?: boolean;
 }
 
 export type Result = { ok: boolean; error?: string; id?: string };
@@ -47,6 +48,7 @@ export async function createMaterialList(input: {
       unit: it.unit || "ea",
       vendor: it.vendor,
       est_cost: it.est_cost,
+      is_tool: it.is_tool ?? false,
       sort_order: idx,
     }));
     const { error: itemsErr } = await supabase
@@ -79,6 +81,7 @@ export async function addMaterialItem(
     unit: item.unit || "ea",
     vendor: item.vendor,
     est_cost: item.est_cost,
+    is_tool: item.is_tool ?? false,
     sort_order: ((last?.sort_order as number) ?? -1) + 1,
   });
   if (error) return { ok: false, error: error.message };
@@ -99,6 +102,7 @@ export async function updateMaterialItem(
   if (patch.unit !== undefined) clean.unit = patch.unit || "ea";
   if (patch.vendor !== undefined) clean.vendor = patch.vendor || null;
   if (patch.est_cost !== undefined) clean.est_cost = patch.est_cost ?? null;
+  if (patch.is_tool !== undefined) clean.is_tool = patch.is_tool;
   const { error } = await supabase.from("material_list_items").update(clean).eq("id", itemId);
   if (error) return { ok: false, error: error.message };
   revalidatePath(`/materials/${listId}`);
@@ -115,6 +119,20 @@ export async function setMaterialItemPurchased(
     .from("material_list_items")
     .update({ purchased, purchased_at: purchased ? new Date().toISOString() : null })
     .eq("id", itemId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath(`/materials/${listId}`);
+  return { ok: true };
+}
+
+/** Flag/unflag an item as a TOOL — tools sort above consumable materials so the
+ *  crew loads what they own first, then shops for the rest. */
+export async function setMaterialItemTool(
+  itemId: string,
+  listId: string,
+  isTool: boolean,
+): Promise<Result> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("material_list_items").update({ is_tool: isTool }).eq("id", itemId);
   if (error) return { ok: false, error: error.message };
   revalidatePath(`/materials/${listId}`);
   return { ok: true };
