@@ -1,5 +1,7 @@
 import "server-only";
 import { sendEmail, renderInvoiceNoticeEmail } from "@/lib/email";
+import { companyFromOrg } from "@/components/doc-letterhead";
+import { companyLines } from "@/lib/company-lines";
 
 /**
  * Render + send an invoice email to the customer and mark a draft "sent".
@@ -26,7 +28,7 @@ export async function deliverInvoiceEmail(
     // Scope to THIS invoice's org explicitly — under the RLS-bypassing service client
     // (the recurring cron) an unfiltered query sees every org and would error on
     // .maybeSingle() or leak another tenant's branding/reply-to to this customer.
-    supabase.from("organizations").select("name, brand_color, phone, email").eq("id", (invoice as any).org_id).maybeSingle(),
+    supabase.from("organizations").select("name, brand_color, phone, email, address_line1, address_line2, city, state, zip, license, logo_url").eq("id", (invoice as any).org_id).maybeSingle(),
   ]);
   // Never email an empty invoice (a blank $0 mis-send) — protects every caller.
   if (!items || items.length === 0) return { ok: false, error: "This invoice has no line items to send." };
@@ -38,6 +40,7 @@ export async function deliverInvoiceEmail(
   // A basic greeting + the balance + a button to the ONE canonical invoice document
   // (viewable, printable, payable) and the portal — never a re-rendered copy of the
   // invoice, so the email can't drift from the print/portal view.
+  const co = companyFromOrg(org as any);
   const html = renderInvoiceNoticeEmail({
     company: {
       name: org?.name ?? "Contractor North",
@@ -45,6 +48,7 @@ export async function deliverInvoiceEmail(
       phone: org?.phone,
       email: org?.email,
     },
+    addressLines: companyLines(co),
     customerName: customer.name,
     number: invoice.invoice_number,
     title: invoice.title,

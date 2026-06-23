@@ -1,5 +1,6 @@
 import { Zap } from "lucide-react";
 import type { CompanyInfo } from "./doc-letterhead";
+import { companyLines } from "@/lib/company-lines";
 
 export type DocTemplate = "classic" | "modern" | "minimal";
 
@@ -12,18 +13,6 @@ export const DOC_TEMPLATES: { id: DocTemplate; name: string; desc: string }[] = 
 /** Accent color for a template — brand color, except Minimal which is neutral. */
 export function docAccent(co: CompanyInfo, template: string): string {
   return template === "minimal" ? "#334155" : co.brand;
-}
-
-/** The company contact block as clean, stacked lines — NOT one long " · " string
- *  that wraps and strands the phone on its own line (the old letterhead bug). */
-function companyLines(co: CompanyInfo): string[] {
-  const lic = co.license ? (/lic/i.test(co.license) ? co.license : `License #${co.license}`) : "";
-  return [
-    [co.address1, co.address2].filter(Boolean).join(", "),
-    co.cityStateZip,
-    [co.phone, co.email].filter(Boolean).join("  ·  "),
-    lic,
-  ].filter(Boolean);
 }
 
 /** Render the stacked contact lines with a template-specific text class. */

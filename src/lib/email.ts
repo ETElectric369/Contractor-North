@@ -124,6 +124,9 @@ export function renderDocEmail(input: {
  */
 export function renderInvoiceNoticeEmail(input: {
   company: { name: string; brand: string; phone?: string | null; email?: string | null };
+  /** The stacked letterhead lines (address / city-state-zip / phone / email / license)
+   *  — same companyLines() the printed document uses, so the email header matches. */
+  addressLines?: string[];
   customerName: string;
   number: string;
   title?: string | null;
@@ -133,11 +136,15 @@ export function renderInvoiceNoticeEmail(input: {
 }): string {
   const c = safeColor(input.company.brand);
   const due = input.balance > 0;
+  const contact =
+    input.addressLines && input.addressLines.length
+      ? input.addressLines.map((l) => `<div style="font-size:12px;color:#64748b">${escape(l)}</div>`).join("")
+      : `<div style="font-size:12px;color:#64748b">${[input.company.phone, input.company.email].filter(Boolean).map(escape).join(" · ")}</div>`;
   return `
   <div style="font-family:ui-sans-serif,system-ui,Arial,sans-serif;max-width:560px;margin:0 auto;color:#0f172a">
     <div style="border-bottom:3px solid ${c};padding-bottom:12px;margin-bottom:16px">
-      <div style="font-size:20px;font-weight:700">${escape(input.company.name)}</div>
-      <div style="font-size:12px;color:#64748b">${[input.company.phone, input.company.email].filter(Boolean).map(escape).join(" · ")}</div>
+      <div style="font-size:20px;font-weight:700;margin-bottom:2px">${escape(input.company.name)}</div>
+      ${contact}
     </div>
     <p style="font-size:14px;margin:0 0 8px">Hi ${escape(input.customerName)},</p>
     <p style="font-size:14px;color:#475569;margin:0">Your invoice <strong>${escape(input.number)}</strong>${input.title ? ` — ${escape(input.title)}` : ""} is ready${due ? `. Balance due: <strong style="color:#0f172a">${money(input.balance)}</strong>.` : " — paid in full. Thank you!"}</p>

@@ -192,8 +192,16 @@ body.modal-open .app-bottom-nav {
     border: none !important;
     margin: 0 !important;
     max-width: none !important;
+    /* The page margin lives on the content now (see @page margin:0), so the doc keeps
+       a clean border without the browser stamping a URL/date/page-number header+footer. */
+    padding: 0.5in 0.55in !important;
   }
   @page {
-    margin: 0.6in;
+    /* Zero page margin suppresses the browser's auto header/footer (the URL, date, and
+       "page 1 of 2" chrome Erik saw). The content provides its own margin above. */
+    margin: 0;
   }
+  /* Keep a single-page invoice on one page: tighten the big trailing gaps in print. */
+  .print-page .mt-10 { margin-top: 1.25rem !important; }
+  .print-page .mt-8 { margin-top: 1rem !important; }
 }
