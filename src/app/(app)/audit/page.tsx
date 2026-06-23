@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
+import { formatDateTime } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -64,7 +65,7 @@ export default async function AuditPage() {
                     </span>
                     <span className="ml-auto text-xs text-slate-400">
                       {nameOf.get(r.user_id) ?? "—"} · {r.source} ·{" "}
-                      {new Date(r.created_at).toLocaleString()}
+                      {formatDateTime(r.created_at)}
                     </span>
                   </div>
                 );

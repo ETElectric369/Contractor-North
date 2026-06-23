@@ -103,9 +103,9 @@ export default async function TimecardsPage({
   }
 
   const techs = [...byTech.values()].sort((a, b) => b.hours - a.hours);
-  const label = `${start.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${new Date(
+  const label = `${start.toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric" })} – ${new Date(
     end.getTime() - 1,
-  ).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+  ).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric" })}`;
 
   const supId = getOrgSettings((org as any)?.settings).timecard_supervisor_id;
   const approver = supId

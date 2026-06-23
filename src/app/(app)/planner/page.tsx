@@ -5,7 +5,7 @@ import { PageHeader } from "@/components/page-header";
 import { WeatherWidget } from "@/components/weather-widget";
 import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
-import { hoursBetween, formatCurrency } from "@/lib/utils";
+import { hoursBetween, formatCurrency, formatTime } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
 import { NavLink } from "@/components/nav-link";
 import { toJobOptions, toCustomerOptions, toStaffOptions } from "@/lib/schedule-options";
@@ -18,8 +18,7 @@ import { NewTaskBox } from "../tasks/tasks-view";
 
 export const dynamic = "force-dynamic";
 
-const fmtTime = (iso: string) =>
-  new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+const fmtTime = (iso: string) => formatTime(iso);
 
 export default async function PlannerPage() {
   const supabase = await createClient();
@@ -115,9 +114,7 @@ export default async function PlannerPage() {
   const nextJob = todayJobs
     .filter((j: any) => j.id !== currentJob?.id && j.status !== "complete" && j.status !== "cancelled")
     .sort((a: any, b: any) => (a.time ?? "~").localeCompare(b.time ?? "~"))[0] as any | undefined;
-  const nextTime = nextJob?.time
-    ? new Date(nextJob.time).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
-    : null;
+  const nextTime = nextJob?.time ? formatTime(nextJob.time) : null;
 
   const hoursToday = (entries ?? []).reduce(
     (sum: number, e: any) =>

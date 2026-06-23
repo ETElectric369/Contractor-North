@@ -4,6 +4,7 @@
  * "America/Los_Angeles"). Computing day boundaries in UTC makes afternoon work
  * in the Americas fall into "tomorrow", so always derive the day in the org tz.
  */
+import { formatDate, formatDateTime } from "./utils";
 
 /** Milliseconds the tz is ahead of UTC at the given instant (handles DST). */
 export function tzOffsetMs(tz: string, at: Date): number {
@@ -63,34 +64,17 @@ export function todayBoundsInTz(tz: string): { dayStart: Date; dayEnd: Date; tod
   return { dayStart, dayEnd, todayStr };
 }
 
-/** Display an instant in the ORG timezone — the tz-correct twins of
- *  formatDate/formatDateTime in lib/utils.ts. Those use the runtime tz, so on the
- *  UTC Vercel server they print UTC (e.g. a 6 PM Pacific clock-out shows as 1 AM
- *  the next day), disagreeing with client-rendered times. Use these for any
- *  server-rendered timestamp that must read in the business's local time. */
+/** Display an instant in a specific org's timezone. These now just forward to the
+ *  canonical (timezone-aware) formatters in lib/utils.ts so there is ONE display
+ *  implementation — pass a per-org tz here when you have one; callers without an
+ *  org tz can use formatDate/formatDateTime directly (they default to the business
+ *  timezone). Kept as named twins so existing call sites need no change. */
 export function formatDateTimeTz(value: string | Date | null | undefined, tz: string): string {
-  if (!value) return "—";
-  const d = typeof value === "string" ? new Date(value) : value;
-  if (isNaN(d.getTime())) return "—";
-  return d.toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZone: tz,
-  });
+  return formatDateTime(value, tz);
 }
 
 export function formatDateTz(value: string | Date | null | undefined, tz: string): string {
-  if (!value) return "—";
-  const d = typeof value === "string" ? new Date(value) : value;
-  if (isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    timeZone: tz,
-  });
+  return formatDate(value, tz);
 }
 
 /** The current pay period [start, end) as date strings, for a schedule + anchor.

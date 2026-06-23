@@ -43,9 +43,9 @@ export function LienInsuranceCard({
     isSubcontractor: !!lien?.gc_name,
   });
 
-  // Date-only values (YYYY-MM-DD) must not be reinterpreted as UTC midnight, or they
-  // render a day early west of UTC — material for a legal deadline. Anchor to local noon.
-  const fd = (v?: string | null) => (v ? formatDate(`${v}T12:00:00`) : "");
+  // formatDate now renders date-only values as a stable wall date (no zone shift),
+  // so the old local-noon hack is gone — this just guards null.
+  const fd = (v?: string | null) => (v ? formatDate(v) : "");
 
   // §8200(e): a direct contractor owes a Preliminary Notice only to a construction lender,
   // if any. A sub (has a GC above it) always owes one; a direct contractor with no lender

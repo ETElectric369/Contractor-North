@@ -11,7 +11,8 @@ export const dynamic = "force-dynamic";
 
 const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 const monthLabel = (k: string) =>
-  new Date(`${k}-15`).toLocaleDateString(undefined, { month: "short" });
+  // k is "YYYY-MM" — a wall month; render in UTC so it never slips to the prior month.
+  new Date(`${k}-15T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", month: "short" });
 
 export default async function AnalyticsPage() {
   const supabase = await createClient();

@@ -18,25 +18,70 @@ export function formatCurrency(value: number | null | undefined) {
   return currency.format(Number.isFinite(n) ? n : 0);
 }
 
-export function formatDate(value: string | Date | null | undefined) {
+// THE business timezone all dates render in. The server runs in UTC, so without a
+// timeZone every server-rendered date prints UTC and disagrees with the browser —
+// the recurring off-by-one / "timezone again" bug. Single source of truth; override
+// per-deploy with NEXT_PUBLIC_DEFAULT_TIMEZONE, or per-call with the `tz` arg.
+export const DEFAULT_TIMEZONE = process.env.NEXT_PUBLIC_DEFAULT_TIMEZONE || "America/Los_Angeles";
+
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Format a date. A date-ONLY value ("YYYY-MM-DD", e.g. a due date) is a wall-
+ *  calendar day and is rendered literally — never shifted across zones. A full
+ *  timestamp is rendered in the business timezone (default America/Los_Angeles),
+ *  the same on the UTC server and in the browser. Pass `tz` for a specific org. */
+export function formatDate(value: string | Date | null | undefined, tz: string = DEFAULT_TIMEZONE) {
   if (!value) return "—";
+  if (typeof value === "string" && DATE_ONLY.test(value)) {
+    // Anchor to noon UTC + render in UTC → the literal day, stable in any zone.
+    return new Date(`${value}T12:00:00Z`).toLocaleDateString("en-US", {
+      timeZone: "UTC",
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  }
   const d = typeof value === "string" ? new Date(value) : value;
+  if (isNaN(d.getTime())) return "—";
   return d.toLocaleDateString("en-US", {
+    timeZone: tz,
     month: "short",
     day: "numeric",
     year: "numeric",
   });
 }
 
-export function formatDateTime(value: string | Date | null | undefined) {
+/** Format an instant (timestamp) as date + time in the business timezone. */
+export function formatDateTime(value: string | Date | null | undefined, tz: string = DEFAULT_TIMEZONE) {
   if (!value) return "—";
   const d = typeof value === "string" ? new Date(value) : value;
+  if (isNaN(d.getTime())) return "—";
   return d.toLocaleString("en-US", {
+    timeZone: tz,
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+/** Time-only ("h:mm AM") in the business timezone. */
+export function formatTime(value: string | Date | null | undefined, tz: string = DEFAULT_TIMEZONE) {
+  if (!value) return "—";
+  const d = typeof value === "string" ? new Date(value) : value;
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" });
+}
+
+/** Short date ("Mon D", no year) — date-only safe, timestamps in the business tz. */
+export function formatDateShort(value: string | Date | null | undefined, tz: string = DEFAULT_TIMEZONE) {
+  if (!value) return "—";
+  if (typeof value === "string" && DATE_ONLY.test(value)) {
+    return new Date(`${value}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric" });
+  }
+  const d = typeof value === "string" ? new Date(value) : value;
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("en-US", { timeZone: tz, month: "short", day: "numeric" });
 }
 
 /** Hours between two timestamps, minus lunch minutes, rounded to 2 decimals. */

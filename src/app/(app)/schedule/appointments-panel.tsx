@@ -3,15 +3,15 @@ import { MapPin, ClipboardCheck, CalendarClock } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getSchedulePickerOptions } from "@/lib/schedule-options";
 import { NavLink } from "@/components/nav-link";
+import { formatTime, DEFAULT_TIMEZONE } from "@/lib/utils";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AppointmentButton, type ApptValue } from "../appointments/appointment-button";
 import { ApptQuickActions } from "../appointments/appointment-status";
 
 const fmtDay = (iso: string) =>
-  new Date(iso).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
-const fmtTime = (iso: string) =>
-  new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  new Date(iso).toLocaleDateString("en-US", { timeZone: DEFAULT_TIMEZONE, weekday: "short", month: "short", day: "numeric" });
+const fmtTime = (iso: string) => formatTime(iso);
 
 /** Appointments & inspections view of the unified Schedule hub (was /appointments). */
 export async function AppointmentsPanel() {

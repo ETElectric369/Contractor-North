@@ -3,7 +3,7 @@ import { Briefcase, FileText, Receipt, CalendarCheck, CheckCircle2, Clock } from
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
-import { hoursBetween, formatDuration } from "@/lib/utils";
+import { hoursBetween, formatDuration, formatDateShort } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +30,7 @@ function ago(iso: string): string {
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
   const d = Math.floor(s / 86400);
   if (d < 7) return `${d}d ago`;
-  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return formatDateShort(iso);
 }
 
 export default async function ActivityPage() {
