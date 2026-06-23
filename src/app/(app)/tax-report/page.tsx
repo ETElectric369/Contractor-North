@@ -6,29 +6,28 @@ import { Card, CardContent } from "@/components/ui/card";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
 import { summarizeMileage } from "@/lib/mileage-math";
+import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
 
 export const dynamic = "force-dynamic";
 
 type Period = "month" | "quarter" | "ytd" | "year";
 
-function rangeFor(period: Period) {
-  const now = new Date();
-  const y = now.getFullYear();
-  // Each period is a half-open [start, end) window. The bug was a fixed
-  // end = Jan 1 next year for month/quarter, so "this month" actually reported
-  // the whole year — wrong sales-tax totals. Snap end to the period boundary.
-  if (period === "month") {
-    return { start: new Date(y, now.getMonth(), 1), end: new Date(y, now.getMonth() + 1, 1) };
-  }
-  if (period === "quarter") {
-    const q = Math.floor(now.getMonth() / 3) * 3;
-    return { start: new Date(y, q, 1), end: new Date(y, q + 3, 1) };
-  }
-  if (period === "year") {
-    return { start: new Date(y - 1, 0, 1), end: new Date(y, 0, 1) };
-  }
-  // ytd → Jan 1 this year through now (next-year boundary keeps today included)
-  return { start: new Date(y, 0, 1), end: new Date(y + 1, 0, 1) };
+/** Half-open [start, end) period window, anchored to the BUSINESS timezone so "this
+ *  month" means the org's month — and so the window agrees with the per-day mileage
+ *  grouping (which is also org-tz). Returns UTC instants of org-tz midnights. */
+function rangeFor(period: Period, tz: string) {
+  const [y, m] = todayStrInTz(tz).split("-").map(Number); // m = 1..12 in the org tz
+  const firstOf = (yy: number, mm: number) => {
+    const yr = yy + Math.floor((mm - 1) / 12);
+    const mo = (((mm - 1) % 12) + 12) % 12 + 1;
+    return `${yr}-${String(mo).padStart(2, "0")}-01`;
+  };
+  let s: string, e: string;
+  if (period === "month") { s = firstOf(y, m); e = firstOf(y, m + 1); }
+  else if (period === "quarter") { const q = Math.floor((m - 1) / 3) * 3 + 1; s = firstOf(y, q); e = firstOf(y, q + 3); }
+  else if (period === "year") { s = `${y - 1}-01-01`; e = `${y}-01-01`; }
+  else { s = `${y}-01-01`; e = `${y + 1}-01-01`; } // ytd
+  return { start: tzDayStartUtc(s, tz), end: tzDayStartUtc(e, tz) };
 }
 
 const LABELS: Record<Period, string> = {
@@ -45,10 +44,13 @@ export default async function TaxReportPage({
 }) {
   const { period: pRaw } = await searchParams;
   const period: Period = (["month", "quarter", "ytd", "year"].includes(pRaw ?? "") ? pRaw : "ytd") as Period;
-  const { start, end } = rangeFor(period);
-
   const supabase = await createClient();
-  const [{ data: invoices }, { data: taxRates }, { data: entries }, { data: org }] = await Promise.all([
+  // Load the org tz first so the period window + the per-day mileage grouping agree.
+  const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+  const settings = getOrgSettings((org as any)?.settings);
+  const { start, end } = rangeFor(period, settings.timezone);
+
+  const [{ data: invoices }, { data: taxRates }, { data: entries }] = await Promise.all([
     supabase
       .from("invoices")
       .select("tax_rate, tax, subtotal, total, status, created_at")
@@ -60,12 +62,10 @@ export default async function TaxReportPage({
       .select("clock_in, miles, profile_id, profiles:profile_id(commute_baseline_miles)")
       .gte("clock_in", start.toISOString())
       .lt("clock_in", end.toISOString()),
-    supabase.from("organizations").select("settings").limit(1).maybeSingle(),
   ]);
 
   // Business (deductible) mileage = logged miles net of each person's daily commute
   // baseline (subtracted once per day). Grouped per person so baselines apply right.
-  const settings = getOrgSettings((org as any)?.settings);
   const byPerson = new Map<string, { baseline: number; entries: any[] }>();
   for (const e of entries ?? []) {
     const rec = byPerson.get(e.profile_id) ?? { baseline: Number((e as any).profiles?.commute_baseline_miles ?? 0), entries: [] as any[] };
