@@ -6,7 +6,7 @@ import { Badge, statusTone } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { PoDetail } from "./po-detail";
 import { DeleteButton } from "@/components/delete-button";
-import { SectionMapButton } from "@/components/section-map-button";
+import { SectionActionsMenu } from "@/components/section-actions-menu";
 import { purchaseOrderSectionTree } from "@/lib/nav-tree";
 import { deletePurchaseOrder } from "../actions";
 import type { PurchaseOrder, PurchaseOrderItem } from "@/lib/types";
@@ -60,7 +60,7 @@ export default async function PurchaseOrderPage({
           <h1 className="text-2xl font-bold text-slate-900">{p.po_number}</h1>
           <Badge tone={statusTone(p.status)}>{p.status}</Badge>
           <div className="ml-auto flex items-center gap-2">
-            <SectionMapButton
+            <SectionActionsMenu
               tree={purchaseOrderSectionTree(p.id, p.po_number, { jobId: p.jobs?.id ?? null })}
             />
             <DeleteButton

@@ -8,7 +8,7 @@ import { formatCurrency, formatDate } from "@/lib/utils";
 import { StatusControl } from "./status-control";
 import { QuoteItemsEditor } from "./quote-items-editor";
 import { EmailButton } from "@/components/email-button";
-import { SectionMapButton } from "@/components/section-map-button";
+import { SectionActionsMenu } from "@/components/section-actions-menu";
 import { QuoteTypeToggle } from "./quote-type-toggle";
 import type { NavTree } from "@/lib/nav-tree";
 import { DeleteButton } from "@/components/delete-button";
@@ -107,7 +107,7 @@ export default async function QuoteDetailPage({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <EmailButton id={q.id} kind="quote" />
-          <SectionMapButton tree={quoteMap} label="Convert / connect" />
+          <SectionActionsMenu tree={quoteMap} label="Convert / connect" />
           <StatusControl id={q.id} status={q.status} />
           <DeleteButton
             run={deleteQuote.bind(null, q.id)}

@@ -7,7 +7,7 @@ import { ItemEditor } from "./item-editor";
 import { DeleteListButton } from "./delete-list-button";
 import { RenameListButton } from "./rename-list-button";
 import { NewPoButton } from "../../purchasing/new-po-button";
-import { SectionMapButton } from "@/components/section-map-button";
+import { SectionActionsMenu } from "@/components/section-actions-menu";
 import { materialListSectionTree } from "@/lib/nav-tree";
 
 export const dynamic = "force-dynamic";
@@ -65,7 +65,7 @@ export default async function MaterialListPage({
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <SectionMapButton tree={materialListSectionTree(l.id, l.name, { jobId: l.jobs?.id ?? null, quoteId: (l as any).quote_id ?? null })} />
+          <SectionActionsMenu tree={materialListSectionTree(l.id, l.name, { jobId: l.jobs?.id ?? null, quoteId: (l as any).quote_id ?? null })} />
           <Link
             href={`/print/material-list/${l.id}`}
             className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"

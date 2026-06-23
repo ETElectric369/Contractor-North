@@ -10,7 +10,7 @@ import { formatDate } from "@/lib/utils";
 import { InvoiceDetail } from "./invoice-detail";
 import { CreditButton } from "./credit-button";
 import { EmailButton } from "@/components/email-button";
-import { SectionMapButton } from "@/components/section-map-button";
+import { SectionActionsMenu } from "@/components/section-actions-menu";
 import { invoiceSectionTree } from "@/lib/nav-tree";
 import { DeleteButton } from "@/components/delete-button";
 import { deleteInvoice } from "../actions";
@@ -120,7 +120,7 @@ export default async function InvoicePage({
             invoiceId={inv.id}
             defaultAmount={Math.max(0, Number(inv.amount_paid) - Number(inv.total))}
           />
-          <SectionMapButton
+          <SectionActionsMenu
             tree={invoiceSectionTree(inv.id, inv.invoice_number, {
               customerId: inv.customers?.id ?? null,
               quoteId: inv.quotes?.id ?? null,

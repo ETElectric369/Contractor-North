@@ -7,7 +7,7 @@ import { Badge, statusTone } from "@/components/ui/badge";
 import { formatDateTime } from "@/lib/utils";
 import { WoStatusControl } from "./wo-status-control";
 import { WoEditButton } from "./wo-edit-button";
-import { SectionMapButton } from "@/components/section-map-button";
+import { SectionActionsMenu } from "@/components/section-actions-menu";
 import { workOrderSectionTree } from "@/lib/nav-tree";
 import { DeleteButton } from "@/components/delete-button";
 import { deleteWorkOrder } from "../actions";
@@ -64,7 +64,7 @@ export default async function WorkOrderDetailPage({
           <p className="mt-1 text-lg text-slate-700">{w.title}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <SectionMapButton
+          <SectionActionsMenu
             tree={workOrderSectionTree(w.id, w.wo_number, {
               jobId: w.jobs?.id ?? null,
               customerId: w.customers?.id ?? null,

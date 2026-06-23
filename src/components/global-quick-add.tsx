@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, ListTodo, Briefcase, CalendarPlus, FileText, Receipt, Camera, UserPlus, X } from "lucide-react";
-import { QuickCostButton } from "@/components/quick-cost-button";
 
+// Add-cost is NOT here — it lives on My Day's Now card + the job header (job-scoped,
+// works cleanly). A self-loading copy in this dropdown was redundant + fiddly.
 const ACTIONS = [
   { label: "New task", href: "/tasks", icon: ListTodo },
   { label: "New customer", href: "/crm?new=1", icon: UserPlus },
@@ -12,13 +13,8 @@ const ACTIONS = [
   { label: "New appointment", href: "/schedule?view=appointments", icon: CalendarPlus },
   { label: "New quote / estimate", href: "/quotes/new", icon: FileText },
   { label: "New invoice", href: "/billing", icon: Receipt },
-  // "New cost / expense" is the QuickCostButton (modal + receipt camera), inserted
-  // below — not a plain link, so the camera works from the global + anywhere.
   { label: "Snap & file (Organize My)", href: "/organize", icon: Camera },
 ];
-
-const QUICK_ITEM_CLS =
-  "relative z-10 flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15";
 
 /** Quick "+" create menu. `placement="topbar"` renders an inline button with a
  *  dropdown; the default is a movable floating FAB. */
@@ -48,21 +44,6 @@ export function GlobalQuickAdd({ placement = "fab" }: { placement?: "fab" | "top
     </button>
   ));
 
-  // The unified Add-cost (modal + receipt camera) — self-loads org + jobs, and
-  // closes this menu when it opens. Inserted after "New invoice".
-  // Keep the menu mounted while the modal is open (the modal lives inside it); just
-  // close the menu once the modal closes.
-  const costItem = (
-    <QuickCostButton key="cost" label="New cost / expense" className={QUICK_ITEM_CLS} onClose={() => setOpen(false)} />
-  );
-  const menuContent = (
-    <>
-      {items.slice(0, 6)}
-      {costItem}
-      {items.slice(6)}
-    </>
-  );
-
   // Top-bar variant: inline + button with a dropdown anchored below it.
   if (placement === "topbar") {
     return (
@@ -85,9 +66,9 @@ export function GlobalQuickAdd({ placement = "fab" }: { placement?: "fab" | "top
                 override a Tailwind `fixed`. top 4.5rem clears the 4rem header. */}
             <div
               style={{ position: "fixed", top: "4.5rem", right: "0.5rem" }}
-              className="glass glass-gloss z-[90] w-60 overflow-hidden rounded-2xl py-1.5 shadow-xl"
+              className="glass glass-gloss glass-menu z-[90] w-60 overflow-hidden rounded-lg py-1.5 shadow-xl"
             >
-              {menuContent}
+              {items}
             </div>
           </>
         )}
@@ -101,10 +82,10 @@ export function GlobalQuickAdd({ placement = "fab" }: { placement?: "fab" | "top
         <>
           <div className="fixed inset-0 z-[80]" onClick={() => setOpen(false)} />
           <div
-            className="glass glass-gloss fixed z-[90] w-60 overflow-hidden rounded-2xl py-1.5 shadow-xl"
+            className="glass glass-gloss glass-menu fixed z-[90] w-60 overflow-hidden rounded-lg py-1.5 shadow-xl"
             style={{ right: pos.x, bottom: pos.y + 56 }}
           >
-            {menuContent}
+            {items}
           </div>
         </>
       )}

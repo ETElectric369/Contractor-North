@@ -41,7 +41,7 @@ import { NewListButton } from "../../materials/new-list-button";
 import { AppointmentButton } from "../../appointments/appointment-button";
 import { NewPoButton } from "../../purchasing/new-po-button";
 import { ConvertButton } from "@/components/convert-button";
-import { SectionMapButton } from "@/components/section-map-button";
+import { SectionActionsMenu } from "@/components/section-actions-menu";
 import { jobSectionTree } from "@/lib/nav-tree";
 import { QuickCostButton } from "@/components/quick-cost-button";
 import { DeleteButton } from "@/components/delete-button";
@@ -751,10 +751,6 @@ export default async function JobDetailPage({
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <SectionMapButton
-            tree={jobSectionTree(j.id, j.name, { customerId: j.customer_id, jobCode: j.job_number })}
-            isStaff={viewerIsStaff}
-          />
           {viewerIsStaff && <QuickCostButton jobId={j.id} />}
           {j.status !== "complete" && j.status !== "invoiced" && j.status !== "cancelled" && (
             <>
@@ -783,6 +779,11 @@ export default async function JobDetailPage({
             run={deleteJob.bind(null, j.id)}
             confirmText={`Delete job ${j.job_number}? Time entries, quotes, and invoices keep their data but lose the job link.`}
             redirectTo="/jobs"
+          />
+          {/* The ⋯ actions menu sits on the far right (clean kebab, no noodles). */}
+          <SectionActionsMenu
+            tree={jobSectionTree(j.id, j.name, { customerId: j.customer_id, jobCode: j.job_number })}
+            isStaff={viewerIsStaff}
           />
         </div>
       </div>
