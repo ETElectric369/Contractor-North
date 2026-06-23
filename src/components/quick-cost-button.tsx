@@ -10,6 +10,7 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { createBill, addDocument } from "@/app/(app)/jobs/actions";
 
 const CATEGORIES = ["Materials", "Fuel", "Shop supplies", "Tools", "Subcontractor", "Permit", "Equipment rental", "Office", "Other"];
+const MAX_PHOTO = 15 * 1024 * 1024;
 
 const DEFAULT_TRIGGER =
   "inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50";
@@ -20,6 +21,10 @@ const DEFAULT_TRIGGER =
  * createBill (a cost = a bill) plus addDocument for the photo, so every surface
  * logs a cost the same way. Drop it anywhere; pass `jobId` to pre-scope it, or
  * `jobs` to show a picker, and `className` to match the surrounding buttons.
+ *
+ * The cost is saved first; the photo is attached after. If the photo fails to
+ * upload we never silently drop it — the modal stays open with a notice and a
+ * one-tap retry (the cost is already safe).
  */
 export function QuickCostButton({
   orgId,
@@ -45,6 +50,9 @@ export function QuickCostButton({
   const [receipt, setReceipt] = useState<File | null>(null);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [warn, setWarn] = useState<string | null>(null);
+  // The cost row is saved; only the photo may still be pending (retry mode).
+  const [costSaved, setCostSaved] = useState(false);
 
   const targetJob = jobId ?? job;
 
@@ -56,10 +64,47 @@ export function QuickCostButton({
     setJob(jobId ?? "");
     setReceipt(null);
     setError(null);
+    setWarn(null);
+    setCostSaved(false);
+    if (fileRef.current) fileRef.current.value = "";
+  }
+
+  function finishOk() {
+    setOpen(false);
+    reset();
+    router.refresh();
+  }
+
+  /** Upload the snapped receipt + file it on the job. Returns false on any failure
+   *  so the caller can tell the user instead of swallowing it. */
+  async function attachReceipt(forJob: string): Promise<boolean> {
+    if (!receipt) return true;
+    if (!orgId) return false;
+    try {
+      const supabase = createClient();
+      const safe = (receipt.name || "receipt.jpg").replace(/[^a-zA-Z0-9._-]/g, "_");
+      const path = `${orgId}/${forJob}/${Date.now()}-${safe}`;
+      const { error: upErr } = await supabase.storage.from("documents").upload(path, receipt, { upsert: false });
+      if (upErr) return false;
+      const res = await addDocument({ job_id: forJob, name: receipt.name || "Receipt", category: "Receipt", file_url: path, size_bytes: receipt.size });
+      return res.ok;
+    } catch {
+      return false;
+    }
   }
 
   function onSave() {
     setError(null);
+    setWarn(null);
+    // Retry mode: the cost already saved last time; only the photo needs a retry.
+    if (costSaved) {
+      if (!receipt || !targetJob) return finishOk();
+      start(async () => {
+        if (await attachReceipt(targetJob)) finishOk();
+        else setWarn("Still couldn't upload the photo — you can add it later from the job's Receipts.");
+      });
+      return;
+    }
     if (!supplier.trim()) return setError("Who was it paid to? (supplier)");
     start(async () => {
       const res = await createBill({
@@ -73,45 +118,34 @@ export function QuickCostButton({
         category,
       });
       if (!res.ok) return setError(res.error ?? "Couldn't save the cost.");
-      // Attach the receipt photo if one was snapped — best-effort, and only when the
-      // cost is job-scoped (documents attach to a job). The cost is already saved, so
-      // a failed upload never loses the entry.
+      setCostSaved(true);
+      // Attach the photo (best-effort) — but if it fails, TELL the user; the cost is
+      // already safe, so the Save button becomes a one-tap photo retry.
       if (receipt && targetJob) {
-        try {
-          const supabase = createClient();
-          if (receipt.size <= 15 * 1024 * 1024) {
-            const safe = (receipt.name || "receipt.jpg").replace(/[^a-zA-Z0-9._-]/g, "_");
-            const path = `${orgId}/${targetJob}/${Date.now()}-${safe}`;
-            const { error: upErr } = await supabase.storage.from("documents").upload(path, receipt, { upsert: false });
-            if (!upErr) {
-              await addDocument({ job_id: targetJob, name: receipt.name || "Receipt", category: "Receipt", file_url: path, size_bytes: receipt.size });
-            }
-          }
-        } catch {
-          /* photo is a bonus — never fail the cost on it */
+        if (!(await attachReceipt(targetJob))) {
+          setWarn("Cost saved ✓ — but the receipt photo didn't upload. Tap “Retry photo”, or close and add it from the job's Receipts.");
+          return;
         }
       }
-      setOpen(false);
-      reset();
-      router.refresh();
+      finishOk();
     });
   }
 
   return (
     <>
-      <button type="button" className={className ?? DEFAULT_TRIGGER} onClick={() => setOpen(true)}>
+      <button type="button" className={className ?? DEFAULT_TRIGGER} onClick={() => { reset(); setOpen(true); }}>
         <Wallet className="h-4 w-4" /> {label}
       </button>
       <Modal
         open={open}
         onClose={() => setOpen(false)}
         title="Add a cost"
-        footer={<ModalActions onCancel={() => setOpen(false)} onSave={onSave} saving={pending} saveLabel="Save cost" />}
+        footer={<ModalActions onCancel={() => setOpen(false)} onSave={onSave} saving={pending} saveLabel={costSaved ? "Retry photo" : "Save cost"} />}
       >
         <div className="space-y-4">
           <div>
             <Label htmlFor="qc-supplier">Paid to / supplier *</Label>
-            <Input id="qc-supplier" value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder="e.g. CED, Home Depot" autoFocus />
+            <Input id="qc-supplier" value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder="e.g. CED, Home Depot" autoFocus disabled={costSaved} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -126,7 +160,7 @@ export function QuickCostButton({
           {!jobId && jobs && jobs.length > 0 && (
             <div>
               <Label htmlFor="qc-job">Job</Label>
-              <Select id="qc-job" value={job} onChange={(e) => setJob(e.target.value)}>
+              <Select id="qc-job" value={job} onChange={(e) => setJob(e.target.value)} disabled={costSaved}>
                 <option value="">Overhead (no job)</option>
                 {jobs.map((j) => (
                   <option key={j.id} value={j.id}>{j.label}</option>
@@ -150,7 +184,19 @@ export function QuickCostButton({
               accept="image/*"
               capture="environment"
               className="hidden"
-              onChange={(e) => setReceipt(e.target.files?.[0] ?? null)}
+              onChange={(e) => {
+                const f = e.target.files?.[0] ?? null;
+                // Block oversized photos at selection so they can't be silently
+                // dropped on save — phone cameras routinely exceed 15 MB.
+                if (f && f.size > MAX_PHOTO) {
+                  setError("That photo is over 15 MB — take or pick a smaller one.");
+                  setReceipt(null);
+                  if (fileRef.current) fileRef.current.value = "";
+                  return;
+                }
+                setError(null);
+                setReceipt(f);
+              }}
             />
             <button
               type="button"
@@ -165,6 +211,7 @@ export function QuickCostButton({
             </button>
             {receipt && !targetJob && <p className="mt-1 text-xs text-amber-600">Pick a job to file the receipt photo with it.</p>}
           </div>
+          {warn && <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">{warn}</p>}
           {error && <p className="text-sm text-red-600">{error}</p>}
         </div>
       </Modal>

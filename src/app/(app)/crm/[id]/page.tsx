@@ -35,6 +35,12 @@ export default async function CustomerDetailPage({
   if (!customer) notFound();
   const c = customer as Customer;
 
+  // Viewer's role gates the staff-only verbs in the Actions menu (New quote/invoice),
+  // matching the job page.
+  const { data: { user } } = await supabase.auth.getUser();
+  const { data: meRow } = await supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle();
+  const viewerIsStaff = ["owner", "admin", "office"].includes((meRow as any)?.role ?? "");
+
   const [{ data: jobs }, { data: quotes }, { data: invoices }, { data: pricingLevels }, { data: credits }] = await Promise.all([
     supabase.from("jobs").select("*").eq("customer_id", id).order("created_at", { ascending: false }),
     supabase.from("quotes").select("*").eq("customer_id", id).order("created_at", { ascending: false }),
@@ -186,7 +192,7 @@ export default async function CustomerDetailPage({
           <Badge tone="slate" className="mt-2">{c.type}</Badge>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <SectionMapButton tree={customerSectionTree(c.id, c.name)} />
+          <SectionMapButton tree={customerSectionTree(c.id, c.name)} isStaff={viewerIsStaff} />
           <EditCustomerButton customer={c} pricingLevels={(pricingLevels ?? []) as any} />
           <NewJobButton customers={[{ id: c.id, name: c.name }]} defaultCustomerId={c.id} />
           <Link href={`/quotes/new?customer=${c.id}`}>

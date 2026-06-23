@@ -18,6 +18,15 @@ export async function clockIn(input: {
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
 
+  // Only attach a job the caller can actually see (RLS-scoped). A stray/foreign
+  // job_id (e.g. from a hand-built action call) would otherwise persist as a
+  // dangling reference — drop it to a no-job entry instead.
+  let jobId = input.job_id;
+  if (jobId) {
+    const { data: vis } = await supabase.from("jobs").select("id").eq("id", jobId).maybeSingle();
+    if (!vis) jobId = null;
+  }
+
   // Allow starting the shift at any time the user picks — never into the future
   // (small skew allowed), and floored at 31 days back so a fat-fingered year
   // can't create a monstrous open shift.
@@ -35,7 +44,7 @@ export async function clockIn(input: {
   // The DB has a unique index preventing two open entries; surface a friendly msg.
   const { error } = await supabase.from("time_entries").insert({
     profile_id: user.id,
-    job_id: input.job_id,
+    job_id: jobId,
     job_code: input.job_code,
     gps_in: input.gps,
     clock_in: clockInIso,
@@ -55,13 +64,13 @@ export async function clockIn(input: {
   // Clocking into a job means work has started — promote it to in_progress.
   // Only from pre-work states (never un-complete/-cancel a finished job), and
   // never let a blocked update (e.g. RLS) fail the clock-in itself.
-  if (input.job_id) {
+  if (jobId) {
     await supabase
       .from("jobs")
       .update({ status: "in_progress" })
-      .eq("id", input.job_id)
+      .eq("id", jobId)
       .in("status", ["scheduled", "on_hold", "quoted", "lead"]);
-    revalidatePath(`/jobs/${input.job_id}`);
+    revalidatePath(`/jobs/${jobId}`);
     revalidatePath("/jobs");
   }
 

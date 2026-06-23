@@ -230,10 +230,19 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   // Week view: the same agenda widened to this week (Sun–Sat), grouped by day.
   const weekDayGroups: { dayStr: string; label: string; items: Agenda[] }[] = [];
   if (view === "week") {
-    const weekEndDate = new Date(weekStartDate);
-    weekEndDate.setUTCDate(weekEndDate.getUTCDate() + 7);
-    const weekEndUtc = tzDayStartUtc(weekEndDate.toISOString().slice(0, 10), tz);
-    const [{ data: wJobs }, { data: wAppts }] = await Promise.all([
+    // The 7 day strings (Sun–Sat) of this week, in the org tz.
+    const weekDayStrs: string[] = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(weekStartDate);
+      d.setUTCDate(d.getUTCDate() + i);
+      weekDayStrs.push(d.toISOString().slice(0, 10));
+    }
+    const weekStartStr = weekDayStrs[0];
+    const weekEndStr = weekDayStrs[6];
+    const weekEndExcl = new Date(weekStartDate);
+    weekEndExcl.setUTCDate(weekEndExcl.getUTCDate() + 7);
+    const weekEndUtc = tzDayStartUtc(weekEndExcl.toISOString().slice(0, 10), tz);
+    const [{ data: wJobs }, { data: wAppts }, { data: wSegs }] = await Promise.all([
       supabase
         .from("jobs")
         .select("id, job_number, name, status, address, scheduled_start, customers(name)")
@@ -247,8 +256,16 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         .lt("starts_at", weekEndUtc.toISOString())
         .neq("status", "cancelled")
         .order("starts_at"),
+      // Multi-range jobs whose segment overlaps this week — so a Mon–Thu job shows on
+      // every covered day (the day view does this too; without it the week view put
+      // such jobs on their start day only).
+      supabase
+        .from("job_schedule_segments")
+        .select("start_date, end_date, jobs(id, job_number, name, status, address, customers(name))")
+        .lte("start_date", weekEndStr)
+        .gte("end_date", weekStartStr),
     ]);
-    const weekItems: Agenda[] = [
+    const timedWeek: Agenda[] = [
       ...((wJobs ?? []) as any[]).map((j) => ({
         key: `wj-${j.id}`,
         kind: "job" as const,
@@ -273,11 +290,25 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       .filter((i) => i.time)
       .sort((a, b) => (a.time as string).localeCompare(b.time as string));
     const tzDayOf = (iso: string) => new Date(iso).toLocaleDateString("en-CA", { timeZone: tz });
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(weekStartDate);
-      d.setUTCDate(d.getUTCDate() + i);
-      const dayStr = d.toISOString().slice(0, 10);
-      weekDayGroups.push({ dayStr, label: prettyDay(dayStr), items: weekItems.filter((it) => tzDayOf(it.time as string) === dayStr) });
+    for (const dayStr of weekDayStrs) {
+      const items: Agenda[] = timedWeek.filter((it) => tzDayOf(it.time as string) === dayStr);
+      for (const s of (wSegs ?? []) as any[]) {
+        const j = s.jobs;
+        if (!j || s.start_date > dayStr || s.end_date < dayStr) continue;
+        // Dedup: skip if this job already shows on this day via a timed row.
+        if (items.some((it) => it.kind === "job" && it.href === `/jobs/${j.id}`)) continue;
+        items.push({
+          key: `ws-${j.id}-${dayStr}`,
+          kind: "job",
+          time: null,
+          title: `${j.job_number} — ${j.name}`,
+          sub: [j.customers?.name, j.address].filter(Boolean).join(" · ") || null,
+          address: j.address ?? null,
+          href: `/jobs/${j.id}`,
+          status: j.status,
+        });
+      }
+      weekDayGroups.push({ dayStr, label: prettyDay(dayStr), items });
     }
   }
 
