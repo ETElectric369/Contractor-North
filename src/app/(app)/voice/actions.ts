@@ -105,7 +105,7 @@ export async function runVoiceCommand(transcript: string): Promise<VoiceResult> 
       max_tokens: 500,
       system: `You turn a contractor's spoken command into ONE action. Output ONLY a JSON object, no prose:
 {
-  "intent": "create_task" | "create_appointment" | "create_customer" | "navigate" | "act_on_item" | "clock_in" | "clock_out" | "log_time" | "add_cost" | "none",
+  "intent": "create_task" | "create_appointment" | "create_customer" | "navigate" | "act_on_item" | "open_job" | "clock_in" | "clock_out" | "log_time" | "add_cost" | "none",
   "params": { ... },
   "speak": a short confirmation to read back (one sentence)
 }
@@ -116,6 +116,7 @@ Params by intent:
 - create_customer: { "name": string, "phone": string|null }
 - navigate: { "path": one of the known paths below }
 - act_on_item: { "item_id": EXACT id from the "needs action" list, "verb": "do"|"schedule"|"assign"|"convert"|"snooze"|"dismiss", "date": "YYYY-MM-DD" (for schedule/snooze), "assignee_name": string (for assign — match a team member), "target": "estimate"|"quote"|"job"|"customer" (for convert) }
+- open_job: { "job_id": EXACT id from your jobs below }   ("open the Smith job", "pull up Tao Zhu", "edit J-12")
 - clock_in: { "job_id": EXACT id from your jobs below, or null for no job }   ("clock me in", "start the clock on the Smith job")
 - clock_out: { "miles": round-trip job miles as a number, or null }   ("clock me out", "clock out, 22 miles")
 - log_time: { "hours": number, "job_id": id from your jobs or null }   ("log 2 hours on the Smith job")
@@ -132,7 +133,7 @@ Items that currently need action:
 ${inboxList}
 Team members (for assign): ${teamList}
 
-Your active jobs (match the spoken name/number for clock_in / log_time / add_cost):
+Your active jobs (for open_job / clock_in / log_time / add_cost). Speech recognition MANGLES names — match PHONETICALLY by how it SOUNDS, not exact spelling (e.g. "town zoo" → "Tao Zhu"; "sue waltz" → the Waltz job; "tee tee pee" → "TTP"). Pick the closest-sounding job; only return null when nothing is remotely close:
 ${jobList}`,
       messages: [{ role: "user", content: text }],
     });
@@ -193,6 +194,12 @@ ${jobList}`,
       if (!res.ok) return { ok: false, message: res.error ?? "I couldn't do that one." };
       // Land on My Day so the spoken result is visible on screen (hands-free).
       return { ok: true, message: speak, navigate: "/planner" };
+    }
+
+    if (intent === "open_job") {
+      const jobId = p.job_id && jobsById.has(String(p.job_id)) ? String(p.job_id) : null;
+      if (!jobId) return { ok: false, message: "I couldn't tell which job you meant — say its name or number again." };
+      return { ok: true, message: speak || `Opening ${jobsById.get(jobId)}.`, navigate: `/jobs/${jobId}` };
     }
 
     // Field actions DON'T execute here — they come back as a pending `confirm`, and

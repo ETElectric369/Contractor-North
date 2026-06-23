@@ -220,6 +220,18 @@ export function GlobalVoiceButton({ lang, placement = "fab" }: { lang?: string; 
       setListening(false);
       return;
     }
+    // Unlock iOS TTS: speechSynthesis only speaks from inside a user gesture, but our
+    // result speak() runs AFTER the async round-trip. Priming with a silent utterance
+    // on this tap activates the engine for the rest of the session, so the read-back
+    // (and the spoken confirm) are actually heard on iPhone.
+    try {
+      const synth = window.speechSynthesis;
+      if (synth) {
+        const warm = new SpeechSynthesisUtterance(" ");
+        warm.volume = 0;
+        synth.speak(warm);
+      }
+    } catch {}
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SR) return;
     const mode: "dictate" | "command" = isTextFieldFocused() ? "dictate" : "command";
