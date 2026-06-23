@@ -8,9 +8,17 @@ import { dispatchAction } from "@/lib/action-items/dispatch";
 import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz } from "@/lib/tz";
 import { toIso } from "@/lib/forms";
+import { executeAction } from "@/lib/actions/execute";
 import type { Affordance } from "@/lib/action-items/types";
 
-export type VoiceResult = { ok: boolean; message: string; navigate?: string };
+/** A pending field action that needs a spoken "yes" before it runs. */
+export type VoiceConfirm = { name: string; input: Record<string, unknown>; speakDone: string };
+export type VoiceResult = { ok: boolean; message: string; navigate?: string; confirm?: VoiceConfirm };
+
+// The ONLY registry actions voice may execute (safe, self-scoped field work). The
+// server-side role gate in executeAction is the real enforcement; this is belt-and-
+// suspenders so voice can never reach a money-/customer-facing or destructive verb.
+const VOICE_ALLOWED = new Set(["time.clockIn", "time.clockOut", "time.addEntry", "bill.create"]);
 
 const ROUTES: Record<string, string> = {
   "/planner": "My Day",
@@ -66,11 +74,20 @@ export async function runVoiceCommand(transcript: string): Promise<VoiceResult> 
     .maybeSingle();
   const tz = getOrgSettings((orgRow as any)?.settings).timezone || "America/Los_Angeles";
   const today = todayStrInTz(tz);
-  const [items, { data: peopleRows }] = await Promise.all([
+  const [items, { data: peopleRows }, { data: jobRows }] = await Promise.all([
     getActionItems({ todayStr: today, isStaff, userId: user.id }),
     supabase.from("profiles").select("id, full_name").eq("active", true),
+    supabase
+      .from("jobs")
+      .select("id, job_number, name")
+      .in("status", ["in_progress", "scheduled", "quoted", "on_hold", "lead"])
+      .order("scheduled_start", { ascending: true, nullsFirst: false })
+      .limit(40),
   ]);
   const people = (peopleRows ?? []) as { id: string; full_name: string | null }[];
+  const jobs = (jobRows ?? []) as { id: string; job_number: string; name: string }[];
+  const jobsById = new Map(jobs.map((j) => [j.id, `${j.job_number} — ${j.name}`]));
+  const jobList = jobs.length ? jobs.map((j) => `- id=${j.id}: "${j.job_number} ${j.name}"`).join("\n") : "(no active jobs)";
 
   const routeList = Object.entries(ROUTES).map(([p, n]) => `${p} — ${n}`).join("\n");
   const inboxList = items.length
@@ -88,7 +105,7 @@ export async function runVoiceCommand(transcript: string): Promise<VoiceResult> 
       max_tokens: 500,
       system: `You turn a contractor's spoken command into ONE action. Output ONLY a JSON object, no prose:
 {
-  "intent": "create_task" | "create_appointment" | "create_customer" | "navigate" | "act_on_item" | "none",
+  "intent": "create_task" | "create_appointment" | "create_customer" | "navigate" | "act_on_item" | "clock_in" | "clock_out" | "log_time" | "add_cost" | "none",
   "params": { ... },
   "speak": a short confirmation to read back (one sentence)
 }
@@ -99,6 +116,10 @@ Params by intent:
 - create_customer: { "name": string, "phone": string|null }
 - navigate: { "path": one of the known paths below }
 - act_on_item: { "item_id": EXACT id from the "needs action" list, "verb": "do"|"schedule"|"assign"|"convert"|"snooze"|"dismiss", "date": "YYYY-MM-DD" (for schedule/snooze), "assignee_name": string (for assign — match a team member), "target": "estimate"|"quote"|"job"|"customer" (for convert) }
+- clock_in: { "job_id": EXACT id from your jobs below, or null for no job }   ("clock me in", "start the clock on the Smith job")
+- clock_out: { "miles": round-trip job miles as a number, or null }   ("clock me out", "clock out, 22 miles")
+- log_time: { "hours": number, "job_id": id from your jobs or null }   ("log 2 hours on the Smith job")
+- add_cost: { "amount": dollars as a number, "supplier": who it was paid to (default "Cash"), "job_id": id from your jobs or null }   ("add a 40 dollar Home Depot cost to the Smith job")
 - none: {}   (when unclear or unsupported — explain briefly in "speak")
 
 Use act_on_item when the user refers to one of their EXISTING items below — finishing/marking done (do), putting it on the calendar (schedule), giving it to someone (assign), pushing it later (snooze), advancing an inquiry (convert), or removing it (dismiss). Match the item by its title.
@@ -109,7 +130,10 @@ ${routeList}
 
 Items that currently need action:
 ${inboxList}
-Team members (for assign): ${teamList}`,
+Team members (for assign): ${teamList}
+
+Your active jobs (match the spoken name/number for clock_in / log_time / add_cost):
+${jobList}`,
       messages: [{ role: "user", content: text }],
     });
     const block = msg.content.find((b) => b.type === "text") as { text: string } | undefined;
@@ -171,14 +195,87 @@ Team members (for assign): ${teamList}`,
       return { ok: true, message: speak, navigate: "/planner" };
     }
 
+    // Field actions DON'T execute here — they come back as a pending `confirm`, and
+    // the client reads it back and waits for a spoken "yes" before running it.
+    if (intent === "clock_in") {
+      const jobId = p.job_id && jobsById.has(String(p.job_id)) ? String(p.job_id) : null;
+      const label = jobId ? jobsById.get(jobId) : null;
+      return {
+        ok: true,
+        message: label ? `Clock you in on ${label} — say yes to confirm.` : "Clock you in — say yes to confirm.",
+        confirm: { name: "time.clockIn", input: { job_id: jobId, job_code: null }, speakDone: "You're clocked in." },
+      };
+    }
+
+    if (intent === "clock_out") {
+      const miles = Number(p.miles) > 0 ? Number(p.miles) : undefined;
+      return {
+        ok: true,
+        message: miles ? `Clock you out with ${miles} miles — say yes to confirm.` : "Clock you out — say yes to confirm.",
+        confirm: { name: "time.clockOut", input: { miles }, speakDone: "You're clocked out." },
+      };
+    }
+
+    if (intent === "log_time") {
+      const hours = Number(p.hours);
+      if (!(hours > 0)) return { ok: false, message: "How many hours should I log?" };
+      const jobId = p.job_id && jobsById.has(String(p.job_id)) ? String(p.job_id) : null;
+      const label = jobId ? jobsById.get(jobId) : null;
+      const now = Date.now();
+      const clockIn = new Date(now - hours * 3_600_000).toISOString();
+      const clockOut = new Date(now).toISOString();
+      const h = hours === 1 ? "hour" : "hours";
+      return {
+        ok: true,
+        message: `Log ${hours} ${h}${label ? ` on ${label}` : ""} — say yes to confirm.`,
+        confirm: {
+          name: "time.addEntry",
+          input: { clock_in: clockIn, clock_out: clockOut, job_id: jobId, lunch_minutes: 0, notes: "" },
+          speakDone: `Logged ${hours} ${h}.`,
+        },
+      };
+    }
+
+    if (intent === "add_cost") {
+      const amount = Number(p.amount);
+      if (!(amount > 0)) return { ok: false, message: "How much was the cost?" };
+      const supplier = (String(p.supplier ?? "").trim() || "Cash").slice(0, 80);
+      const jobId = p.job_id && jobsById.has(String(p.job_id)) ? String(p.job_id) : null;
+      const label = jobId ? jobsById.get(jobId) : null;
+      return {
+        ok: true,
+        message: `Add a $${amount.toFixed(2)} cost from ${supplier}${label ? ` on ${label}` : ""} — say yes to confirm.`,
+        confirm: {
+          name: "bill.create",
+          input: { supplier, amount, job_id: jobId, status: "unpaid", bill_number: "", notes: "", category: "Materials" },
+          speakDone: "Cost added.",
+        },
+      };
+    }
+
     if (intent === "navigate") {
       const path = String(p.path ?? "");
       if (ROUTES[path]) return { ok: true, message: speak || `Opening ${ROUTES[path]}.`, navigate: path };
       return { ok: false, message: "I'm not sure which page you mean." };
     }
 
-    return { ok: false, message: speak || "I can add tasks, appointments, customers, or open a page — try again." };
+    return { ok: false, message: speak || "I can add tasks, appointments, customers, clock you in or out, log time, add a cost, or open a page — try again." };
   } catch (e: any) {
     return { ok: false, message: e?.message ?? "Something went wrong." };
   }
+}
+
+/**
+ * Run a voice field action — ONLY after the user said "yes" to the spoken confirm.
+ * Whitelisted to the safe field verbs; executeAction still enforces the per-action
+ * role gate server-side (so e.g. a tech can't add a cost even if it's offered).
+ */
+export async function confirmVoiceAction(name: string, input: Record<string, unknown>): Promise<VoiceResult> {
+  if (!VOICE_ALLOWED.has(name)) return { ok: false, message: "That action can't be done by voice." };
+  const res = await executeAction(name, input, { source: "voice" });
+  if (!res.ok) return { ok: false, message: res.error ? `Sorry — ${res.error}` : "That didn't work." };
+  revalidatePath("/timeclock");
+  revalidatePath("/planner");
+  if (name === "bill.create") revalidatePath("/bills");
+  return { ok: true, message: "Done.", navigate: name === "bill.create" ? "/bills" : "/timeclock" };
 }
