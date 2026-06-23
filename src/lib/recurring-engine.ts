@@ -56,8 +56,17 @@ export async function runTemplate(supabase: any, t: any, userId: string | null):
  *  org_id explicit for the cron path. Auto-sends best-effort when the template opts in.
  *  Does NOT advance next_date — the caller claims the period first (runInvoiceTemplate). */
 async function createRecurringInvoice(supabase: any, t: any, userId: string | null): Promise<boolean> {
-  const amount = Math.round((Number(t.amount) || 0) * 100) / 100;
   const taxRate = Number(t.tax_rate) || 0;
+  // Itemized when the template carries line_items; otherwise a single line from
+  // `amount` (back-compat with single-amount templates created before line items).
+  const src = Array.isArray(t.line_items) && t.line_items.length ? t.line_items : null;
+  const li = (src ?? [{ description: t.title, quantity: 1, unit: "ea", unit_price: Number(t.amount) || 0 }]).map((x: any) => ({
+    description: String(x.description || t.title || "Service").slice(0, 500),
+    quantity: Number(x.quantity) || 1,
+    unit: x.unit || "ea",
+    unit_price: Math.round((Number(x.unit_price) || 0) * 100) / 100,
+  }));
+  const amount = Math.round(li.reduce((s: number, x: any) => s + x.quantity * x.unit_price, 0) * 100) / 100;
   const tax = Math.round(amount * taxRate * 100) / 100;
   const total = Math.round((amount + tax) * 100) / 100;
   const { data: inv, error } = await supabase
@@ -76,13 +85,15 @@ async function createRecurringInvoice(supabase: any, t: any, userId: string | nu
     .select("id")
     .single();
   if (error) { reportError("recurring-template", error, { templateId: t.id, kind: t.kind }); return false; }
-  const { error: liErr } = await supabase.from("invoice_items").insert({
+  const rows = li.map((x: any, idx: number) => ({
     invoice_id: inv.id,
-    description: t.title,
-    quantity: 1,
-    unit: "ea",
-    unit_price: amount,
-  });
+    description: x.description,
+    quantity: x.quantity,
+    unit: x.unit,
+    unit_price: x.unit_price,
+    sort_order: idx,
+  }));
+  const { error: liErr } = await supabase.from("invoice_items").insert(rows);
   if (liErr) { reportError("recurring-invoice-item", liErr, { templateId: t.id, invoiceId: inv.id }); return false; }
   if (t.auto_send) {
     // Best-effort send: a customer with no email just leaves a draft to send by hand.

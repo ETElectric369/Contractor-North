@@ -24,9 +24,31 @@ export async function saveRecurring(formData: FormData, id?: string): Promise<Re
   const amountRaw = String(formData.get("amount") ?? "").trim();
   const taxRaw = String(formData.get("tax_pct") ?? "").trim();
   const customerId = kind === "job" || kind === "invoice" ? emptyToNull(formData.get("customer_id")) : null;
+
+  // Recurring invoices carry LINE ITEMS (JSON from the form). Compute the subtotal
+  // from them; fall back to the single `amount` field for older single-line saves.
+  let invoiceItems: { description: string; quantity: number; unit_price: number }[] | null = null;
+  let invoiceAmount = amountRaw ? Number(amountRaw) : 0;
   if (kind === "invoice") {
+    try {
+      const parsed = JSON.parse(String(formData.get("line_items") ?? "[]"));
+      if (Array.isArray(parsed)) {
+        invoiceItems = parsed
+          .map((x: any) => ({
+            description: String(x.description ?? "").trim(),
+            quantity: Number(x.quantity) > 0 ? Number(x.quantity) : 1,
+            unit_price: Math.max(0, Number(x.unit_price) || 0),
+          }))
+          .filter((x) => x.description || x.unit_price > 0);
+      }
+    } catch {}
+    if (invoiceItems && invoiceItems.length) {
+      invoiceAmount = invoiceItems.reduce((s, x) => s + x.quantity * x.unit_price, 0);
+    } else {
+      invoiceItems = null; // back-compat: a single amount
+    }
     if (!customerId) return { ok: false, error: "Pick a customer for the recurring invoice." };
-    if (!amountRaw || !(Number(amountRaw) > 0)) return { ok: false, error: "Enter the invoice amount." };
+    if (!(invoiceAmount > 0)) return { ok: false, error: "Add at least one line item with an amount." };
   }
   // The customer must belong to the caller's org — the user client's RLS enforces it,
   // so a forged foreign customer_id resolves to nothing and is rejected.
@@ -42,7 +64,13 @@ export async function saveRecurring(formData: FormData, id?: string): Promise<Re
     active: true,
     customer_id: customerId,
     description: kind === "job" ? emptyToNull(formData.get("description")) : null,
-    amount: (kind === "expense" || kind === "invoice") && amountRaw ? Number(amountRaw) : null,
+    amount:
+      kind === "invoice"
+        ? Math.round(invoiceAmount * 100) / 100
+        : kind === "expense" && amountRaw
+          ? Number(amountRaw)
+          : null,
+    line_items: kind === "invoice" ? invoiceItems : null,
     category: kind === "expense" ? emptyToNull(formData.get("category")) : null,
     vendor: kind === "expense" ? emptyToNull(formData.get("vendor")) : null,
     tax_rate: kind === "invoice" && taxRaw ? Math.max(0, Number(taxRaw)) / 100 : 0,

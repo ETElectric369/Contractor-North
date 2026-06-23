@@ -2,13 +2,15 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Pencil } from "lucide-react";
+import { Plus, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { formatCurrency } from "@/lib/utils";
 import { saveRecurring, deleteRecurring } from "./actions";
 
 interface CustomerOpt { id: string; name: string }
+interface LineItem { description: string; quantity: number; unit_price: number }
 
 export interface RecurringValue {
   id: string;
@@ -23,6 +25,7 @@ export interface RecurringValue {
   vendor: string | null;
   tax_rate?: number | null;
   auto_send?: boolean | null;
+  line_items?: LineItem[] | null;
 }
 
 export function RecurringButton({
@@ -38,6 +41,20 @@ export function RecurringButton({
   const [kind, setKind] = useState(template?.kind ?? "job");
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
+
+  // Recurring-invoice line items. Seed from the template's items, or a single line
+  // from an older single-amount template, or one blank row for a new one.
+  const [items, setItems] = useState<LineItem[]>(
+    template?.line_items?.length
+      ? template.line_items.map((x) => ({ description: x.description ?? "", quantity: Number(x.quantity) || 1, unit_price: Number(x.unit_price) || 0 }))
+      : template?.kind === "invoice" && template?.amount
+        ? [{ description: template.title ?? "", quantity: 1, unit_price: Number(template.amount) || 0 }]
+        : [{ description: "", quantity: 1, unit_price: 0 }],
+  );
+  const itemsTotal = items.reduce((s, x) => s + (Number(x.quantity) || 1) * (Number(x.unit_price) || 0), 0);
+  const setItem = (i: number, patch: Partial<LineItem>) => setItems((arr) => arr.map((x, idx) => (idx === i ? { ...x, ...patch } : x)));
+  const addItem = () => setItems((arr) => [...arr, { description: "", quantity: 1, unit_price: 0 }]);
+  const removeItem = (i: number) => setItems((arr) => (arr.length > 1 ? arr.filter((_, idx) => idx !== i) : arr));
 
   function submit(formData: FormData) {
     setError(null);
@@ -143,15 +160,29 @@ export function RecurringButton({
                   {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </Select>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label htmlFor="r-iamt">Amount</Label>
-                  <Input id="r-iamt" name="amount" type="number" step="0.01" min="0" defaultValue={template?.amount ?? ""} required />
+              <div>
+                <Label>Line items</Label>
+                <div className="space-y-2">
+                  {items.map((it, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <Input value={it.description} onChange={(e) => setItem(i, { description: e.target.value })} placeholder="Description" className="flex-1" />
+                      <Input type="number" step="1" min="0" value={it.quantity} onChange={(e) => setItem(i, { quantity: Number(e.target.value) })} className="w-14 text-center" title="Qty" />
+                      <Input type="number" step="0.01" min="0" value={it.unit_price} onChange={(e) => setItem(i, { unit_price: Number(e.target.value) })} className="w-24 text-right" placeholder="Price" title="Unit price" />
+                      <button type="button" onClick={() => removeItem(i)} className="shrink-0 text-slate-300 hover:text-red-600" aria-label="Remove line">
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ))}
                 </div>
-                <div>
-                  <Label htmlFor="r-itax">Tax (%)</Label>
-                  <Input id="r-itax" name="tax_pct" type="number" step="0.001" min="0" defaultValue={(template as { tax_rate?: number } | undefined)?.tax_rate ? Number((template as { tax_rate?: number }).tax_rate) * 100 : ""} placeholder="0" />
+                <div className="mt-1.5 flex items-center justify-between">
+                  <button type="button" onClick={addItem} className="text-sm font-medium text-brand hover:underline">+ Add line</button>
+                  <span className="text-sm font-semibold text-slate-900">Subtotal: {formatCurrency(itemsTotal)}</span>
                 </div>
+                <input type="hidden" name="line_items" value={JSON.stringify(items)} />
+              </div>
+              <div className="w-32">
+                <Label htmlFor="r-itax">Tax (%)</Label>
+                <Input id="r-itax" name="tax_pct" type="number" step="0.001" min="0" defaultValue={(template as { tax_rate?: number } | undefined)?.tax_rate ? Number((template as { tax_rate?: number }).tax_rate) * 100 : ""} placeholder="0" />
               </div>
               <label className="flex items-start gap-2 text-sm text-slate-700">
                 <input type="checkbox" name="auto_send" defaultChecked={(template as { auto_send?: boolean } | undefined)?.auto_send ?? false} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand" />

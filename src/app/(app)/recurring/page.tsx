@@ -46,7 +46,7 @@ export default async function RecurringPage() {
               const value: RecurringValue = {
                 id: t.id, kind: t.kind, title: t.title, frequency: t.frequency, next_date: t.next_date,
                 customer_id: t.customer_id, description: t.description, amount: t.amount, category: t.category, vendor: t.vendor,
-                tax_rate: t.tax_rate, auto_send: t.auto_send,
+                tax_rate: t.tax_rate, auto_send: t.auto_send, line_items: t.line_items,
               };
               const due = t.active && t.next_date <= today;
               return (
