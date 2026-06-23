@@ -91,24 +91,33 @@ export function InvoiceDocument({
         }}
       />
 
-      {/* Bill-to + Balance */}
-      <div className="mt-6 flex items-start justify-between">
-        <div>
+      {/* Bill-to (two columns to save vertical space: identity + contact | location)
+          + Balance. Mirrors the letterhead grouping above — contact behind an accent rule. */}
+      <div className="mt-6 flex items-start justify-between gap-6">
+        <div className="min-w-0 flex-1">
           <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Bill to</div>
           {c ? (
-            <div className="mt-1 text-sm text-slate-700">
-              <div className="font-medium text-slate-900">{c.name}</div>
-              {c.company_name && <div>{c.company_name}</div>}
-              {c.address && <div>{c.address}</div>}
-              {(c.city || c.state || c.zip) && <div>{[c.city, c.state, c.zip].filter(Boolean).join(", ")}</div>}
-              {c.email && <div>{c.email}</div>}
-              {c.phone && <div>{c.phone}</div>}
+            <div className="mt-1 grid grid-cols-2 gap-x-6 text-sm">
+              <div className="min-w-0">
+                <div className="font-medium text-slate-900">{c.name}</div>
+                {c.company_name && <div className="text-slate-700">{c.company_name}</div>}
+                {(c.phone || c.email) && (
+                  <div className="mt-1.5 space-y-0.5 border-l-2 pl-2.5 text-slate-600" style={{ borderColor: co.brand }}>
+                    {c.phone && <div>{c.phone}</div>}
+                    {c.email && <div className="break-words">{c.email}</div>}
+                  </div>
+                )}
+              </div>
+              <div className="min-w-0 text-slate-700">
+                {c.address && <div>{c.address}</div>}
+                {(c.city || c.state || c.zip) && <div>{[c.city, c.state, c.zip].filter(Boolean).join(", ")}</div>}
+              </div>
             </div>
           ) : (
             <div className="mt-1 text-sm text-slate-400">—</div>
           )}
         </div>
-        <div className="rounded-lg border border-slate-200 bg-slate-50 px-5 py-3 text-right">
+        <div className="shrink-0 rounded-lg border border-slate-200 bg-slate-50 px-5 py-3 text-right">
           <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Balance due</div>
           <div className="text-2xl font-bold text-slate-900">{formatCurrency(balance)}</div>
         </div>
