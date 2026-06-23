@@ -139,6 +139,35 @@ export async function clockOut(input: {
   return { ok: true };
 }
 
+/** Close the CALLER's currently-open time entry — finds the open entry instead of
+ *  taking an entry_id, so the action registry / voice can "clock me out" hands-free.
+ *  Routes through the one clockOut path (no duplicate close logic). */
+export async function clockOutCurrent(input: {
+  miles?: number;
+  notes?: string;
+  lunch_minutes?: number;
+}): Promise<ClockResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+  const { data: open } = await supabase
+    .from("time_entries")
+    .select("id")
+    .eq("profile_id", user.id)
+    .eq("status", "open")
+    .maybeSingle();
+  if (!open) return { ok: false, error: "You're not clocked in." };
+  return clockOut({
+    entry_id: (open as any).id,
+    lunch_minutes: input.lunch_minutes ?? 0,
+    notes: input.notes ?? "",
+    gps: null,
+    miles: input.miles,
+  });
+}
+
 /**
  * Add a past (manual) timecard entry. Techs can add their own; owner/admin/
  * office can add for any crew member. clock_in/clock_out are ISO strings built
