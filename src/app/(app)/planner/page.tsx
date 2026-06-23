@@ -15,6 +15,7 @@ import { getActionItems } from "@/lib/action-items/query";
 import { ActionList } from "@/components/action-items/action-list";
 import { AppointmentButton } from "../appointments/appointment-button";
 import { NewTaskBox } from "../tasks/tasks-view";
+import { QuickCostButton } from "@/components/quick-cost-button";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +31,7 @@ export default async function PlannerPage() {
   // otherwise afternoon work in the Americas falls into "tomorrow".
   const { data: orgRow } = await supabase
     .from("organizations")
-    .select("city, state, zip, settings")
+    .select("id, city, state, zip, settings")
     .limit(1)
     .maybeSingle();
   const tz = getOrgSettings((orgRow as any)?.settings).timezone || "America/Los_Angeles";
@@ -272,24 +273,29 @@ export default async function PlannerPage() {
                 {currentJob.customers?.name ?? ""}{currentJob.address ? ` · ${currentJob.address}` : ""}
               </div>
             )}
-            <div className="mt-3 flex gap-2 text-sm font-medium">
+            <div className="mt-3 grid grid-cols-2 gap-2 text-sm font-medium">
               {currentJob.address && (
                 <NavLink
                   address={currentJob.address}
-                  className="flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-lg bg-brand text-white shadow-sm hover:bg-brand-dark"
+                  className="flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-brand text-white shadow-sm hover:bg-brand-dark"
                 >
                   <Navigation className="h-4 w-4" /> Navigate
                 </NavLink>
               )}
-              <Link href={`/jobs/${currentJob.id}`} className="flex min-h-[44px] flex-1 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50">
+              <Link href={`/jobs/${currentJob.id}`} className="flex min-h-[44px] items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50">
                 Open
               </Link>
               <Link
                 href={currentMaterials ? `/materials/${currentMaterials.id}` : `/jobs/${currentJob.id}?tab=materials`}
-                className="flex min-h-[44px] flex-1 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                className="flex min-h-[44px] items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
               >
                 Materials
               </Link>
+              <QuickCostButton
+                orgId={(org as any)?.id ?? ""}
+                jobId={currentJob.id}
+                className="flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+              />
             </div>
           </div>
         </Card>
