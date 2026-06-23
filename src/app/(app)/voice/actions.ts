@@ -237,6 +237,9 @@ ${jobList}`,
     }
 
     if (intent === "add_cost") {
+      // bill.create is staff-only — don't walk a tech through the whole confirm just
+      // to reject it at execution.
+      if (!isStaff) return { ok: false, message: "Recording costs is office-only." };
       const amount = Number(p.amount);
       if (!(amount > 0)) return { ok: false, message: "How much was the cost?" };
       const supplier = (String(p.supplier ?? "").trim() || "Cash").slice(0, 80);
@@ -247,7 +250,7 @@ ${jobList}`,
         message: `Add a $${amount.toFixed(2)} cost from ${supplier}${label ? ` on ${label}` : ""} — say yes to confirm.`,
         confirm: {
           name: "bill.create",
-          input: { supplier, amount, job_id: jobId, status: "unpaid", bill_number: "", notes: "", category: "Materials" },
+          input: { supplier, amount, job_id: jobId, status: "unpaid", bill_number: "", notes: "", category: "Materials", bill_date: today },
           speakDone: "Cost added.",
         },
       };

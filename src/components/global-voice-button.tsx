@@ -58,15 +58,27 @@ export function GlobalVoiceButton({ lang, placement = "fab" }: { lang?: string; 
   // Read the result aloud so a driver never has to look at the screen — the
   // server already returns a driver-friendly sentence.
   function speak(msg: string, onEnd?: () => void) {
+    // onEnd MUST fire even if TTS is interrupted/cancelled (which fires `onerror`,
+    // not `onend`, on Chrome/WebKit) — otherwise the hands-free yes/no listener
+    // never starts. Guard so it runs at most once across onend/onerror.
+    let fired = false;
+    const fire = () => {
+      if (fired) return;
+      fired = true;
+      onEnd?.();
+    };
     try {
       const synth = window.speechSynthesis;
-      if (!synth || !msg) { onEnd?.(); return; }
+      if (!synth || !msg) { fire(); return; }
       synth.cancel();
       const u = new SpeechSynthesisUtterance(msg);
-      if (onEnd) u.onend = () => onEnd();
+      if (onEnd) {
+        u.onend = fire;
+        u.onerror = fire;
+      }
       synth.speak(u);
     } catch {
-      onEnd?.(); /* TTS unsupported — the toast still shows */
+      fire(); /* TTS unsupported — the toast still shows */
     }
   }
 
@@ -96,16 +108,21 @@ export function GlobalVoiceButton({ lang, placement = "fab" }: { lang?: string; 
   // tap on the Yes/Cancel buttons) before anything is written.
   function handleConfirmReply(text: string) {
     const t = text.toLowerCase();
-    if (/\b(yes|yeah|yep|yup|confirm|do it|go ahead|sure|correct|right|ok|okay)\b/.test(t)) resolveConfirm(true);
-    else if (/\b(no|nope|cancel|stop|never ?mind|don'?t|do not|wrong)\b/.test(t)) resolveConfirm(false);
+    // Fail SAFE for voice writes: an explicit no/cancel WINS (checked first), and the
+    // affirmative set excludes ambiguous short words (ok/right/sure/correct) that turn
+    // up inside negative replies like "no, that's not right".
+    if (/\b(no|nope|cancel|stop|never ?mind|don'?t|do not|wrong|negative)\b/.test(t)) resolveConfirm(false);
+    else if (/\b(yes|yeah|yep|yup|confirm|do it|go ahead|affirmative)\b/.test(t)) resolveConfirm(true);
     else speak("Say yes or no.", () => startListen(handleConfirmReply, "Say yes or no…"));
   }
 
   async function resolveConfirm(yes: boolean) {
     const c = pendingRef.current;
-    pendingRef.current = null;
+    pendingRef.current = null; // nulling first makes a second call (tap + spoken) a no-op
     setPendingConfirm(null);
     setConfirmMsg("");
+    try { recog.current?.stop(); } catch {} // stop the live yes/no listener
+    setListening(false);
     if (!c) return;
     if (!yes) {
       flash("Okay, cancelled.");

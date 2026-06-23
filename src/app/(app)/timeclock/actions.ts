@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { visibleJobIdOrNull } from "@/lib/job-visibility";
 import type { GeoPoint } from "@/lib/types";
 
 export type ClockResult = { ok: boolean; error?: string };
@@ -18,14 +19,10 @@ export async function clockIn(input: {
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
 
-  // Only attach a job the caller can actually see (RLS-scoped). A stray/foreign
+  // Only attach a job the caller can actually see (RLS-scoped) — a stray/foreign
   // job_id (e.g. from a hand-built action call) would otherwise persist as a
-  // dangling reference — drop it to a no-job entry instead.
-  let jobId = input.job_id;
-  if (jobId) {
-    const { data: vis } = await supabase.from("jobs").select("id").eq("id", jobId).maybeSingle();
-    if (!vis) jobId = null;
-  }
+  // dangling reference. Drops it to a no-job entry instead.
+  const jobId = await visibleJobIdOrNull(supabase, input.job_id);
 
   // Allow starting the shift at any time the user picks — never into the future
   // (small skew allowed), and floored at 31 days back so a fat-fingered year
@@ -214,9 +211,13 @@ export async function createManualEntry(input: {
   }
   if (co <= ci) return { ok: false, error: "End must be after start." };
 
+  // Drop a job_id the caller can't see (e.g. a crafted voice/registry call) — never
+  // persist a cross-org job reference.
+  const jobId = await visibleJobIdOrNull(supabase, input.job_id);
+
   const { error } = await supabase.from("time_entries").insert({
     profile_id: profileId,
-    job_id: input.job_id,
+    job_id: jobId,
     job_code: input.job_code,
     clock_in: ci.toISOString(),
     clock_out: co.toISOString(),

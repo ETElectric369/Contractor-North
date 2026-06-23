@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { emptyToNull } from "@/lib/forms";
+import { visibleJobIdOrNull } from "@/lib/job-visibility";
 import {
   createInvoiceFromQuote,
   createBlankInvoice,
@@ -194,8 +195,12 @@ export async function createBill(input: {
   if (!user) return { ok: false, error: "Not signed in." };
   if (!input.supplier.trim()) return { ok: false, error: "Supplier is required." };
 
+  // Drop a job_id the caller can't see (e.g. a crafted voice/registry call) — never
+  // persist a cross-org job reference on a bill.
+  const jobId = await visibleJobIdOrNull(supabase, input.job_id);
+
   const { error } = await supabase.from("bills").insert({
-    job_id: input.job_id || null,
+    job_id: jobId,
     supplier: input.supplier.trim(),
     bill_number: input.bill_number.trim() || null,
     amount: input.amount || 0,
