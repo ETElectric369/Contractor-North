@@ -19,6 +19,14 @@ function toLocalDate(iso: string | null): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
+/** HH:MM of an ISO timestamp in the viewer's local time, for a <input type="time">. */
+function toLocalTime(iso: string | null, fallback: string): string {
+  if (!iso) return fallback;
+  const d = new Date(iso);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 export function JobEditButton({
   job,
   customers,
@@ -37,13 +45,16 @@ export function JobEditButton({
   const [zip, setZip] = useState(job.zip ?? "");
   const [startDate, setStartDate] = useState(toLocalDate(job.scheduled_start));
   const [endDate, setEndDate] = useState(toLocalDate(job.scheduled_end));
+  const [startTime, setStartTime] = useState(toLocalTime(job.scheduled_start, "08:00"));
+  const [endTime, setEndTime] = useState(toLocalTime(job.scheduled_end, "16:00"));
   const router = useRouter();
 
   function onSubmit(formData: FormData) {
     setError(null);
-    // Convert local dates to ISO here so the server never guesses the timezone.
-    formData.set("scheduled_start", startDate ? new Date(`${startDate}T08:00:00`).toISOString() : "");
-    formData.set("scheduled_end", endDate ? new Date(`${endDate}T16:00:00`).toISOString() : "");
+    // Convert local date + time-of-day to ISO here so the server never guesses the
+    // timezone. The time-of-day is what the planner/Agenda lays the day out by.
+    formData.set("scheduled_start", startDate ? new Date(`${startDate}T${startTime || "08:00"}:00`).toISOString() : "");
+    formData.set("scheduled_end", endDate ? new Date(`${endDate}T${endTime || "16:00"}:00`).toISOString() : "");
     start(async () => {
       const res = await updateJob(job.id, formData);
       if (!res.ok) {
@@ -142,8 +153,16 @@ export function JobEditButton({
               <Input id="ej-start" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
             </div>
             <div>
+              <Label htmlFor="ej-start-time">Start time</Label>
+              <Input id="ej-start-time" type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} disabled={!startDate} />
+            </div>
+            <div>
               <Label htmlFor="ej-end">End date</Label>
               <Input id="ej-end" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+            </div>
+            <div>
+              <Label htmlFor="ej-end-time">End time</Label>
+              <Input id="ej-end-time" type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} disabled={!endDate} />
             </div>
           </div>
 
