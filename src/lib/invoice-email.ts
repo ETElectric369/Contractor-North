@@ -1,5 +1,5 @@
 import "server-only";
-import { sendEmail, renderDocEmail } from "@/lib/email";
+import { sendEmail, renderInvoiceNoticeEmail } from "@/lib/email";
 
 /**
  * Render + send an invoice email to the customer and mark a draft "sent".
@@ -14,7 +14,7 @@ export async function deliverInvoiceEmail(
 ): Promise<{ ok: boolean; error?: string }> {
   const { data: invoice } = await supabase
     .from("invoices")
-    .select("*, customers(name, email)")
+    .select("*, customers(name, email, portal_token)")
     .eq("id", id)
     .maybeSingle();
   if (!invoice) return { ok: false, error: "Invoice not found." };
@@ -31,11 +31,14 @@ export async function deliverInvoiceEmail(
   // Never email an empty invoice (a blank $0 mis-send) — protects every caller.
   if (!items || items.length === 0) return { ok: false, error: "This invoice has no line items to send." };
 
-  const link = `${process.env.NEXT_PUBLIC_SITE_URL || ""}/i/${(invoice as any).public_token}`;
+  const site = process.env.NEXT_PUBLIC_SITE_URL || "https://contractor-north.vercel.app";
+  const link = `${site}/i/${(invoice as any).public_token}`;
+  const portalLink = customer.portal_token ? `${site}/portal/${customer.portal_token}` : undefined;
   const balance = Number(invoice.total) - Number(invoice.amount_paid);
-  const html = renderDocEmail({
-    docType: "Invoice",
-    number: invoice.invoice_number,
+  // A basic greeting + the balance + a button to the ONE canonical invoice document
+  // (viewable, printable, payable) and the portal — never a re-rendered copy of the
+  // invoice, so the email can't drift from the print/portal view.
+  const html = renderInvoiceNoticeEmail({
     company: {
       name: org?.name ?? "Contractor North",
       brand: org?.brand_color ?? "#0b57c4",
@@ -43,20 +46,11 @@ export async function deliverInvoiceEmail(
       email: org?.email,
     },
     customerName: customer.name,
+    number: invoice.invoice_number,
     title: invoice.title,
-    items: (items ?? []).map((i: any) => ({
-      description: i.description,
-      quantity: i.quantity,
-      unit: i.unit,
-      price: i.unit_price,
-      total: i.line_total,
-    })),
-    subtotal: invoice.subtotal,
-    tax: invoice.tax,
-    total: invoice.total,
     balance,
-    notes: invoice.notes,
-    link,
+    invoiceLink: link,
+    portalLink,
   });
 
   const res = await sendEmail({

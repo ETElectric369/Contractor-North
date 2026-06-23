@@ -115,6 +115,38 @@ export function renderDocEmail(input: {
   </div>`;
 }
 
+/**
+ * Invoice notification email — a basic greeting + the balance + a button to the one
+ * canonical invoice document (the /i link, which is viewable, printable to the same
+ * PDF, and payable), plus a link to the customer portal. Deliberately does NOT
+ * re-render the line items: the document lives at the link, so the email can never
+ * drift from the print/portal view (that was the recurring "print ≠ email" bug).
+ */
+export function renderInvoiceNoticeEmail(input: {
+  company: { name: string; brand: string; phone?: string | null; email?: string | null };
+  customerName: string;
+  number: string;
+  title?: string | null;
+  balance: number;
+  invoiceLink: string;
+  portalLink?: string;
+}): string {
+  const c = safeColor(input.company.brand);
+  const due = input.balance > 0;
+  return `
+  <div style="font-family:ui-sans-serif,system-ui,Arial,sans-serif;max-width:560px;margin:0 auto;color:#0f172a">
+    <div style="border-bottom:3px solid ${c};padding-bottom:12px;margin-bottom:16px">
+      <div style="font-size:20px;font-weight:700">${escape(input.company.name)}</div>
+      <div style="font-size:12px;color:#64748b">${[input.company.phone, input.company.email].filter(Boolean).map(escape).join(" · ")}</div>
+    </div>
+    <p style="font-size:14px;margin:0 0 8px">Hi ${escape(input.customerName)},</p>
+    <p style="font-size:14px;color:#475569;margin:0">Your invoice <strong>${escape(input.number)}</strong>${input.title ? ` — ${escape(input.title)}` : ""} is ready${due ? `. Balance due: <strong style="color:#0f172a">${money(input.balance)}</strong>.` : " — paid in full. Thank you!"}</p>
+    <p style="margin:18px 0"><a href="${input.invoiceLink}" style="display:inline-block;background:${c};color:#fff;text-decoration:none;padding:11px 20px;border-radius:8px;font-size:14px;font-weight:600">${due ? `View &amp; pay ${money(input.balance)}` : "View invoice"}</a></p>
+    ${input.portalLink ? `<p style="font-size:13px;color:#475569;margin:0">Or see all your invoices, quotes, and documents — and print a PDF — in <a href="${input.portalLink}" style="color:${c};font-weight:600">your customer portal</a>.</p>` : ""}
+    <p style="font-size:13px;color:#64748b;margin-top:24px">Thank you for your business,<br/>${escape(input.company.name)}</p>
+  </div>`;
+}
+
 /** A light branded "nudge" email — payment reminder, quote follow-up, appointment
  *  reminder. Header + heading + a short message + optional button. Same brand header
  *  as renderDocEmail so reminders look like the rest of the contractor's mail. */
