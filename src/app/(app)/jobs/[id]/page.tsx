@@ -43,6 +43,7 @@ import { NewPoButton } from "../../purchasing/new-po-button";
 import { ConvertButton } from "@/components/convert-button";
 import { SectionMapButton } from "@/components/section-map-button";
 import { jobSectionTree } from "@/lib/nav-tree";
+import { QuickCostButton } from "@/components/quick-cost-button";
 import { DeleteButton } from "@/components/delete-button";
 import { EditCustomerButton } from "../../crm/[id]/edit-customer-button";
 import { createInvoiceForJob, deleteJob } from "../actions";
@@ -754,6 +755,7 @@ export default async function JobDetailPage({
             tree={jobSectionTree(j.id, j.name, { customerId: j.customer_id, jobCode: j.job_number })}
             isStaff={viewerIsStaff}
           />
+          {viewerIsStaff && <QuickCostButton jobId={j.id} />}
           {j.status !== "complete" && j.status !== "invoiced" && j.status !== "cancelled" && (
             <>
               <ProposeDatesButton
