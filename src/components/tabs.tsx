@@ -127,27 +127,69 @@ export function TabBar({
   maxVisible?: number;
 }) {
   const shown = items.filter((t) => !t.staffOnly || viewerIsStaff);
+  // `tier` is a PRIORITY hint — primaries prefer to stay visible, overflow prefer
+  // the More menu — but the real split is MEASURED against the available width, so
+  // the strip fits any screen (more tabs on a wide monitor, fewer on a phone) with
+  // the overflow collapsing into More, instead of a fixed count that scrolls.
   const hasTiers = shown.some((t) => t.tier);
-  let primary: TabBarItem[];
-  let overflow: TabBarItem[];
-  if (hasTiers) {
-    primary = shown.filter((t) => t.tier !== "overflow");
-    overflow = shown.filter((t) => t.tier === "overflow");
-  } else if (shown.length > maxVisible) {
-    primary = shown.slice(0, maxVisible);
-    overflow = shown.slice(maxVisible);
-  } else {
-    primary = shown;
-    overflow = [];
-  }
+  const ordered = hasTiers
+    ? [...shown.filter((t) => t.tier !== "overflow"), ...shown.filter((t) => t.tier === "overflow")]
+    : shown;
+
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const ghostRef = useRef<HTMLDivElement>(null);
+  const [visN, setVisN] = useState(Math.min(ordered.length, maxVisible));
+  const sig = ordered.map((t) => `${t.id}:${t.count ?? ""}`).join("|");
+
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    const ghost = ghostRef.current;
+    if (!wrap || !ghost) return;
+    const measure = () => {
+      const avail = wrap.clientWidth;
+      if (!avail) return;
+      const tabEls = Array.from(ghost.querySelectorAll<HTMLElement>("[data-gtab]"));
+      const moreW = (ghost.querySelector<HTMLElement>("[data-gmore]")?.offsetWidth ?? 60) + 4;
+      let used = 0;
+      let n = 0;
+      for (let i = 0; i < tabEls.length; i++) {
+        used += tabEls[i].offsetWidth + 4; // gap-1 = 4px
+        const willOverflow = i < tabEls.length - 1;
+        if (used + (willOverflow ? moreW : 0) <= avail) n = i + 1;
+        else break;
+      }
+      setVisN(Math.max(1, n)); // always show at least one tab
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(wrap);
+    return () => ro.disconnect();
+  }, [sig, maxVisible]);
+
+  const primary = ordered.slice(0, visN);
+  const overflow = ordered.slice(visN);
   const activeItem = shown.find((t) => t.id === activeId);
   const activeInOverflow = !!activeItem && overflow.some((t) => t.id === activeItem.id);
   const strip = activeInOverflow ? [...primary, activeItem!] : primary;
 
   return (
-    <div className="mb-5 flex items-end gap-1 border-b border-slate-200">
+    <div ref={wrapRef} className="relative mb-5 flex items-end gap-1 border-b border-slate-200">
       <ScrollStrip items={strip} activeId={activeId} onSelect={onSelect} />
       {overflow.length > 0 && <MoreMenu items={overflow} activeId={activeId} onSelect={onSelect} />}
+      {/* Hidden measuring row: every tab + a More button at natural width, so we can
+          compute how many fit without affecting layout (absolute, off-screen). */}
+      <div ref={ghostRef} aria-hidden className="invisible pointer-events-none absolute -left-[9999px] top-0 flex gap-1">
+        {ordered.map((t) => (
+          <span key={t.id} data-gtab className={TAB_CLS}>
+            {t.icon}
+            {t.label}
+            <CountBadge count={t.count} active={false} />
+          </span>
+        ))}
+        <span data-gmore className="flex items-center gap-1 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium">
+          More <ChevronDown className="h-3.5 w-3.5" />
+        </span>
+      </div>
     </div>
   );
 }
