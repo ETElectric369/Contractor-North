@@ -5,7 +5,8 @@ import { emptyToNull } from "@/lib/forms";
 import { createClient } from "@/lib/supabase/server";
 import { formatPhone, formatState, formatZip, titleCase } from "@/lib/utils";
 import { requireStaff } from "@/lib/staff-guard";
-import { sendEmail, renderReminderEmail } from "@/lib/email";
+import { sendEmail, renderReminderEmail, ownerBcc } from "@/lib/email";
+import { getOrgSettings } from "@/lib/org-settings";
 
 export type ActionResult = { ok: boolean; error?: string; id?: string };
 
@@ -23,7 +24,7 @@ export async function emailPortalLink(customerId: string): Promise<ActionResult>
   if (!c) return { ok: false, error: "Customer not found." };
   if (!c.email) return { ok: false, error: "This customer has no email address." };
 
-  const { data: org } = await supabase.from("organizations").select("name, brand_color, phone, email").maybeSingle();
+  const { data: org } = await supabase.from("organizations").select("name, brand_color, phone, email, settings").maybeSingle();
   // Always an absolute origin so the emailed link is clickable even if the env var is unset.
   const site = process.env.NEXT_PUBLIC_SITE_URL || "https://contractor-north.vercel.app";
   const link = `${site}/portal/${c.portal_token}`;
@@ -39,6 +40,7 @@ export async function emailPortalLink(customerId: string): Promise<ActionResult>
     subject: `Your ${org?.name ?? "customer"} portal`.trim(),
     html,
     replyTo: org?.email ?? undefined,
+    bcc: ownerBcc(getOrgSettings((org as any)?.settings).copy_owner_on_emails, org?.email),
   });
   return res.ok ? { ok: true } : res;
 }

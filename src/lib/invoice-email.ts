@@ -1,5 +1,6 @@
 import "server-only";
-import { sendEmail, renderInvoiceNoticeEmail } from "@/lib/email";
+import { sendEmail, renderInvoiceNoticeEmail, ownerBcc } from "@/lib/email";
+import { getOrgSettings } from "@/lib/org-settings";
 import { companyFromOrg } from "@/components/doc-letterhead";
 import { companyBlock } from "@/lib/company-lines";
 
@@ -28,7 +29,7 @@ export async function deliverInvoiceEmail(
     // Scope to THIS invoice's org explicitly — under the RLS-bypassing service client
     // (the recurring cron) an unfiltered query sees every org and would error on
     // .maybeSingle() or leak another tenant's branding/reply-to to this customer.
-    supabase.from("organizations").select("name, brand_color, phone, email, address_line1, address_line2, city, state, zip, license, logo_url").eq("id", (invoice as any).org_id).maybeSingle(),
+    supabase.from("organizations").select("name, brand_color, phone, email, address_line1, address_line2, city, state, zip, license, logo_url, settings").eq("id", (invoice as any).org_id).maybeSingle(),
   ]);
   // Never email an empty invoice (a blank $0 mis-send) — protects every caller.
   if (!items || items.length === 0) return { ok: false, error: "This invoice has no line items to send." };
@@ -63,6 +64,7 @@ export async function deliverInvoiceEmail(
     subject: `Invoice ${invoice.invoice_number} from ${org?.name ?? "us"}`,
     html,
     replyTo: org?.email ?? undefined,
+    bcc: ownerBcc(getOrgSettings((org as any)?.settings).copy_owner_on_emails, org?.email),
   });
   if (!res.ok) return res;
   if (invoice.status === "draft") {

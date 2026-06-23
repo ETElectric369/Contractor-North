@@ -46,6 +46,9 @@ export interface OrgSettings {
   remind_quote_followup: boolean;
   remind_invoice_due: boolean;
   remind_appointments: boolean;
+  // BCC the owner (org email) on every customer-facing email — invoices, quotes,
+  // contracts, portal links — so you always have a copy and can confirm it sent.
+  copy_owner_on_emails: boolean;
 
   // Billing automation
   // When a job is finished, auto-email the draft invoice to the customer.
@@ -93,6 +96,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   remind_quote_followup: false,
   remind_invoice_due: false,
   remind_appointments: false,
+  copy_owner_on_emails: false,
   auto_send_invoice_on_complete: false,
   splash_headline: "",
   splash_tagline: "",

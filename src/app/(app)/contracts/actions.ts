@@ -5,7 +5,7 @@ import { requireStaff } from "@/lib/staff-guard";
 import { getOrgSettings } from "@/lib/org-settings";
 import { scheduleStatus, contractTotalFromQuotes, type Milestone } from "@/lib/payment-schedule-math";
 import { buildContractBody } from "@/lib/contract-body";
-import { sendEmail, renderReminderEmail } from "@/lib/email";
+import { sendEmail, renderReminderEmail, ownerBcc } from "@/lib/email";
 import { formatDate } from "@/lib/utils";
 
 type Result = { ok: boolean; error?: string; id?: string };
@@ -156,7 +156,7 @@ export async function sendContract(id: string): Promise<Result> {
   const customer = (c as any).customers;
   if (!customer?.email) return { ok: false, error: "This customer has no email address." };
 
-  const { data: org } = await supabase.from("organizations").select("name, brand_color, phone, email").maybeSingle();
+  const { data: org } = await supabase.from("organizations").select("name, brand_color, phone, email, settings").maybeSingle();
   const link = contractLink((c as any).public_token);
   const html = renderReminderEmail({
     company: { name: org?.name ?? "Contractor North", brand: org?.brand_color ?? "#0b57c4", phone: org?.phone, email: org?.email },
@@ -170,6 +170,7 @@ export async function sendContract(id: string): Promise<Result> {
     subject: `Contract ${(c as any).contract_number ?? ""} from ${org?.name ?? "us"}`,
     html,
     replyTo: org?.email ?? undefined,
+    bcc: ownerBcc(getOrgSettings((org as any)?.settings).copy_owner_on_emails, org?.email),
   });
   if (!res.ok) return res;
   // Freeze the body by flipping draft -> sent only after the email actually went out.

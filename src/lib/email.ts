@@ -9,11 +9,17 @@ export function emailConfigured(): boolean {
  * Send a transactional email via Resend. Returns { ok, error }.
  * No-ops (logs) until RESEND_API_KEY is set, so the feature is safe pre-setup.
  */
+/** The owner's email to BCC on customer mail when "copy me on emails" is on. */
+export function ownerBcc(copyOwner: boolean, ownerEmail?: string | null): string | undefined {
+  return copyOwner && ownerEmail ? ownerEmail : undefined;
+}
+
 export async function sendEmail(input: {
   to: string;
   subject: string;
   html: string;
   replyTo?: string;
+  bcc?: string | string[];
 }): Promise<{ ok: boolean; error?: string }> {
   const key = process.env.RESEND_API_KEY;
   const from = process.env.EMAIL_FROM || "Contractor North <onboarding@resend.dev>";
@@ -34,6 +40,7 @@ export async function sendEmail(input: {
       subject: input.subject,
       html: input.html,
       ...(input.replyTo ? { reply_to: input.replyTo } : {}),
+      ...(input.bcc && input.bcc.length ? { bcc: input.bcc } : {}),
     }),
   });
 
