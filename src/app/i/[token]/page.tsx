@@ -6,6 +6,7 @@ import { templateFor } from "@/components/doc-templates";
 import { billingEnabled } from "@/lib/stripe";
 import { formatCurrency } from "@/lib/utils";
 import { docTitle } from "@/lib/doc-title";
+import { invoiceTypeLabel } from "@/lib/invoice-math";
 import { InvoiceDocument } from "@/components/invoice-document";
 import type { Metadata } from "next";
 import type { Organization } from "@/lib/types";
@@ -74,6 +75,7 @@ export default async function PublicInvoicePage({
         createdAt={inv.created_at}
         dueDate={inv.due_date}
         title={inv.title}
+        billingLabel={invoiceTypeLabel(inv.billing_type, inv.invoice_kind)}
         customer={c}
         items={items}
         subtotal={inv.subtotal}

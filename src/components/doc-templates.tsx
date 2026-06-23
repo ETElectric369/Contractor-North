@@ -14,16 +14,29 @@ export function docAccent(co: CompanyInfo, template: string): string {
   return template === "minimal" ? "#334155" : co.brand;
 }
 
-function metaLine(co: CompanyInfo): string {
+/** The company contact block as clean, stacked lines — NOT one long " · " string
+ *  that wraps and strands the phone on its own line (the old letterhead bug). */
+function companyLines(co: CompanyInfo): string[] {
+  const lic = co.license ? (/lic/i.test(co.license) ? co.license : `License #${co.license}`) : "";
   return [
     [co.address1, co.address2].filter(Boolean).join(", "),
     co.cityStateZip,
-    co.phone,
-    co.email,
-    co.license,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+    [co.phone, co.email].filter(Boolean).join("  ·  "),
+    lic,
+  ].filter(Boolean);
+}
+
+/** Render the stacked contact lines with a template-specific text class. */
+function ContactBlock({ co, className }: { co: CompanyInfo; className: string }) {
+  const lines = companyLines(co);
+  if (!lines.length) return null;
+  return (
+    <div className={`mt-1 space-y-0.5 ${className}`}>
+      {lines.map((l, i) => (
+        <div key={i}>{l}</div>
+      ))}
+    </div>
+  );
 }
 
 /** Company logo image if uploaded, otherwise a brand-colored placeholder mark. */
@@ -68,8 +81,6 @@ export function DocHeader({
   template: string;
   meta: DocMeta;
 }) {
-  const info = metaLine(co);
-
   if (template === "modern") {
     return (
       <div
@@ -81,7 +92,7 @@ export function DocHeader({
           <div>
             <div className="text-xl font-bold">{co.name}</div>
             <div className="text-xs text-white/80">{co.tagline}</div>
-            {info && <div className="mt-1 max-w-sm text-[11px] text-white/70">{info}</div>}
+            <ContactBlock co={co} className="max-w-sm text-[11px] text-white/70" />
           </div>
         </div>
         <div className="text-right">
@@ -106,7 +117,7 @@ export function DocHeader({
             <div className="text-lg font-semibold tracking-tight text-slate-900">
               {co.name}
             </div>
-            {info && <div className="mt-1 max-w-sm text-[11px] text-slate-500">{info}</div>}
+            <ContactBlock co={co} className="max-w-sm text-[11px] text-slate-500" />
           </div>
         </div>
         <div className="text-right">
@@ -135,7 +146,7 @@ export function DocHeader({
         <div>
           <div className="text-xl font-bold text-slate-900">{co.name}</div>
           <div className="text-xs text-slate-500">{co.tagline}</div>
-          {info && <div className="mt-1 text-xs text-slate-500">{info}</div>}
+          <ContactBlock co={co} className="text-xs text-slate-500" />
         </div>
       </div>
       <div className="text-right">

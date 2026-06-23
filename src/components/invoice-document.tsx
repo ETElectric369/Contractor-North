@@ -39,6 +39,7 @@ export function InvoiceDocument({
   createdAt,
   dueDate,
   title,
+  billingLabel,
   customer,
   items,
   subtotal,
@@ -58,6 +59,7 @@ export function InvoiceDocument({
   createdAt: string | Date;
   dueDate?: string | Date | null;
   title?: string | null;
+  billingLabel?: string | null;
   customer: InvoiceDocCustomer;
   items: InvoiceDocItem[];
   subtotal: number;
@@ -112,7 +114,15 @@ export function InvoiceDocument({
         </div>
       </div>
 
-      {title && <div className="mt-5 text-base font-semibold text-slate-900">{title}</div>}
+      {/* A clear statement of what this invoice is — Time & Material vs Fixed-Price. */}
+      {billingLabel && (
+        <div className="mt-5">
+          <span className="inline-flex items-center rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-slate-600">
+            {billingLabel}
+          </span>
+        </div>
+      )}
+      {title && <div className={`${billingLabel ? "mt-3" : "mt-5"} text-base font-semibold text-slate-900`}>{title}</div>}
 
       {/* Line items */}
       <div className="mt-4 overflow-x-auto">

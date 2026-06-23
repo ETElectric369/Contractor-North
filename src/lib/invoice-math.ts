@@ -162,3 +162,21 @@ export function groupInvoiceLines(items: InvoiceLine[]): LineBreakdown {
   g.hasBreakdown = g.labor.lines.length > 0 || g.materials.lines.length > 0;
   return g;
 }
+
+/**
+ * A clear, customer-facing statement of WHAT this invoice is: Time & Material vs
+ * Fixed-Price, plus the draw stage if any. Returns null when the billing model is
+ * unknown and there's no draw stage (a plain one-off invoice needs no label).
+ */
+export function invoiceTypeLabel(
+  billingType?: string | null,
+  invoiceKind?: string | null,
+): string | null {
+  const stage =
+    invoiceKind === "deposit" ? "Deposit" :
+    invoiceKind === "progress" ? "Progress Payment" :
+    invoiceKind === "final" ? "Final Payment" : null;
+  if (billingType === "tm") return stage ? `Time & Material · ${stage}` : "Time & Material";
+  if (billingType === "fixed") return stage ? `Fixed-Price · ${stage}` : "Fixed-Price";
+  return stage; // billing model unknown — show the stage if it's a draw, else nothing
+}

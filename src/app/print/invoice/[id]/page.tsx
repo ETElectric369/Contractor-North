@@ -7,6 +7,7 @@ import { companyFromOrg } from "@/components/doc-letterhead";
 import { templateFor } from "@/components/doc-templates";
 import { getOrgSettings } from "@/lib/org-settings";
 import { jobProgressFinancials } from "@/lib/job-financials";
+import { invoiceTypeLabel } from "@/lib/invoice-math";
 import { InvoiceDocument } from "@/components/invoice-document";
 import { docTitle } from "@/lib/doc-title";
 import type { Metadata } from "next";
@@ -51,6 +52,13 @@ export default async function InvoicePrintPage({ params }: { params: Promise<{ i
   const isDraw = !!(inv as any).job_id && ["deposit", "progress", "final"].includes(drawKind ?? "");
   const fin = isDraw ? await jobProgressFinancials(supabase, (inv as any).job_id) : null;
 
+  // A clear "Time & Material vs Fixed-Price" statement from the job's billing model.
+  const jobId = (inv as any).job_id;
+  const { data: jobRow } = jobId
+    ? await supabase.from("jobs").select("billing_type").eq("id", jobId).maybeSingle()
+    : { data: null };
+  const billingLabel = invoiceTypeLabel((jobRow as any)?.billing_type, drawKind);
+
   return (
     <div className="min-h-screen bg-slate-100 py-8 print:bg-white print:py-0">
       <div className="no-print mx-auto mb-4 flex max-w-3xl items-center justify-between px-4">
@@ -67,6 +75,7 @@ export default async function InvoicePrintPage({ params }: { params: Promise<{ i
         createdAt={inv.created_at}
         dueDate={inv.due_date}
         title={inv.title}
+        billingLabel={billingLabel}
         customer={inv.customers}
         items={lineItems as any}
         subtotal={inv.subtotal}

@@ -1,5 +1,20 @@
 import { describe, it, expect } from "vitest";
-import { recalcTotals, resolveDrawCredit, drawAmount, progressSummary, shouldBlockStandardImport, isStandardBillingBlocker, groupInvoiceLines, paidStatus } from "@/lib/invoice-math";
+import { recalcTotals, resolveDrawCredit, drawAmount, progressSummary, shouldBlockStandardImport, isStandardBillingBlocker, groupInvoiceLines, paidStatus, invoiceTypeLabel } from "@/lib/invoice-math";
+
+describe("invoiceTypeLabel", () => {
+  it("states the billing model, with the draw stage when present", () => {
+    expect(invoiceTypeLabel("tm", "standard")).toBe("Time & Material");
+    expect(invoiceTypeLabel("tm", null)).toBe("Time & Material");
+    expect(invoiceTypeLabel("fixed", "progress")).toBe("Fixed-Price · Progress Payment");
+    expect(invoiceTypeLabel("fixed", "deposit")).toBe("Fixed-Price · Deposit");
+    expect(invoiceTypeLabel("fixed", null)).toBe("Fixed-Price");
+  });
+  it("falls back to the stage when the model is unknown, else nothing", () => {
+    expect(invoiceTypeLabel(null, "final")).toBe("Final Payment");
+    expect(invoiceTypeLabel(null, "standard")).toBeNull();
+    expect(invoiceTypeLabel(null, null)).toBeNull();
+  });
+});
 
 describe("paidStatus (shared by recalcTotals + the Stripe webhook)", () => {
   it("marks PAID with float dust — the webhook bug (was stuck 'partial')", () => {
