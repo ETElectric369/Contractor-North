@@ -29,6 +29,7 @@ import { FinishJobButton } from "./finish-job-button";
 import { PaymentScheduleCard } from "./payment-schedule-card";
 import { ContractCard } from "./contract-card";
 import { LienInsuranceCard } from "./lien-insurance-card";
+import { JobDescription } from "./job-description";
 import { contractTotalFromQuotes } from "@/lib/payment-schedule-math";
 import { ProposeDatesButton } from "./propose-dates-button";
 import { ProgressInvoiceButton } from "./progress-invoice-button";
@@ -330,12 +331,7 @@ export default async function JobDetailPage({
                   </div>
                 </div>
               </div>
-              {j.description && (
-                <div>
-                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Description</div>
-                  <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{j.description}</p>
-                </div>
-              )}
+              <JobDescription jobId={j.id} description={j.description} />
             </CardContent>
           </Card>
 

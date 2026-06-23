@@ -85,7 +85,7 @@ export function DocHeader({
   if (template === "modern") {
     return (
       <div
-        className="-mx-10 -mt-10 mb-8 flex items-start justify-between px-10 py-8 text-white"
+        className="-mx-10 -mt-10 mb-8 flex items-start justify-between px-10 py-8 text-white print:mb-4 print:py-5"
         style={{ backgroundColor: co.brand }}
       >
         <div className="flex items-center gap-3">
