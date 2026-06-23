@@ -325,7 +325,7 @@ export async function setAvatarUrl(url: string | null): Promise<Result> {
 /** Owner/admin edits a team member's profile (name, role, active, rate). */
 export async function updateMember(
   id: string,
-  patch: { full_name?: string; phone?: string; role?: string; active?: boolean; hourly_rate?: number | null; home_address?: string | null },
+  patch: { full_name?: string; phone?: string; role?: string; active?: boolean; hourly_rate?: number | null; home_address?: string | null; commute_baseline_miles?: number },
 ): Promise<Result> {
   const supabase = await createClient();
   const {
@@ -345,6 +345,7 @@ export async function updateMember(
   if (patch.active !== undefined) clean.active = patch.active;
   if (patch.hourly_rate !== undefined) clean.hourly_rate = patch.hourly_rate;
   if (patch.home_address !== undefined) clean.home_address = patch.home_address?.trim() || null;
+  if (patch.commute_baseline_miles !== undefined) clean.commute_baseline_miles = Math.max(0, Number(patch.commute_baseline_miles) || 0);
   if (!Object.keys(clean).length) return { ok: true };
 
   const { error } = await supabase.from("profiles").update(clean).eq("id", id);

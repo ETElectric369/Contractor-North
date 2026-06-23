@@ -14,6 +14,7 @@ import {
 } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
 import { formatDateTimeTz, payPeriodBounds, tzDayStartUtc, todayStrInTz } from "@/lib/tz";
+import { summarizeMileage } from "@/lib/mileage-math";
 import { AddEntryButton } from "../timeclock/add-entry-button";
 import { EditEntryButton } from "./edit-entry-button";
 import { DuplicateEntryButton } from "./duplicate-entry-button";
@@ -73,7 +74,7 @@ export default async function TimecardsPage({
   const { data: entries } = await supabase
     .from("time_entries")
     .select(
-      "id, profile_id, clock_in, clock_out, lunch_minutes, miles, job_id, job_code, status, notes, source, profiles:profile_id(full_name), job:job_id(job_number, name), time_allocations(job_code, hours, description)",
+      "id, profile_id, clock_in, clock_out, lunch_minutes, miles, job_id, job_code, status, notes, source, profiles:profile_id(full_name, commute_baseline_miles), job:job_id(job_number, name), time_allocations(job_code, hours, description)",
     )
     .gte("clock_in", start.toISOString())
     .lt("clock_in", end.toISOString())
@@ -102,7 +103,15 @@ export default async function TimecardsPage({
     byTech.set(e.profile_id, rec);
   }
 
-  const techs = [...byTech.values()].sort((a, b) => b.hours - a.hours);
+  // Split each person's miles into the commute baseline vs reimbursable business
+  // miles (baseline subtracted once per day-driven).
+  const techs = [...byTech.values()]
+    .map((rec) => {
+      const baseline = Number(rec.entries[0]?.profiles?.commute_baseline_miles ?? 0);
+      return { ...rec, baseline, mileage: summarizeMileage(rec.entries, baseline, tz) };
+    })
+    .sort((a, b) => b.hours - a.hours);
+  const crewBusinessMiles = Math.round(techs.reduce((s, t) => s + t.mileage.business, 0) * 10) / 10;
   const label = `${start.toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric" })} – ${new Date(
     end.getTime() - 1,
   ).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric" })}`;
@@ -194,9 +203,10 @@ export default async function TimecardsPage({
         </Card>
         <Card>
           <CardContent className="py-4">
-            <div className="text-2xl font-bold text-slate-900">{crewMiles.toFixed(1)} mi</div>
+            <div className="text-2xl font-bold text-slate-900">{crewBusinessMiles.toFixed(1)} mi</div>
             <div className="text-xs text-slate-500">
-              {mileageRate > 0 ? `${formatCurrency(crewMiles * mileageRate)} · ` : ""}Crew miles
+              {mileageRate > 0 ? `${formatCurrency(crewBusinessMiles * mileageRate)} · ` : ""}Business miles
+              {crewMiles > crewBusinessMiles ? <span className="text-slate-400"> · {crewMiles.toFixed(1)} logged</span> : null}
             </div>
           </CardContent>
         </Card>
@@ -280,8 +290,12 @@ export default async function TimecardsPage({
                 </div>
                 <span className="text-sm font-bold text-slate-900">
                   {formatDuration(rec.hours)}
-                  {rec.miles > 0 && (
-                    <span className="ml-2 text-xs font-normal text-slate-400">{rec.miles.toFixed(1)} mi</span>
+                  {rec.mileage.recorded > 0 && (
+                    <span className="ml-2 text-xs font-normal text-slate-400">
+                      {rec.baseline > 0
+                        ? `${rec.mileage.business.toFixed(1)} mi business · ${rec.mileage.recorded.toFixed(1)} logged`
+                        : `${rec.mileage.recorded.toFixed(1)} mi`}
+                    </span>
                   )}
                 </span>
               </div>

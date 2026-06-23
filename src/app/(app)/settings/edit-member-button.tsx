@@ -16,6 +16,7 @@ interface Member {
   role: string;
   active: boolean;
   home_address?: string | null;
+  commute_baseline_miles?: number | null;
 }
 
 /** Owner/admin edit for a team member: name/role/active + login email/password. */
@@ -36,6 +37,7 @@ export function EditMemberButton({
   const [name, setName] = useState(member.full_name ?? "");
   const [phone, setPhone] = useState(member.phone ?? "");
   const [homeAddress, setHomeAddress] = useState(member.home_address ?? "");
+  const [commuteBaseline, setCommuteBaseline] = useState(Number(member.commute_baseline_miles ?? 0));
   const [role, setRole] = useState(member.role);
   const [active, setActive] = useState(member.active);
   const [email, setEmail] = useState(member.email ?? "");
@@ -50,6 +52,7 @@ export function EditMemberButton({
         full_name: name,
         phone,
         home_address: homeAddress,
+        commute_baseline_miles: commuteBaseline,
         role: isSelf ? undefined : role,
         active: isSelf ? undefined : active,
       });
@@ -107,6 +110,18 @@ export function EditMemberButton({
           <div>
             <Label htmlFor="m-home">Home address</Label>
             <Input id="m-home" value={homeAddress} onChange={(e) => setHomeAddress(e.target.value)} placeholder="For auto-mileage from home to the job" />
+          </div>
+          <div>
+            <Label htmlFor="m-baseline">Daily commute baseline (miles, round trip)</Label>
+            <Input
+              id="m-baseline"
+              type="number"
+              inputMode="decimal"
+              value={commuteBaseline}
+              onChange={(e) => setCommuteBaseline(Number(e.target.value) || 0)}
+              placeholder="0"
+            />
+            <p className="mt-1 text-xs text-slate-400">Subtracted once per day driven — only miles ABOVE this count as reimbursable/business miles. 0 = treat all as business.</p>
           </div>
           {!isSelf && (
             <div className="grid grid-cols-2 gap-3">

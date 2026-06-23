@@ -4,6 +4,8 @@ import { createClient } from "@/lib/supabase/server";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { getOrgSettings } from "@/lib/org-settings";
+import { summarizeMileage } from "@/lib/mileage-math";
 
 export const dynamic = "force-dynamic";
 
@@ -46,14 +48,40 @@ export default async function TaxReportPage({
   const { start, end } = rangeFor(period);
 
   const supabase = await createClient();
-  const [{ data: invoices }, { data: taxRates }] = await Promise.all([
+  const [{ data: invoices }, { data: taxRates }, { data: entries }, { data: org }] = await Promise.all([
     supabase
       .from("invoices")
       .select("tax_rate, tax, subtotal, total, status, created_at")
       .gte("created_at", start.toISOString())
       .lt("created_at", end.toISOString()),
     supabase.from("tax_rates").select("name, rate").order("rate"),
+    supabase
+      .from("time_entries")
+      .select("clock_in, miles, profile_id, profiles:profile_id(commute_baseline_miles)")
+      .gte("clock_in", start.toISOString())
+      .lt("clock_in", end.toISOString()),
+    supabase.from("organizations").select("settings").limit(1).maybeSingle(),
   ]);
+
+  // Business (deductible) mileage = logged miles net of each person's daily commute
+  // baseline (subtracted once per day). Grouped per person so baselines apply right.
+  const settings = getOrgSettings((org as any)?.settings);
+  const byPerson = new Map<string, { baseline: number; entries: any[] }>();
+  for (const e of entries ?? []) {
+    const rec = byPerson.get(e.profile_id) ?? { baseline: Number((e as any).profiles?.commute_baseline_miles ?? 0), entries: [] as any[] };
+    rec.entries.push(e);
+    byPerson.set(e.profile_id, rec);
+  }
+  let businessMiles = 0;
+  let loggedMiles = 0;
+  for (const rec of byPerson.values()) {
+    const s = summarizeMileage(rec.entries, rec.baseline, settings.timezone);
+    businessMiles += s.business;
+    loggedMiles += s.recorded;
+  }
+  businessMiles = Math.round(businessMiles * 10) / 10;
+  loggedMiles = Math.round(loggedMiles * 10) / 10;
+  const mileageDeduction = Math.round(businessMiles * (settings.mileage_rate || 0) * 100) / 100;
 
   // Only count real (issued) invoices — exclude drafts & voids.
   const real = (invoices ?? []).filter((i: any) => !["void", "draft"].includes(i.status));
@@ -114,6 +142,22 @@ export default async function TaxReportPage({
           </CardContent>
         </Card>
       </div>
+
+      {businessMiles > 0 && (
+        <Card className="mb-6 sm:max-w-lg">
+          <CardContent className="py-4">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Business mileage deduction (estimate)</div>
+            <div className="mt-1 flex items-baseline gap-3">
+              <div className="text-2xl font-bold text-slate-900">{businessMiles.toFixed(1)} mi</div>
+              {settings.mileage_rate > 0 && <div className="text-lg font-semibold text-green-600">≈ {formatCurrency(mileageDeduction)}</div>}
+            </div>
+            <p className="mt-1 text-xs text-slate-400">
+              {loggedMiles.toFixed(1)} logged, net of each person&apos;s commute baseline
+              {settings.mileage_rate > 0 ? ` · at ${formatCurrency(settings.mileage_rate)}/mi` : ""}. Confirm the rate &amp; classification with your CPA.
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       {rows.length === 0 ? (
         <EmptyState icon={Calculator} title="No invoices in this period" description="Tax collected on issued invoices will appear here." />
