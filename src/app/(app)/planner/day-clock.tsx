@@ -125,14 +125,22 @@ export function DayClock({
           {err && <div className="mt-1 text-xs text-red-600">{err}</div>}
         </div>
         {open ? (
-          <Button
-            variant="outline"
-            onClick={() => run(() => clockOut({ entry_id: open.id, lunch_minutes: 0, notes: "", gps: null }))}
-            disabled={busy}
-            className="shrink-0 text-red-600"
-          >
-            <Square className="h-4 w-4" /> Clock out
-          </Button>
+          isStaff ? (
+            <Button
+              variant="outline"
+              onClick={() => run(() => clockOut({ entry_id: open.id, lunch_minutes: 0, notes: "", gps: null }))}
+              disabled={busy}
+              className="shrink-0 text-red-600"
+            >
+              <Square className="h-4 w-4" /> Clock out
+            </Button>
+          ) : (
+            // Field crew clock out on the full timeclock so they answer the codes+hours
+            // question (this quick widget can't capture the breakdown).
+            <Button variant="outline" onClick={() => router.push("/timeclock")} className="shrink-0 text-red-600">
+              <Square className="h-4 w-4" /> Clock out
+            </Button>
+          )
         ) : (
           <Button
             onClick={() => run(() => clockIn({ job_id: jobId || null, job_code: null, gps: null, clock_in_at: startAt || null }))}

@@ -109,6 +109,9 @@ export function TimeclockPanel({
     (s, a) => s + (a.hours || 0) + (a.minutes || 0) / 60,
     0,
   );
+  // The crew MUST say which code(s) they worked + hours before clocking out — this is the
+  // mis-billing fix (wrong hours on wrong jobs). At least one row needs a code AND hours.
+  const allocOk = allocations.some((a) => a.job_code && (a.hours || 0) + (a.minutes || 0) / 60 > 0);
 
   // live elapsed timer
   const [now, setNow] = useState(() => Date.now());
@@ -116,6 +119,26 @@ export function TimeclockPanel({
     if (!openEntry) return;
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
+  }, [openEntry]);
+
+  // Pre-seed the "jobs worked today" breakdown with ONE row = the shift's job + all of
+  // the elapsed time, so the everyday case (one code all day) is a single confirm. The
+  // tech adjusts the hours or splits across codes. Seeds once per open entry (a ref keeps
+  // a cleared row from re-appearing).
+  const seededRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!openEntry) {
+      seededRef.current = null;
+      return;
+    }
+    if (seededRef.current === openEntry.id) return;
+    seededRef.current = openEntry.id;
+    const worked = hoursBetween(openEntry.clock_in, new Date(), 0); // gross at open
+    const h = Math.max(0, Math.floor(worked));
+    const m = Math.max(0, Math.round((worked - h) * 60));
+    setAllocations([
+      { job_id: openEntry.job_id ?? "", job_code: openEntry.job_code ?? "", hours: h, minutes: m, description: "" },
+    ]);
   }, [openEntry]);
 
   // voice dictation (Web Speech API — Chrome/Safari)
@@ -260,20 +283,24 @@ export function TimeclockPanel({
             <span className="text-slate-700">Took {twoBreaks ? "two 10-minute rest breaks" : "a 10-minute rest break"}{breaksRequired ? <span className="font-medium text-amber-700"> · required</span> : null}</span>
           </label>
 
-          {/* Jobs worked today */}
-          <div>
-            <div className="mb-1.5 flex items-center justify-between">
-              <Label className="mb-0 flex items-center gap-1.5">
-                <Briefcase className="h-4 w-4 text-slate-400" /> {t("tc_jobsToday")}
+          {/* Jobs worked today — the PRIMARY clock-out question: which code(s) + hours.
+              This is the wrong-hours-on-wrong-jobs fix; required for the field crew. */}
+          <div className={`rounded-xl border p-3 ${!isStaff && !allocOk ? "border-amber-300 bg-amber-50/60" : "border-brand/30 bg-brand/5"}`}>
+            <div className="mb-1 flex items-center justify-between">
+              <Label className="mb-0 flex items-center gap-1.5 text-slate-900">
+                <Briefcase className="h-4 w-4 text-brand" /> {t("tc_jobsToday")}
               </Label>
               <button
                 type="button"
                 onClick={addAlloc}
-                className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200"
+                className="inline-flex items-center gap-1 rounded-lg bg-white px-2.5 py-1 text-xs font-medium text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"
               >
                 <Plus className="h-3.5 w-3.5" /> {t("tc_addJob")}
               </button>
             </div>
+            <p className="mb-2 text-xs text-slate-500">
+              Which job code(s) did you work today, and how many hours on each? Usually one — split it if you worked more than one.
+            </p>
             {allocations.length === 0 ? (
               <p className="text-xs text-slate-400">{t("tc_breakdownHint")}</p>
             ) : (
@@ -337,8 +364,8 @@ export function TimeclockPanel({
                     />
                   </div>
                 ))}
-                <div className="text-right text-xs text-slate-500">
-                  {t("tc_allocated")}: {formatDuration(allocatedHours)}
+                <div className={`text-right text-xs ${Math.abs(allocatedHours - elapsed) > 0.1 ? "text-amber-600" : "text-slate-500"}`}>
+                  {t("tc_allocated")}: {formatDuration(allocatedHours)} of {formatDuration(elapsed)} worked
                 </div>
               </div>
             )}
@@ -396,13 +423,18 @@ export function TimeclockPanel({
           </div>
 
           {error && <p className="text-sm text-red-600">{error}</p>}
+          {!isStaff && !allocOk && (
+            <p className="text-center text-xs font-medium text-amber-600">
+              Add the job code(s) you worked and the hours before clocking out.
+            </p>
+          )}
 
           <Button
             variant="destructive"
             size="lg"
             className="w-full"
             onClick={doClockOut}
-            disabled={pending || !breaksOk}
+            disabled={pending || !breaksOk || (!isStaff && !allocOk)}
           >
             {pending ? (
               <>
