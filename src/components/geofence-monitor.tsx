@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { geoClockOut } from "@/app/(app)/timeclock/actions";
+import { speakSmart } from "@/lib/tts";
 import type { GeoPoint } from "@/lib/types";
 
 /** Great-circle distance in meters. */
@@ -92,7 +93,7 @@ export function GeofenceMonitor({
             return;
           }
           try {
-            window.speechSynthesis?.speak(new SpeechSynthesisUtterance("Clocked out — you left the job site."));
+            speakSmart("Clocked out — you left the job site.");
           } catch {}
           try {
             navigator.vibrate?.([60, 40, 60]);

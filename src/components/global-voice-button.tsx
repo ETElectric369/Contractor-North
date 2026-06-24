@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Mic, MicOff, Loader2, Sparkles } from "lucide-react";
 import { runVoiceCommand, confirmVoiceAction, type VoiceConfirm } from "@/app/(app)/voice/actions";
 import { startAuthentication } from "@simplewebauthn/browser";
+import { speakSmart, unlockAudio } from "@/lib/tts";
 
 /**
  * Floating mic with two modes:
@@ -59,28 +60,9 @@ export function GlobalVoiceButton({ lang, placement = "fab" }: { lang?: string; 
   // Read the result aloud so a driver never has to look at the screen — the
   // server already returns a driver-friendly sentence.
   function speak(msg: string, onEnd?: () => void) {
-    // onEnd MUST fire even if TTS is interrupted/cancelled (which fires `onerror`,
-    // not `onend`, on Chrome/WebKit) — otherwise the hands-free yes/no listener
-    // never starts. Guard so it runs at most once across onend/onerror.
-    let fired = false;
-    const fire = () => {
-      if (fired) return;
-      fired = true;
-      onEnd?.();
-    };
-    try {
-      const synth = window.speechSynthesis;
-      if (!synth || !msg) { fire(); return; }
-      synth.cancel();
-      const u = new SpeechSynthesisUtterance(msg);
-      if (onEnd) {
-        u.onend = fire;
-        u.onerror = fire;
-      }
-      synth.speak(u);
-    } catch {
-      fire(); /* TTS unsupported — the toast still shows */
-    }
+    // Neural voice first (Claude's real voice), browser voice only as a fallback. onEnd
+    // always fires once (the hands-free yes/no listener depends on it), even on error.
+    speakSmart(msg, onEnd);
   }
 
   // Generic listen: start the recognizer and hand the final transcript to `handler`.
@@ -242,6 +224,9 @@ export function GlobalVoiceButton({ lang, placement = "fab" }: { lang?: string; 
         synth.speak(warm);
       }
     } catch {}
+    // Same unlock for the NEURAL audio element, so Claude's real voice can play on iOS
+    // after the async round-trip.
+    unlockAudio();
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SR) return;
     const mode: "dictate" | "command" = isTextFieldFocused() ? "dictate" : "command";
