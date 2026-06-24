@@ -52,6 +52,8 @@ export async function dispatchAction(input: {
   id: string;
   verb: Affordance;
   payload?: { date?: string; assignee?: string; target?: ConvertTarget };
+  /** Which surface drove this — flows to the audit log + the confirm gate. */
+  source?: "ui" | "voice" | "agent";
 }): Promise<Result> {
   const { kind, id, verb, payload } = input;
   if ((verb === "schedule" || verb === "snooze") && !payload?.date) {
@@ -60,7 +62,7 @@ export async function dispatchAction(input: {
   const mapped = resolve(kind, verb, id, payload);
   if (!mapped) return { ok: false, error: "That action isn't available here." };
 
-  const res = await executeAction(mapped.name, mapped.input);
+  const res = await executeAction(mapped.name, mapped.input, { source: input.source ?? "ui" });
   if (res.ok) revalidatePath("/planner");
   return { ok: res.ok, error: res.error };
 }

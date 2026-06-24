@@ -12,6 +12,12 @@ export type ActionResult = {
   data?: unknown;
   /** Driver-friendly sentence for voice/TTS read-back. */
   speak?: string;
+  /** Set by executeAction when a confirm/tier-2 action was invoked by the agent/voice
+   *  WITHOUT explicit consent — the surface must read confirmPrompt back and re-call
+   *  with `confirmed: true`. The action did NOT run. */
+  needsConfirm?: boolean;
+  /** Human sentence describing what will happen, for the confirm read-back. */
+  confirmPrompt?: string;
 };
 
 /** Resolved caller context, built once per execute() call. */

@@ -60,6 +60,7 @@ export function ActionList({
   const [assigneeVal, setAssigneeVal] = useState("");
   const [savingAssign, setSavingAssign] = useState(false);
   const [converting, setConverting] = useState<ActionItem | null>(null);
+  const [dismissing, setDismissing] = useState<ActionItem | null>(null);
 
   const visible = sortActionItems(
     items.filter((i) => !removedIds.has(i.id)).map((i) => ({ ...i, done: i.done || doneIds.has(i.id) })),
@@ -89,7 +90,21 @@ export function ActionList({
     setDoneIds((s) => new Set(s).add(item.id)); // sink it immediately
     run(item, "do");
   }
+  // Dismiss is a HARD DELETE for tasks/inquiries (it can't be undone) — confirm first.
+  // For appointments/organize it just cancels/archives (reversible), so run it straight.
+  const HARD_DELETE_KINDS = new Set(["task", "work_order", "inquiry"]);
   function onDismiss(item: ActionItem) {
+    if (HARD_DELETE_KINDS.has(item.kind)) {
+      setDismissing(item);
+      return;
+    }
+    setRemovedIds((s) => new Set(s).add(item.id));
+    run(item, "dismiss");
+  }
+  function confirmDismiss() {
+    const item = dismissing;
+    if (!item) return;
+    setDismissing(null);
     setRemovedIds((s) => new Set(s).add(item.id));
     run(item, "dismiss");
   }
@@ -267,6 +282,20 @@ export function ActionList({
             ))}
           </div>
         </div>
+      </Modal>
+
+      <Modal
+        open={!!dismissing}
+        onClose={() => setDismissing(null)}
+        title="Delete this?"
+        size="sm"
+        footer={
+          <ModalActions onCancel={() => setDismissing(null)} onSave={confirmDismiss} saveLabel="Delete" destructive />
+        }
+      >
+        <p className="text-sm text-slate-600">
+          This permanently deletes <span className="font-medium text-slate-900">{dismissing?.title}</span>. It can&apos;t be undone.
+        </p>
       </Modal>
     </div>
   );

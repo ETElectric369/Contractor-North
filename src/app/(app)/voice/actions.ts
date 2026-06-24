@@ -183,6 +183,11 @@ ${jobList}`,
       const item = items.find((it) => it.id === String(p.item_id ?? ""));
       if (!item) return { ok: false, message: "I couldn't find that item — try saying its name again." };
       const verb = String(p.verb ?? "") as Affordance;
+      // "Dismiss" hard-deletes a task/inquiry — NEVER by voice. Direct to the screen,
+      // where the ✗ now asks to confirm. Voice keeps to the non-destructive verbs.
+      if (verb === "dismiss") {
+        return { ok: false, message: `Dismissing deletes "${item.title}". Tap it on screen to confirm — I won't delete by voice.` };
+      }
       const payload: { date?: string; assignee?: string; target?: "customer" | "quote" | "estimate" | "job" } = {};
       if (p.date) payload.date = String(p.date);
       if (p.target) payload.target = String(p.target) as typeof payload.target;
@@ -190,7 +195,7 @@ ${jobList}`,
         const want = String(p.assignee_name).toLowerCase();
         payload.assignee = people.find((pp) => (pp.full_name ?? "").toLowerCase().includes(want))?.id;
       }
-      const res = await dispatchAction({ kind: item.kind, id: item.id, verb, payload });
+      const res = await dispatchAction({ kind: item.kind, id: item.id, verb, payload, source: "voice" });
       if (!res.ok) return { ok: false, message: res.error ?? "I couldn't do that one." };
       // Land on My Day so the spoken result is visible on screen (hands-free).
       return { ok: true, message: speak, navigate: "/planner" };
@@ -282,7 +287,9 @@ ${jobList}`,
  */
 export async function confirmVoiceAction(name: string, input: Record<string, unknown>): Promise<VoiceResult> {
   if (!VOICE_ALLOWED.has(name)) return { ok: false, message: "That action can't be done by voice." };
-  const res = await executeAction(name, input, { source: "voice" });
+  // The spoken "yes" the client already collected IS the consent — pass it so the
+  // executeAction confirm gate (e.g. bill.create = financial) lets it through.
+  const res = await executeAction(name, input, { source: "voice", confirmed: true });
   if (!res.ok) return { ok: false, message: res.error ? `Sorry — ${res.error}` : "That didn't work." };
   revalidatePath("/timeclock");
   revalidatePath("/planner");

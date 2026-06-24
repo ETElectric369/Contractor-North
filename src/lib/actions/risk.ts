@@ -10,3 +10,16 @@ export function actionRisk(def: Pick<ActionDef, "effect" | "confirm" | "risk">):
   if (def.confirm) return 2;
   return 1;
 }
+
+/** The Phase C confirm gate: does an AGENT/VOICE call have to be refused until the
+ *  human has explicitly consented? A confirm-flagged or tier-2+ action does. The UI is
+ *  exempt — its own confirm modal IS the consent, and a human is directly clicking.
+ *  Pure (no server imports) so the security gate has unit coverage. */
+export function needsConsent(
+  def: Pick<ActionDef, "effect" | "confirm" | "risk">,
+  source: "ui" | "voice" | "agent",
+  confirmed: boolean | undefined,
+): boolean {
+  const confirmRequired = def.confirm != null || actionRisk(def) >= 2;
+  return confirmRequired && source !== "ui" && !confirmed;
+}

@@ -9,7 +9,7 @@ export const appointmentActions: Record<string, ActionDef> = {
     label: "Set appointment status",
     description: "Set an appointment's status (e.g. completed, cancelled, scheduled).",
     input: z.object({ id: z.string(), status: z.string() }),
-    auth: "any",
+    auth: "staff", // appointments are staff-only in RLS — the registry gate now matches (Phase C)
     effect: "write",
     handler: (i) => setAppointmentStatus(i.id, i.status),
   },

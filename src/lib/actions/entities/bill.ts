@@ -52,6 +52,7 @@ export const billActions: Record<string, ActionDef> = {
     }),
     auth: "staff",
     effect: "write",
+    confirm: "financial", // edits the amount/status of a money record → tier 2
     handler: ({ id, ...patch }) => updateBill(id, patch),
   },
   "bill.setStatus": {
@@ -62,6 +63,7 @@ export const billActions: Record<string, ActionDef> = {
     input: z.object({ id: z.string(), status: z.string(), job_id: z.string() }),
     auth: "staff",
     effect: "write",
+    confirm: "financial", // flips a bill paid/unpaid → tier 2
     handler: (i) => setBillStatus(i.id, i.status, i.job_id),
   },
   "bill.delete": {

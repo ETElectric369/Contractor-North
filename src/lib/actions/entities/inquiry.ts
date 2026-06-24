@@ -9,7 +9,7 @@ export const inquiryActions: Record<string, ActionDef> = {
     label: "Mark inquiry contacted",
     description: "Mark a lead/inquiry as contacted, optionally with a follow-up date (YYYY-MM-DD).",
     input: z.object({ id: z.string(), follow_up_date: z.string().nullable().optional() }),
-    auth: "any",
+    auth: "staff",
     effect: "write",
     handler: (i) => markInquiryContacted(i.id, i.follow_up_date ?? undefined),
   },
@@ -19,7 +19,7 @@ export const inquiryActions: Record<string, ActionDef> = {
     label: "Convert inquiry",
     description: "Convert a lead/inquiry into a customer, quote, estimate, or job.",
     input: z.object({ id: z.string(), target: z.enum(["customer", "quote", "estimate", "job"]).default("estimate") }),
-    auth: "any", // matches the pre-registry inbox (RLS enforces server-side)
+    auth: "staff", // inquiries are staff-only in RLS — the registry gate now matches (Phase C)
     effect: "write",
     handler: (i) => convertInquiry(i.id, i.target),
   },
@@ -29,7 +29,7 @@ export const inquiryActions: Record<string, ActionDef> = {
     label: "Delete inquiry",
     description: "Delete/dismiss a lead inquiry.",
     input: z.object({ id: z.string() }),
-    auth: "any",
+    auth: "staff",
     effect: "write",
     confirm: "destructive",
     handler: (i) => deleteInquiry(i.id),
