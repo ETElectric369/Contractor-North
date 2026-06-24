@@ -65,6 +65,12 @@ export async function updateSession(request: NextRequest) {
   const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
 
   if (!user && !isPublic && pathname !== "/") {
+    // An API route (fetched via fetch()) must get a clean 401 — NOT a 307 to /login, which
+    // the browser would follow and hand the caller the login PAGE's HTML (e.g. the chat
+    // would stream the login page back as "Claude's reply"). Only redirect real navigations.
+    if (pathname.startsWith("/api/")) {
+      return new NextResponse("Your session expired — please sign in again.", { status: 401 });
+    }
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("next", pathname);
