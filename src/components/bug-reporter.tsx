@@ -1,0 +1,117 @@
+"use client";
+
+import { useEffect, useState, useTransition } from "react";
+import { usePathname } from "next/navigation";
+import { Bug, Check, Loader2 } from "lucide-react";
+import { Modal } from "@/components/ui/modal";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/input";
+import { installErrorCapture, getLogs } from "@/lib/bug-buffer";
+import { createBugReport, listBugReports, setBugReportStatus, type BugReport } from "@/app/(app)/bug-report-actions";
+
+/** One-tap "Report a bug" button (staff only — mounted by the app layout). Auto-attaches
+ *  the page, captured console errors, browser/viewport + reporter to each report, and
+ *  shows the org's recent reports so the team can track what's logged/fixed. */
+export function BugReporter() {
+  const pathname = usePathname();
+  const [open, setOpen] = useState(false);
+  const [note, setNote] = useState("");
+  const [pending, start] = useTransition();
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [reports, setReports] = useState<BugReport[]>([]);
+  const [errCount, setErrCount] = useState(0);
+
+  useEffect(() => {
+    installErrorCapture();
+  }, []);
+
+  function openPanel() {
+    setOpen(true);
+    setSent(false);
+    setNote("");
+    setError(null);
+    setErrCount(getLogs().filter((l) => l.level === "error").length);
+    listBugReports().then(setReports).catch(() => {});
+  }
+
+  function submit() {
+    const n = note.trim();
+    if (!n) return setError("Tell me what happened.");
+    setError(null);
+    start(async () => {
+      const res = await createBugReport({
+        page: pathname + (typeof window !== "undefined" ? window.location.search : ""),
+        note: n,
+        console: getLogs(),
+        userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "",
+        viewport: typeof window !== "undefined" ? `${window.innerWidth}x${window.innerHeight}` : "",
+      });
+      if (!res.ok) return setError(res.error ?? "Could not send.");
+      setSent(true);
+      setNote("");
+      listBugReports().then(setReports).catch(() => {});
+    });
+  }
+
+  function markFixed(id: string) {
+    setReports((p) => p.map((r) => (r.id === id ? { ...r, status: "fixed" } : r)));
+    setBugReportStatus(id, "fixed");
+  }
+
+  return (
+    <>
+      <button
+        onClick={openPanel}
+        title="Report a bug"
+        aria-label="Report a bug"
+        className="fixed bottom-20 right-4 z-40 flex h-11 w-11 items-center justify-center rounded-full bg-slate-900 text-white shadow-lg transition hover:bg-slate-700 sm:bottom-4"
+      >
+        <Bug className="h-5 w-5" />
+      </button>
+
+      <Modal open={open} onClose={() => setOpen(false)} title="Report a bug">
+        <div className="space-y-4">
+          {sent ? (
+            <div className="flex items-center gap-2 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+              <Check className="h-4 w-4" /> Sent — thanks. I&apos;ll pick it up on the next pass.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <Textarea rows={3} autoFocus placeholder="What happened? (e.g. clock-out wouldn't save)" value={note} onChange={(e) => setNote(e.target.value)} />
+              <p className="text-xs text-slate-400">
+                Auto-attached: this page (<span className="font-mono">{pathname}</span>)
+                {errCount > 0 ? `, ${errCount} console error${errCount > 1 ? "s" : ""}` : ""}, your name + browser. Paste a screenshot into the box if it&apos;s visual.
+              </p>
+              {error && <p className="text-sm text-red-600">{error}</p>}
+              <Button onClick={submit} disabled={pending} className="w-full">
+                {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> Sending</> : "Send report"}
+              </Button>
+            </div>
+          )}
+
+          {reports.length > 0 && (
+            <div>
+              <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Recent reports</div>
+              <ul className="max-h-56 divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-200 text-sm">
+                {reports.map((r) => (
+                  <li key={r.id} className="flex items-start justify-between gap-2 px-3 py-1.5">
+                    <div className="min-w-0">
+                      <div className={`truncate ${r.status === "fixed" ? "text-slate-400 line-through" : "text-slate-800"}`}>{r.note}</div>
+                      <div className="truncate text-xs text-slate-400">{r.page ?? ""}{r.reporter ? ` · ${r.reporter}` : ""}</div>
+                    </div>
+                    {r.status === "fixed" ? (
+                      <span className="shrink-0 text-xs text-green-600">fixed</span>
+                    ) : (
+                      <button onClick={() => markFixed(r.id)} className="shrink-0 text-xs text-slate-400 hover:text-green-600">mark fixed</button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      </Modal>
+    </>
+  );
+}

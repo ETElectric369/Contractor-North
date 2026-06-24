@@ -10,6 +10,7 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { getActionItemsCount } from "@/lib/action-items/query";
 import { todayStrInTz } from "@/lib/tz";
 import { GeofenceMonitor } from "@/components/geofence-monitor";
+import { BugReporter } from "@/components/bug-reporter";
 import type { Profile, GeoPoint } from "@/lib/types";
 
 /** "#1b9488" → "27 148 136" (the space-separated rgb our --glass-tint expects). */
@@ -114,6 +115,7 @@ export default async function AppLayout({
       </div>
       <CommandBar />
       <BottomNav role={profile.role} />
+      {isStaff && <BugReporter />}
       {openEntry && (
         <GeofenceMonitor
           entryId={openEntry.id}
