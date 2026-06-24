@@ -28,6 +28,8 @@ import { AvatarUpload } from "./avatar-upload";
 import { AddEmployeeButton } from "./add-employee-button";
 import { CrewImportButton } from "./crew-import-button";
 import { CodeTemplatesManager } from "./code-templates-manager";
+import { PasskeyManager } from "./passkey-manager";
+import { listPasskeys } from "./passkey-actions";
 import { adminConfigured } from "@/lib/supabase/admin";
 import { gcalConfigured } from "@/lib/google-calendar";
 import { GcalCard } from "./gcal-card";
@@ -109,6 +111,8 @@ export default async function SettingsPage({
     ? await QRCode.toDataURL(inquiryUrl, { margin: 1, width: 280, color: { dark: "#0f172a" } })
     : null;
 
+  const passkeys = await listPasskeys();
+
   const profileTab = {
     id: "profile",
     label: "Profile",
@@ -135,6 +139,10 @@ export default async function SettingsPage({
         <div className="mt-5 border-t border-slate-100 pt-4">
           <div className="mb-1 text-sm font-medium text-slate-700">Navigation app</div>
           <MapsProviderToggle />
+        </div>
+        <div className="mt-5 border-t border-slate-100 pt-4">
+          <div className="mb-2 text-sm font-medium text-slate-700">Sign-in &amp; security</div>
+          <PasskeyManager passkeys={passkeys} />
         </div>
       </Section>
     ),
