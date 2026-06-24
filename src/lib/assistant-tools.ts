@@ -265,29 +265,24 @@ export async function runDataTool(
 
       case "list_customers": {
         const lim = clampLimit(input.limit, 20);
+        const s = sanitize(input.search ?? "");
         let q = supabase
           .from("customers")
           .select("name, company_name, phone, email, city, state")
           .order("name")
           .limit(lim);
-        if (input.search) {
-          const s = sanitize(input.search);
-          if (s)
-            q = q.or(
-              `name.ilike.%${s}%,company_name.ilike.%${s}%,phone.ilike.%${s}%,email.ilike.%${s}%`,
-            );
-        }
-        const searched = !!sanitize(input.search ?? "");
+        if (s) q = q.or(`name.ilike.%${s}%,company_name.ilike.%${s}%,phone.ilike.%${s}%,email.ilike.%${s}%`);
         const { data, error } = await q;
         if (error) throw error;
-        // Data minimization (framework §7): the model gets full contact details ONLY on a
-        // TARGETED lookup (a search the user asked for — "what's Jane's number"). A broad
-        // list returns name + locality only, so we don't bulk-ship phone/email to the
-        // provider just to answer "how many customers do I have".
+        // Data minimization (framework §7): phone/email reach the model ONLY on a SPECIFIC
+        // lookup (>=3 chars) that resolves to a SMALL set — so a broad/short term like "a"
+        // can't walk the whole customer book with contact attached. A broad list returns
+        // name + locality only.
+        const showPII = s.length >= 3 && (data?.length ?? 0) <= 5;
         return JSON.stringify({
           count: data?.length ?? 0,
           customers: (data ?? []).map((c: any) =>
-            searched
+            showPII
               ? { name: c.name, company: c.company_name, phone: c.phone, email: c.email, city: c.city, state: c.state }
               : { name: c.name, company: c.company_name, city: c.city, state: c.state },
           ),
