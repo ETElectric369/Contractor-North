@@ -6,6 +6,56 @@
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
+/** GET /api/tts?diag=1 — a human-readable check (open it in the browser while logged in).
+ *  Tells us which provider is configured and whether a real test call actually works, so a
+ *  "still robotic" report is server-vs-client decidable without log spelunking. */
+export async function GET(req: Request) {
+  const url = new URL(req.url);
+  if (url.searchParams.get("diag") !== "1") {
+    return new Response("POST text here, or GET ?diag=1 to check config.", { status: 200 });
+  }
+  const elKey = process.env.ELEVENLABS_API_KEY;
+  const oaKey = process.env.OPENAI_API_KEY;
+  const out: any = {
+    provider: elKey ? "elevenlabs" : oaKey ? "openai" : "NONE — no key set",
+    elevenLabsKeyPresent: !!elKey,
+    openAiKeyPresent: !!oaKey,
+  };
+  try {
+    if (elKey) {
+      const voice = process.env.ELEVENLABS_VOICE_ID || "21m00Tcm4TlvDq8ikWAM";
+      const r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice}?output_format=mp3_44100_64`, {
+        method: "POST",
+        headers: { "xi-api-key": elKey, "content-type": "application/json", accept: "audio/mpeg" },
+        body: JSON.stringify({ text: "Test.", model_id: process.env.ELEVENLABS_MODEL || "eleven_flash_v2_5" }),
+      });
+      out.testCall = {
+        ok: r.ok,
+        status: r.status,
+        contentType: r.headers.get("content-type"),
+        error: r.ok ? null : (await r.text().catch(() => "")).slice(0, 400),
+      };
+      out.verdict = r.ok
+        ? "✅ KEY WORKS — the voice is being blocked on the device (iOS audio), not the key."
+        : `❌ KEY/REQUEST REJECTED by ElevenLabs (HTTP ${r.status}) — see error. Likely the key lacks Text-to-Speech permission, or quota is exhausted.`;
+    } else if (oaKey) {
+      const r = await fetch("https://api.openai.com/v1/audio/speech", {
+        method: "POST",
+        headers: { authorization: `Bearer ${oaKey}`, "content-type": "application/json" },
+        body: JSON.stringify({ model: process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts", voice: process.env.OPENAI_TTS_VOICE || "nova", input: "Test." }),
+      });
+      out.testCall = { ok: r.ok, status: r.status, error: r.ok ? null : (await r.text().catch(() => "")).slice(0, 400) };
+      out.verdict = r.ok ? "✅ KEY WORKS — device-side audio is the issue." : `❌ OpenAI rejected (HTTP ${r.status}).`;
+    } else {
+      out.verdict = "❌ No ELEVENLABS_API_KEY or OPENAI_API_KEY is set on this deployment.";
+    }
+  } catch (e: any) {
+    out.testCall = { ok: false, error: String(e?.message || e).slice(0, 400) };
+    out.verdict = "❌ The test call threw before getting a response.";
+  }
+  return new Response(JSON.stringify(out, null, 2), { headers: { "Content-Type": "application/json" } });
+}
+
 export async function POST(req: Request) {
   let text = "";
   try {
