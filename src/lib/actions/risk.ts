@@ -23,3 +23,10 @@ export function needsConsent(
   const confirmRequired = def.confirm != null || actionRisk(def) >= 2;
   return confirmRequired && source !== "ui" && !confirmed;
 }
+
+/** Whether an action is "money-grade" and therefore needs the WebAuthn step-up (C2) when
+ *  the agent/voice invokes it and the caller has a passkey: a financial confirm or an
+ *  explicit tier-2+. Destructive (delete) is confirm-only, not step-up. Pure. */
+export function requiresStepUp(def: Pick<ActionDef, "confirm" | "risk">): boolean {
+  return def.confirm === "financial" || (def.risk ?? 0) >= 2;
+}

@@ -13,7 +13,10 @@ import type { Affordance } from "@/lib/action-items/types";
 
 /** A pending field action that needs a spoken "yes" before it runs. */
 export type VoiceConfirm = { name: string; input: Record<string, unknown>; speakDone: string };
-export type VoiceResult = { ok: boolean; message: string; navigate?: string; confirm?: VoiceConfirm };
+/** A money action that additionally needs a WebAuthn (Face ID) tap — the client runs the
+ *  assertion against `options` and re-calls confirmVoiceAction with it. */
+export type VoiceStepUp = { name: string; input: Record<string, unknown>; options: unknown };
+export type VoiceResult = { ok: boolean; message: string; navigate?: string; confirm?: VoiceConfirm; stepUp?: VoiceStepUp };
 
 // The ONLY registry actions voice may execute (safe, self-scoped field work). The
 // server-side role gate in executeAction is the real enforcement; this is belt-and-
@@ -286,11 +289,20 @@ ${jobList}`,
  * Whitelisted to the safe field verbs; executeAction still enforces the per-action
  * role gate server-side (so e.g. a tech can't add a cost even if it's offered).
  */
-export async function confirmVoiceAction(name: string, input: Record<string, unknown>): Promise<VoiceResult> {
+export async function confirmVoiceAction(
+  name: string,
+  input: Record<string, unknown>,
+  stepUpAssertion?: unknown,
+): Promise<VoiceResult> {
   if (!VOICE_ALLOWED.has(name)) return { ok: false, message: "That action can't be done by voice." };
   // The spoken "yes" the client already collected IS the consent — pass it so the
   // executeAction confirm gate (e.g. bill.create = financial) lets it through.
-  const res = await executeAction(name, input, { source: "voice", confirmed: true });
+  const res = await executeAction(name, input, { source: "voice", confirmed: true, stepUpAssertion });
+  // A money action from an enrolled user needs the Face ID tap — hand the options back so
+  // the client runs it and re-calls with the assertion.
+  if (res.needsStepUp) {
+    return { ok: false, message: "Confirm with Face ID to finish.", stepUp: { name, input, options: res.stepUpOptions } };
+  }
   if (!res.ok) return { ok: false, message: res.error ? `Sorry — ${res.error}` : "That didn't work." };
   revalidatePath("/timeclock");
   revalidatePath("/planner");

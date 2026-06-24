@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Mic, MicOff, Loader2, Sparkles } from "lucide-react";
 import { runVoiceCommand, confirmVoiceAction, type VoiceConfirm } from "@/app/(app)/voice/actions";
+import { startAuthentication } from "@simplewebauthn/browser";
 
 /**
  * Floating mic with two modes:
@@ -133,16 +134,25 @@ export function GlobalVoiceButton({ lang, placement = "fab" }: { lang?: string; 
     setWorking(true);
     setStatus("Working…");
     try {
-      const res = await confirmVoiceAction(c.name, c.input);
+      let res = await confirmVoiceAction(c.name, c.input);
+      // Money action from an enrolled user → do the Face ID tap, then re-run with the
+      // assertion. startAuthentication throws on cancel (caught below).
+      if (res.stepUp) {
+        flash(res.message);
+        speak(res.message);
+        const assertion = await startAuthentication({ optionsJSON: res.stepUp.options as any });
+        res = await confirmVoiceAction(res.stepUp.name, res.stepUp.input, assertion);
+      }
       const msg = res.ok ? c.speakDone : res.message;
       flash(msg);
       speak(msg);
       buzz(res.ok ? 30 : [40, 40, 40]);
       if (res.ok && res.navigate) router.push(res.navigate);
       router.refresh();
-    } catch {
-      flash("That didn't work.");
-      speak("That didn't work.");
+    } catch (e: any) {
+      const m = e?.name === "NotAllowedError" ? "Cancelled." : "That didn't work.";
+      flash(m);
+      speak(m);
     } finally {
       setWorking(false);
     }

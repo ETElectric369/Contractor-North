@@ -2,6 +2,7 @@
 
 import { REGISTRY } from "./registry";
 import { actionRisk, needsConsent } from "./risk";
+import { stepUpGate } from "@/lib/webauthn/stepup";
 import { roleCanRun } from "./perms";
 import { buildActionCtx } from "./context";
 import { createClient } from "@/lib/supabase/server";
@@ -51,7 +52,7 @@ async function logAction(
 export async function executeAction(
   name: string,
   rawInput: unknown,
-  opts?: { source?: ActionSource; confirmed?: boolean },
+  opts?: { source?: ActionSource; confirmed?: boolean; stepUpAssertion?: unknown },
 ): Promise<ActionResult> {
   const source = opts?.source ?? "ui";
   const def = REGISTRY[name];
@@ -76,20 +77,29 @@ export async function executeAction(
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
   }
 
-  // Confirm gate (framework §3) — THE lock that makes def.confirm / the risk tier
-  // load-bearing instead of advisory. A confirm-flagged or tier-2+ action invoked by
-  // the AGENT or VOICE must carry explicit human consent (opts.confirmed); the UI's own
-  // confirm modal is the consent for source "ui", so it's exempt. Without consent we
-  // refuse to run and hand back a read-back prompt. (Tier-2 step-up re-auth = Phase C2.)
-  if (needsConsent(def, source, opts?.confirmed)) {
-    const blocked: ActionResult = {
-      ok: false,
-      needsConfirm: true,
-      confirmPrompt: `${def.label} — say yes to confirm.`,
-      error: `${def.label} needs confirmation.`,
-    };
-    await logAction(def, ctx, source, parsed.data, blocked);
-    return blocked;
+  // Step-up + confirm gate (framework §3) — makes def.confirm / the risk tier load-bearing
+  // instead of advisory. For the AGENT / VOICE (the UI is exempt — its own modal is the
+  // consent + a human is directly clicking):
+  //  · MONEY actions (financial / tier-2+) require a fresh WebAuthn assertion when the
+  //    caller has a passkey — the unforgeable consent (C2). Not enrolled → the confirm
+  //    read-back below applies instead.
+  //  · everything else confirm-flagged (e.g. destructive) needs the explicit consent flag.
+  if (source !== "ui") {
+    const su = await stepUpGate(ctx.userId, def, parsed.data, source, opts?.stepUpAssertion);
+    if (su.kind === "block") {
+      await logAction(def, ctx, source, parsed.data, su.result);
+      return su.result;
+    }
+    if (su.kind !== "pass" && needsConsent(def, source, opts?.confirmed)) {
+      const blocked: ActionResult = {
+        ok: false,
+        needsConfirm: true,
+        confirmPrompt: `${def.label} — say yes to confirm.`,
+        error: `${def.label} needs confirmation.`,
+      };
+      await logAction(def, ctx, source, parsed.data, blocked);
+      return blocked;
+    }
   }
 
   let result: ActionResult;

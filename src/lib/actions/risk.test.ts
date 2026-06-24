@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { actionRisk, needsConsent } from "./risk";
+import { actionRisk, needsConsent, requiresStepUp } from "./risk";
 
 describe("actionRisk — agent-security tier derivation (framework §3)", () => {
   it("reads are tier 0 (safe, no confirm)", () => {
@@ -49,5 +49,22 @@ describe("needsConsent — Phase C confirm gate", () => {
   it("gates an explicitly tier-2 action even without a confirm flag", () => {
     expect(needsConsent({ effect: "write", risk: 2 }, "voice", undefined)).toBe(true);
     expect(needsConsent({ effect: "write", risk: 2 }, "voice", true)).toBe(false);
+  });
+});
+
+describe("requiresStepUp — Phase C2 (which actions need the Face ID tap)", () => {
+  it("financial actions require step-up", () => {
+    expect(requiresStepUp({ confirm: "financial" })).toBe(true);
+  });
+  it("explicit tier-2+ requires step-up", () => {
+    expect(requiresStepUp({ risk: 2 })).toBe(true);
+    expect(requiresStepUp({ risk: 3 })).toBe(true);
+  });
+  it("destructive is confirm-only — NOT step-up (deleting a task shouldn't need Face ID)", () => {
+    expect(requiresStepUp({ confirm: "destructive" })).toBe(false);
+  });
+  it("ordinary writes / reads never need step-up", () => {
+    expect(requiresStepUp({})).toBe(false);
+    expect(requiresStepUp({ risk: 1 })).toBe(false);
   });
 });

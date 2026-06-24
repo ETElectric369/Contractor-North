@@ -18,6 +18,12 @@ export type ActionResult = {
   needsConfirm?: boolean;
   /** Human sentence describing what will happen, for the confirm read-back. */
   confirmPrompt?: string;
+  /** Set when a MONEY action needs a WebAuthn step-up (the caller has a passkey). The
+   *  surface runs startAuthentication(stepUpOptions) then re-calls with the assertion in
+   *  opts.stepUpAssertion. The action did NOT run. */
+  needsStepUp?: boolean;
+  /** WebAuthn authentication options (PublicKeyCredentialRequestOptionsJSON) for the tap. */
+  stepUpOptions?: unknown;
 };
 
 /** Resolved caller context, built once per execute() call. */
