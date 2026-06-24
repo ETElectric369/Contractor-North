@@ -45,6 +45,10 @@ export default async function AppLayout({
   // No organization yet → finish onboarding before entering the app.
   if (!profile?.org_id) redirect("/onboarding");
 
+  // Created with a handed-out temp password (crew import / add-employee) → force them to
+  // pick their own before they can use the app, so the temp can't be reused indefinitely.
+  if (profile.must_reset_password) redirect("/set-password");
+
   const { data: org } = await supabase
     .from("organizations")
     .select("name, logo_url, brand_color, subscription_status, trial_ends_at, settings")

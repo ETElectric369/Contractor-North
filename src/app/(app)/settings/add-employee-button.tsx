@@ -31,6 +31,7 @@ export function AddEmployeeButton({ configured }: { configured: boolean }) {
   const [showPw, setShowPw] = useState(true);
   const [role, setRole] = useState("tech");
   const [rate, setRate] = useState(0);
+  const [requireReset, setRequireReset] = useState(true);
 
   function save() {
     setError(null);
@@ -41,9 +42,10 @@ export function AddEmployeeButton({ configured }: { configured: boolean }) {
         password,
         role,
         hourly_rate: rate || null,
+        requireReset,
       });
       if (!res.ok) return setError(res.error ?? "Could not create the employee.");
-      setDone(`${name} can now log in with ${email} and the password below — send it to them, they can change it later.`);
+      setDone(`${name} can now log in with ${email} and the password below — send it to them${requireReset ? "; they'll set their own password on first login." : ", they can change it later."}`);
     });
   }
 
@@ -55,6 +57,7 @@ export function AddEmployeeButton({ configured }: { configured: boolean }) {
     setPassword(generatePassword());
     setRole("tech");
     setRate(0);
+    setRequireReset(true);
     router.refresh();
   }
 
@@ -133,6 +136,10 @@ export function AddEmployeeButton({ configured }: { configured: boolean }) {
                 <Label htmlFor="emp-rate">Billable rate ($/hr)</Label>
                 <NumberInput id="emp-rate" value={rate} onValueChange={setRate} />
               </div>
+              <label className="col-span-2 flex items-start gap-2 text-sm text-slate-700">
+                <input type="checkbox" checked={requireReset} onChange={(e) => setRequireReset(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand" />
+                <span>Require a password reset on first login <span className="text-slate-400">— they use this password once, then set their own.</span></span>
+              </label>
             </div>
           </div>
         )}

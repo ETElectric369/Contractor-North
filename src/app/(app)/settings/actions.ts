@@ -202,6 +202,7 @@ export async function createEmployee(input: {
   password: string;
   role: string;
   hourly_rate: number | null;
+  requireReset?: boolean;
 }): Promise<Result> {
   const supabase = await createClient();
   const {
@@ -249,6 +250,7 @@ export async function createEmployee(input: {
       role,
       hourly_rate: input.hourly_rate,
       active: true,
+      must_reset_password: input.requireReset ?? true,
     })
     .eq("id", created.user.id);
   if (profErr) return { ok: false, error: profErr.message };
@@ -264,7 +266,7 @@ export type CrewImportResult = { name: string; email: string; password?: string;
  *  employee's PHONE DIGITS (>=8); a no-phone row gets a temp default to reset. Owner/
  *  admin only; needs SUPABASE_SERVICE_ROLE_KEY. Returns the login+password per row so
  *  the office can hand them out. Best-effort per row — one failure doesn't stop the rest. */
-export async function importCrew(rows: CrewImportRow[]): Promise<{ ok: boolean; error?: string; results?: CrewImportResult[] }> {
+export async function importCrew(rows: CrewImportRow[], requireReset = true): Promise<{ ok: boolean; error?: string; results?: CrewImportResult[] }> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -303,7 +305,7 @@ export async function importCrew(rows: CrewImportRow[]): Promise<{ ok: boolean; 
     }
     const { error: profErr } = await admin
       .from("profiles")
-      .update({ org_id: me.org_id, full_name: name, role, hourly_rate: r.hourly_rate ?? null, active: true })
+      .update({ org_id: me.org_id, full_name: name, role, hourly_rate: r.hourly_rate ?? null, active: true, must_reset_password: requireReset })
       .eq("id", created.user.id);
     if (profErr) {
       // Roll back the just-created login so a failed profile attach can't leave an

@@ -48,6 +48,7 @@ export function CrewImportButton() {
   const [results, setResults] = useState<CrewImportResult[] | null>(null);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [requireReset, setRequireReset] = useState(true);
 
   function reset() {
     setRows([]);
@@ -69,7 +70,7 @@ export function CrewImportButton() {
     if (!rows.length) return;
     setError(null);
     start(async () => {
-      const res = await importCrew(rows);
+      const res = await importCrew(rows, requireReset);
       if (!res.ok) return setError(res.error ?? "Import failed.");
       setResults(res.results ?? []);
       router.refresh();
@@ -116,6 +117,10 @@ export function CrewImportButton() {
                 </ul>
               </div>
             )}
+            <label className="flex items-start gap-2 text-sm text-slate-700">
+              <input type="checkbox" checked={requireReset} onChange={(e) => setRequireReset(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand" />
+              <span>Require a password reset on first login <span className="text-slate-400">— they sign in with the phone/temp password once, then set their own.</span></span>
+            </label>
             {error && <p className="text-sm text-red-600">{error}</p>}
           </div>
         ) : (
@@ -123,7 +128,7 @@ export function CrewImportButton() {
             <div className="flex items-center gap-2 text-sm font-medium text-green-700">
               <Check className="h-4 w-4" /> Added {created.length}{failed.length ? ` · ${failed.length} skipped` : ""}
             </div>
-            <p className="text-xs text-slate-500">Give each person their login + password (their phone number). They install the app and clock in.</p>
+            <p className="text-xs text-slate-500">Give each person their login + password (their phone number).{requireReset ? " They'll set their own password the first time they sign in." : " They install the app and clock in."}</p>
             <div className="rounded-lg border border-slate-200">
               <ul className="max-h-64 divide-y divide-slate-100 overflow-y-auto text-sm">
                 {created.map((r, i) => (
