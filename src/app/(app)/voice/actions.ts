@@ -16,7 +16,9 @@ export type VoiceConfirm = { name: string; input: Record<string, unknown>; speak
 /** A money action that additionally needs a WebAuthn (Face ID) tap — the client runs the
  *  assertion against `options` and re-calls confirmVoiceAction with it. */
 export type VoiceStepUp = { name: string; input: Record<string, unknown>; options: unknown };
-export type VoiceResult = { ok: boolean; message: string; navigate?: string; confirm?: VoiceConfirm; stepUp?: VoiceStepUp };
+export type VoiceResult = { ok: boolean; message: string; navigate?: string; confirm?: VoiceConfirm; stepUp?: VoiceStepUp; needMore?: boolean };
+/** A turn in the spoken back-and-forth, so a follow-up answer is read in context. */
+export type VoiceTurn = { role: "user" | "assistant"; content: string };
 
 // The ONLY registry actions voice may execute (safe, self-scoped field work). The
 // server-side role gate in executeAction is the real enforcement; this is belt-and-
@@ -57,7 +59,7 @@ function jsonFrom(text: string): any {
  * intent; we execute only a whitelisted, non-destructive set (create task /
  * appointment / customer, or navigate). Everything else just speaks back.
  */
-export async function runVoiceCommand(transcript: string): Promise<VoiceResult> {
+export async function runVoiceCommand(transcript: string, history: VoiceTurn[] = []): Promise<VoiceResult> {
   const text = transcript.trim();
   if (!text) return { ok: false, message: "I didn't catch that." };
 
@@ -137,8 +139,13 @@ ${inboxList}
 Team members (for assign): ${teamList}
 
 Your active jobs (for open_job / clock_in / log_time / add_cost). Speech recognition MANGLES names — match PHONETICALLY by how it SOUNDS, not exact spelling (e.g. "town zoo" → "Tao Zhu"; "sue waltz" → the Waltz job; "tee tee pee" → "TTP"). Pick the closest-sounding job; only return null when nothing is remotely close:
-${jobList}`,
-      messages: [{ role: "user", content: text }],
+${jobList}
+
+If this is a follow-up (earlier turns are shown), COMBINE everything said so far into ONE complete action — e.g. you asked "how many hours?" and they now say "two", so emit the full log_time. Carry over the job/customer/title already mentioned earlier; don't ask again for something already given.`,
+      messages: [
+        ...history.slice(-8).map((h) => ({ role: h.role, content: h.content })),
+        { role: "user" as const, content: text },
+      ],
     });
     const block = msg.content.find((b) => b.type === "text") as { text: string } | undefined;
     parsed = jsonFrom(block?.text ?? "");
@@ -153,7 +160,7 @@ ${jobList}`,
   try {
     if (intent === "create_task") {
       const title = String(p.title ?? "").trim();
-      if (!title) return { ok: false, message: "What should the task say?" };
+      if (!title) return { ok: false, message: "What should the task say?", needMore: true };
       const category = ["office", "operations", "sales"].includes(p.category) ? p.category : "operations";
       // Through the chokepoint (audit + role gate + source tag), not a bespoke insert.
       const res = await executeAction("task.create", { title, category }, { source: "voice" });
@@ -165,7 +172,7 @@ ${jobList}`,
     if (intent === "create_appointment") {
       const title = String(p.title ?? "").trim();
       const startIso = toIso(String(p.date ?? ""), String(p.time ?? "08:00"));
-      if (!title || !startIso) return { ok: false, message: "I need a title and a date for that appointment." };
+      if (!title || !startIso) return { ok: false, message: "I need a title and a date for that appointment.", needMore: true };
       const type = p.type === "inspection" ? "inspection" : "appointment";
       const res = await executeAction("appointment.create", { title, type, starts_at: startIso }, { source: "voice" });
       if (!res.ok) return { ok: false, message: res.error ?? "Couldn't create that appointment." };
@@ -175,7 +182,7 @@ ${jobList}`,
 
     if (intent === "create_customer") {
       const name = String(p.name ?? "").trim();
-      if (!name) return { ok: false, message: "What's the customer's name?" };
+      if (!name) return { ok: false, message: "What's the customer's name?", needMore: true };
       const phone = p.phone ? String(p.phone) : null;
       const res = await executeAction("customer.create", { name, phone }, { source: "voice" });
       if (!res.ok) return { ok: false, message: res.error ?? "Couldn't create that customer." };
@@ -185,7 +192,7 @@ ${jobList}`,
 
     if (intent === "act_on_item") {
       const item = items.find((it) => it.id === String(p.item_id ?? ""));
-      if (!item) return { ok: false, message: "I couldn't find that item — try saying its name again." };
+      if (!item) return { ok: false, message: "I couldn't find that item — try saying its name again.", needMore: true };
       const verb = String(p.verb ?? "") as Affordance;
       // "Dismiss" hard-deletes a task/inquiry — NEVER by voice. Direct to the screen,
       // where the ✗ now asks to confirm. Voice keeps to the non-destructive verbs.
@@ -207,7 +214,7 @@ ${jobList}`,
 
     if (intent === "open_job") {
       const jobId = p.job_id && jobsById.has(String(p.job_id)) ? String(p.job_id) : null;
-      if (!jobId) return { ok: false, message: "I couldn't tell which job you meant — say its name or number again." };
+      if (!jobId) return { ok: false, message: "I couldn't tell which job you meant — say its name or number again.", needMore: true };
       return { ok: true, message: speak || `Opening ${jobsById.get(jobId)}.`, navigate: `/jobs/${jobId}` };
     }
 
@@ -234,7 +241,7 @@ ${jobList}`,
 
     if (intent === "log_time") {
       const hours = Number(p.hours);
-      if (!(hours > 0)) return { ok: false, message: "How many hours should I log?" };
+      if (!(hours > 0)) return { ok: false, message: "How many hours should I log?", needMore: true };
       const jobId = p.job_id && jobsById.has(String(p.job_id)) ? String(p.job_id) : null;
       const label = jobId ? jobsById.get(jobId) : null;
       const now = Date.now();
@@ -257,7 +264,7 @@ ${jobList}`,
       // to reject it at execution.
       if (!isStaff) return { ok: false, message: "Recording costs is office-only." };
       const amount = Number(p.amount);
-      if (!(amount > 0)) return { ok: false, message: "How much was the cost?" };
+      if (!(amount > 0)) return { ok: false, message: "How much was the cost?", needMore: true };
       const supplier = (String(p.supplier ?? "").trim() || "Cash").slice(0, 80);
       const jobId = p.job_id && jobsById.has(String(p.job_id)) ? String(p.job_id) : null;
       const label = jobId ? jobsById.get(jobId) : null;
@@ -275,10 +282,10 @@ ${jobList}`,
     if (intent === "navigate") {
       const path = String(p.path ?? "");
       if (ROUTES[path]) return { ok: true, message: speak || `Opening ${ROUTES[path]}.`, navigate: path };
-      return { ok: false, message: "I'm not sure which page you mean." };
+      return { ok: false, message: "I'm not sure which page you mean.", needMore: true };
     }
 
-    return { ok: false, message: speak || "I can add tasks, appointments, customers, clock you in or out, log time, add a cost, or open a page — try again." };
+    return { ok: false, message: speak || "I can add tasks, appointments, customers, clock you in or out, log time, add a cost, or open a page — try again.", needMore: true };
   } catch (e: any) {
     return { ok: false, message: e?.message ?? "Something went wrong." };
   }

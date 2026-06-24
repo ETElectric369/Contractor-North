@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Mic, MicOff, Loader2, Sparkles } from "lucide-react";
-import { runVoiceCommand, confirmVoiceAction, type VoiceConfirm } from "@/app/(app)/voice/actions";
+import { runVoiceCommand, confirmVoiceAction, type VoiceConfirm, type VoiceTurn } from "@/app/(app)/voice/actions";
 import { startAuthentication } from "@simplewebauthn/browser";
 import { speakSmart, unlockAudio } from "@/lib/tts";
 
@@ -31,6 +31,9 @@ export function GlobalVoiceButton({ lang, placement = "fab" }: { lang?: string; 
   // The pending confirm lives in a ref too, so the speak→listen callback chain reads
   // the CURRENT value (state alone would be stale inside those closures).
   const pendingRef = useRef<VoiceConfirm | null>(null);
+  // The spoken back-and-forth so far. When a command needs more info ("how many hours?"),
+  // we re-open the mic and send the answer WITH this history so it completes in context.
+  const convoRef = useRef<VoiceTurn[]>([]);
 
   useEffect(() => {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -167,10 +170,14 @@ export function GlobalVoiceButton({ lang, placement = "fab" }: { lang?: string; 
   async function handleCommand(transcript: string) {
     setWorking(true);
     setStatus("Working…");
+    const history = convoRef.current.slice(); // turns BEFORE this answer
     try {
-      const res = await runVoiceCommand(transcript);
+      const res = await runVoiceCommand(transcript, history);
+      // Record this exchange so a follow-up answer is read in context.
+      convoRef.current.push({ role: "user", content: transcript });
       // A field action needs a spoken "yes" first — read it back + listen for yes/no.
       if (res.confirm) {
+        convoRef.current = []; // gathering done; the confirm is its own yes/no loop
         setWorking(false);
         pendingRef.current = res.confirm;
         setPendingConfirm(res.confirm);
@@ -180,12 +187,25 @@ export function GlobalVoiceButton({ lang, placement = "fab" }: { lang?: string; 
         speak(res.message, () => startListen(handleConfirmReply, "Say yes or no…"));
         return;
       }
+      // It's asking for more info — keep the conversation open: read the question, then
+      // re-open the mic for the answer (bounded so it can't loop forever).
+      if (res.needMore && convoRef.current.length < 8) {
+        convoRef.current.push({ role: "assistant", content: res.message });
+        setWorking(false);
+        flash(res.message);
+        buzz(20);
+        speak(res.message, () => startListen(handleCommand, "Listening…"));
+        return;
+      }
+      // Resolved (or a hard stop) — end the conversation.
+      convoRef.current = [];
       flash(res.message);
       speak(res.message);
       buzz(30); // short confirm pulse
       if (res.navigate) router.push(res.navigate);
       router.refresh();
     } catch {
+      convoRef.current = [];
       const err = "Sorry — that didn't work.";
       flash(err);
       speak(err);
@@ -231,6 +251,7 @@ export function GlobalVoiceButton({ lang, placement = "fab" }: { lang?: string; 
     if (!SR) return;
     const mode: "dictate" | "command" = isTextFieldFocused() ? "dictate" : "command";
     modeRef.current = mode;
+    if (mode === "command") convoRef.current = []; // a fresh tap = a new conversation
     const r = new SR();
     r.continuous = false;
     r.interimResults = false;
