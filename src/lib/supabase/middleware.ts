@@ -18,6 +18,7 @@ const PUBLIC_PATHS = [
   "/api/timeclock",
   "/api/automations",
   "/api/health",
+  "/api/voicecheck",
   "/_next",
   "/favicon",
   // PWA assets must load without auth, or install/offline break.
