@@ -29,8 +29,9 @@ export async function POST(req: Request) {
   // Respond in the user's preferred language + follow the org's quoting playbook.
   const [{ data: prof }, { data: org }] = await Promise.all([
     supabase.from("profiles").select("language").eq("id", user.id).maybeSingle(),
-    supabase.from("organizations").select("settings").limit(1).maybeSingle(),
+    supabase.from("organizations").select("id, settings").limit(1).maybeSingle(),
   ]);
+  const orgId = (org as { id?: string } | null)?.id ?? null;
   const playbook = getOrgSettings((org as any)?.settings).quote_playbook?.trim();
   let systemPrompt = ASSISTANT_SYSTEM_PROMPT;
   if (playbook) {
@@ -86,6 +87,7 @@ export async function POST(req: Request) {
   const stream = new ReadableStream({
     async start(controller) {
       const emit = (t: string) => controller.enqueue(encoder.encode(t));
+      const toolsUsed = new Set<string>();
       try {
         for (let round = 0; round < MAX_ROUNDS; round++) {
           const turn = client.messages.stream({
@@ -107,6 +109,7 @@ export async function POST(req: Request) {
           );
           const results: Anthropic.ToolResultBlockParam[] = [];
           for (const tu of toolUses) {
+            toolsUsed.add(tu.name);
             const out = await runDataTool(tu.name, tu.input, supabase);
             results.push({
               type: "tool_result",
@@ -124,6 +127,26 @@ export async function POST(req: Request) {
       } catch (e: any) {
         emit(`\n\n[Error: ${e?.message ?? "stream failed"}]`);
         controller.close();
+      } finally {
+        // Egress trail (framework §7/§6): when the assistant pulled org data for the
+        // model, record WHICH data categories left for the provider — tool names + the
+        // org/user, never the content. Best-effort; never affects the response.
+        if (toolsUsed.size > 0) {
+          try {
+            await supabase.from("agent_audit_log").insert({
+              org_id: orgId,
+              user_id: user.id,
+              action: "chat.query",
+              risk: 0,
+              effect: "read",
+              ok: true,
+              input_summary: { tools: [...toolsUsed] },
+              source: "agent",
+            });
+          } catch {
+            /* audit is best-effort */
+          }
+        }
       }
     },
   });
