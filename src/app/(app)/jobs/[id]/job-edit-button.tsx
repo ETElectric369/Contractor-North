@@ -31,10 +31,12 @@ export function JobEditButton({
   job,
   customers,
   techs,
+  templates = [],
 }: {
   job: Job;
   customers: { id: string; name: string }[];
   techs: { id: string; full_name: string | null }[];
+  templates?: { id: string; name: string }[];
 }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -198,6 +200,19 @@ export function JobEditButton({
             </Select>
             <p className="mt-1 text-xs text-slate-400">Time &amp; Material bills actual labor + materials; the estimate is a reference, not a cap.</p>
           </div>
+
+          {templates.length > 0 && (
+            <div>
+              <Label htmlFor="ej-template">Job-code template</Label>
+              <Select id="ej-template" name="code_template_id" defaultValue={(job as any).code_template_id ?? ""}>
+                <option value="">All codes</option>
+                {templates.map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </Select>
+              <p className="mt-1 text-xs text-slate-400">Limits the crew&apos;s clock-in/out code picker to this job&apos;s codes.</p>
+            </div>
+          )}
           </div>
         </Modal>
       </form>

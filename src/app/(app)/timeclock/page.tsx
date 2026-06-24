@@ -49,7 +49,7 @@ export default async function TimeclockPage() {
     supabase.from("job_codes").select("*").eq("active", true).order("code"),
     supabase
       .from("jobs")
-      .select("id, job_number, name, address, city, state, zip")
+      .select("id, job_number, name, address, city, state, zip, code_template_id")
       .in("status", ["scheduled", "in_progress", "estimate"])
       .order("created_at", { ascending: false })
       .limit(50),
@@ -62,6 +62,14 @@ export default async function TimeclockPage() {
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),
   ]);
   const orgSettings = getOrgSettings((orgRes.data as any)?.settings);
+
+  // Attach each job's template codes so the code picker can narrow to the right codes.
+  const { data: tmplData } = await supabase.from("job_code_templates").select("id, codes");
+  const tmplMap = new Map((tmplData ?? []).map((t: any) => [t.id as string, (t.codes ?? []) as string[]]));
+  const jobOptions = ((jobsRes.data ?? []) as any[]).map((j) => ({
+    ...j,
+    codes: j.code_template_id ? tmplMap.get(j.code_template_id) : undefined,
+  }));
 
   const openEntry = (openRes.data as TimeEntry) ?? null;
   const week = (weekRes.data ?? []) as TimeEntry[];
@@ -96,7 +104,7 @@ export default async function TimeclockPage() {
           isStaff={isStaff}
           members={members ?? []}
           jobCodes={(codesRes.data ?? []) as JobCode[]}
-          jobs={jobsRes.data ?? []}
+          jobs={jobOptions}
         />
       </PageHeader>
 
@@ -105,7 +113,7 @@ export default async function TimeclockPage() {
           <TimeclockPanel
             openEntry={openEntry}
             jobCodes={(codesRes.data ?? []) as JobCode[]}
-            jobs={jobsRes.data ?? []}
+            jobs={jobOptions}
             lang={lang}
             autoLunch={orgSettings.auto_lunch_30}
             homeAddress={(prof as any)?.home_address ?? ""}

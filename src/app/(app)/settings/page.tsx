@@ -27,6 +27,7 @@ import { ImportCustomersButton } from "../crm/import-customers-button";
 import { AvatarUpload } from "./avatar-upload";
 import { AddEmployeeButton } from "./add-employee-button";
 import { CrewImportButton } from "./crew-import-button";
+import { CodeTemplatesManager } from "./code-templates-manager";
 import { adminConfigured } from "@/lib/supabase/admin";
 import { gcalConfigured } from "@/lib/google-calendar";
 import { GcalCard } from "./gcal-card";
@@ -75,7 +76,7 @@ export default async function SettingsPage({
   const isAdmin = profile?.role === "owner" || profile?.role === "admin";
   const t = translator(profile?.language);
 
-  const [{ data: org }, { data: team }, { data: invites }, { data: taxRates }, { data: pricingLevels }] = await Promise.all([
+  const [{ data: org }, { data: team }, { data: invites }, { data: taxRates }, { data: pricingLevels }, { data: codeTemplates }, { data: jobCodes }] = await Promise.all([
     profile?.org_id
       ? supabase.from("organizations").select("*").eq("id", profile.org_id).maybeSingle()
       : Promise.resolve({ data: null }),
@@ -85,6 +86,8 @@ export default async function SettingsPage({
       : Promise.resolve({ data: [] }),
     supabase.from("tax_rates").select("id, name, rate, is_default").order("created_at"),
     supabase.from("pricing_levels").select("id, name, markup_pct, is_default").order("created_at"),
+    supabase.from("job_code_templates").select("id, name, codes").order("name"),
+    supabase.from("job_codes").select("code, description").eq("active", true).order("code"),
   ]);
 
   const members = (team ?? []) as Profile[];
@@ -282,13 +285,21 @@ export default async function SettingsPage({
           id: "scheduling",
           label: "Scheduling",
           content: (
-            <Section title="Scheduler & timesheets">
-              <SchedulingSettings
-                settings={settings}
-                employees={members.map((m) => ({ id: m.id, full_name: m.full_name }))}
-                ownerName={members.find((m) => m.role === "owner")?.full_name ?? undefined}
-              />
-            </Section>
+            <>
+              <Section title="Scheduler & timesheets">
+                <SchedulingSettings
+                  settings={settings}
+                  employees={members.map((m) => ({ id: m.id, full_name: m.full_name }))}
+                  ownerName={members.find((m) => m.role === "owner")?.full_name ?? undefined}
+                />
+              </Section>
+              <Section title="Job-code templates">
+                <CodeTemplatesManager
+                  templates={(codeTemplates ?? []) as { id: string; name: string; codes: string[] }[]}
+                  codes={(jobCodes ?? []) as { code: string; description: string }[]}
+                />
+              </Section>
+            </>
           ),
         },
         {

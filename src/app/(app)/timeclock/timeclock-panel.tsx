@@ -40,6 +40,7 @@ interface JobOption {
   city?: string | null;
   state?: string | null;
   zip?: string | null;
+  codes?: string[]; // this job's template codes (undefined = all org codes)
 }
 
 function getGps(): Promise<GeoPoint | null> {
@@ -112,6 +113,14 @@ export function TimeclockPanel({
   // The crew MUST say which code(s) they worked + hours before clocking out — this is the
   // mis-billing fix (wrong hours on wrong jobs). At least one row needs a code AND hours.
   const allocOk = allocations.some((a) => a.job_code && (a.hours || 0) + (a.minutes || 0) / 60 > 0);
+
+  // Narrow the code picker to a job's template codes (so people pick the right code for
+  // the job type). No template / unknown job → all org codes.
+  function codesForJob(jobIdSel: string): JobCode[] {
+    const j = jobs.find((x) => x.id === jobIdSel);
+    if (j?.codes && j.codes.length) return jobCodes.filter((c) => j.codes!.includes(c.code));
+    return jobCodes;
+  }
 
   // live elapsed timer
   const [now, setNow] = useState(() => Date.now());
@@ -326,7 +335,7 @@ export function TimeclockPanel({
                         className="h-9 w-28"
                       >
                         <option value="">Code</option>
-                        {jobCodes.map((c) => (
+                        {codesForJob(a.job_id).map((c) => (
                           <option key={c.id} value={c.code}>
                             {c.code}
                           </option>
@@ -475,7 +484,7 @@ export function TimeclockPanel({
             <Label htmlFor="code">{t("tc_jobCode")}</Label>
             <Select id="code" value={jobCode} onChange={(e) => setJobCode(e.target.value)}>
               <option value="">{t("tc_selectCode")}</option>
-              {jobCodes.map((c) => (
+              {codesForJob(jobId).map((c) => (
                 <option key={c.id} value={c.code}>
                   {c.code} — {c.description}
                 </option>

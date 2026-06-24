@@ -161,6 +161,7 @@ export async function updateJob(
       description: emptyToNull(formData.get("description")),
       customer_id: customerId,
       ...(formData.get("billing_type") != null ? { billing_type: String(formData.get("billing_type")) } : {}),
+      ...(formData.has("code_template_id") ? { code_template_id: emptyToNull(formData.get("code_template_id")) } : {}),
       address: emptyToNull(formData.get("address")),
       city: emptyToNull(formData.get("city")),
       state: emptyToNull(formData.get("state")),

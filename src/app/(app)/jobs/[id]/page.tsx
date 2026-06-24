@@ -182,13 +182,14 @@ export default async function JobDetailPage({
   } = await supabase.auth.getUser();
   const { data: meRow } = await supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle();
   const viewerIsStaff = ["owner", "admin", "office"].includes((meRow as any)?.role ?? "");
-  const [{ data: techs }, { data: jobCodes }, { data: lists }, { data: org }, { data: allCustomers }, { data: allJobs }] = await Promise.all([
+  const [{ data: techs }, { data: jobCodes }, { data: lists }, { data: org }, { data: allCustomers }, { data: allJobs }, { data: codeTemplates }] = await Promise.all([
     supabase.from("profiles").select("id, full_name, home_address").order("full_name"),
     supabase.from("job_codes").select("*").order("code"),
     supabase.from("material_lists").select("id, name").order("created_at", { ascending: false }).limit(100),
     supabase.from("organizations").select("address_line1, city, state, zip, settings").limit(1).maybeSingle(),
     supabase.from("customers").select("id, name").order("name"),
     supabase.from("jobs").select("id, job_number, name").order("created_at", { ascending: false }).limit(100),
+    supabase.from("job_code_templates").select("id, name").order("name"),
   ]);
   const thisJobOpt = [{ id: j.id, job_number: j.job_number, name: j.name }];
   // Appointment button takes {id,label} option lists.
@@ -771,7 +772,7 @@ export default async function JobDetailPage({
               />
             </>
           )}
-          <JobEditButton job={j} customers={allCustomers ?? []} techs={techs ?? []} />
+          <JobEditButton job={j} customers={allCustomers ?? []} techs={techs ?? []} templates={(codeTemplates ?? []) as { id: string; name: string }[]} />
           <ConvertButton
             label="Create invoice"
             run={createInvoiceForJob.bind(null, j.id)}
