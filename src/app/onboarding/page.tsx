@@ -3,7 +3,8 @@ import { Zap, Building2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { createOrganization, acceptInvitation } from "./actions";
 import { Button } from "@/components/ui/button";
-import { Input, Label } from "@/components/ui/input";
+import { Input, Label, Select } from "@/components/ui/input";
+import { TRADE_PRESETS, TRADE_ORDER } from "@/lib/trade-codes";
 
 export const dynamic = "force-dynamic";
 
@@ -93,8 +94,17 @@ export default async function OnboardingPage({
                 name="name"
                 required
                 autoFocus
-                placeholder="e.g. North Star Electric"
+                placeholder="e.g. Tahoe Deck"
               />
+            </div>
+            <div>
+              <Label htmlFor="trade">Your trade</Label>
+              <Select id="trade" name="trade" defaultValue="general">
+                {TRADE_ORDER.map((t) => (
+                  <option key={t} value={t}>{TRADE_PRESETS[t].label}</option>
+                ))}
+              </Select>
+              <p className="mt-1 text-xs text-slate-500">Sets your starter job codes — you can change them anytime in Settings.</p>
             </div>
             <Button type="submit" size="lg" className="w-full">
               Create company & continue
