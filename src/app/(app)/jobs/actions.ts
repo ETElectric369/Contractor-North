@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { emptyToNull } from "@/lib/forms";
-import { visibleJobIdOrNull } from "@/lib/job-visibility";
+import { visibleJobIdOrNull, visibleTemplateIdOrNull } from "@/lib/job-visibility";
 import { requireStaff } from "@/lib/staff-guard";
 import {
   createInvoiceFromQuote,
@@ -154,6 +154,11 @@ export async function updateJob(
   const end = String(formData.get("scheduled_end") ?? "");
   const assigned = formData.getAll("assigned_to").map(String).filter(Boolean);
 
+  // Scope the template to the caller's org — a job can't reference another org's template.
+  const codeTemplatePatch = formData.has("code_template_id")
+    ? { code_template_id: await visibleTemplateIdOrNull(supabase, emptyToNull(formData.get("code_template_id")) as string | null) }
+    : {};
+
   const { error } = await supabase
     .from("jobs")
     .update({
@@ -161,7 +166,7 @@ export async function updateJob(
       description: emptyToNull(formData.get("description")),
       customer_id: customerId,
       ...(formData.get("billing_type") != null ? { billing_type: String(formData.get("billing_type")) } : {}),
-      ...(formData.has("code_template_id") ? { code_template_id: emptyToNull(formData.get("code_template_id")) } : {}),
+      ...codeTemplatePatch,
       address: emptyToNull(formData.get("address")),
       city: emptyToNull(formData.get("city")),
       state: emptyToNull(formData.get("state")),
@@ -361,7 +366,9 @@ export type JobImportRow = {
 };
 export type JobImportResult = { name: string; status: "created" | "failed"; reason?: string };
 
-const JOB_STATUSES = ["estimate", "lead", "quoted", "scheduled", "in_progress", "on_hold", "complete", "invoiced", "cancelled"];
+// Matches the job_status enum exactly — anything else (e.g. "lead", "in_production")
+// falls back to in_progress rather than erroring the insert.
+const JOB_STATUSES = ["estimate", "scheduled", "in_progress", "on_hold", "complete", "invoiced", "cancelled"];
 
 /** Bulk-import jobs from a roster (migration importer): find-or-create the customer,
  *  create the job, and record its contract value as an ACCEPTED quote so the job's
@@ -437,8 +444,9 @@ export async function importJobs(
 
     // Contract value -> accepted quote + a single line item.
     const value = Number(r.value) || 0;
+    let valueNote = "";
     if (value > 0) {
-      const { data: quote } = await supabase
+      const { data: quote, error: qe } = await supabase
         .from("quotes")
         .insert({
           job_id: job.id,
@@ -456,9 +464,13 @@ export async function importJobs(
         await supabase
           .from("quote_line_items")
           .insert({ quote_id: quote.id, description: jobName || "Contract", quantity: 1, unit: "ea", unit_price: value, sort_order: 0 });
+      } else if (qe) {
+        // Job was created but the contract value didn't attach — flag it instead of
+        // silently dropping the money.
+        valueNote = " — value not saved, add it manually";
       }
     }
-    results.push({ name: `${job.job_number} · ${jobName}`, status: "created" });
+    results.push({ name: `${job.job_number} · ${jobName}${valueNote}`, status: "created" });
   }
   revalidatePath("/jobs");
   revalidatePath("/crm");

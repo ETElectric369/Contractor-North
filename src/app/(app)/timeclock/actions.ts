@@ -113,6 +113,20 @@ export async function clockOut(input: {
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
 
+  // The codes+hours requirement (the wrong-hours-on-wrong-jobs fix) must hold on EVERY
+  // surface, not just the UI button — voice ("clock me out"), the action registry, and
+  // crafted calls all reach clockOut directly. A field tech can't close a shift with no
+  // code breakdown; staff reconcile later, and the geofence auto-close (input.auto)
+  // legitimately defers the codes to completeAutoClockOut.
+  if (!input.auto) {
+    const { data: me } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
+    const isStaff = ["owner", "admin", "office"].includes((me as { role?: string } | null)?.role ?? "");
+    const allocOk = (input.allocations ?? []).some((a) => a.job_code && a.hours > 0);
+    if (!isStaff && !allocOk) {
+      return { ok: false, error: "Add the job code(s) you worked and the hours before clocking out." };
+    }
+  }
+
   // Clock-out time defaults to now; `at` (the geofence "time they left") is honored
   // only if it's not in the future and not before clock-in (never negative hours).
   let clockOutIso = new Date().toISOString();
@@ -155,14 +169,18 @@ export async function clockOut(input: {
     .eq("time_entry_id", input.entry_id);
   const oldIds = (oldAllocs ?? []).map((a: { id: string }) => a.id);
   if (allocations.length) {
-    const rows = allocations.map((a, idx) => ({
-      time_entry_id: input.entry_id,
-      job_id: a.job_id,
-      job_code: a.job_code,
-      hours: a.hours || 0,
-      description: a.description || null,
-      sort_order: idx,
-    }));
+    // Drop any job_id the caller can't actually see (crafted/registry call) — never
+    // persist a cross-org job reference on an allocation.
+    const rows = await Promise.all(
+      allocations.map(async (a, idx) => ({
+        time_entry_id: input.entry_id,
+        job_id: await visibleJobIdOrNull(supabase, a.job_id),
+        job_code: a.job_code,
+        hours: a.hours || 0,
+        description: a.description || null,
+        sort_order: idx,
+      })),
+    );
     const { error: allocErr } = await supabase.from("time_allocations").insert(rows);
     if (allocErr) return { ok: false, error: allocErr.message };
   }
@@ -259,14 +277,16 @@ export async function completeAutoClockOut(input: {
 
   const allocations = (input.allocations ?? []).filter((a) => a.job_code || a.hours);
   if (allocations.length) {
-    const rows = allocations.map((a, idx) => ({
-      time_entry_id: input.entry_id,
-      job_id: a.job_id || null,
-      job_code: a.job_code || null,
-      hours: a.hours || 0,
-      description: a.description || null,
-      sort_order: idx,
-    }));
+    const rows = await Promise.all(
+      allocations.map(async (a, idx) => ({
+        time_entry_id: input.entry_id,
+        job_id: await visibleJobIdOrNull(supabase, a.job_id),
+        job_code: a.job_code || null,
+        hours: a.hours || 0,
+        description: a.description || null,
+        sort_order: idx,
+      })),
+    );
     const { error: insErr } = await supabase.from("time_allocations").insert(rows);
     if (insErr) return { ok: false, error: insErr.message };
   }

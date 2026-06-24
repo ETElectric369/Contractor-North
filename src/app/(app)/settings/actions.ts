@@ -286,7 +286,10 @@ export async function importCrew(rows: CrewImportRow[]): Promise<{ ok: boolean; 
       continue;
     }
     const digits = (r.phone || "").replace(/\D/g, "");
-    const password = digits.length >= 8 ? digits : ("deck" + email.split("@")[0].replace(/[^a-z0-9]/g, "")).slice(0, 18).padEnd(8, "1");
+    // Password = the phone digits (Erik's call — simplest for field crew the office texts).
+    // No-phone rows get a RANDOM temp (NOT derived from the email, which was guessable from
+    // a public address); it's shown once on the import screen for the office to hand out.
+    const password = digits.length >= 8 ? digits : "deck-" + crypto.randomUUID().slice(0, 8);
     const role = ["admin", "office", "tech"].includes(r.role || "") ? (r.role as string) : "tech";
     const { data: created, error: authErr } = await admin.auth.admin.createUser({
       email,
@@ -303,6 +306,9 @@ export async function importCrew(rows: CrewImportRow[]): Promise<{ ok: boolean; 
       .update({ org_id: me.org_id, full_name: name, role, hourly_rate: r.hourly_rate ?? null, active: true })
       .eq("id", created.user.id);
     if (profErr) {
+      // Roll back the just-created login so a failed profile attach can't leave an
+      // orphaned auth user with no org.
+      await admin.auth.admin.deleteUser(created.user.id).catch(() => {});
       results.push({ name, email, status: "failed", reason: profErr.message });
       continue;
     }

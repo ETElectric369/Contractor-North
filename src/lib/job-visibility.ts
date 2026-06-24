@@ -13,3 +13,17 @@ export async function visibleJobIdOrNull(
   const { data } = await supabase.from("jobs").select("id").eq("id", jobId).maybeSingle();
   return data ? jobId : null;
 }
+
+/**
+ * Same guard for a job-code template id — return it only when the caller's RLS-scoped
+ * client can see it (a foreign-org template resolves to nothing). Use before writing
+ * jobs.code_template_id so a job can never reference another org's template.
+ */
+export async function visibleTemplateIdOrNull(
+  supabase: { from: (t: string) => any },
+  templateId: string | null | undefined,
+): Promise<string | null> {
+  if (!templateId) return null;
+  const { data } = await supabase.from("job_code_templates").select("id").eq("id", templateId).maybeSingle();
+  return data ? templateId : null;
+}
