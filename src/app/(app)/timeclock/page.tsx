@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { TimeclockPanel } from "./timeclock-panel";
+import { AutoClockoutPrompt } from "./auto-clockout-prompt";
 import { getOrgSettings } from "@/lib/org-settings";
 import { AddEntryButton } from "./add-entry-button";
 import { EditEntryButton } from "../timecards/edit-entry-button";
@@ -74,6 +75,42 @@ export default async function TimeclockPage() {
   const openEntry = (openRes.data as TimeEntry) ?? null;
   const week = (weekRes.data ?? []) as TimeEntry[];
 
+  // Geofence auto-clock-out completion: the tech's most recent auto-closed entry that
+  // still has no code breakdown — prompt them to answer the clock-out questions.
+  let autoPrompt:
+    | { id: string; clock_in: string; clock_out: string; lunch_minutes: number; jobId: string | null; jobLabel: string }
+    | null = null;
+  if (user) {
+    const threeDaysAgo = new Date(Date.now() - 3 * 86_400_000).toISOString();
+    const { data: autoEntry } = await supabase
+      .from("time_entries")
+      .select("id, clock_in, clock_out, lunch_minutes, job_id, job:job_id(job_number, name)")
+      .eq("profile_id", user.id)
+      .eq("source", "auto_gps")
+      .eq("status", "closed")
+      .gte("clock_out", threeDaysAgo)
+      .order("clock_out", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if ((autoEntry as any)?.clock_out) {
+      const { count } = await supabase
+        .from("time_allocations")
+        .select("id", { count: "exact", head: true })
+        .eq("time_entry_id", (autoEntry as any).id);
+      if (!count) {
+        const j = (autoEntry as any).job;
+        autoPrompt = {
+          id: (autoEntry as any).id,
+          clock_in: (autoEntry as any).clock_in,
+          clock_out: (autoEntry as any).clock_out,
+          lunch_minutes: (autoEntry as any).lunch_minutes ?? 0,
+          jobId: (autoEntry as any).job_id ?? null,
+          jobLabel: j ? `${j.job_number} · ${j.name}` : "the jobsite",
+        };
+      }
+    }
+  }
+
   // Recent entries table: staff see the whole crew (with names + edit), everyone
   // else sees their own. Editable inline.
   let recentQ = supabase
@@ -110,6 +147,9 @@ export default async function TimeclockPage() {
 
       <div className="grid gap-6 lg:grid-cols-5">
         <div className="lg:col-span-3">
+          {autoPrompt && (
+            <AutoClockoutPrompt entry={autoPrompt} jobCodes={(codesRes.data ?? []) as JobCode[]} jobs={jobOptions} />
+          )}
           <TimeclockPanel
             openEntry={openEntry}
             jobCodes={(codesRes.data ?? []) as JobCode[]}

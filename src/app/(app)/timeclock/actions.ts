@@ -229,6 +229,52 @@ export async function geoClockOut(gps: GeoPoint | null, atIso: string): Promise<
 }
 
 /**
+ * Finish a geofence auto-clock-out: the tech answers the clock-out questions AFTER the
+ * fact (which code(s) + hours, and whether they took lunch). Self-scoped to the caller's
+ * OWN closed entry — the clock in/out times stay LOCKED at the geofence times; the tech
+ * can only add the code breakdown and confirm lunch (which can only reduce hours).
+ */
+export async function completeAutoClockOut(input: {
+  entry_id: string;
+  lunch_minutes: number;
+  allocations: JobAllocationInput[];
+}): Promise<ClockResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  const { data: entry } = await supabase
+    .from("time_entries")
+    .select("id")
+    .eq("id", input.entry_id)
+    .eq("profile_id", user.id)
+    .eq("status", "closed")
+    .maybeSingle();
+  if (!entry) return { ok: false, error: "Entry not found." };
+
+  const lunch = Math.max(0, Math.round(Number(input.lunch_minutes) || 0));
+  await supabase.from("time_entries").update({ lunch_minutes: lunch }).eq("id", input.entry_id);
+
+  const allocations = (input.allocations ?? []).filter((a) => a.job_code || a.hours);
+  if (allocations.length) {
+    const rows = allocations.map((a, idx) => ({
+      time_entry_id: input.entry_id,
+      job_id: a.job_id || null,
+      job_code: a.job_code || null,
+      hours: a.hours || 0,
+      description: a.description || null,
+      sort_order: idx,
+    }));
+    const { error: insErr } = await supabase.from("time_allocations").insert(rows);
+    if (insErr) return { ok: false, error: insErr.message };
+  }
+  revalidatePath("/timeclock");
+  return { ok: true };
+}
+
+/**
  * Add a past (manual) timecard entry — STAFF ONLY. A tech padding hours with a
  * back-dated manual entry is exactly what mis-billed jobs; techs clock in/out live
  * (rounding the start back to the half hour at most). The office adds corrections

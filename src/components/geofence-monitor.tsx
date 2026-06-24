@@ -97,6 +97,22 @@ export function GeofenceMonitor({
           try {
             navigator.vibrate?.([60, 40, 60]);
           } catch {}
+          // Push the "answer the clock-out questions" prompt — works while the page is
+          // alive even if backgrounded. If notifications aren't granted, the in-app
+          // banner on /timeclock catches them when they reopen. (SMS is a future add,
+          // pending Twilio provisioning.)
+          try {
+            if ("Notification" in window && Notification.permission === "granted") {
+              const n = new Notification("Clocked out — you left the job site", {
+                body: "Tap to log which job codes you worked today.",
+                tag: "geo-clockout",
+              });
+              n.onclick = () => {
+                window.focus();
+                window.location.href = "/timeclock";
+              };
+            }
+          } catch {}
           router.refresh();
         });
       }
