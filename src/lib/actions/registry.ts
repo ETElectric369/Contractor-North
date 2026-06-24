@@ -5,6 +5,7 @@ import { taskActions } from "./entities/task";
 import { inquiryActions } from "./entities/inquiry";
 import { appointmentActions } from "./entities/appointment";
 import { customerActions } from "./entities/customer";
+import { quoteActions } from "./entities/quote";
 import { jobActions } from "./entities/job";
 import { organizeActions } from "./entities/organize";
 import { timeActions } from "./entities/time";
@@ -18,6 +19,7 @@ export const REGISTRY: Record<string, ActionDef> = {
   ...inquiryActions,
   ...appointmentActions,
   ...customerActions,
+  ...quoteActions,
   ...jobActions,
   ...organizeActions,
   ...timeActions,

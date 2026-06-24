@@ -15,6 +15,10 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   "task.assign",
   "customer.create",
   "appointment.create",
+  // Quotes are DRAFTS (reversible, reviewable, not sent, no money moved). The agent must
+  // read the whole quote back + get a spoken "yes" before calling it — that conversational
+  // confirm is enforced in the tool description, and saveQuote is staff-gated + audited.
+  "quote.create",
 ]);
 
 // Registry names are group.verb (a dot); Anthropic tool names can't contain dots.

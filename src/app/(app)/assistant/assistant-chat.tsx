@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Send, Sparkles, Loader2 } from "lucide-react";
+import { Send, Sparkles, Loader2, Mic, MicOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
+import { speakSmart, unlockAudio } from "@/lib/tts";
 
 interface Msg {
   role: "user" | "assistant";
@@ -11,17 +12,28 @@ interface Msg {
 }
 
 const SUGGESTIONS = [
+  "Start a quote — I'll tell you what's on it.",
   "What's on the schedule this week?",
-  "Show me my open quotes and their totals.",
   "Which invoices are still unpaid?",
-  "Draft a material list for a 200A residential panel upgrade.",
+  "Show me my open quotes and their totals.",
 ];
 
 export function AssistantChat() {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
+  const [listening, setListening] = useState(false);
+  const [voiceOn, setVoiceOn] = useState(false); // is the mic available
   const scrollRef = useRef<HTMLDivElement>(null);
+  const recogRef = useRef<any>(null);
+  // True while we're in a spoken back-and-forth: each reply is read aloud and the mic
+  // re-opens for the next turn. Tapping the mic off, or typing, leaves voice mode.
+  const voiceModeRef = useRef(false);
+
+  useEffect(() => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    setVoiceOn(Boolean(SR));
+  }, []);
 
   function scrollToBottom() {
     requestAnimationFrame(() =>
@@ -29,9 +41,10 @@ export function AssistantChat() {
     );
   }
 
-  async function send(text: string) {
+  async function send(text: string, viaVoice = false) {
     const content = text.trim();
     if (!content || streaming) return;
+    if (!viaVoice) voiceModeRef.current = false; // typing leaves voice mode
 
     const next: Msg[] = [...messages, { role: "user", content }];
     setMessages(next);
@@ -58,10 +71,12 @@ export function AssistantChat() {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
 
+      let full = ""; // the complete reply, captured locally to speak once at the end
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         const chunk = decoder.decode(value, { stream: true });
+        full += chunk;
         setMessages((m) => {
           const copy = [...m];
           copy[copy.length - 1] = {
@@ -72,6 +87,14 @@ export function AssistantChat() {
         });
         scrollToBottom();
       }
+
+      // If this turn came from the mic, read the WHOLE reply aloud (once), then re-open
+      // the mic for the next turn so it flows like a conversation. (Typed turns stay
+      // silent — there's no gesture to unlock audio on iOS, and it'd surprise a reader.)
+      if (viaVoice) {
+        const clean = full.replace(/\s*\[[^\]]*\]\s*$/, "").trim(); // drop trailing [notes]
+        if (clean) speakSmart(clean, () => { if (voiceModeRef.current) startMic(); });
+      }
     } catch (e: any) {
       setMessages((m) => [
         ...m,
@@ -81,6 +104,48 @@ export function AssistantChat() {
       setStreaming(false);
       scrollToBottom();
     }
+  }
+
+  // Open the recognizer; the final transcript is sent as a spoken turn.
+  function startMic() {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) return;
+    try {
+      const r = new SR();
+      r.continuous = false;
+      r.interimResults = false;
+      r.lang = "en-US";
+      r.onresult = (e: any) => {
+        let text = "";
+        for (let i = e.resultIndex; i < e.results.length; i++) text += e.results[i][0].transcript;
+        text = text.trim();
+        if (text) send(text, true);
+      };
+      r.onerror = () => setListening(false);
+      r.onend = () => setListening(false);
+      r.start();
+      recogRef.current = r;
+      setListening(true);
+    } catch {
+      setListening(false);
+    }
+  }
+
+  function toggleMic() {
+    if (listening) {
+      voiceModeRef.current = false; // tapping off ends the spoken conversation
+      try { recogRef.current?.stop(); } catch {}
+      setListening(false);
+      return;
+    }
+    // Prime iOS audio INSIDE this tap so the reply can be spoken after the round-trip.
+    try {
+      const synth = window.speechSynthesis;
+      if (synth) { const w = new SpeechSynthesisUtterance(" "); w.volume = 0; synth.speak(w); }
+    } catch {}
+    unlockAudio();
+    voiceModeRef.current = true;
+    startMic();
   }
 
   // When opened with ?q= (e.g. "Ask the assistant" from the command bar),
@@ -110,7 +175,8 @@ export function AssistantChat() {
             </h3>
             <p className="mt-1 max-w-sm text-sm text-slate-500">
               I can pull up your jobs, quotes, invoices, schedule, and who&apos;s
-              clocked in — plus help with take-offs, scopes, and code questions.
+              clocked in, draft quotes &amp; take-offs, and help with scopes and code.
+              {voiceOn && " Tap the mic and just talk — I'll read replies back."}
             </p>
             <div className="mt-5 grid w-full max-w-lg gap-2 sm:grid-cols-2">
               {SUGGESTIONS.map((s) => (
@@ -167,6 +233,20 @@ export function AssistantChat() {
             placeholder="Ask the assistant…  (Enter to send, Shift+Enter for newline)"
             className="max-h-40 min-h-[44px] flex-1 resize-none"
           />
+          {voiceOn && (
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              onClick={toggleMic}
+              disabled={streaming}
+              aria-label={listening ? "Stop listening" : "Talk to the assistant"}
+              title={listening ? "Listening… tap to stop" : "Tap and talk"}
+              className={listening ? "animate-pulse text-red-600" : "text-slate-500"}
+            >
+              {listening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+            </Button>
+          )}
           <Button type="submit" size="icon" disabled={streaming || !input.trim()}>
             {streaming ? (
               <Loader2 className="h-4 w-4 animate-spin" />
