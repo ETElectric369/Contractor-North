@@ -26,6 +26,7 @@ import { EditMemberButton } from "./edit-member-button";
 import { ImportCustomersButton } from "../crm/import-customers-button";
 import { AvatarUpload } from "./avatar-upload";
 import { AddEmployeeButton } from "./add-employee-button";
+import { CrewImportButton } from "./crew-import-button";
 import { adminConfigured } from "@/lib/supabase/admin";
 import { gcalConfigured } from "@/lib/google-calendar";
 import { GcalCard } from "./gcal-card";
@@ -158,7 +159,10 @@ export default async function SettingsPage({
               <div className="mb-2 text-xs text-slate-500">
                 Or create their login yourself and hand them the password — no email needed:
               </div>
-              <AddEmployeeButton configured={adminConfigured()} />
+              <div className="flex flex-wrap items-center gap-2">
+                <AddEmployeeButton configured={adminConfigured()} />
+                {adminConfigured() && <CrewImportButton />}
+              </div>
             </div>
           </Section>
         )}

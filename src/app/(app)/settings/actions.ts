@@ -257,6 +257,61 @@ export async function createEmployee(input: {
   return { ok: true };
 }
 
+export type CrewImportRow = { full_name: string; email: string; phone?: string; role?: string; hourly_rate?: number | null };
+export type CrewImportResult = { name: string; email: string; password?: string; status: "created" | "failed"; reason?: string };
+
+/** Bulk-create employees from a roster (the migration importer). Each password is the
+ *  employee's PHONE DIGITS (>=8); a no-phone row gets a temp default to reset. Owner/
+ *  admin only; needs SUPABASE_SERVICE_ROLE_KEY. Returns the login+password per row so
+ *  the office can hand them out. Best-effort per row — one failure doesn't stop the rest. */
+export async function importCrew(rows: CrewImportRow[]): Promise<{ ok: boolean; error?: string; results?: CrewImportResult[] }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+  const { data: me } = await supabase.from("profiles").select("role, org_id").eq("id", user.id).maybeSingle();
+  if (!me || !["owner", "admin"].includes(me.role)) return { ok: false, error: "Not allowed." };
+  if (!me.org_id) return { ok: false, error: "No organization." };
+  const { adminConfigured, createAdminClient } = await import("@/lib/supabase/admin");
+  if (!adminConfigured()) return { ok: false, error: "Crew import needs SUPABASE_SERVICE_ROLE_KEY set on the server (it is, in production)." };
+  const admin = createAdminClient();
+
+  const results: CrewImportResult[] = [];
+  for (const r of (rows ?? []).slice(0, 200)) {
+    const name = (r.full_name || "").trim();
+    const email = (r.email || "").trim().toLowerCase();
+    if (!name || !email.includes("@")) {
+      results.push({ name: name || email || "(blank)", email, status: "failed", reason: "Missing name or email." });
+      continue;
+    }
+    const digits = (r.phone || "").replace(/\D/g, "");
+    const password = digits.length >= 8 ? digits : ("deck" + email.split("@")[0].replace(/[^a-z0-9]/g, "")).slice(0, 18).padEnd(8, "1");
+    const role = ["admin", "office", "tech"].includes(r.role || "") ? (r.role as string) : "tech";
+    const { data: created, error: authErr } = await admin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: { full_name: name },
+    });
+    if (authErr || !created?.user) {
+      results.push({ name, email, status: "failed", reason: /already/i.test(authErr?.message ?? "") ? "Already has a login." : authErr?.message ?? "Could not create login." });
+      continue;
+    }
+    const { error: profErr } = await admin
+      .from("profiles")
+      .update({ org_id: me.org_id, full_name: name, role, hourly_rate: r.hourly_rate ?? null, active: true })
+      .eq("id", created.user.id);
+    if (profErr) {
+      results.push({ name, email, status: "failed", reason: profErr.message });
+      continue;
+    }
+    results.push({ name, email, password, status: "created" });
+  }
+  revalidatePath("/settings");
+  return { ok: true, results };
+}
+
 /** Push upcoming scheduled jobs (next 60 days) to the connected Google
  *  Calendar — updates existing events, creates the rest. */
 export async function syncScheduleToGoogle(): Promise<Result & { synced?: number }> {
