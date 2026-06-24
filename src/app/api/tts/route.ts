@@ -33,7 +33,11 @@ export async function POST(req: Request) {
         voice_settings: { stability: 0.45, similarity_boost: 0.75, style: 0.15, use_speaker_boost: true, speed: 1.0 },
       }),
     });
-    if (!r.ok || !r.body) return new Response("TTS failed", { status: 502 });
+    if (!r.ok || !r.body) {
+      const detail = await r.text().catch(() => "");
+      console.error("[tts] ElevenLabs failed:", r.status, detail.slice(0, 300));
+      return new Response("TTS failed", { status: 502 });
+    }
     return new Response(r.body, { headers: { "Content-Type": "audio/mpeg", "Cache-Control": "no-store" } });
   }
 
@@ -52,7 +56,11 @@ export async function POST(req: Request) {
         response_format: "mp3",
       }),
     });
-    if (!r.ok || !r.body) return new Response("TTS failed", { status: 502 });
+    if (!r.ok || !r.body) {
+      const detail = await r.text().catch(() => "");
+      console.error("[tts] OpenAI failed:", r.status, detail.slice(0, 300));
+      return new Response("TTS failed", { status: 502 });
+    }
     return new Response(r.body, { headers: { "Content-Type": "audio/mpeg", "Cache-Control": "no-store" } });
   }
 
