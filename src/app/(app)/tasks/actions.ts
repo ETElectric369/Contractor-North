@@ -87,7 +87,16 @@ export async function updateTask(
   if (patch.category !== undefined) clean.category = patch.category;
   if (patch.due_date !== undefined) clean.due_date = patch.due_date || null;
   if (patch.priority !== undefined) clean.priority = patch.priority;
-  if (patch.assigned_to !== undefined) clean.assigned_to = patch.assigned_to || null;
+  if (patch.assigned_to !== undefined) {
+    // Persist an assignee only if they're actually in the caller's org (the RLS-scoped
+    // profiles read returns nothing for a foreign/crafted id) — never a cross-org id.
+    let assignee: string | null = patch.assigned_to || null;
+    if (assignee) {
+      const { data: p } = await supabase.from("profiles").select("id").eq("id", assignee).maybeSingle();
+      assignee = p ? assignee : null;
+    }
+    clean.assigned_to = assignee;
+  }
   if (patch.notes !== undefined) clean.notes = patch.notes?.trim() || null;
   if (patch.tags !== undefined) {
     const tags = (patch.tags ?? []).map((t) => t.trim()).filter(Boolean);

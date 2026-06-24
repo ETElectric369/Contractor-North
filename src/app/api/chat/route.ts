@@ -98,6 +98,10 @@ export async function POST(req: Request) {
     async start(controller) {
       const emit = (t: string) => controller.enqueue(encoder.encode(t));
       const toolsUsed = new Set<string>();
+      // Cap agent writes per request so a prompt-injection in tool-returned data can't
+      // mass-create — bounds the blast radius of the tier-1 write exposure.
+      const MAX_WRITES = 3;
+      let writeCount = 0;
       try {
         for (let round = 0; round < MAX_ROUNDS; round++) {
           const turn = client.messages.stream({
@@ -125,12 +129,17 @@ export async function POST(req: Request) {
             const actionName = resolveWrite(tu.name);
             let out: string;
             if (actionName) {
-              const res = await executeAction(actionName, tu.input, { source: "agent" });
-              out = JSON.stringify({
-                ok: res.ok,
-                error: res.error ?? null,
-                ...(res.needsConfirm ? { needsConfirm: true, note: "This needs the user to confirm it themselves — tell them you can't complete it from here." } : {}),
-              });
+              if (writeCount >= MAX_WRITES) {
+                out = JSON.stringify({ ok: false, error: "That's enough changes for one go — ask me to continue if you want more." });
+              } else {
+                writeCount++;
+                const res = await executeAction(actionName, tu.input, { source: "agent" });
+                out = JSON.stringify({
+                  ok: res.ok,
+                  error: res.error ?? null,
+                  ...(res.needsConfirm ? { needsConfirm: true, note: "This needs the user to confirm it themselves — tell them you can't complete it from here." } : {}),
+                });
+              }
             } else {
               out = await runDataTool(tu.name, tu.input, supabase);
             }
