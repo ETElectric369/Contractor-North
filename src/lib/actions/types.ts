@@ -61,6 +61,9 @@ export interface ActionDef<I = any> {
   effect: ActionEffect;
   /** Forces a confirm step for the agent / a confirm modal in the UI. */
   confirm?: ActionConfirm;
+  /** Money-MOVEMENT (pay / refund / send funds). Requires the unforgeable WebAuthn
+   *  step-up (C2) from the agent/voice — a cost RECORD (confirm:"financial") does not. */
+  stepUp?: boolean;
   /** Risk tier (0-3). Optional — actionRisk() derives a safe default from
    *  effect+confirm. Set explicitly to escalate (e.g. a tier-3 human-only action). */
   risk?: ActionRisk;

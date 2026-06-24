@@ -31,16 +31,28 @@ export async function stepUpGate(
     .from("webauthn_credentials")
     .select("id, credential_id, public_key, counter, transports")
     .eq("user_id", userId);
-  if (!creds || creds.length === 0) return { kind: "skip" }; // not enrolled → confirm-only fallback
+  // Step-up is MANDATORY for money movement — a no-passkey caller is BLOCKED (never waved
+  // through to a spoken-yes confirm), so the unforgeable invariant can't be opted out of.
+  if (!creds || creds.length === 0) {
+    return {
+      kind: "block",
+      result: { ok: false, error: "Enroll Face ID (Settings → Profile → Sign-in & security) before doing this by voice or assistant." },
+    };
+  }
 
   const hash = await actionHash(def.name, input);
 
   if (assertion) {
     const a = assertion as { id?: string };
+    // ATOMIC single-use claim: delete-RETURNING so two concurrent replays of the same
+    // assertion can't both pass before a separate delete commits (the counter is no
+    // replay defense for platform passkeys that report counter=0). The second caller's
+    // claim returns no row → blocked.
     const { data: ch } = await supabase
       .from("webauthn_challenges")
-      .select("challenge, purpose, action_hash, created_at")
+      .delete()
       .eq("user_id", userId)
+      .select("challenge, purpose, action_hash, created_at")
       .maybeSingle();
     if (!ch || ch.purpose !== "stepup" || ch.action_hash !== hash) {
       return { kind: "block", result: { ok: false, error: "That confirmation didn't match this action." } };
@@ -72,12 +84,12 @@ export async function stepUpGate(
     }
     if (!v.verified) return { kind: "block", result: { ok: false, error: "Could not verify your passkey." } };
 
-    // Single-use: bump the signature counter (replay defense) + drop the challenge.
+    // The challenge was already consumed by the atomic claim above. Bump the counter for
+    // authenticators that report one (no-op for counter=0 platform passkeys).
     await supabase
       .from("webauthn_credentials")
       .update({ counter: v.authenticationInfo.newCounter, last_used_at: new Date().toISOString() })
       .eq("id", cred.id);
-    await supabase.from("webauthn_challenges").delete().eq("user_id", userId);
     return { kind: "pass" };
   }
 

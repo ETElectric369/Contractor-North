@@ -24,9 +24,11 @@ export function needsConsent(
   return confirmRequired && source !== "ui" && !confirmed;
 }
 
-/** Whether an action is "money-grade" and therefore needs the WebAuthn step-up (C2) when
- *  the agent/voice invokes it and the caller has a passkey: a financial confirm or an
- *  explicit tier-2+. Destructive (delete) is confirm-only, not step-up. Pure. */
-export function requiresStepUp(def: Pick<ActionDef, "confirm" | "risk">): boolean {
-  return def.confirm === "financial" || (def.risk ?? 0) >= 2;
+/** Whether an action needs the unforgeable WebAuthn step-up (C2): money MOVEMENT
+ *  (an explicit `stepUp` flag — pay / refund / send funds) or a tier-3 action. A cost
+ *  RECORD (confirm:"financial", e.g. bill.create) is confirm-only, NOT step-up; deletes
+ *  are confirm-only too. When this is true, step-up is MANDATORY for the agent/voice
+ *  (an un-enrolled caller is blocked, not waved through). Pure. */
+export function requiresStepUp(def: Pick<ActionDef, "confirm" | "risk" | "stepUp">): boolean {
+  return def.stepUp === true || (def.risk ?? 0) >= 3;
 }

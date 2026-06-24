@@ -52,18 +52,19 @@ describe("needsConsent — Phase C confirm gate", () => {
   });
 });
 
-describe("requiresStepUp — Phase C2 (which actions need the Face ID tap)", () => {
-  it("financial actions require step-up", () => {
-    expect(requiresStepUp({ confirm: "financial" })).toBe(true);
+describe("requiresStepUp — Phase C2 (only money MOVEMENT needs the Face ID tap)", () => {
+  it("an explicit money-movement action (stepUp) requires step-up", () => {
+    expect(requiresStepUp({ stepUp: true })).toBe(true);
   });
-  it("explicit tier-2+ requires step-up", () => {
-    expect(requiresStepUp({ risk: 2 })).toBe(true);
+  it("a tier-3 action requires step-up", () => {
     expect(requiresStepUp({ risk: 3 })).toBe(true);
   });
-  it("destructive is confirm-only — NOT step-up (deleting a task shouldn't need Face ID)", () => {
-    expect(requiresStepUp({ confirm: "destructive" })).toBe(false);
+  it("a cost RECORD (confirm:financial) is confirm-only — NOT step-up", () => {
+    expect(requiresStepUp({ confirm: "financial" })).toBe(false);
+    expect(requiresStepUp({ confirm: "financial", risk: 2 })).toBe(false);
   });
-  it("ordinary writes / reads never need step-up", () => {
+  it("destructive + ordinary writes/reads never need step-up", () => {
+    expect(requiresStepUp({ confirm: "destructive" })).toBe(false);
     expect(requiresStepUp({})).toBe(false);
     expect(requiresStepUp({ risk: 1 })).toBe(false);
   });

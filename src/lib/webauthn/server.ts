@@ -4,6 +4,13 @@ import { headers } from "next/headers";
  *  AND prod without a hardcoded domain. rpID = the bare host (passkeys bind to it);
  *  origin = the full scheme+host the browser will assert. */
 export async function getRpConfig(): Promise<{ rpID: string; rpName: string; origin: string }> {
+  // Prefer a pinned, host-independent config in prod (set WEBAUTHN_RP_ID + WEBAUTHN_ORIGIN
+  // to the real address bar users see) so a spoofed Host header can't shift the RP. Fall
+  // back to deriving from the request only when unset (dev / preview).
+  const envId = process.env.WEBAUTHN_RP_ID;
+  const envOrigin = process.env.WEBAUTHN_ORIGIN;
+  if (envId && envOrigin) return { rpID: envId, rpName: "Contractor North", origin: envOrigin };
+
   const h = await headers();
   const host = h.get("host") ?? "localhost:3000";
   const proto = h.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
