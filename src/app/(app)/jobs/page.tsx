@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { NewJobButton } from "../schedule/new-job-button";
+import { JobImportButton } from "./job-import-button";
 import type { Job } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -24,10 +25,15 @@ export default async function JobsPage({
     .order("created_at", { ascending: false });
   if (status) query = query.eq("status", status);
 
-  const [{ data: jobsData }, { data: customers }] = await Promise.all([
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const [{ data: jobsData }, { data: customers }, { data: me }] = await Promise.all([
     query,
     supabase.from("customers").select("id, name").order("name"),
+    user ? supabase.from("profiles").select("role").eq("id", user.id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
+  const isStaff = ["owner", "admin", "office"].includes((me as { role?: string } | null)?.role ?? "");
   const jobs = (jobsData ?? []) as (Job & { customers: { name: string } | null })[];
 
   // Default (unfiltered) view: active jobs up top, completed/invoiced sink to the
@@ -44,7 +50,10 @@ export default async function JobsPage({
   return (
     <div>
       <PageHeader title="Jobs" description="All jobs across the business.">
-        <NewJobButton customers={customers ?? []} />
+        <div className="flex items-center gap-2">
+          {isStaff && <JobImportButton />}
+          <NewJobButton customers={customers ?? []} />
+        </div>
       </PageHeader>
 
       <div className="mb-4 flex flex-wrap gap-1.5">

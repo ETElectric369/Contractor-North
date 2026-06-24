@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { emptyToNull } from "@/lib/forms";
 import { visibleJobIdOrNull } from "@/lib/job-visibility";
+import { requireStaff } from "@/lib/staff-guard";
 import {
   createInvoiceFromQuote,
   createBlankInvoice,
@@ -343,4 +344,122 @@ export async function deleteDocument(
   if (error) return { ok: false, error: error.message };
   revalidatePath(`/jobs/${jobId}`);
   return { ok: true };
+}
+
+export type JobImportRow = {
+  customer: string;
+  job_name: string;
+  value?: number;
+  status?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  email?: string;
+  phone?: string;
+};
+export type JobImportResult = { name: string; status: "created" | "failed"; reason?: string };
+
+const JOB_STATUSES = ["estimate", "lead", "quoted", "scheduled", "in_progress", "on_hold", "complete", "invoiced", "cancelled"];
+
+/** Bulk-import jobs from a roster (migration importer): find-or-create the customer,
+ *  create the job, and record its contract value as an ACCEPTED quote so the job's
+ *  Contract / Invoiced / Paid math works. Staff only; best-effort per row. */
+export async function importJobs(
+  rows: JobImportRow[],
+): Promise<{ ok: boolean; error?: string; results?: JobImportResult[] }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { supabase, userId } = ctx;
+
+  const results: JobImportResult[] = [];
+  for (const r of (rows ?? []).slice(0, 200)) {
+    const cname = (r.customer || "").trim();
+    const jobName = (r.job_name || "").trim() || cname;
+    if (!cname && !jobName) {
+      results.push({ name: "(blank)", status: "failed", reason: "Missing customer and job name." });
+      continue;
+    }
+
+    // Find-or-create the customer (match by name, narrowed by email when given) — RLS
+    // already scopes this to the caller's org.
+    let customerId: string | null = null;
+    if (cname) {
+      const email = (r.email || "").trim().toLowerCase();
+      let q = supabase.from("customers").select("id").ilike("name", cname).limit(1);
+      if (email) q = q.ilike("email", email);
+      const { data: hit } = await q.maybeSingle();
+      if (hit) customerId = hit.id;
+      else {
+        const { data: nc, error: ce } = await supabase
+          .from("customers")
+          .insert({
+            name: cname,
+            email: r.email?.trim() || null,
+            phone: r.phone?.trim() || null,
+            address: r.address?.trim() || null,
+            city: r.city?.trim() || null,
+            state: r.state?.trim() || null,
+            zip: r.zip?.trim() || null,
+            status: "active",
+            created_by: userId,
+          })
+          .select("id")
+          .single();
+        if (ce) {
+          results.push({ name: jobName, status: "failed", reason: ce.message });
+          continue;
+        }
+        customerId = nc.id;
+      }
+    }
+
+    const status = JOB_STATUSES.includes((r.status || "").trim()) ? (r.status as string).trim() : "in_progress";
+    const { data: job, error: je } = await supabase
+      .from("jobs")
+      .insert({
+        name: jobName,
+        customer_id: customerId,
+        status,
+        address: r.address?.trim() || null,
+        city: r.city?.trim() || null,
+        state: r.state?.trim() || null,
+        zip: r.zip?.trim() || null,
+        created_by: userId,
+      })
+      .select("id, job_number")
+      .single();
+    if (je) {
+      results.push({ name: jobName, status: "failed", reason: je.message });
+      continue;
+    }
+
+    // Contract value -> accepted quote + a single line item.
+    const value = Number(r.value) || 0;
+    if (value > 0) {
+      const { data: quote } = await supabase
+        .from("quotes")
+        .insert({
+          job_id: job.id,
+          customer_id: customerId,
+          status: "accepted",
+          title: "Imported contract",
+          subtotal: value,
+          tax: 0,
+          total: value,
+          created_by: userId,
+        })
+        .select("id")
+        .single();
+      if (quote) {
+        await supabase
+          .from("quote_line_items")
+          .insert({ quote_id: quote.id, description: jobName || "Contract", quantity: 1, unit: "ea", unit_price: value, sort_order: 0 });
+      }
+    }
+    results.push({ name: `${job.job_number} · ${jobName}`, status: "created" });
+  }
+  revalidatePath("/jobs");
+  revalidatePath("/crm");
+  return { ok: true, results };
 }
