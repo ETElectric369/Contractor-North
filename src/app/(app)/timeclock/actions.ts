@@ -105,6 +105,7 @@ export async function clockOut(input: {
   auto?: boolean;
   miles?: number;
   allocations?: JobAllocationInput[];
+  at?: string; // explicit clock-out time (ISO) — used by the geofence auto clock-out
 }): Promise<ClockResult> {
   const supabase = await createClient();
   const {
@@ -112,10 +113,22 @@ export async function clockOut(input: {
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
 
+  // Clock-out time defaults to now; `at` (the geofence "time they left") is honored
+  // only if it's not in the future and not before clock-in (never negative hours).
+  let clockOutIso = new Date().toISOString();
+  if (input.at) {
+    const atMs = Date.parse(input.at);
+    if (!isNaN(atMs) && atMs <= Date.now() + 60_000) {
+      const { data: e } = await supabase.from("time_entries").select("clock_in").eq("id", input.entry_id).maybeSingle();
+      const ciMs = e?.clock_in ? Date.parse(e.clock_in) : 0;
+      clockOutIso = new Date(Math.max(atMs, ciMs + 60_000)).toISOString();
+    }
+  }
+
   const { error } = await supabase
     .from("time_entries")
     .update({
-      clock_out: new Date().toISOString(),
+      clock_out: clockOutIso,
       lunch_minutes: input.lunch_minutes || 0,
       notes: input.notes || null,
       gps_out: input.gps,
@@ -185,6 +198,33 @@ export async function clockOutCurrent(input: {
     notes: input.notes ?? "",
     gps: null,
     miles: input.miles,
+  });
+}
+
+/** Geofence auto clock-out — the GeofenceMonitor calls this when the employee has left
+ *  the spot they clocked in at. Clocks out the caller's OPEN entry at `atIso` (the time
+ *  they were last at the site), stamps the GPS, and marks the source 'auto_gps'. The
+ *  entry's note is preserved. */
+export async function geoClockOut(gps: GeoPoint | null, atIso: string): Promise<ClockResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+  const { data: open } = await supabase
+    .from("time_entries")
+    .select("id, notes")
+    .eq("profile_id", user.id)
+    .eq("status", "open")
+    .maybeSingle();
+  if (!open) return { ok: false, error: "Not clocked in." };
+  return clockOut({
+    entry_id: (open as any).id,
+    lunch_minutes: 0,
+    notes: (open as any).notes ?? "",
+    gps,
+    auto: true,
+    at: atIso,
   });
 }
 

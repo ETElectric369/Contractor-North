@@ -35,6 +35,11 @@ export interface OrgSettings {
   labor_law_breaks: boolean; // require break confirmation at clock-out (CA)
   auto_lunch_30: boolean; // auto-apply 30-min unpaid lunch on shifts > 5h
   timecard_supervisor_id: string; // who approves timecards ("" = org owner)
+  /** Geofence auto clock-out: when a clocked-in employee leaves the spot they clocked
+   *  in at by more than the radius (for a grace period), clock them out — AT the time
+   *  they left, so a forgotten clock-out can't over-bill. Default on. */
+  geofence_logout: boolean;
+  geofence_radius_m: number; // meters from the clock-in point before auto clock-out
   /** Payroll cadence + the anchor date a biweekly/weekly cycle counts from. */
   pay_schedule: "weekly" | "biweekly" | "semimonthly" | "monthly";
   pay_anchor: string; // "YYYY-MM-DD" — start of a reference pay period
@@ -89,6 +94,8 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   labor_law_breaks: false,
   auto_lunch_30: false,
   timecard_supervisor_id: "",
+  geofence_logout: true,
+  geofence_radius_m: 300,
   pay_schedule: "biweekly",
   pay_anchor: "2026-01-05", // a Monday; biweekly cycles cascade from here
 

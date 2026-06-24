@@ -9,7 +9,8 @@ import { hasActiveAccess, isCompedOrg } from "@/lib/subscription";
 import { getOrgSettings } from "@/lib/org-settings";
 import { getActionItemsCount } from "@/lib/action-items/query";
 import { todayStrInTz } from "@/lib/tz";
-import type { Profile } from "@/lib/types";
+import { GeofenceMonitor } from "@/components/geofence-monitor";
+import type { Profile, GeoPoint } from "@/lib/types";
 
 /** "#1b9488" → "27 148 136" (the space-separated rgb our --glass-tint expects). */
 function hexToRgbTriplet(hex: string): string {
@@ -50,6 +51,21 @@ export default async function AppLayout({
     .eq("id", profile.org_id)
     .maybeSingle();
 
+  const settings = getOrgSettings((org as any)?.settings);
+
+  // Geofence auto clock-out: if the user is on the clock, load the open entry's
+  // clock-in GPS so the global monitor can watch whether they leave the job site.
+  let openEntry: { id: string; gps_in: GeoPoint; clock_in: string } | null = null;
+  if (settings.geofence_logout) {
+    const { data: oe } = await supabase
+      .from("time_entries")
+      .select("id, gps_in, clock_in")
+      .eq("profile_id", user.id)
+      .eq("status", "open")
+      .maybeSingle();
+    if (oe && (oe as any).gps_in) openEntry = oe as any;
+  }
+
   // Billing gate (only when Stripe is configured): trial expired & not subscribed.
   // The operator's own house org (COMPED_ORG_IDS) is never paywalled.
   if (billingEnabled && org && !hasActiveAccess(org as any) && !isCompedOrg(profile.org_id)) {
@@ -60,11 +76,11 @@ export default async function AppLayout({
   const brand = org?.brand_color || "#0b57c4";
   const branding = { name: org?.name ?? null, logo: org?.logo_url ?? null };
   // The glass tint is a separate per-org chrome accent (documents keep brand_color).
-  const glassTint = hexToRgbTriplet(getOrgSettings((org as any)?.settings).glass_tint);
+  const glassTint = hexToRgbTriplet(settings.glass_tint);
 
   // The unified "Needs action" inbox count, surfaced on the dock Home icon (it
   // already includes the organize/needs-review captures, so no separate badge).
-  const tz = getOrgSettings((org as any)?.settings).timezone || "America/Los_Angeles";
+  const tz = settings.timezone || "America/Los_Angeles";
   const isStaff = ["owner", "admin", "office"].includes(profile.role);
   const needsAction = await getActionItemsCount({
     todayStr: todayStrInTz(tz),
@@ -94,6 +110,14 @@ export default async function AppLayout({
       </div>
       <CommandBar />
       <BottomNav role={profile.role} />
+      {openEntry && (
+        <GeofenceMonitor
+          entryId={openEntry.id}
+          gpsIn={openEntry.gps_in}
+          clockInIso={openEntry.clock_in}
+          radiusM={settings.geofence_radius_m}
+        />
+      )}
     </div>
   );
 }

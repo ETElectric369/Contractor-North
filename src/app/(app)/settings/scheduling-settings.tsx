@@ -21,6 +21,8 @@ export function SchedulingSettings({
   const [weekStart, setWeekStart] = useState(settings.week_start);
   const [method, setMethod] = useState(settings.time_tracking_method);
   const [autoLunch, setAutoLunch] = useState(settings.auto_lunch_30);
+  const [geofence, setGeofence] = useState(settings.geofence_logout);
+  const [radius, setRadius] = useState(settings.geofence_radius_m);
   const [supervisor, setSupervisor] = useState(settings.timecard_supervisor_id);
   const [paySchedule, setPaySchedule] = useState(settings.pay_schedule);
   const [payAnchor, setPayAnchor] = useState(settings.pay_anchor);
@@ -38,6 +40,8 @@ export function SchedulingSettings({
         week_start: weekStart,
         time_tracking_method: method,
         auto_lunch_30: autoLunch,
+        geofence_logout: geofence,
+        geofence_radius_m: Math.max(50, Math.round(Number(radius) || 300)),
         timecard_supervisor_id: supervisor,
         pay_schedule: paySchedule,
         pay_anchor: payAnchor,
@@ -89,6 +93,22 @@ export function SchedulingSettings({
           <input type="checkbox" checked={autoLunch} onChange={(e) => setAutoLunch(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand" />
           <span>Pre-check the 30-min unpaid lunch on shifts over 5 hours (crew still confirms).</span>
         </label>
+      </div>
+
+      <div className="space-y-2 border-t border-slate-100 pt-4">
+        <div className="text-sm font-medium text-slate-700">Geofence auto clock-out</div>
+        <label className="flex items-start gap-2 text-sm text-slate-600">
+          <input type="checkbox" checked={geofence} onChange={(e) => setGeofence(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand" />
+          <span>Clock an employee out when they leave the job they clocked into — at the time they left, so a forgotten clock-out can&apos;t over-bill.</span>
+        </label>
+        {geofence && (
+          <div className="flex items-center gap-2 pl-6">
+            <Label htmlFor="geo-r" className="text-xs text-slate-500">Leave radius (meters)</Label>
+            <Input id="geo-r" type="number" min={50} step={50} value={radius} onChange={(e) => setRadius(Number(e.target.value))} className="h-8 w-24" />
+            <span className="text-xs text-slate-400">~{Math.round((Number(radius) || 300) * 3.28)} ft</span>
+          </div>
+        )}
+        <p className="text-xs text-slate-400">Runs while the app is open on the employee&apos;s phone. (True background tracking needs the native app.)</p>
       </div>
 
       <div className="space-y-1.5 border-t border-slate-100 pt-4">
