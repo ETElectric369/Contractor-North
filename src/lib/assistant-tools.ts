@@ -277,18 +277,20 @@ export async function runDataTool(
               `name.ilike.%${s}%,company_name.ilike.%${s}%,phone.ilike.%${s}%,email.ilike.%${s}%`,
             );
         }
+        const searched = !!sanitize(input.search ?? "");
         const { data, error } = await q;
         if (error) throw error;
+        // Data minimization (framework §7): the model gets full contact details ONLY on a
+        // TARGETED lookup (a search the user asked for — "what's Jane's number"). A broad
+        // list returns name + locality only, so we don't bulk-ship phone/email to the
+        // provider just to answer "how many customers do I have".
         return JSON.stringify({
           count: data?.length ?? 0,
-          customers: (data ?? []).map((c: any) => ({
-            name: c.name,
-            company: c.company_name,
-            phone: c.phone,
-            email: c.email,
-            city: c.city,
-            state: c.state,
-          })),
+          customers: (data ?? []).map((c: any) =>
+            searched
+              ? { name: c.name, company: c.company_name, phone: c.phone, email: c.email, city: c.city, state: c.state }
+              : { name: c.name, company: c.company_name, city: c.city, state: c.state },
+          ),
         });
       }
 

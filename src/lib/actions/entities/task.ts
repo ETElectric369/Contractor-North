@@ -1,9 +1,19 @@
 import { z } from "zod";
-import { toggleTask, updateTask, deleteTask } from "@/app/(app)/tasks/actions";
+import { createTask, toggleTask, updateTask, deleteTask } from "@/app/(app)/tasks/actions";
 import type { ActionDef } from "../types";
 
 // Seeded so the dispatch.ts inbox switchboard can migrate onto the registry next.
 export const taskActions: Record<string, ActionDef> = {
+  "task.create": {
+    name: "task.create",
+    group: "task",
+    label: "Add task",
+    description: "Create a task with a title and category (office | operations | sales).",
+    input: z.object({ title: z.string().min(1), category: z.enum(["office", "operations", "sales"]).default("operations") }),
+    auth: "any",
+    effect: "write",
+    handler: (i) => createTask({ title: i.title, category: i.category }),
+  },
   "task.complete": {
     name: "task.complete",
     group: "task",

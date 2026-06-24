@@ -152,8 +152,9 @@ ${jobList}`,
       const title = String(p.title ?? "").trim();
       if (!title) return { ok: false, message: "What should the task say?" };
       const category = ["office", "operations", "sales"].includes(p.category) ? p.category : "operations";
-      const { error } = await supabase.from("tasks").insert({ title, category, status: "open", created_by: user.id });
-      if (error) return { ok: false, message: error.message };
+      // Through the chokepoint (audit + role gate + source tag), not a bespoke insert.
+      const res = await executeAction("task.create", { title, category }, { source: "voice" });
+      if (!res.ok) return { ok: false, message: res.error ?? "Couldn't create that task." };
       revalidatePath("/tasks");
       return { ok: true, message: speak, navigate: "/tasks" };
     }
@@ -163,8 +164,8 @@ ${jobList}`,
       const startIso = toIso(String(p.date ?? ""), String(p.time ?? "08:00"));
       if (!title || !startIso) return { ok: false, message: "I need a title and a date for that appointment." };
       const type = p.type === "inspection" ? "inspection" : "appointment";
-      const { error } = await supabase.from("appointments").insert({ type, title, starts_at: startIso, status: "scheduled", created_by: user.id });
-      if (error) return { ok: false, message: error.message };
+      const res = await executeAction("appointment.create", { title, type, starts_at: startIso }, { source: "voice" });
+      if (!res.ok) return { ok: false, message: res.error ?? "Couldn't create that appointment." };
       revalidatePath("/schedule");
       return { ok: true, message: speak, navigate: "/schedule?view=appointments" };
     }
@@ -173,8 +174,8 @@ ${jobList}`,
       const name = String(p.name ?? "").trim();
       if (!name) return { ok: false, message: "What's the customer's name?" };
       const phone = p.phone ? String(p.phone) : null;
-      const { error } = await supabase.from("customers").insert({ name, phone, status: "active", created_by: user.id });
-      if (error) return { ok: false, message: error.message };
+      const res = await executeAction("customer.create", { name, phone }, { source: "voice" });
+      if (!res.ok) return { ok: false, message: res.error ?? "Couldn't create that customer." };
       revalidatePath("/crm");
       return { ok: true, message: speak, navigate: "/crm" };
     }
