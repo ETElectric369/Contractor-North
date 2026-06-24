@@ -213,14 +213,14 @@ export async function geoClockOut(gps: GeoPoint | null, atIso: string): Promise<
   if (!user) return { ok: false, error: "Not signed in." };
   const { data: open } = await supabase
     .from("time_entries")
-    .select("id, notes")
+    .select("id, notes, lunch_minutes")
     .eq("profile_id", user.id)
     .eq("status", "open")
     .maybeSingle();
   if (!open) return { ok: false, error: "Not clocked in." };
   return clockOut({
     entry_id: (open as any).id,
-    lunch_minutes: 0,
+    lunch_minutes: (open as any).lunch_minutes ?? 0,
     notes: (open as any).notes ?? "",
     gps,
     auto: true,

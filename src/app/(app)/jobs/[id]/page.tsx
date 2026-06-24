@@ -414,15 +414,17 @@ export default async function JobDetailPage({
             <span className="font-semibold text-slate-900">Time on this job · {formatDuration(laborHours)}</span>
             <div className="flex items-center gap-2">
               <JobClockButton jobId={j.id} isStaff={viewerIsStaff} />
-              <JobAddTimeEntry
-                jobId={j.id}
-                techs={techs ?? []}
-                jobCodes={(jobCodes ?? []) as any}
-                defaultProfileId={user?.id ?? ""}
-                companyAddress={companyAddress}
-                jobAddress={jobAddress}
-                mileageRate={mileageRate}
-              />
+              {viewerIsStaff && (
+                <JobAddTimeEntry
+                  jobId={j.id}
+                  techs={techs ?? []}
+                  jobCodes={(jobCodes ?? []) as any}
+                  defaultProfileId={user?.id ?? ""}
+                  companyAddress={companyAddress}
+                  jobAddress={jobAddress}
+                  mileageRate={mileageRate}
+                />
+              )}
             </div>
           </div>
           <ul className="divide-y divide-slate-100">

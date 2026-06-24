@@ -43,25 +43,34 @@ export function GeofenceMonitor({
 }) {
   const router = useRouter();
   const doneRef = useRef(false);
+  // Depend on the PRIMITIVE lat/lng, not the gpsIn object — the layout re-renders on
+  // every navigation and hands us a fresh object ref, which would otherwise tear down
+  // the watch + reset the grace/seen-inside state on every page change.
+  const lat = gpsIn?.lat;
+  const lng = gpsIn?.lng;
 
   useEffect(() => {
-    if (typeof navigator === "undefined" || !navigator.geolocation || !gpsIn) return;
-    if (typeof gpsIn.lat !== "number" || typeof gpsIn.lng !== "number") return;
+    if (typeof navigator === "undefined" || !navigator.geolocation) return;
+    if (typeof lat !== "number" || typeof lng !== "number") return;
+    const center = { lat, lng };
     doneRef.current = false;
     let seenInside = false;
     let lastInsideMs = clockInIso ? Date.parse(clockInIso) || Date.now() : Date.now();
     let firstOutsideMs: number | null = null;
     const graceMs = Math.max(60_000, graceMin * 60_000);
+    // A fix fuzzier than this tells us nothing — it neither confirms "inside" nor
+    // triggers a clock-out, so a junk reading can't false-fire.
+    const ignoreAccuracy = Math.max(radiusM, 200);
 
     const onPos = (pos: GeolocationPosition) => {
       if (doneRef.current) return;
+      const acc = pos.coords.accuracy || 0;
+      if (acc > ignoreAccuracy) return;
       const here = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-      // Pad the radius by the fix's own uncertainty so a fuzzy GPS reading can't
-      // false-trigger a clock-out.
-      const margin = Math.min(pos.coords.accuracy || 0, 150);
-      const d = haversineM(gpsIn, here);
+      const d = haversineM(center, here);
       const now = Date.now();
-      if (d <= radiusM + margin) {
+      // Pad the radius by the fix's uncertainty so a fuzzy-but-usable fix can't trip it.
+      if (d <= radiusM + acc) {
         seenInside = true;
         lastInsideMs = now;
         firstOutsideMs = null;
@@ -73,7 +82,13 @@ export function GeofenceMonitor({
         doneRef.current = true;
         geoClockOut(here, new Date(lastInsideMs).toISOString()).then((res) => {
           if (!res.ok) {
-            doneRef.current = false; // let it retry on the next reading
+            // "Not clocked in" → already closed elsewhere; terminal. Anything else is
+            // transient: re-arm, but make the grace window re-elapse before retrying
+            // (no per-fix retry storm).
+            if (!/not clocked in/i.test(res.error ?? "")) {
+              doneRef.current = false;
+              firstOutsideMs = now;
+            }
             return;
           }
           try {
@@ -93,7 +108,7 @@ export function GeofenceMonitor({
       timeout: 60_000,
     });
     return () => navigator.geolocation.clearWatch(id);
-  }, [entryId, gpsIn, gpsIn?.lat, gpsIn?.lng, radiusM, clockInIso, graceMin, router]);
+  }, [entryId, lat, lng, radiusM, clockInIso, graceMin, router]);
 
   return null;
 }
