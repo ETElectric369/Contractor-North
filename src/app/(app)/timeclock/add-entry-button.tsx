@@ -103,6 +103,8 @@ export function AddEntryButton({
     });
   }
 
+  if (!isStaff) return null; // techs clock in/out live — only the office adds entries
+
   return (
     <>
       <Button variant="outline" onClick={() => setOpen(true)}>

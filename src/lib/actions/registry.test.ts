@@ -29,12 +29,14 @@ describe("action registry — structural invariants", () => {
 // Fault #3 close-out: time-logging is now a first-class registry capability, so voice
 // and every surface call ONE path (the same the timeclock UI uses).
 describe("action registry — time entity (Fault #3)", () => {
-  it("exposes clock-in/out + add-entry, open to any tech, as writes", () => {
+  it("clock-in/out are open to any tech; manual add-entry is staff-only (office correction)", () => {
     for (const v of ["time.clockIn", "time.clockOut", "time.addEntry"]) {
       expect(REGISTRY[v]).toBeDefined();
-      expect(REGISTRY[v].auth).toBe("any"); // a tech clocks themselves
       expect(REGISTRY[v].effect).toBe("write");
     }
+    expect(REGISTRY["time.clockIn"].auth).toBe("any"); // a tech clocks themselves
+    expect(REGISTRY["time.clockOut"].auth).toBe("any");
+    expect(REGISTRY["time.addEntry"].auth).toBe("staff"); // back-dated entries = padding risk
   });
 
   it("listActions can surface the whole time group", () => {

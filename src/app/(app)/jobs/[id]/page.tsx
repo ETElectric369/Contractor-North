@@ -413,7 +413,7 @@ export default async function JobDetailPage({
           <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3 text-sm">
             <span className="font-semibold text-slate-900">Time on this job · {formatDuration(laborHours)}</span>
             <div className="flex items-center gap-2">
-              <JobClockButton jobId={j.id} />
+              <JobClockButton jobId={j.id} isStaff={viewerIsStaff} />
               <JobAddTimeEntry
                 jobId={j.id}
                 techs={techs ?? []}

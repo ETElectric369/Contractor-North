@@ -24,14 +24,44 @@ function nowParts() {
 export function ClockStartPicker({
   onChange,
   className = "",
+  staff = true,
 }: {
   onChange: (iso: string | null) => void;
   className?: string;
+  /** Staff get the free date/time picker (backdate corrections). A tech/field
+   *  employee can ONLY round the live start back to the nearest half hour. */
+  staff?: boolean;
 }) {
   const [custom, setCustom] = useState(false);
+  const [rounded, setRounded] = useState(false);
   const init = nowParts();
   const [date, setDate] = useState(init.date);
   const [time, setTime] = useState(init.time);
+
+  // Employee path: no free picker — just toggle the start between "now" and the
+  // nearest half-hour BEFORE now. (The server clamps it the same way regardless.)
+  if (!staff) {
+    const now = Date.now();
+    const floor = new Date(now - (now % 1_800_000));
+    const p = (n: number) => String(n).padStart(2, "0");
+    const lbl = `${p(floor.getHours())}:${p(floor.getMinutes())}`;
+    const onBoundary = now - floor.getTime() < 60_000;
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          const t = Date.now();
+          const next = !rounded;
+          setRounded(next);
+          onChange(next ? new Date(t - (t % 1_800_000)).toISOString() : null);
+        }}
+        className={`inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-brand ${className}`}
+      >
+        <Clock className="h-3.5 w-3.5" />
+        {rounded ? `Rounded to ${lbl} · tap for now` : onBoundary ? "Starting now" : `Starting now · round back to ${lbl}`}
+      </button>
+    );
+  }
 
   function emit(d: string, t: string) {
     const iso = new Date(`${d}T${t}:00`);

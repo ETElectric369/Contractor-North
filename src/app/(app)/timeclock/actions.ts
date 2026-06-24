@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { visibleJobIdOrNull } from "@/lib/job-visibility";
+import { requireStaff } from "@/lib/staff-guard";
 import type { GeoPoint } from "@/lib/types";
 
 export type ClockResult = { ok: boolean; error?: string };
@@ -19,22 +20,35 @@ export async function clockIn(input: {
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
 
+  // Role decides how far the start time may move. STAFF (owner/admin/office) can
+  // backdate freely (forgot to clock in). A TECH/field employee can only round the
+  // LIVE start BACK to the nearest half hour — so they can't pad hours by backdating.
+  const { data: meRow } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
+  const isStaff = !!meRow && ["owner", "admin", "office"].includes((meRow as { role?: string }).role ?? "");
+
   // Only attach a job the caller can actually see (RLS-scoped) — a stray/foreign
   // job_id (e.g. from a hand-built action call) would otherwise persist as a
   // dangling reference. Drops it to a no-job entry instead.
   const jobId = await visibleJobIdOrNull(supabase, input.job_id);
 
-  // Allow starting the shift at any time the user picks — never into the future
-  // (small skew allowed), and floored at 31 days back so a fat-fingered year
-  // can't create a monstrous open shift.
+  // Start time — never into the future (small skew), floored 31 days back so a
+  // fat-fingered year can't create a monstrous open shift. For a tech the value is
+  // additionally clamped to [floor-to-30-min(now), now] so it can only round back.
   let clockInIso = new Date().toISOString();
   let backdated = false;
   if (input.clock_in_at) {
     const d = new Date(input.clock_in_at);
-    const ms = d.getTime();
-    if (!isNaN(ms) && ms <= Date.now() + 60_000 && ms >= Date.now() - 31 * 86_400_000) {
-      clockInIso = d.toISOString();
-      backdated = Math.abs(ms - Date.now()) > 60_000;
+    let ms = d.getTime();
+    if (!isNaN(ms)) {
+      if (!isStaff) {
+        const now = Date.now();
+        const floor30 = now - (now % 1_800_000); // last :00/:30 boundary
+        ms = Math.min(Math.max(ms, floor30), now + 60_000);
+      }
+      if (ms <= Date.now() + 60_000 && ms >= Date.now() - 31 * 86_400_000) {
+        clockInIso = new Date(ms).toISOString();
+        backdated = Math.abs(ms - Date.now()) > 60_000;
+      }
     }
   }
 
@@ -175,9 +189,10 @@ export async function clockOutCurrent(input: {
 }
 
 /**
- * Add a past (manual) timecard entry. Techs can add their own; owner/admin/
- * office can add for any crew member. clock_in/clock_out are ISO strings built
- * on the client (so the user's local time is used).
+ * Add a past (manual) timecard entry — STAFF ONLY. A tech padding hours with a
+ * back-dated manual entry is exactly what mis-billed jobs; techs clock in/out live
+ * (rounding the start back to the half hour at most). The office adds corrections
+ * here, for any crew member.
  */
 export async function createManualEntry(input: {
   profile_id: string;
@@ -190,19 +205,10 @@ export async function createManualEntry(input: {
   miles?: number;
   rate_override?: number | null;
 }): Promise<ClockResult> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
-
-  const { data: me } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .maybeSingle();
-  const isStaff = !!me && ["owner", "admin", "office"].includes(me.role);
-  const profileId = isStaff ? input.profile_id || user.id : user.id;
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const profileId = input.profile_id || ctx.userId;
 
   const ci = new Date(input.clock_in);
   const co = new Date(input.clock_out);
@@ -235,8 +241,10 @@ export async function createManualEntry(input: {
   return { ok: true };
 }
 
-/** Edit an existing time entry (office payroll correction). RLS allows the
- *  entry owner or org staff. */
+/** Edit an existing time entry (office payroll correction). STAFF ONLY — a tech
+ *  must not be able to change their own times/job after the fact (that's how wrong
+ *  hours reached the wrong jobs). Techs edit only the "what I did" note via
+ *  saveEntryNotes; the office corrects the rest. */
 export async function updateTimeEntry(input: {
   id: string;
   clock_in: string;
@@ -248,7 +256,9 @@ export async function updateTimeEntry(input: {
   miles?: number;
   profile_id?: string | null; // reassign the entry to a different team member
 }): Promise<ClockResult> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const ci = new Date(input.clock_in);
   const co = new Date(input.clock_out);
   if (isNaN(ci.getTime()) || isNaN(co.getTime())) {

@@ -39,7 +39,7 @@ export const timeActions: Record<string, ActionDef> = {
     name: "time.addEntry",
     group: "time",
     label: "Add time entry",
-    description: "Add a past/manual timecard entry (clock_in & clock_out are ISO timestamps). Staff can add for any crew member via profile_id; otherwise it's for the current user.",
+    description: "Add a past/manual timecard entry (clock_in & clock_out are ISO timestamps), for any crew member via profile_id. Office correction — staff only; techs clock in/out live.",
     input: z.object({
       profile_id: z.string().optional().default(""),
       clock_in: z.string(),
@@ -50,7 +50,7 @@ export const timeActions: Record<string, ActionDef> = {
       notes: z.string().optional().default(""),
       miles: z.number().optional(),
     }),
-    auth: "any", // createManualEntry self-scopes non-staff to their own profile
+    auth: "staff", // manual/back-dated entries are office corrections, not tech self-service
     effect: "write",
     handler: (i) =>
       createManualEntry({

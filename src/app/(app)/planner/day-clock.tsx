@@ -22,12 +22,14 @@ export function DayClock({
   closedHoursWeek,
   currentJobId,
   jobs,
+  isStaff = true,
 }: {
   open: { id: string; clock_in: string; jobLabel: string | null } | null;
   closedHoursToday: number;
   closedHoursWeek: number;
   currentJobId: string;
   jobs: JobOpt[];
+  isStaff?: boolean;
 }) {
   const router = useRouter();
   const [now, setNow] = useState(() => Date.now());
@@ -116,7 +118,7 @@ export function DayClock({
                 </Select>
               )}
               <div className="mt-1.5">
-                <ClockStartPicker onChange={(iso) => setStartAt(iso ?? "")} />
+                <ClockStartPicker onChange={(iso) => setStartAt(iso ?? "")} staff={isStaff} />
               </div>
             </>
           )}

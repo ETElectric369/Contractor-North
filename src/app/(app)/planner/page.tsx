@@ -470,6 +470,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         closedHoursWeek={hoursWeek}
         currentJobId={currentJob?.id ?? ""}
         jobs={clockJobs}
+        isStaff={isStaff}
       />
 
       {/* Needs action — the one unified inbox (tasks, jobs to schedule,

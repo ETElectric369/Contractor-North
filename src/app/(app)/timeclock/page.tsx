@@ -110,6 +110,7 @@ export default async function TimeclockPage() {
             autoLunch={orgSettings.auto_lunch_30}
             homeAddress={(prof as any)?.home_address ?? ""}
             mileageRate={orgSettings.mileage_rate ?? 0}
+            isStaff={isStaff}
           />
         </div>
 

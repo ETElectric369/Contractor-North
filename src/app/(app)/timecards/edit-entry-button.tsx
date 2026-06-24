@@ -122,6 +122,8 @@ export function EditEntryButton({
     });
   }
 
+  if (!isStaff) return null; // techs can't edit times/job after the fact — office only
+
   return (
     <>
       <button

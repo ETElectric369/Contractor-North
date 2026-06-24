@@ -66,6 +66,7 @@ export function TimeclockPanel({
   autoLunch = false,
   homeAddress = "",
   mileageRate = 0,
+  isStaff = true,
 }: {
   openEntry: TimeEntry | null;
   jobCodes: JobCode[];
@@ -74,6 +75,7 @@ export function TimeclockPanel({
   autoLunch?: boolean;
   homeAddress?: string;
   mileageRate?: number;
+  isStaff?: boolean;
 }) {
   const t = translator(lang);
   const [error, setError] = useState<string | null>(null);
@@ -452,7 +454,7 @@ export function TimeclockPanel({
 
         <div>
           <Label>Start time</Label>
-          <ClockStartPicker onChange={(iso) => setStartAt(iso ?? "")} />
+          <ClockStartPicker onChange={(iso) => setStartAt(iso ?? "")} staff={isStaff} />
         </div>
 
         {error && <p className="text-sm text-red-600">{error}</p>}
