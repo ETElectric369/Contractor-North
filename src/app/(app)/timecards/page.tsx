@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { ChevronLeft, ChevronRight, Clock } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader, EmptyState } from "@/components/page-header";
+import { TimeSubnav } from "@/components/time-subnav";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -187,6 +188,8 @@ export default async function TimecardsPage({
           </Link>
         </div>
       </PageHeader>
+
+      <TimeSubnav isStaff />
 
       <div className="mb-4 grid grid-cols-3 gap-4 sm:max-w-2xl">
         <Card>
