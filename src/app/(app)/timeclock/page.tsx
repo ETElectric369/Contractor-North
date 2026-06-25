@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
-import { TimeSubnav } from "@/components/time-subnav";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { TimeclockPanel } from "./timeclock-panel";
@@ -145,8 +144,6 @@ export default async function TimeclockPage() {
           jobs={jobOptions}
         />
       </PageHeader>
-
-      <TimeSubnav isStaff={isStaff} />
 
       <div className="grid gap-6 lg:grid-cols-5">
         <div className="lg:col-span-3">

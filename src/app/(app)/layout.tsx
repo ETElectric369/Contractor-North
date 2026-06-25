@@ -11,6 +11,8 @@ import { getActionItemsCount } from "@/lib/action-items/query";
 import { todayStrInTz } from "@/lib/tz";
 import { GeofenceMonitor } from "@/components/geofence-monitor";
 import { BugReporter } from "@/components/bug-reporter";
+import { SectionSubnav } from "@/components/section-subnav";
+import { Suspense } from "react";
 import type { Profile, GeoPoint } from "@/lib/types";
 
 /** "#1b9488" → "27 148 136" (the space-separated rgb our --glass-tint expects). */
@@ -110,6 +112,9 @@ export default async function AppLayout({
       <div className="flex flex-1 flex-col overflow-hidden">
         <Topbar profile={(profile as Profile) ?? null} lang={profile.language} />
         <main className="flex-1 overflow-y-auto bg-slate-50/70 p-4 pb-[calc(7.5rem+env(safe-area-inset-bottom))] lg:p-6 lg:pb-6">
+          <Suspense fallback={null}>
+            <SectionSubnav isStaff={isStaff} />
+          </Suspense>
           {children}
         </main>
       </div>
