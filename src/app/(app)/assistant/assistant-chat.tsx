@@ -20,7 +20,7 @@ const SUGGESTIONS = [
   "Show me my open quotes and their totals.",
 ];
 
-export function AssistantChat() {
+export function AssistantChat({ autoStart = false }: { autoStart?: boolean } = {}) {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
@@ -40,6 +40,15 @@ export function AssistantChat() {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     setVoiceOn(Boolean(SR));
   }, []);
+
+  // Voice-first: when the assistant is opened by the mic launcher, start listening right
+  // away (it already unlocked audio in the tap), so it's tap → talk, not tap → tap-mic.
+  useEffect(() => {
+    if (!autoStart) return;
+    voiceModeRef.current = true;
+    startMic();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStart]);
 
   function scrollToBottom() {
     requestAnimationFrame(() =>

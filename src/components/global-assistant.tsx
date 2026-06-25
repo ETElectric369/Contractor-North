@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Sparkles, X } from "lucide-react";
 import { AssistantChat } from "@/app/(app)/assistant/assistant-chat";
+import { unlockAudio } from "@/lib/tts";
 
 /**
  * ONE assistant, everywhere. The topbar launcher opens the full conversational Claude (the
@@ -11,6 +12,21 @@ import { AssistantChat } from "@/app/(app)/assistant/assistant-chat";
  */
 export function GlobalAssistant() {
   const [open, setOpen] = useState(false);
+
+  function launch() {
+    // Prime audio + TTS INSIDE this tap (the gesture) so the spoken reply plays on iOS and
+    // the mic can start listening the moment the panel opens — tap → talk, one motion.
+    try {
+      const synth = window.speechSynthesis;
+      if (synth) {
+        const w = new SpeechSynthesisUtterance(" ");
+        w.volume = 0;
+        synth.speak(w);
+      }
+    } catch {}
+    unlockAudio();
+    setOpen(true);
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -21,8 +37,8 @@ export function GlobalAssistant() {
   return (
     <>
       <button
-        onClick={() => setOpen(true)}
-        title="Assistant — tap, then talk or type"
+        onClick={launch}
+        title="Assistant — tap and talk"
         aria-label="Open the assistant"
         className="btn-gloss inline-flex h-10 items-center gap-1.5 rounded-full bg-brand px-3 text-white shadow-sm transition-colors hover:bg-brand-dark"
       >
