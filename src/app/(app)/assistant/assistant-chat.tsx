@@ -55,12 +55,33 @@ export function AssistantChat({ autoStart = false }: { autoStart?: boolean } = {
   const [pendingConfirm, setPendingConfirm] = useState<AgentConfirm | null>(null);
   const confirmRef = useRef<AgentConfirm | null>(null);
   const [voiceMode, setVoiceModeState] = useState(false); // in a spoken conversation (drives the UI)
+  const [speaking, setSpeaking] = useState(false); // Claude's reply is currently playing
 
   // Enter/leave voice mode — keep the ref (read by the async re-listen closures) and the UI
   // state in lockstep.
   function setVoiceMode(on: boolean) {
     voiceModeRef.current = on;
     setVoiceModeState(on);
+  }
+
+  // Speak a reply, tracking the speaking state, then run `after` (usually re-open the mic).
+  function say(text: string, after?: () => void) {
+    setSpeaking(true);
+    speakSmart(text, () => {
+      setSpeaking(false);
+      after?.();
+    });
+  }
+
+  // The big mic button in voice mode: cut off any speech, end a listening turn, or start one.
+  function voiceTap() {
+    if (listening) {
+      try { recogRef.current?.stop(); } catch {}
+      return;
+    }
+    stopSpeaking();
+    setSpeaking(false);
+    startMic();
   }
 
   useEffect(() => {
@@ -149,7 +170,7 @@ export function AssistantChat({ autoStart = false }: { autoStart?: boolean } = {
 
       if (openDir?.url) {
         // Hands-free navigation: say it, then open Maps (keep the app if the browser lets us).
-        if (viaVoice) speakSmart(`Opening maps for ${openDir.label}.`, () => { if (voiceModeRef.current) startMic(); });
+        if (viaVoice) say(`Opening maps for ${openDir.label}.`, () => { if (voiceModeRef.current) startMic(); });
         try {
           const w = window.open(openDir.url, "_blank");
           if (!w) window.location.href = openDir.url;
@@ -167,11 +188,11 @@ export function AssistantChat({ autoStart = false }: { autoStart?: boolean } = {
           });
         }
         // Voice: read the proposal and listen for yes/no. Card shows either way.
-        if (viaVoice) speakSmart(proposal.prompt, () => { if (voiceModeRef.current) confirmListen(); });
+        if (viaVoice) say(proposal.prompt, () => { if (voiceModeRef.current) confirmListen(); });
       } else if (viaVoice) {
         // No directive — read the whole reply aloud, then re-open the mic for the next turn.
         const clean = visibleText.replace(/\s*\[[^\]]*\]\s*$/, "").trim();
-        if (clean) speakSmart(clean, () => { if (voiceModeRef.current) startMic(); });
+        if (clean) say(clean, () => { if (voiceModeRef.current) startMic(); });
       }
     } catch (e: any) {
       setMessages((m) => [
@@ -240,7 +261,7 @@ export function AssistantChat({ autoStart = false }: { autoStart?: boolean } = {
         // Fail safe: an explicit no/cancel wins (checked first).
         if (/\b(no|nope|cancel|stop|never ?mind|don'?t|do not|wrong|negative)\b/.test(t)) resolveConfirm(false);
         else if (/\b(yes|yeah|yep|yup|confirm|do it|go ahead|sure|okay|ok|save it|sounds good)\b/.test(t)) resolveConfirm(true);
-        else speakSmart("Say yes or no.", () => { if (voiceModeRef.current && confirmRef.current) confirmListen(); });
+        else say("Say yes or no.", () => { if (voiceModeRef.current && confirmRef.current) confirmListen(); });
       };
       r.onerror = () => setListening(false);
       r.onend = () => setListening(false);
@@ -262,7 +283,7 @@ export function AssistantChat({ autoStart = false }: { autoStart?: boolean } = {
     if (!c) return;
     if (!yes) {
       setMessages((m) => [...m, { role: "assistant", content: "Okay — skipped that." }]);
-      if (voiceModeRef.current) speakSmart("Okay, skipped that.", () => { if (voiceModeRef.current) startMic(); });
+      if (voiceModeRef.current) say("Okay, skipped that.", () => { if (voiceModeRef.current) startMic(); });
       return;
     }
     setStreaming(true);
@@ -270,7 +291,7 @@ export function AssistantChat({ autoStart = false }: { autoStart?: boolean } = {
       const res = await confirmAgentAction(c.name, c.input);
       const msg = res.message || (res.ok ? "Done." : "That didn't work.");
       setMessages((m) => [...m, { role: "assistant", content: (res.ok ? "✓ " : "") + msg }]);
-      if (voiceModeRef.current) speakSmart(msg, () => { if (voiceModeRef.current) startMic(); });
+      if (voiceModeRef.current) say(msg, () => { if (voiceModeRef.current) startMic(); });
     } catch {
       setMessages((m) => [...m, { role: "assistant", content: "That didn't work." }]);
     } finally {
@@ -367,21 +388,30 @@ export function AssistantChat({ autoStart = false }: { autoStart?: boolean } = {
           </div>
         </div>
       ) : voiceMode ? (
-        // Voice mode — exactly like chat: it's listening / talking, and Stop ends it anytime.
+        // Voice mode — chat-style. It listens / thinks / talks; the big mic is "your turn"
+        // (auto-reopens on desktop, one tap on iPhone), and End closes the conversation.
         <div className="flex flex-col items-center gap-2 border-t border-slate-100 p-4">
-          <VoiceWave active />
+          <VoiceWave active={listening || speaking} />
           <div className="text-sm font-medium text-slate-600">
-            {streaming ? "Thinking…" : listening ? "Listening…" : "Talking…"}
+            {streaming ? "Thinking…" : listening ? "Listening…" : speaking ? "Talking…" : "Your turn — tap the mic"}
           </div>
           <button
             type="button"
-            onClick={stopVoice}
-            aria-label="Stop"
-            className="mt-1 flex h-14 w-14 items-center justify-center rounded-full bg-red-600 text-white shadow-lg transition hover:bg-red-500 active:scale-95"
+            onClick={voiceTap}
+            aria-label={listening ? "Stop listening" : "Talk"}
+            className={`mt-1 flex h-16 w-16 items-center justify-center rounded-full text-white shadow-lg transition active:scale-95 ${
+              listening ? "animate-pulse bg-red-600" : "bg-brand hover:bg-brand-dark"
+            }`}
           >
-            <Square className="h-6 w-6" fill="currentColor" />
+            <Mic className="h-7 w-7" />
           </button>
-          <div className="text-xs text-slate-400">Tap to stop</div>
+          <button
+            type="button"
+            onClick={stopVoice}
+            className="mt-1 inline-flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-red-600"
+          >
+            <Square className="h-3 w-3" fill="currentColor" /> End conversation
+          </button>
         </div>
       ) : (
         <form
