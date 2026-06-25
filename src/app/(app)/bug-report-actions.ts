@@ -9,6 +9,7 @@ export type BugReport = {
   status: string;
   created_at: string;
   reporter: string | null;
+  screenshot_path: string | null;
 };
 
 /** File a bug report (any org member). Tagged with the page, captured console errors,
@@ -19,6 +20,7 @@ export async function createBugReport(input: {
   console: { level: string; msg: string; at: number }[];
   userAgent: string;
   viewport: string;
+  screenshotPath?: string;
 }): Promise<{ ok: boolean; error?: string }> {
   const supabase = await createClient();
   const {
@@ -35,6 +37,7 @@ export async function createBugReport(input: {
     console: (input.console || []).slice(0, 20),
     user_agent: (input.userAgent || "").slice(0, 300) || null,
     viewport: (input.viewport || "").slice(0, 50) || null,
+    screenshot_path: input.screenshotPath || null,
   });
   if (error) return { ok: false, error: error.message };
   return { ok: true };
@@ -45,7 +48,7 @@ export async function listBugReports(): Promise<BugReport[]> {
   const supabase = await createClient();
   const { data } = await supabase
     .from("bug_reports")
-    .select("id, note, page, status, created_at, profiles:reported_by(full_name)")
+    .select("id, note, page, status, created_at, screenshot_path, profiles:reported_by(full_name)")
     .order("created_at", { ascending: false })
     .limit(30);
   return ((data ?? []) as any[]).map((r) => ({
@@ -55,6 +58,7 @@ export async function listBugReports(): Promise<BugReport[]> {
     status: r.status,
     created_at: r.created_at,
     reporter: r.profiles?.full_name ?? null,
+    screenshot_path: r.screenshot_path ?? null,
   }));
 }
 

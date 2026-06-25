@@ -115,7 +115,7 @@ export default async function AppLayout({
       </div>
       <CommandBar />
       <BottomNav role={profile.role} />
-      {isStaff && <BugReporter />}
+      {isStaff && <BugReporter orgId={profile.org_id} />}
       {openEntry && (
         <GeofenceMonitor
           entryId={openEntry.id}

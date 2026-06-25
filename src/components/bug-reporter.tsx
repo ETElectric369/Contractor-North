@@ -1,32 +1,64 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { usePathname } from "next/navigation";
-import { Bug, Check, Loader2 } from "lucide-react";
+import { Bug, Check, Loader2, Image as ImageIcon } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
+import { createClient } from "@/lib/supabase/client";
 import { installErrorCapture, getLogs } from "@/lib/bug-buffer";
 import { createBugReport, listBugReports, setBugReportStatus, type BugReport } from "@/app/(app)/bug-report-actions";
+
+/** Grab a screenshot of what's on screen right now (oklch-safe via html2canvas-pro), as a
+ *  compact JPEG. Best-effort — returns null on any failure so a report never blocks on it. */
+async function captureScreen(): Promise<Blob | null> {
+  try {
+    const html2canvas = (await import("html2canvas-pro")).default;
+    const canvas = await html2canvas(document.body, {
+      backgroundColor: "#ffffff",
+      scale: 0.6,
+      useCORS: true,
+      logging: false,
+      // Skip the report button itself (and anything else flagged) so it's not in the shot.
+      ignoreElements: (el) => (el as HTMLElement)?.getAttribute?.("data-bug-ignore") === "1",
+      x: window.scrollX,
+      y: window.scrollY,
+      width: window.innerWidth,
+      height: window.innerHeight,
+      windowWidth: window.innerWidth,
+      windowHeight: window.innerHeight,
+    });
+    return await new Promise((res) => canvas.toBlob((b) => res(b), "image/jpeg", 0.6));
+  } catch {
+    return null;
+  }
+}
 
 /** One-tap "Report a bug" button (staff only — mounted by the app layout). Auto-attaches
  *  the page, captured console errors, browser/viewport + reporter to each report, and
  *  shows the org's recent reports so the team can track what's logged/fixed. */
-export function BugReporter() {
+export function BugReporter({ orgId }: { orgId: string }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [note, setNote] = useState("");
   const [pending, start] = useTransition();
+  const [capturing, setCapturing] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reports, setReports] = useState<BugReport[]>([]);
   const [errCount, setErrCount] = useState(0);
+  const shotRef = useRef<Blob | null>(null);
 
   useEffect(() => {
     installErrorCapture();
   }, []);
 
-  function openPanel() {
+  async function openPanel() {
+    // Grab the screen they're looking at FIRST (before the dialog covers it), then open.
+    setCapturing(true);
+    shotRef.current = await captureScreen();
+    setCapturing(false);
     setOpen(true);
     setSent(false);
     setNote("");
@@ -40,14 +72,30 @@ export function BugReporter() {
     if (!n) return setError("Tell me what happened.");
     setError(null);
     start(async () => {
+      // Best-effort: upload the screenshot to the documents bucket (path starts with org_id
+      // per the storage RLS). A failed upload never blocks the report.
+      let screenshotPath: string | undefined;
+      if (shotRef.current) {
+        try {
+          const path = `${orgId}/bug-screenshots/${Date.now()}.jpg`;
+          const { error: upErr } = await createClient().storage
+            .from("documents")
+            .upload(path, shotRef.current, { upsert: false, contentType: "image/jpeg" });
+          if (!upErr) screenshotPath = path;
+        } catch {
+          /* ignore — report still goes through */
+        }
+      }
       const res = await createBugReport({
         page: pathname + (typeof window !== "undefined" ? window.location.search : ""),
         note: n,
         console: getLogs(),
         userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "",
         viewport: typeof window !== "undefined" ? `${window.innerWidth}x${window.innerHeight}` : "",
+        screenshotPath,
       });
       if (!res.ok) return setError(res.error ?? "Could not send.");
+      shotRef.current = null;
       setSent(true);
       setNote("");
       listBugReports().then(setReports).catch(() => {});
@@ -59,15 +107,26 @@ export function BugReporter() {
     setBugReportStatus(id, "fixed");
   }
 
+  async function viewShot(path: string) {
+    try {
+      const { data } = await createClient().storage.from("documents").createSignedUrl(path, 3600);
+      if (data?.signedUrl) window.open(data.signedUrl, "_blank");
+    } catch {
+      /* ignore */
+    }
+  }
+
   return (
     <>
       <button
         onClick={openPanel}
+        data-bug-ignore="1"
+        disabled={capturing}
         title="Report a bug"
         aria-label="Report a bug"
-        className="fixed bottom-20 right-4 z-40 flex h-11 w-11 items-center justify-center rounded-full bg-slate-900 text-white shadow-lg transition hover:bg-slate-700 sm:bottom-4"
+        className="fixed bottom-20 right-4 z-40 flex h-11 w-11 items-center justify-center rounded-full bg-slate-900 text-white shadow-lg transition hover:bg-slate-700 disabled:opacity-70 sm:bottom-4"
       >
-        <Bug className="h-5 w-5" />
+        {capturing ? <Loader2 className="h-5 w-5 animate-spin" /> : <Bug className="h-5 w-5" />}
       </button>
 
       <Modal open={open} onClose={() => setOpen(false)} title="Report a bug">
@@ -80,8 +139,9 @@ export function BugReporter() {
             <div className="space-y-2">
               <Textarea rows={3} autoFocus placeholder="What happened? (e.g. clock-out wouldn't save)" value={note} onChange={(e) => setNote(e.target.value)} />
               <p className="text-xs text-slate-400">
-                Auto-attached: this page (<span className="font-mono">{pathname}</span>)
-                {errCount > 0 ? `, ${errCount} console error${errCount > 1 ? "s" : ""}` : ""}, your name + browser. Paste a screenshot into the box if it&apos;s visual.
+                Auto-attached: a <span className="font-medium text-slate-500">screenshot</span> of this screen
+                {shotRef.current ? " ✓" : ""}, this page (<span className="font-mono">{pathname}</span>)
+                {errCount > 0 ? `, ${errCount} console error${errCount > 1 ? "s" : ""}` : ""}, your name + browser.
               </p>
               {error && <p className="text-sm text-red-600">{error}</p>}
               <Button onClick={submit} disabled={pending} className="w-full">
@@ -100,11 +160,18 @@ export function BugReporter() {
                       <div className={`truncate ${r.status === "fixed" ? "text-slate-400 line-through" : "text-slate-800"}`}>{r.note}</div>
                       <div className="truncate text-xs text-slate-400">{r.page ?? ""}{r.reporter ? ` · ${r.reporter}` : ""}</div>
                     </div>
-                    {r.status === "fixed" ? (
-                      <span className="shrink-0 text-xs text-green-600">fixed</span>
-                    ) : (
-                      <button onClick={() => markFixed(r.id)} className="shrink-0 text-xs text-slate-400 hover:text-green-600">mark fixed</button>
-                    )}
+                    <div className="flex shrink-0 items-center gap-2">
+                      {r.screenshot_path && (
+                        <button onClick={() => viewShot(r.screenshot_path!)} title="View screenshot" className="text-slate-400 hover:text-brand">
+                          <ImageIcon className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                      {r.status === "fixed" ? (
+                        <span className="text-xs text-green-600">fixed</span>
+                      ) : (
+                        <button onClick={() => markFixed(r.id)} className="text-xs text-slate-400 hover:text-green-600">mark fixed</button>
+                      )}
+                    </div>
                   </li>
                 ))}
               </ul>
