@@ -67,6 +67,10 @@ export interface ActionDef<I = any> {
   /** Risk tier (0-3). Optional — actionRisk() derives a safe default from
    *  effect+confirm. Set explicitly to escalate (e.g. a tier-3 human-only action). */
   risk?: ActionRisk;
+  /** Optional descriptive confirm read-back built from the input (e.g. include the dollar
+   *  amount). Used for the agent/voice confirm so the user hears WHAT they're approving, not
+   *  just the action label. Falls back to "<label> — say yes to confirm." */
+  describe?: (input: I) => string;
   /** The implementation — wraps an existing server action. */
   handler: (input: I, ctx: ActionCtx) => Promise<ActionResult>;
 }

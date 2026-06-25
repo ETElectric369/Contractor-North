@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Send, Sparkles, Loader2, Mic, MicOff } from "lucide-react";
+import { Send, Sparkles, Loader2, Mic, MicOff, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
 import { speakSmart, unlockAudio } from "@/lib/tts";
+import { CONFIRM_MARKER, type AgentConfirm } from "@/lib/assistant-protocol";
+import { confirmAgentAction } from "./actions";
 
 interface Msg {
   role: "user" | "assistant";
@@ -29,6 +31,10 @@ export function AssistantChat() {
   // True while we're in a spoken back-and-forth: each reply is read aloud and the mic
   // re-opens for the next turn. Tapping the mic off, or typing, leaves voice mode.
   const voiceModeRef = useRef(false);
+  // A confirm-gated action the agent proposed; nothing runs until the user says yes (card
+  // tap or a spoken "yes"). The ref mirrors it so the voice yes/no closure reads it fresh.
+  const [pendingConfirm, setPendingConfirm] = useState<AgentConfirm | null>(null);
+  const confirmRef = useRef<AgentConfirm | null>(null);
 
   useEffect(() => {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -71,28 +77,42 @@ export function AssistantChat() {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
 
-      let full = ""; // the complete reply, captured locally to speak once at the end
+      let full = ""; // the whole reply, which may END with a CONFIRM proposal
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        full += chunk;
+        full += decoder.decode(value, { stream: true });
+        const visible = full.split(CONFIRM_MARKER)[0]; // never show the marker/proposal
         setMessages((m) => {
           const copy = [...m];
-          copy[copy.length - 1] = {
-            role: "assistant",
-            content: copy[copy.length - 1].content + chunk,
-          };
+          copy[copy.length - 1] = { role: "assistant", content: visible };
           return copy;
         });
         scrollToBottom();
       }
 
-      // If this turn came from the mic, read the WHOLE reply aloud (once), then re-open
-      // the mic for the next turn so it flows like a conversation. (Typed turns stay
-      // silent — there's no gesture to unlock audio on iOS, and it'd surprise a reader.)
-      if (viaVoice) {
-        const clean = full.replace(/\s*\[[^\]]*\]\s*$/, "").trim(); // drop trailing [notes]
+      // Split off a confirm proposal the agent appended (a cost, etc. — nothing ran yet).
+      const [reply, confirmJson] = full.split(CONFIRM_MARKER);
+      let proposal: AgentConfirm | null = null;
+      if (confirmJson) {
+        try { proposal = JSON.parse(confirmJson); } catch {}
+      }
+
+      if (proposal) {
+        confirmRef.current = proposal;
+        setPendingConfirm(proposal);
+        if (!reply.trim()) {
+          setMessages((m) => {
+            const c = [...m];
+            c[c.length - 1] = { role: "assistant", content: proposal!.prompt };
+            return c;
+          });
+        }
+        // Voice: read the proposal and listen for yes/no. Card shows either way.
+        if (viaVoice) speakSmart(proposal.prompt, () => { if (voiceModeRef.current) confirmListen(); });
+      } else if (viaVoice) {
+        // No confirm — read the whole reply aloud, then re-open the mic for the next turn.
+        const clean = (reply || "").replace(/\s*\[[^\]]*\]\s*$/, "").trim();
         if (clean) speakSmart(clean, () => { if (voiceModeRef.current) startMic(); });
       }
     } catch (e: any) {
@@ -145,7 +165,63 @@ export function AssistantChat() {
     } catch {}
     unlockAudio();
     voiceModeRef.current = true;
-    startMic();
+    if (confirmRef.current) confirmListen(); // a proposal is waiting → hear yes/no
+    else startMic();
+  }
+
+  // Listen for a spoken yes/no on a pending confirm proposal.
+  function confirmListen() {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) return;
+    try {
+      const r = new SR();
+      r.continuous = false;
+      r.interimResults = false;
+      r.lang = "en-US";
+      r.onresult = (e: any) => {
+        let t = "";
+        for (let i = e.resultIndex; i < e.results.length; i++) t += e.results[i][0].transcript;
+        t = t.trim().toLowerCase();
+        // Fail safe: an explicit no/cancel wins (checked first).
+        if (/\b(no|nope|cancel|stop|never ?mind|don'?t|do not|wrong|negative)\b/.test(t)) resolveConfirm(false);
+        else if (/\b(yes|yeah|yep|yup|confirm|do it|go ahead|sure|okay|ok|save it|sounds good)\b/.test(t)) resolveConfirm(true);
+        else speakSmart("Say yes or no.", () => { if (voiceModeRef.current && confirmRef.current) confirmListen(); });
+      };
+      r.onerror = () => setListening(false);
+      r.onend = () => setListening(false);
+      r.start();
+      recogRef.current = r;
+      setListening(true);
+    } catch {
+      setListening(false);
+    }
+  }
+
+  // Resolve a pending confirm: run it (yes) or drop it (no). Nothing wrote until here.
+  async function resolveConfirm(yes: boolean) {
+    const c = confirmRef.current;
+    confirmRef.current = null;
+    setPendingConfirm(null);
+    try { recogRef.current?.stop(); } catch {}
+    setListening(false);
+    if (!c) return;
+    if (!yes) {
+      setMessages((m) => [...m, { role: "assistant", content: "Okay — skipped that." }]);
+      if (voiceModeRef.current) speakSmart("Okay, skipped that.", () => { if (voiceModeRef.current) startMic(); });
+      return;
+    }
+    setStreaming(true);
+    try {
+      const res = await confirmAgentAction(c.name, c.input);
+      const msg = res.message || (res.ok ? "Done." : "That didn't work.");
+      setMessages((m) => [...m, { role: "assistant", content: (res.ok ? "✓ " : "") + msg }]);
+      if (voiceModeRef.current) speakSmart(msg, () => { if (voiceModeRef.current) startMic(); });
+    } catch {
+      setMessages((m) => [...m, { role: "assistant", content: "That didn't work." }]);
+    } finally {
+      setStreaming(false);
+      scrollToBottom();
+    }
   }
 
   // When opened with ?q= (e.g. "Ask the assistant" from the command bar),
@@ -212,6 +288,30 @@ export function AssistantChat() {
         )}
       </div>
 
+      {pendingConfirm && (
+        <div className="border-t border-amber-200 bg-amber-50 p-3">
+          <div className="mb-1.5 text-sm font-medium text-amber-900">{pendingConfirm.prompt}</div>
+          {/* Show EVERY field that will be written, so what you approve == what runs. */}
+          <ul className="mb-2 space-y-0.5 text-xs text-amber-800">
+            {Object.entries(pendingConfirm.input)
+              .filter(([k, v]) => v != null && v !== "" && !["status", "bill_number", "lunch_minutes"].includes(k))
+              .map(([k, v]) => (
+                <li key={k}>
+                  <span className="font-medium capitalize">{k.replace(/_/g, " ")}:</span>{" "}
+                  {typeof v === "object" ? JSON.stringify(v) : String(v)}
+                </li>
+              ))}
+          </ul>
+          <div className="flex gap-2">
+            <Button onClick={() => resolveConfirm(true)} className="flex-1 bg-green-600 hover:bg-green-500">
+              <Check className="h-4 w-4" /> Yes, do it
+            </Button>
+            <Button variant="outline" onClick={() => resolveConfirm(false)} className="flex-1">
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -247,7 +347,7 @@ export function AssistantChat() {
               {listening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
             </Button>
           )}
-          <Button type="submit" size="icon" disabled={streaming || !input.trim()}>
+          <Button type="submit" size="icon" disabled={streaming || !input.trim() || !!pendingConfirm}>
             {streaming ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (

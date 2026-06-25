@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { REGISTRY, listActions } from "./registry";
 import { AGENT_WRITE_ALLOWED, agentWriteToolsForRole } from "./agent-tools";
+import { needsConsent } from "./risk";
 
 // Structural invariants over the WHOLE registry — so a malformed new entity (wrong
 // key, missing handler, bad auth) fails CI instead of at runtime on a real surface.
@@ -87,5 +88,49 @@ describe("action registry — quote.create (Assistant quote generation)", () => 
     expect(offered("owner")).toContain("quote__create");
     expect(offered("office")).toContain("quote__create");
     expect(offered("tech")).not.toContain("quote__create");
+  });
+});
+
+// One-assistant-everywhere: the agent can now do field + cost work. The cost action is
+// confirm-gated (tier-2) and must surface a confirm before it writes; field clock work is
+// tier-1 and runs straight through. Role gating still holds.
+describe("action registry — agent field + cost powers (one assistant)", () => {
+  const offered = (role: string) => agentWriteToolsForRole(role).tools.map((t) => t.name);
+
+  it("clock in/out, log time, and record cost are all agent-allowed", () => {
+    for (const n of ["time.clockIn", "time.clockOut", "time.addEntry", "bill.create"]) {
+      expect(AGENT_WRITE_ALLOWED.has(n)).toBe(true);
+    }
+  });
+
+  it("a tech may clock in/out by agent but NOT record a cost (staff-only)", () => {
+    const tech = offered("tech");
+    expect(tech).toContain("time__clockIn");
+    expect(tech).toContain("time__clockOut");
+    expect(tech).not.toContain("bill__create");
+  });
+
+  it("office/owner ARE offered the cost tool (confirm-gated tier-2 now surfaced)", () => {
+    expect(offered("owner")).toContain("bill__create");
+    expect(offered("office")).toContain("bill__create");
+  });
+
+  it("recording a cost still trips the confirm gate for the agent — no silent write", () => {
+    expect(needsConsent(REGISTRY["bill.create"], "agent", false)).toBe(true);
+    expect(needsConsent(REGISTRY["bill.create"], "agent", true)).toBe(false); // an explicit yes passes
+    expect(needsConsent(REGISTRY["time.clockIn"], "agent", false)).toBe(false); // tier-1 runs straight
+  });
+
+  it("the cost confirm read-back states the amount + supplier (not just a label)", () => {
+    const d = REGISTRY["bill.create"].describe?.({ amount: 40, supplier: "Home Depot" } as any);
+    expect(d).toContain("40.00");
+    expect(d).toContain("Home Depot");
+  });
+
+  it("money-MOVEMENT and tier-3 are never offered to the agent", () => {
+    const all = offered("owner");
+    // pay/refund/delete-style verbs must not leak into the chat agent's tools
+    expect(all).not.toContain("bill__delete");
+    expect(all).not.toContain("bill__setStatus");
   });
 });

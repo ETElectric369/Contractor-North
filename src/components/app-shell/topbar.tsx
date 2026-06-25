@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { LogOut, ArrowLeft, ArrowRight, Search } from "lucide-react";
 import { LanguageSwitcher } from "@/components/language-switcher";
-import { GlobalVoiceButton } from "@/components/global-voice-button";
+import { GlobalAssistant } from "@/components/global-assistant";
 import { GlobalQuickAdd } from "@/components/global-quick-add";
 import { initials } from "@/lib/utils";
 import { signOut } from "@/app/login/actions";
@@ -46,8 +46,8 @@ export function Topbar({
         <div className="flex-1" />
 
         <div className="flex items-center gap-2 sm:gap-3">
-          {/* Assistant (voice) + quick-add — permanent, reachable while driving. */}
-          <GlobalVoiceButton placement="topbar" lang={lang} />
+          {/* ONE assistant — voice + chat + actions — reachable from every screen. */}
+          <GlobalAssistant />
           <GlobalQuickAdd placement="topbar" />
           <button
             onClick={() => window.dispatchEvent(new Event("cn:command"))}

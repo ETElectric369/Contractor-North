@@ -106,6 +106,18 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
       "A quick snapshot of the business right now: count of active jobs, open quotes, total unpaid invoice balance, and how many people are clocked in. Use for 'how's business', 'give me a status update', 'what's going on'.",
     input_schema: { type: "object", properties: {} },
   },
+  {
+    name: "search_price_list",
+    description:
+      "Search the company's PRICE LIST — their real priced catalog of materials and services (their own buy price + markup → sell price). When drafting or pricing a quote line, ALWAYS search here first and use the catalog's sell_price when there's a match; only fall back to an estimate when there's no catalog match, and say which lines are estimates. Search by description, part code, or category.",
+    input_schema: {
+      type: "object",
+      properties: {
+        search: { type: "string", description: "Text to match against item description, part code, or category." },
+        limit: { type: "integer", description: "Max rows (default 15, max 40)." },
+      },
+    },
+  },
 ];
 
 const VALID_TOOL_NAMES = new Set(DATA_TOOLS.map((t) => t.name));
@@ -367,6 +379,32 @@ export async function runDataTool(
           open_quotes: openQuotes.count ?? 0,
           people_clocked_in: clockedIn.count ?? 0,
           unpaid_invoice_balance: money(outstanding),
+        });
+      }
+
+      case "search_price_list": {
+        const lim = clampLimit(input.limit, 15);
+        const s = sanitize(input.search ?? "");
+        let q = supabase
+          .from("price_list_items")
+          .select("code, description, category, unit, buy_price, markup_pct, supplier")
+          .eq("archived", false)
+          .order("description")
+          .limit(lim);
+        if (s) q = q.or(`description.ilike.%${s}%,code.ilike.%${s}%,category.ilike.%${s}%`);
+        const { data, error } = await q;
+        if (error) throw error;
+        return JSON.stringify({
+          count: data?.length ?? 0,
+          items: (data ?? []).map((r: any) => ({
+            code: r.code,
+            description: r.description,
+            category: r.category,
+            unit: r.unit,
+            // sell = buy × (1 + markup%) — the same math the quote builder uses.
+            sell_price: money(Number(r.buy_price) * (1 + Number(r.markup_pct) / 100)),
+            supplier: r.supplier,
+          })),
         });
       }
 

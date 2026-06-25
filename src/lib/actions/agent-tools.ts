@@ -19,6 +19,14 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   // read the whole quote back + get a spoken "yes" before calling it — that conversational
   // confirm is enforced in the tool description, and saveQuote is staff-gated + audited.
   "quote.create",
+  // Field work — the one-assistant-everywhere set. Clock in/out + log time are reversible
+  // tier-1 records; bill.create (add a cost) is tier-2 financial and trips the confirm gate,
+  // which the chat now surfaces (propose → user says yes → confirmAgentAction). NONE of these
+  // is money-MOVEMENT, so none needs the WebAuthn step-up.
+  "time.clockIn",
+  "time.clockOut",
+  "time.addEntry",
+  "bill.create",
 ]);
 
 // Registry names are group.verb (a dot); Anthropic tool names can't contain dots.
@@ -33,7 +41,14 @@ export function agentWriteToolsForRole(role: string | null | undefined): {
   resolve: (toolName: string) => string | null;
 } {
   const allowed = actionsForRole(role, { effect: "write" }).filter(
-    (a) => AGENT_WRITE_ALLOWED.has(a.name) && actionRisk(a) <= 1,
+    (a) =>
+      AGENT_WRITE_ALLOWED.has(a.name) &&
+      // tier-1 runs straight through; tier-2 CONFIRM actions are now offered too because the
+      // chat surfaces the confirm (propose → user yes). Money-MOVEMENT (stepUp) and tier-3
+      // (human-only) stay OUT of the agent's reach entirely.
+      (actionRisk(a) <= 1 || a.confirm != null) &&
+      !a.stepUp &&
+      actionRisk(a) < 3,
   );
   const map = new Map<string, string>();
   const tools: Anthropic.Tool[] = allowed.map((a) => {

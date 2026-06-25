@@ -22,6 +22,10 @@ export const billActions: Record<string, ActionDef> = {
     auth: "staff",
     effect: "write",
     confirm: "financial",
+    describe: (i) =>
+      `Add a $${Number(i.amount ?? 0).toFixed(2)} cost${i.supplier ? ` from ${i.supplier}` : ""}` +
+      `${i.category ? ` as ${i.category}` : ""}${i.job_id ? " on a job" : ""}${i.notes ? " with a note" : ""}` +
+      ` — say yes to confirm. Check the details below.`,
     handler: (i) =>
       createBill({
         job_id: i.job_id ?? null,

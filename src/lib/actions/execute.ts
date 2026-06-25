@@ -94,7 +94,12 @@ export async function executeAction(
       const blocked: ActionResult = {
         ok: false,
         needsConfirm: true,
-        confirmPrompt: `${def.label} — say yes to confirm.`,
+        // Descriptive read-back when the action provides one (e.g. the dollar amount), so a
+        // spoken confirm states WHAT is being approved — never just "Add cost".
+        confirmPrompt: def.describe ? def.describe(parsed.data) : `${def.label} — say yes to confirm.`,
+        // Carry the VALIDATED input (not the raw model output) across the confirm boundary, so
+        // what the card shows == what actually runs, with no Zod-coercion desync.
+        data: parsed.data,
         error: `${def.label} needs confirmation.`,
       };
       await logAction(def, ctx, source, parsed.data, blocked);
