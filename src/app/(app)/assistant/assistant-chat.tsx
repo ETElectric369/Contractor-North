@@ -10,7 +10,7 @@ import {
   CONFIRM_MARKER, OPEN_MARKER, DRAFT_OPEN, DRAFT_CLOSE,
   type AgentConfirm, type AgentOpen, type AgentDraft,
 } from "@/lib/assistant-protocol";
-import { confirmAgentAction, saveQuoteFromDraft } from "./actions";
+import { confirmAgentAction, saveQuoteFromDraft, loadConversation, saveConversation, clearConversation } from "./actions";
 
 const money = (n: number) => `$${(Math.round(n * 100) / 100).toFixed(2)}`;
 
@@ -183,6 +183,34 @@ export function AssistantChat({ autoStart = false, glass = false }: { autoStart?
     startMic();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoStart]);
+
+  // MEMORY: restore the saved conversation + draft on open (pick up where you left off).
+  const loadedRef = useRef(false);
+  useEffect(() => {
+    if (loadedRef.current) return;
+    loadedRef.current = true;
+    loadConversation()
+      .then(({ messages: m, draft: d }) => {
+        if (m && m.length) setMessages(m as Msg[]);
+        if (d) setDraft(d);
+      })
+      .catch(() => {});
+  }, []);
+
+  // ...and auto-persist (debounced) so nothing is ever lost.
+  useEffect(() => {
+    if (messages.length === 0 && !draft) return;
+    const t = setTimeout(() => { saveConversation(messages, draft).catch(() => {}); }, 800);
+    return () => clearTimeout(t);
+  }, [messages, draft]);
+
+  function newChat() {
+    stopVoice();
+    setMessages([]);
+    setDraft(null);
+    setInput("");
+    clearConversation().catch(() => {});
+  }
 
   // Stop the whole voice conversation at any time (like chat): stop listening, cut off any
   // speech mid-sentence, and leave voice mode.
@@ -403,6 +431,11 @@ export function AssistantChat({ autoStart = false, glass = false }: { autoStart?
 
   return (
     <div className={`flex min-h-0 flex-1 flex-col overflow-hidden ${glass ? "bg-transparent" : "rounded-xl border border-slate-200 bg-white"}`}>
+      {messages.length > 0 && (
+        <div className="flex shrink-0 justify-end px-3 pt-1">
+          <button onClick={newChat} className="text-xs font-medium text-slate-400 hover:text-brand">+ New chat</button>
+        </div>
+      )}
       <div ref={scrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
         {messages.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center text-center">

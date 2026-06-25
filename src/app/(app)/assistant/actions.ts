@@ -2,7 +2,43 @@
 
 import { executeAction } from "@/lib/actions/execute";
 import { AGENT_WRITE_ALLOWED } from "@/lib/actions/agent-tools";
+import { createClient } from "@/lib/supabase/server";
 import type { AgentDraft } from "@/lib/assistant-protocol";
+
+type StoredMsg = { role: "user" | "assistant"; content: string };
+
+/** Restore the user's saved conversation + live quote draft (pick up where you left off). */
+export async function loadConversation(): Promise<{ messages: StoredMsg[]; draft: AgentDraft | null }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { messages: [], draft: null };
+  const { data } = await supabase.from("assistant_state").select("messages, draft").eq("user_id", user.id).maybeSingle();
+  return { messages: (data?.messages as StoredMsg[]) ?? [], draft: (data?.draft as AgentDraft | null) ?? null };
+}
+
+/** Persist the conversation + draft (RLS-private to this user) so it survives a close. */
+export async function saveConversation(messages: StoredMsg[], draft: AgentDraft | null): Promise<{ ok: boolean }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false };
+  const capped = (messages ?? []).slice(-40).map((m) => ({ role: m.role, content: String(m.content ?? "").slice(0, 8000) }));
+  const { error } = await supabase.from("assistant_state").upsert({
+    user_id: user.id,
+    messages: capped,
+    draft: draft ?? null,
+    updated_at: new Date().toISOString(),
+  });
+  return { ok: !error };
+}
+
+/** Start fresh — forget the current conversation (memory facts are kept). */
+export async function clearConversation(): Promise<{ ok: boolean }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false };
+  await supabase.from("assistant_state").delete().eq("user_id", user.id);
+  return { ok: true };
+}
 
 /** Save the live quote draft the user was watching build — their tap on Save IS the consent
  *  (source:"ui"), so it runs through the staff role gate + audit without a separate confirm.
