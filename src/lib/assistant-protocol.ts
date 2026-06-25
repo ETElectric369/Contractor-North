@@ -14,3 +14,15 @@ export type AgentConfirm = {
   /** Human read-back, e.g. "Add a $40.00 cost from Home Depot — say yes to confirm." */
   prompt: string;
 };
+
+// A second client directive: open Maps (navigate / find a place). Emitted as the last
+// stream chunk, same split rule as the confirm marker. The agent decides search vs
+// directions; the client opens the URL.
+export const OPEN_MARKER = "␞CN_OPEN␞";
+
+export type AgentOpen = {
+  /** Maps URL to open. */
+  url: string;
+  /** What we're opening, for the read-back, e.g. "gas station". */
+  label: string;
+};

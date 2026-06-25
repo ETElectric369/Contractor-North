@@ -5,7 +5,7 @@ import { Send, Sparkles, Loader2, Mic, MicOff, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
 import { speakSmart, unlockAudio } from "@/lib/tts";
-import { CONFIRM_MARKER, type AgentConfirm } from "@/lib/assistant-protocol";
+import { CONFIRM_MARKER, OPEN_MARKER, type AgentConfirm, type AgentOpen } from "@/lib/assistant-protocol";
 import { confirmAgentAction } from "./actions";
 
 interface Msg {
@@ -82,7 +82,7 @@ export function AssistantChat() {
         const { done, value } = await reader.read();
         if (done) break;
         full += decoder.decode(value, { stream: true });
-        const visible = full.split(CONFIRM_MARKER)[0]; // never show the marker/proposal
+        const visible = full.split(CONFIRM_MARKER)[0].split(OPEN_MARKER)[0]; // never show a marker/payload
         setMessages((m) => {
           const copy = [...m];
           copy[copy.length - 1] = { role: "assistant", content: visible };
@@ -91,17 +91,30 @@ export function AssistantChat() {
         scrollToBottom();
       }
 
-      // Split off a confirm proposal the agent appended (a cost, etc. — nothing ran yet).
-      const [reply, confirmJson] = full.split(CONFIRM_MARKER);
+      // Directive markers (confirm / open-maps) come at the very end of the stream.
+      const visibleText = full.split(CONFIRM_MARKER)[0].split(OPEN_MARKER)[0];
       let proposal: AgentConfirm | null = null;
-      if (confirmJson) {
-        try { proposal = JSON.parse(confirmJson); } catch {}
+      if (full.includes(CONFIRM_MARKER)) {
+        try { proposal = JSON.parse(full.split(CONFIRM_MARKER)[1]); } catch {}
+      }
+      let openDir: AgentOpen | null = null;
+      if (full.includes(OPEN_MARKER)) {
+        try { openDir = JSON.parse(full.split(OPEN_MARKER)[1]); } catch {}
       }
 
-      if (proposal) {
+      if (openDir?.url) {
+        // Hands-free navigation: say it, then open Maps (keep the app if the browser lets us).
+        if (viaVoice) speakSmart(`Opening maps for ${openDir.label}.`, () => { if (voiceModeRef.current) startMic(); });
+        try {
+          const w = window.open(openDir.url, "_blank");
+          if (!w) window.location.href = openDir.url;
+        } catch {
+          window.location.href = openDir.url;
+        }
+      } else if (proposal) {
         confirmRef.current = proposal;
         setPendingConfirm(proposal);
-        if (!reply.trim()) {
+        if (!visibleText.trim()) {
           setMessages((m) => {
             const c = [...m];
             c[c.length - 1] = { role: "assistant", content: proposal!.prompt };
@@ -111,8 +124,8 @@ export function AssistantChat() {
         // Voice: read the proposal and listen for yes/no. Card shows either way.
         if (viaVoice) speakSmart(proposal.prompt, () => { if (voiceModeRef.current) confirmListen(); });
       } else if (viaVoice) {
-        // No confirm — read the whole reply aloud, then re-open the mic for the next turn.
-        const clean = (reply || "").replace(/\s*\[[^\]]*\]\s*$/, "").trim();
+        // No directive — read the whole reply aloud, then re-open the mic for the next turn.
+        const clean = visibleText.replace(/\s*\[[^\]]*\]\s*$/, "").trim();
         if (clean) speakSmart(clean, () => { if (voiceModeRef.current) startMic(); });
       }
     } catch (e: any) {
