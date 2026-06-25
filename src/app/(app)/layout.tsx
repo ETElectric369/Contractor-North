@@ -109,7 +109,7 @@ export default async function AppLayout({
       <Dock branding={branding} role={profile.role} badges={badges} />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Topbar profile={(profile as Profile) ?? null} lang={profile.language} />
-        <main className="flex-1 overflow-y-auto bg-slate-50/70 p-4 pb-[calc(6rem+env(safe-area-inset-bottom))] lg:p-6 lg:pb-6">
+        <main className="flex-1 overflow-y-auto bg-slate-50/70 p-4 pb-[calc(7.5rem+env(safe-area-inset-bottom))] lg:p-6 lg:pb-6">
           {children}
         </main>
       </div>

@@ -624,14 +624,8 @@ export default async function JobDetailPage({
       count: invoices?.length ?? 0,
       content: (
         <div className="space-y-3">
-          <ContractCard jobId={j.id} contract={((contractRows as any) ?? [])[0] ?? null} />
-          <PaymentScheduleCard
-            jobId={j.id}
-            billingType={(j as any).billing_type ?? "fixed"}
-            contractTotal={contractTotal}
-            depositPercent={getOrgSettings((org as any)?.settings).deposit_percent}
-            milestones={(paymentMilestones as any) ?? []}
-          />
+          {/* Lead with the INVOICES (this is the Invoices tab) — the contract / payment
+              schedule / lien cards live below, since they're supporting deal-to-cash context. */}
           <div className="flex justify-end gap-2">
             <ProgressInvoiceButton jobId={j.id} billingType={(j as any).billing_type ?? "fixed"} estimate={quoted} worked={workedToDate} invoiced={billedToDate} paid={collected} openInvoices={openInvoices} scheduleActive={((paymentMilestones as any) ?? []).length > 0} />
             <ConvertButton
@@ -653,6 +647,14 @@ export default async function JobDetailPage({
             {(!invoices || invoices.length === 0) && empty("invoices")}
           </ul>
           </Card>
+          <PaymentScheduleCard
+            jobId={j.id}
+            billingType={(j as any).billing_type ?? "fixed"}
+            contractTotal={contractTotal}
+            depositPercent={getOrgSettings((org as any)?.settings).deposit_percent}
+            milestones={(paymentMilestones as any) ?? []}
+          />
+          <ContractCard jobId={j.id} contract={((contractRows as any) ?? [])[0] ?? null} />
           <LienInsuranceCard
             jobId={j.id}
             lien={(lienRecord as any) ?? null}

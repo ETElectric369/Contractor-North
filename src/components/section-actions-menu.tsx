@@ -84,9 +84,10 @@ export function SectionActionsMenu({
       </button>
       {open && (
         // position set inline because .glass-gloss forces position:relative, which
-        // would override a Tailwind `absolute`. Right-aligned, just below the button.
+        // would override a Tailwind `absolute`. Left-aligned (the kebab is the leftmost
+        // control, so right-anchoring pushed the panel off-screen to the left).
         <div
-          style={{ position: "absolute", right: 0, top: "calc(100% + 0.25rem)" }}
+          style={{ position: "absolute", left: 0, top: "calc(100% + 0.25rem)" }}
           className="glass glass-gloss glass-menu z-[90] w-56 overflow-hidden rounded-lg py-1.5 shadow-xl"
         >
           {shown.map((n) => {
