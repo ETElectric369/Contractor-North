@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Send, Sparkles, Loader2, Mic, MicOff, Check } from "lucide-react";
+import { Send, Sparkles, Loader2, Mic, Check, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
-import { speakSmart, unlockAudio } from "@/lib/tts";
+import { speakSmart, unlockAudio, stopSpeaking } from "@/lib/tts";
 import { CONFIRM_MARKER, OPEN_MARKER, type AgentConfirm, type AgentOpen } from "@/lib/assistant-protocol";
 import { confirmAgentAction } from "./actions";
 
@@ -19,6 +19,25 @@ const SUGGESTIONS = [
   "Which invoices are still unpaid?",
   "Show me my open quotes and their totals.",
 ];
+
+/** The chat-style "voice mode" waveform — bars that bounce while it's live. */
+function VoiceWave({ active }: { active?: boolean }) {
+  return (
+    <div className="flex h-10 items-center justify-center gap-1.5">
+      {[0, 1, 2, 3, 4].map((i) => (
+        <span
+          key={i}
+          className="w-1.5 rounded-full bg-brand"
+          style={{
+            height: active ? undefined : 10,
+            animation: active ? `cnwave 0.9s ease-in-out ${i * 0.12}s infinite` : "none",
+          }}
+        />
+      ))}
+      <style>{`@keyframes cnwave{0%,100%{height:10px}50%{height:34px}}`}</style>
+    </div>
+  );
+}
 
 export function AssistantChat({ autoStart = false }: { autoStart?: boolean } = {}) {
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -35,6 +54,14 @@ export function AssistantChat({ autoStart = false }: { autoStart?: boolean } = {
   // tap or a spoken "yes"). The ref mirrors it so the voice yes/no closure reads it fresh.
   const [pendingConfirm, setPendingConfirm] = useState<AgentConfirm | null>(null);
   const confirmRef = useRef<AgentConfirm | null>(null);
+  const [voiceMode, setVoiceModeState] = useState(false); // in a spoken conversation (drives the UI)
+
+  // Enter/leave voice mode — keep the ref (read by the async re-listen closures) and the UI
+  // state in lockstep.
+  function setVoiceMode(on: boolean) {
+    voiceModeRef.current = on;
+    setVoiceModeState(on);
+  }
 
   useEffect(() => {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -45,10 +72,19 @@ export function AssistantChat({ autoStart = false }: { autoStart?: boolean } = {
   // away (it already unlocked audio in the tap), so it's tap → talk, not tap → tap-mic.
   useEffect(() => {
     if (!autoStart) return;
-    voiceModeRef.current = true;
+    setVoiceMode(true);
     startMic();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoStart]);
+
+  // Stop the whole voice conversation at any time (like chat): stop listening, cut off any
+  // speech mid-sentence, and leave voice mode.
+  function stopVoice() {
+    setVoiceMode(false);
+    try { recogRef.current?.stop(); } catch {}
+    stopSpeaking();
+    setListening(false);
+  }
 
   function scrollToBottom() {
     requestAnimationFrame(() =>
@@ -59,7 +95,7 @@ export function AssistantChat({ autoStart = false }: { autoStart?: boolean } = {
   async function send(text: string, viaVoice = false) {
     const content = text.trim();
     if (!content || streaming) return;
-    if (!viaVoice) voiceModeRef.current = false; // typing leaves voice mode
+    if (!viaVoice) setVoiceMode(false); // typing leaves voice mode
 
     const next: Msg[] = [...messages, { role: "user", content }];
     setMessages(next);
@@ -173,20 +209,17 @@ export function AssistantChat({ autoStart = false }: { autoStart?: boolean } = {
     }
   }
 
-  function toggleMic() {
-    if (listening) {
-      voiceModeRef.current = false; // tapping off ends the spoken conversation
-      try { recogRef.current?.stop(); } catch {}
-      setListening(false);
-      return;
-    }
+  // Enter voice mode from the text composer's Talk button. (Leaving is the Stop button →
+  // stopVoice.)
+  function startVoice() {
+    if (voiceModeRef.current) { stopVoice(); return; }
     // Prime iOS audio INSIDE this tap so the reply can be spoken after the round-trip.
     try {
       const synth = window.speechSynthesis;
       if (synth) { const w = new SpeechSynthesisUtterance(" "); w.volume = 0; synth.speak(w); }
     } catch {}
     unlockAudio();
-    voiceModeRef.current = true;
+    setVoiceMode(true);
     if (confirmRef.current) confirmListen(); // a proposal is waiting → hear yes/no
     else startMic();
   }
@@ -310,7 +343,7 @@ export function AssistantChat({ autoStart = false }: { autoStart?: boolean } = {
         )}
       </div>
 
-      {pendingConfirm && (
+      {pendingConfirm ? (
         <div className="border-t border-amber-200 bg-amber-50 p-3">
           <div className="mb-1.5 text-sm font-medium text-amber-900">{pendingConfirm.prompt}</div>
           {/* Show EVERY field that will be written, so what you approve == what runs. */}
@@ -333,51 +366,69 @@ export function AssistantChat({ autoStart = false }: { autoStart?: boolean } = {
             </Button>
           </div>
         </div>
-      )}
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          send(input);
-        }}
-        className="border-t border-slate-100 p-3"
-      >
-        <div className="flex items-end gap-2">
-          <Textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                send(input);
-              }
-            }}
-            rows={1}
-            placeholder="Ask the assistant…  (Enter to send, Shift+Enter for newline)"
-            className="max-h-40 min-h-[44px] flex-1 resize-none"
-          />
-          {voiceOn && (
-            <Button
-              type="button"
-              size="icon"
-              variant="ghost"
-              onClick={toggleMic}
-              disabled={streaming}
-              aria-label={listening ? "Stop listening" : "Talk to the assistant"}
-              title={listening ? "Listening… tap to stop" : "Tap and talk"}
-              className={listening ? "animate-pulse text-red-600" : "text-slate-500"}
-            >
-              {listening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-            </Button>
-          )}
-          <Button type="submit" size="icon" disabled={streaming || !input.trim() || !!pendingConfirm}>
-            {streaming ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Send className="h-4 w-4" />
-            )}
-          </Button>
+      ) : voiceMode ? (
+        // Voice mode — exactly like chat: it's listening / talking, and Stop ends it anytime.
+        <div className="flex flex-col items-center gap-2 border-t border-slate-100 p-4">
+          <VoiceWave active />
+          <div className="text-sm font-medium text-slate-600">
+            {streaming ? "Thinking…" : listening ? "Listening…" : "Talking…"}
+          </div>
+          <button
+            type="button"
+            onClick={stopVoice}
+            aria-label="Stop"
+            className="mt-1 flex h-14 w-14 items-center justify-center rounded-full bg-red-600 text-white shadow-lg transition hover:bg-red-500 active:scale-95"
+          >
+            <Square className="h-6 w-6" fill="currentColor" />
+          </button>
+          <div className="text-xs text-slate-400">Tap to stop</div>
         </div>
-      </form>
+      ) : (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            send(input);
+          }}
+          className="border-t border-slate-100 p-3"
+        >
+          <div className="flex items-end gap-2">
+            <Textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  send(input);
+                }
+              }}
+              rows={1}
+              placeholder="Ask, or tap Talk to speak…"
+              className="max-h-40 min-h-[44px] flex-1 resize-none"
+            />
+            {voiceOn && (
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                onClick={startVoice}
+                disabled={streaming}
+                aria-label="Talk to the assistant"
+                title="Tap and talk"
+                className="text-brand"
+              >
+                <Mic className="h-4 w-4" />
+              </Button>
+            )}
+            <Button type="submit" size="icon" disabled={streaming || !input.trim()}>
+              {streaming ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="h-4 w-4" />
+              )}
+            </Button>
+          </div>
+        </form>
+      )}
     </div>
   );
 }

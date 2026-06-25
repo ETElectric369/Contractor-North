@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Sparkles, X } from "lucide-react";
+import { AudioLines, Sparkles, X } from "lucide-react";
 import { AssistantChat } from "@/app/(app)/assistant/assistant-chat";
 import { unlockAudio } from "@/lib/tts";
 
@@ -42,8 +42,8 @@ export function GlobalAssistant() {
         aria-label="Open the assistant"
         className="btn-gloss inline-flex h-10 items-center gap-1.5 rounded-full bg-brand px-3 text-white shadow-sm transition-colors hover:bg-brand-dark"
       >
-        <Sparkles className="h-5 w-5" />
-        <span className="hidden text-sm font-medium sm:inline">Assistant</span>
+        <AudioLines className="h-5 w-5" />
+        <span className="hidden text-sm font-medium sm:inline">Talk</span>
       </button>
 
       {open && (

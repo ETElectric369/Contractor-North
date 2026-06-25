@@ -55,6 +55,19 @@ export function unlockAudio() {
   } catch {}
 }
 
+/** Stop any in-flight speech immediately (neural audio + browser voice). Used by the
+ *  voice-mode Stop button so the user can cut Claude off mid-sentence, like chat. */
+export function stopSpeaking() {
+  try { window.speechSynthesis?.cancel(); } catch {}
+  try {
+    if (audioEl) {
+      audioEl.onended = null;
+      audioEl.pause();
+      audioEl.currentTime = 0;
+    }
+  } catch {}
+}
+
 function browserSpeak(text: string, fire: () => void) {
   try {
     const synth = window.speechSynthesis;
