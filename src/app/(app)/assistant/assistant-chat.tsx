@@ -214,7 +214,7 @@ export function AssistantChat({ autoStart = false, glass = false }: { autoStart?
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: next }),
+        body: JSON.stringify({ messages: next, voice: viaVoice }),
       });
 
       if (!res.ok || !res.body) {

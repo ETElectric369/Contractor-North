@@ -14,6 +14,7 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   "task.setDue",
   "task.assign",
   "customer.create",
+  "customer.update", // fix a misspelled name / add contact info (reversible edit)
   "appointment.create",
   // Quotes are DRAFTS (reversible, reviewable, not sent, no money moved). The agent must
   // read the whole quote back + get a spoken "yes" before calling it — that conversational

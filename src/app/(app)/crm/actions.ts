@@ -112,6 +112,33 @@ export async function updateCustomer(
   return { ok: true };
 }
 
+/** Partial update — only the fields provided change (so the agent can fix a misspelled
+ *  name or add a phone without wiping everything else). RLS scopes it to the org. */
+export async function patchCustomer(
+  id: string,
+  patch: {
+    name?: string; phone?: string | null; email?: string | null; company_name?: string | null;
+    address?: string | null; city?: string | null; state?: string | null; zip?: string | null; notes?: string | null;
+  },
+): Promise<ActionResult> {
+  const supabase = await createClient();
+  const upd: Record<string, unknown> = {};
+  if (patch.name != null) { const n = String(patch.name).trim(); if (!n) return { ok: false, error: "Name can't be empty." }; upd.name = n; }
+  if (patch.phone != null) upd.phone = orNull(formatPhone(String(patch.phone)));
+  if (patch.email != null) upd.email = emptyToNull(patch.email);
+  if (patch.company_name != null) upd.company_name = emptyToNull(patch.company_name);
+  if (patch.address != null) upd.address = emptyToNull(patch.address);
+  if (patch.city != null) upd.city = orNull(titleCase(String(patch.city)));
+  if (patch.state != null) upd.state = orNull(formatState(String(patch.state)));
+  if (patch.zip != null) upd.zip = orNull(formatZip(String(patch.zip)));
+  if (patch.notes != null) upd.notes = emptyToNull(patch.notes);
+  if (Object.keys(upd).length === 0) return { ok: false, error: "Nothing to update." };
+  const { error } = await supabase.from("customers").update(upd).eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/crm");
+  return { ok: true };
+}
+
 export interface CustomerImportRow {
   name: string;
   company_name?: string;
