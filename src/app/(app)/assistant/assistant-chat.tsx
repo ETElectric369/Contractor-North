@@ -1,12 +1,77 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Send, Sparkles, Loader2, Mic, Check, Square } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Send, Sparkles, Loader2, Mic, Check, Square, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
 import { speakSmart, unlockAudio, stopSpeaking } from "@/lib/tts";
-import { CONFIRM_MARKER, OPEN_MARKER, type AgentConfirm, type AgentOpen } from "@/lib/assistant-protocol";
-import { confirmAgentAction } from "./actions";
+import {
+  CONFIRM_MARKER, OPEN_MARKER, DRAFT_OPEN, DRAFT_CLOSE,
+  type AgentConfirm, type AgentOpen, type AgentDraft,
+} from "@/lib/assistant-protocol";
+import { confirmAgentAction, saveQuoteFromDraft } from "./actions";
+
+const money = (n: number) => `$${(Math.round(n * 100) / 100).toFixed(2)}`;
+
+/** Pull the visible text + the latest live quote draft out of the raw stream so far. */
+function parseStream(full: string): { text: string; draft: AgentDraft | null } {
+  let draft: AgentDraft | null = null;
+  const re = new RegExp(DRAFT_OPEN + "([\\s\\S]*?)" + DRAFT_CLOSE, "g");
+  const blocks = [...full.matchAll(re)];
+  if (blocks.length) {
+    try { draft = JSON.parse(blocks[blocks.length - 1][1]); } catch {}
+  }
+  let text = full.replace(re, "");
+  // Drop a half-arrived draft block at the tail so its JSON never flashes on screen.
+  const partial = text.indexOf(DRAFT_OPEN);
+  if (partial >= 0) text = text.slice(0, partial);
+  text = text.split(CONFIRM_MARKER)[0].split(OPEN_MARKER)[0];
+  return { text, draft };
+}
+
+/** The live quote building in front of you — the bottom half of the glass window. */
+function LiveQuote({ draft, onSave, saving }: { draft: AgentDraft; onSave: () => void; saving: boolean }) {
+  const items = draft.items ?? [];
+  const subtotal = items.reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0);
+  const tax = subtotal * (Number(draft.tax_rate) || 0);
+  const total = subtotal + tax;
+  const ready = draft.status === "ready";
+  return (
+    <div className="mx-2 mb-2 overflow-hidden rounded-xl border border-white/40 bg-white/70 shadow-sm backdrop-blur">
+      <div className="flex items-center gap-2 border-b border-slate-200/70 px-3 py-2 text-xs font-semibold text-slate-700">
+        <FileText className="h-3.5 w-3.5 text-brand" />
+        {draft.title || "New quote"}
+        {draft.customer_name ? <span className="font-normal text-slate-400">· {draft.customer_name}</span> : null}
+      </div>
+      <ul className="max-h-40 divide-y divide-slate-100 overflow-y-auto px-3 text-xs">
+        {items.length === 0 ? (
+          <li className="py-2 text-slate-400">Building…</li>
+        ) : (
+          items.map((it, i) => (
+            <li key={i} className="flex items-baseline justify-between gap-2 py-1.5">
+              <span className="min-w-0 truncate text-slate-700">
+                {it.description}
+                <span className="text-slate-400"> · {Number(it.quantity) || 1} {it.unit || "ea"} × {money(Number(it.unit_price) || 0)}</span>
+              </span>
+              <span className="shrink-0 font-medium text-slate-800">{money((Number(it.quantity) || 0) * (Number(it.unit_price) || 0))}</span>
+            </li>
+          ))
+        )}
+      </ul>
+      <div className="space-y-0.5 border-t border-slate-200/70 px-3 py-2 text-xs">
+        <div className="flex justify-between text-slate-500"><span>Subtotal</span><span>{money(subtotal)}</span></div>
+        {draft.tax_rate ? <div className="flex justify-between text-slate-500"><span>Tax</span><span>{money(tax)}</span></div> : null}
+        <div className="flex justify-between text-sm font-semibold text-slate-900"><span>Total</span><span>{money(total)}</span></div>
+      </div>
+      <div className="p-2">
+        <Button onClick={onSave} disabled={saving || items.length === 0} className={`w-full ${ready ? "bg-green-600 hover:bg-green-500" : ""}`}>
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : ready ? "Save quote →" : "Save draft →"}
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 interface Msg {
   role: "user" | "assistant";
@@ -39,7 +104,7 @@ function VoiceWave({ active }: { active?: boolean }) {
   );
 }
 
-export function AssistantChat({ autoStart = false }: { autoStart?: boolean } = {}) {
+export function AssistantChat({ autoStart = false, glass = false }: { autoStart?: boolean; glass?: boolean } = {}) {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
@@ -56,6 +121,27 @@ export function AssistantChat({ autoStart = false }: { autoStart?: boolean } = {
   const confirmRef = useRef<AgentConfirm | null>(null);
   const [voiceMode, setVoiceModeState] = useState(false); // in a spoken conversation (drives the UI)
   const [speaking, setSpeaking] = useState(false); // Claude's reply is currently playing
+  const [draft, setDraft] = useState<AgentDraft | null>(null); // the live quote being built
+  const [savingDraft, setSavingDraft] = useState(false);
+  const router = useRouter();
+
+  // Finalize the live draft → real quote, then flip to the actual quote page (filled out).
+  async function saveDraft() {
+    if (!draft) return;
+    setSavingDraft(true);
+    try {
+      const res = await saveQuoteFromDraft(draft);
+      if (res.ok && res.id) {
+        setDraft(null);
+        stopVoice();
+        router.push(`/quotes/${res.id}`);
+      } else {
+        setMessages((m) => [...m, { role: "assistant", content: res.error ? `Couldn't save: ${res.error}` : "Couldn't save the quote." }]);
+      }
+    } finally {
+      setSavingDraft(false);
+    }
+  }
 
   // Enter/leave voice mode — keep the ref (read by the async re-listen closures) and the UI
   // state in lockstep.
@@ -148,7 +234,8 @@ export function AssistantChat({ autoStart = false }: { autoStart?: boolean } = {
         const { done, value } = await reader.read();
         if (done) break;
         full += decoder.decode(value, { stream: true });
-        const visible = full.split(CONFIRM_MARKER)[0].split(OPEN_MARKER)[0]; // never show a marker/payload
+        const { text: visible, draft: liveDraft } = parseStream(full);
+        if (liveDraft) setDraft(liveDraft); // the quote fills in live as blocks arrive
         setMessages((m) => {
           const copy = [...m];
           copy[copy.length - 1] = { role: "assistant", content: visible };
@@ -158,7 +245,7 @@ export function AssistantChat({ autoStart = false }: { autoStart?: boolean } = {
       }
 
       // Directive markers (confirm / open-maps) come at the very end of the stream.
-      const visibleText = full.split(CONFIRM_MARKER)[0].split(OPEN_MARKER)[0];
+      const visibleText = parseStream(full).text;
       let proposal: AgentConfirm | null = null;
       if (full.includes(CONFIRM_MARKER)) {
         try { proposal = JSON.parse(full.split(CONFIRM_MARKER)[1]); } catch {}
@@ -315,8 +402,8 @@ export function AssistantChat({ autoStart = false }: { autoStart?: boolean } = {
   }, []);
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white">
-      <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto p-4">
+    <div className={`flex min-h-0 flex-1 flex-col overflow-hidden ${glass ? "bg-transparent" : "rounded-xl border border-slate-200 bg-white"}`}>
+      <div ref={scrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
         {messages.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center text-center">
             <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-light">
@@ -363,6 +450,8 @@ export function AssistantChat({ autoStart = false }: { autoStart?: boolean } = {
           ))
         )}
       </div>
+
+      {draft ? <LiveQuote draft={draft} onSave={saveDraft} saving={savingDraft} /> : null}
 
       {pendingConfirm ? (
         <div className="border-t border-amber-200 bg-amber-50 p-3">

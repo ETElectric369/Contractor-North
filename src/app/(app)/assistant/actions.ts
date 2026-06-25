@@ -2,6 +2,35 @@
 
 import { executeAction } from "@/lib/actions/execute";
 import { AGENT_WRITE_ALLOWED } from "@/lib/actions/agent-tools";
+import type { AgentDraft } from "@/lib/assistant-protocol";
+
+/** Save the live quote draft the user was watching build — their tap on Save IS the consent
+ *  (source:"ui"), so it runs through the staff role gate + audit without a separate confirm.
+ *  Returns the new quote id so the client can flip to the real quote page. */
+export async function saveQuoteFromDraft(
+  draft: AgentDraft,
+): Promise<{ ok: boolean; id?: string; error?: string }> {
+  const res = await executeAction(
+    "quote.create",
+    {
+      customer_id: draft.customer_id ?? null,
+      job_id: draft.job_id ?? null,
+      title: draft.title ?? "",
+      notes: "",
+      tax_rate: draft.tax_rate ?? 0,
+      valid_until: null,
+      items: (draft.items ?? []).map((i) => ({
+        description: i.description,
+        quantity: Number(i.quantity) || 1,
+        unit: i.unit || "ea",
+        unit_price: Number(i.unit_price) || 0,
+      })),
+    },
+    { source: "ui" },
+  );
+  if (!res.ok) return { ok: false, error: res.error };
+  return { ok: true, id: (res.data as { id?: string } | undefined)?.id };
+}
 
 /**
  * Run an agent-proposed action AFTER the user explicitly confirmed it in the chat (the

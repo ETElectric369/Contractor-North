@@ -26,3 +26,30 @@ export type AgentOpen = {
   /** What we're opening, for the read-back, e.g. "gas station". */
   label: string;
 };
+
+// A LIVE quote draft the agent builds as you talk — emitted MID-stream (delimited by an
+// open/close marker so the client can extract complete blocks while text keeps streaming),
+// and re-emitted each time a line is added/changed, so the preview fills in line-by-line.
+export const DRAFT_OPEN = "␞CN_DRAFT␞";
+export const DRAFT_CLOSE = "␞/CN_DRAFT␞";
+
+export type AgentDraftItem = {
+  description: string;
+  quantity: number;
+  unit: string;
+  unit_price: number;
+};
+
+export type AgentDraft = {
+  kind: "quote";
+  /** Display name; resolve customer_id via list_customers when known (null = unattached). */
+  customer_name?: string | null;
+  customer_id?: string | null;
+  job_id?: string | null;
+  title?: string;
+  /** Fraction, e.g. 0.0825 for 8.25%. */
+  tax_rate?: number;
+  items: AgentDraftItem[];
+  /** "building" while gathering, "ready" once read back + good to save. */
+  status?: "building" | "ready";
+};

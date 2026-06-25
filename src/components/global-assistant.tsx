@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AudioLines, Sparkles, X } from "lucide-react";
+import { AudioLines, X } from "lucide-react";
 import { AssistantChat } from "@/app/(app)/assistant/assistant-chat";
 import { unlockAudio } from "@/lib/tts";
 
@@ -47,26 +47,27 @@ export function GlobalAssistant() {
       </button>
 
       {open && (
-        <div className="fixed inset-0 z-[120] flex items-stretch justify-end">
-          <div className="absolute inset-0 bg-slate-900/30" onClick={() => setOpen(false)} />
-          <div className="relative z-10 flex h-full w-full max-w-md flex-col bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+        <>
+          {/* Tap away to close; the app stays visible behind the glass. */}
+          <div className="fixed inset-0 z-[110]" onClick={() => setOpen(false)} />
+          {/* A floating, semi-transparent glass window that drops under the top bar and grows
+              with the conversation; its bottom half fills with the live quote as you talk. */}
+          <div className="fixed right-2 top-[4.25rem] z-[120] flex max-h-[80vh] w-[min(26rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-2xl border border-white/50 bg-white/80 shadow-2xl backdrop-blur-xl sm:right-4">
+            <div className="flex shrink-0 items-center justify-between border-b border-white/40 px-4 py-2.5">
               <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                <Sparkles className="h-4 w-4 text-brand" /> Assistant
+                <AudioLines className="h-4 w-4 text-brand" /> Assistant
               </div>
               <button
                 onClick={() => setOpen(false)}
                 aria-label="Close assistant"
-                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100"
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-white/60"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="flex flex-1 flex-col overflow-hidden p-2">
-              <AssistantChat />
-            </div>
+            <AssistantChat autoStart glass />
           </div>
-        </div>
+        </>
       )}
     </>
   );
