@@ -293,6 +293,18 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
       "List this company's team members (id, name, role). Use to find a person to ASSIGN a job/task to or LOG TIME for — resolve a spoken name to their id ('assign the Smith job to Mike' → list_team → job.assign with Mike's id).",
     input_schema: { type: "object", properties: {} },
   },
+  {
+    name: "list_compliance",
+    description:
+      "List COMPLIANCE items — insurance policies, licenses, bonds — with their numbers, amounts, and EXPIRY dates (soonest first). Use for 'what's expiring soon', 'is our GL insurance current', 'license status'. A lapsing policy is expensive to miss.",
+    input_schema: { type: "object", properties: { limit: { type: "integer" } } },
+  },
+  {
+    name: "list_liens",
+    description:
+      "List LIEN records (mechanic's-lien tracking) with the legally time-sensitive dates — prelim sent, lien recorded, completion, first furnished — and the job. Use for 'is the prelim filed on Hill Street', 'which jobs need a prelim notice'. Pass job_id to filter.",
+    input_schema: { type: "object", properties: { job_id: { type: "string" }, limit: { type: "integer" } } },
+  },
 ];
 
 const VALID_TOOL_NAMES = new Set(DATA_TOOLS.map((t) => t.name));
@@ -478,6 +490,53 @@ export async function runDataTool(
               ? { id: c.id, name: c.name, company: c.company_name, phone: c.phone, email: c.email, city: c.city, state: c.state }
               : { id: c.id, name: c.name, company: c.company_name, city: c.city, state: c.state },
           ),
+        });
+      }
+
+      case "list_compliance": {
+        const lim = clampLimit(input.limit, 30);
+        const { data, error } = await supabase
+          .from("compliance_items")
+          .select("id, type, name, policy_number, amount, issued_date, expires_date")
+          .order("expires_date", { ascending: true, nullsFirst: false })
+          .limit(lim);
+        if (error) throw error;
+        return JSON.stringify({
+          count: data?.length ?? 0,
+          items: (data ?? []).map((c: any) => ({
+            id: c.id,
+            type: c.type,
+            name: c.name,
+            policy_number: c.policy_number,
+            amount: money(c.amount),
+            issued: c.issued_date,
+            expires: c.expires_date,
+          })),
+        });
+      }
+
+      case "list_liens": {
+        const lim = clampLimit(input.limit, 30);
+        let q = supabase
+          .from("lien_records")
+          .select("id, job_id, prelim_sent_at, lien_recorded_at, completion_date, first_furnished_date, jobs(job_number, name)")
+          .order("completion_date", { ascending: true, nullsFirst: false })
+          .limit(lim);
+        const jid = sanitize(input.job_id);
+        if (jid) q = q.eq("job_id", jid);
+        const { data, error } = await q;
+        if (error) throw error;
+        return JSON.stringify({
+          count: data?.length ?? 0,
+          liens: (data ?? []).map((l: any) => ({
+            id: l.id,
+            job_id: l.job_id,
+            job: l.jobs ? `${l.jobs.job_number} ${l.jobs.name}` : null,
+            prelim_sent_at: l.prelim_sent_at,
+            lien_recorded_at: l.lien_recorded_at,
+            completion_date: l.completion_date,
+            first_furnished_date: l.first_furnished_date,
+          })),
         });
       }
 

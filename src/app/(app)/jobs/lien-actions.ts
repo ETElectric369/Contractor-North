@@ -34,6 +34,28 @@ export type InsuranceInput = {
 
 const d = (v: string | null | undefined) => (v && v.trim() ? v.trim() : null);
 
+/** Partial update of a job's lien record — sets ONLY the provided date fields (so a voice
+ *  "mark the prelim sent today" doesn't wipe owner/GC/dates already on file). Upserts on first
+ *  set. Staff + org-scoped. */
+export async function patchLienRecord(jobId: string, patch: Partial<LienInput>): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const { data: job } = await supabase.from("jobs").select("id").eq("id", jobId).maybeSingle();
+  if (!job) return { ok: false, error: "Job not found." };
+  const fields: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  for (const k of ["first_furnished_date", "completion_date", "prelim_sent_at", "lien_recorded_at", "notes"] as const) {
+    if (patch[k] !== undefined) fields[k] = d(patch[k] as string | null | undefined);
+  }
+  const { data: existing } = await supabase.from("lien_records").select("id").eq("job_id", jobId).maybeSingle();
+  const { error } = existing
+    ? await supabase.from("lien_records").update(fields).eq("job_id", jobId)
+    : await supabase.from("lien_records").insert({ ...fields, job_id: jobId, created_by: ctx.userId });
+  if (error) return { ok: false, error: error.message };
+  revalidatePath(`/jobs/${jobId}`);
+  return { ok: true };
+}
+
 export async function upsertLienRecord(jobId: string, input: LienInput): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };

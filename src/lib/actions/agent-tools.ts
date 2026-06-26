@@ -56,6 +56,8 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   "pettycash.add",
   "inventory.adjust",
   "safety.log",
+  "compliance.create",
+  "lien.update",
   // The JOB LIFECYCLE (the deep audit's biggest miss): CIB could quote a job but not OPEN,
   // schedule, assign, set status on, or FINISH one. job.finish is confirm-gated (drafts an
   // invoice — but never sends); the rest are tier-1 reversible.
