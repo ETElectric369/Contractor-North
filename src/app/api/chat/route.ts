@@ -9,6 +9,8 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { DATA_TOOLS, runDataTool } from "@/lib/assistant-tools";
 import { agentWriteToolsForRole } from "@/lib/actions/agent-tools";
 import { executeAction } from "@/lib/actions/execute";
+import { REGISTRY } from "@/lib/actions/registry";
+import { needsConsent } from "@/lib/actions/risk";
 import { CONFIRM_MARKER, OPEN_MARKER, DRAFT_OPEN, DRAFT_CLOSE, type AgentConfirm, type AgentOpen } from "@/lib/assistant-protocol";
 
 // A client-intent tool: show/refresh the LIVE quote preview as the agent builds it. Not a
@@ -99,7 +101,13 @@ export async function POST(req: Request) {
 
   // Phase E: the tier-1 write tools this role may use, generated from the registry. Every
   // call still goes through executeAction (role + audit + confirm/step-up gate).
-  const { tools: writeTools, resolve: resolveWrite } = agentWriteToolsForRole((prof as { role?: string } | null)?.role);
+  const role = (prof as { role?: string } | null)?.role;
+  const { tools: writeTools, resolve: resolveWrite } = agentWriteToolsForRole(role);
+  // L5: defense-in-depth — don't even OFFER financial/sales read tools to a tech (the DB RLS
+  // already returns zero rows, but least-privilege at the tool layer too).
+  const STAFF_ONLY_READ = new Set(["list_invoices", "get_invoice", "list_quotes", "business_summary", "search_price_list", "list_bug_reports", "list_customers"]);
+  const isStaffCaller = ["owner", "admin", "office"].includes(role ?? "");
+  const dataTools = isStaffCaller ? DATA_TOOLS : DATA_TOOLS.filter((t) => !STAFF_ONLY_READ.has(t.name));
   const playbook = getOrgSettings((org as any)?.settings).quote_playbook?.trim();
   let systemPrompt = ASSISTANT_SYSTEM_PROMPT;
   if (playbook) {
@@ -115,7 +123,7 @@ export async function POST(req: Request) {
     systemPrompt +=
       "\n\nFIXING & LOOKING UP: to fix a customer (a misspelled name, a wrong number, a missing email), look them up with list_customers — it returns their id — then call customer.update with that id and only the field(s) to change; read the corrected values back so they can confirm. To complete, reschedule, or reassign a task, FIRST call list_tasks to get the task's id. You can also review this company's filed bug reports / feature requests with list_bug_reports — use it when the user asks what they've reported, what's still open, or to cluster and prioritize their bugs.";
     systemPrompt +=
-      "\n\nINVOICES — the money loop (this is a big one for field users billing from the truck): when they want to bill a job ('get the invoice ready', 'invoice the Jones job'), look up the job with list_jobs and call invoice.fromJob with its id — it creates a DRAFT invoice PRE-FILLED with the job's labor (hours × rate) and materials. Then read it back with get_invoice — every line and the total — and make any changes they ask for with invoice.addItem / invoice.updateItem / invoice.deleteItem (get the item_ids from get_invoice first). When it's right, tell them it's ready to review and SEND. You NEVER send it — sending stays THEIR tap on the big Send button. You can also turn an accepted quote into an invoice with invoice.fromQuote, and record a payment they RECEIVED with payment.record (the app asks them to confirm the amount first; this only records money in, it never moves money).";
+      "\n\nINVOICES — the money loop (this is a big one for field users billing from the truck): when they want to bill a job ('get the invoice ready', 'invoice the Jones job'), look up the job with list_jobs and call invoice.fromJob with its id — it creates a DRAFT invoice PRE-FILLED with the job's labor (hours × rate) and materials. Then read it back with get_invoice — every line and the total — and make any changes they ask for with invoice.addItem / invoice.updateItem / invoice.deleteItem (get the item_ids from get_invoice first). When it's right, tell them it's ready to review and SEND. You NEVER send it — sending stays THEIR tap on the big Send button. You can also turn an accepted quote into an invoice with invoice.fromQuote, and record a payment they RECEIVED with payment.record — but FIRST look the invoice up (get_invoice or list_invoices) and read back the invoice number, the customer, and the outstanding BALANCE along with the amount, so they're confirming the RIGHT invoice for the right amount (the app also shows a confirm; it won't let you overpay the balance and never moves money).";
     systemPrompt +=
       "\n\nREAD BACK + FIX: after you create or change anything, briefly read back the key values you just saved (the name, amount, date, or code) so the user can catch a typo on the spot — this matters most by voice, where they can't see the screen. If they say it's wrong, don't tell them you can't fix it: look the record up (list_customers / list_tasks / get_invoice return the id) and correct it (customer.update, task.setDue, invoice.updateItem, …).";
   }
@@ -200,7 +208,7 @@ export async function POST(req: Request) {
             // LIVE prices, specs, and code while estimating — the core "do it like Claude
             // did the Tao Zhu quote" capability. Results are untrusted web text (the
             // input-is-data rule in the system prompt covers them).
-            tools: [...DATA_TOOLS, ...writeTools, OPEN_MAPS_TOOL, QUOTE_DRAFT_TOOL, REMEMBER_TOOL, { type: "web_search_20250305", name: "web_search", max_uses: 6 }] as any,
+            tools: [...dataTools, ...writeTools, OPEN_MAPS_TOOL, QUOTE_DRAFT_TOOL, REMEMBER_TOOL, { type: "web_search_20250305", name: "web_search", max_uses: 6 }] as any,
             messages: convo,
           });
           // Strip the directive markers from MODEL text so a prompt-injection can't forge a
@@ -227,6 +235,16 @@ export async function POST(req: Request) {
           const results: Anthropic.ToolResultBlockParam[] = [];
           let pendingConfirm: AgentConfirm | null = null;
           let pendingOpen: AgentOpen | null = null;
+          // M5: does this batch contain a CONFIRM-gated write (e.g. record a payment)? If so,
+          // any OTHER straight-through write must NOT commit before the user approves the
+          // confirm — defer them, so a turn can't silently mutate while only the payment is
+          // surfaced for consent.
+          const gatedWrite = (toolName: string) => {
+            const an = resolveWrite(toolName);
+            const def = an ? REGISTRY[an] : null;
+            return !!(def && needsConsent(def, "agent", false));
+          };
+          const batchHasGated = toolUses.some((tu: Anthropic.ToolUseBlock) => gatedWrite(tu.name));
           for (const tu of toolUses) {
             toolsUsed.add(tu.name);
             // Client-intent: refresh the live quote preview. Emit it mid-stream + keep going
@@ -264,7 +282,10 @@ export async function POST(req: Request) {
             const actionName = resolveWrite(tu.name);
             let out: string;
             if (actionName) {
-              if (writeCount >= MAX_WRITES) {
+              if (batchHasGated && !gatedWrite(tu.name)) {
+                // M5: hold this write until the confirm-gated action in this turn is approved.
+                out = JSON.stringify({ ok: false, deferred: true, error: "I'll make that change right after you confirm the pending action — confirm it first, then ask me again." });
+              } else if (writeCount >= MAX_WRITES) {
                 out = JSON.stringify({ ok: false, error: "That's enough changes for one go — ask me to continue if you want more." });
               } else {
                 writeCount++;

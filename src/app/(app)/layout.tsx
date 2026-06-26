@@ -118,7 +118,7 @@ export default async function AppLayout({
           {children}
         </main>
       </div>
-      <CommandBar />
+      <CommandBar isStaff={isStaff} />
       <BottomNav role={profile.role} />
       {isStaff && <BugReporter orgId={profile.org_id} />}
       {openEntry && (

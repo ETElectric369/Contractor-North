@@ -22,6 +22,20 @@ export async function createInvoiceForJob(
 ): Promise<{ ok: boolean; error?: string; id?: string }> {
   const supabase = await createClient();
 
+  // M3: don't create a SECOND draft — "invoice the Jones job" twice should land on the
+  // existing open draft, not duplicate it (idempotent for the voice flow, which can't see
+  // the screen). Only an open STANDARD draft dedups; draws have their own unique index.
+  const { data: existingDraft } = await supabase
+    .from("invoices")
+    .select("id")
+    .eq("job_id", jobId)
+    .eq("status", "draft")
+    .eq("invoice_kind", "standard")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (existingDraft) return { ok: true, id: existingDraft.id };
+
   const { data: quote } = await supabase
     .from("quotes")
     .select("id")
@@ -39,10 +53,11 @@ export async function createInvoiceForJob(
       .select("customer_id, name, description")
       .eq("id", jobId)
       .maybeSingle();
+    if (!job) return { ok: false, error: "Job not found." }; // L4: never persist a dangling/cross-org job_id
     res = await createBlankInvoice({
-      customer_id: job?.customer_id ?? null,
+      customer_id: job.customer_id ?? null,
       job_id: jobId, // keep the job link so the invoice can pull Labor/Materials
-      title: job?.name ?? "",
+      title: job.name ?? "",
       description: (job as any)?.description ?? null, // scope shown above the line items
       tax_rate: 0,
     });

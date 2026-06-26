@@ -5,25 +5,22 @@ import { useRouter } from "next/navigation";
 import { Search, Sparkles, Plus, ArrowRight } from "lucide-react";
 import { DOCK } from "@/lib/dock";
 
-type Item = { kind: string; label: string; sub?: string; href: string };
+type Item = { kind: string; label: string; sub?: string; href: string; staffOnly?: boolean };
 
 // ONE source of truth: the command bar's "go to" list is derived from the SAME dock that
-// drives the dock + sub-nav, so they can never drift again. Assistant is reached via the
-// Talk button + the "ask the assistant" row (not a duplicate "go to"); creates live only in
-// the global quick-add "+".
-// Flatten the dock into searchable destinations — recursing into the nested "More" hubs
-// (Schedule, Sales, Office…) so every page stays reachable from the command bar.
-type DockLeaf = { label: string; href?: string; children?: DockLeaf[] };
-function navLeaves(nodes: DockLeaf[], sub: string): Item[] {
+// drives the dock + sub-nav, so they can never drift again. Carry staffOnly (section OR item)
+// so we can role-filter — a tech shouldn't be shown Payroll / Tax / Invoices (L11).
+type DockLeaf = { label: string; href?: string; children?: DockLeaf[]; staffOnly?: boolean };
+function navLeaves(nodes: DockLeaf[], sub: string, sectionStaff?: boolean): Item[] {
   return nodes.flatMap((n) =>
     n.children?.length
-      ? navLeaves(n.children, n.label)
+      ? navLeaves(n.children, n.label, sectionStaff || n.staffOnly)
       : n.href
-        ? [{ kind: "Go to", label: n.label, sub, href: n.href }]
+        ? [{ kind: "Go to", label: n.label, sub, href: n.href, staffOnly: sectionStaff || n.staffOnly }]
         : [],
   );
 }
-const NAV_ITEMS: Item[] = DOCK.flatMap((s) => navLeaves(s.children, s.label));
+const NAV_ITEMS: Item[] = DOCK.flatMap((s) => navLeaves(s.children, s.label, s.staffOnly));
 
 function LeadIcon({ kind }: { kind: string }) {
   if (kind === "Assistant") return <Sparkles className="h-4 w-4 text-brand" />;
@@ -37,8 +34,9 @@ function LeadIcon({ kind }: { kind: string }) {
  * the org's jobs/customers/quotes/invoices, jumps to any page, or hands the
  * query to the Assistant. Deep-links use Wave-1's ?tab= where useful.
  */
-export function CommandBar() {
+export function CommandBar({ isStaff }: { isStaff?: boolean }) {
   const router = useRouter();
+  const navItems = useMemo(() => (isStaff ? NAV_ITEMS : NAV_ITEMS.filter((i) => !i.staffOnly)), [isStaff]);
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [results, setResults] = useState<Item[]>([]);
@@ -104,9 +102,9 @@ export function CommandBar() {
 
   const staticMatches = useMemo(() => {
     const term = q.trim().toLowerCase();
-    if (!term) return NAV_ITEMS.slice(0, 7);
-    return NAV_ITEMS.filter((i) => i.label.toLowerCase().includes(term)).slice(0, 6);
-  }, [q]);
+    if (!term) return navItems.slice(0, 7);
+    return navItems.filter((i) => i.label.toLowerCase().includes(term)).slice(0, 6);
+  }, [q, navItems]);
 
   const askItem: Item | null = q.trim()
     ? { kind: "Assistant", label: `Ask the assistant: “${q.trim()}”`, href: `/assistant?q=${encodeURIComponent(q.trim())}` }

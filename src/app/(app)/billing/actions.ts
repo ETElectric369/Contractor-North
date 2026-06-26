@@ -240,10 +240,11 @@ export async function addInvoiceItem(
     return { ok: false, error: "That amount is too large." };
   const { data: inv } = await supabase
     .from("invoices")
-    .select("id, job_id, invoice_kind")
+    .select("id, job_id, invoice_kind, status")
     .eq("id", invoiceId)
     .maybeSingle();
   if (!inv) return { ok: false, error: "Invoice not found." };
+  if (inv.status !== "draft") return NOT_DRAFT_LOCKED; // M1: only draft invoices accept line edits
   if (inv.job_id) {
     const conflict = await standardInvoiceOnDrawJob(supabase, inv, invoiceId);
     if (conflict) return conflict; // H4: can't add billable lines to a standard invoice on a draw job
@@ -800,6 +801,8 @@ export async function updateInvoiceItem(
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
   if (!item.description.trim()) return { ok: false, error: "Description is required." };
+  const block = await requireDraftInvoice(supabase, invoiceId);
+  if (block) return block; // M1: draft-only edits
   if (await isProtectedCreditLine(supabase, itemId)) return CREDIT_LINE_LOCKED;
   const { error } = await supabase
     .from("invoice_items")
@@ -808,7 +811,8 @@ export async function updateInvoiceItem(
       quantity: item.quantity || 1,
       unit_price: item.unit_price || 0,
     })
-    .eq("id", itemId);
+    .eq("id", itemId)
+    .eq("invoice_id", invoiceId); // L3: the item must belong to THIS invoice
   if (error) return { ok: false, error: error.message };
   await recalcInvoice(supabase, invoiceId);
   revalidatePath(`/billing/${invoiceId}`);
@@ -822,8 +826,14 @@ export async function deleteInvoiceItem(
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  const block = await requireDraftInvoice(supabase, invoiceId);
+  if (block) return block; // M1: draft-only edits
   if (await isProtectedCreditLine(supabase, itemId)) return CREDIT_LINE_LOCKED;
-  const { error } = await supabase.from("invoice_items").delete().eq("id", itemId);
+  const { error } = await supabase
+    .from("invoice_items")
+    .delete()
+    .eq("id", itemId)
+    .eq("invoice_id", invoiceId); // L3: the item must belong to THIS invoice
   if (error) return { ok: false, error: error.message };
   await recalcInvoice(supabase, invoiceId);
   revalidatePath(`/billing/${invoiceId}`);
@@ -839,9 +849,26 @@ const CREDIT_LINE_LOCKED: Result = {
   error:
     "That's the automatic “less previous billings” credit — it can't be edited or deleted, since it's what keeps this draw from re-billing the deposit and prior draws.",
 };
+// A draw's auto credit line AND its milestone line are tamper-evident: hand-editing either
+// desyncs the prior-billings offset or payment_milestones. (M2 — lock milestone like draw_credit.)
 async function isProtectedCreditLine(supabase: any, itemId: string): Promise<boolean> {
   const { data } = await supabase.from("invoice_items").select("import_source").eq("id", itemId).maybeSingle();
-  return data?.import_source === "draw_credit";
+  return data?.import_source === "draw_credit" || data?.import_source === "milestone";
+}
+
+// Line edits are for DRAFTS only — once an invoice is sent/paid/void, its lines are locked so
+// a voice/agent (or a stray UI tap) can't silently re-bill a customer or un-pay a paid invoice
+// via recalc. (M1 — the "reversible draft only" guarantee the voice money-loop rests on.)
+const NOT_DRAFT_LOCKED: Result = {
+  ok: false,
+  error:
+    "This invoice has already been sent, so its lines are locked. Edit it while it's still a draft, or record an adjustment / new invoice instead.",
+};
+async function requireDraftInvoice(supabase: any, invoiceId: string): Promise<Result | null> {
+  const { data: inv } = await supabase.from("invoices").select("status").eq("id", invoiceId).maybeSingle();
+  if (!inv) return { ok: false, error: "Invoice not found." };
+  if (inv.status !== "draft") return NOT_DRAFT_LOCKED;
+  return null;
 }
 
 export async function setInvoiceStatus(
@@ -893,12 +920,26 @@ export async function recordPayment(input: {
   // under the org-scoped read policy) before recording a payment against it.
   const { data: inv } = await supabase
     .from("invoices")
-    .select("id, org_id, invoice_number, customers(name)")
+    .select("id, org_id, invoice_number, total, amount_paid, customers(name)")
     .eq("id", input.invoice_id)
     .maybeSingle();
   if (!inv) return { ok: false, error: "Invoice not found." };
 
+  // M4: a misheard amount ("$30k" on a $3k invoice) shouldn't silently overpay + mark paid.
+  const balance = Math.round((Number(inv.total) - Number(inv.amount_paid)) * 100) / 100;
+  const cap = Math.max(0, balance);
+  if (input.amount > cap + 0.01) {
+    return {
+      ok: false,
+      error: `That's more than the $${cap.toLocaleString()} balance on invoice ${inv.invoice_number}. Enter up to the balance, or fix the invoice first.`,
+    };
+  }
+
   const paidAt = dateToIso(input.paid_at);
+  // L2: a payment can't be dated into the future (wrong tax / reporting period).
+  if (paidAt && Date.parse(paidAt) > Date.now() + 86_400_000) {
+    return { ok: false, error: "That payment date is in the future." };
+  }
   const { error } = await supabase.from("payments").insert({
     invoice_id: input.invoice_id,
     amount: input.amount,

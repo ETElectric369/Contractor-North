@@ -32,7 +32,7 @@ export const invoiceActions: Record<string, ActionDef> = {
       return {
         ok: true,
         data: { invoice_id: r.id },
-        speak: "Draft invoice created and pre-filled from the job's labor and materials.",
+        speak: "Draft invoice ready — I pulled in any logged labor and materials from the job. Read it back before you send.",
       };
     },
   },
