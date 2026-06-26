@@ -76,14 +76,20 @@ export function BugReporter({ orgId }: { orgId: string }) {
       // per the storage RLS). A failed upload never blocks the report.
       let screenshotPath: string | undefined;
       if (shotRef.current) {
-        try {
-          const path = `${orgId}/bug-screenshots/${Date.now()}.jpg`;
-          const { error: upErr } = await createClient().storage
-            .from("documents")
-            .upload(path, shotRef.current, { upsert: false, contentType: "image/jpeg" });
-          if (!upErr) screenshotPath = path;
-        } catch {
-          /* ignore — report still goes through */
+        // Retry the upload — a single attempt drops the screenshot on a flaky connection
+        // (e.g. reporting from the field while driving), which is exactly when we most want
+        // it. upsert:true so a retry to the same path doesn't collide. Report sends regardless.
+        const path = `${orgId}/bug-screenshots/${Date.now()}.jpg`;
+        for (let attempt = 0; attempt < 3 && !screenshotPath; attempt++) {
+          try {
+            const { error: upErr } = await createClient().storage
+              .from("documents")
+              .upload(path, shotRef.current, { upsert: true, contentType: "image/jpeg" });
+            if (!upErr) { screenshotPath = path; break; }
+          } catch {
+            /* fall through to retry */
+          }
+          if (attempt < 2) await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
         }
       }
       const res = await createBugReport({
