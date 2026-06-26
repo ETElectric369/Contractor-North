@@ -38,7 +38,7 @@ export function InquiryModal({ inquiry, mode = "new" }: { inquiry?: Inquiry; mod
         </Button>
       ) : (
         <Button onClick={() => setOpen(true)}>
-          <Plus className="h-4 w-4" /> New inquiry
+          <Plus className="h-4 w-4" /> New lead
         </Button>
       )}
 
@@ -46,13 +46,13 @@ export function InquiryModal({ inquiry, mode = "new" }: { inquiry?: Inquiry; mod
         <Modal
           open={open}
           onClose={() => setOpen(false)}
-          title={editing ? "Edit inquiry" : "New inquiry"}
+          title={editing ? "Edit lead" : "New lead"}
           footer={
             <ModalActions
               onCancel={() => setOpen(false)}
               submit
               saving={pending}
-              saveLabel={editing ? "Save changes" : "Create inquiry"}
+              saveLabel={editing ? "Save changes" : "Create lead"}
             />
           }
         >

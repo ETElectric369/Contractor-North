@@ -32,7 +32,7 @@ export default async function InquiriesPage() {
 
   return (
     <div>
-      <PageHeader title="Inquiries" description="New requests to follow up and convert — nothing converts automatically.">
+      <PageHeader title="Leads" description="New requests to follow up and convert — nothing converts automatically.">
         <InquiryModal />
       </PageHeader>
 
@@ -56,8 +56,8 @@ export default async function InquiriesPage() {
       {inquiries.length === 0 ? (
         <EmptyState
           icon={UserPlus}
-          title="No open inquiries"
-          description="Web submissions and manually-added inquiries show up here to follow up and convert."
+          title="No open leads"
+          description="Web submissions and manually-added leads show up here to follow up and convert."
         >
           <InquiryModal />
         </EmptyState>

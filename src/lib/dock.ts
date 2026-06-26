@@ -6,7 +6,6 @@ import {
   Play,
   CalendarDays,
   CalendarClock,
-  MapPin,
   TrendingUp,
   UserPlus,
   Users,
@@ -61,10 +60,10 @@ export interface DockSection {
   staffOnly?: boolean;
 }
 
-// FIVE titles built around a field day — four are one-tap DESTINATIONS (tapping the
-// title lands you there; the top-of-page sub-nav shows its siblings), and "More" is the
-// drawer that holds everything you reach rarely (Schedule, Sales, money admin, office
-// admin), grouped. Create lives on the center "+", not in here.
+// SIX titles built around a field day — most are one-tap DESTINATIONS (tapping the title
+// lands you there; the top-of-page sub-nav shows its siblings). Schedule rides WITH Clock
+// (time + calendar together); Sales is its own dock tile; "More" is the rarely-from-the-
+// truck drawer (money admin + office admin), grouped. Create lives on the center "+".
 export const DOCK: DockSection[] = [
   {
     key: "today",
@@ -92,10 +91,23 @@ export const DOCK: DockSection[] = [
     key: "clock",
     label: "Clock",
     icon: Clock,
-    href: "/timeclock", // everyone can clock in; timecards are office-only
+    href: "/timeclock", // everyone can clock in; timecards + schedule are office-only
     children: [
       { id: "ck-clock", label: "Timeclock", icon: Play, href: "/timeclock" },
       { id: "ck-cards", label: "Timecards", icon: CalendarClock, href: "/timecards", staffOnly: true },
+      { id: "ck-sched", label: "Schedule", icon: CalendarDays, href: "/schedule", staffOnly: true },
+    ],
+  },
+  {
+    key: "sales",
+    label: "Sales",
+    icon: TrendingUp,
+    href: "/crm",
+    staffOnly: true,
+    children: [
+      { id: "sl-leads", label: "Leads", icon: UserPlus, href: "/leads" },
+      { id: "sl-cust", label: "Customers", icon: Users, href: "/crm" },
+      { id: "sl-quotes", label: "Quotes", icon: FileText, href: "/quotes" },
     ],
   },
   {
@@ -115,32 +127,10 @@ export const DOCK: DockSection[] = [
     key: "more",
     label: "More",
     icon: Menu,
-    href: "/schedule", // desktop click fallback; on mobile the title opens the More drawer
+    href: "/permits", // desktop click fallback; on mobile the title opens the More drawer
     children: [
       // Hubs (no href of their own → the bloom/drawer drills into them; their children
       // carry the hrefs and drive the top-of-page sub-nav for those pages).
-      {
-        id: "more-schedule",
-        label: "Schedule",
-        icon: CalendarDays,
-        staffOnly: true,
-        children: [
-          { id: "sc-cal", label: "Calendar", icon: CalendarDays, href: "/schedule" },
-          { id: "sc-appt", label: "Appointments", icon: CalendarClock, href: "/schedule?view=appointments" },
-          { id: "sc-map", label: "Map", icon: MapPin, href: "/schedule?view=map" },
-        ],
-      },
-      {
-        id: "more-sales",
-        label: "Sales",
-        icon: TrendingUp,
-        staffOnly: true,
-        children: [
-          { id: "sl-inq", label: "Inquiries", icon: UserPlus, href: "/leads" },
-          { id: "sl-cust", label: "Customers", icon: Users, href: "/crm" },
-          { id: "sl-quotes", label: "Quotes", icon: FileText, href: "/quotes" },
-        ],
-      },
       {
         id: "more-moneyadmin",
         label: "Money admin",

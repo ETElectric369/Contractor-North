@@ -41,7 +41,7 @@ export const KIND_META: Record<ActionKind, { label: string; tone: "slate" | "blu
   task: { label: "Task", tone: "slate" },
   work_order: { label: "Job task", tone: "blue" },
   job_to_schedule: { label: "To schedule", tone: "amber" },
-  inquiry: { label: "Inquiry", tone: "green" },
+  inquiry: { label: "Lead", tone: "green" },
   appointment: { label: "Appointment", tone: "blue" },
   organize: { label: "To file", tone: "slate" },
   invoice_overdue: { label: "Overdue invoice", tone: "amber" },

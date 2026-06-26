@@ -132,7 +132,7 @@ export async function convertInquiry(
   if (!user) return { ok: false, error: "Not signed in." };
 
   const { data: inq } = await supabase.from("inquiries").select("*").eq("id", id).maybeSingle();
-  if (!inq) return { ok: false, error: "Inquiry not found." };
+  if (!inq) return { ok: false, error: "Lead not found." };
 
   // Resolve the customer: link the chosen existing one, or create from inquiry.
   let customerId = opts.customerId || null;

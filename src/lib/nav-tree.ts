@@ -68,7 +68,7 @@ export const NAV_TREE: NavTree = {
       countKey: "customers",
       children: [
         { id: "c-all", label: "All customers", icon: "users", href: "/crm" },
-        { id: "c-inq", label: "Inquiries", icon: "mail", href: "/leads" },
+        { id: "c-inq", label: "Leads", icon: "mail", href: "/leads" },
         { id: "c-quotes", label: "Quotes", icon: "fileText", href: "/quotes", countKey: "quotes" },
       ],
     },

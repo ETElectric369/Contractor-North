@@ -6,8 +6,9 @@ import { DOCK, type DockNode } from "@/lib/dock";
 
 const basePath = (href: string) => href.split("?")[0];
 // Pages that render their OWN tab strip (Jobs status pills, Schedule's view tabs) — skip
-// here so there aren't two stacked tab bars.
-const SKIP = new Set(["jobs", "more-schedule"]);
+// by PATH so there aren't two stacked tab bars (Schedule now lives under Clock, so a
+// group-key skip would wrongly hide Clock's sub-nav too).
+const SKIP_PATHS = new Set(["/jobs", "/schedule"]);
 
 type Group = { key: string; staffOnly?: boolean; children: DockNode[] };
 
@@ -35,9 +36,9 @@ export function SectionSubnav({ isStaff }: { isStaff?: boolean }) {
   const search = useSearchParams();
   const current = pathname + (search.toString() ? `?${search.toString()}` : "");
 
+  if (SKIP_PATHS.has(pathname)) return null;
   const group = navGroups().find(
     (g) =>
-      !SKIP.has(g.key) &&
       (isStaff || !g.staffOnly) &&
       g.children.some((c) => c.href && basePath(c.href) === pathname),
   );

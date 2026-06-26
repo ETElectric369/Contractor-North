@@ -21,7 +21,7 @@ const en: Dict = {
   // nav items
   Dashboard: "Dashboard",
   Assistant: "Assistant",
-  Inquiries: "Inquiries",
+  Inquiries: "Leads",
   Customers: "Customers",
   Quotes: "Quotes",
   Scheduler: "Scheduler",
@@ -78,7 +78,7 @@ const es: Dict = {
   System: "Sistema",
   Dashboard: "Panel",
   Assistant: "Asistente",
-  Inquiries: "Consultas",
+  Inquiries: "Prospectos",
   Customers: "Clientes",
   Quotes: "Cotizaciones",
   Scheduler: "Programador",

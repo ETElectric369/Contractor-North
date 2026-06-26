@@ -46,8 +46,8 @@ export function BottomNav({ role }: { role?: string }) {
   }, [pathname]);
 
   const sections = DOCK.filter((s) => isStaff || !s.staffOnly);
-  // The center "+" sits after the first two tiles: [Today][Jobs] (+) [Clock][Money][More].
-  const split = Math.min(2, sections.length);
+  // The center "+" sits in the MIDDLE: e.g. [Today][Jobs][Clock] (+) [Sales][Money][More].
+  const split = Math.floor(sections.length / 2);
   const left = sections.slice(0, split);
   const right = sections.slice(split);
 

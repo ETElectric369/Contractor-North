@@ -515,7 +515,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
             </span>
             <div>
               <div className="text-lg font-bold text-slate-900">{openInquiries}</div>
-              <div className="text-xs text-slate-500">Open inquiries</div>
+              <div className="text-xs text-slate-500">Open leads</div>
             </div>
           </Link>
           <Link href="/billing" className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 hover:bg-slate-50">
