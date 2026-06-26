@@ -4,6 +4,7 @@ import { Dock } from "@/components/app-shell/dock";
 import { Topbar } from "@/components/app-shell/topbar";
 import { CommandBar } from "@/components/command-bar";
 import { BottomNav } from "@/components/bottom-nav";
+import { GlobalQuickAdd } from "@/components/global-quick-add";
 import { billingEnabled } from "@/lib/stripe";
 import { hasActiveAccess, isCompedOrg } from "@/lib/subscription";
 import { getOrgSettings } from "@/lib/org-settings";
@@ -120,6 +121,8 @@ export default async function AppLayout({
       </div>
       <CommandBar />
       <BottomNav role={profile.role} />
+      {/* The menu for the bottom dock's center "+" (opened via the cn:quick-add event). */}
+      <GlobalQuickAdd placement="dock" />
       {isStaff && <BugReporter orgId={profile.org_id} />}
       {openEntry && (
         <GeofenceMonitor

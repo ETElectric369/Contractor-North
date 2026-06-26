@@ -2,30 +2,47 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { DOCK } from "@/lib/dock";
+import { DOCK, type DockNode } from "@/lib/dock";
 
 const basePath = (href: string) => href.split("?")[0];
-// These pages render their OWN tab strip (Jobs status pills, Schedule's view tabs), so
-// skip them here to avoid two stacked tab bars.
-const SKIP = new Set(["jobs", "schedule"]);
+// Pages that render their OWN tab strip (Jobs status pills, Schedule's view tabs) — skip
+// here so there aren't two stacked tab bars.
+const SKIP = new Set(["jobs", "more-schedule"]);
 
-/** A persistent horizontal sub-nav at the top of a section's pages — the same menu
- *  that blooms from the dock, pinned in place (like the Jobs status pills). It figures
- *  out which section the current page belongs to and renders its sibling pages as tabs.
- *  Detail pages (no exact match) get none, so they keep their own tabs. */
+type Group = { key: string; staffOnly?: boolean; children: DockNode[] };
+
+/** Every navigable group whose siblings should show as a sub-nav: a top-level section's
+ *  leaf children (Today, Jobs, Clock, Money), AND each nested hub inside More (Schedule,
+ *  Sales, Money admin, Office) — so a demoted page still gets its own sibling tabs. */
+function navGroups(): Group[] {
+  const out: Group[] = [];
+  for (const s of DOCK) {
+    const leaves = s.children.filter((c) => c.href && !c.children?.length);
+    if (leaves.length) out.push({ key: s.key, staffOnly: s.staffOnly, children: leaves });
+    for (const c of s.children) {
+      if (c.children?.length) out.push({ key: c.id, staffOnly: s.staffOnly || c.staffOnly, children: c.children });
+    }
+  }
+  return out;
+}
+
+/** A persistent horizontal sub-nav at the top of a section's pages — the siblings of the
+ *  current page, pinned in place (like the Jobs status pills). It figures out which group
+ *  the current page belongs to (top-level section OR a nested More hub) and renders its
+ *  siblings as tabs. Detail pages (no exact match) get none, so they keep their own tabs. */
 export function SectionSubnav({ isStaff }: { isStaff?: boolean }) {
   const pathname = usePathname();
   const search = useSearchParams();
   const current = pathname + (search.toString() ? `?${search.toString()}` : "");
 
-  const section = DOCK.find(
-    (s) =>
-      !SKIP.has(s.key) &&
-      (isStaff || !s.staffOnly) &&
-      s.children.some((c) => c.href && basePath(c.href) === pathname),
+  const group = navGroups().find(
+    (g) =>
+      !SKIP.has(g.key) &&
+      (isStaff || !g.staffOnly) &&
+      g.children.some((c) => c.href && basePath(c.href) === pathname),
   );
-  if (!section) return null;
-  const tabs = section.children.filter((c) => c.href && (isStaff || !c.staffOnly));
+  if (!group) return null;
+  const tabs = group.children.filter((c) => c.href && (isStaff || !c.staffOnly));
   if (tabs.length < 2) return null;
 
   const exact = tabs.find((c) => c.href === current);

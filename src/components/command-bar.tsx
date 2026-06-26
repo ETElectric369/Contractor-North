@@ -11,11 +11,19 @@ type Item = { kind: string; label: string; sub?: string; href: string };
 // drives the dock + sub-nav, so they can never drift again. Assistant is reached via the
 // Talk button + the "ask the assistant" row (not a duplicate "go to"); creates live only in
 // the global quick-add "+".
-const NAV_ITEMS: Item[] = DOCK.flatMap((s) =>
-  s.children
-    .filter((c) => c.href && c.id !== "h-assist")
-    .map((c) => ({ kind: "Go to", label: c.label, sub: s.label, href: c.href! })),
-);
+// Flatten the dock into searchable destinations — recursing into the nested "More" hubs
+// (Schedule, Sales, Office…) so every page stays reachable from the command bar.
+type DockLeaf = { label: string; href?: string; children?: DockLeaf[] };
+function navLeaves(nodes: DockLeaf[], sub: string): Item[] {
+  return nodes.flatMap((n) =>
+    n.children?.length
+      ? navLeaves(n.children, n.label)
+      : n.href
+        ? [{ kind: "Go to", label: n.label, sub, href: n.href }]
+        : [],
+  );
+}
+const NAV_ITEMS: Item[] = DOCK.flatMap((s) => navLeaves(s.children, s.label));
 
 function LeadIcon({ kind }: { kind: string }) {
   if (kind === "Assistant") return <Sparkles className="h-4 w-4 text-brand" />;

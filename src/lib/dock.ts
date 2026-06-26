@@ -1,5 +1,4 @@
 import {
-  Home,
   Sun,
   ListChecks,
   Wand2,
@@ -34,6 +33,7 @@ import {
   Settings,
   ScrollText,
   ScanLine,
+  Menu,
   type LucideIcon,
 } from "lucide-react";
 
@@ -49,7 +49,8 @@ export interface DockNode {
 }
 
 /** A top-level dock icon. `href` is where a plain click on the section center
- *  goes; `children` bloom out from the icon as the sub-nav. */
+ *  goes; `children` are its sub-pages (shown as the top-of-page sub-nav and the
+ *  bloom). */
 export interface DockSection {
   key: string;
   label: string;
@@ -60,20 +61,20 @@ export interface DockSection {
   staffOnly?: boolean;
 }
 
-// SEVEN titles, each with a sub-nav that blooms out. Order follows the day:
-// Home → Jobs → Schedule → Sales → Money → Time → Office. Everything that used to
-// be its own dock icon (Tasks, Tools, Settings) now lives under one of these.
+// FIVE titles built around a field day — four are one-tap DESTINATIONS (tapping the
+// title lands you there; the top-of-page sub-nav shows its siblings), and "More" is the
+// drawer that holds everything you reach rarely (Schedule, Sales, money admin, office
+// admin), grouped. Create lives on the center "+", not in here.
 export const DOCK: DockSection[] = [
   {
-    key: "home",
-    label: "Home",
-    icon: Home,
+    key: "today",
+    label: "Today",
+    icon: Sun,
     href: "/planner",
     children: [
-      { id: "h-day", label: "My day", icon: Sun, href: "/planner" },
-      { id: "h-tasks", label: "Tasks", icon: ListChecks, href: "/tasks" },
-      { id: "h-org", label: "Organize my", icon: Wand2, href: "/organize" },
-      // (Assistant is the topbar "Talk" button, not a duplicate dock entry.)
+      { id: "t-day", label: "My day", icon: Sun, href: "/planner" },
+      { id: "t-tasks", label: "Tasks", icon: ListChecks, href: "/tasks" },
+      { id: "t-org", label: "Organize", icon: Wand2, href: "/organize" },
     ],
   },
   {
@@ -88,27 +89,13 @@ export const DOCK: DockSection[] = [
     ],
   },
   {
-    key: "schedule",
-    label: "Schedule",
-    icon: CalendarDays,
-    href: "/schedule",
-    staffOnly: true,
+    key: "clock",
+    label: "Clock",
+    icon: Clock,
+    href: "/timeclock", // everyone can clock in; timecards are office-only
     children: [
-      { id: "sc-cal", label: "Calendar", icon: CalendarDays, href: "/schedule" },
-      { id: "sc-appt", label: "Appointments", icon: CalendarClock, href: "/schedule?view=appointments" },
-      { id: "sc-map", label: "Map", icon: MapPin, href: "/schedule?view=map" },
-    ],
-  },
-  {
-    key: "sales",
-    label: "Sales",
-    icon: TrendingUp,
-    href: "/crm",
-    staffOnly: true,
-    children: [
-      { id: "sl-inq", label: "Inquiries", icon: UserPlus, href: "/leads" },
-      { id: "sl-cust", label: "Customers", icon: Users, href: "/crm" },
-      { id: "sl-quotes", label: "Quotes", icon: FileText, href: "/quotes" },
+      { id: "ck-clock", label: "Timeclock", icon: Play, href: "/timeclock" },
+      { id: "ck-cards", label: "Timecards", icon: CalendarClock, href: "/timecards", staffOnly: true },
     ],
   },
   {
@@ -122,41 +109,70 @@ export const DOCK: DockSection[] = [
       { id: "m-pay", label: "Payments", icon: CreditCard, href: "/payments" },
       { id: "m-bills", label: "Bills & POs", icon: Wallet, href: "/bills" },
       { id: "m-price", label: "Price list", icon: Tags, href: "/price-list" },
-      { id: "m-stock", label: "Inventory", icon: Boxes, href: "/inventory" },
-      { id: "m-petty", label: "Petty cash", icon: Coins, href: "/petty-cash" },
-      { id: "m-recur", label: "Recurring", icon: Repeat, href: "/recurring" },
-      { id: "m-tax", label: "Tax report", icon: Calculator, href: "/tax-report" },
-      { id: "m-payroll", label: "Payroll", icon: Banknote, href: "/payroll", staffOnly: true },
-      { id: "m-analytics", label: "Analytics", icon: TrendingUp, href: "/analytics", staffOnly: true },
     ],
   },
   {
-    key: "time",
-    label: "Time",
-    icon: Clock,
-    href: "/timeclock", // everyone can clock in; timecards are office-only
+    key: "more",
+    label: "More",
+    icon: Menu,
+    href: "/schedule", // desktop click fallback; on mobile the title opens the More drawer
     children: [
-      { id: "tm-clock", label: "Timeclock", icon: Play, href: "/timeclock" },
-      { id: "tm-cards", label: "Timecards", icon: CalendarClock, href: "/timecards", staffOnly: true },
-    ],
-  },
-  {
-    key: "office",
-    label: "Office",
-    icon: Building2,
-    href: "/permits",
-    children: [
-      { id: "o-permits", label: "Permits", icon: Stamp, href: "/permits" },
-      { id: "o-comply", label: "Compliance", icon: ShieldCheck, href: "/compliance" },
-      { id: "o-safety", label: "Safety", icon: HardHat, href: "/safety" },
-      { id: "o-handbook", label: "Handbook", icon: BookOpen, href: "/handbook" },
-      { id: "o-resources", label: "Resources", icon: BookUser, href: "/resources" },
-      { id: "o-forms", label: "Forms", icon: ClipboardList, href: "/forms" },
-      { id: "o-tools", label: "Tools", icon: Wrench, href: "/tools" },
-      { id: "o-docs", label: "Employee docs", icon: IdCard, href: "/employee-docs", staffOnly: true },
-      { id: "o-settings", label: "Settings", icon: Settings, href: "/settings" },
-      { id: "o-audit", label: "Activity audit", icon: ScrollText, href: "/audit", staffOnly: true },
-      { id: "o-plans", label: "Plans & LiDAR", icon: ScanLine, href: "/plans" },
+      // Hubs (no href of their own → the bloom/drawer drills into them; their children
+      // carry the hrefs and drive the top-of-page sub-nav for those pages).
+      {
+        id: "more-schedule",
+        label: "Schedule",
+        icon: CalendarDays,
+        staffOnly: true,
+        children: [
+          { id: "sc-cal", label: "Calendar", icon: CalendarDays, href: "/schedule" },
+          { id: "sc-appt", label: "Appointments", icon: CalendarClock, href: "/schedule?view=appointments" },
+          { id: "sc-map", label: "Map", icon: MapPin, href: "/schedule?view=map" },
+        ],
+      },
+      {
+        id: "more-sales",
+        label: "Sales",
+        icon: TrendingUp,
+        staffOnly: true,
+        children: [
+          { id: "sl-inq", label: "Inquiries", icon: UserPlus, href: "/leads" },
+          { id: "sl-cust", label: "Customers", icon: Users, href: "/crm" },
+          { id: "sl-quotes", label: "Quotes", icon: FileText, href: "/quotes" },
+        ],
+      },
+      {
+        id: "more-moneyadmin",
+        label: "Money admin",
+        icon: Calculator,
+        staffOnly: true,
+        children: [
+          { id: "ma-stock", label: "Inventory", icon: Boxes, href: "/inventory" },
+          { id: "ma-petty", label: "Petty cash", icon: Coins, href: "/petty-cash" },
+          { id: "ma-recur", label: "Recurring", icon: Repeat, href: "/recurring" },
+          { id: "ma-tax", label: "Tax report", icon: Calculator, href: "/tax-report" },
+          { id: "ma-payroll", label: "Payroll", icon: Banknote, href: "/payroll" },
+          { id: "ma-analytics", label: "Analytics", icon: TrendingUp, href: "/analytics" },
+        ],
+      },
+      {
+        id: "more-office",
+        label: "Office",
+        icon: Building2,
+        children: [
+          { id: "o-permits", label: "Permits", icon: Stamp, href: "/permits" },
+          { id: "o-comply", label: "Compliance", icon: ShieldCheck, href: "/compliance" },
+          { id: "o-safety", label: "Safety", icon: HardHat, href: "/safety" },
+          { id: "o-handbook", label: "Handbook", icon: BookOpen, href: "/handbook" },
+          { id: "o-resources", label: "Resources", icon: BookUser, href: "/resources" },
+          { id: "o-forms", label: "Forms", icon: ClipboardList, href: "/forms" },
+          { id: "o-tools", label: "Tools", icon: Wrench, href: "/tools" },
+          { id: "o-docs", label: "Employee docs", icon: IdCard, href: "/employee-docs", staffOnly: true },
+          { id: "o-settings", label: "Settings", icon: Settings, href: "/settings" },
+          { id: "o-audit", label: "Activity audit", icon: ScrollText, href: "/audit", staffOnly: true },
+          { id: "o-plans", label: "Plans & LiDAR", icon: ScanLine, href: "/plans" },
+        ],
+      },
     ],
   },
 ];

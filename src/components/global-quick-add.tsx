@@ -18,7 +18,7 @@ const ACTIONS = [
 
 /** Quick "+" create menu. `placement="topbar"` renders an inline button with a
  *  dropdown; the default is a movable floating FAB. */
-export function GlobalQuickAdd({ placement = "fab" }: { placement?: "fab" | "topbar" }) {
+export function GlobalQuickAdd({ placement = "fab" }: { placement?: "fab" | "topbar" | "dock" }) {
   const router = useRouter();
   const [pos, setPos] = useState({ x: 20, y: 168 }); // above the mic, clearing the floating glass bottom nav
   const [open, setOpen] = useState(false);
@@ -30,6 +30,15 @@ export function GlobalQuickAdd({ placement = "fab" }: { placement?: "fab" | "top
       if (saved) setPos(JSON.parse(saved));
     } catch {}
   }, []);
+
+  // The "dock" instance is opened by the bottom-nav center "+" via a window event (only it
+  // listens, so the topbar instance doesn't also pop open).
+  useEffect(() => {
+    if (placement !== "dock") return;
+    const onOpen = () => setOpen(true);
+    window.addEventListener("cn:quick-add", onOpen);
+    return () => window.removeEventListener("cn:quick-add", onOpen);
+  }, [placement]);
 
   const items = ACTIONS.map((a) => (
     <button
@@ -43,6 +52,22 @@ export function GlobalQuickAdd({ placement = "fab" }: { placement?: "fab" | "top
       <a.icon className="h-4 w-4 text-[rgb(var(--glass-ink))]" /> {a.label}
     </button>
   ));
+
+  // Dock variant: no button of its own — the bottom-nav center "+" opens it via the
+  // window event; the menu sits centered above the bottom dock.
+  if (placement === "dock") {
+    return open ? (
+      <>
+        <div className="fixed inset-0 z-[80]" onClick={() => setOpen(false)} />
+        <div
+          style={{ bottom: "calc(5.25rem + env(safe-area-inset-bottom))" }}
+          className="glass glass-gloss glass-menu fixed left-1/2 z-[90] w-64 -translate-x-1/2 overflow-hidden rounded-lg py-1.5 shadow-xl lg:hidden"
+        >
+          {items}
+        </div>
+      </>
+    ) : null;
+  }
 
   // Top-bar variant: inline + button with a dropdown anchored below it.
   if (placement === "topbar") {

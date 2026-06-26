@@ -2,13 +2,16 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
+import { Plus } from "lucide-react";
 import { DOCK, type DockSection } from "@/lib/dock";
 import { GlassBloom } from "./app-shell/glass-bloom";
 
 /**
- * The dock, slid to the bottom for phones: the same glass sections, tapping one
- * blooms its line-items UPWARD over the page (the desktop left-dock and this are
- * one structure at two screen sizes). Hidden on desktop, where the left dock runs.
+ * The phone bottom dock: four one-tap DESTINATIONS (Today / Jobs / Clock / Money) plus a
+ * "More" drawer, with a raised center "+" to create. Tapping a destination goes straight
+ * there — the top-of-page sub-nav shows its siblings, so there's no two-tap bloom while
+ * driving. Only "More" still blooms (it's a grab-bag with no single home). Hidden on
+ * desktop, where the left dock runs.
  */
 export function BottomNav({ role }: { role?: string }) {
   const router = useRouter();
@@ -37,41 +40,66 @@ export function BottomNav({ role }: { role?: string }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
-  // Close the bloom whenever the route changes (a leaf was tapped).
+  // Close the More bloom whenever the route changes (a leaf was tapped).
   useEffect(() => {
     close();
   }, [pathname]);
 
+  const sections = DOCK.filter((s) => isStaff || !s.staffOnly);
+  // The center "+" sits after the first two tiles: [Today][Jobs] (+) [Clock][Money][More].
+  const split = Math.min(2, sections.length);
+  const left = sections.slice(0, split);
+  const right = sections.slice(split);
+
+  const tile = (section: DockSection) => {
+    const Icon = section.icon;
+    const isOn = active?.key === section.key;
+    const onRoute = pathname === section.href || pathname.startsWith(section.href + "/");
+    const isMore = section.key === "more";
+    return (
+      <button
+        key={section.key}
+        ref={(el) => {
+          tileRefs.current[section.key] = el;
+        }}
+        onClick={() => {
+          // Destinations are ONE TAP — straight there. Only "More" opens a menu.
+          if (isMore) {
+            isOn ? close() : open(section);
+          } else {
+            close();
+            router.push(section.href);
+          }
+        }}
+        className={`flex flex-1 flex-col items-center gap-0.5 rounded-xl py-2 text-[9px] font-medium ${
+          isOn || onRoute ? "text-[color:rgb(var(--glass-ink))]" : "text-slate-600"
+        }`}
+        aria-label={section.label}
+      >
+        <Icon className="h-5 w-5 shrink-0" />
+        <span className="whitespace-nowrap leading-none">{section.label}</span>
+      </button>
+    );
+  };
+
   return (
     <>
       <nav
-        // transform:translateZ(0) promotes the bar to its own GPU layer so iOS
-        // Safari stops letting it drift/jump during momentum & rubber-band scroll
-        // ("bottom menu bar moves up out of place when scrolling sometimes").
+        // transform:translateZ(0) promotes the bar to its own GPU layer so iOS Safari
+        // stops letting it drift during momentum / rubber-band scroll.
         style={{ transform: "translateZ(0)", WebkitBackfaceVisibility: "hidden" }}
-        className="app-bottom-nav glass fixed inset-x-2 bottom-2 z-[70] flex rounded-2xl border-white/40 px-0.5 pb-[env(safe-area-inset-bottom)] lg:hidden"
+        className="app-bottom-nav glass fixed inset-x-2 bottom-2 z-[70] flex items-center rounded-2xl border-white/40 px-0.5 pb-[env(safe-area-inset-bottom)] lg:hidden"
       >
-        {DOCK.filter((s) => isStaff || !s.staffOnly).map((section) => {
-          const Icon = section.icon;
-          const isOn = active?.key === section.key;
-          const onRoute = pathname === section.href || pathname.startsWith(section.href + "/");
-          return (
-            <button
-              key={section.key}
-              ref={(el) => {
-                tileRefs.current[section.key] = el;
-              }}
-              onClick={() => (isOn ? (close(), router.push(section.href)) : open(section))}
-              className={`flex flex-1 flex-col items-center gap-0.5 rounded-xl py-2 text-[9px] font-medium ${
-                isOn || onRoute ? "text-[color:rgb(var(--glass-ink))]" : "text-slate-600"
-              }`}
-              aria-label={section.label}
-            >
-              <Icon className="h-5 w-5 shrink-0" />
-              <span className="whitespace-nowrap leading-none">{section.label}</span>
-            </button>
-          );
-        })}
+        {left.map(tile)}
+        <button
+          onClick={() => window.dispatchEvent(new Event("cn:quick-add"))}
+          aria-label="Create"
+          title="Create"
+          className="btn-gloss mx-0.5 -mt-5 flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-brand text-white shadow-lg"
+        >
+          <Plus className="h-6 w-6" />
+        </button>
+        {right.map(tile)}
       </nav>
 
       {active && anchor && (
