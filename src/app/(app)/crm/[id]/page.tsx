@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Mail, Phone, MapPin, Plus } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { NavLink } from "@/components/nav-link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -85,15 +86,18 @@ export default async function CustomerDetailPage({
                 <Phone className="h-4 w-4 text-slate-400" /> {c.phone}
               </a>
             ) : null}
-            {(c.address || c.city) && (
-              <div className="flex items-start gap-2 text-slate-600">
+            {(c.address || c.city || c.state || c.zip) && (
+              <NavLink
+                address={[c.address, c.city, c.state, c.zip].filter(Boolean).join(", ")}
+                className="flex items-start gap-2 text-slate-600 hover:text-brand"
+              >
                 <MapPin className="mt-0.5 h-4 w-4 text-slate-400" />
                 <span>
                   {c.address}
                   {c.address && <br />}
                   {[c.city, c.state, c.zip].filter(Boolean).join(", ")}
                 </span>
-              </div>
+              </NavLink>
             )}
             {c.notes && (
               <div className="border-t border-slate-100 pt-3 text-slate-500">{c.notes}</div>

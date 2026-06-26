@@ -337,7 +337,7 @@ export function TimeclockPanel({
                         <option value="">Code</option>
                         {codesForJob(a.job_id).map((c) => (
                           <option key={c.id} value={c.code}>
-                            {c.code}
+                            {c.code}{c.description ? ` · ${c.description}` : ""}
                           </option>
                         ))}
                       </Select>

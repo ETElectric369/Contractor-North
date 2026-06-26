@@ -67,8 +67,8 @@ export function BottomNav({ role }: { role?: string }) {
               }`}
               aria-label={section.label}
             >
-              <Icon className="h-5 w-5" />
-              {section.label}
+              <Icon className="h-5 w-5 shrink-0" />
+              <span className="whitespace-nowrap leading-none">{section.label}</span>
             </button>
           );
         })}

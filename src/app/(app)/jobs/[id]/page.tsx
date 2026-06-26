@@ -552,7 +552,7 @@ export default async function JobDetailPage({
       content: (
         <div className="space-y-3">
           <div className="flex justify-end">
-            <NewListButton jobs={thisJobOpt} />
+            <NewListButton jobs={thisJobOpt} defaultJobId={j.id} />
           </div>
           {(jobLists ?? []).length === 0 ? (
             <Card>

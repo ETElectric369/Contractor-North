@@ -124,7 +124,7 @@ export function BugReporter({ orgId }: { orgId: string }) {
         disabled={capturing}
         title="Report a bug"
         aria-label="Report a bug"
-        className="fixed bottom-20 right-4 z-40 flex h-11 w-11 items-center justify-center rounded-full bg-slate-900 text-white shadow-lg transition hover:bg-slate-700 disabled:opacity-70 sm:bottom-4"
+        className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] right-4 z-[71] flex h-11 w-11 items-center justify-center rounded-full bg-slate-900 text-white shadow-lg transition hover:bg-slate-700 disabled:opacity-70 sm:bottom-4"
       >
         {capturing ? <Loader2 className="h-5 w-5 animate-spin" /> : <Bug className="h-5 w-5" />}
       </button>

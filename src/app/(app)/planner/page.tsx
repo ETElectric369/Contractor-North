@@ -225,7 +225,10 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   const untimedAgenda = agenda.filter((i) => !i.time);
   const futureAgenda = timedAgenda.filter((i) => new Date(i.time as string).getTime() > nowMs);
   const nextAgenda = futureAgenda.slice(0, 2);
-  const laterAgenda = [...futureAgenda.slice(2), ...untimedAgenda];
+  // Everything else for the day — including jobs scheduled EARLIER today, which were being
+  // dropped entirely — in time order, plus untimed items.
+  const nextSet = new Set(nextAgenda);
+  const laterAgenda = [...timedAgenda.filter((i) => !nextSet.has(i)), ...untimedAgenda];
 
   // Week view: the same agenda widened to this week (Sun–Sat), grouped by day.
   const weekDayGroups: { dayStr: string; label: string; items: Agenda[] }[] = [];
