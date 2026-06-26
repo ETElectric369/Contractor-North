@@ -12,19 +12,9 @@ const SKIP_PATHS = new Set(["/jobs", "/schedule"]);
 
 type Group = { key: string; staffOnly?: boolean; children: DockNode[] };
 
-/** Every navigable group whose siblings should show as a sub-nav: a top-level section's
- *  leaf children (Today, Jobs, Clock, Money), AND each nested hub inside More (Schedule,
- *  Sales, Money admin, Office) — so a demoted page still gets its own sibling tabs. */
+/** The dock is flat now — each section is its own group, its pages are the sibling tabs. */
 function navGroups(): Group[] {
-  const out: Group[] = [];
-  for (const s of DOCK) {
-    const leaves = s.children.filter((c) => c.href && !c.children?.length);
-    if (leaves.length) out.push({ key: s.key, staffOnly: s.staffOnly, children: leaves });
-    for (const c of s.children) {
-      if (c.children?.length) out.push({ key: c.id, staffOnly: s.staffOnly || c.staffOnly, children: c.children });
-    }
-  }
-  return out;
+  return DOCK.map((s) => ({ key: s.key, staffOnly: s.staffOnly, children: s.children }));
 }
 
 /** A persistent horizontal sub-nav at the top of a section's pages — the siblings of the
@@ -51,7 +41,8 @@ export function SectionSubnav({ isStaff }: { isStaff?: boolean }) {
     exact?.href ?? tabs.find((c) => c.href && basePath(c.href) === pathname && !c.href.includes("?"))?.href;
 
   return (
-    <div className="mb-4 -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
+    // Mobile only — on desktop the left sidebar shows the section's pages instead.
+    <div className="mb-4 -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 lg:hidden">
       {tabs.map((c) => {
         const active = c.href === activeHref;
         const Icon = c.icon;

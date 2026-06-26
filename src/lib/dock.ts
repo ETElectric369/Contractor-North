@@ -32,27 +32,26 @@ import {
   Settings,
   ScrollText,
   ScanLine,
-  Menu,
   type LucideIcon,
 } from "lucide-react";
 
-/** A node in a dock section's bloom. A leaf has an href; a hub has children. */
+/** A leaf in a dock section — a single page. */
 export interface DockNode {
   id: string;
   label: string;
   icon: LucideIcon;
-  href?: string;
-  children?: DockNode[];
+  href: string;
   /** Hidden from techs (office/admin/owner only). */
   staffOnly?: boolean;
 }
 
-/** A top-level dock icon. `href` is where a plain click on the section center
- *  goes; `children` are its sub-pages (shown as the top-of-page sub-nav and the
- *  bloom). */
+/** A top-level dock section. `href` is where a one-click on the title goes; `children`
+ *  are its pages (shown as the left-sidebar sub-list on desktop / the top strip on mobile). */
 export interface DockSection {
   key: string;
   label: string;
+  /** Shorter label for the tight mobile tile (falls back to `label`). */
+  short?: string;
   icon: LucideIcon;
   href: string;
   children: DockNode[];
@@ -60,10 +59,9 @@ export interface DockSection {
   staffOnly?: boolean;
 }
 
-// SIX titles built around a field day — most are one-tap DESTINATIONS (tapping the title
-// lands you there; the top-of-page sub-nav shows its siblings). Schedule rides WITH Clock
-// (time + calendar together); Sales is its own dock tile; "More" is the rarely-from-the-
-// truck drawer (money admin + office admin), grouped. Create lives on the center "+".
+// SEVEN flat sections — every title is ONE CLICK to its main page; its pages live in the
+// left sidebar (desktop) or the top strip (mobile). No bloom, no "More" wrapper: Office and
+// Money admin are their own titles so nothing is buried. Order follows the day.
 export const DOCK: DockSection[] = [
   {
     key: "today",
@@ -124,45 +122,38 @@ export const DOCK: DockSection[] = [
     ],
   },
   {
-    key: "more",
-    label: "More",
-    icon: Menu,
-    href: "/permits", // desktop click fallback; on mobile the title opens the More drawer
+    key: "moneyadmin",
+    label: "Money admin",
+    short: "Admin",
+    icon: Calculator,
+    href: "/tax-report",
+    staffOnly: true,
     children: [
-      // Hubs (no href of their own → the bloom/drawer drills into them; their children
-      // carry the hrefs and drive the top-of-page sub-nav for those pages).
-      {
-        id: "more-moneyadmin",
-        label: "Money admin",
-        icon: Calculator,
-        staffOnly: true,
-        children: [
-          { id: "ma-stock", label: "Inventory", icon: Boxes, href: "/inventory" },
-          { id: "ma-petty", label: "Petty cash", icon: Coins, href: "/petty-cash" },
-          { id: "ma-recur", label: "Recurring", icon: Repeat, href: "/recurring" },
-          { id: "ma-tax", label: "Tax report", icon: Calculator, href: "/tax-report" },
-          { id: "ma-payroll", label: "Payroll", icon: Banknote, href: "/payroll" },
-          { id: "ma-analytics", label: "Analytics", icon: TrendingUp, href: "/analytics" },
-        ],
-      },
-      {
-        id: "more-office",
-        label: "Office",
-        icon: Building2,
-        children: [
-          { id: "o-permits", label: "Permits", icon: Stamp, href: "/permits" },
-          { id: "o-comply", label: "Compliance", icon: ShieldCheck, href: "/compliance" },
-          { id: "o-safety", label: "Safety", icon: HardHat, href: "/safety" },
-          { id: "o-handbook", label: "Handbook", icon: BookOpen, href: "/handbook" },
-          { id: "o-resources", label: "Resources", icon: BookUser, href: "/resources" },
-          { id: "o-forms", label: "Forms", icon: ClipboardList, href: "/forms" },
-          { id: "o-tools", label: "Tools", icon: Wrench, href: "/tools" },
-          { id: "o-docs", label: "Employee docs", icon: IdCard, href: "/employee-docs", staffOnly: true },
-          { id: "o-settings", label: "Settings", icon: Settings, href: "/settings" },
-          { id: "o-audit", label: "Activity audit", icon: ScrollText, href: "/audit", staffOnly: true },
-          { id: "o-plans", label: "Plans & LiDAR", icon: ScanLine, href: "/plans" },
-        ],
-      },
+      { id: "ma-stock", label: "Inventory", icon: Boxes, href: "/inventory" },
+      { id: "ma-petty", label: "Petty cash", icon: Coins, href: "/petty-cash" },
+      { id: "ma-recur", label: "Recurring", icon: Repeat, href: "/recurring" },
+      { id: "ma-tax", label: "Tax report", icon: Calculator, href: "/tax-report" },
+      { id: "ma-payroll", label: "Payroll", icon: Banknote, href: "/payroll" },
+      { id: "ma-analytics", label: "Analytics", icon: TrendingUp, href: "/analytics" },
+    ],
+  },
+  {
+    key: "office",
+    label: "Office",
+    icon: Building2,
+    href: "/permits",
+    children: [
+      { id: "o-permits", label: "Permits", icon: Stamp, href: "/permits" },
+      { id: "o-comply", label: "Compliance", icon: ShieldCheck, href: "/compliance" },
+      { id: "o-safety", label: "Safety", icon: HardHat, href: "/safety" },
+      { id: "o-handbook", label: "Handbook", icon: BookOpen, href: "/handbook" },
+      { id: "o-resources", label: "Resources", icon: BookUser, href: "/resources" },
+      { id: "o-forms", label: "Forms", icon: ClipboardList, href: "/forms" },
+      { id: "o-tools", label: "Tools", icon: Wrench, href: "/tools" },
+      { id: "o-docs", label: "Employee docs", icon: IdCard, href: "/employee-docs", staffOnly: true },
+      { id: "o-settings", label: "Settings", icon: Settings, href: "/settings" },
+      { id: "o-audit", label: "Activity audit", icon: ScrollText, href: "/audit", staffOnly: true },
+      { id: "o-plans", label: "Plans & LiDAR", icon: ScanLine, href: "/plans" },
     ],
   },
 ];
