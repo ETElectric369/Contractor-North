@@ -1,9 +1,20 @@
 import { z } from "zod";
 import { setJobScheduleRanges, setJobAssignee, createJob } from "@/app/(app)/schedule/actions";
-import { setJobStatus, finishJob } from "@/app/(app)/jobs/actions";
+import { setJobStatus, finishJob, updateJobDescription } from "@/app/(app)/jobs/actions";
 import type { ActionDef } from "../types";
 
 export const jobActions: Record<string, ActionDef> = {
+  "job.setScope": {
+    name: "job.setScope",
+    group: "job",
+    label: "Set job scope",
+    description:
+      "Set a job's scope / description (REPLACES the existing text) — 'set the scope of the Miller job to: rough-in + panel upgrade + final'. Resolve the job with list_jobs first.",
+    input: z.object({ job_id: z.string(), description: z.string() }),
+    auth: "staff",
+    effect: "write",
+    handler: (i) => updateJobDescription(i.job_id, i.description),
+  },
   "job.create": {
     name: "job.create",
     group: "job",

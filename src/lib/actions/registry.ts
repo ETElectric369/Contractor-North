@@ -17,6 +17,7 @@ import { safetyActions } from "./entities/safety";
 import { complianceActions } from "./entities/compliance";
 import { lienActions } from "./entities/lien";
 import { pricelistActions } from "./entities/pricelist";
+import { contractActions } from "./entities/contract";
 
 // THE registry. Every capability is one named entry. New entity files get spread
 // in here; UI buttons, voice, and (later) Claude chat tools all resolve through it,
@@ -39,6 +40,7 @@ export const REGISTRY: Record<string, ActionDef> = {
   ...complianceActions,
   ...lienActions,
   ...pricelistActions,
+  ...contractActions,
 };
 
 export function listActions(filter?: { effect?: "read" | "write"; group?: string }): ActionDef[] {

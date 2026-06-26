@@ -1,8 +1,29 @@
 import { z } from "zod";
-import { archiveItem, saveVoiceNote } from "@/app/(app)/organize/actions";
+import { archiveItem, saveVoiceNote, aiReviewItem, billJobReceipt } from "@/app/(app)/organize/actions";
 import type { ActionDef } from "../types";
 
 export const organizeActions: Record<string, ActionDef> = {
+  "organize.review": {
+    name: "organize.review",
+    group: "organize",
+    label: "AI-review captured item",
+    description: "Run the AI triage on a captured Organize-My item — it suggests where the item belongs. Pass the item id (from the inbox).",
+    input: z.object({ id: z.string() }),
+    auth: "any",
+    effect: "write",
+    handler: (i) => aiReviewItem(i.id),
+  },
+  "organize.billReceipt": {
+    name: "organize.billReceipt",
+    group: "organize",
+    label: "Bill a captured receipt",
+    description: "Turn a captured RECEIPT document into a billable job cost — 'bill that Home Depot receipt to the job'. Pass the document id of the receipt.",
+    input: z.object({ document_id: z.string() }),
+    auth: "staff",
+    effect: "write",
+    confirm: "financial",
+    handler: (i) => billJobReceipt(i.document_id),
+  },
   "organize.saveNote": {
     name: "organize.saveNote",
     group: "organize",

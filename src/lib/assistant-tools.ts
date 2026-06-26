@@ -305,6 +305,18 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
       "List LIEN records (mechanic's-lien tracking) with the legally time-sensitive dates — prelim sent, lien recorded, completion, first furnished — and the job. Use for 'is the prelim filed on Hill Street', 'which jobs need a prelim notice'. Pass job_id to filter.",
     input_schema: { type: "object", properties: { job_id: { type: "string" }, limit: { type: "integer" } } },
   },
+  {
+    name: "get_job",
+    description:
+      "Read ONE job in full — number, name, status, customer, address, billing type, description, schedule. Use for 'tell me about the Jones job', or before acting on a job. Pass a job_id.",
+    input_schema: { type: "object", properties: { job_id: { type: "string" } } },
+  },
+  {
+    name: "list_contracts",
+    description:
+      "List CONTRACTS with status, number, title, and who signed. Use for 'which contracts are unsigned', 'is the Jones contract signed'. Pass job_id to filter.",
+    input_schema: { type: "object", properties: { status: { type: "string" }, job_id: { type: "string" }, limit: { type: "integer" } } },
+  },
 ];
 
 const VALID_TOOL_NAMES = new Set(DATA_TOOLS.map((t) => t.name));
@@ -490,6 +502,58 @@ export async function runDataTool(
               ? { id: c.id, name: c.name, company: c.company_name, phone: c.phone, email: c.email, city: c.city, state: c.state }
               : { id: c.id, name: c.name, company: c.company_name, city: c.city, state: c.state },
           ),
+        });
+      }
+
+      case "get_job": {
+        const jid = sanitize(input.job_id);
+        if (!jid) return JSON.stringify({ error: "Provide a job_id." });
+        const { data: j, error } = await supabase
+          .from("jobs")
+          .select("id, job_number, name, status, billing_type, address, description, scheduled_start, scheduled_end, customers(name)")
+          .eq("id", jid)
+          .maybeSingle();
+        if (error) throw error;
+        if (!j) return JSON.stringify({ found: false, message: "Job not found." });
+        return JSON.stringify({
+          found: true,
+          id: (j as any).id,
+          job: (j as any).job_number,
+          name: (j as any).name,
+          status: (j as any).status,
+          billing_type: (j as any).billing_type,
+          address: (j as any).address,
+          description: (j as any).description,
+          customer: embedName((j as any).customers),
+          scheduled_start: (j as any).scheduled_start,
+          scheduled_end: (j as any).scheduled_end,
+        });
+      }
+
+      case "list_contracts": {
+        const lim = clampLimit(input.limit, 20);
+        let q = supabase
+          .from("contracts")
+          .select("id, contract_number, title, status, signed_name, signed_at, job_id, jobs(name)")
+          .order("created_at", { ascending: false })
+          .limit(lim);
+        const st = sanitize(input.status);
+        if (st) q = q.eq("status", st);
+        const jid = sanitize(input.job_id);
+        if (jid) q = q.eq("job_id", jid);
+        const { data, error } = await q;
+        if (error) throw error;
+        return JSON.stringify({
+          count: data?.length ?? 0,
+          contracts: (data ?? []).map((c: any) => ({
+            id: c.id,
+            contract_number: c.contract_number,
+            title: c.title,
+            status: c.status,
+            signed_by: c.signed_name,
+            signed_at: c.signed_at,
+            job: embedName(c.jobs),
+          })),
         });
       }
 

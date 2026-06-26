@@ -5,10 +5,11 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { DOCK, type DockNode } from "@/lib/dock";
 
 const basePath = (href: string) => href.split("?")[0];
-// Pages that render their OWN tab strip (Jobs status pills, Schedule's view tabs) — skip
-// by PATH so there aren't two stacked tab bars (Schedule now lives under Clock, so a
-// group-key skip would wrongly hide Clock's sub-nav too).
-const SKIP_PATHS = new Set(["/jobs", "/schedule"]);
+// Only Jobs renders its own duplicate strip (the status pills). /schedule is NOT skipped:
+// Schedule lives under Clock now, so the Clock strip (Timeclock · Timecards · Schedule) doesn't
+// duplicate the page's Calendar/Appointments/Map view tabs — and showing it gives /schedule a
+// link back to the clock (Erik: "scheduler has no link to the top nav of clock").
+const SKIP_PATHS = new Set(["/jobs"]);
 
 type Group = { key: string; staffOnly?: boolean; children: DockNode[] };
 

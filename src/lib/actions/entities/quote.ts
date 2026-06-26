@@ -1,8 +1,28 @@
 import { z } from "zod";
-import { saveQuote, addQuoteItem, updateQuoteItem, deleteQuoteItem } from "@/app/(app)/quotes/actions";
+import { saveQuote, addQuoteItem, updateQuoteItem, deleteQuoteItem, createJobFromQuote, updateQuoteStatus } from "@/app/(app)/quotes/actions";
 import type { ActionDef } from "../types";
 
 export const quoteActions: Record<string, ActionDef> = {
+  "quote.setStatus": {
+    name: "quote.setStatus",
+    group: "quote",
+    label: "Set quote status",
+    description: "Set a quote/estimate's status — 'mark the Jones quote accepted / declined / sent'. Resolve the quote with list_quotes first.",
+    input: z.object({ id: z.string(), status: z.string() }),
+    auth: "staff",
+    effect: "write",
+    handler: (i) => updateQuoteStatus(i.id, i.status),
+  },
+  "quote.convertToJob": {
+    name: "quote.convertToJob",
+    group: "quote",
+    label: "Convert quote to job",
+    description: "Turn an accepted QUOTE into a JOB (idempotent — also spins up the work order + material list). Resolve the quote with list_quotes and pass its id. 'Turn the Jones quote into a job.'",
+    input: z.object({ id: z.string() }),
+    auth: "staff",
+    effect: "write",
+    handler: (i) => createJobFromQuote(i.id),
+  },
   "quote.addItem": {
     name: "quote.addItem",
     group: "quote",
