@@ -5,6 +5,7 @@ import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
+import { AddPermitButton } from "./add-permit-button";
 
 export const dynamic = "force-dynamic";
 
@@ -25,12 +26,23 @@ export default async function PermitsPage() {
 
   const rows = permits ?? [];
 
+  const { data: jobsData } = await supabase
+    .from("jobs")
+    .select("id, job_number, name")
+    .order("created_at", { ascending: false })
+    .limit(200);
+  const jobOpts = (jobsData ?? []).map((j: any) => ({ id: j.id, label: `${j.job_number} · ${j.name}` }));
+
   return (
     <div>
-      <PageHeader title="Permits & Inspections" description="Every permit and inspection across your jobs." />
+      <PageHeader title="Permits & Inspections" description="Every permit and inspection across your jobs.">
+        <AddPermitButton jobs={jobOpts} />
+      </PageHeader>
 
       {rows.length === 0 ? (
-        <EmptyState icon={Stamp} title="No permits yet" description="Add permits from a job's Permits tab to track applications and inspections here." />
+        <EmptyState icon={Stamp} title="No permits yet" description="Add a permit here (the job is optional) or from a job's Permits tab.">
+          <AddPermitButton jobs={jobOpts} />
+        </EmptyState>
       ) : (
         <Card className="overflow-hidden">
           <div className="hidden grid-cols-12 gap-3 border-b border-slate-100 bg-slate-50 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-400 md:grid">
