@@ -74,6 +74,21 @@ export default async function JobsPage({
         ))}
       </div>
 
+      {isStaff && (
+        <div className="mb-4 flex flex-wrap items-center gap-1.5 text-xs">
+          <span className="mr-0.5 text-slate-400">Across all jobs:</span>
+          {[
+            ["Work orders", "/work-orders"],
+            ["Materials", "/materials"],
+            ["Change orders", "/change-orders"],
+          ].map(([label, href]) => (
+            <Link key={href} href={href} className="rounded-lg border border-slate-200 px-3 py-1.5 font-medium text-slate-600 hover:bg-slate-50">
+              {label}
+            </Link>
+          ))}
+        </div>
+      )}
+
       {jobs.length === 0 ? (
         <EmptyState icon={Briefcase} title="No jobs" description="Create a job to get started.">
           <NewJobButton customers={customers ?? []} />

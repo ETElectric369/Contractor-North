@@ -84,6 +84,10 @@ export const DOCK: DockSection[] = [
       { id: "j-prog", label: "In progress", icon: Play, href: "/jobs?status=in_progress" },
       { id: "j-sched", label: "Scheduled", icon: CalendarDays, href: "/jobs?status=scheduled" },
       { id: "j-all", label: "All jobs", icon: Briefcase, href: "/jobs" },
+      // Cross-job views (office/dispatch) — the same records live on each job's tabs too.
+      { id: "j-wo", label: "Work orders", icon: Wrench, href: "/work-orders", staffOnly: true },
+      { id: "j-mat", label: "Materials", icon: Boxes, href: "/materials", staffOnly: true },
+      { id: "j-co", label: "Change orders", icon: FileText, href: "/change-orders", staffOnly: true },
     ],
   },
   {
