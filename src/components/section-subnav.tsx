@@ -34,7 +34,9 @@ export function SectionSubnav({ isStaff }: { isStaff?: boolean }) {
   );
   if (!group) return null;
   const tabs = group.children.filter((c) => c.href && (isStaff || !c.staffOnly));
-  if (tabs.length < 2) return null;
+  // Short menus ride up here as a top strip; the LONG ones (Office, Money admin) skip it and
+  // use the inside-left drawer instead (a horizontal strip of 11 items is the cramped case).
+  if (tabs.length < 2 || tabs.length > 5) return null;
 
   const exact = tabs.find((c) => c.href === current);
   const activeHref =
