@@ -312,7 +312,7 @@ export default async function SettingsPage({
         },
         {
           id: "payments",
-          label: "Payments",
+          label: "Payment methods",
           content: <Section title="Payment methods"><PaymentMethods settings={settings} /></Section>,
         },
         {

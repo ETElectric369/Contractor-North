@@ -3,20 +3,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Search, Sparkles, Plus, ArrowRight } from "lucide-react";
-import { NAV } from "@/lib/nav";
+import { DOCK } from "@/lib/dock";
 
 type Item = { kind: string; label: string; sub?: string; href: string };
 
-const NAV_ITEMS: Item[] = NAV.flatMap((s) =>
-  s.items.map((i) => ({ kind: "Go to", label: i.label, sub: s.title, href: i.href })),
+// ONE source of truth: the command bar's "go to" list is derived from the SAME dock that
+// drives the dock + sub-nav, so they can never drift again. Assistant is reached via the
+// Talk button + the "ask the assistant" row (not a duplicate "go to"); creates live only in
+// the global quick-add "+".
+const NAV_ITEMS: Item[] = DOCK.flatMap((s) =>
+  s.children
+    .filter((c) => c.href && c.id !== "h-assist")
+    .map((c) => ({ kind: "Go to", label: c.label, sub: s.label, href: c.href! })),
 );
-const CREATE_ITEMS: Item[] = [
-  { kind: "Create", label: "New job", href: "/jobs" },
-  { kind: "Create", label: "New quote / estimate", href: "/quotes/new" },
-  { kind: "Create", label: "New invoice", href: "/billing" },
-  { kind: "Create", label: "New task", href: "/tasks" },
-  { kind: "Create", label: "Snap & file a receipt", href: "/organize" },
-];
 
 function LeadIcon({ kind }: { kind: string }) {
   if (kind === "Assistant") return <Sparkles className="h-4 w-4 text-brand" />;
@@ -98,7 +97,7 @@ export function CommandBar() {
   const staticMatches = useMemo(() => {
     const term = q.trim().toLowerCase();
     if (!term) return NAV_ITEMS.slice(0, 7);
-    return [...NAV_ITEMS, ...CREATE_ITEMS].filter((i) => i.label.toLowerCase().includes(term)).slice(0, 6);
+    return NAV_ITEMS.filter((i) => i.label.toLowerCase().includes(term)).slice(0, 6);
   }, [q]);
 
   const askItem: Item | null = q.trim()

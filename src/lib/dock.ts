@@ -3,11 +3,9 @@ import {
   Sun,
   ListChecks,
   Wand2,
-  Sparkles,
   Briefcase,
   Play,
   CalendarDays,
-  LayoutGrid,
   CalendarClock,
   MapPin,
   TrendingUp,
@@ -75,7 +73,7 @@ export const DOCK: DockSection[] = [
       { id: "h-day", label: "My day", icon: Sun, href: "/planner" },
       { id: "h-tasks", label: "Tasks", icon: ListChecks, href: "/tasks" },
       { id: "h-org", label: "Organize my", icon: Wand2, href: "/organize" },
-      { id: "h-assist", label: "Assistant", icon: Sparkles, href: "/assistant" },
+      // (Assistant is the topbar "Talk" button, not a duplicate dock entry.)
     ],
   },
   {
@@ -97,7 +95,6 @@ export const DOCK: DockSection[] = [
     staffOnly: true,
     children: [
       { id: "sc-cal", label: "Calendar", icon: CalendarDays, href: "/schedule" },
-      { id: "sc-board", label: "Board", icon: LayoutGrid, href: "/schedule?view=board" },
       { id: "sc-appt", label: "Appointments", icon: CalendarClock, href: "/schedule?view=appointments" },
       { id: "sc-map", label: "Map", icon: MapPin, href: "/schedule?view=map" },
     ],

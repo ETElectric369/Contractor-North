@@ -5,8 +5,9 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { DOCK } from "@/lib/dock";
 
 const basePath = (href: string) => href.split("?")[0];
-// Jobs already shows its own status pills; skip it so it isn't doubled.
-const SKIP = new Set(["jobs"]);
+// These pages render their OWN tab strip (Jobs status pills, Schedule's view tabs), so
+// skip them here to avoid two stacked tab bars.
+const SKIP = new Set(["jobs", "schedule"]);
 
 /** A persistent horizontal sub-nav at the top of a section's pages — the same menu
  *  that blooms from the dock, pinned in place (like the Jobs status pills). It figures
