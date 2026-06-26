@@ -79,6 +79,20 @@ export async function createInvoiceForJob(
 /** Finish a job: mark complete and auto-build a draft invoice — from the
  *  job's quote when there is one, optionally pulling labor from timecards
  *  and materials from POs/bills. Returns the invoice id for review. */
+/** Set a job's status (partial — keeps everything else). For voice: "mark the Miller job on
+ *  hold / in progress". Org-scoped by RLS (a cross-org id is a clean no-op). */
+export async function setJobStatus(id: string, status: string): Promise<{ ok: boolean; error?: string }> {
+  const valid = ["estimate", "scheduled", "in_progress", "on_hold", "complete", "invoiced", "cancelled"];
+  if (!valid.includes(status)) return { ok: false, error: `Status must be one of: ${valid.join(", ")}.` };
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("jobs").update({ status }).eq("id", id).select("id");
+  if (error) return { ok: false, error: error.message };
+  if (!data || !data.length) return { ok: false, error: "Job not found." };
+  revalidatePath(`/jobs/${id}`);
+  revalidatePath("/jobs");
+  return { ok: true };
+}
+
 export async function finishJob(
   jobId: string,
   opts: { importLabor: boolean; importCosts: boolean; sendInvoice?: boolean },

@@ -351,7 +351,7 @@ export async function runDataTool(
         const lim = clampLimit(input.limit, 15);
         let q = supabase
           .from("jobs")
-          .select("job_number, name, status, scheduled_start, scheduled_end, customers(name)")
+          .select("id, job_number, name, status, address, scheduled_start, scheduled_end, customers(name)")
           .order("created_at", { ascending: false })
           .limit(lim);
         if (input.status) q = q.eq("status", String(input.status));
@@ -364,10 +364,12 @@ export async function runDataTool(
         return JSON.stringify({
           count: data?.length ?? 0,
           jobs: (data ?? []).map((j: any) => ({
+            id: j.id, // needed to schedule / assign / set status / finish / invoice a job
             job: j.job_number,
             name: j.name,
             status: j.status,
             customer: embedName(j.customers),
+            address: j.address, // so "navigate to my next job" works
             scheduled_start: j.scheduled_start,
             scheduled_end: j.scheduled_end,
           })),

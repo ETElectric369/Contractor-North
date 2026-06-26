@@ -53,6 +53,14 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   "pettycash.add",
   "inventory.adjust",
   "safety.log",
+  // The JOB LIFECYCLE (the deep audit's biggest miss): CIB could quote a job but not OPEN,
+  // schedule, assign, set status on, or FINISH one. job.finish is confirm-gated (drafts an
+  // invoice — but never sends); the rest are tier-1 reversible.
+  "job.create",
+  "job.setStatus",
+  "job.finish",
+  "job.scheduleDay",
+  "job.assign",
 ]);
 
 // Registry names are group.verb (a dot); Anthropic tool names can't contain dots.
