@@ -317,6 +317,18 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
       "List CONTRACTS with status, number, title, and who signed. Use for 'which contracts are unsigned', 'is the Jones contract signed'. Pass job_id to filter.",
     input_schema: { type: "object", properties: { status: { type: "string" }, job_id: { type: "string" }, limit: { type: "integer" } } },
   },
+  {
+    name: "hours_summary",
+    description:
+      "Total LABOR HOURS per employee over a date range — 'how many hours did Mike work this week', 'payroll hours this pay period'. Pass from and to (YYYY-MM-DD); defaults to the last 14 days. Sums clock-out minus clock-in minus lunch for completed entries.",
+    input_schema: { type: "object", properties: { from: { type: "string" }, to: { type: "string" } } },
+  },
+  {
+    name: "list_forms",
+    description:
+      "List the company's FORM templates (id, name, and the fields each asks for). Use to find a checklist/form to fill, then form.submit with the answers keyed by field label.",
+    input_schema: { type: "object", properties: {} },
+  },
 ];
 
 const VALID_TOOL_NAMES = new Set(DATA_TOOLS.map((t) => t.name));
@@ -502,6 +514,51 @@ export async function runDataTool(
               ? { id: c.id, name: c.name, company: c.company_name, phone: c.phone, email: c.email, city: c.city, state: c.state }
               : { id: c.id, name: c.name, company: c.company_name, city: c.city, state: c.state },
           ),
+        });
+      }
+
+      case "hours_summary": {
+        const today = new Date();
+        const to = sanitize(input.to) || today.toISOString().slice(0, 10);
+        const past = new Date(today);
+        past.setDate(past.getDate() - 14);
+        const from = sanitize(input.from) || past.toISOString().slice(0, 10);
+        const { data, error } = await supabase
+          .from("time_entries")
+          .select("clock_in, clock_out, lunch_minutes, profiles(full_name)")
+          .gte("clock_in", from)
+          .lte("clock_in", to + "T23:59:59")
+          .not("clock_out", "is", null);
+        if (error) throw error;
+        const byPerson: Record<string, number> = {};
+        for (const e of (data ?? []) as any[]) {
+          if (!e.clock_in || !e.clock_out) continue;
+          const mins = (new Date(e.clock_out).getTime() - new Date(e.clock_in).getTime()) / 60000 - (e.lunch_minutes || 0);
+          if (mins <= 0) continue;
+          const name = e.profiles?.full_name || "Unknown";
+          byPerson[name] = (byPerson[name] || 0) + mins;
+        }
+        const people = Object.entries(byPerson)
+          .map(([name, mins]) => ({ name, hours: Math.round((mins / 60) * 100) / 100 }))
+          .sort((a, b) => b.hours - a.hours);
+        return JSON.stringify({
+          from,
+          to,
+          total_hours: Math.round(people.reduce((s, p) => s + p.hours, 0) * 100) / 100,
+          by_employee: people,
+        });
+      }
+
+      case "list_forms": {
+        const { data, error } = await supabase.from("forms").select("id, name, schema").order("name");
+        if (error) throw error;
+        return JSON.stringify({
+          count: data?.length ?? 0,
+          forms: (data ?? []).map((f: any) => ({
+            id: f.id,
+            name: f.name,
+            fields: Array.isArray(f.schema) ? f.schema.map((fl: any) => ({ label: fl.label, type: fl.type, options: fl.options })) : [],
+          })),
         });
       }
 
