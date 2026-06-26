@@ -1,8 +1,19 @@
 import { z } from "zod";
-import { createAppointment, setAppointmentStatus } from "@/app/(app)/appointments/actions";
+import { createAppointment, setAppointmentStatus, rescheduleAppointment } from "@/app/(app)/appointments/actions";
 import type { ActionDef } from "../types";
 
 export const appointmentActions: Record<string, ActionDef> = {
+  "appointment.update": {
+    name: "appointment.update",
+    group: "appointment",
+    label: "Reschedule appointment",
+    description:
+      "Reschedule an appointment / inspection to a new time — e.g. 'move the Smith inspection to Thursday at 9am'. Find it first with schedule_overview (it returns the id), then pass that id plus the new starts_at as an ISO datetime (optionally ends_at). Keeps everything else; no cancel+recreate.",
+    input: z.object({ id: z.string(), starts_at: z.string().min(1), ends_at: z.string().nullable().optional() }),
+    auth: "staff",
+    effect: "write",
+    handler: (i) => rescheduleAppointment(i.id, i.starts_at, i.ends_at ?? null),
+  },
   "appointment.create": {
     name: "appointment.create",
     group: "appointment",

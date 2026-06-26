@@ -16,6 +16,8 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   "customer.create",
   "customer.update", // fix a misspelled name / add contact info (reversible edit)
   "appointment.create",
+  "appointment.update", // reschedule by voice (no cancel+recreate)
+  "appointment.setStatus", // mark completed / cancelled
   // Quotes are DRAFTS (reversible, reviewable, not sent, no money moved). The agent must
   // read the whole quote back + get a spoken "yes" before calling it — that conversational
   // confirm is enforced in the tool description, and saveQuote is staff-gated + audited.

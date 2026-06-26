@@ -260,6 +260,29 @@ export async function setAppointmentStatus(id: string, status: string): Promise<
   return { ok: true };
 }
 
+/** Reschedule an appointment to a new time (partial — keeps everything else). Used by the
+ *  voice agent ("move the Smith inspection to Thursday at 9") so a reschedule doesn't force a
+ *  cancel+recreate. Org-scoped by RLS (a cross-org id is a clean no-op). */
+export async function rescheduleAppointment(
+  id: string,
+  startsAtIso: string,
+  endsAtIso?: string | null,
+): Promise<Result> {
+  const supabase = await createClient();
+  const start = new Date(startsAtIso);
+  if (isNaN(start.getTime())) return { ok: false, error: "I couldn't read that date/time." };
+  const patch: Record<string, string> = { starts_at: start.toISOString(), updated_at: new Date().toISOString() };
+  if (endsAtIso) {
+    const end = new Date(endsAtIso);
+    if (!isNaN(end.getTime()) && end.getTime() > start.getTime()) patch.ends_at = end.toISOString();
+  }
+  const { data, error } = await supabase.from("appointments").update(patch).eq("id", id).select("id");
+  if (error) return { ok: false, error: error.message };
+  if (!data || !data.length) return { ok: false, error: "Appointment not found." };
+  revalidatePath("/schedule");
+  return { ok: true };
+}
+
 /** Turn an appointment (often a site-visit/estimate walk-through) into a job —
  *  idempotent: if it already spawned one, returns that job. Inherits the
  *  customer, title → name, location → address, and start time. */

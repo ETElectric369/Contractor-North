@@ -751,7 +751,7 @@ export async function runDataTool(
             .order("scheduled_start"),
           supabase
             .from("appointments")
-            .select("title, type, starts_at, ends_at, location, status, customers(name), jobs(name)")
+            .select("id, title, type, starts_at, ends_at, location, status, customers(name), jobs(name)")
             .gte("starts_at", start)
             .lt("starts_at", end)
             .order("starts_at"),
@@ -769,6 +769,7 @@ export async function runDataTool(
             scheduled_end: j.scheduled_end,
           })),
           appointments: (apptRes.data ?? []).map((a: any) => ({
+            id: a.id, // pass to appointment.update (reschedule) / appointment.setStatus
             title: a.title,
             type: a.type,
             starts_at: a.starts_at,
