@@ -301,7 +301,7 @@ export function BillsReceipts({
                       <div className="text-xs text-slate-400">
                         {b.bill_number ? `#${b.bill_number} · ` : ""}
                         {b.bill_date ? `${formatDate(b.bill_date)} · ` : ""}
-                        {b.jobs?.name ?? `Overhead${b.category ? ` · ${b.category}` : ""}`}
+                        {b.jobs?.name ? <Link href={`/jobs/${b.job_id}`} className="hover:text-brand">{b.jobs.name}</Link> : `Overhead${b.category ? ` · ${b.category}` : ""}`}
                         {(b.line_items?.length ?? 0) > 0 ? ` · ${b.line_items!.length} items` : ""}
                       </div>
                     </div>

@@ -91,9 +91,9 @@ export default async function FormDetailPage({
                     <span>{formatDateTime(s.created_at)}</span>
                   </div>
                   {s.jobs?.name && (
-                    <div className="mb-1 text-xs font-medium text-slate-600">
+                    <Link href={`/jobs/${s.job_id}`} className="mb-1 block text-xs font-medium text-slate-600 hover:text-brand">
                       {s.jobs.job_number} · {s.jobs.name}
-                    </div>
+                    </Link>
                   )}
                   <dl className="space-y-0.5">
                     {fields.map((f) => (

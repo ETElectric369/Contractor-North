@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2, AlertTriangle, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -149,7 +150,7 @@ function SafetyPanel({
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-400">
                     <span>{formatDate(r.record_date)}</span>
                     {r.profiles?.full_name && <span>· {r.profiles.full_name}</span>}
-                    {r.jobs?.name && <span>· {r.jobs.name}</span>}
+                    {r.jobs?.name && <Link href={`/jobs/${r.job_id}`} className="hover:text-brand">· {r.jobs.name}</Link>}
                     {r.attendees && <span>· {r.attendees}</span>}
                   </div>
                   {r.description && <p className="mt-1 whitespace-pre-wrap text-sm text-slate-600">{r.description}</p>}
