@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { requireStaff } from "@/lib/staff-guard";
 
 export type Result = { ok: boolean; error?: string };
 
@@ -28,22 +29,22 @@ function clean(input: ComplianceInput) {
 }
 
 export async function createCompliance(input: ComplianceInput): Promise<Result> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   if (!input.name?.trim()) return { ok: false, error: "Name is required." };
   const { error } = await supabase
     .from("compliance_items")
-    .insert({ ...clean(input), created_by: user.id });
+    .insert({ ...clean(input), created_by: ctx.userId });
   if (error) return { ok: false, error: error.message };
   revalidatePath("/compliance");
   return { ok: true };
 }
 
 export async function updateCompliance(id: string, input: ComplianceInput): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   if (!input.name?.trim()) return { ok: false, error: "Name is required." };
   const { error } = await supabase.from("compliance_items").update(clean(input)).eq("id", id);
   if (error) return { ok: false, error: error.message };
@@ -52,7 +53,9 @@ export async function updateCompliance(id: string, input: ComplianceInput): Prom
 }
 
 export async function deleteCompliance(id: string): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { error } = await supabase.from("compliance_items").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/compliance");

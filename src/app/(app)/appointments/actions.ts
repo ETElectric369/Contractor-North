@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
 import { createClient } from "@/lib/supabase/server";
+import { requireStaff } from "@/lib/staff-guard";
 import { sendPushToProfiles } from "@/lib/push";
 import { getOrgSettings } from "@/lib/org-settings";
 import { tzDateTimeUtc } from "@/lib/tz";
@@ -53,11 +54,9 @@ async function resolveCustomer(
 /** Combine a date + time input into an ISO timestamp at local time. */
 
 export async function createAppointment(formData: FormData): Promise<Result> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
 
   const title = String(formData.get("title") ?? "").trim();
   if (!title) return { ok: false, error: "Title is required." };
@@ -72,7 +71,7 @@ export async function createAppointment(formData: FormData): Promise<Result> {
     emptyToNull(formData.get("ends_at_iso")) ??
     (endTime ? await resolveIso(supabase, null, apptDate, endTime) : null);
 
-  const cust = await resolveCustomer(supabase, formData, user.id);
+  const cust = await resolveCustomer(supabase, formData, ctx.userId);
   if (cust.error) return { ok: false, error: cust.error };
   const customerId = cust.customerId;
 
@@ -88,14 +87,14 @@ export async function createAppointment(formData: FormData): Promise<Result> {
       location: emptyToNull(formData.get("location")),
       notes: emptyToNull(formData.get("notes")),
       assigned_to: emptyToNull(formData.get("assigned_to")),
-      created_by: user.id,
+      created_by: ctx.userId,
     })
     .select("id")
     .single();
   if (error) return { ok: false, error: error.message };
 
   const assignedTo = emptyToNull(formData.get("assigned_to"));
-  if (assignedTo && assignedTo !== user.id) {
+  if (assignedTo && assignedTo !== ctx.userId) {
     void sendPushToProfiles([assignedTo], "assigned", {
       title: "New appointment assigned",
       body: title,
@@ -241,7 +240,9 @@ export async function updateAppointment(id: string, formData: FormData): Promise
 }
 
 export async function setAppointmentStatus(id: string, status: string): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { error } = await supabase
     .from("appointments")
     .update({ status, updated_at: new Date().toISOString() })
@@ -268,7 +269,9 @@ export async function rescheduleAppointment(
   startsAtIso: string,
   endsAtIso?: string | null,
 ): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const start = new Date(startsAtIso);
   if (isNaN(start.getTime())) return { ok: false, error: "I couldn't read that date/time." };
   const patch: Record<string, string> = { starts_at: start.toISOString(), updated_at: new Date().toISOString() };
@@ -290,11 +293,9 @@ export async function rescheduleAppointment(
  *  idempotent: if it already spawned one, returns that job. Inherits the
  *  customer, title → name, location → address, and start time. */
 export async function createJobFromAppointment(appointmentId: string): Promise<Result> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
 
   const { data: appt } = await supabase
     .from("appointments")
@@ -312,7 +313,7 @@ export async function createJobFromAppointment(appointmentId: string): Promise<R
       status: "scheduled",
       scheduled_start: appt.starts_at,
       address: appt.location,
-      created_by: user.id,
+      created_by: ctx.userId,
     })
     .select("id")
     .single();

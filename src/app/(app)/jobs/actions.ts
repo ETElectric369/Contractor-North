@@ -20,7 +20,21 @@ export type Result = { ok: boolean; error?: string };
 export async function createInvoiceForJob(
   jobId: string,
 ): Promise<{ ok: boolean; error?: string; id?: string }> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+
+  // A scheduled (draw-billed) job bills through its milestone draws, not a standard invoice —
+  // the mirror of setPaymentSchedule's guard, so the two billing paths can never mix (which
+  // would corrupt the job's billing state).
+  const { data: milestone } = await supabase
+    .from("payment_milestones")
+    .select("id")
+    .eq("job_id", jobId)
+    .limit(1)
+    .maybeSingle();
+  if (milestone)
+    return { ok: false, error: "This job bills on a payment schedule — request the next draw from Billing instead." };
 
   // M3: don't create a SECOND draft — "invoice the Jones job" twice should land on the
   // existing open draft, not duplicate it (idempotent for the voice flow, which can't see
@@ -84,7 +98,9 @@ export async function createInvoiceForJob(
 export async function setJobStatus(id: string, status: string): Promise<{ ok: boolean; error?: string }> {
   const valid = ["estimate", "scheduled", "in_progress", "on_hold", "complete", "invoiced", "cancelled"];
   if (!valid.includes(status)) return { ok: false, error: `Status must be one of: ${valid.join(", ")}.` };
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { data, error } = await supabase.from("jobs").update({ status }).eq("id", id).select("id");
   if (error) return { ok: false, error: error.message };
   if (!data || !data.length) return { ok: false, error: "Job not found." };
@@ -97,11 +113,9 @@ export async function finishJob(
   jobId: string,
   opts: { importLabor: boolean; importCosts: boolean; sendInvoice?: boolean },
 ): Promise<{ ok: boolean; error?: string; id?: string; sent?: boolean }> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
 
   // A draw-billed job is finished with a Final draw, not a standard invoice. Mark it
   // complete without creating a conflicting standard invoice (H4), and hand back the
@@ -237,11 +251,9 @@ export async function createBill(input: {
   notes: string;
   category?: string | null;
 }): Promise<Result> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   if (!input.supplier.trim()) return { ok: false, error: "Supplier is required." };
 
   // Drop a job_id the caller can't see (e.g. a crafted voice/registry call) — never
@@ -257,7 +269,7 @@ export async function createBill(input: {
     bill_date: input.bill_date || null,
     notes: input.notes.trim() || null,
     category: input.category ?? null,
-    created_by: user.id,
+    created_by: ctx.userId,
   });
   if (error) return { ok: false, error: error.message };
   if (input.job_id) revalidatePath(`/jobs/${input.job_id}`);
@@ -278,7 +290,9 @@ export async function updateBill(
     job_id?: string | null;
   },
 ): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const clean: Record<string, unknown> = {};
   if (patch.supplier !== undefined) {
     if (!patch.supplier.trim()) return { ok: false, error: "Supplier is required." };
@@ -304,7 +318,9 @@ export async function setBillStatus(
   status: string,
   jobId: string,
 ): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { error } = await supabase.from("bills").update({ status }).eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath(`/jobs/${jobId}`);
@@ -312,7 +328,9 @@ export async function setBillStatus(
 }
 
 export async function deleteBill(id: string, jobId: string): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { error } = await supabase.from("bills").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath(`/jobs/${jobId}`);
@@ -323,7 +341,9 @@ export async function updateJobNotes(
   jobId: string,
   notes: string,
 ): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { error } = await supabase
     .from("jobs")
     .update({ notes: notes.trim() || null })
@@ -338,7 +358,9 @@ export async function updateJobDescription(
   jobId: string,
   description: string,
 ): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { error } = await supabase
     .from("jobs")
     .update({ description: description.trim() || null })

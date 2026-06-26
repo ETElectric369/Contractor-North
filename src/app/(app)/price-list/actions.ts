@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { requireStaff } from "@/lib/staff-guard";
 
 export type Result = { ok: boolean; error?: string; imported?: number };
 
@@ -16,7 +17,9 @@ export interface PriceItemInput {
 }
 
 export async function createPriceItem(input: PriceItemInput): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   if (!input.description?.trim()) return { ok: false, error: "Description is required." };
   const { error } = await supabase.from("price_list_items").insert({
     code: input.code?.trim() || null,
@@ -33,7 +36,9 @@ export async function createPriceItem(input: PriceItemInput): Promise<Result> {
 }
 
 export async function updatePriceItem(id: string, patch: PriceItemInput): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const clean: Record<string, unknown> = {};
   if (patch.code !== undefined) clean.code = patch.code?.trim() || null;
   if (patch.description !== undefined) clean.description = patch.description.trim();
@@ -49,7 +54,9 @@ export async function updatePriceItem(id: string, patch: PriceItemInput): Promis
 }
 
 export async function deletePriceItem(id: string): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { error } = await supabase.from("price_list_items").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/price-list");

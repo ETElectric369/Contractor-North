@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { requireStaff } from "@/lib/staff-guard";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { getOrgSettings } from "@/lib/org-settings";
 import { sendEmail, renderDocEmail, ownerBcc } from "@/lib/email";
@@ -157,7 +158,9 @@ export async function addQuoteItem(
   quoteId: string,
   item: { description: string; quantity: number; unit: string; unit_price: number },
 ): Promise<{ ok: boolean; error?: string }> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   if (!item.description.trim()) return { ok: false, error: "Description is required." };
   const { data: last } = await supabase
     .from("quote_line_items")
@@ -186,7 +189,9 @@ export async function updateQuoteItem(
   quoteId: string,
   item: { description: string; quantity: number; unit_price: number },
 ): Promise<{ ok: boolean; error?: string }> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   if (!item.description.trim()) return { ok: false, error: "Description is required." };
   const { error } = await supabase
     .from("quote_line_items")
@@ -207,7 +212,9 @@ export async function deleteQuoteItem(
   itemId: string,
   quoteId: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { error } = await supabase.from("quote_line_items").delete().eq("id", itemId);
   if (error) return { ok: false, error: error.message };
   await recalcQuote(supabase, quoteId);
@@ -221,7 +228,9 @@ export async function updateQuoteMeta(
   quoteId: string,
   meta: { title: string; notes: string; tax_rate: number; valid_until: string | null },
 ): Promise<{ ok: boolean; error?: string }> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { error } = await supabase
     .from("quotes")
     .update({
@@ -247,11 +256,9 @@ export async function deleteQuote(id: string): Promise<{ ok: boolean; error?: st
 }
 
 export async function saveQuote(input: SaveQuoteInput) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false as const, error: "Not signed in." };
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false as const, error: ctx.error };
+  const supabase = ctx.supabase;
 
   const subtotal = round2(
     input.items.reduce((s, i) => s + i.quantity * i.unit_price, 0),
@@ -271,7 +278,7 @@ export async function saveQuote(input: SaveQuoteInput) {
       tax,
       total,
       valid_until: input.valid_until,
-      created_by: user.id,
+      created_by: ctx.userId,
     })
     .select("id")
     .single();
@@ -301,7 +308,7 @@ export async function saveQuote(input: SaveQuoteInput) {
     priority: 0,
     job_id: input.job_id || null,
     due_date: new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10),
-    created_by: user.id,
+    created_by: ctx.userId,
   });
 
   revalidatePath("/quotes");
@@ -313,11 +320,9 @@ export async function saveQuote(input: SaveQuoteInput) {
 export async function createJobFromQuote(
   quoteId: string,
 ): Promise<{ ok: boolean; error?: string; id?: string }> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
 
   const { data: q } = await supabase
     .from("quotes")
@@ -333,7 +338,7 @@ export async function createJobFromQuote(
       customer_id: q.customer_id,
       name: q.title || `Job from ${q.quote_number}`,
       status: "scheduled",
-      created_by: user.id,
+      created_by: ctx.userId,
     })
     .select("id")
     .single();
@@ -353,7 +358,9 @@ export async function createJobFromQuote(
 }
 
 export async function updateQuoteStatus(id: string, status: string) {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false as const, error: ctx.error };
+  const supabase = ctx.supabase;
   const { error } = await supabase
     .from("quotes")
     .update({ status })

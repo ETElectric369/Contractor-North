@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
+import { requireStaff } from "@/lib/staff-guard";
 import { createClient } from "@/lib/supabase/server";
 import { formatPhone, formatState, formatZip, titleCase } from "@/lib/utils";
 
@@ -29,11 +30,9 @@ function inquiryFields(formData: FormData) {
 }
 
 export async function createInquiry(formData: FormData): Promise<Result> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
 
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return { ok: false, error: "Name is required." };
@@ -41,7 +40,7 @@ export async function createInquiry(formData: FormData): Promise<Result> {
   const fields = inquiryFields(formData);
   const { data, error } = await supabase
     .from("inquiries")
-    .insert({ name, ...fields, source: "manual", status: "new", created_by: user.id })
+    .insert({ name, ...fields, source: "manual", status: "new", created_by: ctx.userId })
     .select("id")
     .single();
   if (error) return { ok: false, error: error.message };
@@ -57,7 +56,7 @@ export async function createInquiry(formData: FormData): Promise<Result> {
     starts_at: followUp.toISOString(),
     location: fields.address,
     notes: fields.message ?? fields.notes,
-    created_by: user.id,
+    created_by: ctx.userId,
   });
 
   revalidatePath("/leads");
@@ -66,7 +65,9 @@ export async function createInquiry(formData: FormData): Promise<Result> {
 }
 
 export async function updateInquiry(id: string, formData: FormData): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return { ok: false, error: "Name is required." };
 
@@ -82,7 +83,9 @@ export async function updateInquiry(id: string, formData: FormData): Promise<Res
 
 /** Log contact now; optionally set/update the next follow-up date. */
 export async function markInquiryContacted(id: string, nextFollowUp?: string | null): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const patch: Record<string, unknown> = {
     last_contacted_at: new Date().toISOString(),
     status: "contacted",
@@ -107,7 +110,9 @@ export async function setInquiryStatus(id: string, status: string): Promise<Resu
 }
 
 export async function deleteInquiry(id: string): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { error } = await supabase.from("inquiries").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/leads");
@@ -125,11 +130,9 @@ export async function convertInquiry(
   target: "customer" | "quote" | "estimate" | "job",
   opts: { customerId?: string | null } = {},
 ): Promise<Result> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
 
   const { data: inq } = await supabase.from("inquiries").select("*").eq("id", id).maybeSingle();
   if (!inq) return { ok: false, error: "Lead not found." };
@@ -151,7 +154,7 @@ export async function convertInquiry(
         state: inq.state,
         zip: inq.zip,
         notes: inq.message ? `From inquiry: ${inq.message}` : inq.notes,
-        created_by: user.id,
+        created_by: ctx.userId,
       })
       .select("id")
       .single();
@@ -180,7 +183,7 @@ export async function convertInquiry(
         city: inq.city,
         state: inq.state,
         zip: inq.zip,
-        created_by: user.id,
+        created_by: ctx.userId,
       })
       .select("id")
       .single();

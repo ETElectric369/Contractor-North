@@ -786,11 +786,21 @@ async function createMilestoneDraw(
   // Link the milestone to the draw (this is what marks it "billed"; deleting the draft
   // nulls the FK and re-offers it). Reported, never silently desynced.
   if (next.id) {
-    const { error: mErr } = await supabase
+    const { data: claimed, error: mErr } = await supabase
       .from("payment_milestones")
       .update({ status: "billed", invoice_id: inv.id, billed_amount: next.dollars })
-      .eq("id", next.id);
-    if (mErr) reportError("createMilestoneDraw.link", mErr, { jobId, milestoneId: next.id });
+      .eq("id", next.id)
+      .is("invoice_id", null) // CLAIM only if still unbilled — wins the race vs a concurrent draw
+      .select("id");
+    if (mErr) {
+      reportError("createMilestoneDraw.link", mErr, { jobId, milestoneId: next.id });
+    } else if (!claimed || !claimed.length) {
+      // Another request already drafted this milestone (the partial unique index usually blocks the
+      // second invoice first; this is the belt-and-suspenders for a delete-then-redraw race). Roll
+      // back the draft we just created so we don't leave an orphaned invoice claiming the slot.
+      await supabase.from("invoices").delete().eq("id", inv.id);
+      return { ok: false, error: "That payment was just drafted by another request — refresh and request the next one." };
+    }
   }
 
   revalidatePath(`/jobs/${jobId}`);

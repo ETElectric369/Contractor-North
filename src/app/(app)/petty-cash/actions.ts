@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { requireStaff } from "@/lib/staff-guard";
 
 export type Result = { ok: boolean; error?: string };
 
@@ -13,11 +14,9 @@ export async function addPettyCash(input: {
   description?: string | null;
   job_id?: string | null;
 }): Promise<Result> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   if (!input.amount || input.amount <= 0) return { ok: false, error: "Enter an amount." };
 
   const { error } = await supabase.from("petty_cash").insert({
@@ -27,7 +26,7 @@ export async function addPettyCash(input: {
     category: input.category?.trim() || null,
     description: input.description?.trim() || null,
     job_id: input.job_id || null,
-    created_by: user.id,
+    created_by: ctx.userId,
   });
   if (error) return { ok: false, error: error.message };
   revalidatePath("/petty-cash");
@@ -35,7 +34,9 @@ export async function addPettyCash(input: {
 }
 
 export async function deletePettyCash(id: string): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { error } = await supabase.from("petty_cash").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/petty-cash");

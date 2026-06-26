@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
+import { requireStaff } from "@/lib/staff-guard";
 
 export type Result = { ok: boolean; error?: string };
 
@@ -28,11 +28,9 @@ function rev(jobId?: string | null) {
 }
 
 export async function createPermit(input: PermitInput): Promise<Result> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
 
   const { error } = await supabase.from("permits").insert({
     job_id: input.job_id || null,
@@ -49,7 +47,7 @@ export async function createPermit(input: PermitInput): Promise<Result> {
     inspection_result: input.inspection_result || "pending",
     notes: input.notes?.trim() || null,
     portal_url: input.portal_url?.trim() || null,
-    created_by: user.id,
+    created_by: ctx.userId,
   });
   if (error) return { ok: false, error: error.message };
   rev(input.job_id);
@@ -57,7 +55,9 @@ export async function createPermit(input: PermitInput): Promise<Result> {
 }
 
 export async function updatePermit(id: string, patch: PermitInput): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const clean: Record<string, unknown> = {};
   for (const k of [
     "permit_number", "type", "authority", "status", "applied_date", "issued_date",
@@ -74,7 +74,9 @@ export async function updatePermit(id: string, patch: PermitInput): Promise<Resu
 }
 
 export async function deletePermit(id: string, jobId?: string | null): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { error } = await supabase.from("permits").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
   rev(jobId);

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
 import { createClient } from "@/lib/supabase/server";
+import { requireStaff } from "@/lib/staff-guard";
 import { getOrgSettings } from "@/lib/org-settings";
 import { tzLocalHourUtc } from "@/lib/tz";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -33,11 +34,9 @@ async function advanceToScheduled(supabase: SupabaseClient, id: string): Promise
 }
 
 export async function createJob(formData: FormData): Promise<Result> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
 
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return { ok: false, error: "Job name is required." };
@@ -55,7 +54,7 @@ export async function createJob(formData: FormData): Promise<Result> {
         phone: emptyToNull(formData.get("new_customer_phone")),
         email: emptyToNull(formData.get("new_customer_email")),
         status: "active",
-        created_by: user.id,
+        created_by: ctx.userId,
       })
       .select("id")
       .single();
@@ -73,7 +72,7 @@ export async function createJob(formData: FormData): Promise<Result> {
       billing_type: String(formData.get("billing_type") ?? "fixed"),
       address: emptyToNull(formData.get("address")),
       scheduled_start: start ? new Date(start).toISOString() : null,
-      created_by: user.id,
+      created_by: ctx.userId,
     })
     .select("id")
     .single();
@@ -97,7 +96,9 @@ export async function setJobAssignee(
   id: string,
   employeeId: string,
 ): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { error } = await supabase
     .from("jobs")
     .update({ assigned_to: employeeId ? [employeeId] : [] })
@@ -179,11 +180,9 @@ export async function setJobScheduleRanges(
   jobId: string,
   ranges: DateRange[],
 ): Promise<Result> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
 
   // Keep only well-formed ranges; default a missing end to the start.
   const clean = ranges

@@ -2,12 +2,14 @@
 
 import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
-import { createClient } from "@/lib/supabase/server";
+import { requireStaff } from "@/lib/staff-guard";
 
 export type Result = { ok: boolean; error?: string; id?: string };
 
 export async function createInventoryItem(formData: FormData): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return { ok: false, error: "Name is required." };
 
@@ -29,7 +31,9 @@ export async function createInventoryItem(formData: FormData): Promise<Result> {
 }
 
 export async function updateInventoryItem(id: string, formData: FormData): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return { ok: false, error: "Name is required." };
 
@@ -52,7 +56,9 @@ export async function updateInventoryItem(id: string, formData: FormData): Promi
 }
 
 export async function deleteInventoryItem(id: string): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { error } = await supabase.from("inventory_items").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/inventory");
@@ -64,7 +70,9 @@ export async function adjustQuantity(
   id: string,
   delta: number,
 ): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { data: item, error: readErr } = await supabase
     .from("inventory_items")
     .select("quantity_on_hand")

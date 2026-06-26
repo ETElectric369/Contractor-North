@@ -176,7 +176,7 @@ export function QuoteBuilder({
         items: cleaned,
       });
       if (!res.ok) {
-        setSaveError(res.error);
+        setSaveError(res.error ?? "Could not save the quote.");
         return;
       }
       router.push(`/quotes/${res.id}`);

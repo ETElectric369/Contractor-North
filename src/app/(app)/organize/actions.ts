@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { requireStaff } from "@/lib/staff-guard";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { OVERHEAD_CATEGORIES } from "./constants";
 
@@ -150,11 +151,9 @@ export async function analyzeAndFile(input: {
   mime: string;
   size: number;
 }): Promise<OrganizedResult> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
 
   // Candidate jobs for matching (recent, active-ish).
   const { data: jobs } = await supabase
@@ -269,7 +268,7 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
         kind: "other",
         file_url: input.path,
         size_bytes: input.size || null,
-        uploaded_by: user.id,
+        uploaded_by: ctx.userId,
       })
       .select("id")
       .single();
@@ -282,14 +281,14 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
   if (kind === "receipt" && amount != null && destination === "job" && jobId) {
     billId = await insertItemizedBill(
       supabase,
-      { job_id: jobId, supplier: vendor, amount, bill_date: itemDate, category, notes: `Receipt filed by Organize My: ${title}`, created_by: user.id },
+      { job_id: jobId, supplier: vendor, amount, bill_date: itemDate, category, notes: `Receipt filed by Organize My: ${title}`, created_by: ctx.userId },
       lines,
       billStatusFor(category),
     );
   } else if (destination === "overhead") {
     billId = await insertItemizedBill(
       supabase,
-      { job_id: null, supplier: vendor, amount, bill_date: itemDate, category: overheadCategory, notes: `Filed by Organize My: ${title}`, created_by: user.id },
+      { job_id: null, supplier: vendor, amount, bill_date: itemDate, category: overheadCategory, notes: `Filed by Organize My: ${title}`, created_by: ctx.userId },
       lines,
       billStatusFor(overheadCategory),
     );
@@ -312,7 +311,7 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
       bill_id: billId,
       line_items: lines.length ? lines : null,
       file_url: input.path,
-      created_by: user.id,
+      created_by: ctx.userId,
     })
     .select("id")
     .single();
@@ -378,11 +377,9 @@ export async function billJobReceipt(documentId: string): Promise<{
   vendor?: string | null;
   lineCount?: number;
 }> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
 
   const { data: doc } = await supabase
     .from("documents")
@@ -472,7 +469,7 @@ In every "description", write inches as the word in (e.g. "6 in EMT", not 6") an
       bill_date: itemDate,
       category: "Receipt",
       notes: `Receipt recorded as cost: ${doc.name}`,
-      created_by: user.id,
+      created_by: ctx.userId,
     },
     lines,
     "paid", // this flow reads a purchase receipt (already paid at the store)
@@ -495,7 +492,7 @@ In every "description", write inches as the word in (e.g. "6 in EMT", not 6") an
     bill_id: billId,
     line_items: lines.length ? lines : null,
     file_url: doc.file_url,
-    created_by: user.id,
+    created_by: ctx.userId,
   });
 
   revalidatePath("/bills");
@@ -516,11 +513,9 @@ export type FileDestination =
  * around can never double-count.
  */
 export async function fileItem(id: string, dest: FileDestination): Promise<Result> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
 
   const { data: item } = await supabase.from("organized_items").select("*").eq("id", id).maybeSingle();
   if (!item) return { ok: false, error: "Item not found." };
@@ -548,7 +543,7 @@ export async function fileItem(id: string, dest: FileDestination): Promise<Resul
         category: docCategory,
         kind: "other",
         file_url: item.file_url,
-        uploaded_by: user.id,
+        uploaded_by: ctx.userId,
       })
       .select("id")
       .single();
@@ -557,7 +552,7 @@ export async function fileItem(id: string, dest: FileDestination): Promise<Resul
     if (item.kind === "receipt" && item.amount != null) {
       billId = await insertItemizedBill(
         supabase,
-        { job_id: dest.jobId, supplier: item.vendor ?? item.title, amount: item.amount, bill_date: item.item_date, category: "Receipt", notes: `Receipt filed by Organize My: ${item.title}`, created_by: user.id },
+        { job_id: dest.jobId, supplier: item.vendor ?? item.title, amount: item.amount, bill_date: item.item_date, category: "Receipt", notes: `Receipt filed by Organize My: ${item.title}`, created_by: ctx.userId },
         lines,
         billStatusFor(item.category),
       );
@@ -566,7 +561,7 @@ export async function fileItem(id: string, dest: FileDestination): Promise<Resul
     category = dest.category;
     billId = await insertItemizedBill(
       supabase,
-      { job_id: null, supplier: item.vendor ?? item.title, amount: item.amount ?? 0, bill_date: item.item_date, category: dest.category, notes: `Filed by Organize My: ${item.title}`, created_by: user.id },
+      { job_id: null, supplier: item.vendor ?? item.title, amount: item.amount ?? 0, bill_date: item.item_date, category: dest.category, notes: `Filed by Organize My: ${item.title}`, created_by: ctx.userId },
       lines,
       billStatusFor(dest.category),
     );
@@ -578,7 +573,7 @@ export async function fileItem(id: string, dest: FileDestination): Promise<Resul
       amount: item.amount ?? 0,
       category: item.kind === "receipt" ? "Receipt" : "Other",
       description: item.title,
-      created_by: user.id,
+      created_by: ctx.userId,
     });
     if (pcErr) return { ok: false, error: pcErr.message };
   }
@@ -599,7 +594,9 @@ export async function fileItem(id: string, dest: FileDestination): Promise<Resul
 
 /** Delete an organized item, everything it filed (doc row, overhead bill), and the stored file. */
 export async function deleteOrganizedItem(id: string): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { data: item } = await supabase.from("organized_items").select("*").eq("id", id).maybeSingle();
   if (!item) return { ok: false, error: "Item not found." };
 
