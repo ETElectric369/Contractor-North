@@ -66,6 +66,9 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   "job.finish",
   "job.scheduleDay",
   "job.assign",
+  // Field capture: a hands-busy voice note + on-site price-list capture.
+  "organize.saveNote",
+  "pricelist.add",
 ]);
 
 // Registry names are group.verb (a dot); Anthropic tool names can't contain dots.
