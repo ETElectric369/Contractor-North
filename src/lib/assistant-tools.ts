@@ -118,6 +118,31 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
       },
     },
   },
+  {
+    name: "list_tasks",
+    description:
+      "List this company's tasks (with their id, title, status, due date, and who they're assigned to). Use BEFORE completing, rescheduling, or reassigning a task so you have its id — e.g. 'mark the inspection task done', 'push the permit task to Friday'. Filter by status (open | done) and/or a text search on the title.",
+    input_schema: {
+      type: "object",
+      properties: {
+        status: { type: "string", enum: ["open", "done"], description: "Optional status filter." },
+        search: { type: "string", description: "Optional text to match against the task title." },
+        limit: { type: "integer", description: "Max rows (default 20, max 40)." },
+      },
+    },
+  },
+  {
+    name: "list_bug_reports",
+    description:
+      "List the bug reports / feature requests this company has filed (note, page, status, date, who filed it). Use when the user asks you to review, summarize, cluster, or prioritize their reported bugs — 'what are we complaining about most', 'what's still open'. Read-only and limited to this company by the database.",
+    input_schema: {
+      type: "object",
+      properties: {
+        status: { type: "string", description: "Optional status filter (e.g. open, fixed)." },
+        limit: { type: "integer", description: "Max rows (default 30, max 40)." },
+      },
+    },
+  },
 ];
 
 const VALID_TOOL_NAMES = new Set(DATA_TOOLS.map((t) => t.name));
@@ -280,7 +305,7 @@ export async function runDataTool(
         const s = sanitize(input.search ?? "");
         let q = supabase
           .from("customers")
-          .select("name, company_name, phone, email, city, state")
+          .select("id, name, company_name, phone, email, city, state")
           .order("name")
           .limit(lim);
         if (s) q = q.or(`name.ilike.%${s}%,company_name.ilike.%${s}%,phone.ilike.%${s}%,email.ilike.%${s}%`);
@@ -289,15 +314,68 @@ export async function runDataTool(
         // Data minimization (framework §7): phone/email reach the model ONLY on a SPECIFIC
         // lookup (>=3 chars) that resolves to a SMALL set — so a broad/short term like "a"
         // can't walk the whole customer book with contact attached. A broad list returns
-        // name + locality only.
+        // name + locality only. The `id` is an opaque UUID (not PII) and is ALWAYS returned —
+        // without it the assistant can find a customer but can never edit them or pin them to
+        // a quote (the exact "it won't let me fix my customers" gap).
         const showPII = s.length >= 3 && (data?.length ?? 0) <= 5;
         return JSON.stringify({
           count: data?.length ?? 0,
           customers: (data ?? []).map((c: any) =>
             showPII
-              ? { name: c.name, company: c.company_name, phone: c.phone, email: c.email, city: c.city, state: c.state }
-              : { name: c.name, company: c.company_name, city: c.city, state: c.state },
+              ? { id: c.id, name: c.name, company: c.company_name, phone: c.phone, email: c.email, city: c.city, state: c.state }
+              : { id: c.id, name: c.name, company: c.company_name, city: c.city, state: c.state },
           ),
+        });
+      }
+
+      case "list_tasks": {
+        const lim = clampLimit(input.limit, 20);
+        const s = sanitize(input.search);
+        let q = supabase
+          .from("tasks")
+          .select("id, title, status, due_date, assignee:assigned_to(full_name), jobs(job_number, name)")
+          .order("due_date", { ascending: true, nullsFirst: false })
+          .limit(lim);
+        const st = String(input.status ?? "");
+        if (st === "open" || st === "done") q = q.eq("status", st);
+        if (s) q = q.ilike("title", `%${s}%`);
+        const { data, error } = await q;
+        if (error) throw error;
+        return JSON.stringify({
+          count: data?.length ?? 0,
+          tasks: (data ?? []).map((t: any) => ({
+            id: t.id, // needed to complete / reschedule / reassign the task
+            title: t.title,
+            status: t.status,
+            due: t.due_date,
+            assigned_to: t.assignee?.full_name ?? null,
+            job: t.jobs ? `${t.jobs.job_number} ${t.jobs.name}` : null,
+          })),
+        });
+      }
+
+      case "list_bug_reports": {
+        const lim = clampLimit(input.limit, 30);
+        let q = supabase
+          .from("bug_reports")
+          .select("note, page, status, created_at, profiles:reported_by(full_name)")
+          .order("created_at", { ascending: false })
+          .limit(lim);
+        const st = sanitize(input.status);
+        if (st) q = q.eq("status", st);
+        // RLS already restricts bug_reports to this org AND to staff — a non-staff caller
+        // simply gets zero rows, so no extra guard is needed here.
+        const { data, error } = await q;
+        if (error) throw error;
+        return JSON.stringify({
+          count: data?.length ?? 0,
+          bug_reports: (data ?? []).map((b: any) => ({
+            note: b.note,
+            page: b.page,
+            status: b.status ?? "open",
+            filed: b.created_at,
+            reporter: b.profiles?.full_name ?? null,
+          })),
         });
       }
 
