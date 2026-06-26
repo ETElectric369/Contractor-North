@@ -216,6 +216,41 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
       },
     },
   },
+  {
+    name: "list_work_orders",
+    description:
+      "List WORK ORDERS across jobs (number, title, status, job). Use for 'what work orders are open', 'work orders on the Miller job'. Pass job_id to filter to one job.",
+    input_schema: {
+      type: "object",
+      properties: {
+        status: { type: "string" },
+        job_id: { type: "string" },
+        limit: { type: "integer", description: "Max rows (default 20, max 40)." },
+      },
+    },
+  },
+  {
+    name: "list_material_lists",
+    description:
+      "List MATERIAL LISTS across jobs (name, item count, job). Use for 'what material lists are there', 'materials for the Miller job'. Pass job_id to filter.",
+    input_schema: {
+      type: "object",
+      properties: { job_id: { type: "string" }, limit: { type: "integer", description: "Max rows (default 20, max 40)." } },
+    },
+  },
+  {
+    name: "list_change_orders",
+    description:
+      "List CHANGE ORDERS across jobs (number, amount, status, job). Use for 'what change orders are pending', 'change orders on the Miller job'. Pass job_id to filter.",
+    input_schema: {
+      type: "object",
+      properties: {
+        status: { type: "string" },
+        job_id: { type: "string" },
+        limit: { type: "integer", description: "Max rows (default 20, max 40)." },
+      },
+    },
+  },
 ];
 
 const VALID_TOOL_NAMES = new Set(DATA_TOOLS.map((t) => t.name));
@@ -398,6 +433,78 @@ export async function runDataTool(
               ? { id: c.id, name: c.name, company: c.company_name, phone: c.phone, email: c.email, city: c.city, state: c.state }
               : { id: c.id, name: c.name, company: c.company_name, city: c.city, state: c.state },
           ),
+        });
+      }
+
+      case "list_work_orders": {
+        const lim = clampLimit(input.limit, 20);
+        let q = supabase
+          .from("work_orders")
+          .select("id, wo_number, title, status, jobs(job_number, name)")
+          .order("created_at", { ascending: false })
+          .limit(lim);
+        const st = sanitize(input.status);
+        if (st) q = q.eq("status", st);
+        const jid = sanitize(input.job_id);
+        if (jid) q = q.eq("job_id", jid);
+        const { data, error } = await q;
+        if (error) throw error;
+        return JSON.stringify({
+          count: data?.length ?? 0,
+          work_orders: (data ?? []).map((w: any) => ({
+            id: w.id,
+            wo_number: w.wo_number,
+            title: w.title,
+            status: w.status,
+            job: w.jobs ? `${w.jobs.job_number} ${w.jobs.name}` : null,
+          })),
+        });
+      }
+
+      case "list_material_lists": {
+        const lim = clampLimit(input.limit, 20);
+        let q = supabase
+          .from("material_lists")
+          .select("id, name, jobs(job_number, name), material_list_items(id)")
+          .order("created_at", { ascending: false })
+          .limit(lim);
+        const jid = sanitize(input.job_id);
+        if (jid) q = q.eq("job_id", jid);
+        const { data, error } = await q;
+        if (error) throw error;
+        return JSON.stringify({
+          count: data?.length ?? 0,
+          material_lists: (data ?? []).map((l: any) => ({
+            id: l.id,
+            name: l.name,
+            items: l.material_list_items?.length ?? 0,
+            job: l.jobs ? `${l.jobs.job_number} ${l.jobs.name}` : null,
+          })),
+        });
+      }
+
+      case "list_change_orders": {
+        const lim = clampLimit(input.limit, 20);
+        let q = supabase
+          .from("change_orders")
+          .select("id, co_number, amount, status, jobs(job_number, name)")
+          .order("created_at", { ascending: false })
+          .limit(lim);
+        const st = sanitize(input.status);
+        if (st) q = q.eq("status", st);
+        const jid = sanitize(input.job_id);
+        if (jid) q = q.eq("job_id", jid);
+        const { data, error } = await q;
+        if (error) throw error;
+        return JSON.stringify({
+          count: data?.length ?? 0,
+          change_orders: (data ?? []).map((c: any) => ({
+            id: c.id,
+            co_number: c.co_number,
+            amount: money(c.amount),
+            status: c.status,
+            job: c.jobs ? `${c.jobs.job_number} ${c.jobs.name}` : null,
+          })),
         });
       }
 
