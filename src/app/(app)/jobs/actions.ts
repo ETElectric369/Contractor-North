@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { emptyToNull } from "@/lib/forms";
 import { visibleJobIdOrNull, visibleTemplateIdOrNull } from "@/lib/job-visibility";
 import { requireStaff } from "@/lib/staff-guard";
+import { getOrgSettings } from "@/lib/org-settings";
 import {
   createInvoiceFromQuote,
   createBlankInvoice,
@@ -29,23 +30,35 @@ export async function createInvoiceForJob(
     .limit(1)
     .maybeSingle();
 
+  let res: { ok: boolean; error?: string; id?: string };
   if (quote) {
-    const res = await createInvoiceFromQuote(quote.id);
-    return res;
+    res = await createInvoiceFromQuote(quote.id);
+  } else {
+    const { data: job } = await supabase
+      .from("jobs")
+      .select("customer_id, name, description")
+      .eq("id", jobId)
+      .maybeSingle();
+    res = await createBlankInvoice({
+      customer_id: job?.customer_id ?? null,
+      job_id: jobId, // keep the job link so the invoice can pull Labor/Materials
+      title: job?.name ?? "",
+      description: (job as any)?.description ?? null, // scope shown above the line items
+      tax_rate: 0,
+    });
   }
 
-  const { data: job } = await supabase
-    .from("jobs")
-    .select("customer_id, name, description")
-    .eq("id", jobId)
-    .maybeSingle();
-  return createBlankInvoice({
-    customer_id: job?.customer_id ?? null,
-    job_id: jobId, // keep the job link so the invoice can pull Labor/Materials
-    title: job?.name ?? "",
-    description: (job as any)?.description ?? null, // scope shown above the line items
-    tax_rate: 0,
-  });
+  // Pre-fill the draft from the job's logged LABOR (hours × rate) + MATERIALS (POs/bills,
+  // marked up), best-effort — both importers no-op cleanly when there's nothing to pull.
+  // THIS is the fix for "Create invoice lands on an empty draft" — so you can invoice
+  // straight from the field instead of having to be back at a desk with the data entered.
+  if (res.ok && res.id) {
+    const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+    const markup = getOrgSettings((org as any)?.settings).material_markup_percent;
+    try { await importLaborIntoInvoice(res.id); } catch {}
+    try { await importCostsIntoInvoice(res.id, markup); } catch {}
+  }
+  return res;
 }
 
 /** Finish a job: mark complete and auto-build a draft invoice — from the
