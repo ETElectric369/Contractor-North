@@ -31,7 +31,6 @@ import {
   IdCard,
   Settings,
   ScrollText,
-  ScanLine,
   type LucideIcon,
 } from "lucide-react";
 
@@ -139,7 +138,7 @@ export const DOCK: DockSection[] = [
       { id: "o-docs", label: "Employee docs", icon: IdCard, href: "/employee-docs", staffOnly: true },
       { id: "o-settings", label: "Settings", icon: Settings, href: "/settings" },
       { id: "o-audit", label: "Activity audit", icon: ScrollText, href: "/audit", staffOnly: true },
-      { id: "o-plans", label: "Plans & LiDAR", icon: ScanLine, href: "/plans" },
+      // (Plans & LiDAR is a ComingSoon stub — kept off the dock until the real upload ships.)
       // Money admin lives inside Office now — a labeled sub-group (staff only).
       { id: "o-ma-header", label: "Money admin", icon: Calculator, header: true, staffOnly: true },
       { id: "ma-stock", label: "Inventory", icon: Boxes, href: "/inventory", staffOnly: true },

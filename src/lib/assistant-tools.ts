@@ -161,6 +161,61 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
       },
     },
   },
+  {
+    name: "list_inquiries",
+    description:
+      "List incoming LEADS (inquiries) — the top of the sales funnel. Returns each lead's id, name, phone, status, and when it was last contacted. Use for 'who are my open leads', 'any new leads', 'who needs a follow-up'. Pass the id to contact or convert a lead.",
+    input_schema: {
+      type: "object",
+      properties: {
+        status: { type: "string", description: "Optional status filter (e.g. new, contacted)." },
+        limit: { type: "integer", description: "Max rows (default 20, max 40)." },
+      },
+    },
+  },
+  {
+    name: "list_payments",
+    description:
+      "List payments RECEIVED (money in), newest first, with the invoice number + customer. Use for 'what payments came in', 'did the Jones invoice get paid'.",
+    input_schema: { type: "object", properties: { limit: { type: "integer", description: "Max rows (default 20, max 40)." } } },
+  },
+  {
+    name: "list_bills",
+    description:
+      "List supplier BILLS (money owed to suppliers) with supplier, amount, status, and the linked job. Use for 'what bills are unpaid', 'how much do I owe suppliers'.",
+    input_schema: {
+      type: "object",
+      properties: {
+        status: { type: "string", description: "Optional status filter (e.g. unpaid, paid)." },
+        limit: { type: "integer", description: "Max rows (default 20, max 40)." },
+      },
+    },
+  },
+  {
+    name: "list_purchase_orders",
+    description:
+      "List PURCHASE ORDERS (materials ordered from vendors) with vendor, total, status, and the linked job. Use for 'what's on order', 'open POs'.",
+    input_schema: {
+      type: "object",
+      properties: {
+        status: { type: "string", description: "Optional status filter." },
+        limit: { type: "integer", description: "Max rows (default 20, max 40)." },
+      },
+    },
+  },
+  {
+    name: "list_permits",
+    description:
+      "List PERMITS with status, authority, and inspection date. Use for 'what permits are open', 'any inspections coming up', 'permit status on the Miller job'. Pass a job_id to filter to one job.",
+    input_schema: {
+      type: "object",
+      properties: {
+        status: { type: "string", description: "Optional status filter." },
+        job_id: { type: "string", description: "Filter to one job's permits." },
+        limit: { type: "integer", description: "Max rows (default 30, max 40)." },
+      },
+    },
+  },
 ];
 
 const VALID_TOOL_NAMES = new Set(DATA_TOOLS.map((t) => t.name));
@@ -343,6 +398,126 @@ export async function runDataTool(
               ? { id: c.id, name: c.name, company: c.company_name, phone: c.phone, email: c.email, city: c.city, state: c.state }
               : { id: c.id, name: c.name, company: c.company_name, city: c.city, state: c.state },
           ),
+        });
+      }
+
+      case "list_inquiries": {
+        const lim = clampLimit(input.limit, 20);
+        let q = supabase
+          .from("inquiries")
+          .select("id, name, company_name, phone, status, last_contacted_at, created_at")
+          .order("created_at", { ascending: false })
+          .limit(lim);
+        const st = sanitize(input.status);
+        if (st) q = q.eq("status", st);
+        const { data, error } = await q;
+        if (error) throw error;
+        return JSON.stringify({
+          count: data?.length ?? 0,
+          inquiries: (data ?? []).map((i: any) => ({
+            id: i.id, // pass to convert/contact a lead
+            name: i.name,
+            company: i.company_name,
+            phone: i.phone,
+            status: i.status,
+            last_contacted: i.last_contacted_at,
+          })),
+        });
+      }
+
+      case "list_payments": {
+        const lim = clampLimit(input.limit, 20);
+        const { data, error } = await supabase
+          .from("payments")
+          .select("amount, method, paid_at, created_at, invoices(invoice_number, customers(name))")
+          .order("created_at", { ascending: false })
+          .limit(lim);
+        if (error) throw error;
+        return JSON.stringify({
+          count: data?.length ?? 0,
+          total: money((data ?? []).reduce((s: number, p: any) => s + money(p.amount), 0)),
+          payments: (data ?? []).map((p: any) => ({
+            amount: money(p.amount),
+            method: p.method,
+            paid_at: p.paid_at ?? p.created_at,
+            invoice: p.invoices?.invoice_number ?? null,
+            customer: embedName(p.invoices?.customers),
+          })),
+        });
+      }
+
+      case "list_bills": {
+        const lim = clampLimit(input.limit, 20);
+        let q = supabase
+          .from("bills")
+          .select("id, supplier, bill_number, amount, status, jobs(name)")
+          .order("created_at", { ascending: false })
+          .limit(lim);
+        const st = sanitize(input.status);
+        if (st) q = q.eq("status", st);
+        const { data, error } = await q;
+        if (error) throw error;
+        return JSON.stringify({
+          count: data?.length ?? 0,
+          bills: (data ?? []).map((b: any) => ({
+            id: b.id,
+            supplier: b.supplier,
+            bill_number: b.bill_number,
+            amount: money(b.amount),
+            status: b.status,
+            job: embedName(b.jobs),
+          })),
+        });
+      }
+
+      case "list_purchase_orders": {
+        const lim = clampLimit(input.limit, 20);
+        let q = supabase
+          .from("purchase_orders")
+          .select("id, po_number, vendor, total, status, jobs(name)")
+          .order("created_at", { ascending: false })
+          .limit(lim);
+        const st = sanitize(input.status);
+        if (st) q = q.eq("status", st);
+        const { data, error } = await q;
+        if (error) throw error;
+        return JSON.stringify({
+          count: data?.length ?? 0,
+          purchase_orders: (data ?? []).map((p: any) => ({
+            id: p.id,
+            po_number: p.po_number,
+            vendor: p.vendor,
+            total: money(p.total),
+            status: p.status,
+            job: embedName(p.jobs),
+          })),
+        });
+      }
+
+      case "list_permits": {
+        const lim = clampLimit(input.limit, 30);
+        let q = supabase
+          .from("permits")
+          .select("id, permit_number, type, authority, status, inspection_date, jobs(job_number, name)")
+          .order("inspection_date", { ascending: true, nullsFirst: false })
+          .limit(lim);
+        const st = sanitize(input.status);
+        if (st) q = q.eq("status", st);
+        const jid = sanitize(input.job_id);
+        if (jid) q = q.eq("job_id", jid);
+        const { data, error } = await q;
+        if (error) throw error;
+        return JSON.stringify({
+          count: data?.length ?? 0,
+          permits: (data ?? []).map((p: any) => ({
+            id: p.id,
+            permit_number: p.permit_number,
+            type: p.type,
+            authority: p.authority,
+            status: p.status,
+            inspection_date: p.inspection_date,
+            job: p.jobs ? `${p.jobs.job_number} ${p.jobs.name}` : null,
+          })),
         });
       }
 

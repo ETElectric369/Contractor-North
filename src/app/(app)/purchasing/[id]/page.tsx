@@ -77,7 +77,7 @@ export default async function PurchaseOrderPage({
           {p.ordered_at && <span>Ordered {formatDate(p.ordered_at)}</span>}
           {p.jobs && (
             <Link
-              href={`/work-orders?job=${p.jobs.id}`}
+              href={`/jobs/${p.jobs.id}`}
               className="flex items-center gap-1 hover:text-brand"
             >
               <Briefcase className="h-3.5 w-3.5" /> {p.jobs.name}

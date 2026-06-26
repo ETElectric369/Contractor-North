@@ -56,7 +56,7 @@ export default async function MaterialListPage({
             <span>Created {formatDate(l.created_at)}</span>
             {l.jobs && (
               <Link
-                href={`/work-orders?job=${l.jobs.id}`}
+                href={`/jobs/${l.jobs.id}`}
                 className="flex items-center gap-1 hover:text-brand"
               >
                 <Briefcase className="h-3.5 w-3.5" /> {l.jobs.name}

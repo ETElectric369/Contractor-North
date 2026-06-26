@@ -105,7 +105,7 @@ export async function POST(req: Request) {
   const { tools: writeTools, resolve: resolveWrite } = agentWriteToolsForRole(role);
   // L5: defense-in-depth — don't even OFFER financial/sales read tools to a tech (the DB RLS
   // already returns zero rows, but least-privilege at the tool layer too).
-  const STAFF_ONLY_READ = new Set(["list_invoices", "get_invoice", "list_quotes", "business_summary", "search_price_list", "list_bug_reports", "list_customers"]);
+  const STAFF_ONLY_READ = new Set(["list_invoices", "get_invoice", "list_quotes", "business_summary", "search_price_list", "list_bug_reports", "list_customers", "list_inquiries", "list_payments", "list_bills", "list_purchase_orders"]);
   const isStaffCaller = ["owner", "admin", "office"].includes(role ?? "");
   const dataTools = isStaffCaller ? DATA_TOOLS : DATA_TOOLS.filter((t) => !STAFF_ONLY_READ.has(t.name));
   const playbook = getOrgSettings((org as any)?.settings).quote_playbook?.trim();
