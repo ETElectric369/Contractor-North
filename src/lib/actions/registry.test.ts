@@ -134,3 +134,43 @@ describe("action registry — agent field + cost powers (one assistant)", () => 
     expect(all).not.toContain("bill__setStatus");
   });
 });
+
+// CIB audit Phase 2 — the money loop. Building/adjusting a DRAFT invoice is tier-1 (runs
+// straight through); recording a received PAYMENT is confirm-gated; SENDING / refunding /
+// DELETING an invoice are never offered to the agent (the user's own tap).
+describe("action registry — invoice money loop (draft fill by voice)", () => {
+  const offered = (role: string) => agentWriteToolsForRole(role).tools.map((t) => t.name);
+
+  it("offers the draft-invoice + payment tools to office/owner", () => {
+    for (const t of [
+      "invoice__fromJob",
+      "invoice__fromQuote",
+      "invoice__addItem",
+      "invoice__updateItem",
+      "invoice__deleteItem",
+      "payment__record",
+    ]) {
+      expect(offered("owner")).toContain(t);
+    }
+  });
+
+  it("draft-invoice edits run straight through, but recording a payment trips the confirm gate", () => {
+    expect(needsConsent(REGISTRY["invoice.fromJob"], "agent", false)).toBe(false); // tier-1 draft
+    expect(needsConsent(REGISTRY["invoice.addItem"], "agent", false)).toBe(false);
+    expect(needsConsent(REGISTRY["payment.record"], "agent", false)).toBe(true); // money in → confirm
+    expect(needsConsent(REGISTRY["payment.record"], "agent", true)).toBe(false); // explicit yes passes
+  });
+
+  it("never exposes invoice SEND / delete / refund to the agent", () => {
+    const all = offered("owner");
+    expect(all).not.toContain("invoice__send");
+    expect(all).not.toContain("invoice__delete");
+    expect(all).not.toContain("payment__delete");
+  });
+
+  it("invoice draft tools are staff-only — a tech is not offered them", () => {
+    const tech = offered("tech");
+    expect(tech).not.toContain("invoice__fromJob");
+    expect(tech).not.toContain("payment__record");
+  });
+});

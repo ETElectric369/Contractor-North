@@ -68,6 +68,18 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "get_invoice",
+    description:
+      "Read ONE invoice in full — status, customer, subtotal/tax/total, balance, and every line item WITH its item_id (you need those ids to edit or remove a line). Pass an invoice_id, OR a job_id to get that job's most recent invoice. Use this to read an invoice back to the user before they send it, and before invoice.updateItem / invoice.deleteItem.",
+    input_schema: {
+      type: "object",
+      properties: {
+        invoice_id: { type: "string", description: "The invoice's id." },
+        job_id: { type: "string", description: "A job's id — returns that job's most recent invoice instead." },
+      },
+    },
+  },
+  {
     name: "list_customers",
     description:
       "List or search customers (name, company, phone, email, city). Use for 'find a customer', 'what's Jane's phone number', 'how many customers do I have'.",
@@ -325,6 +337,54 @@ export async function runDataTool(
               ? { id: c.id, name: c.name, company: c.company_name, phone: c.phone, email: c.email, city: c.city, state: c.state }
               : { id: c.id, name: c.name, company: c.company_name, city: c.city, state: c.state },
           ),
+        });
+      }
+
+      case "get_invoice": {
+        let invId = sanitize(input.invoice_id);
+        if (!invId) {
+          const jid = sanitize(input.job_id);
+          if (!jid) return JSON.stringify({ error: "Provide an invoice_id or a job_id." });
+          const { data: latest } = await supabase
+            .from("invoices")
+            .select("id")
+            .eq("job_id", jid)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (!latest) return JSON.stringify({ found: false, message: "No invoice on that job yet." });
+          invId = latest.id;
+        }
+        const { data: inv, error } = await supabase
+          .from("invoices")
+          .select(
+            "id, invoice_number, status, subtotal, tax, total, amount_paid, due_date, customers(name), invoice_items(id, description, quantity, unit, unit_price)",
+          )
+          .eq("id", invId)
+          .maybeSingle();
+        if (error) throw error;
+        if (!inv) return JSON.stringify({ found: false, message: "Invoice not found." });
+        const total = money(inv.total);
+        const paid = money(inv.amount_paid);
+        return JSON.stringify({
+          found: true,
+          invoice_id: inv.id, // pass to invoice.addItem / payment.record
+          invoice: inv.invoice_number,
+          status: inv.status,
+          customer: embedName(inv.customers),
+          subtotal: money(inv.subtotal),
+          tax: money(inv.tax),
+          total,
+          paid,
+          balance: money(total - paid),
+          items: ((inv as any).invoice_items ?? []).map((it: any) => ({
+            item_id: it.id, // needed for invoice.updateItem / invoice.deleteItem
+            description: it.description,
+            quantity: it.quantity,
+            unit: it.unit,
+            unit_price: money(it.unit_price),
+            amount: money((it.quantity || 1) * (it.unit_price || 0)),
+          })),
         });
       }
 

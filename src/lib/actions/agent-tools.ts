@@ -28,6 +28,17 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   "time.clockOut",
   "time.addEntry",
   "bill.create",
+  // The money loop (CIB audit Phase 2 — "fill in the invoice and get it ready, I'll hit
+  // Send"). Building/adjusting a DRAFT invoice is tier-1 (reversible, nothing sent, no money
+  // moved) so it runs straight through; payment.record touches money so it's confirm-gated
+  // (confirm:"financial" → propose → spoken yes). SENDING / refunding / deleting an invoice
+  // are NOT here — those remain the user's tap on the big Send button.
+  "invoice.fromJob",
+  "invoice.fromQuote",
+  "invoice.addItem",
+  "invoice.updateItem",
+  "invoice.deleteItem",
+  "payment.record",
 ]);
 
 // Registry names are group.verb (a dot); Anthropic tool names can't contain dots.
