@@ -74,8 +74,9 @@ export function Dock({
         </div>
       </aside>
 
-      {/* The inside-left nav: the pages of the section you're in. */}
-      {items.length > 1 && (
+      {/* The inside-left nav — Office only (its list is long). Every other section uses the
+          top tabs (short, critical menus). */}
+      {active.key === "office" && items.length > 1 && (
         <nav className="flex h-full w-[186px] shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-slate-200/80 bg-white/55 px-2.5 py-3 backdrop-blur-sm">
           <div className="px-2 pb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">{active.label}</div>
           {items.map((c) => {

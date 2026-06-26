@@ -33,18 +33,18 @@ export function SectionSubnav({ isStaff }: { isStaff?: boolean }) {
       g.children.some((c) => c.href && basePath(c.href) === pathname),
   );
   if (!group) return null;
+  // Office uses the inside-left side nav (its list is long); EVERY other section uses these
+  // top tabs — short, critical menus — on desktop AND mobile.
+  if (group.key === "office") return null;
   const tabs = group.children.filter((c) => c.href && (isStaff || !c.staffOnly));
-  // Short menus ride up here as a top strip; the LONG ones (Office, Money admin) skip it and
-  // use the inside-left drawer instead (a horizontal strip of 11 items is the cramped case).
-  if (tabs.length < 2 || tabs.length > 5) return null;
+  if (tabs.length < 2) return null;
 
   const exact = tabs.find((c) => c.href === current);
   const activeHref =
     exact?.href ?? tabs.find((c) => c.href && basePath(c.href) === pathname && !c.href.includes("?"))?.href;
 
   return (
-    // Mobile only — on desktop the left sidebar shows the section's pages instead.
-    <div className="mb-4 -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 lg:hidden">
+    <div className="mb-4 -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
       {tabs.map((c) => {
         const active = c.href === activeHref;
         const Icon = c.icon;

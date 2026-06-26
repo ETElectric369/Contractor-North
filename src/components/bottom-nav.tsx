@@ -30,7 +30,8 @@ export function BottomNav({ role }: { role?: string }) {
 
   function tap(s: DockSection) {
     router.push(s.href); // go to the page…
-    setDrawer(s); // …and show that section's inside-left nav
+    // …Office uses the inside-left drawer (long list); every other section uses the top tabs.
+    setDrawer(s.key === "office" ? s : null);
   }
 
   const tile = (s: DockSection) => {
