@@ -38,7 +38,7 @@ export function BottomNav({ role }: { role?: string }) {
     const onRoute =
       pathname === s.href ||
       pathname.startsWith(s.href + "/") ||
-      s.children.some((c) => basePath(c.href) === pathname);
+      s.children.some((c) => c.href && basePath(c.href) === pathname);
     return (
       <button
         key={s.key}
@@ -77,8 +77,16 @@ export function BottomNav({ role }: { role?: string }) {
               </button>
             </div>
             {drawerItems.map((c) => {
-              const cur = basePath(c.href) === pathname;
               const CIcon = c.icon;
+              if (c.header || !c.href) {
+                return (
+                  <div key={c.id} className="mt-2 flex items-center gap-1.5 px-3 pb-0.5 pt-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                    <CIcon className="h-3.5 w-3.5 shrink-0" />
+                    {c.label}
+                  </div>
+                );
+              }
+              const cur = basePath(c.href) === pathname;
               return (
                 <Link
                   key={c.id}

@@ -29,7 +29,7 @@ export function Dock({
       (s) =>
         pathname === s.href ||
         pathname.startsWith(s.href + "/") ||
-        s.children.some((c) => basePath(c.href) === pathname),
+        s.children.some((c) => c.href && basePath(c.href) === pathname),
     ) ?? sections[0];
   const items = active.children.filter((c) => isStaff || !c.staffOnly);
 
@@ -49,7 +49,7 @@ export function Dock({
           {sections.map((s) => {
             const Icon = s.icon;
             const on = s.key === active.key;
-            const badge = s.children.reduce((sum, c) => sum + (badges?.[c.href] ?? 0), 0);
+            const badge = s.children.reduce((sum, c) => sum + (c.href ? badges?.[c.href] ?? 0 : 0), 0);
             return (
               <Link
                 key={s.key}
@@ -79,8 +79,16 @@ export function Dock({
         <nav className="flex h-full w-[186px] shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-slate-200/80 bg-white/55 px-2.5 py-3 backdrop-blur-sm">
           <div className="px-2 pb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">{active.label}</div>
           {items.map((c) => {
-            const cur = basePath(c.href) === pathname;
             const CIcon = c.icon;
+            if (c.header || !c.href) {
+              return (
+                <div key={c.id} className="mt-2 flex items-center gap-1.5 px-2.5 pb-0.5 pt-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                  <CIcon className="h-3.5 w-3.5 shrink-0" />
+                  {c.label}
+                </div>
+              );
+            }
+            const cur = basePath(c.href) === pathname;
             return (
               <Link
                 key={c.id}

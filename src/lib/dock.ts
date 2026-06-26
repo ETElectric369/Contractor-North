@@ -35,12 +35,14 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-/** A leaf in a dock section — a single page. */
+/** A leaf in a dock section — a single page. A node with `header: true` (and no href) is a
+ *  non-clickable sub-group label inside the section's nav (e.g. "Money admin" within Office). */
 export interface DockNode {
   id: string;
   label: string;
   icon: LucideIcon;
-  href: string;
+  href?: string;
+  header?: boolean;
   /** Hidden from techs (office/admin/owner only). */
   staffOnly?: boolean;
 }
@@ -122,22 +124,6 @@ export const DOCK: DockSection[] = [
     ],
   },
   {
-    key: "moneyadmin",
-    label: "Money admin",
-    short: "Admin",
-    icon: Calculator,
-    href: "/tax-report",
-    staffOnly: true,
-    children: [
-      { id: "ma-stock", label: "Inventory", icon: Boxes, href: "/inventory" },
-      { id: "ma-petty", label: "Petty cash", icon: Coins, href: "/petty-cash" },
-      { id: "ma-recur", label: "Recurring", icon: Repeat, href: "/recurring" },
-      { id: "ma-tax", label: "Tax report", icon: Calculator, href: "/tax-report" },
-      { id: "ma-payroll", label: "Payroll", icon: Banknote, href: "/payroll" },
-      { id: "ma-analytics", label: "Analytics", icon: TrendingUp, href: "/analytics" },
-    ],
-  },
-  {
     key: "office",
     label: "Office",
     icon: Building2,
@@ -154,6 +140,14 @@ export const DOCK: DockSection[] = [
       { id: "o-settings", label: "Settings", icon: Settings, href: "/settings" },
       { id: "o-audit", label: "Activity audit", icon: ScrollText, href: "/audit", staffOnly: true },
       { id: "o-plans", label: "Plans & LiDAR", icon: ScanLine, href: "/plans" },
+      // Money admin lives inside Office now — a labeled sub-group (staff only).
+      { id: "o-ma-header", label: "Money admin", icon: Calculator, header: true, staffOnly: true },
+      { id: "ma-stock", label: "Inventory", icon: Boxes, href: "/inventory", staffOnly: true },
+      { id: "ma-petty", label: "Petty cash", icon: Coins, href: "/petty-cash", staffOnly: true },
+      { id: "ma-recur", label: "Recurring", icon: Repeat, href: "/recurring", staffOnly: true },
+      { id: "ma-tax", label: "Tax report", icon: Calculator, href: "/tax-report", staffOnly: true },
+      { id: "ma-payroll", label: "Payroll", icon: Banknote, href: "/payroll", staffOnly: true },
+      { id: "ma-analytics", label: "Analytics", icon: TrendingUp, href: "/analytics", staffOnly: true },
     ],
   },
 ];
