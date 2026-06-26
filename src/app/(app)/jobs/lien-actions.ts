@@ -45,7 +45,11 @@ export async function patchLienRecord(jobId: string, patch: Partial<LienInput>):
   if (!job) return { ok: false, error: "Job not found." };
   const fields: Record<string, unknown> = { updated_at: new Date().toISOString() };
   for (const k of ["first_furnished_date", "completion_date", "prelim_sent_at", "lien_recorded_at", "notes"] as const) {
-    if (patch[k] !== undefined) fields[k] = d(patch[k] as string | null | undefined);
+    if (patch[k] === undefined) continue;
+    const v = d(patch[k] as string | null | undefined);
+    // Only SET via a partial patch — never clear. Wiping a legally time-sensitive date
+    // (prelim/recording) must be deliberate through the lien editor, not an empty voice arg.
+    if (v !== null) fields[k] = v;
   }
   const { data: existing } = await supabase.from("lien_records").select("id").eq("job_id", jobId).maybeSingle();
   const { error } = existing

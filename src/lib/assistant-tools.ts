@@ -1,5 +1,7 @@
 import "server-only";
 import type Anthropic from "@anthropic-ai/sdk";
+import { tzDayStartUtc } from "@/lib/tz";
+import { getOrgSettings } from "@/lib/org-settings";
 
 /**
  * Read-only data tools for the in-app assistant.
@@ -537,25 +539,33 @@ export async function runDataTool(
       }
 
       case "hours_summary": {
+        // Day boundaries must be the ORG's local midnight, not UTC — else entries near midnight on
+        // the from/to boundary get mis-bucketed, undercounting payroll for non-UTC orgs.
+        const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+        const tz = getOrgSettings((org as any)?.settings).timezone;
         const today = new Date();
         const to = sanitize(input.to) || today.toISOString().slice(0, 10);
         const past = new Date(today);
         past.setDate(past.getDate() - 14);
         const from = sanitize(input.from) || past.toISOString().slice(0, 10);
+        const fromUtc = tzDayStartUtc(from, tz).toISOString();
+        const toUtc = new Date(tzDayStartUtc(to, tz).getTime() + 86_400_000).toISOString(); // end of `to`, exclusive
         const { data, error } = await supabase
           .from("time_entries")
           .select("clock_in, clock_out, lunch_minutes, profiles(full_name)")
-          .gte("clock_in", from)
-          .lte("clock_in", to + "T23:59:59")
+          .gte("clock_in", fromUtc)
+          .lt("clock_in", toUtc)
           .not("clock_out", "is", null);
         if (error) throw error;
         const byPerson: Record<string, number> = {};
+        let skipped = 0;
         for (const e of (data ?? []) as any[]) {
-          if (!e.clock_in || !e.clock_out) continue;
-          const mins = (new Date(e.clock_out).getTime() - new Date(e.clock_in).getTime()) / 60000 - (e.lunch_minutes || 0);
-          if (mins <= 0) continue;
+          if (!e.clock_in || !e.clock_out) { skipped++; continue; }
+          const gross = (new Date(e.clock_out).getTime() - new Date(e.clock_in).getTime()) / 60000;
+          if (gross <= 0) { skipped++; continue; } // clock-out at/before clock-in — a bad pair, not zero hours
+          const lunch = Math.min(Math.max(0, e.lunch_minutes || 0), gross); // never deduct more than the shift
           const name = e.profiles?.full_name || "Unknown";
-          byPerson[name] = (byPerson[name] || 0) + mins;
+          byPerson[name] = (byPerson[name] || 0) + (gross - lunch);
         }
         const people = Object.entries(byPerson)
           .map(([name, mins]) => ({ name, hours: Math.round((mins / 60) * 100) / 100 }))
@@ -565,6 +575,7 @@ export async function runDataTool(
           to,
           total_hours: Math.round(people.reduce((s, p) => s + p.hours, 0) * 100) / 100,
           by_employee: people,
+          ...(skipped ? { skipped_entries: skipped } : {}),
         });
       }
 

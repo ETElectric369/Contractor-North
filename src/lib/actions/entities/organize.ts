@@ -22,6 +22,7 @@ export const organizeActions: Record<string, ActionDef> = {
     auth: "staff",
     effect: "write",
     confirm: "financial",
+    describe: () => "Turn this captured receipt into a billable job cost (at the amount read off the receipt) — say yes to confirm.",
     handler: (i) => billJobReceipt(i.document_id),
   },
   "organize.saveNote": {

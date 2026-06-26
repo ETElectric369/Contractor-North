@@ -673,6 +673,12 @@ export async function setPaymentSchedule(
     return { ok: true };
   }
 
+  // Percent-based milestones partition the contract — they can't sum past 100% (each draws as its
+  // own invoice, so >100% would silently overbill the contract). Amount-based rows are exempt.
+  const pctSum = rows.reduce((s, m) => s + (m.percent ?? 0), 0);
+  if (pctSum > 100.01)
+    return { ok: false, error: `Those milestones add up to ${Math.round(pctSum)}% — a draw schedule can't exceed 100% of the contract.` };
+
   const { error } = await supabase.from("payment_milestones").insert(rows); // org_id via trigger
   if (error) return { ok: false, error: error.message };
   revalidatePath(`/jobs/${jobId}`);

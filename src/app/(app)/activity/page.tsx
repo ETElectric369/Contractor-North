@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { Briefcase, FileText, Receipt, CalendarCheck, CheckCircle2, Clock } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
@@ -35,6 +36,15 @@ function ago(iso: string): string {
 
 export default async function ActivityPage() {
   const supabase = await createClient();
+  // Staff-only: the org-wide activity feed is an office view (like /audit). Techs land on My Day.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const { data: me } = user
+    ? await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle()
+    : { data: null };
+  if (!me || !["owner", "admin", "office"].includes((me as { role?: string }).role ?? "")) redirect("/planner");
+
   const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
 
   const [jobs, quotes, invoices, appts, tasks, times] = await Promise.all([

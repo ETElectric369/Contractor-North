@@ -274,7 +274,10 @@ export async function rescheduleAppointment(
   const patch: Record<string, string> = { starts_at: start.toISOString(), updated_at: new Date().toISOString() };
   if (endsAtIso) {
     const end = new Date(endsAtIso);
-    if (!isNaN(end.getTime()) && end.getTime() > start.getTime()) patch.ends_at = end.toISOString();
+    // Don't silently swallow a bad end time and still report success — tell the caller.
+    if (isNaN(end.getTime())) return { ok: false, error: "I couldn't read the end time." };
+    if (end.getTime() <= start.getTime()) return { ok: false, error: "The end time has to be after the start." };
+    patch.ends_at = end.toISOString();
   }
   const { data, error } = await supabase.from("appointments").update(patch).eq("id", id).select("id");
   if (error) return { ok: false, error: error.message };

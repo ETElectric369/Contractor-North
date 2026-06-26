@@ -105,7 +105,10 @@ export async function POST(req: Request) {
   const { tools: writeTools, resolve: resolveWrite } = agentWriteToolsForRole(role);
   // L5: defense-in-depth — don't even OFFER financial/sales read tools to a tech (the DB RLS
   // already returns zero rows, but least-privilege at the tool layer too).
-  const STAFF_ONLY_READ = new Set(["list_invoices", "get_invoice", "list_quotes", "get_quote", "business_summary", "search_price_list", "list_bug_reports", "list_customers", "list_inquiries", "list_payments", "list_bills", "list_purchase_orders", "list_work_orders", "list_material_lists", "list_change_orders", "list_inventory", "list_petty_cash", "list_recurring", "list_compliance", "list_liens", "list_contracts", "hours_summary", "get_payment_schedule"]);
+  const STAFF_ONLY_READ = new Set(["list_invoices", "get_invoice", "list_quotes", "get_quote", "business_summary", "search_price_list", "list_bug_reports", "list_customers", "list_inquiries", "list_payments", "list_bills", "list_purchase_orders", "list_work_orders", "list_material_lists", "list_change_orders", "list_inventory", "list_petty_cash", "list_recurring", "list_compliance", "list_liens", "list_contracts", "hours_summary", "get_payment_schedule",
+    // get_job exposes billing_type (fixed vs T&M — pricing strategy); list_team exposes the org's
+    // role structure. Both are office concerns — keep them off the field-tech agent surface.
+    "get_job", "list_team"]);
   const isStaffCaller = ["owner", "admin", "office"].includes(role ?? "");
   const dataTools = isStaffCaller ? DATA_TOOLS : DATA_TOOLS.filter((t) => !STAFF_ONLY_READ.has(t.name));
   const playbook = getOrgSettings((org as any)?.settings).quote_playbook?.trim();

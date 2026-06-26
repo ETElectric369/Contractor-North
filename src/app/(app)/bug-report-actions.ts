@@ -63,12 +63,17 @@ export async function listBugReports(): Promise<BugReport[]> {
   }));
 }
 
+const BUG_STATUSES = new Set(["open", "fixed", "wontfix"]);
+
 export async function setBugReportStatus(id: string, status: string): Promise<{ ok: boolean; error?: string }> {
   // Defense-in-depth: app-layer staff gate ON TOP of the RLS staff policy (the same belt-and-
   // suspenders pattern as the billing actions — RLS alone is the single-layer class we've
   // already had to retro-fix once).
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  // The status column is unconstrained text; whitelist here so a stray value can't write a
+  // status the /bugs tabs don't know how to surface.
+  if (!BUG_STATUSES.has(status)) return { ok: false, error: "Unknown status." };
   await ctx.supabase.from("bug_reports").update({ status }).eq("id", id);
   return { ok: true };
 }

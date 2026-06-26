@@ -31,6 +31,8 @@ import {
   IdCard,
   Settings,
   ScrollText,
+  Activity,
+  Bug,
   type LucideIcon,
 } from "lucide-react";
 
@@ -141,6 +143,8 @@ export const DOCK: DockSection[] = [
       { id: "o-tools", label: "Tools", icon: Wrench, href: "/tools" },
       { id: "o-docs", label: "Employee docs", icon: IdCard, href: "/employee-docs", staffOnly: true },
       { id: "o-settings", label: "Settings", icon: Settings, href: "/settings" },
+      { id: "o-activity", label: "Activity", icon: Activity, href: "/activity", staffOnly: true },
+      { id: "o-bugs", label: "Bug watch", icon: Bug, href: "/bugs", staffOnly: true },
       { id: "o-audit", label: "Activity audit", icon: ScrollText, href: "/audit", staffOnly: true },
       // (Plans & LiDAR is a ComingSoon stub — kept off the dock until the real upload ships.)
       // Money admin lives inside Office now — a labeled sub-group (staff only).
