@@ -1,0 +1,34 @@
+import { z } from "zod";
+import { addPettyCash } from "@/app/(app)/petty-cash/actions";
+import type { ActionDef } from "../types";
+
+export const pettyCashActions: Record<string, ActionDef> = {
+  "pettycash.add": {
+    name: "pettycash.add",
+    group: "pettycash",
+    label: "Log petty cash",
+    description:
+      "Log a petty-cash transaction by voice — '$20 cash for fuel' (kind expense) or 'put $200 in the box' (kind replenish). amount is positive; optionally a category, a note, a date (YYYY-MM-DD), or a job. The app asks to confirm the amount first.",
+    input: z.object({
+      kind: z.enum(["expense", "replenish"]).default("expense"),
+      amount: z.number(),
+      category: z.string().nullable().optional(),
+      description: z.string().nullable().optional(),
+      tx_date: z.string().nullable().optional(),
+      job_id: z.string().nullable().optional(),
+    }),
+    auth: "staff",
+    effect: "write",
+    confirm: "financial",
+    describe: (i) => `Log a $${i.amount} petty-cash ${i.kind}${i.description ? ` (${i.description})` : ""} — say yes to confirm.`,
+    handler: (i) =>
+      addPettyCash({
+        kind: i.kind,
+        amount: i.amount,
+        category: i.category ?? null,
+        description: i.description ?? null,
+        tx_date: i.tx_date ?? null,
+        job_id: i.job_id ?? null,
+      }),
+  },
+};

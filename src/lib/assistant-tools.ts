@@ -251,6 +251,30 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
       },
     },
   },
+  {
+    name: "list_inventory",
+    description:
+      "List INVENTORY items (part, category, quantity on hand vs reorder point, location). Use for 'what's running low', 'how many breakers do I have', 'inventory for X'.",
+    input_schema: { type: "object", properties: { search: { type: "string" }, low_only: { type: "boolean", description: "Only items at/below reorder point." }, limit: { type: "integer" } } },
+  },
+  {
+    name: "list_petty_cash",
+    description:
+      "List PETTY CASH transactions (date, expense/replenish, amount, category). Use for 'where did the petty cash go', 'cash spent this month', 'petty cash balance'.",
+    input_schema: { type: "object", properties: { limit: { type: "integer" } } },
+  },
+  {
+    name: "list_recurring",
+    description:
+      "List RECURRING templates (recurring invoices/expenses — kind, frequency, amount, customer). Use for 'what's set to recur', 'recurring invoices'.",
+    input_schema: { type: "object", properties: { limit: { type: "integer" } } },
+  },
+  {
+    name: "list_safety",
+    description:
+      "List SAFETY records — incidents + toolbox talks (date, kind, title, severity). Use for 'any safety incidents', 'recent toolbox talks', 'safety on the Miller job'. Pass job_id to filter.",
+    input_schema: { type: "object", properties: { kind: { type: "string", description: "incident or toolbox" }, job_id: { type: "string" }, limit: { type: "integer" } } },
+  },
 ];
 
 const VALID_TOOL_NAMES = new Set(DATA_TOOLS.map((t) => t.name));
@@ -433,6 +457,105 @@ export async function runDataTool(
               ? { id: c.id, name: c.name, company: c.company_name, phone: c.phone, email: c.email, city: c.city, state: c.state }
               : { id: c.id, name: c.name, company: c.company_name, city: c.city, state: c.state },
           ),
+        });
+      }
+
+      case "list_inventory": {
+        const lim = clampLimit(input.limit, 30);
+        const s = sanitize(input.search);
+        let q = supabase
+          .from("inventory_items")
+          .select("id, part_number, category, quantity_on_hand, reorder_point, unit, location")
+          .order("part_number")
+          .limit(lim);
+        if (s) q = q.or(`part_number.ilike.%${s}%,category.ilike.%${s}%`);
+        const { data, error } = await q;
+        if (error) throw error;
+        let rows = (data ?? []).map((it: any) => ({
+          id: it.id,
+          part: it.part_number,
+          category: it.category,
+          on_hand: it.quantity_on_hand,
+          reorder_point: it.reorder_point,
+          unit: it.unit,
+          location: it.location,
+          low: Number(it.quantity_on_hand) <= Number(it.reorder_point ?? 0),
+        }));
+        if (input.low_only) rows = rows.filter((r: any) => r.low);
+        return JSON.stringify({ count: rows.length, items: rows });
+      }
+
+      case "list_petty_cash": {
+        const lim = clampLimit(input.limit, 20);
+        const { data, error } = await supabase
+          .from("petty_cash")
+          .select("id, tx_date, kind, amount, category, description")
+          .order("tx_date", { ascending: false })
+          .limit(lim);
+        if (error) throw error;
+        const balance = (data ?? []).reduce(
+          (s: number, t: any) => s + (t.kind === "replenish" ? money(t.amount) : -money(t.amount)),
+          0,
+        );
+        return JSON.stringify({
+          count: data?.length ?? 0,
+          balance: money(balance),
+          transactions: (data ?? []).map((t: any) => ({
+            date: t.tx_date,
+            kind: t.kind,
+            amount: money(t.amount),
+            category: t.category,
+            description: t.description,
+          })),
+        });
+      }
+
+      case "list_recurring": {
+        const lim = clampLimit(input.limit, 20);
+        const { data, error } = await supabase
+          .from("recurring_templates")
+          .select("id, kind, frequency, amount, description, active, customers(name)")
+          .order("created_at", { ascending: false })
+          .limit(lim);
+        if (error) throw error;
+        return JSON.stringify({
+          count: data?.length ?? 0,
+          recurring: (data ?? []).map((t: any) => ({
+            id: t.id,
+            kind: t.kind,
+            frequency: t.frequency,
+            amount: money(t.amount),
+            description: t.description,
+            active: t.active,
+            customer: embedName(t.customers),
+          })),
+        });
+      }
+
+      case "list_safety": {
+        const lim = clampLimit(input.limit, 30);
+        let q = supabase
+          .from("safety_records")
+          .select("id, kind, record_date, title, severity, recordable, jobs(name)")
+          .order("record_date", { ascending: false })
+          .limit(lim);
+        const k = sanitize(input.kind);
+        if (k) q = q.eq("kind", k);
+        const jid = sanitize(input.job_id);
+        if (jid) q = q.eq("job_id", jid);
+        const { data, error } = await q;
+        if (error) throw error;
+        return JSON.stringify({
+          count: data?.length ?? 0,
+          records: (data ?? []).map((r: any) => ({
+            id: r.id,
+            kind: r.kind,
+            date: r.record_date,
+            title: r.title,
+            severity: r.severity,
+            recordable: r.recordable,
+            job: embedName(r.jobs),
+          })),
         });
       }
 

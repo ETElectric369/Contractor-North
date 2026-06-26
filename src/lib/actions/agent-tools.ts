@@ -48,6 +48,11 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   "inquiry.contact",
   "inquiry.convert",
   "permit.create",
+  // Mycelium: the office/field nodes — log petty cash (confirm-gated, money), adjust stock,
+  // log a safety record. All reversible tier-1 except pettyCash.add (confirm:financial).
+  "pettycash.add",
+  "inventory.adjust",
+  "safety.log",
 ]);
 
 // Registry names are group.verb (a dot); Anthropic tool names can't contain dots.
