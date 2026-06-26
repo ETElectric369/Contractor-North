@@ -22,6 +22,9 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   // read the whole quote back + get a spoken "yes" before calling it — that conversational
   // confirm is enforced in the tool description, and saveQuote is staff-gated + audited.
   "quote.create",
+  "quote.addItem", // the deep audit's biggest miss — CIB could create a quote but not edit it
+  "quote.updateItem",
+  "quote.deleteItem",
   // Field work — the one-assistant-everywhere set. Clock in/out + log time are reversible
   // tier-1 records; bill.create (add a cost) is tier-2 financial and trips the confirm gate,
   // which the chat now surfaces (propose → user says yes → confirmAgentAction). NONE of these

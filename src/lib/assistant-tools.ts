@@ -80,6 +80,18 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "get_quote",
+    description:
+      "Read ONE quote / estimate in full — status, customer, subtotal/tax/total, and every line item WITH its item_id (you need those to edit or remove a line). Pass a quote_id, OR a job_id for that job's most recent quote. Read it back before editing or telling the user it's ready, and before quote.updateItem / quote.deleteItem.",
+    input_schema: {
+      type: "object",
+      properties: {
+        quote_id: { type: "string" },
+        job_id: { type: "string", description: "A job's id — returns that job's most recent quote instead." },
+      },
+    },
+  },
+  {
     name: "list_job_codes",
     description:
       "List the company's active job/cost codes (code + description). Use to map a spoken name like 'rough-in' or 'service call' to its code when allocating hours on a clock-out (time.clockOut allocations).",
@@ -275,6 +287,12 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
       "List SAFETY records — incidents + toolbox talks (date, kind, title, severity). Use for 'any safety incidents', 'recent toolbox talks', 'safety on the Miller job'. Pass job_id to filter.",
     input_schema: { type: "object", properties: { kind: { type: "string", description: "incident or toolbox" }, job_id: { type: "string" }, limit: { type: "integer" } } },
   },
+  {
+    name: "list_team",
+    description:
+      "List this company's team members (id, name, role). Use to find a person to ASSIGN a job/task to or LOG TIME for — resolve a spoken name to their id ('assign the Smith job to Mike' → list_team → job.assign with Mike's id).",
+    input_schema: { type: "object", properties: {} },
+  },
 ];
 
 const VALID_TOOL_NAMES = new Set(DATA_TOOLS.map((t) => t.name));
@@ -380,7 +398,7 @@ export async function runDataTool(
         const lim = clampLimit(input.limit, 15);
         let q = supabase
           .from("quotes")
-          .select("quote_number, title, status, total, created_at, valid_until, customers(name)")
+          .select("id, quote_number, title, status, total, created_at, valid_until, customers(name)")
           .order("created_at", { ascending: false })
           .limit(lim);
         if (input.status) q = q.eq("status", String(input.status));
@@ -393,6 +411,7 @@ export async function runDataTool(
         return JSON.stringify({
           count: data?.length ?? 0,
           quotes: (data ?? []).map((r: any) => ({
+            id: r.id, // pass to get_quote / quote.addItem / quote.convertToJob
             quote: r.quote_number,
             title: r.title,
             status: r.status,
@@ -459,6 +478,15 @@ export async function runDataTool(
               ? { id: c.id, name: c.name, company: c.company_name, phone: c.phone, email: c.email, city: c.city, state: c.state }
               : { id: c.id, name: c.name, company: c.company_name, city: c.city, state: c.state },
           ),
+        });
+      }
+
+      case "list_team": {
+        const { data, error } = await supabase.from("profiles").select("id, full_name, role").order("full_name");
+        if (error) throw error;
+        return JSON.stringify({
+          count: data?.length ?? 0,
+          team: (data ?? []).map((p: any) => ({ id: p.id, name: p.full_name, role: p.role })),
         });
       }
 
@@ -763,6 +791,52 @@ export async function runDataTool(
         return JSON.stringify({
           count: data?.length ?? 0,
           codes: (data ?? []).map((c: any) => ({ code: c.code, description: c.description })),
+        });
+      }
+
+      case "get_quote": {
+        let qid = sanitize(input.quote_id);
+        if (!qid) {
+          const jid = sanitize(input.job_id);
+          if (!jid) return JSON.stringify({ error: "Provide a quote_id or a job_id." });
+          const { data: latest } = await supabase
+            .from("quotes")
+            .select("id")
+            .eq("job_id", jid)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (!latest) return JSON.stringify({ found: false, message: "No quote on that job yet." });
+          qid = latest.id;
+        }
+        const { data: qt, error } = await supabase
+          .from("quotes")
+          .select(
+            "id, quote_number, title, status, subtotal, tax, total, valid_until, customers(name), quote_line_items(id, description, quantity, unit, unit_price)",
+          )
+          .eq("id", qid)
+          .maybeSingle();
+        if (error) throw error;
+        if (!qt) return JSON.stringify({ found: false, message: "Quote not found." });
+        return JSON.stringify({
+          found: true,
+          quote_id: qt.id, // pass to quote.addItem / quote.convertToJob
+          quote: qt.quote_number,
+          title: qt.title,
+          status: qt.status,
+          customer: embedName(qt.customers),
+          subtotal: money(qt.subtotal),
+          tax: money(qt.tax),
+          total: money(qt.total),
+          valid_until: qt.valid_until,
+          items: ((qt as any).quote_line_items ?? []).map((it: any) => ({
+            item_id: it.id, // needed for quote.updateItem / quote.deleteItem
+            description: it.description,
+            quantity: it.quantity,
+            unit: it.unit,
+            unit_price: money(it.unit_price),
+            amount: money((it.quantity || 1) * (it.unit_price || 0)),
+          })),
         });
       }
 
