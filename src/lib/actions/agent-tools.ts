@@ -39,6 +39,13 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   "invoice.updateItem",
   "invoice.deleteItem",
   "payment.record",
+  // Connect-the-dots: the funnel's first hop + permits. inquiry.create/contact/convert make the
+  // leads->quote->job pipeline voice-walkable end to end; permit.create logs a permit. All tier-1
+  // (reversible records; no money, nothing sent). inquiry.delete stays OUT (destructive).
+  "inquiry.create",
+  "inquiry.contact",
+  "inquiry.convert",
+  "permit.create",
 ]);
 
 // Registry names are group.verb (a dot); Anthropic tool names can't contain dots.
