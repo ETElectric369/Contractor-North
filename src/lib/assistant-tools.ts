@@ -329,6 +329,25 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
       "List the company's FORM templates (id, name, and the fields each asks for). Use to find a checklist/form to fill, then form.submit with the answers keyed by field label.",
     input_schema: { type: "object", properties: {} },
   },
+  {
+    name: "list_resources",
+    description:
+      "List the company's saved RESOURCES / contacts — inspectors, suppliers, permit offices, subs — with category, contact name, phone, email, website, address. Use for 'what's the building inspector's number', 'who's our copper supplier'. Optional category or search filter.",
+    input_schema: {
+      type: "object",
+      properties: {
+        category: { type: "string" },
+        search: { type: "string", description: "Match against name / contact / category." },
+        limit: { type: "integer" },
+      },
+    },
+  },
+  {
+    name: "get_payment_schedule",
+    description:
+      "Read a job's PROGRESS-BILLING / draw schedule — each milestone's label, percent or amount, and whether it's been billed yet (pending vs billed). Use for 'what's the draw schedule on the Miller job', 'what's the next draw'. Pass a job_id.",
+    input_schema: { type: "object", properties: { job_id: { type: "string" } } },
+  },
 ];
 
 const VALID_TOOL_NAMES = new Set(DATA_TOOLS.map((t) => t.name));
@@ -559,6 +578,65 @@ export async function runDataTool(
             name: f.name,
             fields: Array.isArray(f.schema) ? f.schema.map((fl: any) => ({ label: fl.label, type: fl.type, options: fl.options })) : [],
           })),
+        });
+      }
+
+      case "list_resources": {
+        const lim = clampLimit(input.limit, 40);
+        let q = supabase
+          .from("resources")
+          .select("id, name, category, contact_name, phone, email, website, address, notes")
+          .order("name")
+          .limit(lim);
+        const cat = sanitize(input.category);
+        if (cat) q = q.eq("category", cat);
+        // Strip PostgREST/ILIKE metacharacters: commas (would split the .or filter) and the
+        // % / _ wildcards (would let a crafted search over-match).
+        const search = sanitize(input.search).replace(/[,%_]/g, "");
+        if (search) q = q.or(`name.ilike.%${search}%,contact_name.ilike.%${search}%,category.ilike.%${search}%`);
+        const { data, error } = await q;
+        if (error) throw error;
+        return JSON.stringify({
+          count: data?.length ?? 0,
+          resources: (data ?? []).map((r: any) => ({
+            id: r.id,
+            name: r.name,
+            category: r.category,
+            contact: r.contact_name,
+            phone: r.phone,
+            email: r.email,
+            website: r.website,
+            address: r.address,
+            notes: r.notes,
+          })),
+        });
+      }
+
+      case "get_payment_schedule": {
+        const jid = sanitize(input.job_id);
+        if (!jid) return JSON.stringify({ error: "Provide a job_id." });
+        // Defense-in-depth: confirm the job is visible to this caller (RLS) before reading its
+        // schedule — same guard setPaymentSchedule/requestNextPayment use, not RLS alone.
+        const { data: job } = await supabase.from("jobs").select("id").eq("id", jid).maybeSingle();
+        if (!job) return JSON.stringify({ found: false, message: "Job not found." });
+        const { data, error } = await supabase
+          .from("payment_milestones")
+          .select("sort_order, label, percent, amount, status, billed_amount")
+          .eq("job_id", jid)
+          .order("sort_order");
+        if (error) throw error;
+        if (!data || !data.length)
+          return JSON.stringify({ found: false, message: "No draw schedule on that job — it bills ad-hoc / T&M." });
+        return JSON.stringify({
+          found: true,
+          milestones: data.map((m: any) => ({
+            label: m.label,
+            percent: m.percent,
+            amount: money(m.amount),
+            status: m.status,
+            billed: money(m.billed_amount),
+          })),
+          pending: data.filter((m: any) => m.status !== "billed").length,
         });
       }
 
@@ -1098,7 +1176,7 @@ export async function runDataTool(
         const lim = clampLimit(input.limit, 30);
         let q = supabase
           .from("bug_reports")
-          .select("note, page, status, created_at, profiles:reported_by(full_name)")
+          .select("id, note, page, status, created_at, profiles:reported_by(full_name)")
           .order("created_at", { ascending: false })
           .limit(lim);
         const st = sanitize(input.status);
@@ -1110,6 +1188,7 @@ export async function runDataTool(
         return JSON.stringify({
           count: data?.length ?? 0,
           bug_reports: (data ?? []).map((b: any) => ({
+            id: b.id, // pass to bug.resolve
             note: b.note,
             page: b.page,
             status: b.status ?? "open",

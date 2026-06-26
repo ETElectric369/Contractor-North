@@ -5,6 +5,8 @@ import {
   updateInvoiceItem,
   deleteInvoiceItem,
   recordPayment,
+  setPaymentSchedule,
+  requestNextPayment,
 } from "@/app/(app)/billing/actions";
 import { createInvoiceForJob } from "@/app/(app)/jobs/actions";
 import type { ActionDef } from "../types";
@@ -144,6 +146,49 @@ export const invoiceActions: Record<string, ActionDef> = {
       });
       if (!r.ok) return { ok: false, error: r.error };
       return { ok: true, speak: `Recorded a ${i.method ?? "check"} payment of $${i.amount}.` };
+    },
+  },
+  "payment.setSchedule": {
+    name: "payment.setSchedule",
+    group: "payment",
+    label: "Set a draw schedule",
+    description:
+      "Set a job's PROGRESS-BILLING / draw schedule — the milestones it gets billed in (e.g. '30% deposit, 40% at rough-in, 30% on final'). Resolve the job with list_jobs and pass job_id plus milestones, each with a label and EITHER a percent OR a fixed amount. Can only be set BEFORE any billing starts on the job. Nothing is sent or billed — this just defines the plan.",
+    input: z.object({
+      job_id: z.string(),
+      milestones: z
+        .array(
+          z.object({
+            label: z.string(),
+            percent: z.number().nullable().optional(),
+            amount: z.number().nullable().optional(),
+          }),
+        )
+        .min(1),
+    }),
+    auth: "staff",
+    effect: "write",
+    handler: async (i) => {
+      const r = await setPaymentSchedule(i.job_id, i.milestones);
+      if (!r.ok) return { ok: false, error: r.error };
+      return { ok: true, speak: `Set a ${i.milestones.length}-milestone draw schedule.` };
+    },
+  },
+  "payment.requestNext": {
+    name: "payment.requestNext",
+    group: "payment",
+    label: "Request the next draw",
+    description:
+      "Draft the NEXT progress payment / draw on a job — the next scheduled milestone for a fixed-bid job with a draw schedule, or the work logged since the last bill for T&M. Resolve the job with list_jobs and pass job_id. It drafts a DRAFT invoice; it never sends. The app asks to confirm first.",
+    input: z.object({ job_id: z.string() }),
+    auth: "staff",
+    effect: "write",
+    confirm: "financial",
+    describe: () => "Draft the next draw on this job from its schedule (or work-to-date) — say yes to confirm. It won't send.",
+    handler: async (i) => {
+      const r = await requestNextPayment(i.job_id);
+      if (!r.ok) return { ok: false, error: r.error };
+      return { ok: true, speak: "Next draw drafted — read it back before sending." };
     },
   },
 };

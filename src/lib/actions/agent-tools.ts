@@ -77,6 +77,11 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   "quote.convertToJob",
   "contract.generate",
   "form.submit", // fill a checklist by voice
+  // Progress billing: define a draw schedule + draft the next draw (confirm-gated).
+  "payment.setSchedule",
+  "payment.requestNext",
+  // Bug-watch: CIB can triage its own bug list (mark fixed / won't-fix).
+  "bug.resolve",
 ]);
 
 // Registry names are group.verb (a dot); Anthropic tool names can't contain dots.

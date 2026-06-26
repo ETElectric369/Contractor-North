@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { requireStaff } from "@/lib/staff-guard";
 
 export type BugReport = {
   id: string;
@@ -62,8 +63,12 @@ export async function listBugReports(): Promise<BugReport[]> {
   }));
 }
 
-export async function setBugReportStatus(id: string, status: string): Promise<{ ok: boolean }> {
-  const supabase = await createClient();
-  await supabase.from("bug_reports").update({ status }).eq("id", id);
+export async function setBugReportStatus(id: string, status: string): Promise<{ ok: boolean; error?: string }> {
+  // Defense-in-depth: app-layer staff gate ON TOP of the RLS staff policy (the same belt-and-
+  // suspenders pattern as the billing actions — RLS alone is the single-layer class we've
+  // already had to retro-fix once).
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  await ctx.supabase.from("bug_reports").update({ status }).eq("id", id);
   return { ok: true };
 }

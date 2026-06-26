@@ -72,11 +72,12 @@ export const jobActions: Record<string, ActionDef> = {
     name: "job.scheduleDay",
     group: "job",
     label: "Schedule job on a day",
-    description: "Schedule a job on a single date (YYYY-MM-DD) — a one-day work window.",
-    input: z.object({ id: z.string(), date: z.string() }),
+    description:
+      "Schedule a job's work window (YYYY-MM-DD). Pass date alone for a one-day job, or date + end for a MULTI-DAY span — 'schedule the Miller job June 10 through 13'. Replaces any existing window.",
+    input: z.object({ id: z.string(), date: z.string(), end: z.string().optional() }),
     auth: "staff", // jobs are staff-only in RLS — the registry gate now matches (Phase C)
     effect: "write",
-    handler: (i) => setJobScheduleRanges(i.id, [{ start: i.date, end: i.date }]),
+    handler: (i) => setJobScheduleRanges(i.id, [{ start: i.date, end: i.end || i.date }]),
   },
   "job.assign": {
     name: "job.assign",

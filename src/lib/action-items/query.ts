@@ -52,7 +52,7 @@ export async function getActionItems(ctx: {
 
   const empty = Promise.resolve({ data: [] as any[] });
 
-  const [tasksR, jobsR, inqR, apptR, orgR, invR, conR, lienR] = await Promise.all([
+  const [tasksR, jobsR, inqR, apptR, orgR, invR, conR, lienR, bugR] = await Promise.all([
     taskQ,
     // Unscheduled jobs — staff only (the "resting place" for things needing a date).
     isStaff
@@ -118,6 +118,15 @@ export async function getActionItems(ctx: {
           .select("id, job_id, first_furnished_date, completion_date, prelim_sent_at, lien_recorded_at, noc_recorded, gc_name, lender_name, jobs(job_number, name)")
           .or("prelim_sent_at.is.null,lien_recorded_at.is.null")
           .limit(100)
+      : empty,
+    // Open bug reports — the owner's "is CIB on watch for bugs" surface. Staff only.
+    isStaff
+      ? supabase
+          .from("bug_reports")
+          .select("id, note, page, created_at")
+          .eq("status", "open")
+          .order("created_at", { ascending: false })
+          .limit(50)
       : empty,
   ]);
 
@@ -277,6 +286,25 @@ export async function getActionItems(ctx: {
       done: false,
       href: `/jobs/${l.job_id}?tab=invoices`,
       affordances: AFFORDANCES.lien_deadline,
+    });
+  }
+
+  // Open bug reports — ONE rollup item (not one per bug) so a backlog of routine field reports
+  // can't flood the dock badge (it stays +1) and the "open" tap lands cleanly on Bug watch.
+  // Low urgency: it sorts below the money/legal items. Triage happens on /bugs.
+  const openBugs = (bugR.data ?? []) as any[];
+  if (openBugs.length) {
+    items.push({
+      id: "bugs-open", // synthetic rollup id — the only affordance is "open" (navigate), no per-row dispatch
+      kind: "bug_report",
+      title: `${openBugs.length} open bug report${openBugs.length > 1 ? "s" : ""}`,
+      subtitle: "Reported from the field",
+      who: null,
+      when: openBugs[0]?.created_at ?? null,
+      urgency: 0,
+      done: false,
+      href: "/bugs",
+      affordances: AFFORDANCES.bug_report,
     });
   }
 

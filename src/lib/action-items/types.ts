@@ -12,7 +12,8 @@ export type ActionKind =
   | "organize" // a capture (receipt/note/doc) needing a filing decision
   | "invoice_overdue" // a sent/partial invoice past its due date (A/R)
   | "lien_deadline" // a lien prelim/recording deadline coming due or past
-  | "contract_unsigned"; // a contract sent but not yet signed
+  | "contract_unsigned" // a contract sent but not yet signed
+  | "bug_report"; // an open bug reported from the field (owner watch)
 
 /** The canonical verbs. Each maps to an existing server action in dispatch.ts. */
 export type Affordance =
@@ -47,6 +48,7 @@ export const KIND_META: Record<ActionKind, { label: string; tone: "slate" | "blu
   invoice_overdue: { label: "Overdue invoice", tone: "amber" },
   lien_deadline: { label: "Lien deadline", tone: "amber" },
   contract_unsigned: { label: "Unsigned contract", tone: "blue" },
+  bug_report: { label: "Bug report", tone: "amber" },
 };
 
 // The affordance matrix — which verbs each kind exposes. THE contract, consumed
@@ -64,6 +66,7 @@ export const AFFORDANCES: Record<ActionKind, Affordance[]> = {
   invoice_overdue: ["open"],
   lien_deadline: ["open"],
   contract_unsigned: ["open"],
+  bug_report: ["open"], // triage on the Bug watch page
 };
 
 /**
