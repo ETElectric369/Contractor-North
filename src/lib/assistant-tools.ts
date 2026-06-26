@@ -80,6 +80,12 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "list_job_codes",
+    description:
+      "List the company's active job/cost codes (code + description). Use to map a spoken name like 'rough-in' or 'service call' to its code when allocating hours on a clock-out (time.clockOut allocations).",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
     name: "list_customers",
     description:
       "List or search customers (name, company, phone, email, city). Use for 'find a customer', 'what's Jane's phone number', 'how many customers do I have'.",
@@ -337,6 +343,19 @@ export async function runDataTool(
               ? { id: c.id, name: c.name, company: c.company_name, phone: c.phone, email: c.email, city: c.city, state: c.state }
               : { id: c.id, name: c.name, company: c.company_name, city: c.city, state: c.state },
           ),
+        });
+      }
+
+      case "list_job_codes": {
+        const { data, error } = await supabase
+          .from("job_codes")
+          .select("code, description")
+          .eq("active", true)
+          .order("code");
+        if (error) throw error;
+        return JSON.stringify({
+          count: data?.length ?? 0,
+          codes: (data ?? []).map((c: any) => ({ code: c.code, description: c.description })),
         });
       }
 

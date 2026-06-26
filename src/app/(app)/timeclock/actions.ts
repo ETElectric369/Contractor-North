@@ -197,6 +197,9 @@ export async function clockOutCurrent(input: {
   miles?: number;
   notes?: string;
   lunch_minutes?: number;
+  /** The job-code/hours split — required for a TECH to close a shift (the codes-and-hours
+   *  rule), so voice ("clock me out, 6 hours on rough-in") can finally complete a clock-out. */
+  allocations?: JobAllocationInput[];
 }): Promise<ClockResult> {
   const supabase = await createClient();
   const {
@@ -216,6 +219,7 @@ export async function clockOutCurrent(input: {
     notes: input.notes ?? "",
     gps: null,
     miles: input.miles,
+    allocations: input.allocations,
   });
 }
 

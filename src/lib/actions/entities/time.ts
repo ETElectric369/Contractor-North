@@ -25,15 +25,27 @@ export const timeActions: Record<string, ActionDef> = {
     name: "time.clockOut",
     group: "time",
     label: "Clock out",
-    description: "Close the current user's open time entry. miles = round-trip job mileage; lunch_minutes = unpaid lunch taken.",
+    description:
+      "Close the current user's open time entry. A FIELD TECH must say which job code(s) they worked and the hours — pass them as `allocations` (each {job_code, hours, optional job_id, optional description}); if they don't give them, ASK before clocking out (use list_job_codes to map a spoken name like 'rough-in' to its code). miles = round-trip job mileage; lunch_minutes = unpaid lunch taken.",
     input: z.object({
       miles: z.number().optional(),
       notes: z.string().optional(),
       lunch_minutes: z.number().optional(),
+      allocations: z
+        .array(
+          z.object({
+            job_id: z.string().nullable().default(null),
+            job_code: z.string().nullable().default(null),
+            hours: z.number(),
+            description: z.string().default(""),
+          }),
+        )
+        .optional(),
     }),
     auth: "any",
     effect: "write",
-    handler: (i) => clockOutCurrent({ miles: i.miles, notes: i.notes, lunch_minutes: i.lunch_minutes }),
+    handler: (i) =>
+      clockOutCurrent({ miles: i.miles, notes: i.notes, lunch_minutes: i.lunch_minutes, allocations: i.allocations }),
   },
   "time.addEntry": {
     name: "time.addEntry",
