@@ -72,6 +72,7 @@ export function EditCustomerButton({
                 <option value="residential">Residential</option>
                 <option value="commercial">Commercial</option>
                 <option value="industrial">Industrial</option>
+                <option value="subcontractor">Subcontractor</option>
               </Select>
             </div>
             <div>

@@ -24,6 +24,7 @@ import { JobClockButton } from "./job-clock-button";
 import { EditEntryButton } from "../../timecards/edit-entry-button";
 import { JobStatusControl } from "./job-status-control";
 import { JobEditButton } from "./job-edit-button";
+import { JobContacts } from "./job-contacts";
 import { JobScheduleControl } from "./job-schedule-control";
 import { FinishJobButton } from "./finish-job-button";
 import { PaymentScheduleCard } from "./payment-schedule-card";
@@ -187,10 +188,25 @@ export default async function JobDetailPage({
     supabase.from("job_codes").select("*").order("code"),
     supabase.from("material_lists").select("id, name").order("created_at", { ascending: false }).limit(100),
     supabase.from("organizations").select("address_line1, city, state, zip, settings").limit(1).maybeSingle(),
-    supabase.from("customers").select("id, name").order("name"),
+    supabase.from("customers").select("id, name, type").order("name"),
     supabase.from("jobs").select("id, job_number, name").order("created_at", { ascending: false }).limit(100),
     supabase.from("job_code_templates").select("id, name").order("name"),
   ]);
+  // Subs & contacts linked to THIS job (many-to-many). Graceful: if job_contacts doesn't exist yet
+  // (migration 0087 not applied), the query errors and we just show an empty card — no crash.
+  const { data: jobContactsRaw } = await supabase
+    .from("job_contacts")
+    .select("id, role, customer_id, customers(name, phone)")
+    .eq("job_id", j.id)
+    .order("created_at");
+  const jobContacts = (jobContactsRaw ?? []).map((r: any) => ({
+    id: r.id,
+    role: r.role,
+    customer_id: r.customer_id,
+    name: r.customers?.name ?? "—",
+    phone: r.customers?.phone ?? null,
+  }));
+  const contactOptions = (allCustomers ?? []).map((c: any) => ({ id: c.id, name: c.name, type: c.type ?? null }));
   const thisJobOpt = [{ id: j.id, job_number: j.job_number, name: j.name }];
   // Appointment button takes {id,label} option lists.
   const apptJobOpts = [{ id: j.id, label: `${j.job_number} · ${j.name}`, address: [j.address, j.city, j.state, j.zip].filter(Boolean).join(", ") || null }];
@@ -355,6 +371,8 @@ export default async function JobDetailPage({
               </div>
             </CardContent>
           </Card>
+
+          <JobContacts jobId={j.id} contacts={jobContacts} options={contactOptions} />
         </div>
       ),
     },
