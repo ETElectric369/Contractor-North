@@ -106,6 +106,7 @@ export async function setJobStatus(id: string, status: string): Promise<{ ok: bo
   if (!data || !data.length) return { ok: false, error: "Job not found." };
   revalidatePath(`/jobs/${id}`);
   revalidatePath("/jobs");
+  revalidatePath("/planner"); // a status/finish change moves a job on/off today's My Day
   return { ok: true };
 }
 
@@ -133,6 +134,7 @@ export async function finishJob(
     if (error) return { ok: false, error: error.message };
     revalidatePath(`/jobs/${jobId}`);
     revalidatePath("/jobs");
+  revalidatePath("/planner"); // a status/finish change moves a job on/off today's My Day
     return { ok: true, id: draws[0].id };
   }
 
@@ -157,6 +159,7 @@ export async function finishJob(
 
   revalidatePath(`/jobs/${jobId}`);
   revalidatePath("/jobs");
+  revalidatePath("/planner"); // a status/finish change moves a job on/off today's My Day
   revalidatePath("/billing");
   return { ok: true, id: inv.id, sent };
 }
@@ -168,6 +171,7 @@ export async function deleteJob(id: string): Promise<{ ok: boolean; error?: stri
   const { error } = await supabase.from("jobs").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/jobs");
+  revalidatePath("/planner"); // a status/finish change moves a job on/off today's My Day
   revalidatePath("/schedule");
   return { ok: true };
 }
@@ -237,6 +241,7 @@ export async function updateJob(
 
   revalidatePath(`/jobs/${id}`);
   revalidatePath("/jobs");
+  revalidatePath("/planner"); // a status/finish change moves a job on/off today's My Day
   revalidatePath("/schedule");
   return { ok: true };
 }
@@ -537,6 +542,7 @@ export async function importJobs(
     results.push({ name: `${job.job_number} · ${jobName}${valueNote}`, status: "created" });
   }
   revalidatePath("/jobs");
+  revalidatePath("/planner"); // a status/finish change moves a job on/off today's My Day
   revalidatePath("/crm");
   return { ok: true, results };
 }

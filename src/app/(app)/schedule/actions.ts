@@ -80,6 +80,7 @@ export async function createJob(formData: FormData): Promise<Result> {
   if (error) return { ok: false, error: error.message };
 
   revalidatePath("/schedule");
+  revalidatePath("/planner"); // My Day reads today's scheduled jobs — keep it in sync
   return { ok: true, id: data.id };
 }
 
@@ -88,6 +89,7 @@ export async function setJobStatus(id: string, status: string): Promise<Result> 
   const { error } = await supabase.from("jobs").update({ status }).eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/schedule");
+  revalidatePath("/planner"); // My Day reads today's scheduled jobs — keep it in sync
   return { ok: true };
 }
 
@@ -105,6 +107,7 @@ export async function setJobAssignee(
     .eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/schedule");
+  revalidatePath("/planner"); // My Day reads today's scheduled jobs — keep it in sync
   revalidatePath(`/jobs/${id}`);
   return { ok: true };
 }
@@ -166,6 +169,7 @@ export async function setJobSchedule(
   // Giving a job a date moves it onto the schedule — advance early-stage status.
   if (startIso) await advanceToScheduled(supabase, id);
   revalidatePath("/schedule");
+  revalidatePath("/planner"); // My Day reads today's scheduled jobs — keep it in sync
   revalidatePath("/jobs");
   revalidatePath(`/jobs/${id}`);
   return { ok: true };
@@ -221,6 +225,7 @@ export async function setJobScheduleRanges(
   }
 
   revalidatePath("/schedule");
+  revalidatePath("/planner"); // My Day reads today's scheduled jobs — keep it in sync
   revalidatePath("/jobs");
   revalidatePath(`/jobs/${jobId}`);
 

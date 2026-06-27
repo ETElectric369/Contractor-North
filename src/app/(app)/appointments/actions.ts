@@ -103,6 +103,7 @@ export async function createAppointment(formData: FormData): Promise<Result> {
   }
 
   revalidatePath("/schedule");
+  revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   return { ok: true, id: data.id };
 }
 
@@ -192,6 +193,7 @@ export async function createAppointmentProposal(
   if (pErr || !prop) return { ok: false, error: pErr?.message ?? "Could not create the pick-a-time link." };
 
   revalidatePath("/schedule");
+  revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   return { ok: true, token: prop.token };
 }
 
@@ -236,6 +238,7 @@ export async function updateAppointment(id: string, formData: FormData): Promise
   if (error) return { ok: false, error: error.message };
 
   revalidatePath("/schedule");
+  revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   return { ok: true };
 }
 
@@ -258,6 +261,7 @@ export async function setAppointmentStatus(id: string, status: string): Promise<
       .eq("status", "pending");
   }
   revalidatePath("/schedule");
+  revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   return { ok: true };
 }
 
@@ -286,6 +290,7 @@ export async function rescheduleAppointment(
   if (error) return { ok: false, error: error.message };
   if (!data || !data.length) return { ok: false, error: "Appointment not found." };
   revalidatePath("/schedule");
+  revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   return { ok: true };
 }
 
@@ -321,6 +326,7 @@ export async function createJobFromAppointment(appointmentId: string): Promise<R
 
   await supabase.from("appointments").update({ job_id: job.id }).eq("id", appointmentId);
   revalidatePath("/schedule");
+  revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   return { ok: true, id: job.id };
 }
 
@@ -329,5 +335,6 @@ export async function deleteAppointment(id: string): Promise<Result> {
   const { error } = await supabase.from("appointments").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/schedule");
+  revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   return { ok: true };
 }

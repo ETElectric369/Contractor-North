@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Briefcase, CalendarCheck, UserPlus, Receipt, Navigation } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
+import { RefreshOnVisible } from "@/components/refresh-on-visible";
 import { WeatherWidget } from "@/components/weather-widget";
 import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
@@ -300,6 +301,8 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
 
   return (
     <div className="mx-auto max-w-3xl">
+      {/* Reopen the app / return to this tab → pull fresh schedule data (no manual reload). */}
+      <RefreshOnVisible />
       <PageHeader title="My Day" description={niceDay} />
 
       <div className="mb-3 flex gap-1">
