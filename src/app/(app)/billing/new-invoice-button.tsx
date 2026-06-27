@@ -108,7 +108,7 @@ export function NewInvoiceButton({
                   : "border-slate-200 text-slate-600"
               }`}
             >
-              From a quote
+              From an estimate
             </button>
             <button
               onClick={() => setMode("blank")}
@@ -124,13 +124,13 @@ export function NewInvoiceButton({
 
           {mode === "quote" ? (
             <div>
-              <Label htmlFor="inv-quote">Quote</Label>
+              <Label htmlFor="inv-quote">Estimate</Label>
               <Select
                 id="inv-quote"
                 value={quoteId}
                 onChange={(e) => setQuoteId(e.target.value)}
               >
-                <option value="">— Select a quote —</option>
+                <option value="">— Select an estimate —</option>
                 {quotes.map((q) => (
                   <option key={q.id} value={q.id}>
                     {q.quote_number} · {q.customers?.name ?? "—"} ·{" "}

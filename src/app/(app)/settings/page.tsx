@@ -275,7 +275,7 @@ export default async function SettingsPage({
           label: "Documents",
           content: (
             <div className="space-y-6">
-              <Section title="Quote & invoice defaults"><DocumentSettings settings={settings} /></Section>
+              <Section title="Estimate & invoice defaults"><DocumentSettings settings={settings} /></Section>
               <Section title="Company logo">
                 <LogoUpload orgId={(org as Organization).id} current={(org as Organization).logo_url} />
               </Section>

@@ -134,7 +134,7 @@ export default async function CustomerDetailPage({
     },
     {
       id: "quotes",
-      label: "Quotes",
+      label: "Estimates",
       count: quotes?.length ?? 0,
       content: (
         <Card className="overflow-hidden">
@@ -150,7 +150,7 @@ export default async function CustomerDetailPage({
                 </Link>
               </li>
             ))}
-            {(!quotes || quotes.length === 0) && empty("quotes")}
+            {(!quotes || quotes.length === 0) && empty("estimates")}
           </ul>
         </Card>
       ),
@@ -201,13 +201,13 @@ export default async function CustomerDetailPage({
           <NewJobButton customers={[{ id: c.id, name: c.name }]} defaultCustomerId={c.id} />
           <Link href={`/quotes/new?customer=${c.id}`}>
             <Button>
-              <Plus className="h-4 w-4" /> New quote
+              <Plus className="h-4 w-4" /> New estimate
             </Button>
           </Link>
           <PortalLinkButton customerId={c.id} portalToken={(customer as any).portal_token} hasEmail={!!(customer as any).email} />
           <DeleteButton
             run={deleteCustomer.bind(null, c.id)}
-            confirmText={`Delete ${c.name}? This only works when no jobs, quotes, or invoices reference them.`}
+            confirmText={`Delete ${c.name}? This only works when no jobs, estimates, or invoices reference them.`}
             redirectTo="/crm"
           />
         </div>

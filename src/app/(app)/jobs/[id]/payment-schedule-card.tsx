@@ -200,7 +200,7 @@ function ScheduleEditor({
       <div className="space-y-3">
         {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
         <p className="text-sm text-slate-600">
-          Each payment is a percentage of the contract{contractTotal > 0 ? ` (${formatCurrency(contractTotal)})` : " (set a quote to see dollar amounts)"}.
+          Each payment is a percentage of the contract{contractTotal > 0 ? ` (${formatCurrency(contractTotal)})` : " (set an estimate to see dollar amounts)"}.
         </p>
         <div className="space-y-2">
           {rows.map((r, i) => (

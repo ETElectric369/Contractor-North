@@ -274,8 +274,8 @@ export function InvoiceDetail({
           !["deposit", "progress", "final"].includes((invoice as any).invoice_kind ?? "") && (
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50/60 px-3 py-2.5">
             <span className="text-xs font-medium text-slate-500">Import:</span>
-            <Button size="sm" variant="outline" onClick={() => runImport(importQuoteItemsIntoInvoice, "Quote items")} disabled={pending}>
-              From quote
+            <Button size="sm" variant="outline" onClick={() => runImport(importQuoteItemsIntoInvoice, "Estimate items")} disabled={pending}>
+              From estimate
             </Button>
             {invoice.job_id && (
               <>

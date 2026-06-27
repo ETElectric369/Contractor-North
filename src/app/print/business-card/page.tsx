@@ -63,8 +63,8 @@ export default async function BusinessCardPage() {
       </div>
       <div className="flex w-[1.15in] flex-col items-center justify-center gap-1 p-2" style={{ background: `${o?.brand_color || "#0b57c4"}10` }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={qr} alt="Request a quote QR" className="h-[0.95in] w-[0.95in]" />
-        <div className="text-center text-[7px] font-medium leading-tight text-slate-600">Scan for a free quote</div>
+        <img src={qr} alt="Request an estimate QR" className="h-[0.95in] w-[0.95in]" />
+        <div className="text-center text-[7px] font-medium leading-tight text-slate-600">Scan for a free estimate</div>
       </div>
     </div>
   );
@@ -79,7 +79,7 @@ export default async function BusinessCardPage() {
       </div>
       <p className="no-print mb-4 text-sm text-slate-500">
         Print on letter card stock and cut — 8 cards per sheet (3.5&quot; × 2&quot;). The QR code opens your
-        public &quot;Request a quote&quot; page.
+        public &quot;Request an estimate&quot; page.
       </p>
       <div className="grid grid-cols-2 justify-items-center gap-x-2 gap-y-2">
         {Array.from({ length: 8 }).map((_, i) => (

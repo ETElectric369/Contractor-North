@@ -63,7 +63,7 @@ export function InquiryForm({ org, brandColor }: { org: string; brandColor: stri
   const field = "w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2";
   return (
     <form onSubmit={submit} className="space-y-3 rounded-2xl bg-white/70 p-6 shadow-xl backdrop-blur-md">
-      <h2 className="text-lg font-bold text-slate-900">Request a quote</h2>
+      <h2 className="text-lg font-bold text-slate-900">Request an estimate</h2>
       {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
       <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name *" className={field} style={{ ["--tw-ring-color" as any]: brandColor }} />
       <div className="grid grid-cols-2 gap-3">

@@ -156,7 +156,7 @@ export default async function AnalyticsPage() {
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
         {stat("Collected (12 mo)", formatCurrency(collected12), TrendingUp, "bg-green-50 text-green-600")}
         {stat("Outstanding A/R", formatCurrency(outstanding), Receipt, "bg-red-50 text-red-600")}
-        {stat("Quote win rate", winRate != null ? `${winRate.toFixed(0)}%` : "—", FileText, "bg-indigo-50 text-indigo-600")}
+        {stat("Estimate win rate", winRate != null ? `${winRate.toFixed(0)}%` : "—", FileText, "bg-indigo-50 text-indigo-600")}
         {stat("Overhead (all time)", formatCurrency(overheadTotal), Wallet, "bg-amber-50 text-amber-600")}
       </div>
 
@@ -211,7 +211,7 @@ export default async function AnalyticsPage() {
 
         <Card>
           <div className="border-b border-slate-100 px-5 py-3 text-sm font-semibold text-slate-900">
-            Quotes & pipeline
+            Estimates & pipeline
           </div>
           <CardContent className="space-y-2 py-5 text-sm">
             <div className="flex justify-between"><span className="text-slate-500">Won</span><span className="font-medium text-green-600">{q.accepted}</span></div>

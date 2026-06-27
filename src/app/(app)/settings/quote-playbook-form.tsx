@@ -29,7 +29,7 @@ export function QuotePlaybookForm({ settings }: { settings: OrgSettings }) {
     <div className="space-y-3">
       <p className="text-sm text-slate-500">
         Teach the AI how <em>you</em> quote: labor rates, markup, wire/material habits,
-        what you include and exclude. Every AI quote draft and assistant answer follows this.
+        what you include and exclude. Every AI estimate draft and assistant answer follows this.
       </p>
       <Textarea
         rows={14}

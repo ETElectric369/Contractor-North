@@ -38,10 +38,10 @@ export default async function NewQuotePage({
         href="/quotes"
         className="mb-4 inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800"
       >
-        <ArrowLeft className="h-4 w-4" /> Back to quotes
+        <ArrowLeft className="h-4 w-4" /> Back to estimates
       </Link>
       <PageHeader
-        title="New quote"
+        title="New estimate"
         description="Build line items by hand or let the AI draft them from a scope of work."
       />
       <QuoteBuilder

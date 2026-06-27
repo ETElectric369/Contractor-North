@@ -116,7 +116,7 @@ export function FinishJobButton({
               <div className="space-y-2 border-t border-slate-100 pt-3">
                 <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Build the invoice from</div>
                 {hasQuote && (
-                  <p className="text-sm text-slate-600">✓ The job&apos;s quote (line items copy over automatically)</p>
+                  <p className="text-sm text-slate-600">✓ The job&apos;s estimate (line items copy over automatically)</p>
                 )}
                 <label className="flex items-center gap-2 text-sm text-slate-700">
                   <input type="checkbox" checked={importLabor} onChange={(e) => setImportLabor(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand" />

@@ -44,7 +44,7 @@ export function DocumentSettings({ settings }: { settings: OrgSettings }) {
       {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div>
-          <Label htmlFor="ds-expiry">Quote valid for (days)</Label>
+          <Label htmlFor="ds-expiry">Estimate valid for (days)</Label>
           <NumberInput id="ds-expiry" value={expiry} onValueChange={setExpiry} />
         </div>
         <div>
@@ -57,8 +57,8 @@ export function DocumentSettings({ settings }: { settings: OrgSettings }) {
         </div>
       </div>
       <div>
-        <Label htmlFor="ds-qterms">Default quote terms</Label>
-        <Textarea id="ds-qterms" rows={2} value={quoteTerms} onChange={(e) => setQuoteTerms(e.target.value)} placeholder="e.g. Quote valid for 30 days. 50% deposit required to schedule." />
+        <Label htmlFor="ds-qterms">Default estimate terms</Label>
+        <Textarea id="ds-qterms" rows={2} value={quoteTerms} onChange={(e) => setQuoteTerms(e.target.value)} placeholder="e.g. Estimate valid for 30 days. 50% deposit required to schedule." />
       </div>
       <div>
         <Label htmlFor="ds-iterms">Default invoice terms</Label>
@@ -70,7 +70,7 @@ export function DocumentSettings({ settings }: { settings: OrgSettings }) {
       </div>
       <div>
         <Label htmlFor="ds-footer">Document footer</Label>
-        <Textarea id="ds-footer" rows={2} value={footer} onChange={(e) => setFooter(e.target.value)} placeholder="Shown at the bottom of quotes, invoices & work orders (license #, thank-you note, etc.)" />
+        <Textarea id="ds-footer" rows={2} value={footer} onChange={(e) => setFooter(e.target.value)} placeholder="Shown at the bottom of estimates, invoices & work orders (license #, thank-you note, etc.)" />
       </div>
       <div className="flex items-center gap-3">
         <Button onClick={save} disabled={pending}>{pending ? "Saving…" : "Save changes"}</Button>

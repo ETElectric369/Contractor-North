@@ -493,7 +493,7 @@ export default async function JobDetailPage({
             <CardContent className="py-5">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3 lg:grid-cols-5">
-                  <div><div className="text-base font-semibold text-slate-700">{formatCurrency(revenue)}</div><div className="text-[11px] uppercase tracking-wide text-slate-400">{invoiced > 0 ? "Invoiced" : "Quoted"}</div></div>
+                  <div><div className="text-base font-semibold text-slate-700">{formatCurrency(revenue)}</div><div className="text-[11px] uppercase tracking-wide text-slate-400">{invoiced > 0 ? "Invoiced" : "Estimated"}</div></div>
                   <div><div className="text-base font-semibold text-slate-700">{formatCurrency(laborCost)}</div><div className="text-[11px] uppercase tracking-wide text-slate-400">Labor · {formatDuration(laborHours)}</div></div>
                   <div><div className="text-base font-semibold text-slate-700">{formatCurrency(materialCost)}</div><div className="text-[11px] uppercase tracking-wide text-slate-400">Materials</div></div>
                   <div><div className="text-base font-semibold text-slate-700">{formatCurrency(billsCost)}</div><div className="text-[11px] uppercase tracking-wide text-slate-400">Bills</div></div>
@@ -559,7 +559,7 @@ export default async function JobDetailPage({
               <CardContent className="py-8 text-center">
                 <p className="text-sm text-slate-500">No material lists yet.</p>
                 <p className="mt-1 text-xs text-slate-400">
-                  Open a quote and tap <span className="font-medium">Build material list</span> to generate a take-off from its line items.
+                  Open an estimate and tap <span className="font-medium">Build material list</span> to generate a take-off from its line items.
                 </p>
               </CardContent>
             </Card>
@@ -585,7 +585,7 @@ export default async function JobDetailPage({
     },
     {
       id: "quotes",
-      label: "Quotes",
+      label: "Estimates",
       count: quotes?.length ?? 0,
       content: (
         <div className="space-y-3">
@@ -594,7 +594,7 @@ export default async function JobDetailPage({
               href={`/quotes/new?customer=${j.customer_id ?? ""}&job=${j.id}`}
               className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
             >
-              <Plus className="h-3.5 w-3.5" /> New quote
+              <Plus className="h-3.5 w-3.5" /> New estimate
             </Link>
           </div>
           <Card className="overflow-hidden">
@@ -612,7 +612,7 @@ export default async function JobDetailPage({
                 </Link>
               </li>
             ))}
-            {(!quotes || quotes.length === 0) && empty("quotes")}
+            {(!quotes || quotes.length === 0) && empty("estimates")}
           </ul>
           </Card>
         </div>
@@ -782,7 +782,7 @@ export default async function JobDetailPage({
           />
           <DeleteButton
             run={deleteJob.bind(null, j.id)}
-            confirmText={`Delete job ${j.job_number}? Time entries, quotes, and invoices keep their data but lose the job link.`}
+            confirmText={`Delete job ${j.job_number}? Time entries, estimates, and invoices keep their data but lose the job link.`}
             redirectTo="/jobs"
           />
           {/* The ⋯ actions menu sits on the far right (clean kebab, no noodles). */}

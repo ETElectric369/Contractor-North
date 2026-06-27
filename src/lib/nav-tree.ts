@@ -112,7 +112,7 @@ export function invoiceSectionTree(
   const nodes: TreeNode[] = [{ id: "i-self", label: "This invoice", icon: "receipt", href: `/billing/${invoiceId}` }];
   if (rel.customerId) nodes.push({ id: "i-cust", label: "Customer", icon: "users", href: `/crm/${rel.customerId}` });
   if (rel.jobId) nodes.push({ id: "i-job", label: "Job", icon: "briefcase", href: `/jobs/${rel.jobId}` });
-  if (rel.quoteId) nodes.push({ id: "i-quote", label: "Source quote", icon: "fileText", href: `/quotes/${rel.quoteId}` });
+  if (rel.quoteId) nodes.push({ id: "i-quote", label: "Source estimate", icon: "fileText", href: `/quotes/${rel.quoteId}` });
   nodes.push({ id: "i-print", label: "Print / PDF", icon: "fileSpreadsheet", href: `/print/invoice/${invoiceId}` });
   nodes.push({ id: "i-all", label: "All invoices", icon: "list", href: "/billing" });
   return { center: { label, icon: "receipt" }, nodes };
@@ -127,7 +127,7 @@ export function workOrderSectionTree(
   const nodes: TreeNode[] = [{ id: "w-self", label: "This work order", icon: "clipboardCheck", href: `/work-orders/${woId}` }];
   if (rel.jobId) nodes.push({ id: "w-job", label: "Job", icon: "briefcase", href: `/jobs/${rel.jobId}` });
   if (rel.customerId) nodes.push({ id: "w-cust", label: "Customer", icon: "users", href: `/crm/${rel.customerId}` });
-  if (rel.quoteId) nodes.push({ id: "w-quote", label: "Source quote", icon: "fileText", href: `/quotes/${rel.quoteId}` });
+  if (rel.quoteId) nodes.push({ id: "w-quote", label: "Source estimate", icon: "fileText", href: `/quotes/${rel.quoteId}` });
   nodes.push({ id: "w-print", label: "Print / PDF", icon: "fileSpreadsheet", href: `/print/work-order/${woId}` });
   nodes.push({ id: "w-all", label: "All work orders", icon: "list", href: "/work-orders" });
   return { center: { label, icon: "clipboardCheck" }, nodes };
@@ -137,7 +137,7 @@ export function workOrderSectionTree(
 export function materialListSectionTree(listId: string, label: string, rel: { jobId?: string | null; quoteId?: string | null }): NavTree {
   const nodes: TreeNode[] = [{ id: "ml-self", label: "This list", icon: "boxes", href: `/materials/${listId}` }];
   if (rel.jobId) nodes.push({ id: "ml-job", label: "Job", icon: "briefcase", href: `/jobs/${rel.jobId}` });
-  if (rel.quoteId) nodes.push({ id: "ml-quote", label: "Source quote", icon: "fileText", href: `/quotes/${rel.quoteId}` });
+  if (rel.quoteId) nodes.push({ id: "ml-quote", label: "Source estimate", icon: "fileText", href: `/quotes/${rel.quoteId}` });
   nodes.push({ id: "ml-all", label: "All material lists", icon: "list", href: "/materials" });
   return { center: { label, icon: "boxes" }, nodes };
 }
@@ -163,7 +163,7 @@ export function customerSectionTree(custId: string, custLabel: string): NavTree 
     center: { label: custLabel, icon: "users" },
     nodes: [
       { id: "c-newjob", label: "New job", icon: "briefcase", href: tab("jobs") },
-      { id: "c-newquote", label: "New quote", icon: "fileText", href: tab("quotes"), staffOnly: true },
+      { id: "c-newquote", label: "New estimate", icon: "fileText", href: tab("quotes"), staffOnly: true },
       { id: "c-newinv", label: "New invoice", icon: "receipt", href: tab("invoices"), staffOnly: true },
     ],
   };
@@ -188,7 +188,7 @@ export function jobSectionTree(
     },
     { id: "jb-cost", label: "Add a cost", icon: "wallet", href: tab("costs"), staffOnly: true },
     { id: "jb-time", label: "Log time", icon: "clock", href: tab("time") },
-    { id: "jb-quote", label: "New quote", icon: "fileText", href: tab("quotes"), staffOnly: true },
+    { id: "jb-quote", label: "New estimate", icon: "fileText", href: tab("quotes"), staffOnly: true },
     { id: "jb-inv", label: "New invoice", icon: "receipt", href: tab("invoices"), staffOnly: true },
     { id: "jb-appt", label: "Schedule a visit", icon: "clipboardCheck", href: tab("appointments") },
     { id: "jb-photo", label: "Add photos", icon: "wand", href: tab("photos") },
