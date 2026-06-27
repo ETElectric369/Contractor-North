@@ -39,49 +39,55 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   const tz = getOrgSettings((orgRow as any)?.settings).timezone || "America/Los_Angeles";
   const { dayStart, dayEnd, todayStr } = todayBoundsInTz(tz);
 
-  const [{ data: jobs }, { data: segJobs }, { data: appts }, { data: tasks }, { data: entries }, { data: openRows }] =
-    await Promise.all([
-      supabase
-        .from("jobs")
-        .select("id, job_number, name, status, address, scheduled_start, customers(name)")
-        .gte("scheduled_start", dayStart.toISOString())
-        .lt("scheduled_start", dayEnd.toISOString())
-        .order("scheduled_start"),
-      // Multi-range jobs whose segment covers today.
-      supabase
-        .from("job_schedule_segments")
-        .select("job_id, jobs(id, job_number, name, status, address, customers(name))")
-        .lte("start_date", todayStr)
-        .gte("end_date", todayStr),
-      supabase
-        .from("appointments")
-        .select("id, type, title, starts_at, ends_at, location, notes, status, job_id, customer_id, assigned_to")
-        .gte("starts_at", dayStart.toISOString())
-        .lt("starts_at", dayEnd.toISOString())
-        .neq("status", "cancelled")
-        .order("starts_at"),
-      supabase
-        .from("tasks")
-        .select("id, title, category, status, priority, due_date, job_id, assigned_to, jobs(job_number, name), assignee:assigned_to(full_name)")
-        .eq("status", "open")
-        .lte("due_date", todayStr)
-        .order("priority", { ascending: false }),
-      supabase
-        .from("time_entries")
-        .select("id, job_id, clock_in, clock_out, lunch_minutes, status")
-        .eq("profile_id", user?.id ?? "")
-        .gte("clock_in", dayStart.toISOString())
-        .lt("clock_in", dayEnd.toISOString()),
-      // The open entry, regardless of when it started (overnight shift, etc.).
-      supabase
-        .from("time_entries")
-        .select("id, job_id, clock_in, clock_out, lunch_minutes, status")
-        .eq("profile_id", user?.id ?? "")
-        .eq("status", "open")
-        .order("clock_in", { ascending: false })
-        .limit(1),
-    ]);
+  // Week boundary (payroll week = Sunday → today, org tz) computed upfront so the week-hours query
+  // can ride the single parallel batch below instead of waiting for a later round.
+  const dow = new Date(`${todayStr}T00:00:00Z`).getUTCDay(); // 0 = Sunday
+  const weekStartDate = new Date(`${todayStr}T00:00:00Z`);
+  weekStartDate.setUTCDate(weekStartDate.getUTCDate() - dow);
+  const weekStartUtc = tzDayStartUtc(weekStartDate.toISOString().slice(0, 10), tz);
 
+  // ONE parallel batch for everything that only needs the tz + the user id — was three sequential
+  // rounds (day data → current job + week total → form/snapshot options). Latency audit 2026-06-27.
+  const [
+    { data: jobs }, { data: segJobs }, { data: appts }, { data: tasks }, { data: entries }, { data: openRows },
+    { data: curRows }, { data: weekEntries },
+    { data: customers }, { data: staff }, { data: jobOptRows }, { data: me }, leadsCount, { data: invRows },
+  ] = await Promise.all([
+    supabase.from("jobs").select("id, job_number, name, status, address, scheduled_start, customers(name)").gte("scheduled_start", dayStart.toISOString()).lt("scheduled_start", dayEnd.toISOString()).order("scheduled_start"),
+    // Multi-range jobs whose segment covers today.
+    supabase.from("job_schedule_segments").select("job_id, jobs(id, job_number, name, status, address, customers(name))").lte("start_date", todayStr).gte("end_date", todayStr),
+    supabase.from("appointments").select("id, type, title, starts_at, ends_at, location, notes, status, job_id, customer_id, assigned_to").gte("starts_at", dayStart.toISOString()).lt("starts_at", dayEnd.toISOString()).neq("status", "cancelled").order("starts_at"),
+    supabase.from("tasks").select("id, title, category, status, priority, due_date, job_id, assigned_to, jobs(job_number, name), assignee:assigned_to(full_name)").eq("status", "open").lte("due_date", todayStr).order("priority", { ascending: false }),
+    supabase.from("time_entries").select("id, job_id, clock_in, clock_out, lunch_minutes, status").eq("profile_id", user?.id ?? "").gte("clock_in", dayStart.toISOString()).lt("clock_in", dayEnd.toISOString()),
+    // The open entry, regardless of when it started (overnight shift, etc.).
+    supabase.from("time_entries").select("id, job_id, clock_in, clock_out, lunch_minutes, status").eq("profile_id", user?.id ?? "").eq("status", "open").order("clock_in", { ascending: false }).limit(1),
+    // The job you're actually on right now.
+    supabase.from("jobs").select("id, job_number, name, status, address, customers(name)").eq("status", "in_progress").order("scheduled_start", { ascending: false }).limit(1),
+    // This week's logged hours.
+    supabase.from("time_entries").select("clock_in, clock_out, lunch_minutes, status").eq("profile_id", user?.id ?? "").gte("clock_in", weekStartUtc.toISOString()).lt("clock_in", dayEnd.toISOString()),
+    // Options for the inline add/edit controls + the owner snapshot.
+    supabase.from("customers").select("id, name").order("name"),
+    supabase.from("profiles").select("id, full_name").eq("active", true).order("full_name"),
+    supabase.from("jobs").select("id, job_number, name, address").order("created_at", { ascending: false }).limit(200),
+    supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle(),
+    supabase.from("inquiries").select("id", { count: "exact", head: true }).is("converted_at", null).neq("status", "lost"),
+    supabase.from("invoices").select("total, amount_paid, status"),
+  ]);
+
+  const currentJob = (curRows ?? [])[0] as any | undefined;
+  const isStaff = ["owner", "admin", "office"].includes((me as any)?.role ?? "");
+
+  // The two reads that depend on a result above — the current job's materials (needs its id) and the
+  // "Needs action" inbox (needs the role) — run together in one final round instead of two more awaits.
+  const [mlRes, actionItems] = await Promise.all([
+    currentJob
+      ? supabase.from("material_lists").select("id, name").eq("job_id", currentJob.id).order("id", { ascending: false }).limit(1).maybeSingle()
+      : Promise.resolve({ data: null }),
+    getActionItems({ todayStr, isStaff, userId: user?.id ?? "" }),
+  ]);
+  const currentMaterials: { id: string; name: string } | null = ((mlRes as any)?.data as any) ?? null;
+
+  // ── derived (no awaits) ──
   // Merge scheduled-today jobs + segment-today jobs (dedup).
   const jobMap = new Map<string, any>();
   for (const j of jobs ?? []) jobMap.set(j.id, { ...j, time: j.scheduled_start });
@@ -91,44 +97,11 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   }
   const todayJobs = [...jobMap.values()];
 
-  // The job you're actually on right now — put it up front, with its materials.
-  const { data: curRows } = await supabase
-    .from("jobs")
-    .select("id, job_number, name, status, address, customers(name)")
-    .eq("status", "in_progress")
-    .order("scheduled_start", { ascending: false })
-    .limit(1);
-  const currentJob = (curRows ?? [])[0] as any | undefined;
-  let currentMaterials: { id: string; name: string } | null = null;
-  if (currentJob) {
-    const { data: ml } = await supabase
-      .from("material_lists")
-      .select("id, name")
-      .eq("job_id", currentJob.id)
-      .order("id", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    currentMaterials = (ml as any) ?? null;
-  }
-
   const hoursToday = (entries ?? []).reduce(
     (sum: number, e: any) =>
       e.status === "closed" && e.clock_out ? sum + hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes) : sum,
     0,
   );
-
-  // This week's logged hours (payroll week = Sunday → today, in the org tz), so
-  // My Day shows a day total AND a running week total.
-  const dow = new Date(`${todayStr}T00:00:00Z`).getUTCDay(); // 0 = Sunday
-  const weekStartDate = new Date(`${todayStr}T00:00:00Z`);
-  weekStartDate.setUTCDate(weekStartDate.getUTCDate() - dow);
-  const weekStartUtc = tzDayStartUtc(weekStartDate.toISOString().slice(0, 10), tz);
-  const { data: weekEntries } = await supabase
-    .from("time_entries")
-    .select("clock_in, clock_out, lunch_minutes, status")
-    .eq("profile_id", user?.id ?? "")
-    .gte("clock_in", weekStartUtc.toISOString())
-    .lt("clock_in", dayEnd.toISOString());
   const hoursWeek = (weekEntries ?? []).reduce(
     (sum: number, e: any) =>
       e.status === "closed" && e.clock_out ? sum + hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes) : sum,
@@ -142,17 +115,6 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       : null;
   const clockJobs = todayJobs.map((j: any) => ({ id: j.id, label: `${j.job_number} — ${j.name}` }));
 
-  // Options for the inline add/edit controls (appointments + tasks) + the owner
-  // snapshot (this page now also covers what "Overview" used to show).
-  const [{ data: customers }, { data: staff }, { data: jobOptRows }, { data: me }, leadsCount, { data: invRows }] =
-    await Promise.all([
-      supabase.from("customers").select("id, name").order("name"),
-      supabase.from("profiles").select("id, full_name").eq("active", true).order("full_name"),
-      supabase.from("jobs").select("id, job_number, name, address").order("created_at", { ascending: false }).limit(200),
-      supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle(),
-      supabase.from("inquiries").select("id", { count: "exact", head: true }).is("converted_at", null).neq("status", "lost"),
-      supabase.from("invoices").select("total, amount_paid, status"),
-    ]);
   const org = orgRow;
   const orgLocation = [(org as any)?.city, (org as any)?.state, (org as any)?.zip].filter(Boolean).join(", ") || null;
   const QUOTES = [
@@ -169,10 +131,6 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   const custOpts = toCustomerOptions(customers);
   const staffOpts = toStaffOptions(staff);
   const people = (staff ?? []).map((s: any) => ({ id: s.id, full_name: s.full_name }));
-  const isStaff = ["owner", "admin", "office"].includes((me as any)?.role ?? "");
-  // The unified "Needs action" inbox — one list across tasks, jobs to schedule,
-  // inquiries, appointments to finish, and captures to file.
-  const actionItems = await getActionItems({ todayStr, isStaff, userId: user?.id ?? "" });
   const openInquiries = leadsCount.count ?? 0;
   const outstanding = (invRows ?? [])
     .filter((i: any) => !["paid", "void"].includes(i.status))
