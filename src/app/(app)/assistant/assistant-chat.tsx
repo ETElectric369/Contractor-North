@@ -80,10 +80,10 @@ interface Msg {
 }
 
 const SUGGESTIONS = [
-  "Start a quote — I'll tell you what's on it.",
+  "Start an estimate — I'll tell you what's on it.",
   "What's on the schedule this week?",
   "Which invoices are still unpaid?",
-  "Show me my open quotes and their totals.",
+  "Show me my open estimates and their totals.",
 ];
 
 /** The chat-style "voice mode" waveform — bars that bounce while it's live. */

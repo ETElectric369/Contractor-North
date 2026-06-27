@@ -22,14 +22,14 @@ export default async function QuotesPage({
   const { data } = await query.order("created_at", { ascending: false });
 
   const quotes = data ?? [];
-  const heading = filter === "estimate" ? "Estimates" : filter === "quote" ? "Quotes" : "Quotes & estimates";
+  const heading = filter === "quote" ? "Quotes" : "Estimates";
 
   return (
     <div>
-      <PageHeader title={heading} description="Fixed-price quotes and time-&-materials estimates — toggle the type on any one.">
+      <PageHeader title={heading} description="Estimates are time-&-materials by default — switch any one to a fixed-price quote.">
         <Link href="/quotes/new">
           <Button>
-            <Plus className="h-4 w-4" /> New quote
+            <Plus className="h-4 w-4" /> New estimate
           </Button>
         </Link>
       </PageHeader>
@@ -37,19 +37,19 @@ export default async function QuotesPage({
       {quotes.length === 0 ? (
         <EmptyState
           icon={FileText}
-          title="No quotes yet"
-          description="Create your first quote — the AI can draft line items from a scope of work."
+          title="No estimates yet"
+          description="Create your first estimate — the AI can draft line items from a scope of work."
         >
           <Link href="/quotes/new">
             <Button>
-              <Plus className="h-4 w-4" /> New quote
+              <Plus className="h-4 w-4" /> New estimate
             </Button>
           </Link>
         </EmptyState>
       ) : (
         <Card className="overflow-hidden">
           <div className="hidden grid-cols-12 gap-4 border-b border-slate-100 bg-slate-50 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-400 md:grid">
-            <div className="col-span-2">Quote #</div>
+            <div className="col-span-2">Estimate #</div>
             <div className="col-span-4">Customer</div>
             <div className="col-span-2">Date</div>
             <div className="col-span-2 text-right">Total</div>

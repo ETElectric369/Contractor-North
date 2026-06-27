@@ -278,6 +278,7 @@ export async function saveQuote(input: SaveQuoteInput) {
       tax,
       total,
       valid_until: input.valid_until,
+      doc_type: "estimate", // everything is an Estimate (T&M) by default; toggle to a fixed-price Quote
       created_by: ctx.userId,
     })
     .select("id")
