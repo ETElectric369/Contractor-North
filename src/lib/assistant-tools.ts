@@ -37,6 +37,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
           type: "string",
           description: "Optional text to match against job name, number, or description.",
         },
+        customer_id: { type: "string", description: "Optional — only this customer's jobs. Resolve a name to an id with list_customers first." },
         limit: { type: "integer", description: "Max rows (default 15, max 40)." },
       },
     },
@@ -44,12 +45,13 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "list_quotes",
     description:
-      "List this company's quotes/estimates with their status, total, and customer. Use for 'show me all quotes', 'which quotes are still open', 'what did I quote the Jones job'. Common statuses: draft, sent, accepted, declined, expired.",
+      "List this company's quotes/estimates with their status, total, and customer. Use for 'show me all quotes', 'which quotes are still open', 'what did I quote the Jones job'. To pull up a SPECIFIC customer's estimate (e.g. 'the estimate we started for Jackie Burks'), FIRST call list_customers to get their customer_id, then pass it here (optionally with status='draft') — don't rely on a text search of the title. Common statuses: draft, sent, accepted, declined, expired.",
     input_schema: {
       type: "object",
       properties: {
         status: { type: "string", description: "Optional status filter (e.g. draft, sent, accepted)." },
         search: { type: "string", description: "Optional text to match against quote number or title." },
+        customer_id: { type: "string", description: "Optional — only this customer's quotes/estimates (resolve the name with list_customers first). The reliable way to find a named customer's estimate." },
         limit: { type: "integer", description: "Max rows (default 15, max 40)." },
       },
     },
@@ -57,7 +59,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "list_invoices",
     description:
-      "List invoices with status, total, amount paid, and remaining balance. Use for 'who owes me money', 'show unpaid invoices', 'what's outstanding'.",
+      "List invoices with status, total, amount paid, and remaining balance. Use for 'who owes me money', 'show unpaid invoices', 'what's outstanding', 'what does Jackie owe' (pass customer_id).",
     input_schema: {
       type: "object",
       properties: {
@@ -65,6 +67,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
           type: "boolean",
           description: "When true, only return invoices with a remaining balance (default false).",
         },
+        customer_id: { type: "string", description: "Optional — only this customer's invoices (resolve the name with list_customers first)." },
         limit: { type: "integer", description: "Max rows (default 15, max 40)." },
       },
     },
@@ -111,6 +114,12 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
         limit: { type: "integer", description: "Max rows (default 20, max 40)." },
       },
     },
+  },
+  {
+    name: "get_customer",
+    description:
+      "Read ONE contact's full record by id — name, company, type, phone, email, full address, status, and notes. Use after list_customers resolves a name to an id: e.g. 'what's Jackie Burks's address', or to confirm you have the right person before pinning them to an estimate / job / invoice.",
+    input_schema: { type: "object", properties: { customer_id: { type: "string", description: "The customer's id (from list_customers)." } }, required: ["customer_id"] },
   },
   {
     name: "schedule_overview",
@@ -447,6 +456,7 @@ export async function runDataTool(
           const s = sanitize(input.search);
           if (s) q = q.or(`name.ilike.%${s}%,job_number.ilike.%${s}%,description.ilike.%${s}%`);
         }
+        if (input.customer_id) q = q.eq("customer_id", String(input.customer_id)); // narrow to one customer's jobs
         const { data, error } = await q;
         if (error) throw error;
         return JSON.stringify({
@@ -476,6 +486,7 @@ export async function runDataTool(
           const s = sanitize(input.search);
           if (s) q = q.or(`quote_number.ilike.%${s}%,title.ilike.%${s}%`);
         }
+        if (input.customer_id) q = q.eq("customer_id", String(input.customer_id)); // the reliable way to find a named customer's estimate
         const { data, error } = await q;
         if (error) throw error;
         return JSON.stringify({
@@ -496,16 +507,19 @@ export async function runDataTool(
 
       case "list_invoices": {
         const lim = clampLimit(input.limit, 15);
-        const { data, error } = await supabase
+        let q = supabase
           .from("invoices")
-          .select("invoice_number, status, total, amount_paid, due_date, created_at, customers(name)")
+          .select("id, invoice_number, status, total, amount_paid, due_date, created_at, customers(name)")
           .order("created_at", { ascending: false })
           .limit(40);
+        if (input.customer_id) q = q.eq("customer_id", String(input.customer_id)); // narrow to one customer's invoices
+        const { data, error } = await q;
         if (error) throw error;
         let rows = (data ?? []).map((r: any) => {
           const total = money(r.total);
           const paid = money(r.amount_paid);
           return {
+            id: r.id, // pass to get_invoice / payment.record
             invoice: r.invoice_number,
             status: r.status,
             total,
@@ -550,6 +564,28 @@ export async function runDataTool(
               ? { id: c.id, name: c.name, company: c.company_name, phone: c.phone, email: c.email, city: c.city, state: c.state, type: c.type }
               : { id: c.id, name: c.name, company: c.company_name, city: c.city, state: c.state, type: c.type },
           ),
+        });
+      }
+
+      case "get_customer": {
+        const { data, error } = await supabase
+          .from("customers")
+          .select("id, name, company_name, type, status, phone, email, address, city, state, zip, notes")
+          .eq("id", String(input.customer_id))
+          .maybeSingle();
+        if (error) throw error;
+        if (!data) return JSON.stringify({ error: "No contact with that id." });
+        const c = data as any;
+        return JSON.stringify({
+          id: c.id,
+          name: c.name,
+          company: c.company_name,
+          type: c.type,
+          status: c.status,
+          phone: c.phone,
+          email: c.email,
+          address: [c.address, c.city, c.state, c.zip].filter(Boolean).join(", ") || null,
+          notes: c.notes,
         });
       }
 
