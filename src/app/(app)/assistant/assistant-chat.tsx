@@ -7,27 +7,43 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
 import { speakSmart, unlockAudio, stopSpeaking } from "@/lib/tts";
 import {
-  CONFIRM_MARKER, OPEN_MARKER, DRAFT_OPEN, DRAFT_CLOSE,
-  type AgentConfirm, type AgentOpen, type AgentDraft,
+  CONFIRM_MARKER, OPEN_MARKER, PICK_MARKER, STATUS_OPEN, STATUS_CLOSE, DRAFT_OPEN, DRAFT_CLOSE,
+  type AgentConfirm, type AgentOpen, type AgentPick, type AgentDraft,
 } from "@/lib/assistant-protocol";
-import { confirmAgentAction, saveQuoteFromDraft, loadConversation, saveConversation, clearConversation } from "./actions";
+import { confirmAgentAction, saveQuoteFromDraft, loadConversation, saveConversation, clearConversation, type PickerContact } from "./actions";
+import { ContactPicker } from "./contact-picker";
 
 const money = (n: number) => `$${(Math.round(n * 100) / 100).toFixed(2)}`;
 
-/** Pull the visible text + the latest live quote draft out of the raw stream so far. */
-function parseStream(full: string): { text: string; draft: AgentDraft | null } {
+/** Pull the visible text + the latest live quote draft + the transient tool-status out of the raw
+ *  stream so far. */
+function parseStream(full: string): { text: string; draft: AgentDraft | null; status: string | null } {
   let draft: AgentDraft | null = null;
-  const re = new RegExp(DRAFT_OPEN + "([\\s\\S]*?)" + DRAFT_CLOSE, "g");
-  const blocks = [...full.matchAll(re)];
+  const dre = new RegExp(DRAFT_OPEN + "([\\s\\S]*?)" + DRAFT_CLOSE, "g");
+  const blocks = [...full.matchAll(dre)];
   if (blocks.length) {
     try { draft = JSON.parse(blocks[blocks.length - 1][1]); } catch {}
   }
-  let text = full.replace(re, "");
-  // Drop a half-arrived draft block at the tail so its JSON never flashes on screen.
-  const partial = text.indexOf(DRAFT_OPEN);
-  if (partial >= 0) text = text.slice(0, partial);
-  text = text.split(CONFIRM_MARKER)[0].split(OPEN_MARKER)[0];
-  return { text, draft };
+  // Transient tool-status ("Searching…"): show ONLY when it's the most recent thing in the stream
+  // (nothing meaningful streamed after it yet), so it appears during the silent tool call and clears
+  // the moment the agent's reply resumes.
+  let status: string | null = null;
+  const lastClose = full.lastIndexOf(STATUS_CLOSE);
+  if (lastClose >= 0) {
+    const after = full.slice(lastClose + STATUS_CLOSE.length).replace(dre, "").trim();
+    if (!after) {
+      const sb = [...full.matchAll(new RegExp(STATUS_OPEN + "([\\s\\S]*?)" + STATUS_CLOSE, "g"))];
+      try { status = JSON.parse(sb[sb.length - 1][1]).label ?? null; } catch {}
+    }
+  }
+  let text = full.replace(dre, "").replace(new RegExp(STATUS_OPEN + "([\\s\\S]*?)" + STATUS_CLOSE, "g"), "");
+  // Drop a half-arrived draft/status block at the tail so raw JSON never flashes on screen.
+  for (const m of [DRAFT_OPEN, STATUS_OPEN]) {
+    const p = text.indexOf(m);
+    if (p >= 0) text = text.slice(0, p);
+  }
+  text = text.split(CONFIRM_MARKER)[0].split(OPEN_MARKER)[0].split(PICK_MARKER)[0];
+  return { text, draft, status };
 }
 
 /** The Estimator — the live estimate building in front of you (the assistant's preview box). */
@@ -111,6 +127,8 @@ export function AssistantChat({ autoStart = false, glass = false }: { autoStart?
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
+  const [status, setStatus] = useState<string | null>(null); // transient "Searching…" tool-status
+  const [pendingPick, setPendingPick] = useState<AgentPick | null>(null); // on-screen contact picker
   const [listening, setListening] = useState(false);
   const [voiceOn, setVoiceOn] = useState(false); // is the mic available
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -265,8 +283,9 @@ export function AssistantChat({ autoStart = false, glass = false }: { autoStart?
         const { done, value } = await reader.read();
         if (done) break;
         full += decoder.decode(value, { stream: true });
-        const { text: visible, draft: liveDraft } = parseStream(full);
+        const { text: visible, draft: liveDraft, status: liveStatus } = parseStream(full);
         if (liveDraft) setDraft(liveDraft); // the quote fills in live as blocks arrive
+        setStatus(liveStatus); // transient "Searching…" pill while a tool runs
         setMessages((m) => {
           const copy = [...m];
           copy[copy.length - 1] = { role: "assistant", content: visible };
@@ -274,8 +293,9 @@ export function AssistantChat({ autoStart = false, glass = false }: { autoStart?
         });
         scrollToBottom();
       }
+      setStatus(null);
 
-      // Directive markers (confirm / open-maps) come at the very end of the stream.
+      // Directive markers (confirm / open-maps / contact-pick) come at the very end of the stream.
       const visibleText = parseStream(full).text;
       let proposal: AgentConfirm | null = null;
       if (full.includes(CONFIRM_MARKER)) {
@@ -285,8 +305,17 @@ export function AssistantChat({ autoStart = false, glass = false }: { autoStart?
       if (full.includes(OPEN_MARKER)) {
         try { openDir = JSON.parse(full.split(OPEN_MARKER)[1]); } catch {}
       }
+      let pickDir: AgentPick | null = null;
+      if (full.includes(PICK_MARKER)) {
+        try { pickDir = JSON.parse(full.split(PICK_MARKER)[1]); } catch {}
+      }
 
-      if (openDir?.url) {
+      if (pickDir) {
+        // The assistant asked the user to pick a contact on screen — pop the picker; their choice
+        // comes back as the next message (handled by onPickContact below).
+        setPendingPick(pickDir);
+        if (viaVoice) say("Go ahead and pick the contact on screen.");
+      } else if (openDir?.url) {
         // Hands-free navigation: say it, then open Maps (keep the app if the browser lets us).
         if (viaVoice) say(`Opening maps for ${openDir.label}.`, () => { if (voiceModeRef.current) startMic(); });
         try {
@@ -487,7 +516,26 @@ export function AssistantChat({ autoStart = false, glass = false }: { autoStart?
         )}
       </div>
 
+      {status && streaming ? (
+        <div className="border-t border-slate-100 px-4 py-1.5">
+          <span className="inline-flex items-center gap-1.5 text-xs italic text-slate-400">
+            <Loader2 className="h-3 w-3 animate-spin" /> {status}
+          </span>
+        </div>
+      ) : null}
+
       {draft ? <LiveQuote draft={draft} onSave={saveDraft} saving={savingDraft} /> : null}
+
+      {pendingPick ? (
+        <ContactPicker
+          pick={pendingPick}
+          onSelect={(c) => {
+            setPendingPick(null);
+            void send(`Selected contact: ${c.name}${c.company ? ` (${c.company})` : ""} — customer_id ${c.id}`, voiceMode);
+          }}
+          onCancel={() => setPendingPick(null)}
+        />
+      ) : null}
 
       {pendingConfirm ? (
         <div className="border-t border-amber-200 bg-amber-50 p-3">

@@ -11,7 +11,7 @@ import { agentWriteToolsForRole } from "@/lib/actions/agent-tools";
 import { executeAction } from "@/lib/actions/execute";
 import { REGISTRY } from "@/lib/actions/registry";
 import { needsConsent } from "@/lib/actions/risk";
-import { CONFIRM_MARKER, OPEN_MARKER, DRAFT_OPEN, DRAFT_CLOSE, type AgentConfirm, type AgentOpen } from "@/lib/assistant-protocol";
+import { CONFIRM_MARKER, OPEN_MARKER, PICK_MARKER, STATUS_OPEN, STATUS_CLOSE, DRAFT_OPEN, DRAFT_CLOSE, type AgentConfirm, type AgentOpen, type AgentPick } from "@/lib/assistant-protocol";
 
 // A client-intent tool: show/refresh the LIVE quote preview as the agent builds it. Not a
 // DB write — the route streams it to the client's preview pane; saving is a separate step.
@@ -74,6 +74,37 @@ const OPEN_MAPS_TOOL = {
   },
 } as const;
 
+// A BIDIRECTIONAL client-intent tool: pop the on-screen CONTACT PICKER so the user can search +
+// physically tap a contact mid-task (e.g. while building an estimate). The route emits a PICK
+// directive and ENDS the turn; the user picks on screen and the client sends their choice back as
+// the next message, so you resume right where you left off — no need to read names out loud.
+const REQUEST_CONTACT_TOOL = {
+  name: "request_contact",
+  description:
+    "Pop the on-screen contact picker so the user can search and TAP the contact themselves — use this instead of reading a long list of names back, e.g. 'add a contact to this estimate', 'who's the customer', 'pick the sub for this job'. Pass an optional `search` to pre-fill (e.g. a partial name they said) and an optional `type` to filter (e.g. 'subcontractor'). After you call this, briefly tell them to pick on screen and STOP — their selection comes back as the next message, then you continue.",
+  input_schema: {
+    type: "object",
+    properties: {
+      search: { type: "string", description: "Optional initial search term to pre-fill, e.g. 'Jackie'." },
+      type: { type: "string", enum: ["residential", "commercial", "industrial", "subcontractor"], description: "Optional — filter the picker to one contact type." },
+    },
+  },
+} as const;
+
+// A friendly "what I'm doing right now" label for the transient tool-status pill — so a silent
+// read doesn't feel like the app froze (especially in voice mode in the field).
+function statusLabel(tool: string): string {
+  const m: Record<string, string> = {
+    list_customers: "Looking up contacts…", get_customer: "Pulling up the contact…",
+    list_quotes: "Finding the estimate…", get_quote: "Opening the estimate…",
+    list_jobs: "Checking jobs…", get_job: "Opening the job…",
+    list_invoices: "Checking invoices…", get_invoice: "Opening the invoice…",
+    search_price_list: "Checking your price list…", schedule_overview: "Checking the schedule…",
+    business_summary: "Crunching the numbers…", hours_summary: "Tallying hours…",
+  };
+  return m[tool] ?? "Looking that up…";
+}
+
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
@@ -126,7 +157,7 @@ export async function POST(req: Request) {
     systemPrompt +=
       "\n\nFIXING & LOOKING UP: to fix a customer (a misspelled name, a wrong number, a missing email), look them up with list_customers — it returns their id — then call customer.update with that id and only the field(s) to change; read the corrected values back so they can confirm. To complete, reschedule, or reassign a task, FIRST call list_tasks to get the task's id. You can also review this company's filed bug reports / feature requests with list_bug_reports — use it when the user asks what they've reported, what's still open, or to cluster and prioritize their bugs.";
     systemPrompt +=
-      "\n\nPULLING UP A NAMED CUSTOMER'S WORK — when the user refers to a customer by name ('pull up the estimate we started for Jackie Burks', 'what does the Miller job owe'), FIRST call list_customers to resolve the name to a customer_id. If MORE THAN ONE matches, name the company / city for each and ask WHICH one before acting — never silently guess the wrong person. THEN pass that customer_id to list_quotes (add status='draft' to find an in-progress estimate), list_jobs, or list_invoices to pull their records directly — don't scan a long unfiltered list hoping the name is in a title. get_customer reads one contact's full record (address, notes) by id. When you find their draft estimate, read it back and offer to keep building it.";
+      "\n\nPULLING UP A NAMED CUSTOMER'S WORK — when the user refers to a customer by name ('pull up the estimate we started for Jackie Burks', 'what does the Miller job owe'), FIRST call list_customers to resolve the name to a customer_id. If MORE THAN ONE matches, name the company / city for each and ask WHICH one before acting — never silently guess the wrong person. THEN pass that customer_id to list_quotes (add status='draft' to find an in-progress estimate), list_jobs, or list_invoices to pull their records directly — don't scan a long unfiltered list hoping the name is in a title. get_customer reads one contact's full record (address, notes) by id. When you find their draft estimate, read it back and offer to keep building it. To let them PICK a contact on screen instead of you reading names aloud — mid-estimate 'add a contact', choosing the customer, or disambiguating which 'Jackie' — call request_contact (pre-fill `search` with whatever name they said); they tap on screen and their choice comes back to you as the next message, so you keep right on going.";
     systemPrompt +=
       "\n\nINVOICES — the money loop (this is a big one for field users billing from the truck): when they want to bill a job ('get the invoice ready', 'invoice the Jones job'), look up the job with list_jobs and call invoice.fromJob with its id — it creates a DRAFT invoice PRE-FILLED with the job's labor (hours × rate) and materials. Then read it back with get_invoice — every line and the total — and make any changes they ask for with invoice.addItem / invoice.updateItem / invoice.deleteItem (get the item_ids from get_invoice first). When it's right, tell them it's ready to review and SEND. You NEVER send it — sending stays THEIR tap on the big Send button. You can also turn an accepted quote into an invoice with invoice.fromQuote, and record a payment they RECEIVED with payment.record — but FIRST look the invoice up (get_invoice or list_invoices) and read back the invoice number, the customer, and the outstanding BALANCE along with the amount, so they're confirming the RIGHT invoice for the right amount (the app also shows a confirm; it won't let you overpay the balance and never moves money).";
     systemPrompt +=
@@ -213,7 +244,7 @@ export async function POST(req: Request) {
             // LIVE prices, specs, and code while estimating — the core "do it like Claude
             // did the Tao Zhu quote" capability. Results are untrusted web text (the
             // input-is-data rule in the system prompt covers them).
-            tools: [...dataTools, ...writeTools, OPEN_MAPS_TOOL, QUOTE_DRAFT_TOOL, REMEMBER_TOOL, { type: "web_search_20250305", name: "web_search", max_uses: 6 }] as any,
+            tools: [...dataTools, ...writeTools, OPEN_MAPS_TOOL, QUOTE_DRAFT_TOOL, REMEMBER_TOOL, ...(isStaffCaller ? [REQUEST_CONTACT_TOOL] : []), { type: "web_search_20250305", name: "web_search", max_uses: 6 }] as any,
             messages: convo,
           });
           // Strip the directive markers from MODEL text so a prompt-injection can't forge a
@@ -224,6 +255,9 @@ export async function POST(req: Request) {
               text
                 .split(CONFIRM_MARKER).join("")
                 .split(OPEN_MARKER).join("")
+                .split(PICK_MARKER).join("")
+                .split(STATUS_OPEN).join("")
+                .split(STATUS_CLOSE).join("")
                 .split(DRAFT_OPEN).join("")
                 .split(DRAFT_CLOSE).join(""),
             ),
@@ -240,6 +274,7 @@ export async function POST(req: Request) {
           const results: Anthropic.ToolResultBlockParam[] = [];
           let pendingConfirm: AgentConfirm | null = null;
           let pendingOpen: AgentOpen | null = null;
+          let pendingPick: AgentPick | null = null;
           // M5: does this batch contain a CONFIRM-gated write (e.g. record a payment)? If so,
           // any OTHER straight-through write must NOT commit before the user approves the
           // confirm — defer them, so a turn can't silently mutate while only the payment is
@@ -282,6 +317,21 @@ export async function POST(req: Request) {
               results.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify({ ok: true, opening: q }) });
               break;
             }
+            // Client-intent (bidirectional): pop the on-screen contact picker. Emit a PICK
+            // directive + END the turn; the user taps a contact and the client sends their choice
+            // back as the next message, so the agent resumes. The "say it, pick it, keep going" flow.
+            if (tu.name === "request_contact") {
+              const inp = (tu.input ?? {}) as { search?: unknown; type?: unknown };
+              const ty = String(inp.type ?? "");
+              pendingPick = {
+                kind: "contact",
+                search: inp.search ? String(inp.search).slice(0, 60) : undefined,
+                type: ["residential", "commercial", "industrial", "subcontractor"].includes(ty) ? (ty as AgentPick["type"]) : undefined,
+                label: "pick the contact",
+              };
+              results.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify({ ok: true, picker_open: true }) });
+              break;
+            }
             // A write tool routes through the chokepoint (role + audit + confirm/step-up);
             // a read tool runs the RLS-scoped data query.
             const actionName = resolveWrite(tu.name);
@@ -312,6 +362,7 @@ export async function POST(req: Request) {
                 }
               }
             } else {
+              emit(STATUS_OPEN + JSON.stringify({ label: statusLabel(tu.name) }) + STATUS_CLOSE); // transient "Searching…" pill
               const raw = await runDataTool(tu.name, tu.input, supabase);
               // Mark read-tool output as untrusted DATA: a customer-controlled field (a note,
               // name, description, inquiry message) must never be read as an instruction on the
@@ -328,6 +379,11 @@ export async function POST(req: Request) {
 
           if (pendingOpen) {
             emit(OPEN_MARKER + JSON.stringify(pendingOpen));
+            break;
+          }
+
+          if (pendingPick) {
+            emit(PICK_MARKER + JSON.stringify(pendingPick));
             break;
           }
 

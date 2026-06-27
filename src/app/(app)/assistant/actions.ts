@@ -3,9 +3,25 @@
 import { executeAction } from "@/lib/actions/execute";
 import { AGENT_WRITE_ALLOWED } from "@/lib/actions/agent-tools";
 import { createClient } from "@/lib/supabase/server";
+import { requireStaff } from "@/lib/staff-guard";
 import type { AgentDraft } from "@/lib/assistant-protocol";
 
 type StoredMsg = { role: "user" | "assistant"; content: string };
+
+export type PickerContact = { id: string; name: string; company: string | null; city: string | null; type: string };
+
+/** Search contacts for the on-screen picker the assistant pops (the request_contact handoff).
+ *  Staff-only + RLS-scoped to the org. Returns the lightweight fields the picker shows. */
+export async function searchContacts(query: string, type?: string): Promise<PickerContact[]> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return [];
+  let q = ctx.supabase.from("customers").select("id, name, company_name, city, type").order("name").limit(25);
+  const s = String(query ?? "").trim().replace(/[%_]/g, "");
+  if (s) q = q.or(`name.ilike.%${s}%,company_name.ilike.%${s}%`);
+  if (type && ["residential", "commercial", "industrial", "subcontractor"].includes(type)) q = q.eq("type", type);
+  const { data } = await q;
+  return (data ?? []).map((c: any) => ({ id: c.id, name: c.name, company: c.company_name, city: c.city, type: c.type }));
+}
 
 /** Restore the user's saved conversation + live quote draft (pick up where you left off). */
 export async function loadConversation(): Promise<{ messages: StoredMsg[]; draft: AgentDraft | null }> {
