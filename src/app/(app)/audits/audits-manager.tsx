@@ -1,0 +1,124 @@
+"use client";
+
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { Plus, Trash2, ClipboardCheck } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { formatDate } from "@/lib/utils";
+import { createCompliance, deleteCompliance } from "../compliance/actions";
+import { daysUntil, type ComplianceItem } from "../compliance/compliance-manager";
+
+// Audits ride on the same tracker (compliance_items); these audit categories route records here.
+export const AUDIT_TYPES = [
+  "Safety Audit",
+  "OSHA Audit",
+  "Insurance Audit",
+  "Financial Audit",
+  "Quality Audit",
+  "License / Permit Audit",
+  "Other Audit",
+];
+
+function dueBadge(date: string | null) {
+  const d = daysUntil(date);
+  if (d === null) return { tone: "slate" as const, label: "No follow-up" };
+  if (d < 0) return { tone: "red" as const, label: `Overdue ${-d}d` };
+  if (d <= 30) return { tone: "amber" as const, label: `Due in ${d}d` };
+  return { tone: "green" as const, label: `Due ${d}d` };
+}
+
+export function AuditsManager({ items }: { items: ComplianceItem[] }) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const [adding, setAdding] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const [type, setType] = useState("Safety Audit");
+  const [name, setName] = useState("");
+  const [ref, setRef] = useState("");
+  const [date, setDate] = useState("");
+  const [nextDue, setNextDue] = useState("");
+  const [findings, setFindings] = useState("");
+
+  function add() {
+    setError(null);
+    if (!name.trim()) return setError("Subject / auditor is required.");
+    start(async () => {
+      const res = await createCompliance({ type, name, policy_number: ref, issued_date: date || null, expires_date: nextDue || null, notes: findings });
+      if (!res.ok) return setError(res.error ?? "Could not save.");
+      setName(""); setRef(""); setDate(""); setNextDue(""); setFindings("");
+      setAdding(false);
+      router.refresh();
+    });
+  }
+
+  const sorted = [...items].sort((a, b) => {
+    const da = daysUntil(a.expires_date), db = daysUntil(b.expires_date);
+    if (da === null) return 1;
+    if (db === null) return -1;
+    return da - db;
+  });
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <Button size="sm" onClick={() => setAdding((a) => !a)}><Plus className="h-3.5 w-3.5" /> Log audit</Button>
+      </div>
+
+      {adding && (
+        <Card className="space-y-3 p-4">
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <div><Label htmlFor="a-type">Audit type</Label><Select id="a-type" value={type} onChange={(e) => setType(e.target.value)}>{AUDIT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}</Select></div>
+            <div className="col-span-2 sm:col-span-1"><Label htmlFor="a-name">Subject / auditor *</Label><Input id="a-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. OSHA inspector, Internal" /></div>
+            <div><Label htmlFor="a-ref">Report / ref #</Label><Input id="a-ref" value={ref} onChange={(e) => setRef(e.target.value)} /></div>
+            <div><Label htmlFor="a-date">Audit date</Label><Input id="a-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div>
+            <div><Label htmlFor="a-due">Next due / follow-up</Label><Input id="a-due" type="date" value={nextDue} onChange={(e) => setNextDue(e.target.value)} /></div>
+          </div>
+          <div><Label htmlFor="a-find">Findings / result</Label><Textarea id="a-find" rows={2} value={findings} onChange={(e) => setFindings(e.target.value)} placeholder="Pass / fail, corrective actions, deadlines…" /></div>
+          <div className="flex justify-end gap-2">
+            <Button size="sm" variant="outline" onClick={() => setAdding(false)}>Cancel</Button>
+            <Button size="sm" onClick={add} disabled={pending || !name.trim()}>{pending ? "Saving…" : "Save"}</Button>
+          </div>
+        </Card>
+      )}
+
+      {items.length === 0 ? (
+        <p className="py-10 text-center text-sm text-slate-400">
+          Log safety, OSHA, insurance, and financial audits — with their findings and the next follow-up date.
+        </p>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {sorted.map((c) => {
+            const b = dueBadge(c.expires_date);
+            return (
+              <Card key={c.id} className="p-4">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <ClipboardCheck className="h-4 w-4 shrink-0 text-slate-400" />
+                      <span className="font-medium text-slate-900">{c.name}</span>
+                    </div>
+                    <div className="mt-0.5 text-xs text-slate-400">
+                      {c.type}{c.policy_number ? ` · #${c.policy_number}` : ""}
+                      {c.issued_date ? ` · ${formatDate(c.issued_date)}` : ""}
+                    </div>
+                  </div>
+                  <button onClick={() => start(async () => { await deleteCompliance(c.id); router.refresh(); })} className="text-slate-300 hover:text-red-600" title="Delete"><Trash2 className="h-4 w-4" /></button>
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+                  <Badge tone={b.tone}>{b.label}</Badge>
+                  {c.expires_date && <span>Follow-up {formatDate(c.expires_date)}</span>}
+                </div>
+                {c.notes && <div className="mt-2 whitespace-pre-wrap border-t border-slate-100 pt-2 text-xs text-slate-500">{c.notes}</div>}
+              </Card>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}

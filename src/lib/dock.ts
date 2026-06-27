@@ -37,6 +37,8 @@ import {
   UserCog,
   Pause,
   CheckCircle2,
+  Umbrella,
+  ClipboardCheck,
   type LucideIcon,
 } from "lucide-react";
 
@@ -149,7 +151,9 @@ export const DOCK: DockSection[] = [
       // the next pages to build — flagged, not stubbed as dead links.
       { id: "o-liab-h", label: "Liabilities", icon: Scale, header: true },
       { id: "o-comply", label: "Compliance", icon: ShieldCheck, href: "/compliance" },
+      { id: "o-insurance", label: "Insurance", icon: Umbrella, href: "/insurance" },
       { id: "o-safety", label: "Safety", icon: HardHat, href: "/safety" },
+      { id: "o-audits", label: "Audits", icon: ClipboardCheck, href: "/audits" },
       // HR
       { id: "o-hr-h", label: "HR", icon: UserCog, header: true },
       { id: "o-docs", label: "Employee docs", icon: IdCard, href: "/employee-docs", staffOnly: true },
