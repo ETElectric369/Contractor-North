@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { requireStaff } from "@/lib/staff-guard";
 import { formatPhone, formatState, formatZip, titleCase } from "@/lib/utils";
 import { reportError } from "@/lib/observe";
 
@@ -520,6 +521,8 @@ export async function saveNumbering(
   prefixes: Record<string, string>,
   nextNumbers: Record<string, number>,
 ): Promise<Result> {
+  const guard = await requireStaff();
+  if ("error" in guard) return { ok: false, error: guard.error };
   const supabase = await createClient();
   const orgId = await myOrgId(supabase);
   if (!orgId) return { ok: false, error: "No organization." };

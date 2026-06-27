@@ -15,7 +15,9 @@ function publicQuoteLink(token: string) {
 }
 
 export async function setQuoteType(id: string, docType: "estimate" | "quote") {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { error } = await supabase
     .from("quotes")
     .update({ doc_type: docType, updated_at: new Date().toISOString() })

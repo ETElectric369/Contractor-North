@@ -35,6 +35,10 @@ export async function linkJobContact(jobId: string, customerId: string, role: st
 export async function unlinkJobContact(id: string, jobId: string): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  // Confirm the link belongs to the job we'll revalidate (RLS already scopes to the org) — so a
+  // mismatched jobId can't delete a link and then rebuild the wrong page.
+  const { data: link } = await ctx.supabase.from("job_contacts").select("job_id").eq("id", id).maybeSingle();
+  if (!link || link.job_id !== jobId) return { ok: false, error: "Link not found." };
   const { error } = await ctx.supabase.from("job_contacts").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath(`/jobs/${jobId}`);

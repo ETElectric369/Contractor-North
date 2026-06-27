@@ -46,6 +46,8 @@ export async function emailPortalLink(customerId: string): Promise<ActionResult>
 }
 
 export async function createCustomer(formData: FormData): Promise<ActionResult> {
+  const guard = await requireStaff();
+  if ("error" in guard) return { ok: false, error: guard.error };
   const supabase = await createClient();
   const {
     data: { user },
@@ -128,6 +130,8 @@ export async function patchCustomer(
     type?: string;
   },
 ): Promise<ActionResult> {
+  const guard = await requireStaff();
+  if ("error" in guard) return { ok: false, error: guard.error };
   const supabase = await createClient();
   const upd: Record<string, unknown> = {};
   if (patch.type != null) upd.type = patch.type; // residential | commercial | industrial | subcontractor
