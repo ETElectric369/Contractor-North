@@ -502,6 +502,64 @@ export async function updateOrgSettings(
   return { ok: true };
 }
 
+/** Read the per-org document counters (current count per doc_type) for the "next #" pre-fill.
+ *  Returns null when migration 0088 hasn't been applied yet (the RPC won't exist) — the UI
+ *  uses that to show an "activate me" banner instead of a broken control. */
+export async function getDocCounters(): Promise<Record<string, number> | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("get_doc_counters");
+  if (error) return null;
+  return (data && typeof data === "object" ? data : {}) as Record<string, number>;
+}
+
+/** Save per-doc-type number PREFIXES (ride on the settings jsonb, read by next_doc_number)
+ *  plus any changed NEXT-NUMBERS (through the staff-gated set_doc_counter RPC). The caller
+ *  sends only the next-numbers the owner actually changed, so a prefix-only save never
+ *  touches a counter and has no migration dependency at write time. */
+export async function saveNumbering(
+  prefixes: Record<string, string>,
+  nextNumbers: Record<string, number>,
+): Promise<Result> {
+  const supabase = await createClient();
+  const orgId = await myOrgId(supabase);
+  if (!orgId) return { ok: false, error: "No organization." };
+
+  // Validate + normalize prefixes (1–10 chars, trimmed).
+  const clean: Record<string, string> = {};
+  for (const [k, v] of Object.entries(prefixes)) {
+    const p = String(v ?? "").trim();
+    if (!p) return { ok: false, error: "Each prefix needs at least one character." };
+    if (p.length > 10) return { ok: false, error: "Prefixes are limited to 10 characters." };
+    clean[k] = p;
+  }
+
+  // Store prefixes in the org settings jsonb (merged over any existing doc_prefixes).
+  const { data: org } = await supabase.from("organizations").select("settings").eq("id", orgId).single();
+  const settings = (org?.settings ?? {}) as Record<string, unknown>;
+  const mergedPrefixes = { ...((settings.doc_prefixes as Record<string, string>) ?? {}), ...clean };
+  const { error: upErr } = await supabase
+    .from("organizations")
+    .update({ settings: { ...settings, doc_prefixes: mergedPrefixes } })
+    .eq("id", orgId);
+  if (upErr) return { ok: false, error: upErr.message };
+
+  // Apply any changed next-numbers via the staff-gated, org-scoped RPC.
+  for (const [type, next] of Object.entries(nextNumbers)) {
+    if (!Number.isFinite(next) || next < 1) continue;
+    const { error } = await supabase.rpc("set_doc_counter", { p_type: type, p_next: Math.floor(next) });
+    if (error) {
+      if (error.code === "PGRST202" || /set_doc_counter/i.test(error.message)) {
+        return { ok: false, error: "Prefixes saved. The next-number control needs migration 0088 applied to take effect." };
+      }
+      return { ok: false, error: error.message };
+    }
+  }
+
+  revalidatePath("/settings");
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
 export async function createTaxRate(input: {
   name: string;
   rate: number;

@@ -14,6 +14,7 @@ import { LanguageToggle } from "./language-toggle";
 import { MapsProviderToggle } from "./maps-provider-toggle";
 import { PushSettings } from "./push-settings";
 import { DocumentSettings } from "./document-settings";
+import { NumberingSettings } from "./numbering-settings";
 import { SchedulingSettings } from "./scheduling-settings";
 import { PaymentMethods } from "./payment-methods";
 import { AutomationSettings } from "./automation-settings";
@@ -39,7 +40,7 @@ import { billingEnabled } from "@/lib/stripe";
 import { qboConfigured } from "@/lib/quickbooks";
 import { trialDaysLeft } from "@/lib/subscription";
 import { startCheckout, openPortal } from "./billing-actions";
-import { disconnectQuickbooks } from "./actions";
+import { disconnectQuickbooks, getDocCounters } from "./actions";
 import type { Organization, Profile } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -95,6 +96,7 @@ export default async function SettingsPage({
   const members = (team ?? []) as Profile[];
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "";
   const settings = getOrgSettings((org as any)?.settings);
+  const docCounters = await getDocCounters(); // null until migration 0088 is applied
 
   const { data: qboConn } = isAdmin
     ? await supabase.from("accounting_connections").select("realm_id, connected_at").maybeSingle()
@@ -276,6 +278,9 @@ export default async function SettingsPage({
           content: (
             <div className="space-y-6">
               <Section title="Estimate & invoice defaults"><DocumentSettings settings={settings} /></Section>
+              <Section title="Numbering">
+                <NumberingSettings prefixes={settings.doc_prefixes} counters={docCounters} />
+              </Section>
               <Section title="Company logo">
                 <LogoUpload orgId={(org as Organization).id} current={(org as Organization).logo_url} />
               </Section>

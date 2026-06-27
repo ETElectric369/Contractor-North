@@ -17,6 +17,11 @@ export interface OrgSettings {
   contract_terms: string;
   document_footer: string;
   deposit_percent: number;
+  /** Per-org document number PREFIX, keyed by the trigger's doc_type ("job","quote",
+   *  "invoice","wo","co","po","contract"). The counter/next-number lives server-side in
+   *  doc_counters; next_doc_number() reads these prefixes (falling back to the built-in
+   *  default). Missing = use the built-in default (J-, Q-, INV-, …). */
+  doc_prefixes: Record<string, string>;
 
   // Financial
   default_labor_rate: number;
@@ -82,6 +87,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
     "1. Payment is due per the schedule above. 2. Any change to the scope of work will be handled by a written change order. 3. Contractor warrants workmanship for one (1) year from completion. 4. Either party may cancel in writing before work begins; deposits cover materials and scheduling already committed. 5. This agreement is governed by the laws of the state where the work is performed.",
   document_footer: "",
   deposit_percent: 0,
+  doc_prefixes: { job: "J-", quote: "Q-", invoice: "INV-", wo: "WO-", co: "CO-", po: "PO-", contract: "C-" },
   default_labor_rate: 0,
   mileage_rate: 0.7,
   material_markup_percent: 25,
@@ -115,8 +121,25 @@ export const DEFAULT_SETTINGS: OrgSettings = {
 /** Merge stored settings over defaults so every key is always present. */
 export function getOrgSettings(raw: unknown): OrgSettings {
   const stored = (raw && typeof raw === "object" ? raw : {}) as Partial<OrgSettings>;
-  return { ...DEFAULT_SETTINGS, ...stored };
+  const merged = { ...DEFAULT_SETTINGS, ...stored };
+  // doc_prefixes is a nested map — fill any missing per-type prefix from the defaults so a
+  // partially-saved map still resolves every doc type.
+  merged.doc_prefixes = { ...DEFAULT_SETTINGS.doc_prefixes, ...(merged.doc_prefixes ?? {}) };
+  return merged;
 }
+
+/** The auto-numbered document types, in display order. `key` is the doc_counters/settings
+ *  doc_type; `fallback` mirrors the built-in prefix the DB trigger passes. Single source of
+ *  truth for the numbering settings panel. */
+export const DOC_NUMBER_TYPES: { key: string; label: string; fallback: string }[] = [
+  { key: "job", label: "Jobs", fallback: "J-" },
+  { key: "quote", label: "Estimates", fallback: "Q-" },
+  { key: "invoice", label: "Invoices", fallback: "INV-" },
+  { key: "wo", label: "Work orders", fallback: "WO-" },
+  { key: "co", label: "Change orders", fallback: "CO-" },
+  { key: "po", label: "Purchase orders", fallback: "PO-" },
+  { key: "contract", label: "Contracts", fallback: "C-" },
+];
 
 export const CURRENCIES = [
   { code: "USD", label: "US Dollar ($)" },

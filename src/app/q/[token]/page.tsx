@@ -107,6 +107,7 @@ export default async function PublicQuotePage({
           <PublicQuoteAccept
             token={token}
             accepted={q.status === "accepted"}
+            declined={q.status === "declined"}
             brand={co.brand}
           />
         </div>
