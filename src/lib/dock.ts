@@ -160,10 +160,6 @@ export const DOCK: DockSection[] = [
       { id: "o-forms", label: "Forms", icon: ClipboardList, href: "/forms" },
       { id: "o-resources", label: "Resources", icon: BookUser, href: "/resources" },
       { id: "o-handbook", label: "Handbook", icon: BookOpen, href: "/handbook" },
-      // General
-      { id: "o-gen-h", label: "General", icon: Building2, header: true },
-      { id: "o-tools", label: "Tools", icon: Wrench, href: "/tools" },
-      { id: "o-settings", label: "Settings", icon: Settings, href: "/settings" },
       // Money admin — kept in Office for now (Alexa asked "under billing?"; that's an open call).
       { id: "o-ma-header", label: "Money admin", icon: Calculator, header: true, staffOnly: true },
       { id: "ma-stock", label: "Inventory", icon: Boxes, href: "/inventory", staffOnly: true },
@@ -177,6 +173,9 @@ export const DOCK: DockSection[] = [
       { id: "o-activity", label: "Activity", icon: Activity, href: "/activity", staffOnly: true },
       { id: "o-bugs", label: "Bug watch", icon: Bug, href: "/bugs", staffOnly: true },
       { id: "o-audit", label: "Activity audit", icon: ScrollText, href: "/audit", staffOnly: true },
+      // General — Settings sits at the very bottom of the Office list (admin config, last reach).
+      { id: "o-gen-h", label: "General", icon: Building2, header: true },
+      { id: "o-settings", label: "Settings", icon: Settings, href: "/settings" },
     ],
   },
   {
@@ -190,5 +189,14 @@ export const DOCK: DockSection[] = [
     staffOnly: true,
     // Just the one destination — Leads lives under Sales (the pipeline), not duplicated here.
     children: [{ id: "c-all", label: "All contacts", icon: Users, href: "/crm" }],
+  },
+  {
+    // Pulled out of Office to its own dock section — the calculators/utilities are a daily
+    // field reach, so they get a one-tap home (everyone, not staff-only).
+    key: "tools",
+    label: "Tools",
+    icon: Wrench,
+    href: "/tools",
+    children: [{ id: "tl-all", label: "Calculators & tools", icon: Wrench, href: "/tools" }],
   },
 ];
