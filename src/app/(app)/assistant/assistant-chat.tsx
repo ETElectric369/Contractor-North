@@ -32,7 +32,9 @@ function parseStream(full: string): { text: string; draft: AgentDraft | null } {
 
 /** The Estimator — the live estimate building in front of you (the assistant's preview box). */
 function LiveQuote({ draft, onSave, saving }: { draft: AgentDraft; onSave: () => void; saving: boolean }) {
-  const items = draft.items ?? [];
+  // Defensive: a streaming/partial draft can briefly arrive with items as a non-array or with
+  // a null entry — never let that crash the Estimator render (it would blank the whole page).
+  const items = (Array.isArray(draft.items) ? draft.items : []).filter((i) => i && typeof i === "object");
   const subtotal = items.reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0);
   const tax = subtotal * (Number(draft.tax_rate) || 0);
   const total = subtotal + tax;
