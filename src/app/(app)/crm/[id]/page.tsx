@@ -58,6 +58,17 @@ export default async function CustomerDetailPage({
       .eq("status", "open"),
   ]);
 
+  // The reverse of jobs.customer_id: jobs this contact is LINKED to as a sub / supplier / inspector
+  // (so a subcontractor sees every job they're on, not just jobs where they're the client).
+  const { data: linkedRaw } = await supabase
+    .from("job_contacts")
+    .select("id, role, jobs(id, job_number, name, status)")
+    .eq("customer_id", id)
+    .order("created_at", { ascending: false });
+  const linkedJobs = (linkedRaw ?? [])
+    .filter((r: any) => r.jobs)
+    .map((r: any) => ({ linkId: r.id, role: r.role as string, ...(r.jobs as any) }));
+
   const accountCredit = (credits ?? [])
     .filter((x: any) => x.disposition === "credit")
     .reduce((s: number, x: any) => s + Number(x.amount), 0);
@@ -112,7 +123,7 @@ export default async function CustomerDetailPage({
     {
       id: "jobs",
       label: "Jobs",
-      count: jobs?.length ?? 0,
+      count: (jobs?.length ?? 0) + linkedJobs.length,
       content: (
         <Card className="overflow-hidden">
           <ul className="divide-y divide-slate-100">
@@ -127,8 +138,28 @@ export default async function CustomerDetailPage({
                 </Link>
               </li>
             ))}
-            {(!jobs || jobs.length === 0) && empty("jobs")}
+            {(!jobs || jobs.length === 0) && linkedJobs.length === 0 && empty("jobs")}
           </ul>
+          {linkedJobs.length > 0 && (
+            <>
+              <div className="border-t border-slate-100 bg-slate-50 px-5 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                Linked to (as a sub / contact)
+              </div>
+              <ul className="divide-y divide-slate-100">
+                {linkedJobs.map((j: any) => (
+                  <li key={j.linkId}>
+                    <Link href={`/jobs/${j.id}`} className="flex items-center justify-between px-5 py-3 hover:bg-slate-50">
+                      <div>
+                        <div className="text-sm font-medium text-slate-900">{j.name}</div>
+                        <div className="text-xs text-slate-400">{j.job_number} · {j.role}</div>
+                      </div>
+                      <Badge tone={statusTone(j.status)}>{String(j.status).replace("_", " ")}</Badge>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
         </Card>
       ),
     },
