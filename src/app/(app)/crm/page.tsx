@@ -6,7 +6,6 @@ import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { NewCustomerButton } from "./new-customer-button";
-import { ImportCustomersButton } from "./import-customers-button";
 import { sanitizeSearch } from "@/lib/utils";
 import type { Customer } from "@/lib/types";
 
@@ -39,7 +38,6 @@ export default async function CrmPage({
     <div>
       <PageHeader title="Contacts" description="Everyone you work with — clients and contacts, all linkable to jobs and quotes. New leads live in the Leads tab.">
         <div className="flex flex-wrap gap-2">
-          <ImportCustomersButton csv={false} />
           <NewCustomerButton />
         </div>
       </PageHeader>
