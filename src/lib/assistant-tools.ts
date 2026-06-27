@@ -102,11 +102,12 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "list_customers",
     description:
-      "List or search customers (name, company, phone, email, city). Use for 'find a customer', 'what's Jane's phone number', 'how many customers do I have'.",
+      "List or search contacts (name, company, phone, email, city, type). Each result includes its type — residential / commercial / industrial client or 'subcontractor' (a sub / supplier / inspector). Use for 'find a customer', 'what's Jane's phone number', 'how many customers do I have', or 'show my subcontractors' (pass type='subcontractor').",
     input_schema: {
       type: "object",
       properties: {
         search: { type: "string", description: "Optional text to match against name, company, phone, or email." },
+        type: { type: "string", enum: ["residential", "commercial", "industrial", "subcontractor"], description: "Optional — only contacts of this type. Use 'subcontractor' to list subs/suppliers/inspectors." },
         limit: { type: "integer", description: "Max rows (default 20, max 40)." },
       },
     },
@@ -298,8 +299,8 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "list_compliance",
     description:
-      "List COMPLIANCE items — insurance policies, licenses, bonds — with their numbers, amounts, and EXPIRY dates (soonest first). Use for 'what's expiring soon', 'is our GL insurance current', 'license status'. A lapsing policy is expensive to miss.",
-    input_schema: { type: "object", properties: { limit: { type: "integer" } } },
+      "List COMPLIANCE items — insurance policies, licenses, bonds, audits — with their numbers, amounts, and EXPIRY dates (soonest first). Each row carries its type. Use for 'what's expiring soon', 'is our GL insurance current', 'license status', 'when's our next audit'. Pass type to narrow (a forgiving contains match — e.g. 'insurance', 'audit', 'license'). A lapsing policy is expensive to miss.",
+    input_schema: { type: "object", properties: { type: { type: "string", description: "Optional — only items whose type contains this (e.g. 'insurance', 'audit', 'license')." }, limit: { type: "integer" } } },
   },
   {
     name: "list_liens",
@@ -349,6 +350,18 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
     description:
       "Read a job's PROGRESS-BILLING / draw schedule — each milestone's label, percent or amount, and whether it's been billed yet (pending vs billed). Use for 'what's the draw schedule on the Miller job', 'what's the next draw'. Pass a job_id.",
     input_schema: { type: "object", properties: { job_id: { type: "string" } } },
+  },
+  {
+    name: "list_job_contacts",
+    description:
+      "List the SUBCONTRACTORS / suppliers / inspectors linked to a job (the job's Subs & contacts) — each with their role and the link id (pass that link id + job_id to job.unlinkContact to remove one). Use for 'who's on the Miller job', 'which sub is on this job'. Pass a job_id (from list_jobs).",
+    input_schema: { type: "object", properties: { job_id: { type: "string" } }, required: ["job_id"] },
+  },
+  {
+    name: "list_contact_jobs",
+    description:
+      "The reverse of list_job_contacts: every job a given contact is linked to as a sub / supplier / inspector, with their role. Use for 'what jobs is Joe's plumbing on', 'which jobs does this sub work'. Pass a customer_id (from list_customers).",
+    input_schema: { type: "object", properties: { customer_id: { type: "string" } }, required: ["customer_id"] },
   },
 ];
 
@@ -455,7 +468,7 @@ export async function runDataTool(
         const lim = clampLimit(input.limit, 15);
         let q = supabase
           .from("quotes")
-          .select("id, quote_number, title, status, total, created_at, valid_until, customers(name)")
+          .select("id, quote_number, title, status, total, created_at, valid_until, doc_type, customers(name)")
           .order("created_at", { ascending: false })
           .limit(lim);
         if (input.status) q = q.eq("status", String(input.status));
@@ -468,10 +481,11 @@ export async function runDataTool(
         return JSON.stringify({
           count: data?.length ?? 0,
           quotes: (data ?? []).map((r: any) => ({
-            id: r.id, // pass to get_quote / quote.addItem / quote.convertToJob
+            id: r.id, // pass to get_quote / quote.addItem / quote.convertToJob / quote.setType
             quote: r.quote_number,
             title: r.title,
             status: r.status,
+            kind: (r.doc_type ?? "estimate") === "quote" ? "Fixed-price quote" : "Estimate (T&M)",
             total: money(r.total),
             customer: embedName(r.customers),
             valid_until: r.valid_until,
@@ -515,10 +529,11 @@ export async function runDataTool(
         const s = sanitize(input.search ?? "");
         let q = supabase
           .from("customers")
-          .select("id, name, company_name, phone, email, city, state")
+          .select("id, name, company_name, phone, email, city, state, type")
           .order("name")
           .limit(lim);
         if (s) q = q.or(`name.ilike.%${s}%,company_name.ilike.%${s}%,phone.ilike.%${s}%,email.ilike.%${s}%`);
+        if (input.type) q = q.eq("type", String(input.type)); // e.g. only subcontractors
         const { data, error } = await q;
         if (error) throw error;
         // Data minimization (framework §7): phone/email reach the model ONLY on a SPECIFIC
@@ -532,10 +547,55 @@ export async function runDataTool(
           count: data?.length ?? 0,
           customers: (data ?? []).map((c: any) =>
             showPII
-              ? { id: c.id, name: c.name, company: c.company_name, phone: c.phone, email: c.email, city: c.city, state: c.state }
-              : { id: c.id, name: c.name, company: c.company_name, city: c.city, state: c.state },
+              ? { id: c.id, name: c.name, company: c.company_name, phone: c.phone, email: c.email, city: c.city, state: c.state, type: c.type }
+              : { id: c.id, name: c.name, company: c.company_name, city: c.city, state: c.state, type: c.type },
           ),
         });
+      }
+
+      case "list_job_contacts": {
+        const { data, error } = await supabase
+          .from("job_contacts")
+          .select("id, role, customer_id, customers(name, type, phone)")
+          .eq("job_id", String(input.job_id))
+          .order("created_at", { ascending: false });
+        if (error) {
+          if ((error as any).code === "42P01") return JSON.stringify({ count: 0, contacts: [], note: "Sublinking isn't set up yet." });
+          throw error;
+        }
+        return JSON.stringify({
+          count: data?.length ?? 0,
+          contacts: (data ?? []).map((r: any) => {
+            const cust = Array.isArray(r.customers) ? r.customers[0] : r.customers;
+            return {
+              link_id: r.id, // pass to job.unlinkContact (with the job_id) to remove
+              customer_id: r.customer_id,
+              name: cust?.name,
+              role: r.role,
+              type: cust?.type,
+              phone: cust?.phone,
+            };
+          }),
+        });
+      }
+
+      case "list_contact_jobs": {
+        const { data, error } = await supabase
+          .from("job_contacts")
+          .select("id, role, jobs(id, job_number, name, status)")
+          .eq("customer_id", String(input.customer_id))
+          .order("created_at", { ascending: false });
+        if (error) {
+          if ((error as any).code === "42P01") return JSON.stringify({ count: 0, jobs: [], note: "Sublinking isn't set up yet." });
+          throw error;
+        }
+        const jobs = (data ?? [])
+          .map((r: any) => {
+            const j = Array.isArray(r.jobs) ? r.jobs[0] : r.jobs;
+            return j ? { id: j.id, job: j.job_number, name: j.name, status: j.status, role: r.role } : null;
+          })
+          .filter(Boolean);
+        return JSON.stringify({ count: jobs.length, jobs });
       }
 
       case "hours_summary": {
@@ -705,11 +765,16 @@ export async function runDataTool(
 
       case "list_compliance": {
         const lim = clampLimit(input.limit, 30);
-        const { data, error } = await supabase
+        let q = supabase
           .from("compliance_items")
           .select("id, type, name, policy_number, amount, issued_date, expires_date")
           .order("expires_date", { ascending: true, nullsFirst: false })
           .limit(lim);
+        if (input.type) {
+          const t = sanitize(String(input.type));
+          if (t) q = q.ilike("type", `%${t}%`); // 'insurance' / 'audit' / 'license' — a forgiving contains match
+        }
+        const { data, error } = await q;
         if (error) throw error;
         return JSON.stringify({
           count: data?.length ?? 0,
@@ -1081,7 +1146,7 @@ export async function runDataTool(
         const { data: qt, error } = await supabase
           .from("quotes")
           .select(
-            "id, quote_number, title, status, subtotal, tax, total, valid_until, customers(name), quote_line_items(id, description, quantity, unit, unit_price)",
+            "id, quote_number, title, status, doc_type, subtotal, tax, total, valid_until, customers(name), quote_line_items(id, description, quantity, unit, unit_price)",
           )
           .eq("id", qid)
           .maybeSingle();
@@ -1089,10 +1154,11 @@ export async function runDataTool(
         if (!qt) return JSON.stringify({ found: false, message: "Quote not found." });
         return JSON.stringify({
           found: true,
-          quote_id: qt.id, // pass to quote.addItem / quote.convertToJob
+          quote_id: qt.id, // pass to quote.addItem / quote.convertToJob / quote.setType
           quote: qt.quote_number,
           title: qt.title,
           status: qt.status,
+          kind: (((qt as any).doc_type ?? "estimate") === "quote" ? "Fixed-price quote" : "Estimate (T&M)"),
           customer: embedName(qt.customers),
           subtotal: money(qt.subtotal),
           tax: money(qt.tax),

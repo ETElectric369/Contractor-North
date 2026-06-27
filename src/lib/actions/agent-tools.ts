@@ -74,9 +74,14 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   "pricelist.add",
   // The last filaments: move a quote down the funnel, draft a contract.
   "quote.setStatus",
+  "quote.setType", // switch a doc between estimate (T&M) and fixed-price quote
   "quote.convertToJob",
   "contract.generate",
   "form.submit", // fill a checklist by voice
+  // Sublinking: put a sub/supplier/inspector on a job (and remove). The contact book + the
+  // many-to-many job_contacts, by voice — "add Joe's plumbing to the Miller job".
+  "job.linkContact",
+  "job.unlinkContact",
   // Progress billing: define a draw schedule + draft the next draw (confirm-gated).
   "payment.setSchedule",
   "payment.requestNext",

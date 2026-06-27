@@ -1,9 +1,31 @@
 import { z } from "zod";
 import { setJobScheduleRanges, setJobAssignee, createJob } from "@/app/(app)/schedule/actions";
 import { setJobStatus, finishJob, updateJobDescription } from "@/app/(app)/jobs/actions";
+import { linkJobContact, unlinkJobContact } from "@/app/(app)/jobs/[id]/job-contacts-actions";
 import type { ActionDef } from "../types";
 
 export const jobActions: Record<string, ActionDef> = {
+  "job.linkContact": {
+    name: "job.linkContact",
+    group: "job",
+    label: "Link a contact to a job",
+    description:
+      "Put a subcontractor, supplier, inspector, or other contact ON a job in a role — 'add Joe's plumbing as the plumbing sub on the Miller job'. The contact must already be in the book (create them with customer.create, type subcontractor). Resolve the job with list_jobs and the contact with list_customers. role defaults to Subcontractor. The same contact can be on many jobs.",
+    input: z.object({ job_id: z.string(), customer_id: z.string(), role: z.string().default("Subcontractor") }),
+    auth: "staff",
+    effect: "write",
+    handler: (i) => linkJobContact(i.job_id, i.customer_id, i.role || "Subcontractor"),
+  },
+  "job.unlinkContact": {
+    name: "job.unlinkContact",
+    group: "job",
+    label: "Remove a contact from a job",
+    description: "Remove a linked contact from a job. Pass the link's id (from list_job_contacts) and the job_id.",
+    input: z.object({ id: z.string(), job_id: z.string() }),
+    auth: "staff",
+    effect: "write",
+    handler: (i) => unlinkJobContact(i.id, i.job_id),
+  },
   "job.setScope": {
     name: "job.setScope",
     group: "job",

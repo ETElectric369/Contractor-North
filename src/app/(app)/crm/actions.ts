@@ -125,10 +125,12 @@ export async function patchCustomer(
   patch: {
     name?: string; phone?: string | null; email?: string | null; company_name?: string | null;
     address?: string | null; city?: string | null; state?: string | null; zip?: string | null; notes?: string | null;
+    type?: string;
   },
 ): Promise<ActionResult> {
   const supabase = await createClient();
   const upd: Record<string, unknown> = {};
+  if (patch.type != null) upd.type = patch.type; // residential | commercial | industrial | subcontractor
   if (patch.name != null) { const n = String(patch.name).trim(); if (!n) return { ok: false, error: "Name can't be empty." }; upd.name = n; }
   if (patch.phone != null) upd.phone = orNull(formatPhone(String(patch.phone)));
   if (patch.email != null) upd.email = emptyToNull(patch.email);

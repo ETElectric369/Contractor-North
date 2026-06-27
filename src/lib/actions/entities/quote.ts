@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { saveQuote, addQuoteItem, updateQuoteItem, deleteQuoteItem, createJobFromQuote, updateQuoteStatus } from "@/app/(app)/quotes/actions";
+import { saveQuote, addQuoteItem, updateQuoteItem, deleteQuoteItem, createJobFromQuote, updateQuoteStatus, setQuoteType } from "@/app/(app)/quotes/actions";
 import type { ActionDef } from "../types";
 
 export const quoteActions: Record<string, ActionDef> = {
@@ -12,6 +12,17 @@ export const quoteActions: Record<string, ActionDef> = {
     auth: "staff",
     effect: "write",
     handler: (i) => updateQuoteStatus(i.id, i.status),
+  },
+  "quote.setType": {
+    name: "quote.setType",
+    group: "quote",
+    label: "Estimate or fixed-price",
+    description:
+      "Switch a document between an ESTIMATE (time & materials — the default) and a fixed-price QUOTE — 'make the Miller estimate a fixed-price quote'. Pass the id (from list_quotes, which shows the current doc_type) and doc_type: 'estimate' or 'quote'.",
+    input: z.object({ id: z.string(), doc_type: z.enum(["estimate", "quote"]) }),
+    auth: "staff",
+    effect: "write",
+    handler: (i) => setQuoteType(i.id, i.doc_type),
   },
   "quote.convertToJob": {
     name: "quote.convertToJob",
