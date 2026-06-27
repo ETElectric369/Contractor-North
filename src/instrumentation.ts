@@ -8,7 +8,9 @@ export async function register() {
     Sentry.init({
       dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
       enabled: !!process.env.NEXT_PUBLIC_SENTRY_DSN,
-      tracesSampleRate: 0, // errors only, no perf tracing (cheapest tier)
+      // Server/edge perf tracing — env-overridable, defaults to 100% so server actions + API routes
+      // report timing during the test window. Dial back with NEXT_PUBLIC_SENTRY_TRACES_RATE if needed.
+      tracesSampleRate: Number(process.env.NEXT_PUBLIC_SENTRY_TRACES_RATE ?? "1"),
     });
   }
 }

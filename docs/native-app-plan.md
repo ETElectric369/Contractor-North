@@ -117,3 +117,46 @@ camera, and public distribution come after, only as far as you want to take it.
 
 The only thing I can't do for you is the Apple account + the Xcode/TestFlight clicks on your Mac —
 I'll write those out step by step so it's not guesswork.
+
+---
+
+## The trigger point — when to actually pull it (set 2026-06-27)
+
+Native is the **graduation, not a latency fix**: wrapping this web app in Capacitor keeps the *same*
+backend / network / LLM latency (same Vercel + Supabase, same Anthropic API; the WebView just renders
+the same pages). Native buys *capabilities* (contacts, background voice, GPS, push, LiDAR) and *feel*
+(instant launch, native gestures) — not raw speed. So the trigger is a **readiness gate**, not a date.
+
+Pull the trigger (Phase 0 → 1 → TestFlight) when **all three** are true:
+
+1. **Stability gate** — core flows (data model, nav, billing, job lifecycle) have run ~2 weeks of real
+   daily use *without a structural change*. Concrete proxy: **two consecutive weeks where no bug report
+   forces a data-model or core-nav change** — reports are down to polish/edge-cases, not "the workflow
+   is wrong." *(Not met yet — we were still reshaping nav + tools through late June.)*
+2. **Capability gate** — you are *actively blocked*, by real users not theory, on a native-only need:
+   hands-free / background voice · native contact import at scale · background-GPS geofence · reliable
+   iOS push.
+3. **Technical go/no-go** — Phase 0 spike done: **cookie auth survives in the WKWebView** (the one
+   question that decides everything). ~half a day; safe to run anytime, it de-risks the rest.
+
+All three → Phase 1 → TestFlight (no App Store review) → contacts/voice on real phones in ~2 weeks.
+
+## Sequencing vs. the testing window (the order that matters)
+
+The next couple weeks = **real-phone testing + bug reports on the current stable build.** The right
+order around optimization:
+
+1. **First: measure, don't restructure.** Get perf + error instrumentation live (Sentry — already
+   coded, ships dark; set `NEXT_PUBLIC_SENTRY_DSN` in Vercel) so the testing window produces *data* on
+   what's actually slow, not vibes. Additive, zero churn. **This is the real prerequisite.**
+2. **Test on the stable base.** A big restructure *before* testing churns the very code you need stable
+   and turns real bug signal into "is this my bug or the refactor's." Don't.
+3. **Surgical optimizations are fine *during* testing** — caching, prefetch, optimistic UI on specific
+   slow flows, query/index fixes. Localized, low-risk, and they improve the test itself.
+4. **The deep optimization restructure comes AFTER** the window — data-driven (the reports name the hot
+   spots), on a bug-light base. (This also answers "does it ease refinement?": the *surgical* kind eases
+   it; the *architectural* kind should wait so it doesn't fight the bug-fixing.)
+
+The one latency win that *would* be dramatic — **local-first** (data on the phone, instant reads,
+background sync) — is a bigger rebuild than the Capacitor wrap and is its own decision, not part of
+this gate.
