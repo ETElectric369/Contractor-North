@@ -63,18 +63,18 @@ export const NAV_TREE: NavTree = {
     },
     {
       id: "customers",
-      label: "Customers",
+      label: "Contacts",
       icon: "users",
       countKey: "customers",
       children: [
-        { id: "c-all", label: "All customers", icon: "users", href: "/crm" },
+        { id: "c-all", label: "All contacts", icon: "users", href: "/crm" },
         { id: "c-inq", label: "Leads", icon: "mail", href: "/leads" },
-        { id: "c-quotes", label: "Quotes", icon: "fileText", href: "/quotes", countKey: "quotes" },
+        { id: "c-quotes", label: "Estimates", icon: "fileText", href: "/quotes", countKey: "quotes" },
       ],
     },
     {
       id: "money",
-      label: "Money",
+      label: "Invoices",
       icon: "receipt",
       countKey: "money",
       children: [

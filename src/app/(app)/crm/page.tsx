@@ -37,7 +37,7 @@ export default async function CrmPage({
 
   return (
     <div>
-      <PageHeader title="Customers" description="Your customers and contacts. New leads live in the Leads tab.">
+      <PageHeader title="Contacts" description="Everyone you work with — clients and contacts, all linkable to jobs and quotes. New leads live in the Leads tab.">
         <div className="flex flex-wrap gap-2">
           <ImportCustomersButton csv={false} />
           <NewCustomerButton />
