@@ -188,9 +188,7 @@ export const DOCK: DockSection[] = [
     icon: Users,
     href: "/crm",
     staffOnly: true,
-    children: [
-      { id: "c-all", label: "All contacts", icon: Users, href: "/crm" },
-      { id: "c-leads", label: "Leads", icon: UserPlus, href: "/leads" },
-    ],
+    // Just the one destination — Leads lives under Sales (the pipeline), not duplicated here.
+    children: [{ id: "c-all", label: "All contacts", icon: Users, href: "/crm" }],
   },
 ];
