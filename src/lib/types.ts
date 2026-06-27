@@ -2,7 +2,7 @@
 // (You can later replace these with `supabase gen types typescript`.)
 
 export type UserRole = "owner" | "admin" | "office" | "tech";
-export type CustomerType = "residential" | "commercial" | "industrial";
+export type CustomerType = "residential" | "commercial" | "industrial" | "subcontractor";
 export type CustomerStatus = "lead" | "active" | "inactive";
 export type JobStatus =
   | "estimate"

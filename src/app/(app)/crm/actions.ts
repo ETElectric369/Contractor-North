@@ -74,7 +74,13 @@ export async function createCustomer(formData: FormData): Promise<ActionResult> 
     .select("id")
     .single();
 
-  if (error) return { ok: false, error: error.message };
+  if (error) {
+    // Before migration 0087 adds the 'subcontractor' enum value, picking that type returns a raw
+    // Postgres enum error — surface a clear nudge instead.
+    if (/enum/i.test(error.message) && /subcontractor/i.test(error.message))
+      return { ok: false, error: "Subcontractor type isn't set up yet — run migration 0087." };
+    return { ok: false, error: error.message };
+  }
 
   revalidatePath("/crm");
   return { ok: true, id: data.id };

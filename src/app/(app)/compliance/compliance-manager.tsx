@@ -22,17 +22,7 @@ export interface ComplianceItem {
   notes: string | null;
 }
 
-const TYPES = [
-  "General Liability",
-  "Workers' Comp",
-  "Commercial Auto",
-  "Bond",
-  "Contractor License",
-  "Business License",
-  "Certification",
-  "Vehicle Registration",
-  "Other",
-];
+import { COMPLIANCE_TYPES as TYPES } from "@/lib/compliance-types";
 
 export function daysUntil(date: string | null): number | null {
   if (!date) return null;
@@ -55,7 +45,7 @@ export function ComplianceManager({ items }: { items: ComplianceItem[] }) {
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [type, setType] = useState("General Liability");
+  const [type, setType] = useState("Contractor License");
   const [name, setName] = useState("");
   const [policy, setPolicy] = useState("");
   const [amount, setAmount] = useState(0);

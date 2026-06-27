@@ -10,17 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { createCompliance, deleteCompliance } from "../compliance/actions";
 import { daysUntil, type ComplianceItem } from "../compliance/compliance-manager";
-
-// Audits ride on the same tracker (compliance_items); these audit categories route records here.
-export const AUDIT_TYPES = [
-  "Safety Audit",
-  "OSHA Audit",
-  "Insurance Audit",
-  "Financial Audit",
-  "Quality Audit",
-  "License / Permit Audit",
-  "Other Audit",
-];
+import { AUDIT_TYPES } from "@/lib/compliance-types";
 
 function dueBadge(date: string | null) {
   const d = daysUntil(date);

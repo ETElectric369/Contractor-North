@@ -430,7 +430,7 @@ export function QuoteBuilder({
               <p className="pt-2 text-sm text-red-600">{saveError}</p>
             )}
             <Button className="mt-2 w-full" onClick={onSave} disabled={saving}>
-              {saving ? "Saving…" : "Save quote"}
+              {saving ? "Saving…" : "Save estimate"}
             </Button>
           </CardContent>
         </Card>

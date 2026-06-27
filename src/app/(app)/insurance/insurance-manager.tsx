@@ -11,18 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { createCompliance, deleteCompliance } from "../compliance/actions";
 import { daysUntil, expiryBadge, type ComplianceItem } from "../compliance/compliance-manager";
-
-// Insurance is a focused view of the same tracker the Compliance page uses (compliance_items) —
-// these are the policy types it routes here.
-export const INSURANCE_TYPES = [
-  "General Liability",
-  "Workers' Comp",
-  "Commercial Auto",
-  "Umbrella",
-  "Professional Liability",
-  "Bond",
-  "Other",
-];
+import { INSURANCE_TYPES } from "@/lib/compliance-types";
 
 export function InsuranceManager({ items }: { items: ComplianceItem[] }) {
   const router = useRouter();

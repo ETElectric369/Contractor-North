@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
-import { AuditsManager, AUDIT_TYPES } from "./audits-manager";
+import { AuditsManager } from "./audits-manager";
+import { AUDIT_TYPES } from "@/lib/compliance-types";
 
 export const dynamic = "force-dynamic";
 

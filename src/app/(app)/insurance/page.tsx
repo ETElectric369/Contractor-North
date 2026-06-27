@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
-import { InsuranceManager, INSURANCE_TYPES } from "./insurance-manager";
+import { InsuranceManager } from "./insurance-manager";
+import { INSURANCE_FILTER } from "@/lib/compliance-types";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +12,7 @@ export default async function InsurancePage() {
   const { data: items } = await supabase
     .from("compliance_items")
     .select("id, type, name, policy_number, amount, issued_date, expires_date, notes")
-    .in("type", [...INSURANCE_TYPES, "Insurance", "Liability"])
+    .in("type", INSURANCE_FILTER)
     .order("expires_date", { ascending: true, nullsFirst: false });
 
   return (
