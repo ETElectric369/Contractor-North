@@ -30,7 +30,7 @@ function parseStream(full: string): { text: string; draft: AgentDraft | null } {
   return { text, draft };
 }
 
-/** The live quote building in front of you — the bottom half of the glass window. */
+/** The Estimator — the live estimate building in front of you (the assistant's preview box). */
 function LiveQuote({ draft, onSave, saving }: { draft: AgentDraft; onSave: () => void; saving: boolean }) {
   const items = draft.items ?? [];
   const subtotal = items.reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0);
@@ -41,8 +41,9 @@ function LiveQuote({ draft, onSave, saving }: { draft: AgentDraft; onSave: () =>
     <div className="mx-2 mb-2 overflow-hidden rounded-xl border border-white/40 bg-white/70 shadow-sm backdrop-blur">
       <div className="flex items-center gap-2 border-b border-slate-200/70 px-3 py-2 text-xs font-semibold text-slate-700">
         <FileText className="h-3.5 w-3.5 text-brand" />
-        {draft.title || "New quote"}
-        {draft.customer_name ? <span className="font-normal text-slate-400">· {draft.customer_name}</span> : null}
+        <span className="text-[10px] font-bold uppercase tracking-wide text-brand">Estimator</span>
+        <span className="min-w-0 truncate font-normal text-slate-500">· {draft.title || "New estimate"}</span>
+        {draft.customer_name ? <span className="truncate font-normal text-slate-400">· {draft.customer_name}</span> : null}
       </div>
       <ul className="max-h-40 divide-y divide-slate-100 overflow-y-auto px-3 text-xs">
         {items.length === 0 ? (
@@ -66,7 +67,7 @@ function LiveQuote({ draft, onSave, saving }: { draft: AgentDraft; onSave: () =>
       </div>
       <div className="p-2">
         <Button onClick={onSave} disabled={saving || items.length === 0} className={`w-full ${ready ? "bg-green-600 hover:bg-green-500" : ""}`}>
-          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : ready ? "Save quote →" : "Save draft →"}
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : ready ? "Save estimate →" : "Save draft →"}
         </Button>
       </div>
     </div>

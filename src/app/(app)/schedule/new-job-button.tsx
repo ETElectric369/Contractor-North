@@ -124,9 +124,9 @@ export function NewJobButton({
           </div>
           <div>
             <Label htmlFor="billing_type">Billing</Label>
-            <Select id="billing_type" name="billing_type" defaultValue="fixed">
-              <option value="fixed">Fixed price</option>
+            <Select id="billing_type" name="billing_type" defaultValue="tm">
               <option value="tm">Time &amp; Material</option>
+              <option value="fixed">Fixed price</option>
             </Select>
             <p className="mt-1 text-xs text-slate-400">Time &amp; Material bills actual labor + materials; the estimate is a reference, not a cap.</p>
           </div>
