@@ -3,7 +3,8 @@
 import { useMemo, useState } from "react";
 import {
   Zap, Cable, Calculator, Ruler, Box, Layers, PaintBucket, Percent, TrendingUp,
-  HardHat, Receipt, Triangle, Spline, ArrowRightLeft, Search, ChevronDown, type LucideIcon,
+  HardHat, Receipt, Triangle, Spline, ArrowRightLeft, Search, ChevronDown,
+  Fan, Plug, Thermometer, ShieldCheck, Sun, Frame, Square, type LucideIcon,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Input, Label, Select } from "@/components/ui/input";
@@ -52,6 +53,42 @@ const STD_BOXES: { name: string; vol: number }[] = [
   { name: "4×4×1½ square", vol: 21.0 },
   { name: "4×4×2⅛ square", vol: 30.3 },
   { name: "4-11/16×2⅛ square", vol: 42.0 },
+];
+/* Standard OCPD sizes (NEC 240.6). */
+const STD_BREAKERS = [15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200, 225, 250, 300, 350, 400];
+const nextBreaker = (a: number) => STD_BREAKERS.find((b) => b >= a) ?? STD_BREAKERS[STD_BREAKERS.length - 1];
+/* Motor full-load current, A (NEC 430.248 single-φ, 430.250 three-φ), by HP. */
+const MOTOR_FLC: Record<string, Record<string, Record<string, number>>> = {
+  "1φ": {
+    "115V": { "0.5": 9.8, "0.75": 13.8, "1": 16, "1.5": 20, "2": 24, "3": 34, "5": 56, "7.5": 80, "10": 100 },
+    "230V": { "0.5": 4.9, "0.75": 6.9, "1": 8, "1.5": 10, "2": 12, "3": 17, "5": 28, "7.5": 40, "10": 50 },
+  },
+  "3φ": {
+    "230V": { "1": 3.6, "1.5": 5.2, "2": 6.8, "3": 9.6, "5": 15.2, "7.5": 22, "10": 28, "15": 42, "20": 54, "25": 68, "30": 80, "40": 104, "50": 130, "60": 154, "75": 192, "100": 248 },
+    "460V": { "1": 1.8, "1.5": 2.6, "2": 3.4, "3": 4.8, "5": 7.6, "7.5": 11, "10": 14, "15": 21, "20": 27, "25": 34, "30": 40, "40": 52, "50": 65, "60": 77, "75": 96, "100": 124 },
+  },
+};
+/* Ambient temp correction, 75°C column (NEC 310.15(B)(1)); reference 86°F = 1.00. [maxF, factor] */
+const AMBIENT_75: [number, number][] = [
+  [50, 1.2], [59, 1.15], [68, 1.11], [77, 1.05], [86, 1.0], [95, 0.94], [104, 0.88],
+  [113, 0.82], [122, 0.75], [131, 0.67], [140, 0.58], [158, 0.47],
+];
+const ambientFactor = (f: number) => (AMBIENT_75.find(([maxF]) => f <= maxF)?.[1] ?? 0.41);
+/* Bundling adjustment, # current-carrying conductors (NEC 310.15(C)(1)). */
+const bundleFactor = (n: number) => (n <= 3 ? 1 : n <= 6 ? 0.8 : n <= 9 ? 0.7 : n <= 20 ? 0.5 : n <= 30 ? 0.45 : n <= 40 ? 0.4 : 0.35);
+/* GFCI / AFCI requirement by dwelling location (NEC 210.8 / 210.12, ~2020 baseline). */
+const PROTECTION: { area: string; gfci: boolean; afci: boolean; ref: string }[] = [
+  { area: "Kitchen — countertop", gfci: true, afci: true, ref: "210.8(A)(6) / 210.12(A)" },
+  { area: "Bathroom", gfci: true, afci: false, ref: "210.8(A)(1)" },
+  { area: "Bedroom", gfci: false, afci: true, ref: "210.12(A)" },
+  { area: "Living / family room", gfci: false, afci: true, ref: "210.12(A)" },
+  { area: "Hallway / closet", gfci: false, afci: true, ref: "210.12(A)" },
+  { area: "Laundry area", gfci: true, afci: true, ref: "210.8(A)(10) / 210.12(A)" },
+  { area: "Garage", gfci: true, afci: false, ref: "210.8(A)(2)" },
+  { area: "Outdoors", gfci: true, afci: false, ref: "210.8(A)(3)" },
+  { area: "Unfinished basement", gfci: true, afci: true, ref: "210.8(A)(5) / 210.12(D)" },
+  { area: "Crawl space", gfci: true, afci: false, ref: "210.8(A)(4)" },
+  { area: "Wet bar (within 6 ft of sink)", gfci: true, afci: false, ref: "210.8(A)(7)" },
 ];
 
 /* ── shared UI bits ───────────────────────────────────────────────────── */
@@ -486,6 +523,187 @@ function UnitConverter() {
   );
 }
 
+/* ── ELECTRICAL (phase 2) ─────────────────────────────────────────────── */
+function MotorFLC() {
+  const [phase, setPhase] = useState("3φ");
+  const [volts, setVolts] = useState("230V");
+  const [hp, setHp] = useState("5");
+  const vOpts = Object.keys(MOTOR_FLC[phase]);
+  const v = vOpts.includes(volts) ? volts : vOpts[0];
+  const hpOpts = Object.keys(MOTOR_FLC[phase][v]);
+  const h = hpOpts.includes(hp) ? hp : hpOpts[0];
+  const flc = MOTOR_FLC[phase][v][h];
+  const breaker = nextBreaker(flc * 2.5);
+  const changePhase = (p: string) => { setPhase(p); setVolts(Object.keys(MOTOR_FLC[p])[0]); };
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-3 gap-3">
+        <Field label="Phase"><Select value={phase} onChange={(e) => changePhase(e.target.value)}>{Object.keys(MOTOR_FLC).map((p) => <option key={p}>{p}</option>)}</Select></Field>
+        <Field label="Voltage"><Select value={v} onChange={(e) => setVolts(e.target.value)}>{vOpts.map((x) => <option key={x}>{x}</option>)}</Select></Field>
+        <Field label="Motor HP"><Select value={h} onChange={(e) => setHp(e.target.value)}>{hpOpts.map((x) => <option key={x} value={x}>{x} hp</option>)}</Select></Field>
+      </div>
+      <Result tone="green">
+        FLC <strong>{flc} A</strong> · breaker (inverse-time, 250%) <strong>{breaker} A</strong> · overload <strong>{(flc * 1.15).toFixed(1)}–{(flc * 1.25).toFixed(1)} A</strong>
+      </Result>
+      <p className="text-xs text-slate-400">FLC per NEC 430.248/430.250 — use the table value (not nameplate) for branch-circuit + breaker sizing; overload uses the nameplate FLA × service factor.</p>
+    </div>
+  );
+}
+
+function KvaAmps() {
+  const [phase, setPhase] = useState<"1" | "3">("3");
+  const [volts, setVolts] = useState(240);
+  const [kva, setKva] = useState(45);
+  const [pf, setPf] = useState(1);
+  const root = phase === "3" ? Math.sqrt(3) : 1;
+  const amps = volts > 0 && pf > 0 ? (kva * 1000) / (root * volts * pf) : 0;
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Field label="Phase"><Select value={phase} onChange={(e) => setPhase(e.target.value as "1" | "3")}><option value="1">1-phase</option><option value="3">3-phase</option></Select></Field>
+        <Field label="Volts"><NumberInput value={volts} onValueChange={setVolts} /></Field>
+        <Field label="kVA"><NumberInput value={kva} onValueChange={setKva} /></Field>
+        <Field label="Power factor"><NumberInput value={pf} onValueChange={setPf} /></Field>
+      </div>
+      <Result><strong>{kva} kVA</strong> at {volts} V {phase}-phase = <strong>{amps.toFixed(1)} A</strong></Result>
+    </div>
+  );
+}
+
+function Derating() {
+  const [size, setSize] = useState("8");
+  const [metal, setMetal] = useState<"cu" | "al">("cu");
+  const [ambF, setAmbF] = useState(86);
+  const [count, setCount] = useState(3);
+  const base = (metal === "cu" ? AMPACITY_CU : AMPACITY_AL)[size] ?? 0;
+  const tf = ambientFactor(ambF);
+  const bf = bundleFactor(count);
+  const derated = base * tf * bf;
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Field label="Wire size"><Select value={size} onChange={(e) => setSize(e.target.value)}>{SIZES.map((s) => <option key={s} value={s}>{s}</option>)}</Select></Field>
+        <Field label="Metal"><Select value={metal} onChange={(e) => setMetal(e.target.value as "cu" | "al")}><option value="cu">Copper</option><option value="al">Aluminum</option></Select></Field>
+        <Field label="Ambient °F"><NumberInput value={ambF} onValueChange={setAmbF} /></Field>
+        <Field label="# current-carrying"><NumberInput value={count} onValueChange={setCount} /></Field>
+      </div>
+      <Result tone={derated < base ? "amber" : "green"}>
+        Base {base} A (75°C) × temp {tf} × bundling {bf} = <strong>{derated.toFixed(1)} A</strong> usable
+      </Result>
+      <p className="text-xs text-slate-400">Ambient correction NEC 310.15(B)(1) (86°F = 1.0); bundling 310.15(C)(1) for 4+ current-carrying conductors.</p>
+    </div>
+  );
+}
+
+function SolarBusbar() {
+  const [bus, setBus] = useState(200);
+  const [main, setMain] = useState(200);
+  const [pv, setPv] = useState(40);
+  const limit = bus * 1.2;
+  const sum = main + pv;
+  const ok = sum <= limit;
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-3 gap-3">
+        <Field label="Busbar rating A"><NumberInput value={bus} onValueChange={setBus} /></Field>
+        <Field label="Main breaker A"><NumberInput value={main} onValueChange={setMain} /></Field>
+        <Field label="PV breaker A"><NumberInput value={pv} onValueChange={setPv} /></Field>
+      </div>
+      <Result tone={ok ? "green" : "red"}>
+        Main + PV = <strong>{sum} A</strong> vs 120% of busbar = <strong>{limit.toFixed(0)} A</strong> → {ok ? "OK to back-feed" : "exceeds — move PV to the opposite end, supply-side tap, or downsize the main"}
+      </Result>
+      <p className="text-xs text-slate-400">NEC 705.12(B)(3)(2): busbar × 120% ≥ main OCPD + PV OCPD, with the PV breaker at the opposite end of the bus.</p>
+    </div>
+  );
+}
+
+function GfciAfci() {
+  const [area, setArea] = useState(PROTECTION[0].area);
+  const sel = PROTECTION.find((p) => p.area === area) ?? PROTECTION[0];
+  return (
+    <div className="space-y-3">
+      <Field label="Location / area"><Select value={area} onChange={(e) => setArea(e.target.value)}>{PROTECTION.map((p) => <option key={p.area}>{p.area}</option>)}</Select></Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Result tone={sel.gfci ? "amber" : "green"}>GFCI: <strong>{sel.gfci ? "Required" : "Not required"}</strong></Result>
+        <Result tone={sel.afci ? "amber" : "green"}>AFCI: <strong>{sel.afci ? "Required" : "Not required"}</strong></Result>
+      </div>
+      <p className="text-xs text-slate-400">{sel.ref} · dwelling units, ~NEC 2020. The 2023 NEC expands AFCI/GFCI — verify your AHJ's adopted edition.</p>
+    </div>
+  );
+}
+
+/* ── ESTIMATING (phase 2) ─────────────────────────────────────────────── */
+function ConcreteFooting() {
+  const [L, setL] = useState(20);
+  const [W, setW] = useState(16);
+  const [D, setD] = useState(8);
+  const [count, setCount] = useState(1);
+  const [waste, setWaste] = useState(7);
+  const cfPer = L * (W / 12) * (D / 12); // length ft, width/depth inches
+  const cf = cfPer * count * (1 + waste / 100);
+  const cy = cf / 27;
+  const bags60 = Math.ceil(cf / 0.45);
+  const bags80 = Math.ceil(cf / 0.6);
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+        <Field label="Length (ft)"><NumberInput value={L} onValueChange={setL} /></Field>
+        <Field label="Width (in)"><NumberInput value={W} onValueChange={setW} /></Field>
+        <Field label="Depth (in)"><NumberInput value={D} onValueChange={setD} /></Field>
+        <Field label="# footings"><NumberInput value={count} onValueChange={setCount} /></Field>
+        <Field label="Waste %"><NumberInput value={waste} onValueChange={setWaste} /></Field>
+      </div>
+      <Result tone={cy <= 1.5 ? "green" : cy <= 3 ? "amber" : "red"}>
+        <strong>{cy.toFixed(2)} cubic yards</strong> total ({cf.toFixed(1)} ft³ incl. {waste}% waste) · <strong>{bags80}</strong> × 80-lb <em>or</em> <strong>{bags60}</strong> × 60-lb bags
+      </Result>
+    </div>
+  );
+}
+
+function Framing() {
+  const [L, setL] = useState(20);
+  const [oc, setOc] = useState(16);
+  const [corners, setCorners] = useState(2);
+  const [openings, setOpenings] = useState(1);
+  const studs = Math.ceil((L * 12) / oc) + 1 + corners * 2 + openings * 2;
+  const plate = L * 3; // single bottom + double top
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Field label="Wall length (ft)"><NumberInput value={L} onValueChange={setL} /></Field>
+        <Field label="Stud spacing"><Select value={String(oc)} onChange={(e) => setOc(Number(e.target.value))}><option value="16">16&quot; OC</option><option value="24">24&quot; OC</option></Select></Field>
+        <Field label="# corners"><NumberInput value={corners} onValueChange={setCorners} /></Field>
+        <Field label="# openings"><NumberInput value={openings} onValueChange={setOpenings} /></Field>
+      </div>
+      <Result><strong>{studs} studs</strong> · <strong>{plate} ft</strong> of plate stock (1 bottom + 2 top)</Result>
+    </div>
+  );
+}
+
+function Drywall() {
+  const [area, setArea] = useState(500);
+  const [sheet, setSheet] = useState(32);
+  const [waste, setWaste] = useState(10);
+  const adj = area * (1 + waste / 100);
+  const sheets = Math.ceil(adj / sheet);
+  const mud = (area / 100) * 20; // lbs, 2-coat all-purpose
+  const tape = Math.ceil((area / 100) * 100); // ft, walls (rough)
+  const screws = sheets * 32;
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <Field label="Area (ft²)"><NumberInput value={area} onValueChange={setArea} /></Field>
+        <Field label="Sheet size"><Select value={String(sheet)} onChange={(e) => setSheet(Number(e.target.value))}><option value="32">4×8 (32 ft²)</option><option value="48">4×12 (48 ft²)</option></Select></Field>
+        <Field label="Waste %"><NumberInput value={waste} onValueChange={setWaste} /></Field>
+      </div>
+      <Result>
+        <strong>{sheets} sheets</strong> · ~<strong>{mud.toFixed(0)} lb</strong> mud · ~<strong>{tape} ft</strong> tape · ~<strong>{screws}</strong> screws
+      </Result>
+      <p className="text-xs text-slate-400">Rough 2-coat estimate; tape varies with layout — buy ~15% extra.</p>
+    </div>
+  );
+}
+
 /* ── registry + packaged, searchable view ─────────────────────────────── */
 type Pkg = "Electrical" | "Estimating" | "Money" | "Field";
 const PKG_TONE: Record<Pkg, string> = {
@@ -501,9 +719,17 @@ const TOOLS: Tool[] = [
   { id: "conduit-fill", name: "Conduit fill", pkg: "Electrical", desc: "Min conduit for THHN at 40% NEC fill", icon: Cable, render: () => <ConduitFill /> },
   { id: "ohms", name: "Ohm's law / load", pkg: "Electrical", desc: "V · I · P · R and breaker size", icon: Calculator, render: () => <OhmsLaw /> },
   { id: "box-fill", name: "Box fill (NEC 314.16)", pkg: "Electrical", desc: "Required box volume + box size", icon: Box, render: () => <BoxFill /> },
+  { id: "motor-flc", name: "Motor FLC + breaker", pkg: "Electrical", desc: "Full-load amps, breaker, overload (NEC 430)", icon: Fan, render: () => <MotorFLC /> },
+  { id: "kva-amps", name: "kVA ↔ amps", pkg: "Electrical", desc: "Transformer / generator sizing, 1φ & 3φ", icon: Plug, render: () => <KvaAmps /> },
+  { id: "derating", name: "Ampacity derating", pkg: "Electrical", desc: "Temp + bundling adjusted ampacity", icon: Thermometer, render: () => <Derating /> },
+  { id: "gfci-afci", name: "GFCI / AFCI lookup", pkg: "Electrical", desc: "Where protection is required (210.8 / 210.12)", icon: ShieldCheck, render: () => <GfciAfci /> },
+  { id: "solar-busbar", name: "Solar 120% busbar", pkg: "Electrical", desc: "PV back-feed busbar check (705.12)", icon: Sun, render: () => <SolarBusbar /> },
   { id: "board-feet", name: "Board feet", pkg: "Estimating", desc: "Lumber board-foot volume", icon: Ruler, render: () => <BoardFeet /> },
   { id: "concrete-slab", name: "Concrete (slab)", pkg: "Estimating", desc: "Cubic yards + bag count for a slab", icon: Layers, render: () => <ConcreteSlab /> },
   { id: "paint", name: "Paint coverage", pkg: "Estimating", desc: "Gallons to paint a room", icon: PaintBucket, render: () => <Paint /> },
+  { id: "concrete-footing", name: "Concrete (footing)", pkg: "Estimating", desc: "Yards + bags for footings / piers", icon: Layers, render: () => <ConcreteFooting /> },
+  { id: "framing", name: "Framing studs", pkg: "Estimating", desc: "Stud count + plate stock for a wall", icon: Frame, render: () => <Framing /> },
+  { id: "drywall", name: "Drywall + finish", pkg: "Estimating", desc: "Sheets, mud, tape, screws", icon: Square, render: () => <Drywall /> },
   { id: "markup", name: "Markup ↔ margin", pkg: "Money", desc: "Convert markup, margin, sell price", icon: Percent, render: () => <MarkupMargin /> },
   { id: "job-profit", name: "Job profit", pkg: "Money", desc: "Profit + margin on a quote", icon: TrendingUp, render: () => <JobProfit /> },
   { id: "labor-burden", name: "Labor burden", pkg: "Money", desc: "True loaded labor cost per hour", icon: HardHat, render: () => <LaborBurden /> },
