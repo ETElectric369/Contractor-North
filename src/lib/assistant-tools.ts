@@ -3,6 +3,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { tzDayStartUtc } from "@/lib/tz";
 import { escapeLike } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
+import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 
 /**
  * Read-only data tools for the in-app assistant.
@@ -1372,7 +1373,7 @@ export async function runDataTool(
           supabase
             .from("jobs")
             .select("id", head)
-            .in("status", ["scheduled", "in_progress", "on_hold"]),
+            .in("status", ACTIVE_JOB_STATUSES),
           supabase.from("quotes").select("id", head).in("status", ["draft", "sent"]),
           supabase.from("time_entries").select("id", head).is("clock_out", null),
           supabase.from("invoices").select("total, amount_paid, status").limit(1000),

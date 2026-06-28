@@ -7,15 +7,9 @@ import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { AddPermitButton } from "./add-permit-button";
 import { EditPermitButton } from "./edit-permit-button";
+import { permitStatusTone as statusTone, permitResultTone } from "@/lib/permit-options";
 
 export const dynamic = "force-dynamic";
-
-function statusTone(s: string): "green" | "red" | "amber" | "slate" {
-  if (["issued", "passed", "closed"].includes(s)) return "green";
-  if (s === "failed") return "red";
-  if (["applied", "scheduled"].includes(s)) return "amber";
-  return "slate";
-}
 
 export default async function PermitsPage() {
   const supabase = await createClient();
@@ -78,7 +72,7 @@ export default async function PermitsPage() {
                 </div>
                 <div className="col-span-2 text-sm text-slate-600">{p.inspection_date ? formatDate(p.inspection_date) : "—"}</div>
                 <div className="col-span-3 flex items-center justify-end gap-2">
-                  <Badge tone={p.inspection_result === "passed" ? "green" : p.inspection_result === "failed" ? "red" : "slate"}>{p.inspection_result}</Badge>
+                  <Badge tone={permitResultTone(p.inspection_result)}>{p.inspection_result}</Badge>
                   <Badge tone={statusTone(p.status)}>{p.status.replace("_", " ")}</Badge>
                   <EditPermitButton permit={p} jobId={p.job_id} />
                 </div>

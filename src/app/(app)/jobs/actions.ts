@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { JOB_STATUSES } from "@/lib/job-status";
 import { emptyToNull } from "@/lib/forms";
 import { visibleJobIdOrNull, visibleTemplateIdOrNull } from "@/lib/job-visibility";
 import { requireStaff } from "@/lib/staff-guard";
@@ -107,8 +108,7 @@ export async function createInvoiceForJob(
 /** Set a job's status (partial — keeps everything else). For voice: "mark the Miller job on
  *  hold / in progress". Org-scoped by RLS (a cross-org id is a clean no-op). */
 export async function setJobStatus(id: string, status: string): Promise<{ ok: boolean; error?: string }> {
-  const valid = ["estimate", "scheduled", "in_progress", "on_hold", "complete", "invoiced", "cancelled"];
-  if (!valid.includes(status)) return { ok: false, error: `Status must be one of: ${valid.join(", ")}.` };
+  if (!(JOB_STATUSES as readonly string[]).includes(status)) return { ok: false, error: `Status must be one of: ${JOB_STATUSES.join(", ")}.` };
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -475,10 +475,6 @@ export type JobImportRow = {
 };
 export type JobImportResult = { name: string; status: "created" | "failed"; reason?: string };
 
-// Matches the job_status enum exactly — anything else (e.g. "lead", "in_production")
-// falls back to in_progress rather than erroring the insert.
-const JOB_STATUSES = ["estimate", "scheduled", "in_progress", "on_hold", "complete", "invoiced", "cancelled"];
-
 /** Bulk-import jobs from a roster (migration importer): find-or-create the customer,
  *  create the job, and record its contract value as an ACCEPTED quote so the job's
  *  Contract / Invoiced / Paid math works. Staff only; best-effort per row. */
@@ -531,7 +527,7 @@ export async function importJobs(
       }
     }
 
-    const status = JOB_STATUSES.includes((r.status || "").trim()) ? (r.status as string).trim() : "in_progress";
+    const status = (JOB_STATUSES as readonly string[]).includes((r.status || "").trim()) ? (r.status as string).trim() : "in_progress";
     const { data: job, error: je } = await supabase
       .from("jobs")
       .insert({

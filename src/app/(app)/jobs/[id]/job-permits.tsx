@@ -10,6 +10,15 @@ import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { createPermit, updatePermit, deletePermit } from "../../permits/actions";
 import { EditPermitButton } from "../../permits/edit-permit-button";
+// Canonical permit options + tones (the inline dropdown now writes the same status keys the
+// standalone editor uses — was "scheduled" here vs "inspection_scheduled" there).
+import {
+  PERMIT_TYPES as TYPES,
+  PERMIT_STATUSES as STATUSES,
+  PERMIT_INSPECTION_RESULTS as RESULTS,
+  permitStatusTone as statusTone,
+  permitResultTone as resultTone,
+} from "@/lib/permit-options";
 
 export interface Permit {
   id: string;
@@ -26,35 +35,6 @@ export interface Permit {
   notes: string | null;
 }
 
-const TYPES = ["Electrical", "Building", "Mechanical", "Plumbing", "Solar/PV", "Low Voltage", "Other"];
-const STATUSES = [
-  ["not_submitted", "Not submitted"],
-  ["applied", "Applied"],
-  ["issued", "Issued"],
-  ["scheduled", "Inspection scheduled"],
-  ["passed", "Passed"],
-  ["failed", "Failed"],
-  ["closed", "Closed / Final"],
-] as const;
-const RESULTS = [
-  ["pending", "Pending"],
-  ["passed", "Passed"],
-  ["partial", "Partial"],
-  ["failed", "Failed"],
-] as const;
-
-function statusTone(s: string): "green" | "red" | "amber" | "slate" {
-  if (["issued", "passed", "closed"].includes(s)) return "green";
-  if (s === "failed") return "red";
-  if (["applied", "scheduled"].includes(s)) return "amber";
-  return "slate";
-}
-function resultTone(s: string): "green" | "red" | "amber" | "slate" {
-  if (s === "passed") return "green";
-  if (s === "failed") return "red";
-  if (s === "partial") return "amber";
-  return "slate";
-}
 
 export function JobPermits({ jobId, permits }: { jobId: string; permits: Permit[] }) {
   const router = useRouter();

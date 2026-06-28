@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
+import { JOB_STATUSES, JOB_STATUS_PRIORITY, jobStatusLabel } from "@/lib/job-status";
 import { formatDate } from "@/lib/utils";
 import { NewJobButton } from "../schedule/new-job-button";
 import { JobImportButton } from "./job-import-button";
@@ -39,13 +40,11 @@ export default async function JobsPage({
   // Default (unfiltered) view: active jobs up top, completed/invoiced sink to the
   // bottom. Within a group the query's newest-first order is preserved (stable sort).
   if (!status) {
-    const PRIORITY: Record<string, number> = {
-      in_progress: 0, scheduled: 1, on_hold: 2, estimate: 3, invoiced: 4, complete: 5,
-    };
-    jobs.sort((a, b) => (PRIORITY[a.status] ?? 9) - (PRIORITY[b.status] ?? 9));
+    jobs.sort((a, b) => (JOB_STATUS_PRIORITY[a.status] ?? 9) - (JOB_STATUS_PRIORITY[b.status] ?? 9));
   }
 
-  const STATUSES = ["estimate", "scheduled", "in_progress", "on_hold", "complete", "invoiced"];
+  // Filter strip is the canonical status list (so 'cancelled' can't silently vanish again).
+  const STATUSES = JOB_STATUSES;
 
   return (
     <div>
@@ -112,7 +111,7 @@ export default async function JobsPage({
                       {j.scheduled_start && <span>· {formatDate(j.scheduled_start)}</span>}
                     </div>
                   </div>
-                  <Badge tone={statusTone(j.status)}>{j.status.replace("_", " ")}</Badge>
+                  <Badge tone={statusTone(j.status)}>{jobStatusLabel(j.status)}</Badge>
                 </Link>
               </li>
             ))}

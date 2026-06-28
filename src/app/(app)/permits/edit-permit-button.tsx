@@ -6,6 +6,7 @@ import { Pencil } from "lucide-react";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { updatePermit } from "./actions";
+import { PERMIT_TYPES as TYPES, PERMIT_STATUSES as STATUSES } from "@/lib/permit-options";
 
 type Permit = {
   id: string;
@@ -22,16 +23,6 @@ type Permit = {
   notes?: string | null;
   portal_url?: string | null;
 };
-
-const TYPES = ["Electrical", "Plumbing", "Mechanical", "Building", "Solar", "Other"];
-const STATUSES: [string, string][] = [
-  ["applied", "Applied"],
-  ["issued", "Issued"],
-  ["inspection_scheduled", "Inspection scheduled"],
-  ["passed", "Passed"],
-  ["failed", "Failed"],
-  ["closed", "Closed"],
-];
 
 const d = (s?: string | null) => (s ? String(s).slice(0, 10) : "");
 

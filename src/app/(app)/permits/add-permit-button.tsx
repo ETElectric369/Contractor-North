@@ -8,18 +8,9 @@ import { Modal } from "@/components/ui/modal";
 import { ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { createPermit } from "./actions";
+import { PERMIT_TYPES as TYPES, PERMIT_STATUSES as STATUSES } from "@/lib/permit-options";
 
 type JobOpt = { id: string; label: string };
-
-const TYPES = ["Electrical", "Plumbing", "Mechanical", "Building", "Solar", "Other"];
-const STATUSES: [string, string][] = [
-  ["applied", "Applied"],
-  ["issued", "Issued"],
-  ["inspection_scheduled", "Inspection scheduled"],
-  ["passed", "Passed"],
-  ["failed", "Failed"],
-  ["closed", "Closed"],
-];
 
 /** Standalone "Add permit" on the /permits page — the job is OPTIONAL (a permit can stand
  *  alone), so the page is no longer view-only. Mirrors the job-tab form, wraps createPermit. */

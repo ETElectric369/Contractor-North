@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { visibleJobIdOrNull } from "@/lib/job-visibility";
 import { requireStaff } from "@/lib/staff-guard";
+import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import type { GeoPoint } from "@/lib/types";
 
 export type ClockResult = { ok: boolean; error?: string };
@@ -80,7 +81,9 @@ export async function clockIn(input: {
       .from("jobs")
       .update({ status: "in_progress" })
       .eq("id", jobId)
-      .in("status", ["scheduled", "on_hold", "quoted", "lead"]);
+      // Promote any not-yet-finished job to in_progress on clock-in (never un-complete a
+      // finished/cancelled one). Was a literal carrying dead 'quoted'/'lead' (non-job statuses).
+      .in("status", ACTIVE_JOB_STATUSES.filter((s) => s !== "in_progress"));
     revalidatePath(`/jobs/${jobId}`);
     revalidatePath("/jobs");
   }

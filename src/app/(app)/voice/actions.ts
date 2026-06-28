@@ -9,6 +9,7 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz } from "@/lib/tz";
 import { toIso } from "@/lib/forms";
 import { executeAction } from "@/lib/actions/execute";
+import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import type { Affordance } from "@/lib/action-items/types";
 
 /** A pending field action that needs a spoken "yes" before it runs. */
@@ -85,7 +86,7 @@ export async function runVoiceCommand(transcript: string, history: VoiceTurn[] =
     supabase
       .from("jobs")
       .select("id, job_number, name")
-      .in("status", ["in_progress", "scheduled", "quoted", "on_hold", "lead"])
+      .in("status", ACTIVE_JOB_STATUSES)
       .order("scheduled_start", { ascending: true, nullsFirst: false })
       .limit(40),
   ]);

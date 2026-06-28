@@ -7,16 +7,9 @@ import { Select } from "@/components/ui/input";
 // There used to be an identically-named UNGUARDED copy in schedule/actions that this imported — a
 // name-collision footgun that silently bypassed the staff guard. That copy is now deleted.
 import { setJobStatus } from "../actions";
+import { JOB_STATUSES } from "@/lib/job-status";
 
-const STATUSES = [
-  "estimate",
-  "scheduled",
-  "in_progress",
-  "on_hold",
-  "complete",
-  "invoiced",
-  "cancelled",
-];
+const STATUSES = JOB_STATUSES;
 
 export function JobStatusControl({ id, status }: { id: string; status: string }) {
   const router = useRouter();
