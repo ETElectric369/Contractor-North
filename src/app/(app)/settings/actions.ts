@@ -60,6 +60,7 @@ export async function updateOrganization(formData: FormData): Promise<Result> {
     timezone: String(formData.get("timezone") ?? "America/Los_Angeles"),
     tax_number: String(formData.get("tax_number") ?? "").trim(),
     glass_tint: String(formData.get("glass_tint") ?? "#1b9488") || "#1b9488",
+    weather_source: formData.get("weather_source") === "business" ? "business" : "device",
   };
 
   const { error } = await supabase

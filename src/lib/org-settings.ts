@@ -45,6 +45,10 @@ export interface OrgSettings {
    *  they left, so a forgotten clock-out can't over-bill. Default on. */
   geofence_logout: boolean;
   geofence_radius_m: number; // meters from the clock-in point before auto clock-out
+  /** Weather widget location: "device" = each user's GPS (the crew is mobile); "business" = the org's
+   *  configured address, always. EXPLICIT choice — no silent fallback between them (that masking, where
+   *  a GPS miss quietly showed the shop's city as if it were yours, was the root weather bug). */
+  weather_source: "device" | "business";
   /** Payroll cadence + the anchor date a biweekly/weekly cycle counts from. */
   pay_schedule: "weekly" | "biweekly" | "semimonthly" | "monthly";
   pay_anchor: string; // "YYYY-MM-DD" — start of a reference pay period
@@ -102,6 +106,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   timecard_supervisor_id: "",
   geofence_logout: true,
   geofence_radius_m: 300,
+  weather_source: "device", // default: each user's own location (the crew is mobile)
   pay_schedule: "biweekly",
   pay_anchor: "2026-01-05", // a Monday; biweekly cycles cascade from here
 

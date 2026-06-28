@@ -132,6 +132,18 @@ export function OrgSettingsForm({ org }: { org: Organization }) {
           </Select>
         </div>
       </div>
+      <div>
+        <Label htmlFor="weather_source">My Day weather location</Label>
+        <Select id="weather_source" name="weather_source" defaultValue={s.weather_source}>
+          <option value="device">My location — each user&apos;s GPS</option>
+          <option value="business">Business address</option>
+        </Select>
+        <p className="mt-1 text-xs text-slate-500">
+          &ldquo;My location&rdquo; shows weather where each person actually is; if location is off it
+          shows a one-tap &ldquo;turn on location&rdquo; prompt — never the shop&apos;s city in disguise.
+          &ldquo;Business address&rdquo; always uses your shop&apos;s location.
+        </p>
+      </div>
       <div className="flex items-center gap-3">
         <Button type="submit" disabled={pending}>
           {pending ? "Saving…" : "Save changes"}

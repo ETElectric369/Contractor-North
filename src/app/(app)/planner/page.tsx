@@ -320,7 +320,11 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       </div>
 
       <div className="mb-3">
-        <WeatherWidget location={orgLocation} label={(org as any)?.city ?? undefined} />
+        <WeatherWidget
+          location={orgLocation}
+          label={(org as any)?.city ?? undefined}
+          source={getOrgSettings((org as any)?.settings).weather_source}
+        />
       </div>
       <p className="mb-4 text-center text-sm italic text-slate-400">&ldquo;{dailyQuote}&rdquo;</p>
 

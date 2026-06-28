@@ -14,14 +14,12 @@ interface WeatherData {
   windMph?: number;
 }
 
-// Where the displayed weather is FOR — drives the label honestly:
-//  fresh  = a real device GPS fix this session ("Your location")
-//  approx = a recent cached device fix, possibly stale ("Approx · 12m ago")
-//  org    = the shop's configured city; GPS off/denied/unavailable ("Location off")
-type LocSource = { kind: "fresh" } | { kind: "approx"; ageMin: number } | { kind: "org" };
+// A recent device fix (this fresh, weather a few miles/minutes off doesn't matter) is reused so we
+// don't re-prompt GPS on every page load — but it's still YOUR location, never the shop's.
+const DEVICE_CACHE_MIN = 30;
 
-// Org-city geocode cache — SEPARATE key from the device-GPS cache, and it can NEVER count as
-// "the user's location" (that mislabeling was the bug). Just saves a geocoder round-trip.
+// Org-address geocode cache — only ever used in "business" mode, so it can never masquerade as the
+// user's location. Just saves a geocoder round-trip.
 function readCityCache(loc: string): GeoCoords | null {
   try {
     const raw = localStorage.getItem(`geocity:${loc}`);
@@ -37,45 +35,49 @@ function writeCityCache(loc: string, c: GeoCoords) {
     /* ignore */
   }
 }
-
-// Last good DEVICE-GPS fix, with its age. We still cache it (a single flaky miss shouldn't blank the
-// card), but it's labeled "approx" with its age — never passed off as a current "Your location" fix.
-function writeGps(c: GeoCoords) {
+function writeDeviceFix(c: GeoCoords) {
   try {
     localStorage.setItem("gps:last", JSON.stringify({ ...c, ts: Date.now() }));
   } catch {
     /* ignore */
   }
 }
-function readGps(): { coords: GeoCoords; ageMin: number } | null {
+function readDeviceFix(): GeoCoords | null {
   try {
     const raw = localStorage.getItem("gps:last");
     if (!raw) return null;
     const v = JSON.parse(raw);
     if (typeof v?.lat !== "number" || typeof v?.lng !== "number" || typeof v?.ts !== "number") return null;
-    return { coords: { lat: v.lat, lng: v.lng }, ageMin: Math.round((Date.now() - v.ts) / 60_000) };
+    if (Date.now() - v.ts > DEVICE_CACHE_MIN * 60_000) return null;
+    return { lat: v.lat, lng: v.lng };
   } catch {
     return null;
   }
 }
 
-// A cached fix older than this is too stale to even show as "approx" — fall to the org city.
-const MAX_APPROX_MIN = 90;
-
 /**
- * Current-conditions weather for WHERE THE USER IS (device GPS), labeled honestly: a fresh fix says
- * "Your location"; a recent cached fix says "approx, Nm ago"; GPS off/denied says "Location off" and
- * shows the shop's city. The "Use my location" tap (an in-gesture geolocation call, which iOS PWAs
- * honor) is ALWAYS available until we have a fresh fix. Renders nothing when no key / no location.
+ * Current-conditions weather. The location is an EXPLICIT choice (org setting `weather_source`), never a
+ * silent guess:
+ *   - "device"  → where THIS user is (GPS). If location is off it shows a "turn on location" prompt — it
+ *                 NEVER falls back to the shop's city pretending to be you (that mask was the root bug).
+ *   - "business" → the org's configured address, always (no GPS prompt).
+ * Renders nothing when there's no key, or (device mode) a compact "enable location" card when GPS is off.
  */
-export function WeatherWidget({ location, label }: { location: string | null; label?: string }) {
+export function WeatherWidget({
+  location,
+  label,
+  source = "device",
+}: {
+  location: string | null;
+  label?: string;
+  source?: "device" | "business";
+}) {
   const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
   const [data, setData] = useState<WeatherData | null>(null);
-  const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
-  const [src, setSrc] = useState<LocSource | null>(null);
+  // "needloc" = device mode, no usable fix → show the enable-location prompt (NOT the shop's weather).
+  const [status, setStatus] = useState<"loading" | "ok" | "error" | "needloc">("loading");
 
-  // Fetch current conditions for a known lat/lng. Returns false on failure (incl. a 200 with no
-  // temperature in the body — we must NOT fabricate a real-looking "0°F" from a partial response).
+  // Fetch current conditions. Returns false on failure incl. a 200 with no temperature (don't fabricate 0°F).
   const fetchWeatherFor = useCallback(
     async (coords: GeoCoords): Promise<boolean> => {
       if (!key) return false;
@@ -87,7 +89,7 @@ export function WeatherWidget({ location, label }: { location: string | null; la
         if (!r.ok) return false;
         const w = await r.json();
         const temp = w.temperature?.degrees;
-        if (typeof temp !== "number") return false; // partial/empty body — don't show a fake 0°F
+        if (typeof temp !== "number") return false;
         setData({
           tempF: Math.round(temp),
           feelsF: Math.round(w.feelsLikeTemperature?.degrees ?? temp),
@@ -105,14 +107,31 @@ export function WeatherWidget({ location, label }: { location: string | null; la
     [key],
   );
 
-  // Explicit "use my location" tap. iOS home-screen PWAs frequently ignore the on-mount geolocation
-  // call (no gesture, separate permission scope) but honor one made directly from a tap — so this is
-  // the reliable recovery out of "showing the shop's city".
+  // Geocode the org's configured address (cached). Used only in "business" mode.
+  const businessCoords = useCallback(async (): Promise<GeoCoords | null> => {
+    if (!location || !key) return null;
+    const cached = readCityCache(location);
+    if (cached) return cached;
+    try {
+      await loadGoogleMaps(key);
+      const g = (window as any).google;
+      const res = await new g.maps.Geocoder().geocode({ address: location });
+      const loc = res.results?.[0]?.geometry?.location;
+      if (!loc) return null;
+      const c = { lat: loc.lat(), lng: loc.lng() };
+      writeCityCache(location, c);
+      return c;
+    } catch {
+      return null;
+    }
+  }, [location, key]);
+
+  // Explicit "use my location" tap (device mode). An in-gesture geolocation call — which iOS home-screen
+  // PWAs honor even when the on-mount call was ignored.
   const locate = useCallback(async () => {
     const res = await getPosition();
-    if (res.status !== "ok") return; // denied/timeout/unavailable → leave the org city + the button up
-    writeGps(res.coords);
-    setSrc({ kind: "fresh" });
+    if (res.status !== "ok") return; // stay on the prompt; don't pretend
+    writeDeviceFix(res.coords);
     setStatus("loading");
     await fetchWeatherFor(res.coords);
   }, [fetchWeatherFor]);
@@ -121,58 +140,54 @@ export function WeatherWidget({ location, label }: { location: string | null; la
     if (!key) return;
     let cancelled = false;
     (async () => {
-      // 1) Try a real device fix first — the crew isn't always at the shop.
+      if (source === "business") {
+        const c = await businessCoords();
+        if (cancelled) return;
+        if (!c || !(await fetchWeatherFor(c))) {
+          if (!cancelled) setStatus("error");
+        }
+        return;
+      }
+      // device mode — YOUR location only, no business fallback.
+      const recent = readDeviceFix();
+      if (recent) {
+        if (!(await fetchWeatherFor(recent)) && !cancelled) setStatus("error");
+        return;
+      }
       const res = await getPosition();
       if (cancelled) return;
       if (res.status === "ok") {
-        writeGps(res.coords);
-        setSrc({ kind: "fresh" });
+        writeDeviceFix(res.coords);
         if (!(await fetchWeatherFor(res.coords)) && !cancelled) setStatus("error");
-        return;
+      } else {
+        setStatus("needloc"); // GPS off/denied → prompt, never the shop's city
       }
-      // 2) A RECENT cached device fix beats the shop's city — but it's labeled "approx", never "Your
-      //    location", and the recovery button stays up so a stale fix can always be refreshed.
-      const last = readGps();
-      if (last && last.ageMin <= MAX_APPROX_MIN) {
-        setSrc({ kind: "approx", ageMin: last.ageMin });
-        if (!(await fetchWeatherFor(last.coords)) && !cancelled) setStatus("error");
-        return;
-      }
-      // 3) No usable device location → the org's configured city, labeled "Location off".
-      if (location) {
-        let coords = readCityCache(location);
-        if (!coords) {
-          try {
-            await loadGoogleMaps(key);
-            const g = (window as any).google;
-            const geocoder = new g.maps.Geocoder();
-            const r = await geocoder.geocode({ address: location });
-            const loc = r.results?.[0]?.geometry?.location;
-            if (loc) {
-              coords = { lat: loc.lat(), lng: loc.lng() };
-              writeCityCache(location, coords);
-            }
-          } catch {
-            /* fall through to error */
-          }
-        }
-        if (coords) {
-          setSrc({ kind: "org" });
-          if (!(await fetchWeatherFor(coords)) && !cancelled) setStatus("error");
-          return;
-        }
-      }
-      if (!cancelled) setStatus("error");
     })();
     return () => {
       cancelled = true;
     };
-  }, [key, location, fetchWeatherFor]);
+  }, [key, source, businessCoords, fetchWeatherFor]);
 
-  // Not configured / nothing to show → render nothing (keeps the dashboard clean).
   if (!key || status === "error") return null;
 
-  const fresh = src?.kind === "fresh";
+  // Device mode, location off → a compact prompt instead of fake weather.
+  if (status === "needloc") {
+    return (
+      <button
+        type="button"
+        onClick={locate}
+        className="mb-4 flex w-full items-center gap-3 rounded-xl border border-sky-100 bg-gradient-to-br from-sky-50 to-white px-5 py-3 text-left hover:border-sky-300"
+      >
+        <Cloud className="h-8 w-8 shrink-0 text-sky-400" />
+        <div className="flex-1">
+          <div className="text-sm font-medium text-slate-700">Weather for your location</div>
+          <div className="inline-flex items-center gap-0.5 text-xs font-medium text-sky-600">
+            <MapPin className="h-3 w-3" /> Turn on location
+          </div>
+        </div>
+      </button>
+    );
+  }
 
   return (
     <div className="mb-4 flex items-center gap-4 rounded-xl border border-sky-100 bg-gradient-to-br from-sky-50 to-white px-5 py-4">
@@ -196,24 +211,10 @@ export function WeatherWidget({ location, label }: { location: string | null; la
               {data.windMph != null ? ` · Wind ${data.windMph} mph` : ""}
               {data.humidity != null ? ` · Humidity ${data.humidity}%` : ""}
               {" · "}
-              {fresh ? (
-                <span className="text-emerald-600">Your location</span>
+              {source === "business" ? (
+                <span>{label ?? "Business address"}</span>
               ) : (
-                <>
-                  {/* Honest about WHY it's not your live location, and always offer the one-tap fix
-                      (an in-gesture geolocation call, which iOS PWAs honor when the on-mount call was
-                      ignored). */}
-                  {src?.kind === "approx"
-                    ? `Approx · ${src.ageMin}m ago · `
-                    : `${label ? `${label} · ` : ""}Location off · `}
-                  <button
-                    type="button"
-                    onClick={locate}
-                    className="inline-flex items-center gap-0.5 font-medium text-sky-600 hover:text-sky-700"
-                  >
-                    <MapPin className="h-3 w-3" /> Use my location
-                  </button>
-                </>
+                <span className="text-emerald-600">Your location</span>
               )}
             </div>
           </>
