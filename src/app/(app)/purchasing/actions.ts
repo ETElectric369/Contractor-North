@@ -244,6 +244,7 @@ export async function receiveItem(
 
   revalidatePath(`/purchasing/${poId}`);
   revalidatePath("/purchasing");
+  revalidatePath("/inventory"); // received goods flowed into stock — refresh the inventory board
   return { ok: true };
 }
 

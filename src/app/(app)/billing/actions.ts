@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { revalidateMoney } from "@/lib/revalidate-money";
 import { createClient } from "@/lib/supabase/server";
 import { deliverInvoiceEmail } from "@/lib/invoice-email";
 import { sendSms } from "@/lib/sms";
@@ -47,7 +48,7 @@ export async function createCustomerCredit(
     created_by: ctx.userId,
   });
   if (error) return { ok: false, error: error.message };
-  revalidatePath(`/billing/${invoiceId}`);
+  revalidateMoney(invoiceId);
   if (inv?.customer_id) revalidatePath(`/crm/${inv.customer_id}`);
   return { ok: true };
 }
@@ -58,7 +59,7 @@ export async function sendInvoiceToQuickbooks(
   const ctx = await requireStaff(); // was duplicated inline auth — use the one guard
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const res = await pushInvoiceToQbo(id);
-  if (res.ok) revalidatePath(`/billing/${id}`);
+  if (res.ok) revalidateMoney(id);
   return { ok: res.ok, error: res.error };
 }
 
@@ -102,7 +103,7 @@ export async function emailInvoice(
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const res = await deliverInvoiceEmail(ctx.supabase, id);
-  if (res.ok) revalidatePath(`/billing/${id}`);
+  if (res.ok) revalidateMoney(id);
   return res;
 }
 
@@ -174,7 +175,7 @@ export async function createInvoiceFromQuote(quoteId: string): Promise<Result> {
     );
   }
 
-  revalidatePath("/billing");
+  revalidateMoney();
   return { ok: true, id: invoice.id };
 }
 
@@ -225,7 +226,7 @@ export async function createBlankInvoice(input: {
     .single();
   if (error) return { ok: false, error: error.message };
 
-  revalidatePath("/billing");
+  revalidateMoney();
   if (input.job_id) revalidatePath(`/jobs/${input.job_id}`);
   return { ok: true, id: data.id };
 }
@@ -259,7 +260,7 @@ export async function addInvoiceItem(
   });
   if (error) return { ok: false, error: error.message };
   await recalcInvoice(supabase, invoiceId);
-  revalidatePath(`/billing/${invoiceId}`);
+  revalidateMoney(invoiceId);
   return { ok: true };
 }
 
@@ -356,7 +357,7 @@ export async function importQuoteItemsIntoInvoice(invoiceId: string): Promise<Re
   );
   if (rep.error) return { ok: false, error: rep.error };
   await recalcInvoice(supabase, invoiceId);
-  revalidatePath(`/billing/${invoiceId}`);
+  revalidateMoney(invoiceId);
   return { ok: true };
 }
 
@@ -456,7 +457,7 @@ export async function importLaborIntoInvoice(invoiceId: string): Promise<Result 
   );
   if (rep.error) return { ok: false, error: rep.error };
   await recalcInvoice(supabase, invoiceId);
-  revalidatePath(`/billing/${invoiceId}`);
+  revalidateMoney(invoiceId);
   return { ok: true };
 }
 
@@ -502,7 +503,7 @@ export async function importCostsIntoInvoice(invoiceId: string, markupPercent = 
   );
   if (rep.error) return { ok: false, error: rep.error };
   await recalcInvoice(supabase, invoiceId);
-  revalidatePath(`/billing/${invoiceId}`);
+  revalidateMoney(invoiceId);
   return { ok: true };
 }
 
@@ -615,7 +616,7 @@ export async function createProgressReportInvoice(
   }
 
   revalidatePath(`/jobs/${jobId}`);
-  revalidatePath("/billing");
+  revalidateMoney();
   return { ok: true, id: inv.id };
 }
 
@@ -808,7 +809,7 @@ async function createMilestoneDraw(
   }
 
   revalidatePath(`/jobs/${jobId}`);
-  revalidatePath("/billing");
+  revalidateMoney();
   return { ok: true, id: inv.id };
 }
 
@@ -835,7 +836,7 @@ export async function updateInvoiceItem(
     .eq("invoice_id", invoiceId); // L3: the item must belong to THIS invoice
   if (error) return { ok: false, error: error.message };
   await recalcInvoice(supabase, invoiceId);
-  revalidatePath(`/billing/${invoiceId}`);
+  revalidateMoney(invoiceId);
   return { ok: true };
 }
 
@@ -856,7 +857,7 @@ export async function deleteInvoiceItem(
     .eq("invoice_id", invoiceId); // L3: the item must belong to THIS invoice
   if (error) return { ok: false, error: error.message };
   await recalcInvoice(supabase, invoiceId);
-  revalidatePath(`/billing/${invoiceId}`);
+  revalidateMoney(invoiceId);
   return { ok: true };
 }
 
@@ -910,8 +911,8 @@ export async function setInvoiceStatus(
       .eq("invoice_id", id);
     if (mErr) reportError("setInvoiceStatus.unlinkMilestone", mErr, { invoiceId: id });
   }
-  revalidatePath("/billing");
-  revalidatePath(`/billing/${id}`);
+  revalidateMoney();
+  revalidateMoney(id);
   return { ok: true };
 }
 
@@ -990,8 +991,8 @@ export async function recordPayment(input: {
       url: `/billing/${input.invoice_id}`,
     },
   );
-  revalidatePath(`/billing/${input.invoice_id}`);
-  revalidatePath("/billing");
+  revalidateMoney(input.invoice_id);
+  revalidateMoney();
   return { ok: true };
 }
 
@@ -1018,8 +1019,8 @@ export async function updatePayment(
     .eq("id", paymentId);
   if (error) return { ok: false, error: error.message };
   await recalcInvoice(supabase, invoiceId);
-  revalidatePath(`/billing/${invoiceId}`);
-  revalidatePath("/billing");
+  revalidateMoney(invoiceId);
+  revalidateMoney();
   return { ok: true };
 }
 
@@ -1031,8 +1032,8 @@ export async function deletePayment(paymentId: string, invoiceId: string): Promi
   const { error } = await supabase.from("payments").delete().eq("id", paymentId);
   if (error) return { ok: false, error: error.message };
   await recalcInvoice(supabase, invoiceId);
-  revalidatePath(`/billing/${invoiceId}`);
-  revalidatePath("/billing");
+  revalidateMoney(invoiceId);
+  revalidateMoney();
   return { ok: true };
 }
 
@@ -1057,7 +1058,7 @@ export async function deleteInvoice(id: string): Promise<Result> {
     .eq("invoice_id", id);
   const { error } = await supabase.from("invoices").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
-  revalidatePath("/billing");
+  revalidateMoney();
   return { ok: true };
 }
 
@@ -1073,7 +1074,7 @@ export async function setInvoiceTaxRate(
   const { error } = await supabase.from("invoices").update({ tax_rate: rate }).eq("id", invoiceId);
   if (error) return { ok: false, error: error.message };
   await recalcInvoice(supabase, invoiceId);
-  revalidatePath(`/billing/${invoiceId}`);
+  revalidateMoney(invoiceId);
   return { ok: true };
 }
 
@@ -1089,7 +1090,7 @@ export async function setInvoiceDescription(
     .update({ description: description.trim() || null })
     .eq("id", invoiceId);
   if (error) return { ok: false, error: error.message };
-  revalidatePath(`/billing/${invoiceId}`);
+  revalidateMoney(invoiceId);
   return { ok: true };
 }
 
@@ -1105,8 +1106,8 @@ export async function setInvoiceTitle(
     .update({ title: title.trim() || null })
     .eq("id", invoiceId);
   if (error) return { ok: false, error: error.message };
-  revalidatePath(`/billing/${invoiceId}`);
-  revalidatePath("/billing");
+  revalidateMoney(invoiceId);
+  revalidateMoney();
   return { ok: true };
 }
 
@@ -1125,8 +1126,8 @@ export async function setInvoiceDueDate(
     .update({ due_date: dueDate })
     .eq("id", invoiceId);
   if (error) return { ok: false, error: error.message };
-  revalidatePath(`/billing/${invoiceId}`);
-  revalidatePath("/billing");
+  revalidateMoney(invoiceId);
+  revalidateMoney();
   return { ok: true };
 }
 
@@ -1177,8 +1178,8 @@ export async function setInvoiceCustomerJob(
     .update({ customer_id: customerId, job_id: jobId })
     .eq("id", invoiceId);
   if (error) return { ok: false, error: error.message };
-  revalidatePath(`/billing/${invoiceId}`);
-  revalidatePath("/billing");
+  revalidateMoney(invoiceId);
+  revalidateMoney();
   if (jobId) revalidatePath(`/jobs/${jobId}`);
   return { ok: true };
 }
