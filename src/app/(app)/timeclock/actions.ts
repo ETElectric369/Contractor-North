@@ -187,6 +187,7 @@ export async function clockOut(input: {
   if (oldIds.length) await supabase.from("time_allocations").delete().in("id", oldIds);
 
   revalidatePath("/timeclock");
+  revalidatePath("/planner"); // clock-in/out status shows on My Day
   return { ok: true };
 }
 
@@ -295,6 +296,7 @@ export async function completeAutoClockOut(input: {
     if (insErr) return { ok: false, error: insErr.message };
   }
   revalidatePath("/timeclock");
+  revalidatePath("/planner"); // auto clock-out changes who's on the clock on My Day
   return { ok: true };
 }
 
@@ -426,6 +428,7 @@ export async function deleteTimeEntry(id: string): Promise<ClockResult> {
   if (error) return { ok: false, error: error.message };
   revalidatePath("/timecards");
   revalidatePath("/timeclock");
+  revalidatePath("/planner"); // a deleted entry changes My Day's hours/clock state
   return { ok: true };
 }
 
@@ -478,5 +481,6 @@ export async function saveEntryNotes(
     .eq("id", entry_id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/timeclock");
+  revalidatePath("/planner"); // notes/job changes surface on My Day
   return { ok: true };
 }

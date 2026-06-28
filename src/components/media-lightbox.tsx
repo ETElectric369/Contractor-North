@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { X, ExternalLink, Download } from "lucide-react";
+import { useModalLock } from "@/components/ui/modal-lock";
 
 /** Full-screen in-app viewer for an image or PDF — always dismissible
  *  (fixes "can't go back from the photo" on the phone). */
@@ -14,14 +15,14 @@ export function MediaLightbox({
   name: string;
   onClose: () => void;
 }) {
+  // Use the shared REF-COUNTED body lock (not a raw document.body.style.overflow), so closing this
+  // lightbox doesn't yank the lock out from under a camera overlay opened on top of it — the bottom nav
+  // stays hidden until BOTH are closed (this is the recurring "Save hidden behind the nav" class).
+  useModalLock(true);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
-    document.body.style.overflow = "hidden";
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      document.body.style.overflow = "";
-    };
+    return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
   const isPdf = /\.pdf($|\?)/i.test(url) || /\.pdf$/i.test(name);

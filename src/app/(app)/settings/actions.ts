@@ -310,9 +310,13 @@ export async function importCrew(rows: CrewImportRow[], requireReset = true): Pr
       .update({ org_id: me.org_id, full_name: name, role, hourly_rate: r.hourly_rate ?? null, active: true, must_reset_password: requireReset })
       .eq("id", created.user.id);
     if (profErr) {
-      // Roll back the just-created login so a failed profile attach can't leave an
-      // orphaned auth user with no org.
-      await admin.auth.admin.deleteUser(created.user.id).catch(() => {});
+      // Roll back the just-created login so a failed profile attach can't leave an orphaned auth user
+      // with no org. If the rollback ITSELF fails, don't swallow it — that's the exact invisible-orphan
+      // state the rollback exists to prevent, so surface it for an operator to clean up.
+      const rb = await admin.auth.admin.deleteUser(created.user.id).catch((e) => ({ error: e }));
+      if ((rb as { error?: unknown })?.error) {
+        reportError("crewImport.rollbackDeleteUser", (rb as { error?: unknown }).error, { email, userId: created.user.id });
+      }
       results.push({ name, email, status: "failed", reason: profErr.message });
       continue;
     }
