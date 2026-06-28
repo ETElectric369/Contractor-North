@@ -7,6 +7,7 @@ import {
 } from "@/lib/anthropic";
 import { getOrgSettings } from "@/lib/org-settings";
 import { DATA_TOOLS, runDataTool } from "@/lib/assistant-tools";
+import { CALC_TOOLS, runCalc, CALC_TOOL_NAMES } from "@/lib/electrical-calc";
 import { agentWriteToolsForRole } from "@/lib/actions/agent-tools";
 import { executeAction } from "@/lib/actions/execute";
 import { REGISTRY } from "@/lib/actions/registry";
@@ -150,7 +151,7 @@ export async function POST(req: Request) {
   systemPrompt += `\n\nESTIMATING METHOD — use this whenever you price work, draft a quote/proposal, or build the Estimator:
 - LABOR: ${orgS.default_labor_rate > 0 ? `bill labor at the company rate of $${orgS.default_labor_rate}/hr` : "the company labor rate isn't set yet — ask for it before pricing labor"}. Estimate the crew-hours the job realistically takes.
 - MATERIALS & EQUIPMENT: never guess a price. Use web_search to pull CURRENT prices for each item from a few sources (Home Depot, Lowe's, a local electrical supply house, Grainger), take the AVERAGE, and note what you found. Then add a ${orgS.material_buffer_percent}% buffer so the number holds.
-- ENGINEERING: calculate the real numbers per NEC — wire size & ampacity, voltage drop, conduit fill, box fill, breaker/feeder sizing, load calcs. Show the calc briefly so it's verifiable. Don't eyeball quantities or sizes.
+- ENGINEERING: calculate the real numbers per NEC — CALL the calc tools (calc_wire_size, calc_voltage_drop, calc_conduit_fill, calc_box_fill) for exact answers, don't eyeball sizes/quantities, and show what they returned so it's verifiable.
 - BE A PARTNER: if there's a better, safer, or cheaper way to do the work, say so in one line.
 - It's an estimate with a small buffer, not a guess — accuracy first.`;
   if (playbook) {
@@ -255,7 +256,7 @@ export async function POST(req: Request) {
             // LIVE prices, specs, and code while estimating — the core "do it like Claude
             // did the Tao Zhu quote" capability. Results are untrusted web text (the
             // input-is-data rule in the system prompt covers them).
-            tools: [...dataTools, ...writeTools, OPEN_MAPS_TOOL, QUOTE_DRAFT_TOOL, REMEMBER_TOOL, ...(isStaffCaller ? [REQUEST_CONTACT_TOOL] : []), { type: "web_search_20250305", name: "web_search", max_uses: 6 }] as any,
+            tools: [...dataTools, ...writeTools, ...CALC_TOOLS, OPEN_MAPS_TOOL, QUOTE_DRAFT_TOOL, REMEMBER_TOOL, ...(isStaffCaller ? [REQUEST_CONTACT_TOOL] : []), { type: "web_search_20250305", name: "web_search", max_uses: 6 }] as any,
             messages: convo,
           });
           // Strip the directive markers from MODEL text so a prompt-injection can't forge a
@@ -350,6 +351,12 @@ export async function POST(req: Request) {
               };
               results.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify({ ok: true, picker_open: true }) });
               break;
+            }
+            // Engineering calculators (pure NEC math, no DB/auth) — the model CALLS these for exact
+            // wire size / voltage drop / conduit fill / box fill instead of reasoning the tables itself.
+            if (CALC_TOOL_NAMES.has(tu.name)) {
+              results.push({ type: "tool_result", tool_use_id: tu.id, content: runCalc(tu.name, tu.input) });
+              continue;
             }
             // A write tool routes through the chokepoint (role + audit + confirm/step-up);
             // a read tool runs the RLS-scoped data query.
