@@ -76,6 +76,8 @@ export function WeatherWidget({
   const [data, setData] = useState<WeatherData | null>(null);
   // "needloc" = device mode, no usable fix → show the enable-location prompt (NOT the shop's weather).
   const [status, setStatus] = useState<"loading" | "ok" | "error" | "needloc">("loading");
+  const [locating, setLocating] = useState(false); // a tap is in flight
+  const [locErr, setLocErr] = useState<string | null>(null); // why the last location attempt failed
 
   // Fetch current conditions. Returns false on failure incl. a 200 with no temperature (don't fabricate 0°F).
   const fetchWeatherFor = useCallback(
@@ -127,13 +129,29 @@ export function WeatherWidget({
   }, [location, key]);
 
   // Explicit "use my location" tap (device mode). An in-gesture geolocation call — which iOS home-screen
-  // PWAs honor even when the on-mount call was ignored.
+  // PWAs honor even when the on-mount call was ignored. LOW accuracy (city-level is plenty for weather and
+  // a cell/wifi fix returns in ~1s, vs. a high-accuracy GPS lock that's slow/flaky on iOS), and it REPORTS
+  // why it failed instead of silently doing nothing.
   const locate = useCallback(async () => {
-    const res = await getPosition();
-    if (res.status !== "ok") return; // stay on the prompt; don't pretend
-    writeDeviceFix(res.coords);
-    setStatus("loading");
-    await fetchWeatherFor(res.coords);
+    setLocating(true);
+    setLocErr(null);
+    const res = await getPosition({ enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 });
+    setLocating(false);
+    if (res.status === "ok") {
+      writeDeviceFix(res.coords);
+      setStatus("loading");
+      await fetchWeatherFor(res.coords);
+      return;
+    }
+    setLocErr(
+      res.status === "denied"
+        ? "Location is off for North. Turn it on in Settings → Privacy & Security → Location → North (allow “While Using”), then tap again."
+        : res.status === "unavailable"
+          ? "Location isn’t available on this device right now."
+          : res.status === "insecure"
+            ? "Location needs a secure (https) connection."
+            : "Couldn’t get a location fix — tap to try again.", // timeout
+    );
   }, [fetchWeatherFor]);
 
   useEffect(() => {
@@ -154,7 +172,7 @@ export function WeatherWidget({
         if (!(await fetchWeatherFor(recent)) && !cancelled) setStatus("error");
         return;
       }
-      const res = await getPosition();
+      const res = await getPosition({ enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 });
       if (cancelled) return;
       if (res.status === "ok") {
         writeDeviceFix(res.coords);
@@ -179,11 +197,13 @@ export function WeatherWidget({
         className="mb-4 flex w-full items-center gap-3 rounded-xl border border-sky-100 bg-gradient-to-br from-sky-50 to-white px-5 py-3 text-left hover:border-sky-300"
       >
         <Cloud className="h-8 w-8 shrink-0 text-sky-400" />
-        <div className="flex-1">
+        <div className="min-w-0 flex-1">
           <div className="text-sm font-medium text-slate-700">Weather for your location</div>
           <div className="inline-flex items-center gap-0.5 text-xs font-medium text-sky-600">
-            <MapPin className="h-3 w-3" /> Turn on location
+            <MapPin className="h-3 w-3" />
+            {locating ? "Getting location…" : locErr ? "Try again" : "Turn on location"}
           </div>
+          {locErr && <div className="mt-0.5 text-xs text-slate-500">{locErr}</div>}
         </div>
       </button>
     );
