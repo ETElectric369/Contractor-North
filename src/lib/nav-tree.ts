@@ -98,7 +98,6 @@ export const NAV_TREE: NavTree = {
         { id: "o-settings", label: "Settings", icon: "settings", href: "/settings" },
       ],
     },
-    { id: "assistant", label: "Assistant", icon: "sparkles", href: "/assistant" },
     { id: "organize", label: "Organize", icon: "wand", href: "/organize" },
   ],
 };

@@ -13,6 +13,8 @@ import { useEstimator } from "@/lib/estimator-store";
  */
 export function GlobalAssistant() {
   const [open, setOpen] = useState(false);
+  const [voiceLaunch, setVoiceLaunch] = useState(false); // Talk button → voice; command bar → text
+  const [pendingQuery, setPendingQuery] = useState<string | null>(null); // a typed question from Cmd-K
   const { speaking, streaming } = useEstimator(); // assistant activity
   const active = speaking || streaming; // CIB is working or talking → the button is a red STOP
 
@@ -28,8 +30,22 @@ export function GlobalAssistant() {
       }
     } catch {}
     unlockAudio();
+    setPendingQuery(null);
+    setVoiceLaunch(true);
     setOpen(true);
   }
+
+  // Open from the Cmd-K command bar with a typed question — text mode, no auto-voice.
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const q = (e as CustomEvent).detail?.q as string | undefined;
+      setVoiceLaunch(false);
+      setPendingQuery(q && q.trim() ? q.trim() : null);
+      setOpen(true);
+    };
+    window.addEventListener("cn:assistant-open", onOpen);
+    return () => window.removeEventListener("cn:assistant-open", onOpen);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -78,7 +94,7 @@ export function GlobalAssistant() {
               <X className="h-5 w-5" />
             </button>
           </div>
-          <AssistantChat autoStart glass />
+          <AssistantChat autoStart={voiceLaunch} initialQuery={pendingQuery ?? undefined} glass />
         </div>
       )}
     </>

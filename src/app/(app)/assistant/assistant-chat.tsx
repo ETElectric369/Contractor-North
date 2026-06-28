@@ -124,7 +124,7 @@ function VoiceWave({ active }: { active?: boolean }) {
   );
 }
 
-export function AssistantChat({ autoStart = false, glass = false }: { autoStart?: boolean; glass?: boolean } = {}) {
+export function AssistantChat({ autoStart = false, glass = false, initialQuery }: { autoStart?: boolean; glass?: boolean; initialQuery?: string } = {}) {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
@@ -496,10 +496,12 @@ export function AssistantChat({ autoStart = false, glass = false }: { autoStart?
   useEffect(() => {
     if (didInit.current) return;
     didInit.current = true;
-    const q = new URLSearchParams(window.location.search).get("q");
-    if (q && q.trim()) {
-      send(q.trim());
-      window.history.replaceState(null, "", window.location.pathname);
+    // The drawer passes the typed question straight in (initialQuery); the legacy page used ?q=.
+    const urlQ = new URLSearchParams(window.location.search).get("q");
+    const q = (initialQuery ?? urlQ ?? "").trim();
+    if (q) {
+      send(q);
+      if (urlQ) window.history.replaceState(null, "", window.location.pathname);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

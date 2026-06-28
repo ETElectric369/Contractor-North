@@ -121,6 +121,12 @@ export function CommandBar({ isStaff }: { isStaff?: boolean }) {
 
   function go(item: Item) {
     setOpen(false);
+    // The assistant is the slim drawer now — open it (with the typed question) instead of a page.
+    if (item.kind === "Assistant") {
+      const ask = new URL(item.href, window.location.origin).searchParams.get("q") ?? "";
+      window.dispatchEvent(new CustomEvent("cn:assistant-open", { detail: { q: ask } }));
+      return;
+    }
     router.push(item.href);
   }
 
