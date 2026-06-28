@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { RefreshOnVisible } from "@/components/refresh-on-visible";
 import { WeatherWidget } from "@/components/weather-widget";
+import { LocationPrimer } from "@/components/location-primer";
 import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { hoursBetween, formatCurrency, formatTime } from "@/lib/utils";
@@ -319,6 +320,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         ))}
       </div>
 
+      <LocationPrimer />
       <div className="mb-3">
         <WeatherWidget
           location={orgLocation}

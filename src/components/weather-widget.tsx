@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Cloud, MapPin } from "lucide-react";
 import { loadGoogleMaps } from "@/lib/google-maps";
-import { getPosition, type GeoCoords } from "@/lib/geo";
+import { getPosition, geoPermission, type GeoCoords } from "@/lib/geo";
 
 interface WeatherData {
   tempF: number;
@@ -78,6 +78,9 @@ export function WeatherWidget({
   const [status, setStatus] = useState<"loading" | "ok" | "error" | "needloc">("loading");
   const [locating, setLocating] = useState(false); // a tap is in flight
   const [locErr, setLocErr] = useState<string | null>(null); // why the last location attempt failed
+  // The app-wide LocationPrimer banner is the location CTA until it's dismissed — so the weather card
+  // doesn't show a SECOND "turn on location" prompt at the same time.
+  const [deferToPrimer, setDeferToPrimer] = useState(true);
 
   // Fetch current conditions. Returns false on failure incl. a 200 with no temperature (don't fabricate 0°F).
   const fetchWeatherFor = useCallback(
@@ -154,6 +157,34 @@ export function WeatherWidget({
     );
   }, [fetchWeatherFor]);
 
+  // Coordinate with the app-wide LocationPrimer: when location is granted (there or via clock-in), refresh
+  // to the device's location; when the primer is dismissed, take over with this card's own prompt.
+  useEffect(() => {
+    let cancelled = false;
+    // Defer to the primer in EXACTLY the case it shows (location not yet granted + not dismissed) — the
+    // same logic the primer uses, so they stay in sync: never both, and never neither (if permission is
+    // somehow "granted" but location still fails, the primer won't show, so this card keeps its own prompt).
+    (async () => {
+      let dismissed = false;
+      try {
+        dismissed = !!localStorage.getItem("loc-primer-dismissed");
+      } catch {
+        /* ignore */
+      }
+      const perm = await geoPermission();
+      if (!cancelled) setDeferToPrimer(!dismissed && perm !== "granted");
+    })();
+    const onGranted = () => void locate();
+    const onDismissed = () => setDeferToPrimer(false);
+    window.addEventListener("cn:location-granted", onGranted);
+    window.addEventListener("cn:location-dismissed", onDismissed);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("cn:location-granted", onGranted);
+      window.removeEventListener("cn:location-dismissed", onDismissed);
+    };
+  }, [locate]);
+
   useEffect(() => {
     if (!key) return;
     let cancelled = false;
@@ -190,6 +221,7 @@ export function WeatherWidget({
 
   // Device mode, location off → a compact prompt instead of fake weather.
   if (status === "needloc") {
+    if (deferToPrimer) return null; // the app-wide LocationPrimer banner above is the CTA — don't double up
     return (
       <button
         type="button"
