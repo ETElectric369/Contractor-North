@@ -139,6 +139,16 @@ export function WeatherWidget({
   useEffect(() => {
     if (!key) return;
     let cancelled = false;
+    let removeGesture: (() => void) | null = null;
+
+    const tryDevice = async (): Promise<boolean> => {
+      const res = await getPosition(GEO_OPTS);
+      if (cancelled || res.status !== "ok") return false;
+      writeGps(res.coords);
+      setUsingDevice(true);
+      return fetchWeatherFor(res.coords);
+    };
+
     (async () => {
       if (source === "device") {
         const recent = readGps();
@@ -146,19 +156,28 @@ export function WeatherWidget({
           setUsingDevice(true);
           if (await fetchWeatherFor(recent)) return;
         }
-        const res = await getPosition(GEO_OPTS);
-        if (cancelled) return;
-        if (res.status === "ok") {
-          writeGps(res.coords);
-          setUsingDevice(true);
-          if (await fetchWeatherFor(res.coords)) return;
-        }
+        // Already granted (or a browser that prompts on load) → your location, no tap needed.
+        if (await tryDevice()) return;
       }
-      // business mode, OR device location unavailable → the shop's weather (so the card always shows).
+      // Default to the shop's weather so the card ALWAYS shows something right away.
       if (!(await showShop()) && !cancelled) setStatus("error");
+      // Device mode + not granted yet: iOS only shows the location PERMISSION POPUP inside a tap. So
+      // fire the request on the user's FIRST tap anywhere — Allow → upgrade to your location, Deny →
+      // just stay on the shop's weather. No Settings, no button to hunt for.
+      if (source === "device" && !cancelled) {
+        const onGesture = () => {
+          removeGesture?.();
+          removeGesture = null;
+          void tryDevice();
+        };
+        window.addEventListener("pointerdown", onGesture, { once: true });
+        removeGesture = () => window.removeEventListener("pointerdown", onGesture);
+      }
     })();
+
     return () => {
       cancelled = true;
+      removeGesture?.();
     };
   }, [key, source, fetchWeatherFor, showShop]);
 
