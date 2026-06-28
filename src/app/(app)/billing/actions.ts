@@ -419,7 +419,7 @@ async function blockStandardCreateOnDrawJob(supabase: any, jobId: string | null 
 /** Import labor from the job's closed time entries: one line per person,
  *  hours × their hourly rate (falls back to the org default labor rate). */
 
-export async function importLaborIntoInvoice(invoiceId: string): Promise<Result> {
+export async function importLaborIntoInvoice(invoiceId: string): Promise<Result & { empty?: boolean }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -440,7 +440,7 @@ export async function importLaborIntoInvoice(invoiceId: string): Promise<Result>
   ]);
   const defaultRate = Number(((org as any)?.settings ?? {}).default_labor_rate ?? 0);
   const { lines } = computeJobLaborBilling(labor.jobEntries, labor.jobAllocs, defaultRate);
-  if (lines.length === 0) return { ok: false, error: "No billable hours on this job yet." };
+  if (lines.length === 0) return { ok: false, error: "No billable hours on this job yet.", empty: true };
 
   const rep = await replaceImportedItems(
     supabase,
@@ -462,7 +462,7 @@ export async function importLaborIntoInvoice(invoiceId: string): Promise<Result>
 /** Import materials from the job's costs: purchase orders + supplier bills,
  *  marked up by `markupPercent` (so they bill at sell price, not cost — the
  *  contractor doesn't do the math by hand). Each line stays editable after. */
-export async function importCostsIntoInvoice(invoiceId: string, markupPercent = 0): Promise<Result> {
+export async function importCostsIntoInvoice(invoiceId: string, markupPercent = 0): Promise<Result & { empty?: boolean }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -491,7 +491,7 @@ export async function importCostsIntoInvoice(invoiceId: string, markupPercent = 
     if (Number(b.amount) > 0)
       rows.push({ description: `Materials — ${b.supplier}${b.bill_number ? ` (bill #${b.bill_number})` : ""}`, unit_price: mark(Number(b.amount)) });
   }
-  if (!rows.length) return { ok: false, error: "No purchase orders or bills on this job yet." };
+  if (!rows.length) return { ok: false, error: "No purchase orders or bills on this job yet.", empty: true };
 
   const rep = await replaceImportedItems(
     supabase,
@@ -562,9 +562,12 @@ export async function createProgressReportInvoice(
     return { ok: false, error: error.message };
   }
 
-  // Itemize the actual work to date (labor at bill rate + materials with markup).
-  await importLaborIntoInvoice(inv.id);
-  await importCostsIntoInvoice(inv.id, markup);
+  // Itemize the actual work to date (labor at bill rate + materials with markup). A real import failure
+  // here would silently understate the draw — log it instead of swallowing (empty:true = nothing to bill).
+  const pLabor = await importLaborIntoInvoice(inv.id);
+  if (!pLabor.ok && !pLabor.empty) reportError("createProgressReportInvoice.labor", pLabor.error, { jobId, invoiceId: inv.id });
+  const pCosts = await importCostsIntoInvoice(inv.id, markup);
+  if (!pCosts.ok && !pCosts.empty) reportError("createProgressReportInvoice.costs", pCosts.error, { jobId, invoiceId: inv.id });
 
   const { data: afterImport } = await supabase.from("invoices").select("total").eq("id", inv.id).maybeSingle();
   const importedTotal = Number(afterImport?.total ?? 0);

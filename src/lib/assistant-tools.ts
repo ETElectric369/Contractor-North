@@ -1382,6 +1382,10 @@ export async function runDataTool(
           supabase.from("time_entries").select("id", head).is("clock_out", null),
           supabase.from("invoices").select("total, amount_paid, status").limit(1000),
         ]);
+        // Don't coerce a failed query into a confident "0 jobs / $0 outstanding" — the model would
+        // state that as fact. If any of the four failed (transient / RLS hiccup), surface it instead.
+        const sumErr = activeJobs.error || openQuotes.error || clockedIn.error || invoices.error;
+        if (sumErr) throw sumErr;
         const outstanding = (invoices.data ?? [])
           .filter((r: any) => !["paid", "void", "cancelled"].includes(r.status))
           .reduce((s: number, r: any) => s + Math.max(0, money(r.total) - money(r.amount_paid)), 0);

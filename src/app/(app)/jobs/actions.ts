@@ -6,6 +6,7 @@ import { emptyToNull } from "@/lib/forms";
 import { visibleJobIdOrNull, visibleTemplateIdOrNull } from "@/lib/job-visibility";
 import { requireStaff } from "@/lib/staff-guard";
 import { getOrgSettings } from "@/lib/org-settings";
+import { reportError } from "@/lib/observe";
 import {
   createInvoiceFromQuote,
   createBlankInvoice,
@@ -19,7 +20,7 @@ export type Result = { ok: boolean; error?: string };
 /** Create an invoice for a job — from its quote if it has one, else blank. */
 export async function createInvoiceForJob(
   jobId: string,
-): Promise<{ ok: boolean; error?: string; id?: string }> {
+): Promise<{ ok: boolean; error?: string; id?: string; importWarning?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -84,8 +85,17 @@ export async function createInvoiceForJob(
   if (res.ok && res.id) {
     const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
     const markup = getOrgSettings((org as any)?.settings).material_markup_percent;
-    try { await importLaborIntoInvoice(res.id); } catch {}
-    try { await importCostsIntoInvoice(res.id, markup); } catch {}
+    // CAPTURE each import. A "nothing to pull" no-op (empty:true) is fine; a REAL failure (DB error)
+    // must NOT be swallowed — a field tech invoicing by voice can't see the screen, so a silently empty
+    // invoice goes out under-billed. Log it AND tell the caller so the UI/voice can flag it.
+    const missed: string[] = [];
+    const labor = await importLaborIntoInvoice(res.id).catch((e) => ({ ok: false as const, error: String(e?.message ?? e), empty: false }));
+    if (!labor.ok && !labor.empty) { reportError("createInvoiceForJob.labor", labor.error, { jobId, invoiceId: res.id }); missed.push("labor"); }
+    const costs = await importCostsIntoInvoice(res.id, markup).catch((e) => ({ ok: false as const, error: String(e?.message ?? e), empty: false }));
+    if (!costs.ok && !costs.empty) { reportError("createInvoiceForJob.costs", costs.error, { jobId, invoiceId: res.id }); missed.push("materials"); }
+    if (missed.length) {
+      return { ...res, importWarning: `Invoice created, but ${missed.join(" and ")} couldn't be pulled in — review the line items before sending.` };
+    }
   }
   return res;
 }
@@ -142,9 +152,10 @@ export async function finishJob(
   const inv = await createInvoiceForJob(jobId);
   if (!inv.ok || !inv.id) return { ok: false, error: inv.error ?? "Could not create the invoice." };
 
-  // Best-effort imports — "nothing to import" shouldn't block finishing.
-  if (opts.importLabor) await importLaborIntoInvoice(inv.id);
-  if (opts.importCosts) await importCostsIntoInvoice(inv.id);
+  // Best-effort imports — "nothing to import" (empty) shouldn't block finishing, but a REAL failure
+  // must be logged, not swallowed (otherwise a finished job quietly invoices for $0 of labor/materials).
+  if (opts.importLabor) { const r = await importLaborIntoInvoice(inv.id); if (!r.ok && !r.empty) reportError("finishJob.labor", r.error, { jobId, invoiceId: inv.id }); }
+  if (opts.importCosts) { const r = await importCostsIntoInvoice(inv.id); if (!r.ok && !r.empty) reportError("finishJob.costs", r.error, { jobId, invoiceId: inv.id }); }
 
   const { error } = await supabase.from("jobs").update({ status: "complete" }).eq("id", jobId);
   if (error) return { ok: false, error: error.message };

@@ -297,10 +297,18 @@ export async function POST(req: Request) {
             // Long-term memory: store one fact about this user (RLS-private to them).
             if (tu.name === "remember") {
               const fact = String((tu.input as { fact?: unknown })?.fact ?? "").trim().slice(0, 400);
+              let ok = false;
               if (fact) {
-                try { await supabase.from("user_memory").insert({ user_id: user.id, content: fact }); } catch {}
+                // supabase-js returns {error}, it doesn't throw — so check it. Was: try/catch + an
+                // UNCONDITIONAL {ok:true}, so the model said "I'll remember that" even when nothing saved.
+                const { error } = await supabase.from("user_memory").insert({ user_id: user.id, content: fact });
+                ok = !error;
               }
-              results.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify({ ok: true }) });
+              results.push({
+                type: "tool_result",
+                tool_use_id: tu.id,
+                content: JSON.stringify(ok ? { ok: true } : { ok: false, error: "Couldn't save that to memory." }),
+              });
               continue;
             }
             // Client-intent: open Maps. Turn it into an OPEN directive + end the turn (the

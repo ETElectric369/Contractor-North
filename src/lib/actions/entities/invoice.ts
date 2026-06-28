@@ -34,7 +34,11 @@ export const invoiceActions: Record<string, ActionDef> = {
       return {
         ok: true,
         data: { invoice_id: r.id },
-        speak: "Draft invoice ready — I pulled in any logged labor and materials from the job. Read it back before you send.",
+        // Don't claim "I pulled in the labor and materials" if an import actually FAILED — say so, so a
+        // hands-free tech doesn't send an under-billed invoice thinking everything's on it.
+        speak: r.importWarning
+          ? `Draft invoice created — but heads up: ${r.importWarning}`
+          : "Draft invoice ready — I pulled in any logged labor and materials from the job. Read it back before you send.",
       };
     },
   },
