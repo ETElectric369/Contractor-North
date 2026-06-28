@@ -44,6 +44,7 @@ export function TaxRatesManager({
   const [laborRate, setLaborRate] = useState(settings.default_labor_rate);
   const [mileageRate, setMileageRate] = useState(settings.mileage_rate);
   const [materialMarkup, setMaterialMarkup] = useState(settings.material_markup_percent);
+  const [materialBuffer, setMaterialBuffer] = useState(settings.material_buffer_percent);
   const [savedLabor, setSavedLabor] = useState(false);
 
   const [levelName, setLevelName] = useState("");
@@ -137,9 +138,13 @@ export function TaxRatesManager({
             <Label htmlFor="fin-markup">Materials markup (%)</Label>
             <NumberInput id="fin-markup" value={materialMarkup} onValueChange={setMaterialMarkup} />
           </div>
+          <div className="w-44">
+            <Label htmlFor="fin-buffer">AI estimate buffer (%)</Label>
+            <NumberInput id="fin-buffer" value={materialBuffer} onValueChange={setMaterialBuffer} />
+          </div>
           <Button
             size="sm"
-            onClick={() => start(async () => { await updateOrgSettings({ default_labor_rate: laborRate, mileage_rate: mileageRate, material_markup_percent: materialMarkup }); setSavedLabor(true); setTimeout(() => setSavedLabor(false), 2000); })}
+            onClick={() => start(async () => { await updateOrgSettings({ default_labor_rate: laborRate, mileage_rate: mileageRate, material_markup_percent: materialMarkup, material_buffer_percent: materialBuffer }); setSavedLabor(true); setTimeout(() => setSavedLabor(false), 2000); })}
             disabled={pending}
           >
             Save

@@ -142,11 +142,22 @@ export async function POST(req: Request) {
     "get_job", "list_team"]);
   const isStaffCaller = ["owner", "admin", "office"].includes(role ?? "");
   const dataTools = isStaffCaller ? DATA_TOOLS : DATA_TOOLS.filter((t) => !STAFF_ONLY_READ.has(t.name));
-  const playbook = getOrgSettings((org as any)?.settings).quote_playbook?.trim();
+  const orgS = getOrgSettings((org as any)?.settings);
+  const playbook = orgS.quote_playbook?.trim();
   let systemPrompt = ASSISTANT_SYSTEM_PROMPT;
+  // THE ESTIMATING METHOD — labor at the company rate, materials by LIVE market research (web_search),
+  // every quantity/size CALCULATED per NEC (not eyeballed), with a small safety buffer.
+  systemPrompt += `\n\nESTIMATING METHOD — use this whenever you price work, draft a quote/proposal, or build the Estimator:
+- LABOR: ${orgS.default_labor_rate > 0 ? `bill labor at the company rate of $${orgS.default_labor_rate}/hr` : "the company labor rate isn't set yet — ask for it before pricing labor"}. Estimate the crew-hours the job realistically takes.
+- MATERIALS & EQUIPMENT: never guess a price. Use web_search to pull CURRENT prices for each item from a few sources (Home Depot, Lowe's, a local electrical supply house, Grainger), take the AVERAGE, and note what you found. Then add a ${orgS.material_buffer_percent}% buffer so the number holds.
+- ENGINEERING: calculate the real numbers per NEC — wire size & ampacity, voltage drop, conduit fill, box fill, breaker/feeder sizing, load calcs. Show the calc briefly so it's verifiable. Don't eyeball quantities or sizes.
+- BE A PARTNER: if there's a better, safer, or cheaper way to do the work, say so in one line.
+- It's an estimate with a small buffer, not a guess — accuracy first.`;
   if (playbook) {
-    systemPrompt += `\n\nThis company's quoting playbook — when estimating or drafting quotes/proposals, follow it over generic assumptions:\n${playbook}`;
+    systemPrompt += `\n\nThis company's own quoting playbook (follow it over the generic method above wherever they differ):\n${playbook}`;
   }
+  // STYLE — Erik: short, direct, no small talk.
+  systemPrompt += `\n\nSTYLE: short, direct answers and questions, straight to the point. No small talk, no filler, no "great question". If you're missing something needed to be accurate, ask one crisp question.`;
   if (prof?.language === "es") {
     systemPrompt +=
       "\n\nThe user's preferred language is Spanish (español). Respond in Spanish unless the user writes to you in English. Use clear, friendly Spanish suitable for an electrician in the field.";

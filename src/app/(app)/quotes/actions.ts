@@ -393,24 +393,30 @@ export async function generateQuoteDraft(
       .select("settings")
       .limit(1)
       .maybeSingle();
-    const playbook = getOrgSettings((org as any)?.settings).quote_playbook?.trim();
+    const orgS = getOrgSettings((org as any)?.settings);
+    const playbook = orgS.quote_playbook?.trim();
 
     const client = getAnthropic();
     const msg = await client.messages.create({
       model: DEFAULT_MODEL,
-      max_tokens: 1500,
+      max_tokens: 2500,
+      // Live market-price research for materials (same web_search the chat estimator uses).
+      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 6 }] as any,
       system:
-        "You are an estimator for an electrical contractor. Given a scope of work, produce a JSON array of quote line items. Each item: {\"description\": string, \"quantity\": number, \"unit\": string (ea/ft/hr/lot), \"unit_price\": number (USD, rough but realistic for US electrical work)}. Include both materials and labor lines. Respond with ONLY the JSON array, no prose." +
-        (playbook
-          ? `\n\nThis company's quoting playbook — follow it over generic assumptions:\n${playbook}`
-          : ""),
+        "You are an estimator for an electrical contractor. Produce quote line items for the scope. " +
+        `LABOR: ${orgS.default_labor_rate > 0 ? `bill labor at $${orgS.default_labor_rate}/hr` : "use a realistic US electrical labor rate"}; estimate the crew-hours realistically. ` +
+        `MATERIALS & EQUIPMENT: use web_search to find CURRENT market prices from a few sources, take the average, then add a ${orgS.material_buffer_percent}% buffer. ` +
+        "ENGINEERING: calculate quantities and sizes per NEC (wire size, voltage drop, conduit fill, box fill, breaker/feeder, loads) — don't eyeball. " +
+        "When done, respond with ONLY a JSON array of items, each {\"description\": string, \"quantity\": number, \"unit\": string (ea/ft/hr/lot), \"unit_price\": number (USD)} — materials AND labor lines, no prose." +
+        (playbook ? `\n\nCompany playbook (follow over generic assumptions):\n${playbook}` : ""),
       messages: [{ role: "user", content: scope }],
     });
 
-    const text =
-      msg.content.find((b) => b.type === "text")?.type === "text"
-        ? (msg.content.find((b) => b.type === "text") as { text: string }).text
-        : "";
+    // Concatenate all text blocks (web_search interleaves search blocks + reasoning before the JSON).
+    const text = msg.content
+      .filter((b) => b.type === "text")
+      .map((b) => (b as { text: string }).text)
+      .join("\n");
 
     const json = extractJsonArray(text);
     const items = (JSON.parse(json) as DraftLineItem[]).map((i) => ({
