@@ -115,11 +115,9 @@ export async function createScheduleProposal(
   slots: { date: string; time?: string }[],
   timeNote?: string | null,
 ): Promise<Result & { token?: string }> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
 
   const clean = slots
     .filter((s) => /^\d{4}-\d{2}-\d{2}$/.test(s?.date ?? ""))
@@ -132,7 +130,7 @@ export async function createScheduleProposal(
 
   const { data, error } = await supabase
     .from("schedule_proposals")
-    .insert({ job_id: jobId, dates: clean, time_note: timeNote || null, created_by: user.id })
+    .insert({ job_id: jobId, dates: clean, time_note: timeNote || null, created_by: ctx.userId })
     .select("token")
     .single();
   if (error) return { ok: false, error: error.message };
@@ -141,7 +139,9 @@ export async function createScheduleProposal(
 }
 
 export async function cancelScheduleProposal(id: string, jobId: string): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { error } = await supabase.from("schedule_proposals").update({ status: "cancelled" }).eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath(`/jobs/${jobId}`);
@@ -154,7 +154,9 @@ export async function setJobSchedule(
   startIso: string | null,
   endIso: string | null,
 ): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const patch: Record<string, unknown> = {
     scheduled_start: startIso,
     scheduled_end: endIso,

@@ -2,7 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
-import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
 import { sendPushToProfiles } from "@/lib/push";
 import { getOrgSettings } from "@/lib/org-settings";
@@ -112,11 +111,9 @@ export async function createAppointment(formData: FormData): Promise<Result> {
 export async function createAppointmentProposal(
   formData: FormData,
 ): Promise<{ ok: boolean; error?: string; token?: string }> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
 
   const title = String(formData.get("title") ?? "").trim();
   if (!title) return { ok: false, error: "Title is required." };
@@ -134,7 +131,7 @@ export async function createAppointmentProposal(
     .slice(0, 3);
   if (!slots.length) return { ok: false, error: "Add at least one date option." };
 
-  const cust = await resolveCustomer(supabase, formData, user.id);
+  const cust = await resolveCustomer(supabase, formData, ctx.userId);
   if (cust.error) return { ok: false, error: cust.error };
 
   const apptType = String(formData.get("type") ?? "quote");
@@ -179,7 +176,7 @@ export async function createAppointmentProposal(
       notes: emptyToNull(formData.get("notes")),
       assigned_to: emptyToNull(formData.get("assigned_to")),
       status: "proposed",
-      created_by: user.id,
+      created_by: ctx.userId,
     })
     .select("id")
     .single();
@@ -187,7 +184,7 @@ export async function createAppointmentProposal(
 
   const { data: prop, error: pErr } = await supabase
     .from("schedule_proposals")
-    .insert({ appointment_id: appt.id, dates: slots, created_by: user.id })
+    .insert({ appointment_id: appt.id, dates: slots, created_by: ctx.userId })
     .select("token")
     .single();
   if (pErr || !prop) return { ok: false, error: pErr?.message ?? "Could not create the pick-a-time link." };
@@ -198,15 +195,12 @@ export async function createAppointmentProposal(
 }
 
 export async function updateAppointment(id: string, formData: FormData): Promise<Result> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const title = String(formData.get("title") ?? "").trim();
   if (!title) return { ok: false, error: "Title is required." };
-  const cust = user
-    ? await resolveCustomer(supabase, formData, user.id)
-    : { customerId: emptyToNull(formData.get("customer_id")) as string | null };
+  const cust = await resolveCustomer(supabase, formData, ctx.userId);
   if (cust.error) return { ok: false, error: cust.error };
   const customerId = cust.customerId;
 
@@ -331,7 +325,9 @@ export async function createJobFromAppointment(appointmentId: string): Promise<R
 }
 
 export async function deleteAppointment(id: string): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { error } = await supabase.from("appointments").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/schedule");

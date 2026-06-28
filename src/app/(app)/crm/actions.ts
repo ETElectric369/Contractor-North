@@ -92,7 +92,9 @@ export async function updateCustomer(
   id: string,
   formData: FormData,
 ): Promise<ActionResult> {
-  const supabase = await createClient();
+  const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return { ok: false, error: "Name is required." };
 
@@ -166,11 +168,9 @@ export interface CustomerImportRow {
 /** Bulk-import customers from a CSV (skips rows with no name; dedupes on
  *  exact name+phone already present). */
 export async function bulkImportCustomers(rows: CustomerImportRow[]): Promise<ActionResult & { imported?: number; skipped?: number }> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
 
   const clean = rows
     .map((r) => ({
@@ -185,7 +185,7 @@ export async function bulkImportCustomers(rows: CustomerImportRow[]): Promise<Ac
       notes: orNull(String(r.notes ?? "")),
       type: "residential",
       status: "active",
-      created_by: user.id,
+      created_by: ctx.userId,
     }))
     .filter((r) => r.name);
   if (!clean.length) return { ok: false, error: "No rows with a name to import." };
@@ -208,7 +208,9 @@ export async function bulkImportCustomers(rows: CustomerImportRow[]): Promise<Ac
 /** Delete a customer — blocked while jobs/quotes/invoices still reference it,
  *  so history can never disappear by accident. */
 export async function deleteCustomer(id: string): Promise<ActionResult> {
-  const supabase = await createClient();
+  const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
 
   const [{ count: jobs }, { count: quotes }, { count: invoices }] = await Promise.all([
     supabase.from("jobs").select("id", { count: "exact", head: true }).eq("customer_id", id),
@@ -236,7 +238,9 @@ export async function updateCustomerStatus(
   id: string,
   status: string,
 ): Promise<ActionResult> {
-  const supabase = await createClient();
+  const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { error } = await supabase
     .from("customers")
     .update({ status })

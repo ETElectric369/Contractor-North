@@ -250,7 +250,9 @@ export async function updateQuoteMeta(
 }
 
 export async function deleteQuote(id: string): Promise<{ ok: boolean; error?: string }> {
-  const supabase = await createClient();
+  const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { error } = await supabase.from("quotes").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/quotes");

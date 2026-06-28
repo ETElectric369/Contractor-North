@@ -179,7 +179,9 @@ export async function finishJob(
 /** Delete a job after warning about linked records (quotes/invoices keep
  *  their data; their job link is cleared by FK rules). */
 export async function deleteJob(id: string): Promise<{ ok: boolean; error?: string }> {
-  const supabase = await createClient();
+  const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { error } = await supabase.from("jobs").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/jobs");
@@ -194,11 +196,9 @@ export async function updateJob(
   id: string,
   formData: FormData,
 ): Promise<{ ok: boolean; error?: string }> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
 
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return { ok: false, error: "Job name is required." };
@@ -214,7 +214,7 @@ export async function updateJob(
         phone: emptyToNull(formData.get("new_customer_phone")),
         email: emptyToNull(formData.get("new_customer_email")),
         status: "active",
-        created_by: user.id,
+        created_by: ctx.userId,
       })
       .select("id")
       .single();

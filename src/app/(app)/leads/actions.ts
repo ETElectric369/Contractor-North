@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
 import { requireStaff } from "@/lib/staff-guard";
-import { createClient } from "@/lib/supabase/server";
 import { formatPhone, formatState, formatZip, titleCase } from "@/lib/utils";
 
 export type Result = { ok: boolean; error?: string; id?: string; redirect?: string };
@@ -99,13 +98,16 @@ export async function markInquiryContacted(id: string, nextFollowUp?: string | n
 }
 
 export async function setInquiryStatus(id: string, status: string): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { error } = await supabase
     .from("inquiries")
     .update({ status, updated_at: new Date().toISOString() })
     .eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/leads");
+  revalidatePath("/planner"); // My Day shows inquiry counts — keep it in sync
   return { ok: true };
 }
 
