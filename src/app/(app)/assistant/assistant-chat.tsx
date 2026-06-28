@@ -6,6 +6,7 @@ import { Send, Sparkles, Loader2, Mic, Check, Square, FileText } from "lucide-re
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
 import { speakSmart, unlockAudio, stopSpeaking } from "@/lib/tts";
+import * as speech from "@/lib/speech";
 import {
   CONFIRM_MARKER, OPEN_MARKER, PICK_MARKER, STATUS_OPEN, STATUS_CLOSE, DRAFT_OPEN, DRAFT_CLOSE,
   type AgentConfirm, type AgentOpen, type AgentPick, type AgentDraft,
@@ -133,7 +134,9 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
   const [listening, setListening] = useState(false);
   const [voiceOn, setVoiceOn] = useState(false); // is the mic available
   const scrollRef = useRef<HTMLDivElement>(null);
-  const recogRef = useRef<any>(null);
+  // The speech service holds the recognizer; we just give it the latest `send` via a ref (so the
+  // module-level result handler never goes stale on `messages`).
+  const sendRef = useRef<((t: string, viaVoice?: boolean) => void) | null>(null);
   // True while we're in a spoken back-and-forth: each reply is read aloud and the mic
   // re-opens for the next turn. Tapping the mic off, or typing, leaves voice mode.
   const voiceModeRef = useRef(false);
@@ -156,7 +159,8 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
   useEffect(() => { estimatorStore.setListening(listening); }, [listening]);
   // Tear the voice session down on unmount (close), so a live recognizer never outlives the panel.
   useEffect(() => () => {
-    try { recogRef.current?.stop(); } catch {}
+    speech.stopListening();
+    speech.setResultHandler(null);
     estimatorStore.setListening(false);
     estimatorStore.setSpeaking(false);
     estimatorStore.setStreaming(false);
@@ -168,7 +172,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
   useEffect(() => {
     const stop = () => {
       try { abortRef.current?.abort(); } catch {}
-      try { recogRef.current?.stop(); } catch {}
+      speech.stopListening();
       stopSpeaking();
       setStreaming(false);
       setSpeaking(false);
@@ -181,12 +185,14 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // The topbar Talk button is the ONLY voice control now (no in-panel mic). When the panel is
-  // already open, tapping it re-opens the mic for the next turn (entering voice mode if needed).
+  // The topbar Talk button is the ONLY voice control now (no in-panel mic). When the panel is already
+  // open, the tap ALREADY (re)started the mic in-gesture (launch → speech.startListening) — here we just
+  // enter voice mode + point the next transcript at a normal spoken turn.
   useEffect(() => {
     const talk = () => {
-      if (!voiceModeRef.current) { setVoiceMode(true); startMic(); return; }
-      voiceTap();
+      setVoiceMode(true);
+      speech.setResultHandler((t) => sendRef.current?.(t, true));
+      setListening(speech.isListening());
     };
     window.addEventListener("cn:assistant-talk", talk);
     return () => window.removeEventListener("cn:assistant-talk", talk);
@@ -241,7 +247,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
   // The big mic button in voice mode: cut off any speech, end a listening turn, or start one.
   function voiceTap() {
     if (listening) {
-      try { recogRef.current?.stop(); } catch {}
+      speech.stopListening();
       return;
     }
     stopSpeaking();
@@ -249,17 +255,30 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     startMic();
   }
 
+  // Wire the shared speech service: detect support, route each transcript to the LATEST send (via the
+  // ref, so it never captures stale messages), and mirror the listening state.
   useEffect(() => {
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    setVoiceOn(Boolean(SR));
+    setVoiceOn(speech.speechSupported());
+    speech.setResultHandler((t) => sendRef.current?.(t, true));
+    const unsub = speech.onListeningState(setListening);
+    setListening(speech.isListening()); // catch an in-gesture start that already happened (first open)
+    return () => {
+      speech.setResultHandler(null);
+      unsub();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Voice-first: when the assistant is opened by the mic launcher, start listening right
-  // away (it already unlocked audio in the tap), so it's tap → talk, not tap → tap-mic.
+  // Voice-first: the topbar tap ALREADY started the mic in-gesture (global-assistant launch →
+  // speech.startListening) — iOS only honors a start inside the gesture. So here we just enter voice
+  // mode (do NOT start the mic from this post-commit effect; iOS would reject it).
   useEffect(() => {
     if (!autoStart) return;
     setVoiceMode(true);
-    startMic();
+    // The mic was started in-gesture by the topbar tap. If it took, mirror "listening"; if it didn't
+    // (no mic, or iOS rejected even the in-gesture start), nudge to tap Talk rather than sit silent.
+    if (speech.isListening()) setListening(true);
+    else setStatus("Tap Talk to speak");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoStart]);
 
@@ -298,7 +317,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
   // speech mid-sentence, and leave voice mode.
   function stopVoice() {
     setVoiceMode(false);
-    try { recogRef.current?.stop(); } catch {}
+    speech.stopListening();
     stopSpeaking();
     setListening(false);
   }
@@ -420,35 +439,12 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     }
   }
 
-  // Open the recognizer; the final transcript is sent as a spoken turn.
+  // Open the mic for a normal spoken turn (transcript → send). Routes through the shared service; if
+  // start() is rejected (off-gesture on iOS — e.g. the auto re-listen after a reply fires from a TTS
+  // callback, outside the gesture), fall back to a "tap Talk" nudge instead of dying silently.
   function startMic() {
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) return;
-    try {
-      const r = new SR();
-      r.continuous = false;
-      r.interimResults = false;
-      r.lang = "en-US";
-      r.onresult = (e: any) => {
-        let text = "";
-        for (let i = e.resultIndex; i < e.results.length; i++) text += e.results[i][0].transcript;
-        text = text.trim();
-        if (text) send(text, true);
-      };
-      r.onerror = (e: any) => {
-        setListening(false);
-        // iOS rejects mic start outside the tap gesture — surface it instead of dying silently.
-        if (e?.error === "not-allowed" || e?.error === "service-not-allowed") setStatus("Tap Talk to speak");
-      };
-      r.onend = () => setListening(false);
-      r.start();
-      recogRef.current = r;
-      setListening(true);
-    } catch {
-      // start() threw (often an off-gesture rejection on iOS) — tell the user to tap Talk.
-      setListening(false);
-      setStatus("Tap Talk to speak");
-    }
+    speech.setResultHandler((t) => sendRef.current?.(t, true)); // normal mode (confirmListen may have changed it)
+    if (!speech.startListening()) setStatus("Tap Talk to speak");
   }
 
   // Enter voice mode from the text composer's Talk button. (Leaving is the Stop button →
@@ -466,32 +462,16 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     else startMic();
   }
 
-  // Listen for a spoken yes/no on a pending confirm proposal.
+  // Listen for a spoken yes/no on a pending confirm proposal (the service routes the transcript here).
   function confirmListen() {
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) return;
-    try {
-      const r = new SR();
-      r.continuous = false;
-      r.interimResults = false;
-      r.lang = "en-US";
-      r.onresult = (e: any) => {
-        let t = "";
-        for (let i = e.resultIndex; i < e.results.length; i++) t += e.results[i][0].transcript;
-        t = t.trim().toLowerCase();
-        // Fail safe: an explicit no/cancel wins (checked first).
-        if (/\b(no|nope|cancel|stop|never ?mind|don'?t|do not|wrong|negative)\b/.test(t)) resolveConfirm(false);
-        else if (/\b(yes|yeah|yep|yup|confirm|do it|go ahead|sure|okay|ok|save it|sounds good)\b/.test(t)) resolveConfirm(true);
-        else say("Say yes or no.", () => { if (voiceModeRef.current && confirmRef.current) confirmListen(); });
-      };
-      r.onerror = () => setListening(false);
-      r.onend = () => setListening(false);
-      r.start();
-      recogRef.current = r;
-      setListening(true);
-    } catch {
-      setListening(false);
-    }
+    speech.setResultHandler((t) => {
+      const low = t.trim().toLowerCase();
+      // Fail safe: an explicit no/cancel wins (checked first).
+      if (/\b(no|nope|cancel|stop|never ?mind|don'?t|do not|wrong|negative)\b/.test(low)) resolveConfirm(false);
+      else if (/\b(yes|yeah|yep|yup|confirm|do it|go ahead|sure|okay|ok|save it|sounds good)\b/.test(low)) resolveConfirm(true);
+      else say("Say yes or no.", () => { if (voiceModeRef.current && confirmRef.current) confirmListen(); });
+    });
+    if (!speech.startListening()) setStatus("Tap Talk to speak");
   }
 
   // Resolve a pending confirm: run it (yes) or drop it (no). Nothing wrote until here.
@@ -499,7 +479,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     const c = confirmRef.current;
     confirmRef.current = null;
     setPendingConfirm(null);
-    try { recogRef.current?.stop(); } catch {}
+    speech.stopListening();
     setListening(false);
     if (!c) return;
     if (!yes) {
@@ -536,6 +516,9 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Keep the speech service pointed at THIS render's send (so a transcript never uses stale messages).
+  sendRef.current = send;
 
   const elapsedStr = (() => { const s = Math.floor(elapsedMs / 1000); return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`; })();
   const statusText = status ?? (streaming ? (tokens > 2 ? "responding…" : "thinking…") : listening ? "listening…" : speaking ? "talking…" : null);

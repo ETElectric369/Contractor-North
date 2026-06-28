@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { AudioLines, Square, X, ChevronDown, ChevronUp, GripHorizontal } from "lucide-react";
 import { AssistantChat } from "@/app/(app)/assistant/assistant-chat";
 import { unlockAudio, stopSpeaking } from "@/lib/tts";
+import * as speech from "@/lib/speech";
 import { useEstimator } from "@/lib/estimator-store";
 
 const PANEL_W = 384; // 24rem
@@ -39,7 +40,11 @@ export function GlobalAssistant() {
       if (synth) { const u = new SpeechSynthesisUtterance(" "); u.volume = 0; synth.speak(u); }
     } catch {}
     unlockAudio();
-    // Already open → the Talk button re-opens the mic for the next turn (single voice control).
+    // START THE MIC RIGHT HERE, INSIDE THE TAP. iOS only honors SpeechRecognition.start() inside the
+    // user gesture — starting it later (the old post-mount effect) was the "mic never starts on iPhone"
+    // bug. The chat panel (mounted next / already mounted) picks up the transcript via the shared service.
+    speech.startListening();
+    // Already open → the Talk button just re-opened the mic; tell the panel to resume the conversation.
     if (open) { window.dispatchEvent(new Event("cn:assistant-talk")); setCollapsed(false); return; }
     setPendingQuery(null);
     setVoiceLaunch(true);
