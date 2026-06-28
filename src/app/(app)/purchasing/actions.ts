@@ -47,7 +47,7 @@ export async function createPurchaseOrder(input: {
         sort_order: idx,
       }));
       await supabase.from("purchase_order_items").insert(rows);
-      await recalcTotals(supabase, po.id);
+      await recalcPoTotals(supabase, po.id);
     }
   }
 
@@ -75,7 +75,7 @@ export async function addPoItem(
     unit_cost: item.unit_cost || 0,
   });
   if (error) return { ok: false, error: error.message };
-  await recalcTotals(supabase, poId);
+  await recalcPoTotals(supabase, poId);
   revalidatePath(`/purchasing/${poId}`);
   return { ok: true };
 }
@@ -110,7 +110,7 @@ export async function updatePoItem(
     })
     .eq("id", itemId);
   if (error) return { ok: false, error: error.message };
-  await recalcTotals(supabase, poId);
+  await recalcPoTotals(supabase, poId);
   revalidatePath(`/purchasing/${poId}`);
   return { ok: true };
 }
@@ -122,7 +122,7 @@ export async function deletePoItem(itemId: string, poId: string): Promise<Result
     .delete()
     .eq("id", itemId);
   if (error) return { ok: false, error: error.message };
-  await recalcTotals(supabase, poId);
+  await recalcPoTotals(supabase, poId);
   revalidatePath(`/purchasing/${poId}`);
   return { ok: true };
 }
@@ -248,13 +248,13 @@ export async function receiveItem(
   return { ok: true };
 }
 
-async function recalcTotals(supabase: any, poId: string) {
+async function recalcPoTotals(supabase: any, poId: string) {
   const { data: items } = await supabase
     .from("purchase_order_items")
     .select("line_total")
     .eq("po_id", poId);
-  const subtotal =
-    items?.reduce((s: number, i: any) => s + Number(i.line_total ?? 0), 0) ?? 0;
+  const raw = items?.reduce((s: number, i: any) => s + Number(i.line_total ?? 0), 0) ?? 0;
+  const subtotal = Math.round(raw * 100) / 100; // cents-round so PO totals don't carry float dust
   await supabase
     .from("purchase_orders")
     .update({ subtotal, total: subtotal })

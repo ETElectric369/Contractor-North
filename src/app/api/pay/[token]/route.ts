@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getStripe, billingEnabled } from "@/lib/stripe";
 import { createServiceClient } from "@/lib/supabase/server";
+import { invoiceBalance } from "@/lib/invoice-math";
 
 export const runtime = "nodejs";
 
@@ -38,7 +39,7 @@ export async function GET(
     .maybeSingle();
   if (!inv) return new NextResponse("Invoice not found.", { status: 404 });
 
-  const balance = Number(inv.total) - Number(inv.amount_paid);
+  const balance = invoiceBalance(inv.total, inv.amount_paid);
   if (balance <= 0) {
     return NextResponse.redirect(`${site}/i/${token}?paid=1`, { status: 303 });
   }

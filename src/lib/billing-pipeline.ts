@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { invoiceBalance } from "@/lib/invoice-math";
 
 /**
  * THE money pipeline: every job/invoice that needs a money action, in exactly one stage, so nothing
@@ -48,13 +49,13 @@ export async function getMoneyPipeline(supabase: SupabaseClient): Promise<MoneyP
 
   const toInv = (i: any, overdue: boolean): PipelineInvoice => ({
     id: i.id, invoice_number: i.invoice_number, total: Number(i.total) || 0,
-    balance: (Number(i.total) || 0) - (Number(i.amount_paid) || 0), status: i.status,
+    balance: invoiceBalance(i.total, i.amount_paid), status: i.status,
     due_date: i.due_date, customer: i.customers?.name ?? null, job: i.jobs?.name ?? null, overdue,
   });
 
   const drafts = invoices.filter((i) => i.status === "draft").map((i) => toInv(i, false));
   const unpaid = invoices
-    .filter((i) => !["draft", "paid", "void"].includes(i.status) && (Number(i.total) || 0) - (Number(i.amount_paid) || 0) > 0.005)
+    .filter((i) => !["draft", "paid", "void"].includes(i.status) && invoiceBalance(i.total, i.amount_paid) > 0.005)
     .map((i) => toInv(i, !!i.due_date && i.due_date < today))
     .sort((a, b) => (a.overdue === b.overdue ? 0 : a.overdue ? -1 : 1)); // overdue first
 

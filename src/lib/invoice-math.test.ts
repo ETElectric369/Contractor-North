@@ -1,5 +1,22 @@
 import { describe, it, expect } from "vitest";
-import { recalcTotals, resolveDrawCredit, drawAmount, progressSummary, shouldBlockStandardImport, isStandardBillingBlocker, groupInvoiceLines, paidStatus, invoiceTypeLabel } from "@/lib/invoice-math";
+import { recalcTotals, resolveDrawCredit, drawAmount, progressSummary, shouldBlockStandardImport, isStandardBillingBlocker, groupInvoiceLines, paidStatus, invoiceTypeLabel, invoiceBalance } from "@/lib/invoice-math";
+
+describe("invoiceBalance — one balance definition", () => {
+  it("total − paid, rounded to cents", () => {
+    expect(invoiceBalance(100, 40)).toBe(60);
+    expect(invoiceBalance(2.02, 0.01)).toBe(2.01);
+  });
+  it("never negative (overpayment floors at 0)", () => {
+    expect(invoiceBalance(50, 75)).toBe(0);
+  });
+  it("float dust floors so a fully-paid invoice reads as settled (the pay-route bug)", () => {
+    expect(invoiceBalance(100, 99.996)).toBe(0);
+  });
+  it("nullish inputs coerce to 0 (no NaN balance)", () => {
+    expect(invoiceBalance(null, undefined)).toBe(0);
+    expect(invoiceBalance(80, null)).toBe(80);
+  });
+});
 
 describe("invoiceTypeLabel", () => {
   it("states the billing model, with the draw stage when present", () => {

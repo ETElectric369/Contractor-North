@@ -28,6 +28,14 @@ export function paidStatus(total: number, amountPaid: number, currentStatus?: st
   return status;
 }
 
+/** THE invoice balance owed: total − amount paid, never negative, rounded to cents. One
+ *  definition so the ~18 inline `total - amount_paid` sites (the pay-route paid gate, the
+ *  billing board/pipeline, the customer portal + email) can't disagree on rounding/flooring
+ *  — e.g. the pay route used an UNROUNDED value, so 0.004 of float dust read as "still owed". */
+export function invoiceBalance(total: number | null | undefined, amountPaid: number | null | undefined): number {
+  return cents(Math.max(0, fin(total) - fin(amountPaid)));
+}
+
 /** Recompute an invoice's rollup from its line totals + payments. Negative line
  *  items (a "Less previous billings" credit) flow through naturally. Amounts are
  *  rounded to cents so float dust (0.01 + 2.01 summing to 2.0199…) can't leave a
