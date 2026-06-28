@@ -150,6 +150,21 @@ export function AssistantChat({ autoStart = false, glass = false }: { autoStart?
   // (total + stop) can live on the topbar Talk button even when this drawer is closed.
   useEffect(() => { estimatorStore.setDraft(draft); }, [draft]);
   useEffect(() => { estimatorStore.setSpeaking(speaking); }, [speaking]);
+  useEffect(() => { estimatorStore.setStreaming(streaming); }, [streaming]);
+  // Anyone (the topbar red-stop button) can stop the assistant via this event: abort the in-flight
+  // stream + cut off any TTS.
+  const abortRef = useRef<AbortController | null>(null);
+  useEffect(() => {
+    const stop = () => {
+      try { abortRef.current?.abort(); } catch {}
+      stopSpeaking();
+      setStreaming(false);
+      setSpeaking(false);
+      setStatus(null);
+    };
+    window.addEventListener("cn:assistant-stop", stop);
+    return () => window.removeEventListener("cn:assistant-stop", stop);
+  }, []);
   const router = useRouter();
 
   // Finalize the live draft → real quote, then flip to the actual quote page (filled out).
@@ -218,7 +233,10 @@ export function AssistantChat({ autoStart = false, glass = false }: { autoStart?
     loadedRef.current = true;
     loadConversation()
       .then(({ messages: m, draft: d }) => {
-        if (m && m.length) setMessages(m as Msg[]);
+        // The preview drawer (glass) opens FRESH — last session's chatter isn't shown again (CIB
+        // keeps what matters as memory facts; an OPEN draft is still restored so an estimate-in-
+        // progress comes back). The full /assistant page keeps the scroll-back history.
+        if (m && m.length && !glass) setMessages(m as Msg[]);
         if (d) setDraft(d);
       })
       .catch(() => {});
@@ -265,9 +283,11 @@ export function AssistantChat({ autoStart = false, glass = false }: { autoStart?
     setStreaming(true);
     scrollToBottom();
 
+    abortRef.current = new AbortController();
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
+        signal: abortRef.current.signal,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: next, voice: viaVoice }),
       });
@@ -348,12 +368,13 @@ export function AssistantChat({ autoStart = false, glass = false }: { autoStart?
         if (clean) say(clean, () => { if (voiceModeRef.current) startMic(); });
       }
     } catch (e: any) {
-      setMessages((m) => [
-        ...m,
-        { role: "assistant", content: `Error: ${e?.message ?? "unknown"}` },
-      ]);
+      // A user-initiated stop (abort) is not an error — leave the partial reply as-is.
+      if (e?.name !== "AbortError") {
+        setMessages((m) => [...m, { role: "assistant", content: `Error: ${e?.message ?? "unknown"}` }]);
+      }
     } finally {
       setStreaming(false);
+      setStatus(null);
       scrollToBottom();
     }
   }

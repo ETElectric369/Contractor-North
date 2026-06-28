@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { AudioLines, X, Square } from "lucide-react";
 import { AssistantChat } from "@/app/(app)/assistant/assistant-chat";
 import { unlockAudio, stopSpeaking } from "@/lib/tts";
-import { useEstimator, draftTotal, estimatorStore } from "@/lib/estimator-store";
+import { useEstimator, draftTotal } from "@/lib/estimator-store";
 
 const compactMoney = (n: number) => "$" + Math.round(n).toLocaleString();
 
@@ -15,8 +15,9 @@ const compactMoney = (n: number) => "$" + Math.round(n).toLocaleString();
  */
 export function GlobalAssistant() {
   const [open, setOpen] = useState(false);
-  const { draft, speaking } = useEstimator(); // the live estimate the assistant is building
+  const { draft, speaking, streaming } = useEstimator(); // the live estimate + assistant activity
   const items = draft?.items?.length ?? 0;
+  const active = speaking || streaming; // CIB is working or talking → the button is a red STOP
 
   function launch() {
     // Prime audio + TTS INSIDE this tap (the gesture) so the spoken reply plays on iOS and
@@ -41,32 +42,39 @@ export function GlobalAssistant() {
 
   return (
     <>
-      {items > 0 && !open ? (
-        // COMPACTED ESTIMATOR: while an estimate is building, the Talk button hosts the running
-        // total + item count, with a stop control when the assistant is talking. Tap it to expand
-        // the full Estimator back open.
-        <div className="btn-gloss inline-flex h-10 items-center gap-0.5 rounded-full bg-brand px-1 text-white shadow-sm">
+      {active ? (
+        // CIB is working or talking → the waveform flips to a red STOP (square in the circle). One
+        // tap aborts the stream + cuts the voice. Tap the rest of the pill to see what's happening.
+        <div className="btn-gloss inline-flex h-10 items-center gap-0.5 rounded-full bg-red-600 px-1 text-white shadow-sm">
           <button
-            onClick={launch}
-            title="Open the estimate"
-            aria-label="Open the estimate"
-            className="flex h-8 items-center gap-1.5 rounded-full px-2 transition-colors hover:bg-white/10"
+            onClick={() => window.dispatchEvent(new Event("cn:assistant-stop"))}
+            title="Stop"
+            aria-label="Stop the assistant"
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-white/15 transition-colors hover:bg-white/30"
           >
-            <AudioLines className="h-4 w-4 shrink-0" />
-            <span className="text-sm font-semibold tabular-nums">{compactMoney(draftTotal(draft))}</span>
-            <span className="hidden text-[11px] text-white/70 sm:inline">{items} item{items === 1 ? "" : "s"}</span>
+            <Square className="h-4 w-4 fill-current" />
           </button>
-          {speaking && (
-            <button
-              onClick={() => { stopSpeaking(); estimatorStore.setSpeaking(false); }}
-              title="Stop talking"
-              aria-label="Stop talking"
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-white/20 transition-colors hover:bg-white/30"
-            >
-              <Square className="h-3.5 w-3.5" />
-            </button>
-          )}
+          <button onClick={launch} aria-label="Open the assistant" className="flex h-8 items-center gap-1.5 rounded-full px-2 transition-colors hover:bg-white/10">
+            {items > 0 ? (
+              <span className="text-sm font-semibold tabular-nums">{compactMoney(draftTotal(draft))}</span>
+            ) : (
+              <span className="hidden text-sm font-medium sm:inline">{speaking ? "Talking…" : "Working…"}</span>
+            )}
+          </button>
         </div>
+      ) : items > 0 && !open ? (
+        // COMPACTED ESTIMATOR: estimate building + drawer closed → the Talk button hosts the running
+        // total + item count. Tap to expand the full Estimator back open.
+        <button
+          onClick={launch}
+          title="Open the estimate"
+          aria-label="Open the estimate"
+          className="btn-gloss inline-flex h-10 items-center gap-1.5 rounded-full bg-brand px-3 text-white shadow-sm transition-colors hover:bg-brand-dark"
+        >
+          <AudioLines className="h-4 w-4 shrink-0" />
+          <span className="text-sm font-semibold tabular-nums">{compactMoney(draftTotal(draft))}</span>
+          <span className="hidden text-[11px] text-white/70 sm:inline">{items} item{items === 1 ? "" : "s"}</span>
+        </button>
       ) : (
         <button
           onClick={launch}
