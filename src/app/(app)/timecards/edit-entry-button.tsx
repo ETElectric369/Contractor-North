@@ -24,6 +24,8 @@ interface Entry {
   // The entry's current job (joined), so we can keep it as an option even when
   // it's older than the recent-jobs list and would otherwise vanish on save.
   job?: { job_number: string; name: string } | null;
+  // Existing split-across-jobs allocations, so the editor round-trips them.
+  time_allocations?: { job_id?: string | null; hours?: number | null; job_code?: string | null; description?: string | null }[];
 }
 interface Member {
   id: string;
@@ -75,6 +77,14 @@ export function EditEntryButton({
   const [breaksTaken, setBreaksTaken] = useState(true);
   const [miles, setMiles] = useState(entry.miles ?? 0);
   const [notes, setNotes] = useState(entry.notes ?? "");
+  // Split-across-jobs rows (pre-filled from existing allocations so save round-trips them).
+  const [splits, setSplits] = useState<{ job_id: string; hours: number; description: string }[]>(() =>
+    (entry.time_allocations ?? []).map((a) => ({ job_id: a.job_id ?? "", hours: Number(a.hours ?? 0), description: a.description ?? "" })),
+  );
+  const addSplit = () => setSplits((s) => [...s, { job_id: jobId || "", hours: 0, description: "" }]);
+  const setSplit = (i: number, patch: Partial<{ job_id: string; hours: number; description: string }>) =>
+    setSplits((s) => s.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  const removeSplit = (i: number) => setSplits((s) => s.filter((_, idx) => idx !== i));
 
   const grossHrs = (() => {
     const ci = new Date(`${date}T${startT}:00`);
@@ -85,6 +95,10 @@ export function EditEntryButton({
   const lunchRequired = grossHrs > 5;
   const breaksRequired = grossHrs > 3.5;
   const twoBreaks = grossHrs > 5;
+  const lunchHrs = lunchTaken ? 0.5 : 0;
+  const workedHrs = Math.max(0, grossHrs - lunchHrs); // billable shift = gross minus lunch
+  const allocated = splits.reduce((s, r) => s + (Number(r.hours) || 0), 0);
+  const remainder = Math.round((workedHrs - allocated) * 100) / 100;
 
   function save() {
     setError(null);
@@ -94,6 +108,10 @@ export function EditEntryButton({
     if (co <= ci) return setError("End must be after start.");
     if (lunchRequired && !lunchTaken) return setError("Confirm the 30-minute lunch — required for shifts over 5 hours.");
     if (breaksRequired && !breaksTaken) return setError("Confirm the rest break(s) — required by labor law.");
+    if (allocated > workedHrs + 0.01) return setError(`Split adds up to ${allocated.toFixed(2)}h — more than the ${workedHrs.toFixed(2)}h worked.`);
+    const allocations = splits
+      .filter((s) => s.job_id || (Number(s.hours) || 0) > 0)
+      .map((s) => ({ job_id: s.job_id || null, job_code: null, hours: Number(s.hours) || 0, description: s.description || "" }));
     start(async () => {
       const res = await updateTimeEntry({
         id: entry.id,
@@ -105,6 +123,7 @@ export function EditEntryButton({
         notes,
         miles,
         profile_id: profileId || undefined,
+        allocations,
       });
       if (!res.ok) return setError(res.error ?? "Could not save.");
       setOpen(false);
@@ -207,7 +226,57 @@ export function EditEntryButton({
                 </option>
               ))}
             </Select>
+            {splits.length > 0 && (
+              <p className="mt-1 text-xs text-slate-400">The split below decides the billing — the job above is just the fallback.</p>
+            )}
           </div>
+
+          {/* Split across jobs — e.g. "1h at Northwoods, the rest elsewhere." Each row bills its job
+              its own hours; the single Job above is ignored for billing once a split exists. */}
+          <div className="rounded-lg border border-slate-200 p-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-slate-700">Split across jobs</span>
+              <button type="button" onClick={addSplit} className="text-xs font-semibold text-brand hover:underline">
+                + Add job
+              </button>
+            </div>
+            <p className="mt-1 text-xs text-slate-500">
+              On more than one job this shift? Give each its hours — billing charges each job its own time.
+              Unallocated time is still paid, just not billed to a job.
+            </p>
+            {splits.length > 0 && (
+              <div className="mt-2 space-y-2">
+                {splits.map((s, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <Select value={s.job_id} onChange={(e) => setSplit(i, { job_id: e.target.value })} className="min-w-0 flex-1">
+                      <option value="">— Job —</option>
+                      {entry.job_id && !jobs.some((j) => j.id === entry.job_id) && (
+                        <option value={entry.job_id}>{entry.job ? `${entry.job.job_number} · ${entry.job.name}` : "Current job"}</option>
+                      )}
+                      {jobs.map((j) => (
+                        <option key={j.id} value={j.id}>{j.job_number} · {j.name}</option>
+                      ))}
+                    </Select>
+                    <div className="w-24 shrink-0">
+                      <NumberInput value={s.hours} onValueChange={(v) => setSplit(i, { hours: v })} step={0.25} aria-label="Hours" />
+                    </div>
+                    <button type="button" onClick={() => removeSplit(i)} className="shrink-0 rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" title="Remove">
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+                <div className={allocated > workedHrs + 0.01 ? "text-xs font-medium text-red-600" : "text-xs text-slate-500"}>
+                  {allocated.toFixed(2)}h allocated of {workedHrs.toFixed(2)}h worked
+                  {allocated > workedHrs + 0.01
+                    ? " · more than worked"
+                    : remainder > 0.01
+                      ? ` · ${remainder.toFixed(2)}h unbilled`
+                      : " · fully allocated"}
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label htmlFor="e-code">Job code</Label>

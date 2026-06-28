@@ -122,7 +122,7 @@ export default async function JobDetailPage({
     supabase.from("purchase_orders").select("id, po_number, vendor, status, total").eq("job_id", id),
     supabase
       .from("time_entries")
-      .select("id, profile_id, clock_in, clock_out, lunch_minutes, miles, status, job_id, job_code, notes, rate_override, profiles(full_name, hourly_rate, bill_rate), job:job_id(job_number, name), time_allocations(id, hours, job_code)")
+      .select("id, profile_id, clock_in, clock_out, lunch_minutes, miles, status, job_id, job_code, notes, rate_override, profiles(full_name, hourly_rate, bill_rate), job:job_id(job_number, name), time_allocations(id, job_id, hours, job_code, description)")
       .eq("job_id", id)
       .order("clock_in", { ascending: false }),
     supabase
@@ -226,7 +226,10 @@ export default async function JobDetailPage({
     // otherwise the person's default profile rate.
     const rate = Number((e as any).rate_override ?? (e as any).profiles?.hourly_rate ?? 0);
     if ((e as any).time_allocations?.length) {
+      // A split shift: count only the hours allocated to THIS job (or unlabeled rows,
+      // which are a job-code breakdown within this job) — not time split to other jobs.
       for (const a of (e as any).time_allocations) {
+        if (a.job_id && a.job_id !== id) continue;
         laborHours += Number(a.hours ?? 0);
         laborCost += Number(a.hours ?? 0) * rate;
       }

@@ -367,6 +367,11 @@ export async function updateTimeEntry(input: {
   notes: string;
   miles?: number;
   profile_id?: string | null; // reassign the entry to a different team member
+  // Split this shift across jobs (e.g. "1h at Northwoods, rest elsewhere"). When present,
+  // these REPLACE the entry's allocations; billing then charges each job its own hours and
+  // the entry's single job_id is no longer billed gross. Omit (undefined) to leave splits
+  // untouched; pass [] to clear them.
+  allocations?: JobAllocationInput[];
 }): Promise<ClockResult> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -417,6 +422,34 @@ export async function updateTimeEntry(input: {
     for (const jid of new Set([oldJobId, input.job_id].filter(Boolean) as string[])) {
       revalidatePath(`/jobs/${jid}`);
     }
+    revalidatePath("/jobs");
+  }
+
+  // Split across jobs — REPLACE this entry's allocations with the submitted set.
+  // Insert the new rows BEFORE deleting the old (a failed insert can't wipe the
+  // split), and refresh every job touched on either side so labor totals move.
+  if (input.allocations !== undefined) {
+    const allocs = input.allocations.filter((a) => (a.hours ?? 0) > 0 || a.job_id || a.job_code || a.description?.trim());
+    const { data: oldAllocs } = await supabase.from("time_allocations").select("id, job_id").eq("time_entry_id", input.id);
+    const oldIds = (oldAllocs ?? []).map((a: { id: string }) => a.id);
+    const touched = new Set<string>((oldAllocs ?? []).map((a: { job_id: string | null }) => a.job_id).filter(Boolean) as string[]);
+    if (allocs.length) {
+      const rows = await Promise.all(
+        allocs.map(async (a, idx) => ({
+          time_entry_id: input.id,
+          job_id: await visibleJobIdOrNull(supabase, a.job_id),
+          job_code: a.job_code || null,
+          hours: a.hours || 0,
+          description: a.description || null,
+          sort_order: idx,
+        })),
+      );
+      for (const r of rows) if (r.job_id) touched.add(r.job_id);
+      const { error: aErr } = await supabase.from("time_allocations").insert(rows);
+      if (aErr) return { ok: false, error: aErr.message };
+    }
+    if (oldIds.length) await supabase.from("time_allocations").delete().in("id", oldIds);
+    for (const jid of touched) revalidatePath(`/jobs/${jid}`);
     revalidatePath("/jobs");
   }
   return { ok: true };
