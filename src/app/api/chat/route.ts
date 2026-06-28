@@ -155,7 +155,7 @@ export async function POST(req: Request) {
 - BE A PARTNER: if there's a better, safer, or cheaper way to do the work, say so in one line.
 - It's an estimate with a small buffer, not a guess — accuracy first.`;
   if (playbook) {
-    systemPrompt += `\n\nThis company's own quoting playbook (follow it over the generic method above wherever they differ):\n${playbook}`;
+    systemPrompt += `\n\nCOMPANY NOTES — apply these ON TOP of the method above. The METHOD governs the numbers (labor rate from settings, live web-searched material prices + buffer, NEC-calculated sizes/quantities); use these notes only for the company's habits, inclusions/exclusions, wording, and special cases. If a note states an old rate or markup that conflicts with the method/settings, the method wins — don't use stale numbers from here:\n${playbook}`;
   }
   // STYLE — Erik: short, direct, no small talk.
   systemPrompt += `\n\nSTYLE: short, direct answers and questions, straight to the point. No small talk, no filler, no "great question". If you're missing something needed to be accurate, ask one crisp question.`;

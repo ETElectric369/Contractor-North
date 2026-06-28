@@ -408,7 +408,7 @@ export async function generateQuoteDraft(
         `MATERIALS & EQUIPMENT: use web_search to find CURRENT market prices from a few sources, take the average, then add a ${orgS.material_buffer_percent}% buffer. ` +
         "ENGINEERING: calculate quantities and sizes per NEC (wire size, voltage drop, conduit fill, box fill, breaker/feeder, loads) — don't eyeball. " +
         "When done, respond with ONLY a JSON array of items, each {\"description\": string, \"quantity\": number, \"unit\": string (ea/ft/hr/lot), \"unit_price\": number (USD)} — materials AND labor lines, no prose." +
-        (playbook ? `\n\nCompany playbook (follow over generic assumptions):\n${playbook}` : ""),
+        (playbook ? `\n\nCompany notes (habits, inclusions/exclusions, special cases) — apply ON TOP of the method; the labor rate, web-searched prices, and calc'd numbers govern, so ignore any stale rate/markup stated here:\n${playbook}` : ""),
       messages: [{ role: "user", content: scope }],
     });
 

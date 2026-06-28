@@ -28,14 +28,17 @@ export function QuotePlaybookForm({ settings }: { settings: OrgSettings }) {
   return (
     <div className="space-y-3">
       <p className="text-sm text-slate-500">
-        Teach the AI how <em>you</em> quote: labor rates, markup, wire/material habits,
-        what you include and exclude. Every AI estimate draft and assistant answer follows this.
+        The AI already handles the <strong>numbers</strong> automatically: labor at your rate (Settings →
+        rates), materials at <em>current</em> web-researched prices + your buffer, and exact NEC-calculated
+        sizes/quantities. Use this box ONLY for your company&apos;s habits, inclusions/exclusions, wording,
+        and special cases it can&apos;t know — <strong>don&apos;t put rates or markup here</strong> (those
+        live in Settings and will override anything stale you type below).
       </p>
       <Textarea
-        rows={14}
+        rows={12}
         value={text}
         onChange={(e) => setText(e.target.value)}
-        placeholder={"e.g.\n• Lead electrician $150/hr, apprentice $75/hr — quote whole-crew hours\n• Materials marked up 25%\n• Buy full 500 ft wire rolls; leftover is shop stock\n• Size feeders for voltage drop, not just ampacity\n• Standard exclusions: permits, sales tax, equipment rental"}
+        placeholder={"e.g.\n• Always include a 1-year workmanship warranty line\n• Standard exclusions: permits, sales tax, equipment rental, drywall patch\n• Buy full 500 ft wire rolls; leftover is shop stock\n• We don't run aluminum branch circuits\n• Round each estimate up to the nearest $25\n• Note a 10% deposit due to schedule"}
       />
       <div className="flex items-center gap-3">
         <Button onClick={save} disabled={pending}>{pending ? "Saving…" : "Save playbook"}</Button>
