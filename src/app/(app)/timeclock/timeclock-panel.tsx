@@ -20,6 +20,7 @@ import { NumberInput } from "@/components/ui/number-input";
 import { hoursBetween, formatDuration } from "@/lib/utils";
 import { translator } from "@/lib/i18n";
 import { drivingDistanceMiles } from "@/lib/google-maps";
+import { getPosition } from "@/lib/geo";
 import type { GeoPoint, JobCode, TimeEntry } from "@/lib/types";
 import { clockIn, clockOut } from "./actions";
 import { ClockStartPicker } from "./clock-start-picker";
@@ -43,20 +44,12 @@ interface JobOption {
   codes?: string[]; // this job's template codes (undefined = all org codes)
 }
 
-function getGps(): Promise<GeoPoint | null> {
-  return new Promise((resolve) => {
-    if (!("geolocation" in navigator)) return resolve(null);
-    navigator.geolocation.getCurrentPosition(
-      (pos) =>
-        resolve({
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-          accuracy: pos.coords.accuracy,
-        }),
-      () => resolve(null),
-      { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 },
-    );
-  });
+// Route through the shared geo helper (one option set, real secure-context/permission handling) instead
+// of a third hand-rolled getCurrentPosition. Still returns null on failure — but the caller now SHOWS
+// that the punch wasn't GPS-stamped instead of silently stamping gps:null.
+async function getGps(): Promise<GeoPoint | null> {
+  const r = await getPosition({ enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 });
+  return r.status === "ok" ? { lat: r.coords.lat, lng: r.coords.lng, accuracy: r.accuracy } : null;
 }
 
 export function TimeclockPanel({
@@ -80,6 +73,7 @@ export function TimeclockPanel({
 }) {
   const t = translator(lang);
   const [error, setError] = useState<string | null>(null);
+  const [gpsNote, setGpsNote] = useState<string | null>(null); // "punch wasn't GPS-stamped" — surfaced, not silent
   const [pending, start] = useTransition();
 
   // clock-in form
@@ -186,6 +180,7 @@ export function TimeclockPanel({
 
   function doClockIn() {
     setError(null);
+    setGpsNote(null);
     start(async () => {
       const gps = await getGps();
       const res = await clockIn({
@@ -195,6 +190,9 @@ export function TimeclockPanel({
         clock_in_at: startAt || null,
       });
       if (!res.ok) setError(res.error ?? "Could not clock in.");
+      // GPS is optional, but don't pretend it was captured — if it's off/denied, say the punch
+      // isn't location-stamped (this used to fall through to gps:null silently).
+      else if (!gps) setGpsNote("Clocked in — location was off, so this punch isn't GPS-stamped.");
     });
   }
 
@@ -499,6 +497,7 @@ export function TimeclockPanel({
         </div>
 
         {error && <p className="text-sm text-red-600">{error}</p>}
+        {gpsNote && <p className="text-sm text-amber-600">{gpsNote}</p>}
 
         <Button size="lg" className="w-full" onClick={doClockIn} disabled={pending}>
           {pending ? (

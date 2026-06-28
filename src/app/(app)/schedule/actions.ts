@@ -84,14 +84,10 @@ export async function createJob(formData: FormData): Promise<Result> {
   return { ok: true, id: data.id };
 }
 
-export async function setJobStatus(id: string, status: string): Promise<Result> {
-  const supabase = await createClient();
-  const { error } = await supabase.from("jobs").update({ status }).eq("id", id);
-  if (error) return { ok: false, error: error.message };
-  revalidatePath("/schedule");
-  revalidatePath("/planner"); // My Day reads today's scheduled jobs — keep it in sync
-  return { ok: true };
-}
+// setJobStatus lived here as an UNGUARDED copy (no requireStaff / no status whitelist) — the job-page
+// status dropdown imported THIS one, silently bypassing the guard on the canonical jobs/actions copy.
+// Removed to kill the name-collision footgun; the single caller now imports the guarded jobs/actions one
+// (which revalidates /schedule + /planner so the calendar stays fresh).
 
 /** Assign a job to a single employee (or clear). */
 export async function setJobAssignee(

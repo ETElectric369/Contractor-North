@@ -3,7 +3,10 @@
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Select } from "@/components/ui/input";
-import { setJobStatus } from "../../schedule/actions";
+// Use the GUARDED setJobStatus (jobs/actions: requireStaff + status whitelist + not-found check).
+// There used to be an identically-named UNGUARDED copy in schedule/actions that this imported — a
+// name-collision footgun that silently bypassed the staff guard. That copy is now deleted.
+import { setJobStatus } from "../actions";
 
 const STATUSES = [
   "estimate",

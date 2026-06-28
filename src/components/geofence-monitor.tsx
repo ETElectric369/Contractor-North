@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { geoClockOut } from "@/app/(app)/timeclock/actions";
 import { speakSmart } from "@/lib/tts";
+import { watchPosition } from "@/lib/geo";
 import type { GeoPoint } from "@/lib/types";
 
 /** Great-circle distance in meters. */
@@ -63,11 +64,11 @@ export function GeofenceMonitor({
     // triggers a clock-out, so a junk reading can't false-fire.
     const ignoreAccuracy = Math.max(radiusM, 200);
 
-    const onPos = (pos: GeolocationPosition) => {
+    const onFix = (fix: { coords: { lat: number; lng: number }; accuracy: number }) => {
       if (doneRef.current) return;
-      const acc = pos.coords.accuracy || 0;
+      const acc = fix.accuracy || 0;
       if (acc > ignoreAccuracy) return;
-      const here = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      const here = fix.coords;
       const d = haversineM(center, here);
       const now = Date.now();
       // Pad the radius by the fix's uncertainty so a fuzzy-but-usable fix can't trip it.
@@ -119,12 +120,15 @@ export function GeofenceMonitor({
       }
     };
 
-    const id = navigator.geolocation.watchPosition(onPos, () => {}, {
-      enableHighAccuracy: true,
-      maximumAge: 30_000,
-      timeout: 60_000,
-    });
-    return () => navigator.geolocation.clearWatch(id);
+    return watchPosition(
+      onFix,
+      (s) => {
+        // Don't swallow: a watch that never arms (GPS off / permission revoked mid-shift) means the
+        // auto clock-out silently can't track movement. Surface it so it's diagnosable, not mysterious.
+        console.warn(`[geofence] location watch error: ${s} — auto clock-out can't track movement`);
+      },
+      { enableHighAccuracy: true, maximumAge: 30_000, timeout: 60_000 },
+    );
   }, [entryId, lat, lng, radiusM, clockInIso, graceMin, router]);
 
   return null;

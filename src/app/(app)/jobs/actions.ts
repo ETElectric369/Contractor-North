@@ -107,6 +107,7 @@ export async function setJobStatus(id: string, status: string): Promise<{ ok: bo
   revalidatePath(`/jobs/${id}`);
   revalidatePath("/jobs");
   revalidatePath("/planner"); // a status/finish change moves a job on/off today's My Day
+  revalidatePath("/schedule"); // and on/off the calendar (the deleted schedule copy did this)
   return { ok: true };
 }
 
