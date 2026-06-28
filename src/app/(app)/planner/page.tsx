@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { RefreshOnVisible } from "@/components/refresh-on-visible";
 import { WeatherWidget } from "@/components/weather-widget";
+import { getMoneyPipeline } from "@/lib/billing-pipeline";
 import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { hoursBetween, formatCurrency, formatTime } from "@/lib/utils";
@@ -87,6 +88,8 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     getActionItems({ todayStr, isStaff, userId: user?.id ?? "" }),
   ]);
   const currentMaterials: { id: string; name: string } | null = ((mlRes as any)?.data as any) ?? null;
+  // Money pipeline (staff only) — the daily "nothing got missed" nudge.
+  const pipeline = isStaff ? await getMoneyPipeline(supabase) : null;
 
   // ── derived (no awaits) ──
   // Merge scheduled-today jobs + segment-today jobs (dedup).
@@ -326,6 +329,27 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           source={getOrgSettings((org as any)?.settings).weather_source}
         />
       </div>
+
+      {/* MONEY LINE — the daily "nothing slipped" nudge. Stays until every job is invoiced + paid. */}
+      {pipeline && (pipeline.doneNotInvoiced.length > 0 || pipeline.unpaid.length > 0) && (
+        <Link
+          href="/billing"
+          className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm hover:bg-slate-50"
+        >
+          <span className="flex items-center gap-1.5 font-semibold text-slate-900"><Receipt className="h-4 w-4 text-brand" /> Money</span>
+          {pipeline.doneNotInvoiced.length > 0 && (
+            <span className="text-rose-700"><strong>{pipeline.doneNotInvoiced.length}</strong> to invoice{pipeline.toInvoiceTotal > 0 ? ` · ${formatCurrency(pipeline.toInvoiceTotal)}` : ""}</span>
+          )}
+          {pipeline.unpaid.length > 0 && (
+            <span className="text-slate-600"><strong>{pipeline.unpaid.length}</strong> unpaid · {formatCurrency(pipeline.outstandingTotal)}</span>
+          )}
+          {pipeline.overdueCount > 0 && (
+            <span className="font-semibold text-red-600"><strong>{pipeline.overdueCount}</strong> overdue · {formatCurrency(pipeline.overdueTotal)}</span>
+          )}
+          <span className="ml-auto text-xs font-medium text-brand">Open Billing →</span>
+        </Link>
+      )}
+
       <p className="mb-4 text-center text-sm italic text-slate-400">&ldquo;{dailyQuote}&rdquo;</p>
 
       {/* NOW — the job you're on, front and center. Buttons share one size so the

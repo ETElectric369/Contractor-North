@@ -1,184 +1,191 @@
 import Link from "next/link";
-import { Receipt, Banknote, Send } from "lucide-react";
+import { Receipt, Banknote, Send, FileText, AlertTriangle, CheckCircle2, ChevronRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { getMoneyPipeline } from "@/lib/billing-pipeline";
 import { NewInvoiceButton } from "./new-invoice-button";
+import { InvoiceJobButton } from "./invoice-job-button";
 
 export const dynamic = "force-dynamic";
+
+const money = (n: number) => formatCurrency(n);
 
 export default async function BillingPage() {
   const supabase = await createClient();
 
-  const [{ data: invoices }, { data: quotes }, { data: customers }, { data: jobs }, { data: refunds }, { data: toInvoice }] =
+  const [pipeline, { data: quotes }, { data: customers }, { data: jobs }, { data: refunds }, { data: allInv }] =
     await Promise.all([
-      supabase
-        .from("invoices")
-        .select("*, customers(name)")
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("quotes")
-        .select("id, quote_number, total, customers(name)")
-        .in("status", ["sent", "accepted"])
-        .order("created_at", { ascending: false })
-        .limit(100),
+      getMoneyPipeline(supabase),
+      supabase.from("quotes").select("id, quote_number, total, customers(name)").in("status", ["sent", "accepted"]).order("created_at", { ascending: false }).limit(100),
       supabase.from("customers").select("id, name").order("name"),
-      supabase
-        .from("jobs")
-        .select("id, name, job_number, customer_id")
-        .not("status", "in", "(cancelled)")
-        .order("created_at", { ascending: false })
-        .limit(300),
+      supabase.from("jobs").select("id, name, job_number, customer_id").not("status", "in", "(cancelled)").order("created_at", { ascending: false }).limit(300),
       supabase.from("customer_credits").select("amount").eq("disposition", "refund"),
-      // "To be invoiced": standard draft invoices sitting on a finished job — created
-      // at job-finish but not yet sent (the hold-for-review queue). Excludes draws
-      // (deposit/progress/final), which are sent through their own progress-report flow.
-      supabase
-        .from("invoices")
-        .select("id, invoice_number, total, customers(name), jobs!inner(name, status)")
-        .eq("status", "draft")
-        .eq("invoice_kind", "standard")
-        .eq("jobs.status", "complete")
-        .order("created_at", { ascending: false })
-        .limit(50),
+      supabase.from("invoices").select("id, invoice_number, total, amount_paid, status, due_date, customers(name)").order("created_at", { ascending: false }),
     ]);
 
-  const list = invoices ?? [];
-  const outstanding = list
-    .filter((i: any) => !["paid", "void"].includes(i.status))
-    .reduce((s: number, i: any) => s + (Number(i.total) - Number(i.amount_paid)), 0);
-  // Collected = cash actually kept: amount paid on NON-void invoices, less refunds.
+  const list = (allInv ?? []) as any[];
   const refundsTotal = (refunds ?? []).reduce((s: number, r: any) => s + Number(r.amount ?? 0), 0);
-  const collected =
-    list
-      .filter((i: any) => i.status !== "void")
-      .reduce((s: number, i: any) => s + Number(i.amount_paid ?? 0), 0) - refundsTotal;
+  const collected = list.filter((i) => i.status !== "void").reduce((s: number, i: any) => s + Number(i.amount_paid ?? 0), 0) - refundsTotal;
+
+  const { doneNotInvoiced, drafts, unpaid } = pipeline;
+  const caughtUp = doneNotInvoiced.length === 0 && drafts.length === 0 && unpaid.length === 0;
 
   return (
     <div>
-      <PageHeader title="Billing" description="Invoices and payments.">
+      <PageHeader title="Billing" description="Your money pipeline — nothing slips through.">
         <div className="flex items-center gap-2">
-          {/* The page is "invoices AND payments" — but payments live on their own
-              screen, so link there explicitly (field feedback: "where's the link?"). */}
-          <Link
-            href="/payments"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
+          <Link href="/payments" className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
             <Banknote className="h-4 w-4" /> Payments
           </Link>
           <NewInvoiceButton quotes={(quotes as any) ?? []} customers={customers ?? []} jobs={(jobs as any) ?? []} />
         </div>
       </PageHeader>
 
-      {(toInvoice ?? []).length > 0 && (
-        <Card className="mb-4 border-amber-200 bg-amber-50/40">
-          <CardContent className="py-4">
-            <div className="mb-1 flex items-center gap-2 text-sm font-semibold text-amber-800">
-              <Send className="h-4 w-4" /> To be invoiced · {(toInvoice ?? []).length}
-            </div>
-            <p className="mb-3 text-xs text-amber-700">
-              Finished jobs with a draft invoice waiting to be reviewed and sent.
-            </p>
-            <ul className="divide-y divide-amber-100 overflow-hidden rounded-lg border border-amber-100 bg-white">
-              {(toInvoice ?? []).map((inv: any) => (
-                <li key={inv.id}>
-                  <Link
-                    href={`/billing/${inv.id}`}
-                    className="flex items-center justify-between gap-3 px-4 py-2.5 hover:bg-amber-50"
-                  >
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-medium text-slate-900">{inv.customers?.name ?? "—"}</div>
-                      <div className="truncate text-xs text-slate-500">{inv.jobs?.name ?? inv.invoice_number}</div>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-3">
-                      <span className="text-sm font-medium text-slate-900">{formatCurrency(inv.total)}</span>
-                      <span className="text-xs font-medium text-brand">Review &amp; send →</span>
-                    </div>
-                  </Link>
-                </li>
-              ))}
-            </ul>
+      {/* The three numbers that matter */}
+      <div className="mb-4 grid grid-cols-3 gap-3">
+        <Card className="border-rose-200">
+          <CardContent className="py-3">
+            <div className="text-xl font-bold text-slate-900">{money(pipeline.toInvoiceTotal)}</div>
+            <div className="text-xs text-slate-500">To invoice · {doneNotInvoiced.length}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="py-3">
+            <div className="text-xl font-bold text-slate-900">{money(pipeline.outstandingTotal)}</div>
+            <div className="text-xs text-slate-500">Outstanding · {unpaid.length}</div>
+          </CardContent>
+        </Card>
+        <Card className={pipeline.overdueTotal > 0 ? "border-red-300 bg-red-50/40" : ""}>
+          <CardContent className="py-3">
+            <div className={`text-xl font-bold ${pipeline.overdueTotal > 0 ? "text-red-700" : "text-slate-900"}`}>{money(pipeline.overdueTotal)}</div>
+            <div className="text-xs text-slate-500">Overdue · {pipeline.overdueCount}</div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {caughtUp && (
+        <Card className="mb-4 border-emerald-200 bg-emerald-50/50">
+          <CardContent className="flex items-center gap-2 py-4 text-sm font-medium text-emerald-800">
+            <CheckCircle2 className="h-5 w-5" /> All caught up — every finished job is invoiced and every invoice is paid.
           </CardContent>
         </Card>
       )}
 
-      {list.length > 0 && (
-        <div className="mb-4 grid grid-cols-2 gap-4 sm:max-w-md">
-          <Card>
-            <CardContent className="py-4">
-              <div className="text-2xl font-bold text-slate-900">
-                {formatCurrency(outstanding)}
-              </div>
-              <div className="text-xs text-slate-500">Outstanding</div>
-            </CardContent>
-          </Card>
-          <Link href="/payments" className="block transition hover:opacity-80">
-            <Card>
-              <CardContent className="py-4">
-                <div className="text-2xl font-bold text-slate-900">
-                  {formatCurrency(collected)}
-                </div>
-                <div className="text-xs text-slate-500">Collected (all time) · view payments →</div>
-              </CardContent>
-            </Card>
-          </Link>
-        </div>
+      {/* STAGE 1 — done, not invoiced (the silent gap) */}
+      {doneNotInvoiced.length > 0 && (
+        <Stage tone="rose" icon={<Receipt className="h-4 w-4" />} title="Done — not invoiced" count={doneNotInvoiced.length} sub="Finished jobs with no invoice yet. Bill them before they slip.">
+          {doneNotInvoiced.map((j) => (
+            <li key={j.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
+              <Link href={`/jobs/${j.id}`} className="min-w-0 hover:underline">
+                <div className="truncate text-sm font-medium text-slate-900">{j.customer ?? "—"}</div>
+                <div className="truncate text-xs text-slate-500">{j.name ?? j.job_number}{j.value > 0 ? ` · est. ${money(j.value)}` : ""}</div>
+              </Link>
+              <InvoiceJobButton jobId={j.id} />
+            </li>
+          ))}
+        </Stage>
       )}
 
-      {list.length === 0 ? (
-        <EmptyState
-          icon={Receipt}
-          title="No invoices yet"
-          description="Turn an accepted quote into an invoice, or start a blank one."
-        >
-          <NewInvoiceButton quotes={(quotes as any) ?? []} customers={customers ?? []} jobs={(jobs as any) ?? []} />
-        </EmptyState>
-      ) : (
-        <Card className="overflow-hidden">
-          <div className="hidden grid-cols-12 gap-4 border-b border-slate-100 bg-slate-50 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-400 md:grid">
-            <div className="col-span-2">Invoice</div>
-            <div className="col-span-3">Customer</div>
-            <div className="col-span-2">Due</div>
-            <div className="col-span-2 text-right">Balance</div>
-            <div className="col-span-2 text-right">Total</div>
-            <div className="col-span-1 text-right">Status</div>
-          </div>
-          <ul className="divide-y divide-slate-100">
-            {list.map((inv: any) => {
-              const balance = Number(inv.total) - Number(inv.amount_paid);
-              return (
-                <li key={inv.id}>
-                  <Link
-                    href={`/billing/${inv.id}`}
-                    className="grid grid-cols-2 gap-2 px-5 py-3 hover:bg-slate-50 md:grid-cols-12 md:items-center md:gap-4"
-                  >
-                    <div className="col-span-2 font-medium text-slate-900">
-                      {inv.invoice_number}
-                    </div>
-                    <div className="col-span-3 text-sm text-slate-600">
-                      {inv.customers?.name ?? "—"}
-                    </div>
-                    <div className="col-span-2 text-sm text-slate-500">
-                      {inv.due_date ? formatDate(inv.due_date) : "—"}
-                    </div>
-                    <div className="col-span-2 text-right text-sm font-medium text-slate-900">
-                      {formatCurrency(balance)}
-                    </div>
-                    <div className="col-span-2 text-right text-sm text-slate-500">
-                      {formatCurrency(inv.total)}
-                    </div>
-                    <div className="col-span-1 text-right">
-                      <Badge tone={statusTone(inv.status)}>{inv.status}</Badge>
-                    </div>
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-        </Card>
+      {/* STAGE 2 — drafts not sent */}
+      {drafts.length > 0 && (
+        <Stage tone="amber" icon={<FileText className="h-4 w-4" />} title="Draft — not sent" count={drafts.length} sub="Invoices written up but not sent to the customer yet.">
+          {drafts.map((inv) => (
+            <li key={inv.id}>
+              <Link href={`/billing/${inv.id}`} className="flex items-center justify-between gap-3 px-4 py-2.5 hover:bg-amber-50">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium text-slate-900">{inv.customer ?? "—"}</div>
+                  <div className="truncate text-xs text-slate-500">{inv.job ?? inv.invoice_number}</div>
+                </div>
+                <div className="flex shrink-0 items-center gap-3">
+                  <span className="text-sm font-medium text-slate-900">{money(inv.total)}</span>
+                  <span className="inline-flex items-center text-xs font-semibold text-brand">Review &amp; send <ChevronRight className="h-3.5 w-3.5" /></span>
+                </div>
+              </Link>
+            </li>
+          ))}
+        </Stage>
       )}
+
+      {/* STAGE 3 — sent, not paid (overdue first) */}
+      {unpaid.length > 0 && (
+        <Stage tone="sky" icon={<Send className="h-4 w-4" />} title="Sent — awaiting payment" count={unpaid.length} sub="Out the door, money not in yet. Overdue ones are flagged.">
+          {unpaid.map((inv) => (
+            <li key={inv.id}>
+              <Link href={`/billing/${inv.id}`} className={`flex items-center justify-between gap-3 px-4 py-2.5 ${inv.overdue ? "bg-red-50/60 hover:bg-red-50" : "hover:bg-sky-50"}`}>
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium text-slate-900">{inv.customer ?? "—"}</div>
+                  <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                    {inv.overdue && <span className="inline-flex items-center gap-0.5 font-semibold text-red-600"><AlertTriangle className="h-3 w-3" /> Overdue</span>}
+                    <span className="truncate">{inv.invoice_number}{inv.due_date ? ` · due ${formatDate(inv.due_date)}` : ""}</span>
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-3">
+                  <span className={`text-sm font-medium ${inv.overdue ? "text-red-700" : "text-slate-900"}`}>{money(inv.balance)}</span>
+                  <span className="inline-flex items-center text-xs font-semibold text-brand">Record payment <ChevronRight className="h-3.5 w-3.5" /></span>
+                </div>
+              </Link>
+            </li>
+          ))}
+        </Stage>
+      )}
+
+      {/* Reference: every invoice + lifetime collected */}
+      <div className="mt-6">
+        <div className="mb-2 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-slate-500">All invoices</h3>
+          <Link href="/payments" className="text-xs font-medium text-slate-500 hover:text-brand">Collected {money(collected)} · payments →</Link>
+        </div>
+        {list.length === 0 ? (
+          <EmptyState icon={Receipt} title="No invoices yet" description="Turn an accepted quote into an invoice, or start a blank one.">
+            <NewInvoiceButton quotes={(quotes as any) ?? []} customers={customers ?? []} jobs={(jobs as any) ?? []} />
+          </EmptyState>
+        ) : (
+          <Card className="overflow-hidden">
+            <ul className="divide-y divide-slate-100">
+              {list.map((inv: any) => {
+                const balance = Number(inv.total) - Number(inv.amount_paid);
+                return (
+                  <li key={inv.id}>
+                    <Link href={`/billing/${inv.id}`} className="flex items-center justify-between gap-3 px-5 py-3 hover:bg-slate-50">
+                      <div className="min-w-0">
+                        <span className="text-sm font-medium text-slate-900">{inv.invoice_number}</span>
+                        <span className="ml-2 text-sm text-slate-500">{inv.customers?.name ?? "—"}</span>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-4">
+                        <span className="text-sm font-medium text-slate-900">{money(balance)}</span>
+                        <Badge tone={statusTone(inv.status)}>{inv.status}</Badge>
+                      </div>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </Card>
+        )}
+      </div>
     </div>
+  );
+}
+
+const TONES: Record<string, string> = {
+  rose: "border-rose-200 bg-rose-50/40 text-rose-800",
+  amber: "border-amber-200 bg-amber-50/40 text-amber-800",
+  sky: "border-sky-200 bg-sky-50/40 text-sky-800",
+};
+
+function Stage({ tone, icon, title, count, sub, children }: { tone: string; icon: React.ReactNode; title: string; count: number; sub: string; children: React.ReactNode }) {
+  return (
+    <Card className={`mb-3 ${TONES[tone].split(" ").slice(0, 2).join(" ")}`}>
+      <CardContent className="py-4">
+        <div className={`mb-1 flex items-center gap-2 text-sm font-semibold ${TONES[tone].split(" ").slice(2).join(" ")}`}>
+          {icon} {title} · {count}
+        </div>
+        <p className="mb-3 text-xs text-slate-500">{sub}</p>
+        <ul className="divide-y divide-slate-100 overflow-hidden rounded-lg border border-slate-100 bg-white">{children}</ul>
+      </CardContent>
+    </Card>
   );
 }
