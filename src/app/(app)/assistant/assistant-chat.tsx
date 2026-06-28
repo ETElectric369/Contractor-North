@@ -12,6 +12,7 @@ import {
 } from "@/lib/assistant-protocol";
 import { confirmAgentAction, saveQuoteFromDraft, loadConversation, saveConversation, clearConversation, type PickerContact } from "./actions";
 import { ContactPicker } from "./contact-picker";
+import { estimatorStore } from "@/lib/estimator-store";
 
 const money = (n: number) => `$${(Math.round(n * 100) / 100).toFixed(2)}`;
 
@@ -144,6 +145,11 @@ export function AssistantChat({ autoStart = false, glass = false }: { autoStart?
   const [speaking, setSpeaking] = useState(false); // Claude's reply is currently playing
   const [draft, setDraft] = useState<AgentDraft | null>(null); // the live quote being built
   const [savingDraft, setSavingDraft] = useState(false);
+
+  // Publish the live estimate + speaking state to the shared store so the COMPACTED Estimator
+  // (total + stop) can live on the topbar Talk button even when this drawer is closed.
+  useEffect(() => { estimatorStore.setDraft(draft); }, [draft]);
+  useEffect(() => { estimatorStore.setSpeaking(speaking); }, [speaking]);
   const router = useRouter();
 
   // Finalize the live draft → real quote, then flip to the actual quote page (filled out).
