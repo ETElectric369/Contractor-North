@@ -1,5 +1,27 @@
 import { describe, it, expect } from "vitest";
-import { computeJobLaborBilling } from "@/lib/labor-billing";
+import { computeJobLaborBilling, laborCostForJob } from "@/lib/labor-billing";
+
+describe("laborCostForJob — allocation-aware pay cost (job hub == analytics)", () => {
+  const prof = (hourly: number) => ({ hourly_rate: hourly });
+  it("un-split closed entry on the job: gross hours × pay rate", () => {
+    const e = { job_id: "J", status: "closed", clock_in: "2026-06-01T08:00:00Z", clock_out: "2026-06-01T16:00:00Z", lunch_minutes: 0, profiles: prof(40) };
+    expect(laborCostForJob([e], "J")).toEqual({ hours: 8, cost: 320 });
+  });
+  it("honors rate_override (supervisor rate) over the base", () => {
+    const e = { job_id: "J", status: "closed", clock_in: "2026-06-01T08:00:00Z", clock_out: "2026-06-01T16:00:00Z", lunch_minutes: 0, rate_override: 60, profiles: prof(40) };
+    expect(laborCostForJob([e], "J")).toEqual({ hours: 8, cost: 480 });
+  });
+  it("a split shift costs ONLY this job's allocated hours, not the whole day", () => {
+    const e = { job_id: "J", status: "closed", clock_in: "2026-06-01T08:00:00Z", clock_out: "2026-06-01T16:00:00Z", lunch_minutes: 0, profiles: prof(40),
+      time_allocations: [{ job_id: "J", hours: 1 }, { job_id: "OTHER", hours: 7 }] };
+    expect(laborCostForJob([e], "J")).toEqual({ hours: 1, cost: 40 });
+    expect(laborCostForJob([e], "OTHER")).toEqual({ hours: 7, cost: 280 });
+  });
+  it("unlabeled allocation rows count toward the entry's own job", () => {
+    const e = { job_id: "J", status: "closed", profiles: prof(50), time_allocations: [{ job_id: null, hours: 2 }] };
+    expect(laborCostForJob([e], "J")).toEqual({ hours: 2, cost: 100 });
+  });
+});
 
 // --- fixtures ----------------------------------------------------------------
 const brian = { id: "b", full_name: "Brian", hourly_rate: 40, bill_rate: 75 };

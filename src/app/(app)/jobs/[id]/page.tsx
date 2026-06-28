@@ -49,7 +49,7 @@ import { DeleteButton } from "@/components/delete-button";
 import { EditCustomerButton } from "../../crm/[id]/edit-customer-button";
 import { createInvoiceForJob, deleteJob } from "../actions";
 import { getOrgSettings } from "@/lib/org-settings";
-import { computeJobLaborBilling, fetchJobLaborRows } from "@/lib/labor-billing";
+import { computeJobLaborBilling, fetchJobLaborRows, laborCostForJob } from "@/lib/labor-billing";
 import { formatDateTz } from "@/lib/tz";
 import type { Customer } from "@/lib/types";
 
@@ -219,28 +219,8 @@ export default async function JobDetailPage({
 
   // Costing. laborCost = what we PAY (pay rate); billableLabor = what we CHARGE
   // (bill rate) — the latter feeds the estimate-vs-actual draw tracking.
-  let laborCost = 0;
-  let laborHours = 0;
-  for (const e of entries ?? []) {
-    // Per-entry pay rate: an explicit override (e.g. supervisor rate) wins,
-    // otherwise the person's default profile rate.
-    const rate = Number((e as any).rate_override ?? (e as any).profiles?.hourly_rate ?? 0);
-    if ((e as any).time_allocations?.length) {
-      // A split shift: count only the hours allocated to THIS job (or unlabeled rows,
-      // which are a job-code breakdown within this job) — not time split to other jobs.
-      for (const a of (e as any).time_allocations) {
-        if (a.job_id && a.job_id !== id) continue;
-        laborHours += Number(a.hours ?? 0);
-        laborCost += Number(a.hours ?? 0) * rate;
-      }
-      continue;
-    }
-    if (e.status === "closed" && e.clock_out) {
-      const h = hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes);
-      laborHours += h;
-      laborCost += h * rate;
-    }
-  }
+  // laborCost (what we PAY) via the shared allocation-aware helper — identical math to /analytics.
+  const { hours: laborHours, cost: laborCost } = laborCostForJob(entries ?? [], id);
   const materialCost = (pos ?? []).reduce((s: number, p: any) => s + Number(p.total ?? 0), 0);
   const billsCost = (bills ?? []).reduce((s: number, b: any) => s + Number(b.amount ?? 0), 0);
   // Billable work to date — computed with the SAME shared helpers importLabor/

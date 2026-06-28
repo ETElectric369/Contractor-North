@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatCurrency } from "@/lib/utils";
+import { laborCostForJob } from "@/lib/labor-billing";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +35,7 @@ export default async function AnalyticsPage() {
       supabase.from("jobs").select("id, job_number, name, status").order("created_at", { ascending: false }).limit(100),
       supabase
         .from("time_entries")
-        .select("job_id, clock_in, clock_out, lunch_minutes, status, profiles(hourly_rate)")
+        .select("job_id, clock_in, clock_out, lunch_minutes, status, rate_override, profiles(hourly_rate), time_allocations(job_id, hours)")
         .eq("status", "closed")
         .not("job_id", "is", null),
       supabase.from("purchase_orders").select("job_id, total"),
@@ -93,21 +94,16 @@ export default async function AnalyticsPage() {
   const winRate = decided > 0 ? (q.accepted / decided) * 100 : null;
 
   // ── Job profitability ─────────────────────────────────────────────────────
-  const cost = new Map<string, number>();
-  const add = (id: string | null, v: number) => {
+  // Materials/bills cost by job (labor is added per-job below via the shared,
+  // allocation-aware laborCostForJob — so a split shift's pay is attributed the
+  // SAME way the job hub does it, instead of dumping 100% onto e.job_id).
+  const matCost = new Map<string, number>();
+  const addMat = (id: string | null, v: number) => {
     if (!id) return;
-    cost.set(id, (cost.get(id) ?? 0) + v);
+    matCost.set(id, (matCost.get(id) ?? 0) + v);
   };
-  for (const e of (entries ?? []) as any[]) {
-    if (!e.clock_out) continue;
-    const hrs = Math.max(
-      0,
-      (new Date(e.clock_out).getTime() - new Date(e.clock_in).getTime()) / 3_600_000 - (e.lunch_minutes ?? 0) / 60,
-    );
-    add(e.job_id, hrs * Number(e.profiles?.hourly_rate ?? 0));
-  }
-  for (const p of (pos ?? []) as any[]) add(p.job_id, Number(p.total));
-  for (const b of (bills ?? []) as any[]) add(b.job_id, Number(b.amount));
+  for (const p of (pos ?? []) as any[]) addMat(p.job_id, Number(p.total));
+  for (const b of (bills ?? []) as any[]) addMat(b.job_id, Number(b.amount));
 
   // Revenue per job = CASH COLLECTED (amount_paid on non-void invoices), not the
   // sum of invoice totals — otherwise a progress invoice + the final double-count.
@@ -119,7 +115,7 @@ export default async function AnalyticsPage() {
   const jobRows = ((jobs ?? []) as any[])
     .map((j) => {
       const rev = revenueByJob.get(j.id) ?? 0;
-      const c = cost.get(j.id) ?? 0;
+      const c = laborCostForJob((entries ?? []) as any[], j.id).cost + (matCost.get(j.id) ?? 0);
       return { ...j, rev, cost: c, profit: rev - c };
     })
     .filter((j) => j.rev > 0 || j.cost > 0)

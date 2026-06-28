@@ -1,5 +1,45 @@
+import { hoursBetween } from "@/lib/utils";
+import { payRateForEntry } from "@/lib/payroll-math";
+
 /** One billable-labor line for a worker on a job. */
 export type LaborLine = { personId: string; name: string; rate: number; rawHours: number; quantity: number; amount: number };
+
+/**
+ * Per-job LABOR COST (what we PAY) — the one allocation-aware implementation shared by the job
+ * hub and /analytics so a job can't show two different profits. Counts only the hours that belong
+ * to `jobId`: an entry's same-job/unlabeled allocations, or its gross hours when it has no split.
+ * Each entry is costed at its OWN pay rate (rate_override ?? base) via payRateForEntry. Accepts the
+ * job's own entries (job hub, pre-filtered) OR all entries (analytics) — same result either way.
+ */
+export function laborCostForJob(
+  entries: any[],
+  jobId: string,
+  fallbackRate = 0,
+): { hours: number; cost: number } {
+  let hours = 0;
+  let cost = 0;
+  for (const e of entries ?? []) {
+    const rate = payRateForEntry(e, fallbackRate);
+    const allocs = e.time_allocations ?? [];
+    if (allocs.length) {
+      for (const a of allocs) {
+        // belongs to this job if the allocation names it, or it's unlabeled and the entry is on this job
+        const belongs = a.job_id ? a.job_id === jobId : e.job_id === jobId;
+        if (!belongs) continue;
+        const h = Number(a.hours ?? 0);
+        hours += h;
+        cost += h * rate;
+      }
+      continue;
+    }
+    if (e.job_id === jobId && e.status === "closed" && e.clock_out) {
+      const h = hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes);
+      hours += h;
+      cost += h * rate;
+    }
+  }
+  return { hours: Math.round(hours * 100) / 100, cost: Math.round(cost * 100) / 100 };
+}
 
 /** Compute per-person billable labor for a job from its CLOSED time — the single
  *  source of truth shared by importLaborIntoInvoice (which inserts these lines)
