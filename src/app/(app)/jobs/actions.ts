@@ -7,6 +7,7 @@ import { visibleJobIdOrNull, visibleTemplateIdOrNull } from "@/lib/job-visibilit
 import { requireStaff } from "@/lib/staff-guard";
 import { getOrgSettings } from "@/lib/org-settings";
 import { reportError } from "@/lib/observe";
+import { escapeLike } from "@/lib/utils";
 import {
   createInvoiceFromQuote,
   createBlankInvoice,
@@ -475,8 +476,8 @@ export async function importJobs(
     let customerId: string | null = null;
     if (cname) {
       const email = (r.email || "").trim().toLowerCase();
-      let q = supabase.from("customers").select("id").ilike("name", cname).limit(1);
-      if (email) q = q.ilike("email", email);
+      let q = supabase.from("customers").select("id").ilike("name", escapeLike(cname)).limit(1);
+      if (email) q = q.ilike("email", escapeLike(email));
       const { data: hit } = await q.maybeSingle();
       if (hit) customerId = hit.id;
       else {

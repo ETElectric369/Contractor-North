@@ -1,6 +1,7 @@
 import "server-only";
 import type Anthropic from "@anthropic-ai/sdk";
 import { tzDayStartUtc } from "@/lib/tz";
+import { escapeLike } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
 
 /**
@@ -595,10 +596,7 @@ export async function runDataTool(
           .select("id, role, customer_id, customers(name, type, phone)")
           .eq("job_id", String(input.job_id))
           .order("created_at", { ascending: false });
-        if (error) {
-          if ((error as any).code === "42P01") return JSON.stringify({ count: 0, contacts: [], note: "Sublinking isn't set up yet." });
-          throw error;
-        }
+        if (error) throw error; // job_contacts exists (migration 0087) — surface real errors, don't mask as "not set up"
         return JSON.stringify({
           count: data?.length ?? 0,
           contacts: (data ?? []).map((r: any) => {
@@ -621,10 +619,7 @@ export async function runDataTool(
           .select("id, role, jobs(id, job_number, name, status)")
           .eq("customer_id", String(input.customer_id))
           .order("created_at", { ascending: false });
-        if (error) {
-          if ((error as any).code === "42P01") return JSON.stringify({ count: 0, jobs: [], note: "Sublinking isn't set up yet." });
-          throw error;
-        }
+        if (error) throw error; // job_contacts exists (migration 0087) — surface real errors, don't mask as "not set up"
         const jobs = (data ?? [])
           .map((r: any) => {
             const j = Array.isArray(r.jobs) ? r.jobs[0] : r.jobs;
@@ -808,7 +803,7 @@ export async function runDataTool(
           .limit(lim);
         if (input.type) {
           const t = sanitize(String(input.type));
-          if (t) q = q.ilike("type", `%${t}%`); // 'insurance' / 'audit' / 'license' — a forgiving contains match
+          if (t) q = q.ilike("type", `%${escapeLike(t)}%`); // 'insurance' / 'audit' / 'license' — a forgiving contains match
         }
         const { data, error } = await q;
         if (error) throw error;
@@ -1269,7 +1264,7 @@ export async function runDataTool(
           .limit(lim);
         const st = String(input.status ?? "");
         if (st === "open" || st === "done") q = q.eq("status", st);
-        if (s) q = q.ilike("title", `%${s}%`);
+        if (s) q = q.ilike("title", `%${escapeLike(s)}%`);
         const { data, error } = await q;
         if (error) throw error;
         return JSON.stringify({

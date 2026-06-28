@@ -6,6 +6,7 @@ import { deliverInvoiceEmail } from "@/lib/invoice-email";
 import { sendSms } from "@/lib/sms";
 import { pushInvoiceToQbo } from "@/lib/quickbooks";
 import { getOrgSettings } from "@/lib/org-settings";
+import { tzLocalHourUtc } from "@/lib/tz";
 import { requireStaff } from "@/lib/staff-guard";
 import { computeJobLaborBilling, fetchJobLaborRows } from "@/lib/labor-billing";
 import { recalcTotals, resolveDrawCredit, shouldBlockStandardImport } from "@/lib/invoice-math";
@@ -914,11 +915,19 @@ export async function setInvoiceStatus(
   return { ok: true };
 }
 
-/** A "YYYY-MM-DD" date → an ISO timestamp at local noon (stable across tz). */
-function dateToIso(d?: string | null): string | undefined {
+/** A "YYYY-MM-DD" payment date → a stable ISO timestamp at NOON IN THE ORG'S TZ. Delegates to the tz
+ *  helper so it's deterministic across deploy environments — the old bare `new Date(`${d}T12:00:00`)`
+ *  had no Z, so it was parsed in the SERVER's timezone (the exact trap tz.ts exists to replace). */
+function dateToIso(d: string | null | undefined, tz: string): string | undefined {
   if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return undefined;
-  const t = new Date(`${d}T12:00:00`);
+  const t = tzLocalHourUtc(d, 12, tz);
   return isNaN(t.getTime()) ? undefined : t.toISOString();
+}
+
+/** The org's configured timezone (for stamping date-only inputs). Defaults to Pacific. */
+async function orgTz(supabase: { from: (t: string) => any }): Promise<string> {
+  const { data } = await supabase.from("organizations").select("settings").maybeSingle();
+  return getOrgSettings((data as { settings?: unknown } | null)?.settings).timezone || "America/Los_Angeles";
 }
 
 export async function recordPayment(input: {
@@ -954,7 +963,7 @@ export async function recordPayment(input: {
     };
   }
 
-  const paidAt = dateToIso(input.paid_at);
+  const paidAt = dateToIso(input.paid_at, await orgTz(supabase));
   // L2: a payment can't be dated into the future (wrong tax / reporting period).
   if (paidAt && Date.parse(paidAt) > Date.now() + 86_400_000) {
     return { ok: false, error: "That payment date is in the future." };
@@ -997,7 +1006,7 @@ export async function updatePayment(
   const supabase = ctx.supabase;
   if (!patch.amount || patch.amount <= 0) return { ok: false, error: "Enter a payment amount." };
   if (patch.amount > 9_999_999) return { ok: false, error: "That amount is too large." };
-  const paidAt = dateToIso(patch.paid_at);
+  const paidAt = dateToIso(patch.paid_at, await orgTz(supabase));
   const { error } = await supabase
     .from("payments")
     .update({

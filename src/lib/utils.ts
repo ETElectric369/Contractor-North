@@ -119,6 +119,16 @@ export function sanitizeSearch(input: string | undefined | null): string {
     .slice(0, 100);
 }
 
+/**
+ * Escape a value for use INSIDE a single ILIKE pattern, so %, _ and \ match LITERALLY instead of as
+ * wildcards — e.g. `.ilike(col, `%${escapeLike(v)}%`)` or `.ilike(col, escapeLike(v))`. Complement to
+ * sanitizeSearch (which STRIPS delimiters for .or() filter EXPRESSIONS): use escapeLike for a single
+ * .ilike() so an email like "john_doe@x" doesn't wildcard-match "johnXdoe@x".
+ */
+export function escapeLike(input: string | undefined | null): string {
+  return (input ?? "").replace(/[\\%_]/g, "\\$&");
+}
+
 /** Format a US phone number progressively: "(530) 933-6686". */
 export function formatPhone(input: string | null | undefined): string {
   let digits = (input ?? "").replace(/\D/g, "").slice(0, 11);
