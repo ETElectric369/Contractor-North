@@ -10,12 +10,32 @@ const fin = (x: unknown): number => {
 export type PayrollRow = {
   profileId: string;
   name: string;
-  rate: number;
+  rate: number; // base profile rate, for display only — gross is accumulated per entry below
   unpaidHours: number;
   unpaidMiles: number;
+  unpaidGross: number; // Σ hours × payRateForEntry — honors per-entry rate_override
   paidHours: number;
   paidMiles: number;
+  paidGross: number;
 };
+
+/** THE single source of truth for what an entry PAYS per hour: a per-entry
+ *  rate_override (e.g. a supervisor rate for that shift) wins, else the person's
+ *  profile hourly_rate (or an explicit fallback when the row carries no profile).
+ *  PAY-rate only — what we CHARGE the customer is the bill_rate in labor-billing. */
+export function payRateForEntry(e: any, fallbackRate?: number): number {
+  const ov = Number(e?.rate_override);
+  if (Number.isFinite(ov) && ov > 0) return ov;
+  return fin(e?.profiles?.hourly_rate ?? fallbackRate);
+}
+
+/** Combine an already-accumulated gross with mileage pay into one rounded line.
+ *  Use this (not payLine) when gross was summed per entry to honor mixed rates. */
+export function payLineFromGross(gross: number, miles: number, mileageRate: number) {
+  const g = Math.round(fin(gross) * 100) / 100;
+  const mileagePay = Math.round(fin(miles) * fin(mileageRate) * 100) / 100;
+  return { gross: g, mileagePay, total: Math.round((g + mileagePay) * 100) / 100 };
+}
 
 /** Gross pay for a set of hours/miles: gross = hours × hourly rate; mileagePay =
  *  miles × mileage rate; total = both, all finite + rounded to cents. Gross only —
@@ -44,17 +64,25 @@ export function aggregatePayrollEntries(entries: any[]): PayrollRow[] {
         rate: fin(e.profiles?.hourly_rate),
         unpaidHours: 0,
         unpaidMiles: 0,
+        unpaidGross: 0,
         paidHours: 0,
         paidMiles: 0,
+        paidGross: 0,
       };
     const h = hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes);
     const m = fin(e.miles);
+    // Gross is summed PER ENTRY at that entry's pay rate (rate_override ?? base), so a
+    // mixed-rate week — a few supervisor-rate shifts among normal ones — pays correctly
+    // instead of flattening everything to the profile's base rate.
+    const gross = h * payRateForEntry(e);
     if (e.paid_at) {
       rec.paidHours += h;
       rec.paidMiles += m;
+      rec.paidGross += gross;
     } else {
       rec.unpaidHours += h;
       rec.unpaidMiles += m;
+      rec.unpaidGross += gross;
     }
     byProfile.set(e.profile_id, rec);
   }

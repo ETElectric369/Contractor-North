@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { payLine, aggregatePayrollEntries } from "@/lib/payroll-math";
+import { payLine, payLineFromGross, payRateForEntry, aggregatePayrollEntries } from "@/lib/payroll-math";
 
 describe("payLine (gross pay)", () => {
   it("gross = hours × rate, mileagePay = miles × rate, total = both", () => {
@@ -66,5 +66,48 @@ describe("aggregatePayrollEntries", () => {
   it("a NaN miles value doesn't poison the row", () => {
     const [r] = aggregatePayrollEntries([entry({ miles: NaN })]);
     expect(r.unpaidMiles).toBe(0);
+  });
+
+  it("accumulates gross at the base rate when no override (8h × $25)", () => {
+    const [r] = aggregatePayrollEntries([entry({})]);
+    expect(r.unpaidGross).toBe(200);
+  });
+
+  it("BUG FIX: a mixed-rate week pays per entry, not one flat rate", () => {
+    // 8h at the $25 base + 8h at a $60 supervisor override = 200 + 480 = 680, NOT 16×25=400.
+    const [r] = aggregatePayrollEntries([entry({}), entry({ rate_override: 60 })]);
+    expect(r.unpaidHours).toBe(16);
+    expect(r.unpaidGross).toBe(680);
+  });
+
+  it("splits gross paid vs unpaid too", () => {
+    const rows = aggregatePayrollEntries([
+      entry({ paid_at: "2026-06-10T00:00:00Z" }), // 8h × 25 = 200 paid
+      entry({ rate_override: 50 }), // 8h × 50 = 400 unpaid
+    ]);
+    expect(rows[0]).toMatchObject({ paidGross: 200, unpaidGross: 400 });
+  });
+});
+
+describe("payRateForEntry — pay rate source of truth", () => {
+  const e = (over: any, hourly?: number) => ({ rate_override: over, profiles: { hourly_rate: hourly } });
+  it("rate_override wins when positive", () => {
+    expect(payRateForEntry(e(60, 25))).toBe(60);
+  });
+  it("falls back to profile hourly_rate when no override", () => {
+    expect(payRateForEntry(e(null, 25))).toBe(25);
+    expect(payRateForEntry(e(0, 25))).toBe(25); // 0 = "no override"
+  });
+  it("uses an explicit fallback when the row carries no profile", () => {
+    expect(payRateForEntry({ rate_override: null }, 30)).toBe(30);
+  });
+  it("never returns NaN", () => {
+    expect(payRateForEntry({ rate_override: "x" } as any)).toBe(0);
+  });
+});
+
+describe("payLineFromGross", () => {
+  it("combines an accumulated gross with mileage, rounded to cents", () => {
+    expect(payLineFromGross(680, 100, 0.65)).toEqual({ gross: 680, mileagePay: 65, total: 745 });
   });
 });

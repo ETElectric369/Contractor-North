@@ -7,7 +7,7 @@ import { ChevronLeft, ChevronRight, Check, Download, Undo2 } from "lucide-react"
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { formatCurrency, formatDuration } from "@/lib/utils";
-import { payLine } from "@/lib/payroll-math";
+import { payLineFromGross } from "@/lib/payroll-math";
 import { markPeriodPaid, unmarkPeriodPaid } from "./actions";
 
 // Format a calendar date STRING without a timezone shift — date-only strings
@@ -22,8 +22,10 @@ interface Row {
   rate: number;
   unpaidHours: number;
   unpaidMiles: number;
+  unpaidGross: number;
   paidHours: number;
   paidMiles: number;
+  paidGross: number;
 }
 
 export function PayrollView({
@@ -46,9 +48,12 @@ export function PayrollView({
   const endInclusive = new Date(new Date(`${period.end}T00:00:00Z`).getTime() - 86_400_000).toISOString().slice(0, 10);
   const label = `${fmtYmd(period.start)} – ${fmtYmd(endInclusive)}`;
 
-  const gross = (r: Row) => payLine(r.unpaidHours, r.rate, r.unpaidMiles, mileageRate).gross;
-  const mileagePay = (r: Row) => payLine(r.unpaidHours, r.rate, r.unpaidMiles, mileageRate).mileagePay;
-  const total = (r: Row) => payLine(r.unpaidHours, r.rate, r.unpaidMiles, mileageRate).total;
+  // Gross comes from the per-entry accumulation (honors rate_override), NOT hours×one-rate.
+  const gross = (r: Row) => payLineFromGross(r.unpaidGross, r.unpaidMiles, mileageRate).gross;
+  const mileagePay = (r: Row) => payLineFromGross(r.unpaidGross, r.unpaidMiles, mileageRate).mileagePay;
+  const total = (r: Row) => payLineFromGross(r.unpaidGross, r.unpaidMiles, mileageRate).total;
+  // Effective $/hr to display — equals the base rate when no shift was overridden.
+  const effRate = (r: Row) => (r.unpaidHours > 0 ? r.unpaidGross / r.unpaidHours : r.paidHours > 0 ? r.paidGross / r.paidHours : r.rate);
 
   const payable = rows.filter((r) => r.unpaidHours > 0);
   const totals = {
@@ -76,8 +81,10 @@ export function PayrollView({
       const paid = r.unpaidHours === 0 && r.paidHours > 0;
       const hrs = paid ? r.paidHours : r.unpaidHours;
       const mi = paid ? r.paidMiles : r.unpaidMiles;
-      const { gross: g, mileagePay: milePay, total: t } = payLine(hrs, r.rate, mi, mileageRate);
-      return [r.name, hrs.toFixed(2), r.rate.toFixed(2), g.toFixed(2), mi.toFixed(1), milePay.toFixed(2), t.toFixed(2), paid ? "Paid" : "Unpaid"];
+      const grossAcc = paid ? r.paidGross : r.unpaidGross;
+      const { gross: g, mileagePay: milePay, total: t } = payLineFromGross(grossAcc, mi, mileageRate);
+      const rate = hrs > 0 ? grossAcc / hrs : r.rate; // effective $/hr (blends any overridden shifts)
+      return [r.name, hrs.toFixed(2), rate.toFixed(2), g.toFixed(2), mi.toFixed(1), milePay.toFixed(2), t.toFixed(2), paid ? "Paid" : "Unpaid"];
     });
     const csv = [
       [`Payroll — ${label}`],
@@ -159,7 +166,7 @@ export function PayrollView({
                     </div>
                     {r.unpaidHours > 0 ? (
                       <div className="mt-0.5 text-xs text-slate-500">
-                        {formatDuration(r.unpaidHours)} × {formatCurrency(r.rate)}/hr = <span className="font-medium text-slate-700">{formatCurrency(gross(r))}</span>
+                        {formatDuration(r.unpaidHours)} × {formatCurrency(effRate(r))}/hr = <span className="font-medium text-slate-700">{formatCurrency(gross(r))}</span>
                         {r.unpaidMiles > 0 && <> · {r.unpaidMiles.toFixed(1)} mi {formatCurrency(mileagePay(r))}</>}
                         {" · "}<span className="font-semibold text-slate-900">{formatCurrency(total(r))}</span>
                       </div>

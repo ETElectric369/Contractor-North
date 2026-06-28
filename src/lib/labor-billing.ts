@@ -29,6 +29,9 @@ export function computeJobLaborBilling(
   const addHours = (prof: any, hrs: number) => {
     if (!(hrs > 0)) return;
     const key = String(prof?.id ?? prof?.full_name ?? "unknown");
+    // BILL rate (what the customer is charged), NOT pay. A time entry's rate_override is a
+    // PAY-rate override (payroll only — see payRateForEntry) and is intentionally ignored
+    // here: paying a tech a supervisor rate doesn't change what the customer is billed.
     const raw = Number(prof?.bill_rate ?? prof?.hourly_rate ?? 0);
     const realRate = Number.isFinite(raw) && raw > 0 ? raw : 0; // 0 = no usable rate on this snapshot
     const cur = perPerson.get(key);

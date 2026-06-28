@@ -31,7 +31,7 @@ export default async function PayrollPage({
 
   const { data: entries } = await supabase
     .from("time_entries")
-    .select("profile_id, clock_in, clock_out, lunch_minutes, miles, paid_at, profiles(full_name, hourly_rate)")
+    .select("profile_id, clock_in, clock_out, lunch_minutes, miles, paid_at, rate_override, profiles(full_name, hourly_rate)")
     .eq("status", "closed")
     .not("clock_out", "is", null)
     .gte("clock_in", startIso)

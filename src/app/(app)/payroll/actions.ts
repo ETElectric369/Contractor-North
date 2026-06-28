@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getOrgSettings } from "@/lib/org-settings";
 import { tzDayStartUtc } from "@/lib/tz";
 import { hoursBetween } from "@/lib/utils";
+import { payRateForEntry } from "@/lib/payroll-math";
 
 export type Result = { ok: boolean; error?: string };
 
@@ -42,7 +43,7 @@ export async function markPeriodPaid(input: {
 
   const { data: entries } = await supabase
     .from("time_entries")
-    .select("id, clock_in, clock_out, lunch_minutes, miles")
+    .select("id, clock_in, clock_out, lunch_minutes, miles, rate_override")
     .eq("profile_id", input.profileId)
     .eq("status", "closed")
     .is("paid_at", null)
@@ -52,10 +53,15 @@ export async function markPeriodPaid(input: {
   const list = (entries ?? []) as any[];
   if (!list.length) return { ok: false, error: "No unpaid hours in this period." };
 
-  let hours = 0, miles = 0;
+  // Accumulate gross PER ENTRY at its own pay rate (rate_override ?? base) — the exact same
+  // resolver the approval screen uses, so the snapshot the accountant exports can't diverge
+  // from what the owner approved, and a mixed-rate week is paid correctly.
+  let hours = 0, miles = 0, gross = 0;
   for (const e of list) {
-    hours += hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes);
+    const h = hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes);
+    hours += h;
     miles += Number(e.miles ?? 0);
+    gross += h * payRateForEntry(e, rate);
   }
   const r2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -72,8 +78,8 @@ export async function markPeriodPaid(input: {
     period_end: input.periodEnd,
     hours: r2(hours),
     miles: r2(miles),
-    rate,
-    gross: r2(hours * rate),
+    rate, // base rate, for reference — gross below is summed per entry (honors overrides)
+    gross: r2(gross),
     created_by: userId,
   });
 
