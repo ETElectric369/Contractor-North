@@ -5,9 +5,9 @@ import type { AgentDraft } from "@/lib/assistant-protocol";
  *  Estimator (the total + a stop control) can live on the topbar Talk button while the full
  *  panel sits in the chat drawer. The chat writes the draft + speaking state here; the topbar
  *  reads it. Module-level so it survives the chat drawer mounting/unmounting. */
-export type EstimatorState = { draft: AgentDraft | null; speaking: boolean; streaming: boolean };
+export type EstimatorState = { draft: AgentDraft | null; speaking: boolean; streaming: boolean; listening: boolean };
 
-let state: EstimatorState = { draft: null, speaking: false, streaming: false };
+let state: EstimatorState = { draft: null, speaking: false, streaming: false, listening: false };
 const subs = new Set<() => void>();
 const emit = () => subs.forEach((f) => f());
 
@@ -31,6 +31,12 @@ export const estimatorStore = {
       emit();
     }
   },
+  setListening(s: boolean) {
+    if (s !== state.listening) {
+      state = { ...state, listening: s };
+      emit();
+    }
+  },
   subscribe(f: () => void) {
     subs.add(f);
     return () => {
@@ -39,7 +45,7 @@ export const estimatorStore = {
   },
 };
 
-const SERVER_SNAPSHOT: EstimatorState = { draft: null, speaking: false, streaming: false };
+const SERVER_SNAPSHOT: EstimatorState = { draft: null, speaking: false, streaming: false, listening: false };
 
 /** Subscribe a client component to the live estimate (total/items) + speaking state. */
 export function useEstimator(): EstimatorState {

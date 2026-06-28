@@ -1,37 +1,50 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { AudioLines, X, Square } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { AudioLines, Square, X, ChevronDown, ChevronUp, GripHorizontal } from "lucide-react";
 import { AssistantChat } from "@/app/(app)/assistant/assistant-chat";
 import { unlockAudio, stopSpeaking } from "@/lib/tts";
 import { useEstimator } from "@/lib/estimator-store";
 
+const PANEL_W = 384; // 24rem
+
 /**
- * ONE assistant, everywhere. The topbar launcher opens the full conversational Claude (the
- * same one on the /assistant page) as a side drawer — voice + chat, your data, quotes, and
- * the safe actions — reachable from any screen. Replaces the old limited command mic.
+ * ONE assistant, everywhere. The topbar waveform is the single source-of-truth control — Talk
+ * (open + listen + re-listen) / red Stop. The panel itself is a slim, draggable, collapsible
+ * command box docked centered on the page: just the live status + estimate lines, no header text
+ * and no in-panel mic. Voice + stop come from the topbar button; the handle moves/collapses/closes.
  */
 export function GlobalAssistant() {
   const [open, setOpen] = useState(false);
   const [voiceLaunch, setVoiceLaunch] = useState(false); // Talk button → voice; command bar → text
   const [pendingQuery, setPendingQuery] = useState<string | null>(null); // a typed question from Cmd-K
-  const { speaking, streaming } = useEstimator(); // assistant activity
-  const active = speaking || streaming; // CIB is working or talking → the button is a red STOP
+  const [collapsed, setCollapsed] = useState(false);
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null); // null until first open
+  const drag = useRef<{ sx: number; sy: number; bx: number; by: number } | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const { draft, speaking, streaming, listening } = useEstimator();
+  const active = speaking || streaming || listening; // listening / thinking / talking → red STOP
+
+  // Default dock: centered horizontally, just under the topbar.
+  function centeredPos() {
+    const w = Math.min(PANEL_W, window.innerWidth - 16);
+    return { x: Math.round((window.innerWidth - w) / 2), y: 68 };
+  }
 
   function launch() {
-    // Prime audio + TTS INSIDE this tap (the gesture) so the spoken reply plays on iOS and
-    // the mic can start listening the moment the panel opens — tap → talk, one motion.
+    // Prime audio + TTS INSIDE this tap (the gesture) so the spoken reply plays on iOS and the mic
+    // can start the moment the panel opens — tap → talk, one motion.
     try {
       const synth = window.speechSynthesis;
-      if (synth) {
-        const w = new SpeechSynthesisUtterance(" ");
-        w.volume = 0;
-        synth.speak(w);
-      }
+      if (synth) { const u = new SpeechSynthesisUtterance(" "); u.volume = 0; synth.speak(u); }
     } catch {}
     unlockAudio();
+    // Already open → the Talk button re-opens the mic for the next turn (single voice control).
+    if (open) { window.dispatchEvent(new Event("cn:assistant-talk")); setCollapsed(false); return; }
     setPendingQuery(null);
     setVoiceLaunch(true);
+    setCollapsed(false);
+    setPos(centeredPos());
     setOpen(true);
   }
 
@@ -41,23 +54,70 @@ export function GlobalAssistant() {
       const q = (e as CustomEvent).detail?.q as string | undefined;
       setVoiceLaunch(false);
       setPendingQuery(q && q.trim() ? q.trim() : null);
+      setCollapsed(false);
+      setPos(centeredPos());
       setOpen(true);
     };
     window.addEventListener("cn:assistant-open", onOpen);
     return () => window.removeEventListener("cn:assistant-open", onOpen);
   }, []);
 
+  // This is a NON-modal floating panel (no scrim, page stays usable) — so it does NOT hide the
+  // mobile bottom nav. Instead, keep it on-screen after rotation / viewport resize.
   useEffect(() => {
     if (!open) return;
-    document.body.classList.add("modal-open");
-    return () => document.body.classList.remove("modal-open");
+    const reclamp = () =>
+      setPos((cur) => {
+        if (!cur) return cur;
+        const w = Math.min(PANEL_W, window.innerWidth - 16);
+        const h = panelRef.current?.getBoundingClientRect().height ?? 80;
+        return {
+          x: Math.max(8, Math.min(window.innerWidth - w - 8, cur.x)),
+          y: Math.max(8, Math.min(Math.max(8, window.innerHeight - h - 8), cur.y)),
+        };
+      });
+    window.addEventListener("resize", reclamp);
+    window.addEventListener("orientationchange", reclamp);
+    window.visualViewport?.addEventListener("resize", reclamp);
+    return () => {
+      window.removeEventListener("resize", reclamp);
+      window.removeEventListener("orientationchange", reclamp);
+      window.visualViewport?.removeEventListener("resize", reclamp);
+    };
   }, [open]);
+
+  function closePanel() {
+    stopSpeaking();
+    window.dispatchEvent(new Event("cn:assistant-stop"));
+    setOpen(false);
+  }
+
+  // Drag by the handle — pointer events cover both mouse and touch. Buttons inside the handle still click.
+  function onHandleDown(e: React.PointerEvent) {
+    if ((e.target as HTMLElement).closest("button")) return;
+    const base = pos ?? centeredPos();
+    drag.current = { sx: e.clientX, sy: e.clientY, bx: base.x, by: base.y };
+    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch {}
+  }
+  function onHandleMove(e: React.PointerEvent) {
+    if (!drag.current) return;
+    const d = drag.current;
+    const w = Math.min(PANEL_W, window.innerWidth - 16);
+    const h = panelRef.current?.getBoundingClientRect().height ?? 80;
+    const x = Math.max(8, Math.min(window.innerWidth - w - 8, d.bx + (e.clientX - d.sx)));
+    const y = Math.max(8, Math.min(Math.max(8, window.innerHeight - h - 8), d.by + (e.clientY - d.sy)));
+    setPos({ x, y });
+  }
+  function onHandleUp(e: React.PointerEvent) {
+    drag.current = null;
+    try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch {}
+  }
+
+  const p = pos ?? { x: 8, y: 68 };
 
   return (
     <>
       {active ? (
-        // CIB is working or talking → a red STOP. One tap aborts the stream + cuts the voice. No data
-        // on the button — the live status + estimate summary are the two lines in the dropdown.
         <button
           onClick={() => window.dispatchEvent(new Event("cn:assistant-stop"))}
           title="Stop"
@@ -78,23 +138,49 @@ export function GlobalAssistant() {
       )}
 
       {open && (
-        // A SLIM dropdown under the Talk button — sized to its content (it grows line-by-line as the
-        // conversation/estimate fills in), NOT a screen-covering panel. No tap-away scrim, so the page
-        // behind stays visible AND interactive while the assistant works alongside you; close with X.
-        <div className="fixed left-2 top-[4.25rem] z-[120] flex max-h-[75vh] w-[min(24rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-2xl border border-white/50 bg-white/85 shadow-2xl backdrop-blur-xl sm:left-4">
-          <div className="flex shrink-0 items-center justify-between border-b border-white/40 px-4 py-2">
-            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-              <AudioLines className="h-4 w-4 text-brand" /> Assistant
-            </div>
+        <div
+          ref={panelRef}
+          role="dialog"
+          aria-label="Assistant"
+          className="fixed z-[120] flex max-h-[75vh] flex-col overflow-hidden rounded-2xl border border-white/50 bg-white/90 shadow-2xl backdrop-blur-xl"
+          style={{ left: p.x, top: p.y, width: `min(${PANEL_W}px, calc(100vw - 1rem))` }}
+        >
+          {/* Slim handle: drag grip · (collapsed summary) · collapse · close. No "Assistant" title. */}
+          <div
+            onPointerDown={onHandleDown}
+            onPointerMove={onHandleMove}
+            onPointerUp={onHandleUp}
+            className="flex shrink-0 cursor-grab touch-none select-none items-center gap-2 px-2 py-1 active:cursor-grabbing"
+          >
+            <GripHorizontal className="h-4 w-4 shrink-0 text-slate-300" />
+            {collapsed && draft ? (
+              <span className="truncate text-xs font-medium text-slate-500">
+                <span className="font-semibold text-brand">ESTIMATOR</span>
+                {draft.title ? ` · ${draft.title}` : ""}
+              </span>
+            ) : null}
+            <span className="flex-1" />
             <button
-              onClick={() => setOpen(false)}
-              aria-label="Close assistant"
-              className="rounded-lg p-1.5 text-slate-400 hover:bg-white/60"
+              onClick={() =>
+                setCollapsed((c) => {
+                  const next = !c;
+                  // Collapsing parks the conversation — stop voice so the mic isn't left hot behind a hidden panel.
+                  if (next) window.dispatchEvent(new Event("cn:assistant-stop"));
+                  return next;
+                })
+              }
+              aria-label={collapsed ? "Expand" : "Collapse"}
+              className="rounded p-1 text-slate-400 hover:bg-white/60"
             >
-              <X className="h-5 w-5" />
+              {collapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+            </button>
+            <button onClick={closePanel} aria-label="Close assistant" className="rounded p-1 text-slate-400 hover:bg-white/60">
+              <X className="h-4 w-4" />
             </button>
           </div>
-          <AssistantChat autoStart={voiceLaunch} initialQuery={pendingQuery ?? undefined} glass />
+          <div className={collapsed ? "hidden" : "flex min-h-0 flex-1 flex-col"}>
+            <AssistantChat autoStart={voiceLaunch} initialQuery={pendingQuery ?? undefined} glass />
+          </div>
         </div>
       )}
     </>

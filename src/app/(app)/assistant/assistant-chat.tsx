@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Send, Sparkles, Loader2, Mic, Check, Square, FileText, ChevronDown, ChevronUp } from "lucide-react";
+import { Send, Sparkles, Loader2, Mic, Check, Square, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
 import { speakSmart, unlockAudio, stopSpeaking } from "@/lib/tts";
@@ -151,24 +151,49 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
   useEffect(() => { estimatorStore.setDraft(draft); }, [draft]);
   useEffect(() => { estimatorStore.setSpeaking(speaking); }, [speaking]);
   useEffect(() => { estimatorStore.setStreaming(streaming); }, [streaming]);
-  // Anyone (the topbar red-stop button) can stop the assistant via this event: abort the in-flight
-  // stream + cut off any TTS.
+  // Publish listening too, so the topbar button can show a real red STOP whenever the mic is hot
+  // (not just while thinking/talking) — it's the only voice control now.
+  useEffect(() => { estimatorStore.setListening(listening); }, [listening]);
+  // Tear the voice session down on unmount (close), so a live recognizer never outlives the panel.
+  useEffect(() => () => {
+    try { recogRef.current?.stop(); } catch {}
+    estimatorStore.setListening(false);
+    estimatorStore.setSpeaking(false);
+    estimatorStore.setStreaming(false);
+  }, []);
+  // The topbar STOP (and Close / Collapse, which dispatch this) fully ends the turn: abort the
+  // in-flight stream, cut TTS, AND stop the mic + leave voice mode — so "stop" deterministically
+  // means stop (no orphaned recognizer, no auto-re-listen loop left armed).
   const abortRef = useRef<AbortController | null>(null);
   useEffect(() => {
     const stop = () => {
       try { abortRef.current?.abort(); } catch {}
+      try { recogRef.current?.stop(); } catch {}
       stopSpeaking();
       setStreaming(false);
       setSpeaking(false);
       setStatus(null);
+      setListening(false);
+      setVoiceMode(false);
     };
     window.addEventListener("cn:assistant-stop", stop);
     return () => window.removeEventListener("cn:assistant-stop", stop);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Glass slim view: by default only two lines show (the estimate summary + a live status line);
-  // the full conversation expands underneath. elapsed/tokens drive the status line like Claude's.
-  const [expanded, setExpanded] = useState(false);
+  // The topbar Talk button is the ONLY voice control now (no in-panel mic). When the panel is
+  // already open, tapping it re-opens the mic for the next turn (entering voice mode if needed).
+  useEffect(() => {
+    const talk = () => {
+      if (!voiceModeRef.current) { setVoiceMode(true); startMic(); return; }
+      voiceTap();
+    };
+    window.addEventListener("cn:assistant-talk", talk);
+    return () => window.removeEventListener("cn:assistant-talk", talk);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Glass compact view: live elapsed/token readout for the status line (like Claude's).
   const [elapsedMs, setElapsedMs] = useState(0);
   const [tokens, setTokens] = useState(0);
   const turnStartRef = useRef(0);
@@ -410,13 +435,19 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         text = text.trim();
         if (text) send(text, true);
       };
-      r.onerror = () => setListening(false);
+      r.onerror = (e: any) => {
+        setListening(false);
+        // iOS rejects mic start outside the tap gesture — surface it instead of dying silently.
+        if (e?.error === "not-allowed" || e?.error === "service-not-allowed") setStatus("Tap Talk to speak");
+      };
       r.onend = () => setListening(false);
       r.start();
       recogRef.current = r;
       setListening(true);
     } catch {
+      // start() threw (often an off-gesture rejection on iOS) — tell the user to tap Talk.
       setListening(false);
+      setStatus("Tap Talk to speak");
     }
   }
 
@@ -508,44 +539,65 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
 
   const elapsedStr = (() => { const s = Math.floor(elapsedMs / 1000); return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`; })();
   const statusText = status ?? (streaming ? (tokens > 2 ? "responding…" : "thinking…") : listening ? "listening…" : speaking ? "talking…" : null);
-  const slim = glass && !expanded; // glass collapsed = the two-line summary view
-
   return (
-    <div className={`flex min-h-0 flex-col overflow-hidden ${slim ? "" : "flex-1"} ${glass ? "bg-transparent" : "rounded-xl border border-slate-200 bg-white"}`}>
-      {/* GLASS: the two slim lines (estimate summary + live status) cascade from the Talk button — the
-          default view. The full conversation + estimate card expand underneath. */}
+    <div className={`flex min-h-0 flex-1 flex-col overflow-hidden ${glass ? "bg-transparent" : "rounded-xl border border-slate-200 bg-white"}`}>
+      {/* GLASS: a clean command box — the ESTIMATOR summary + its line items, the live status line,
+          then one line per conversation turn expanding down. No header/footer chrome; the topbar
+          waveform button is the only control (voice + stop), the panel handle moves/collapses it. */}
       {glass && (
-        <div className="shrink-0 border-b border-slate-100 bg-white/40">
+        <div className="flex min-h-0 flex-1 flex-col">
           {draft && (
-            <button onClick={() => setExpanded((e) => !e)} className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-white/60">
-              <FileText className="h-4 w-4 shrink-0 text-brand" />
-              <span className="truncate text-sm">
-                <span className="font-semibold text-brand">ESTIMATOR</span>
-                {draft.title ? <span className="text-slate-700"> · {draft.title}</span> : null}
-                {draft.customer_name ? <span className="text-slate-400"> · {draft.customer_name}</span> : null}
-              </span>
-            </button>
+            <div className="shrink-0">
+              <div className="flex items-center gap-2 px-3 pb-1 pt-2.5">
+                <FileText className="h-4 w-4 shrink-0 text-brand" />
+                <span className="truncate text-sm">
+                  <span className="font-semibold text-brand">ESTIMATOR</span>
+                  {draft.title ? <span className="text-slate-700"> · {draft.title}</span> : null}
+                  {draft.customer_name ? <span className="text-slate-400"> · {draft.customer_name}</span> : null}
+                </span>
+              </div>
+              {(draft.items ?? []).length > 0 && (
+                <div className="max-h-[22vh] space-y-0.5 overflow-y-auto px-3 pb-1.5">
+                  {(draft.items ?? []).map((it, i) => (
+                    <div key={i} className="flex items-baseline justify-between gap-2 text-xs">
+                      <span className="truncate text-slate-500">{it.description || "item"}</span>
+                      <span className="shrink-0 tabular-nums text-slate-400">
+                        {Number(it.quantity) || 1}×${Math.round(Number(it.unit_price) || 0)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
           {statusText ? (
-            <div className="flex items-center gap-2 px-3 py-2">
+            <div className="flex shrink-0 items-center gap-2 px-3 py-2">
               <Sparkles className="h-4 w-4 shrink-0 animate-pulse text-orange-500" />
               <span className="truncate text-sm text-slate-500">{elapsedStr} · {tokens} tokens · {statusText}</span>
             </div>
           ) : !draft && messages.length === 0 ? (
-            <div className="px-3 py-2 text-sm text-slate-400">What can I help you with?</div>
+            <div className="px-3 py-2.5 text-sm text-slate-400">What can I help you with?</div>
           ) : null}
           {messages.length > 0 && (
-            <button onClick={() => setExpanded((e) => !e)} className="flex w-full items-center justify-center gap-1 py-1 text-[11px] font-medium text-slate-400 hover:text-brand">
-              {expanded ? <>Hide <ChevronUp className="h-3 w-3" /></> : <>Show conversation <ChevronDown className="h-3 w-3" /></>}
-            </button>
+            <div ref={scrollRef} className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 pb-2 pt-0.5">
+              {messages.map((m, i) => (
+                <div key={i} className="flex items-baseline gap-1.5 text-xs leading-snug">
+                  <span className={`shrink-0 font-semibold ${m.role === "user" ? "text-brand" : "text-slate-300"}`}>
+                    {m.role === "user" ? "›" : "↳"}
+                  </span>
+                  <span className="whitespace-pre-wrap break-words text-slate-600">{m.content || "…"}</span>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       )}
 
-      {/* The conversation — always on the full /assistant page; only when EXPANDED in the glass drawer */}
-      {!slim && (
+      {/* The full-page (non-glass) conversation — bubbles + welcome. The glass drawer uses the
+          compact command-line render above instead. */}
+      {!glass && (
         <>
-          {!glass && messages.length > 0 && (
+          {messages.length > 0 && (
             <div className="flex shrink-0 justify-end px-3 pt-1">
               <button onClick={newChat} className="text-xs font-medium text-slate-400 hover:text-brand">+ New chat</button>
             </div>
@@ -604,8 +656,8 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         </div>
       ) : null}
 
-      {/* The full estimate card — non-glass always; glass only when expanded (the slim line covers it). */}
-      {draft && (!glass || expanded) ? <LiveQuote draft={draft} onSave={saveDraft} saving={savingDraft} /> : null}
+      {/* The full estimate card — non-glass only; the glass drawer shows the ESTIMATOR line + items. */}
+      {draft && !glass ? <LiveQuote draft={draft} onSave={saveDraft} saving={savingDraft} /> : null}
 
       {pendingPick ? (
         <ContactPicker
@@ -641,28 +693,9 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
             </Button>
           </div>
         </div>
-      ) : voiceMode ? (
-        glass ? (
-          // Compact voice control for the slim drawer — the status LINE up top already shows
-          // listening/thinking/talking, so just a small mic + end down here.
-          <div className="flex items-center justify-center gap-3 border-t border-slate-100 p-2">
-            <button
-              type="button"
-              onClick={voiceTap}
-              aria-label={listening ? "Stop listening" : "Talk"}
-              className={`flex h-11 w-11 items-center justify-center rounded-full text-white shadow transition active:scale-95 ${
-                listening ? "animate-pulse bg-red-600" : "bg-brand hover:bg-brand-dark"
-              }`}
-            >
-              <Mic className="h-5 w-5" />
-            </button>
-            <button type="button" onClick={stopVoice} className="text-xs font-medium text-slate-400 hover:text-red-600">
-              End
-            </button>
-          </div>
-        ) : (
-          // Voice mode — chat-style. It listens / thinks / talks; the big mic is "your turn"
-          // (auto-reopens on desktop, one tap on iPhone), and End closes the conversation.
+      ) : glass ? null : voiceMode ? (
+          // Voice mode (full page only) — chat-style. It listens / thinks / talks; the big mic is
+          // "your turn". In the glass drawer the topbar waveform button is the only voice control.
           <div className="flex flex-col items-center gap-2 border-t border-slate-100 p-4">
             <VoiceWave active={listening || speaking} />
             <div className="text-sm font-medium text-slate-600">
@@ -686,7 +719,6 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
               <Square className="h-3 w-3" fill="currentColor" /> End conversation
             </button>
           </div>
-        )
       ) : (
         <form
           onSubmit={(e) => {
