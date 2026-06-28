@@ -54,13 +54,11 @@ export function GlobalAssistant() {
           >
             <Square className="h-4 w-4 fill-current" />
           </button>
-          <button onClick={launch} aria-label="Open the assistant" className="flex h-8 items-center gap-1.5 rounded-full px-2 transition-colors hover:bg-white/10">
-            {items > 0 ? (
+          {items > 0 && (
+            <button onClick={launch} aria-label="Open the estimate" className="flex h-8 items-center rounded-full px-2 transition-colors hover:bg-white/10">
               <span className="text-sm font-semibold tabular-nums">{compactMoney(draftTotal(draft))}</span>
-            ) : (
-              <span className="hidden text-sm font-medium sm:inline">{speaking ? "Talking…" : "Working…"}</span>
-            )}
-          </button>
+            </button>
+          )}
         </div>
       ) : items > 0 && !open ? (
         // COMPACTED ESTIMATOR: estimate building + drawer closed → the Talk button hosts the running
@@ -78,37 +76,33 @@ export function GlobalAssistant() {
       ) : (
         <button
           onClick={launch}
-          title="Assistant — tap and talk"
+          title="Talk to the assistant"
           aria-label="Open the assistant"
-          className="btn-gloss inline-flex h-10 items-center gap-1.5 rounded-full bg-brand px-3 text-white shadow-sm transition-colors hover:bg-brand-dark"
+          className="btn-gloss inline-flex h-10 w-10 items-center justify-center rounded-full bg-brand text-white shadow-sm transition-colors hover:bg-brand-dark"
         >
           <AudioLines className="h-5 w-5" />
-          <span className="hidden text-sm font-medium sm:inline">Talk</span>
         </button>
       )}
 
       {open && (
-        <>
-          {/* Tap away to close; the app stays visible behind the glass. */}
-          <div className="fixed inset-0 z-[110]" onClick={() => setOpen(false)} />
-          {/* A floating, semi-transparent glass window that drops under the top bar and grows
-              with the conversation; its bottom half fills with the live quote as you talk. */}
-          <div className="fixed right-2 top-[4.25rem] z-[120] flex max-h-[80vh] w-[min(26rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-2xl border border-white/50 bg-white/80 shadow-2xl backdrop-blur-xl sm:right-4">
-            <div className="flex shrink-0 items-center justify-between border-b border-white/40 px-4 py-2.5">
-              <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                <AudioLines className="h-4 w-4 text-brand" /> Assistant
-              </div>
-              <button
-                onClick={() => setOpen(false)}
-                aria-label="Close assistant"
-                className="rounded-lg p-1.5 text-slate-400 hover:bg-white/60"
-              >
-                <X className="h-5 w-5" />
-              </button>
+        // A SLIM dropdown under the Talk button — sized to its content (it grows line-by-line as the
+        // conversation/estimate fills in), NOT a screen-covering panel. No tap-away scrim, so the page
+        // behind stays visible AND interactive while the assistant works alongside you; close with X.
+        <div className="fixed left-2 top-[4.25rem] z-[120] flex max-h-[75vh] w-[min(24rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-2xl border border-white/50 bg-white/85 shadow-2xl backdrop-blur-xl sm:left-4">
+          <div className="flex shrink-0 items-center justify-between border-b border-white/40 px-4 py-2">
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+              <AudioLines className="h-4 w-4 text-brand" /> Assistant
             </div>
-            <AssistantChat autoStart glass />
+            <button
+              onClick={() => setOpen(false)}
+              aria-label="Close assistant"
+              className="rounded-lg p-1.5 text-slate-400 hover:bg-white/60"
+            >
+              <X className="h-5 w-5" />
+            </button>
           </div>
-        </>
+          <AssistantChat autoStart glass />
+        </div>
       )}
     </>
   );
