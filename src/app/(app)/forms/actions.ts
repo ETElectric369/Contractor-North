@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { requireStaff } from "@/lib/staff-guard";
 
 export type Result = { ok: boolean; error?: string; id?: string };
 
@@ -91,6 +92,28 @@ export async function submitForm(input: {
   if (error) return { ok: false, error: error.message };
   revalidatePath(`/forms/${input.form_id}`);
   return { ok: true, id: data.id };
+}
+
+export async function deleteFormSubmission(
+  id: string,
+  formId: string,
+): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+
+  // Scope the delete to a submission that belongs to the form being viewed.
+  // RLS already isolates by org; this matches it to formId so a stray id
+  // can't be deleted out from under a different form's view.
+  const { error } = await supabase
+    .from("form_submissions")
+    .delete()
+    .eq("id", id)
+    .eq("form_id", formId);
+
+  if (error) return { ok: false, error: error.message };
+  revalidatePath(`/forms/${formId}`);
+  return { ok: true };
 }
 
 export async function deleteForm(id: string): Promise<Result> {

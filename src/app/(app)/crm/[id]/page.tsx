@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs } from "@/components/tabs";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { EditCustomerButton } from "./edit-customer-button";
+import { MergeCustomerButton } from "./merge-customer-button";
 import { PortalLinkButton } from "./portal-link-button";
 import { DeleteButton } from "@/components/delete-button";
 import { SectionActionsMenu } from "@/components/section-actions-menu";
@@ -68,6 +69,16 @@ export default async function CustomerDetailPage({
   const linkedJobs = (linkedRaw ?? [])
     .filter((r: any) => r.jobs)
     .map((r: any) => ({ linkId: r.id, role: r.role as string, ...(r.jobs as any) }));
+
+  // Other customers in the org (RLS-scoped) — the pick-list for "Merge into…".
+  // Staff-only, since merge is destructive (it deletes the source record).
+  const { data: otherCustomers } = viewerIsStaff
+    ? await supabase
+        .from("customers")
+        .select("id, name")
+        .neq("id", id)
+        .order("name")
+    : { data: [] as { id: string; name: string }[] };
 
   const accountCredit = (credits ?? [])
     .filter((x: any) => x.disposition === "credit")
@@ -229,6 +240,12 @@ export default async function CustomerDetailPage({
         <div className="flex flex-wrap items-center gap-2">
           <SectionActionsMenu tree={customerSectionTree(c.id, c.name)} isStaff={viewerIsStaff} />
           <EditCustomerButton customer={c} pricingLevels={(pricingLevels ?? []) as any} />
+          {viewerIsStaff && (
+            <MergeCustomerButton
+              customer={{ id: c.id, name: c.name }}
+              others={(otherCustomers ?? []) as { id: string; name: string }[]}
+            />
+          )}
           <NewJobButton customers={[{ id: c.id, name: c.name }]} defaultCustomerId={c.id} />
           <Link href={`/quotes/new?customer=${c.id}`}>
             <Button>

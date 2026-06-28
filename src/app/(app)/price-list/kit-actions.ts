@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { requireStaff } from "@/lib/staff-guard";
 
 export type Result = { ok: boolean; error?: string; id?: string };
 
@@ -16,6 +17,27 @@ export async function createKit(input: { name: string; category?: string | null 
   if (error) return { ok: false, error: error.message };
   revalidatePath("/price-list");
   return { ok: true, id: data.id };
+}
+
+export async function updateKit(
+  id: string,
+  input: { name: string; category?: string | null },
+): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  if (!input.name.trim()) return { ok: false, error: "Name is required." };
+  // Org-safe: RLS scopes the row to the caller's org; we confirm it's visible
+  // before mutating so a hidden/foreign id can't be silently updated.
+  const { data: existing } = await supabase.from("kits").select("id").eq("id", id).maybeSingle();
+  if (!existing) return { ok: false, error: "Kit not found." };
+  const { error } = await supabase
+    .from("kits")
+    .update({ name: input.name.trim(), category: input.category?.trim() || null })
+    .eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/price-list");
+  return { ok: true };
 }
 
 export async function deleteKit(id: string): Promise<Result> {
@@ -42,6 +64,32 @@ export async function addKitItem(input: {
     unit: input.unit?.trim() || "ea",
     unit_price: input.unit_price ?? 0,
   });
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/price-list");
+  return { ok: true };
+}
+
+export async function updateKitItem(
+  id: string,
+  input: { description: string; quantity?: number; unit?: string; unit_price?: number },
+): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  if (!input.description.trim()) return { ok: false, error: "Description is required." };
+  // Org-safe: RLS scopes the row to the caller's org; confirm it's visible
+  // before mutating so a hidden/foreign id can't be silently updated.
+  const { data: existing } = await supabase.from("kit_items").select("id").eq("id", id).maybeSingle();
+  if (!existing) return { ok: false, error: "Line item not found." };
+  const { error } = await supabase
+    .from("kit_items")
+    .update({
+      description: input.description.trim(),
+      quantity: input.quantity ?? 1,
+      unit: input.unit?.trim() || "ea",
+      unit_price: input.unit_price ?? 0,
+    })
+    .eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/price-list");
   return { ok: true };

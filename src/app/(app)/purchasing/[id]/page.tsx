@@ -4,7 +4,7 @@ import { ArrowLeft, Briefcase } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
-import { PoDetail } from "./po-detail";
+import { PoDetail, EditPoButton } from "./po-detail";
 import { DeleteButton } from "@/components/delete-button";
 import { SectionActionsMenu } from "@/components/section-actions-menu";
 import { purchaseOrderSectionTree } from "@/lib/nav-tree";
@@ -31,7 +31,7 @@ export default async function PurchaseOrderPage({
   if (!po) notFound();
   const p = po as PurchaseOrder & { jobs: any };
 
-  const [{ data: items }, { data: priceItems }] = await Promise.all([
+  const [{ data: items }, { data: priceItems }, { data: jobs }] = await Promise.all([
     supabase
       .from("purchase_order_items")
       .select("*")
@@ -44,6 +44,11 @@ export default async function PurchaseOrderPage({
       .eq("archived", false)
       .order("description")
       .limit(2000),
+    supabase
+      .from("jobs")
+      .select("id, job_number, name")
+      .order("created_at", { ascending: false })
+      .limit(100),
   ]);
 
   return (
@@ -60,6 +65,12 @@ export default async function PurchaseOrderPage({
           <h1 className="text-2xl font-bold text-slate-900">{p.po_number}</h1>
           <Badge tone={statusTone(p.status)}>{p.status}</Badge>
           <div className="ml-auto flex items-center gap-2">
+            <EditPoButton
+              poId={p.id}
+              vendor={p.vendor}
+              jobId={p.jobs?.id ?? null}
+              jobs={(jobs ?? []) as { id: string; job_number: string; name: string }[]}
+            />
             <SectionActionsMenu
               tree={purchaseOrderSectionTree(p.id, p.po_number, { jobId: p.jobs?.id ?? null })}
             />

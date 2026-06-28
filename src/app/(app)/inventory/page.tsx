@@ -130,7 +130,7 @@ export default async function InventoryPage({
                       {it.unit_cost != null ? formatCurrency(it.unit_cost) : "—"}
                     </td>
                     <td className="px-5 py-3">
-                      <QtyControl id={it.id} quantity={it.quantity_on_hand} unit={it.unit} />
+                      <QtyControl id={it.id} name={it.name} quantity={it.quantity_on_hand} unit={it.unit} />
                     </td>
                     <td className="px-3 py-3">
                       <ItemActions item={it} />

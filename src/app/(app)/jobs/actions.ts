@@ -420,6 +420,33 @@ export async function addDocument(input: {
   return { ok: true, id: data?.id };
 }
 
+/** Rename / re-categorize an already-uploaded document. Staff only; partial patch.
+ *  RLS scopes the update to the caller's org, so a crafted id can't reach another
+ *  org's document — mirrors updateBill's pattern. */
+export async function updateDocument(
+  id: string,
+  patch: {
+    name?: string;
+    category?: string | null;
+  },
+  jobId: string,
+): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const clean: Record<string, unknown> = {};
+  if (patch.name !== undefined) {
+    if (!patch.name.trim()) return { ok: false, error: "Name is required." };
+    clean.name = patch.name.trim();
+  }
+  if (patch.category !== undefined) clean.category = patch.category ?? null;
+
+  const { error } = await supabase.from("documents").update(clean).eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath(`/jobs/${jobId}`);
+  return { ok: true };
+}
+
 export async function deleteDocument(
   id: string,
   path: string,

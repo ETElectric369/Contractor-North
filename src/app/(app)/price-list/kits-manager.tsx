@@ -2,13 +2,14 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Package } from "lucide-react";
+import { Plus, Trash2, Package, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Card } from "@/components/ui/card";
+import { Modal, ModalActions } from "@/components/ui/modal";
 import { formatCurrency } from "@/lib/utils";
-import { createKit, deleteKit, addKitItem, deleteKitItem } from "./kit-actions";
+import { createKit, updateKit, deleteKit, addKitItem, updateKitItem, deleteKitItem } from "./kit-actions";
 
 interface KitItem { id: string; description: string; quantity: number; unit: string; unit_price: number; }
 interface Kit { id: string; name: string; category: string | null; kit_items: KitItem[]; }
@@ -75,10 +76,88 @@ function AddItemRow({ kitId, priceItems, onDone }: { kitId: string; priceItems: 
   );
 }
 
+function EditKitModal({ kit, onClose }: { kit: Kit; onClose: () => void }) {
+  const router = useRouter();
+  const [name, setName] = useState(kit.name);
+  const [category, setCategory] = useState(kit.category ?? "");
+  const [err, setErr] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+
+  function save() {
+    if (!name.trim()) return;
+    setErr(null);
+    start(async () => {
+      const res = await updateKit(kit.id, { name, category });
+      if (!res.ok) { setErr(res.error ?? "Could not save kit."); return; }
+      router.refresh();
+      onClose();
+    });
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Edit kit"
+      size="md"
+      footer={<ModalActions onCancel={onClose} onSave={save} saving={pending} disabled={!name.trim()} />}
+    >
+      <div className="space-y-3">
+        <div><Label htmlFor="ek-name">Kit name</Label><Input id="ek-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. 200A panel upgrade" /></div>
+        <div><Label htmlFor="ek-cat">Category</Label><Input id="ek-cat" value={category} onChange={(e) => setCategory(e.target.value)} /></div>
+        {err && <p className="text-sm text-red-600">{err}</p>}
+      </div>
+    </Modal>
+  );
+}
+
+function EditItemModal({ item, onClose }: { item: KitItem; onClose: () => void }) {
+  const router = useRouter();
+  const [desc, setDesc] = useState(item.description);
+  const [qty, setQty] = useState(Number(item.quantity));
+  const [unit, setUnit] = useState(item.unit);
+  const [price, setPrice] = useState(Number(item.unit_price));
+  const [err, setErr] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+
+  function save() {
+    if (!desc.trim()) return;
+    setErr(null);
+    start(async () => {
+      const res = await updateKitItem(item.id, { description: desc, quantity: qty, unit, unit_price: price });
+      if (!res.ok) { setErr(res.error ?? "Could not save line."); return; }
+      router.refresh();
+      onClose();
+    });
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Edit line item"
+      size="md"
+      footer={<ModalActions onCancel={onClose} onSave={save} saving={pending} disabled={!desc.trim()} />}
+    >
+      <div className="space-y-3">
+        <div><Label htmlFor="ei-desc">Description</Label><Input id="ei-desc" value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Description" /></div>
+        <div className="grid grid-cols-3 gap-2">
+          <div><Label htmlFor="ei-qty">Qty</Label><NumberInput id="ei-qty" placeholder="Qty" value={qty} onValueChange={setQty} /></div>
+          <div><Label htmlFor="ei-unit">Unit</Label><Input id="ei-unit" value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="ea" /></div>
+          <div><Label htmlFor="ei-price">Unit price</Label><NumberInput id="ei-price" placeholder="$" value={price} onValueChange={setPrice} /></div>
+        </div>
+        {err && <p className="text-sm text-red-600">{err}</p>}
+      </div>
+    </Modal>
+  );
+}
+
 export function KitsManager({ kits, priceItems }: { kits: Kit[]; priceItems: PriceItem[] }) {
   const router = useRouter();
   const [name, setName] = useState("");
   const [category, setCategory] = useState("");
+  const [editingKit, setEditingKit] = useState<Kit | null>(null);
+  const [editingItem, setEditingItem] = useState<KitItem | null>(null);
   const [pending, start] = useTransition();
 
   function create() {
@@ -116,7 +195,8 @@ export function KitsManager({ kits, priceItems }: { kits: Kit[]; priceItems: Pri
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="text-sm font-medium text-slate-700">{formatCurrency(total)}</span>
-                    <button onClick={() => start(async () => { await deleteKit(k.id); router.refresh(); })} className="text-slate-400 hover:text-red-600" title="Delete kit"><Trash2 className="h-4 w-4" /></button>
+                    <button onClick={() => setEditingKit(k)} className="text-slate-400 hover:text-brand" title="Edit kit"><Pencil className="h-4 w-4" /></button>
+                    <button onClick={() => { if (confirm(`Delete the "${k.name}" kit and all its items?`)) start(async () => { await deleteKit(k.id); router.refresh(); }); }} className="text-slate-400 hover:text-red-600" title="Delete kit"><Trash2 className="h-4 w-4" /></button>
                   </div>
                 </div>
                 <div className="space-y-2 p-4">
@@ -127,7 +207,8 @@ export function KitsManager({ kits, priceItems }: { kits: Kit[]; priceItems: Pri
                           <span className="flex-1">{it.description}</span>
                           <span className="text-slate-500">{Number(it.quantity)} {it.unit} × {formatCurrency(it.unit_price)}</span>
                           <span className="w-20 text-right font-medium text-slate-800">{formatCurrency(Number(it.quantity) * Number(it.unit_price))}</span>
-                          <button onClick={() => start(async () => { await deleteKitItem(it.id); router.refresh(); })} className="text-slate-400 hover:text-red-600" title="Remove"><Trash2 className="h-3.5 w-3.5" /></button>
+                          <button onClick={() => setEditingItem(it)} className="text-slate-400 hover:text-brand" title="Edit line"><Pencil className="h-3.5 w-3.5" /></button>
+                          <button onClick={() => { if (confirm("Remove this line item?")) start(async () => { await deleteKitItem(it.id); router.refresh(); }); }} className="text-slate-400 hover:text-red-600" title="Remove"><Trash2 className="h-3.5 w-3.5" /></button>
                         </li>
                       ))}
                     </ul>
@@ -139,6 +220,9 @@ export function KitsManager({ kits, priceItems }: { kits: Kit[]; priceItems: Pri
           })}
         </div>
       )}
+
+      {editingKit && <EditKitModal kit={editingKit} onClose={() => setEditingKit(null)} />}
+      {editingItem && <EditItemModal item={editingItem} onClose={() => setEditingItem(null)} />}
     </div>
   );
 }

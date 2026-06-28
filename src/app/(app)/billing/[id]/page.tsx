@@ -39,7 +39,11 @@ export default async function InvoicePage({
   if (!invoice) notFound();
   const inv = invoice as Invoice & { customers: any; quotes: any };
 
-  const [{ data: items }, { data: payments }, { data: priceItems }, { data: taxRates }, { data: org }] =
+  // The customer/job pickers only matter while the invoice is still an editable
+  // draft, so only pay for those lookups then.
+  const isDraft = inv.status === "draft";
+
+  const [{ data: items }, { data: payments }, { data: priceItems }, { data: taxRates }, { data: org }, { data: customers }, { data: jobs }] =
     await Promise.all([
       supabase
         .from("invoice_items")
@@ -55,6 +59,12 @@ export default async function InvoicePage({
         .limit(2000),
       supabase.from("tax_rates").select("id, name, rate, is_default").order("created_at"),
       supabase.from("organizations").select("settings").limit(1).maybeSingle(),
+      isDraft
+        ? supabase.from("customers").select("id, name").order("name").limit(2000)
+        : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+      isDraft
+        ? supabase.from("jobs").select("id, name, job_number, customer_id").order("created_at", { ascending: false }).limit(2000)
+        : Promise.resolve({ data: [] as { id: string; name: string | null; job_number: string | null; customer_id: string | null }[] }),
     ]);
   const orgSettings = getOrgSettings((org as any)?.settings);
   const paymentMethods = orgSettings.payment_methods;
@@ -162,6 +172,8 @@ export default async function InvoicePage({
         taxRates={(taxRates ?? []) as any}
         paymentMethods={paymentMethods}
         materialMarkup={orgSettings.material_markup_percent}
+        customers={(customers ?? []) as any}
+        jobs={(jobs ?? []) as any}
       />
     </div>
   );

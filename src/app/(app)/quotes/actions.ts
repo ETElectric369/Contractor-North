@@ -158,7 +158,7 @@ async function recalcQuote(supabase: any, quoteId: string) {
 
 export async function addQuoteItem(
   quoteId: string,
-  item: { description: string; quantity: number; unit: string; unit_price: number },
+  item: { description: string; quantity: number; unit?: string; unit_price: number },
 ): Promise<{ ok: boolean; error?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -189,7 +189,7 @@ export async function addQuoteItem(
 export async function updateQuoteItem(
   itemId: string,
   quoteId: string,
-  item: { description: string; quantity: number; unit_price: number },
+  item: { description: string; quantity: number; unit?: string; unit_price: number },
 ): Promise<{ ok: boolean; error?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -200,6 +200,7 @@ export async function updateQuoteItem(
     .update({
       description: item.description.trim(),
       quantity: item.quantity || 1,
+      unit: item.unit?.trim() || "ea",
       unit_price: item.unit_price || 0,
     })
     .eq("id", itemId);
@@ -244,6 +245,40 @@ export async function updateQuoteMeta(
     .eq("id", quoteId);
   if (error) return { ok: false, error: error.message };
   await recalcQuote(supabase, quoteId);
+  revalidatePath(`/quotes/${quoteId}`);
+  revalidatePath("/quotes");
+  return { ok: true };
+}
+
+/**
+ * Change a saved quote's customer. Mirrors the visibleJobIdOrNull guard:
+ * a customerId the caller's RLS-scoped client can't see resolves to null,
+ * so a crafted/foreign id can never persist as a cross-org dangling FK.
+ */
+export async function setQuoteCustomer(
+  quoteId: string,
+  customerId: string | null,
+): Promise<{ ok: boolean; error?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+
+  let safeCustomerId: string | null = null;
+  if (customerId) {
+    const { data } = await supabase
+      .from("customers")
+      .select("id")
+      .eq("id", customerId)
+      .maybeSingle();
+    if (!data) return { ok: false, error: "That customer isn't available." };
+    safeCustomerId = customerId;
+  }
+
+  const { error } = await supabase
+    .from("quotes")
+    .update({ customer_id: safeCustomerId, updated_at: new Date().toISOString() })
+    .eq("id", quoteId);
+  if (error) return { ok: false, error: error.message };
   revalidatePath(`/quotes/${quoteId}`);
   revalidatePath("/quotes");
   return { ok: true };
@@ -320,6 +355,50 @@ export async function saveQuote(input: SaveQuoteInput) {
   revalidatePath("/tasks");
   revalidatePath("/tasks/sales");
   return { ok: true as const, id: quote.id };
+}
+
+/**
+ * Clone a quote (header fields + all line items) into a fresh draft titled
+ * "… (copy)". Reuses the existing saveQuote insert path so totals, the
+ * follow-up task, and revalidation all behave exactly like a new estimate.
+ * RLS-scoped reads mean a foreign-org quote resolves to nothing here.
+ */
+export async function duplicateQuote(
+  id: string,
+): Promise<{ ok: boolean; error?: string; id?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+
+  const { data: quote } = await supabase
+    .from("quotes")
+    .select("customer_id, title, notes, tax_rate, valid_until")
+    .eq("id", id)
+    .maybeSingle();
+  if (!quote) return { ok: false, error: "Quote not found." };
+
+  const { data: items } = await supabase
+    .from("quote_line_items")
+    .select("description, quantity, unit, unit_price")
+    .eq("quote_id", id)
+    .order("sort_order");
+
+  const res = await saveQuote({
+    customer_id: quote.customer_id ?? null,
+    job_id: null, // a copy stands on its own — it isn't tied to the original's job
+    title: `${quote.title ?? "Quote"} (copy)`,
+    notes: quote.notes ?? "",
+    tax_rate: Number(quote.tax_rate) || 0,
+    valid_until: quote.valid_until ?? null,
+    items: (items ?? []).map((it: any) => ({
+      description: it.description,
+      quantity: Number(it.quantity) || 1,
+      unit: it.unit || "ea",
+      unit_price: Number(it.unit_price) || 0,
+    })),
+  });
+  if (!res.ok) return { ok: false, error: res.error };
+  return { ok: true, id: res.id };
 }
 
 export async function createJobFromQuote(

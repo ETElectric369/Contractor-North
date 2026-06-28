@@ -19,6 +19,7 @@ interface Entry {
   job_code: string | null;
   notes: string | null;
   miles?: number;
+  rate_override?: number | null;
   profile_id?: string;
   profiles?: { full_name: string | null } | null;
   // The entry's current job (joined), so we can keep it as an option even when
@@ -76,6 +77,7 @@ export function EditEntryButton({
   const [lunchTaken, setLunchTaken] = useState((entry.lunch_minutes ?? 0) >= 30);
   const [breaksTaken, setBreaksTaken] = useState(true);
   const [miles, setMiles] = useState(entry.miles ?? 0);
+  const [rate, setRate] = useState(entry.rate_override ?? 0);
   const [notes, setNotes] = useState(entry.notes ?? "");
   // Split-across-jobs rows (pre-filled from existing allocations so save round-trips them).
   const [splits, setSplits] = useState<{ job_id: string; hours: number; description: string }[]>(() =>
@@ -122,6 +124,8 @@ export function EditEntryButton({
         job_code: jobCode || null,
         notes,
         miles,
+        // Blank/0 ⇒ default rate (clear any override); a positive number sets it.
+        rate_override: rate > 0 ? rate : null,
         profile_id: profileId || undefined,
         allocations,
       });
@@ -277,8 +281,8 @@ export function EditEntryButton({
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="col-span-2">
               <Label htmlFor="e-code">Job code</Label>
               <Select id="e-code" value={jobCode} onChange={(e) => setJobCode(e.target.value)}>
                 <option value="">— Code —</option>
@@ -292,6 +296,10 @@ export function EditEntryButton({
             <div>
               <Label htmlFor="e-miles">Miles</Label>
               <NumberInput id="e-miles" value={miles} onValueChange={setMiles} />
+            </div>
+            <div>
+              <Label htmlFor="e-rate">Rate ($/hr, blank/0 = default)</Label>
+              <NumberInput id="e-rate" value={rate} onValueChange={setRate} step={0.5} />
             </div>
           </div>
           <label className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${lunchRequired && !lunchTaken ? "border-amber-300 bg-amber-50" : "border-slate-200"}`}>

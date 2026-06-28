@@ -31,11 +31,19 @@ export default async function MaterialListPage({
 
   // material_list_items has no created_at column — ordering by it errored the
   // whole query, so items silently never loaded. Order by sort_order only.
-  const { data: items } = await supabase
-    .from("material_list_items")
-    .select("*")
-    .eq("list_id", id)
-    .order("sort_order");
+  // Pull the org's jobs (RLS-scoped) so the edit control can re-link this list.
+  const [{ data: items }, { data: jobs }] = await Promise.all([
+    supabase
+      .from("material_list_items")
+      .select("*")
+      .eq("list_id", id)
+      .order("sort_order"),
+    supabase
+      .from("jobs")
+      .select("id, job_number, name")
+      .order("created_at", { ascending: false })
+      .limit(100),
+  ]);
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -50,7 +58,7 @@ export default async function MaterialListPage({
         <div>
           <div className="flex items-center gap-1.5">
             <h1 className="text-2xl font-bold text-slate-900">{l.name}</h1>
-            <RenameListButton listId={l.id} name={l.name} />
+            <RenameListButton listId={l.id} name={l.name} jobId={l.jobs?.id ?? l.job_id ?? null} jobs={jobs ?? []} />
           </div>
           <div className="mt-1 flex items-center gap-3 text-sm text-slate-400">
             <span>Created {formatDate(l.created_at)}</span>

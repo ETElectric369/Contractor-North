@@ -234,6 +234,88 @@ export async function deleteCustomer(id: string): Promise<ActionResult> {
   return { ok: true };
 }
 
+/** Merge a duplicate customer into another. Re-points every child table that references
+ *  the source customer onto the target, then deletes the now-empty source. This is the
+ *  ONLY way to clean up duplicates once they're referenced (deleteCustomer refuses while
+ *  history points at them). Org-safe: requireStaff + both ids must be visible to the
+ *  caller's org (RLS scopes every read/write below). */
+export async function mergeCustomers(
+  sourceId: string,
+  targetId: string,
+): Promise<ActionResult> {
+  const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+
+  if (!sourceId || !targetId) return { ok: false, error: "Pick a customer to merge into." };
+  if (sourceId === targetId) return { ok: false, error: "Can't merge a customer into itself." };
+
+  // Confirm BOTH belong to the caller's org (the .select is RLS-scoped, so a row from
+  // another org is invisible → treated as not found).
+  const { data: pair } = await supabase
+    .from("customers")
+    .select("id, name")
+    .in("id", [sourceId, targetId]);
+  const source = (pair ?? []).find((c: any) => c.id === sourceId);
+  const target = (pair ?? []).find((c: any) => c.id === targetId);
+  if (!source) return { ok: false, error: "Source customer not found." };
+  if (!target) return { ok: false, error: "Target customer not found." };
+
+  // job_contacts has a unique (job_id, customer_id, role) — re-pointing source→target
+  // would collide where the target is already linked to the same job/role. Drop those
+  // duplicate source links first so the re-point can't violate the constraint.
+  const { data: srcLinks } = await supabase
+    .from("job_contacts")
+    .select("id, job_id, role")
+    .eq("customer_id", sourceId);
+  if (srcLinks && srcLinks.length) {
+    const { data: tgtLinks } = await supabase
+      .from("job_contacts")
+      .select("job_id, role")
+      .eq("customer_id", targetId);
+    const taken = new Set((tgtLinks ?? []).map((l: any) => `${l.job_id}|${l.role}`));
+    const collidingIds = srcLinks
+      .filter((l: any) => taken.has(`${l.job_id}|${l.role}`))
+      .map((l: any) => l.id);
+    if (collidingIds.length) {
+      const { error } = await supabase.from("job_contacts").delete().in("id", collidingIds);
+      if (error) return { ok: false, error: error.message };
+    }
+  }
+
+  // Re-point every child table that references customers.id from source → target.
+  // (Discovered from the schema: each carries a customer_id FK.) RLS scopes each update.
+  const childTables = [
+    "jobs",
+    "quotes",
+    "invoices",
+    "job_contacts",
+    "customer_credits",
+    "inquiries",
+    "documents",
+    "work_orders",
+    "appointments",
+    "recurring_templates",
+    "contracts",
+  ];
+  for (const table of childTables) {
+    const { error } = await supabase
+      .from(table)
+      .update({ customer_id: targetId })
+      .eq("customer_id", sourceId);
+    if (error) return { ok: false, error: `Couldn't move ${table}: ${error.message}` };
+  }
+
+  // Source is now unreferenced — delete it.
+  const { error: delErr } = await supabase.from("customers").delete().eq("id", sourceId);
+  if (delErr) return { ok: false, error: delErr.message };
+
+  revalidatePath("/crm");
+  revalidatePath(`/crm/${targetId}`);
+  revalidatePath("/leads");
+  return { ok: true, id: targetId };
+}
+
 export async function updateCustomerStatus(
   id: string,
   status: string,

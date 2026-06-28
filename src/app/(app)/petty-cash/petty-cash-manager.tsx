@@ -2,14 +2,15 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, ArrowDownCircle, ArrowUpCircle } from "lucide-react";
+import { Plus, Trash2, Pencil, ArrowDownCircle, ArrowUpCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Modal, ModalActions } from "@/components/ui/modal";
 import { formatCurrency, formatDate } from "@/lib/utils";
-import { addPettyCash, deletePettyCash } from "./actions";
+import { addPettyCash, updatePettyCash, deletePettyCash } from "./actions";
 
 export interface PettyTx {
   id: string;
@@ -84,12 +85,73 @@ export function PettyCashManager({ items, balance }: { items: PettyTx[]; balance
               <span className={`font-medium ${i.kind === "replenish" ? "text-green-600" : "text-red-600"}`}>
                 {i.kind === "replenish" ? "+" : "−"}{formatCurrency(i.amount)}
               </span>
-              <button onClick={() => start(async () => { await deletePettyCash(i.id); router.refresh(); })} className="text-slate-300 hover:text-red-600" title="Delete"><Trash2 className="h-4 w-4" /></button>
+              <EditPettyCashButton tx={i} />
+              <button onClick={() => { if (!confirm("Delete this entry?")) return; start(async () => { await deletePettyCash(i.id); router.refresh(); }); }} className="text-slate-300 hover:text-red-600" title="Delete"><Trash2 className="h-4 w-4" /></button>
             </li>
           ))}
           {items.length === 0 && <li className="px-4 py-10 text-center text-sm text-slate-400">No transactions yet. Add cash to your box, then log expenses as you spend.</li>}
         </ul>
       </Card>
     </div>
+  );
+}
+
+function EditPettyCashButton({ tx }: { tx: PettyTx }) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const [open, setOpen] = useState(false);
+  const [kind, setKind] = useState<"expense" | "replenish">(tx.kind === "replenish" ? "replenish" : "expense");
+  const [amount, setAmount] = useState(Number(tx.amount));
+  const [category, setCategory] = useState(tx.category ?? "");
+  const [description, setDescription] = useState(tx.description ?? "");
+  const [date, setDate] = useState(tx.tx_date.slice(0, 10));
+  const [error, setError] = useState<string | null>(null);
+
+  function openModal() {
+    setKind(tx.kind === "replenish" ? "replenish" : "expense");
+    setAmount(Number(tx.amount));
+    setCategory(tx.category ?? "");
+    setDescription(tx.description ?? "");
+    setDate(tx.tx_date.slice(0, 10));
+    setError(null);
+    setOpen(true);
+  }
+
+  function save() {
+    setError(null);
+    if (!amount || amount <= 0) return setError("Enter an amount.");
+    start(async () => {
+      const res = await updatePettyCash(tx.id, { tx_date: date, kind, amount, category, description });
+      if (!res.ok) return setError(res.error ?? "Could not save.");
+      setOpen(false);
+      router.refresh();
+    });
+  }
+
+  return (
+    <>
+      <button onClick={openModal} className="text-slate-300 hover:text-brand" title="Edit"><Pencil className="h-4 w-4" /></button>
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Edit entry"
+        footer={<ModalActions onCancel={() => setOpen(false)} onSave={save} saving={pending} disabled={!amount} />}
+      >
+        {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label htmlFor="epc-kind">Type</Label>
+            <Select id="epc-kind" value={kind} onChange={(e) => setKind(e.target.value as any)}>
+              <option value="expense">Expense (−)</option>
+              <option value="replenish">Add cash (+)</option>
+            </Select>
+          </div>
+          <div><Label htmlFor="epc-amt">Amount</Label><NumberInput id="epc-amt" value={amount} onValueChange={setAmount} /></div>
+          <div><Label htmlFor="epc-cat">Category</Label><Input id="epc-cat" value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Fuel, parts…" /></div>
+          <div><Label htmlFor="epc-date">Date</Label><Input id="epc-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div>
+          <div className="col-span-2"><Label htmlFor="epc-desc">Description</Label><Input id="epc-desc" value={description} onChange={(e) => setDescription(e.target.value)} /></div>
+        </div>
+      </Modal>
+    </>
   );
 }

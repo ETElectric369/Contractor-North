@@ -22,12 +22,14 @@ export function QuoteItemsEditor({ quote, items }: { quote: Quote; items: QuoteL
   // add-item state
   const [desc, setDesc] = useState("");
   const [qty, setQty] = useState(1);
+  const [unit, setUnit] = useState("ea");
   const [price, setPrice] = useState(0);
 
   // edit-item state
   const [editId, setEditId] = useState<string | null>(null);
   const [editDesc, setEditDesc] = useState("");
   const [editQty, setEditQty] = useState(1);
+  const [editUnit, setEditUnit] = useState("ea");
   const [editPrice, setEditPrice] = useState(0);
 
   // details modal state
@@ -42,10 +44,11 @@ export function QuoteItemsEditor({ quote, items }: { quote: Quote; items: QuoteL
     if (!desc.trim()) return;
     setError(null);
     start(async () => {
-      const res = await addQuoteItem(quote.id, { description: desc.trim(), quantity: qty, unit: "ea", unit_price: price });
+      const res = await addQuoteItem(quote.id, { description: desc.trim(), quantity: qty, unit: unit.trim() || "ea", unit_price: price });
       if (!res.ok) return setError(res.error ?? "Couldn't add the item.");
       setDesc("");
       setQty(1);
+      setUnit("ea");
       setPrice(0);
       refresh();
     });
@@ -55,6 +58,7 @@ export function QuoteItemsEditor({ quote, items }: { quote: Quote; items: QuoteL
     setEditId(it.id);
     setEditDesc(it.description);
     setEditQty(Number(it.quantity));
+    setEditUnit(it.unit ?? "ea");
     setEditPrice(Number(it.unit_price));
   }
 
@@ -62,7 +66,7 @@ export function QuoteItemsEditor({ quote, items }: { quote: Quote; items: QuoteL
     if (!editId) return;
     setError(null);
     start(async () => {
-      const res = await updateQuoteItem(editId, quote.id, { description: editDesc, quantity: editQty, unit_price: editPrice });
+      const res = await updateQuoteItem(editId, quote.id, { description: editDesc, quantity: editQty, unit: editUnit.trim() || "ea", unit_price: editPrice });
       if (!res.ok) return setError(res.error ?? "Couldn't save the item.");
       setEditId(null);
       refresh();
@@ -105,7 +109,8 @@ export function QuoteItemsEditor({ quote, items }: { quote: Quote; items: QuoteL
               <li key={it.id} className="space-y-2 bg-slate-50/80 px-5 py-3 text-sm">
                 <Input value={editDesc} onChange={(e) => setEditDesc(e.target.value)} placeholder="Description" />
                 <div className="flex items-center gap-2">
-                  <NumberInput value={editQty} onValueChange={setEditQty} className="w-20 text-center" />
+                  <NumberInput value={editQty} onValueChange={setEditQty} className="w-16 text-center" />
+                  <Input value={editUnit} onChange={(e) => setEditUnit(e.target.value)} className="w-16 text-center" placeholder="ea" aria-label="Unit" />
                   <span className="text-slate-400">×</span>
                   <NumberInput value={editPrice} onValueChange={setEditPrice} className="flex-1 text-right" />
                   <button
@@ -172,7 +177,8 @@ export function QuoteItemsEditor({ quote, items }: { quote: Quote; items: QuoteL
             onKeyDown={(e) => e.key === "Enter" && addItem()}
           />
           <div className="flex items-center gap-2">
-            <NumberInput value={qty} onValueChange={setQty} className="w-20 text-center" placeholder="Qty" />
+            <NumberInput value={qty} onValueChange={setQty} className="w-16 text-center" placeholder="Qty" />
+            <Input value={unit} onChange={(e) => setUnit(e.target.value)} className="w-16 text-center" placeholder="ea" aria-label="Unit" onKeyDown={(e) => e.key === "Enter" && addItem()} />
             <span className="text-slate-400">×</span>
             <NumberInput value={price} onValueChange={setPrice} className="flex-1 text-right" placeholder="Price" />
             <Button onClick={addItem} disabled={pending || !desc.trim()}>

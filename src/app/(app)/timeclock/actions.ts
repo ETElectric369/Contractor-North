@@ -373,6 +373,7 @@ export async function updateTimeEntry(input: {
   job_code: string | null;
   notes: string;
   miles?: number;
+  rate_override?: number | null; // per-entry pay rate (e.g. supervisor rate); blank/0 ⇒ default
   profile_id?: string | null; // reassign the entry to a different team member
   // Split this shift across jobs (e.g. "1h at Northwoods, rest elsewhere"). When present,
   // these REPLACE the entry's allocations; billing then charges each job its own hours and
@@ -403,6 +404,9 @@ export async function updateTimeEntry(input: {
   // it don't accidentally null out an entry's job. `null` explicitly clears it.
   if (input.job_id !== undefined) patch.job_id = input.job_id;
   if (input.profile_id) patch.profile_id = input.profile_id;
+  // Only set rate_override when the caller sent the field (mirrors createManualEntry),
+  // so older callers that omit it never wipe an existing supervisor rate. `null` clears it.
+  if (input.rate_override !== undefined) patch.rate_override = input.rate_override;
 
   // If the job is changing, grab the previous job first so we can refresh BOTH
   // the old and new job pages (their Time tab + labor totals), not just the

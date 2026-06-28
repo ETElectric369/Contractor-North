@@ -145,15 +145,17 @@ export function NewTaskBox({
   );
 }
 
-/** Full edit modal: title, due date, priority, and assigned person. */
+/** Full edit modal: title, job, due date, priority, and assigned person. */
 function TaskEditModal({
   t,
+  jobs,
   people,
   category,
   open,
   onClose,
 }: {
   t: ViewTask;
+  jobs: JobOption[];
   people: Person[];
   category: TaskCategory;
   open: boolean;
@@ -162,6 +164,7 @@ function TaskEditModal({
   const router = useRouter();
   const [pending, start] = useTransition();
   const [title, setTitle] = useState(t.title);
+  const [jobId, setJobId] = useState(t.job_id ?? "");
   const [dueDate, setDueDate] = useState(t.due_date ?? "");
   const [priority, setPriority] = useState(t.priority);
   const [assignedTo, setAssignedTo] = useState(t.assigned_to ?? "");
@@ -177,13 +180,14 @@ function TaskEditModal({
         t.id,
         {
           title,
+          job_id: jobId || null,
           due_date: dueDate || null,
           priority,
           assigned_to: assignedTo || null,
           tags: tags.split(",").map((s) => s.trim()).filter(Boolean),
           notes: notes || null,
         },
-        { category },
+        { category, jobId: t.job_id },
       );
       if (!res.ok) return setError(res.error ?? "Could not save.");
       onClose();
@@ -203,6 +207,15 @@ function TaskEditModal({
         <div>
           <Label htmlFor="te-title">Title</Label>
           <Input id="te-title" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />
+        </div>
+        <div>
+          <Label htmlFor="te-job">Job</Label>
+          <Select id="te-job" value={jobId} onChange={(e) => setJobId(e.target.value)}>
+            <option value="">— No job —</option>
+            {jobs.map((j) => (
+              <option key={j.id} value={j.id}>{j.job_number} · {j.name}</option>
+            ))}
+          </Select>
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
@@ -242,11 +255,13 @@ function TaskEditModal({
 
 export function TaskRow({
   t,
+  jobs,
   people,
   category,
   subtasks = [],
 }: {
   t: ViewTask;
+  jobs: JobOption[];
   people: Person[];
   category: TaskCategory;
   subtasks?: ViewTask[];
@@ -344,7 +359,7 @@ export function TaskRow({
       )}
 
       {editing && (
-        <TaskEditModal t={t} people={people} category={category} open={editing} onClose={() => setEditing(false)} />
+        <TaskEditModal t={t} jobs={jobs} people={people} category={category} open={editing} onClose={() => setEditing(false)} />
       )}
     </li>
   );
@@ -355,12 +370,14 @@ function TaskColumn({
   label,
   tone,
   tasks,
+  jobs,
   people,
 }: {
   category: TaskCategory;
   label: string;
   tone: string;
   tasks: ViewTask[];
+  jobs: JobOption[];
   people: Person[];
 }) {
   // Nest subtasks under their parent; only top-level tasks are columns rows.
@@ -375,7 +392,7 @@ function TaskColumn({
   const open = top.filter((t) => t.status !== "done");
   const done = top.filter((t) => t.status === "done");
   const row = (t: ViewTask) => (
-    <TaskRow key={t.id} t={t} people={people} category={category} subtasks={childrenByParent.get(t.id) ?? []} />
+    <TaskRow key={t.id} t={t} jobs={jobs} people={people} category={category} subtasks={childrenByParent.get(t.id) ?? []} />
   );
 
   return (
@@ -421,6 +438,7 @@ export function TasksView({
             label={c.label}
             tone={c.tone}
             tasks={tasks.filter((t) => t.category === c.id)}
+            jobs={jobs}
             people={people}
           />
         ))}

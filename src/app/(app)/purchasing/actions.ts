@@ -80,6 +80,41 @@ export async function addPoItem(
   return { ok: true };
 }
 
+/** Edit a PO line in place. Preserves received_qty; recalcs PO totals. */
+export async function updatePoItem(
+  itemId: string,
+  poId: string,
+  patch: {
+    description: string;
+    part_number: string | null;
+    quantity: number;
+    unit: string;
+    unit_cost: number;
+  },
+): Promise<Result> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  const { error } = await supabase
+    .from("purchase_order_items")
+    .update({
+      description: patch.description,
+      part_number: patch.part_number,
+      quantity: patch.quantity || 1,
+      unit: patch.unit || "ea",
+      unit_cost: patch.unit_cost || 0,
+      // received_qty intentionally untouched — receiving history is preserved.
+    })
+    .eq("id", itemId);
+  if (error) return { ok: false, error: error.message };
+  await recalcTotals(supabase, poId);
+  revalidatePath(`/purchasing/${poId}`);
+  return { ok: true };
+}
+
 export async function deletePoItem(itemId: string, poId: string): Promise<Result> {
   const supabase = await createClient();
   const { error } = await supabase
@@ -97,6 +132,38 @@ export async function setPoStatus(id: string, status: string): Promise<Result> {
   const patch: Record<string, unknown> = { status };
   if (status === "sent") patch.ordered_at = new Date().toISOString();
   const { error } = await supabase.from("purchase_orders").update(patch).eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/purchasing");
+  revalidatePath(`/purchasing/${id}`);
+  return { ok: true };
+}
+
+/** Edit a PO's header (vendor + linked job). Job id validated as visible via RLS. */
+export async function updatePurchaseOrder(
+  id: string,
+  patch: { vendor: string; job_id: string | null },
+): Promise<Result> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  // Only accept a job the caller can actually see (RLS-scoped); otherwise clear it.
+  let jobId: string | null = null;
+  if (patch.job_id) {
+    const { data: job } = await supabase
+      .from("jobs")
+      .select("id")
+      .eq("id", patch.job_id)
+      .maybeSingle();
+    jobId = job?.id ?? null;
+  }
+
+  const { error } = await supabase
+    .from("purchase_orders")
+    .update({ vendor: patch.vendor.trim() || "CED", job_id: jobId })
+    .eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/purchasing");
   revalidatePath(`/purchasing/${id}`);

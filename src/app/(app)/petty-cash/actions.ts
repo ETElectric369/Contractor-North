@@ -33,6 +33,36 @@ export async function addPettyCash(input: {
   return { ok: true };
 }
 
+export async function updatePettyCash(
+  id: string,
+  patch: {
+    tx_date?: string | null;
+    kind: "expense" | "replenish";
+    amount: number;
+    category?: string | null;
+    description?: string | null;
+  },
+): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  if (!patch.amount || patch.amount <= 0) return { ok: false, error: "Enter an amount." };
+
+  const { error } = await supabase
+    .from("petty_cash")
+    .update({
+      tx_date: patch.tx_date || new Date().toISOString().slice(0, 10),
+      kind: patch.kind === "replenish" ? "replenish" : "expense",
+      amount: patch.amount,
+      category: patch.category?.trim() || null,
+      description: patch.description?.trim() || null,
+    })
+    .eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/petty-cash");
+  return { ok: true };
+}
+
 export async function deletePettyCash(id: string): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };

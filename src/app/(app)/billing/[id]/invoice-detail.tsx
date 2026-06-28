@@ -6,6 +6,7 @@ import { Plus, Trash2, Pencil, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
+import { Modal, ModalActions } from "@/components/ui/modal";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { LineItemText } from "@/components/line-item-text";
@@ -18,6 +19,9 @@ import {
   setInvoiceStatus,
   setInvoiceTaxRate,
   setInvoiceDescription,
+  setInvoiceTitle,
+  setInvoiceDueDate,
+  setInvoiceCustomerJob,
   recordPayment,
   importQuoteItemsIntoInvoice,
   importLaborIntoInvoice,
@@ -28,6 +32,8 @@ import {
 
 interface PriceItemLite { id: string; code: string | null; description: string; unit: string; buy_price: number; markup_pct: number; }
 interface TaxRateLite { id: string; name: string; rate: number; is_default: boolean; }
+interface CustomerLite { id: string; name: string; }
+interface JobLite { id: string; name: string | null; job_number: string | null; customer_id: string | null; }
 
 const sellPrice = (buy: number, markup: number) => buy * (1 + (markup || 0) / 100);
 
@@ -48,6 +54,8 @@ export function InvoiceDetail({
   taxRates = [],
   paymentMethods = [],
   materialMarkup = 0,
+  customers = [],
+  jobs = [],
 }: {
   invoice: Invoice;
   items: InvoiceItem[];
@@ -56,6 +64,8 @@ export function InvoiceDetail({
   taxRates?: TaxRateLite[];
   paymentMethods?: string[];
   materialMarkup?: number;
+  customers?: CustomerLite[];
+  jobs?: JobLite[];
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -75,6 +85,66 @@ export function InvoiceDetail({
       setTimeout(() => setDescrSaved(false), 2000);
     });
   }
+
+  const isDraft = invoice.status === "draft";
+
+  // inline-editable title (the short header label)
+  const [titleEditing, setTitleEditing] = useState(false);
+  const [title, setTitle] = useState(invoice.title ?? "");
+  const [titleError, setTitleError] = useState<string | null>(null);
+  function saveTitle() {
+    setTitleError(null);
+    start(async () => {
+      const res = await setInvoiceTitle(invoice.id, title);
+      if (!res.ok) { setTitleError(res.error ?? "Could not save the title."); return; }
+      setTitleEditing(false);
+      refresh();
+    });
+  }
+
+  // editable due date (the field the Overdue tracker reads)
+  const [dueDate, setDueDate] = useState(toDateInput(invoice.due_date));
+  const [dueSaved, setDueSaved] = useState(false);
+  const [dueError, setDueError] = useState<string | null>(null);
+  const dueDirty = dueDate !== toDateInput(invoice.due_date);
+  function saveDue() {
+    setDueError(null);
+    setDueSaved(false);
+    start(async () => {
+      const res = await setInvoiceDueDate(invoice.id, dueDate || null);
+      if (!res.ok) { setDueError(res.error ?? "Could not save the due date."); return; }
+      setDueSaved(true);
+      setTimeout(() => setDueSaved(false), 2000);
+      refresh();
+    });
+  }
+
+  // draft-only customer/job correction
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkCustomer, setLinkCustomer] = useState(invoice.customer_id ?? "");
+  const [linkJob, setLinkJob] = useState(invoice.job_id ?? "");
+  const [linkError, setLinkError] = useState<string | null>(null);
+  function openLink() {
+    setLinkCustomer(invoice.customer_id ?? "");
+    setLinkJob(invoice.job_id ?? "");
+    setLinkError(null);
+    setLinkOpen(true);
+  }
+  function saveLink() {
+    setLinkError(null);
+    start(async () => {
+      const res = await setInvoiceCustomerJob(invoice.id, {
+        customer_id: linkCustomer || null,
+        job_id: linkJob || null,
+      });
+      if (!res.ok) { setLinkError(res.error ?? "Could not update the link."); return; }
+      setLinkOpen(false);
+      refresh();
+    });
+  }
+  // When a job is chosen, narrow the customer to that job's customer for clarity.
+  const linkJobObj = jobs.find((j) => j.id === linkJob) ?? null;
+  const customerOf = (jobObj: JobLite | null) => jobObj?.customer_id ?? "";
 
   // add-item state
   const [desc, setDesc] = useState("");
@@ -194,6 +264,93 @@ export function InvoiceDetail({
   return (
     <div className="grid gap-6 lg:grid-cols-3">
       <div className="space-y-6 lg:col-span-2">
+        {/* Header fields — title (inline), due date (drives the Overdue tracker),
+            and on drafts the customer/job link. */}
+        <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3">
+          {/* Title */}
+          <div>
+            <Label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">Title</Label>
+            {titleEditing ? (
+              <div className="flex items-center gap-2">
+                <Input
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="Short label for this invoice"
+                  onKeyDown={(e) => e.key === "Enter" && saveTitle()}
+                  autoFocus
+                />
+                <button
+                  onClick={saveTitle}
+                  disabled={pending}
+                  className="rounded-md bg-brand p-1.5 text-white hover:bg-brand-dark disabled:opacity-50"
+                  aria-label="Save title"
+                >
+                  <Check className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => { setTitleEditing(false); setTitle(invoice.title ?? ""); setTitleError(null); }}
+                  className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100"
+                  aria-label="Cancel"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setTitleEditing(true)}
+                className="group flex w-full items-center gap-2 text-left"
+                title="Edit title"
+              >
+                <span className={invoice.title ? "font-medium text-slate-800" : "text-slate-400"}>
+                  {invoice.title || "Add a title…"}
+                </span>
+                <Pencil className="h-3.5 w-3.5 text-slate-400 group-hover:text-brand" />
+              </button>
+            )}
+            {titleError && <p className="mt-1 text-xs text-red-600">{titleError}</p>}
+          </div>
+
+          {/* Due date — without this the Overdue tracker can never fire. */}
+          <div>
+            <Label htmlFor="inv-due" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">Due date</Label>
+            <div className="flex items-center gap-2">
+              <Input
+                id="inv-due"
+                type="date"
+                value={dueDate}
+                onChange={(e) => setDueDate(e.target.value)}
+                className="w-44"
+              />
+              <Button size="sm" onClick={saveDue} disabled={pending || !dueDirty}>
+                {dueSaved ? <Check className="h-3.5 w-3.5" /> : null}
+                {dueSaved ? "Saved" : "Save"}
+              </Button>
+              {dueDate && (
+                <button
+                  type="button"
+                  onClick={() => setDueDate("")}
+                  className="text-xs text-slate-400 hover:text-red-600"
+                >
+                  Clear
+                </button>
+              )}
+              {dueDirty && !pending && <span className="text-xs text-slate-400">Unsaved</span>}
+            </div>
+            {dueError && <p className="mt-1 text-xs text-red-600">{dueError}</p>}
+          </div>
+
+          {/* Customer / job link — correctable while it's still a draft. */}
+          {isDraft && (
+            <div>
+              <Label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">Customer / Job</Label>
+              <Button size="sm" variant="outline" onClick={openLink} disabled={pending}>
+                <Pencil className="mr-1 h-3.5 w-3.5" /> Edit customer / job
+              </Button>
+            </div>
+          )}
+        </div>
+
         <div className="flex flex-wrap items-center gap-3">
           <span className="text-sm text-slate-500">Status</span>
           <Select
@@ -569,6 +726,56 @@ export function InvoiceDetail({
           </Card>
         )}
       </div>
+
+      <Modal open={linkOpen} onClose={() => setLinkOpen(false)} title="Edit customer / job">
+        <div className="space-y-4">
+          {linkError && <p className="text-sm text-red-600">{linkError}</p>}
+          <div>
+            <Label htmlFor="link-job">Job</Label>
+            <Select
+              id="link-job"
+              value={linkJob}
+              onChange={(e) => {
+                const id = e.target.value;
+                setLinkJob(id);
+                // Inherit the job's customer so the invoice stays attached to it.
+                const cust = customerOf(jobs.find((j) => j.id === id) ?? null);
+                if (cust) setLinkCustomer(cust);
+              }}
+            >
+              <option value="">No job</option>
+              {jobs.map((j) => (
+                <option key={j.id} value={j.id}>
+                  {j.job_number ? `${j.job_number} — ` : ""}{j.name || "Untitled job"}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div>
+            <Label htmlFor="link-customer">Customer</Label>
+            <Select
+              id="link-customer"
+              value={linkCustomer}
+              disabled={!!linkJobObj?.customer_id}
+              onChange={(e) => setLinkCustomer(e.target.value)}
+            >
+              <option value="">No customer</option>
+              {customers.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </Select>
+            {linkJobObj?.customer_id && (
+              <p className="mt-1 text-xs text-slate-400">Set from the selected job.</p>
+            )}
+          </div>
+        </div>
+        <ModalActions
+          onCancel={() => setLinkOpen(false)}
+          onSave={saveLink}
+          saving={pending}
+          saveLabel="Save link"
+        />
+      </Modal>
     </div>
   );
 }

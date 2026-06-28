@@ -49,6 +49,7 @@ export function AddEntryButton({
   const [lunchTaken, setLunchTaken] = useState(true);
   const [breaksTaken, setBreaksTaken] = useState(true);
   const [miles, setMiles] = useState(0);
+  const [rate, setRate] = useState(0);
   const [notes, setNotes] = useState("");
 
   const grossHrs = (() => {
@@ -92,6 +93,8 @@ export function AddEntryButton({
         lunch_minutes: lunchTaken ? 30 : 0,
         notes,
         miles,
+        // Blank/0 ⇒ default rate; a positive number sets a per-entry override.
+        rate_override: rate > 0 ? rate : null,
       });
       if (!res.ok) {
         setError(res.error ?? "Could not add entry.");
@@ -173,6 +176,10 @@ export function AddEntryButton({
             <div>
               <Label htmlFor="m-miles">Miles</Label>
               <NumberInput id="m-miles" value={miles} onValueChange={setMiles} />
+            </div>
+            <div className="col-span-2 sm:col-span-3">
+              <Label htmlFor="m-rate">Rate ($/hr, blank/0 = default)</Label>
+              <NumberInput id="m-rate" value={rate} onValueChange={setRate} step={0.5} />
             </div>
           </div>
           <label className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${lunchRequired && !lunchTaken ? "border-amber-300 bg-amber-50" : "border-slate-200"}`}>

@@ -2,14 +2,22 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Check, PackageCheck } from "lucide-react";
+import { Plus, Trash2, Check, PackageCheck, Pencil, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input, Select } from "@/components/ui/input";
+import { Modal, ModalActions } from "@/components/ui/modal";
+import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatCurrency } from "@/lib/utils";
 import type { PurchaseOrder, PurchaseOrderItem } from "@/lib/types";
-import { addPoItem, deletePoItem, setPoStatus, receiveItem } from "../actions";
+import {
+  addPoItem,
+  updatePoItem,
+  deletePoItem,
+  updatePurchaseOrder,
+  setPoStatus,
+  receiveItem,
+} from "../actions";
 
 interface PriceItemLite { id: string; code: string | null; description: string; unit: string; buy_price: number; }
 
@@ -192,6 +200,39 @@ function PoLine({
   const fully = Number(it.received_qty) >= Number(it.quantity);
   const [recv, setRecv] = useState(remaining);
 
+  // Inline edit state — mirrors the add-item controls.
+  const [editing, setEditing] = useState(false);
+  const [eDesc, setEDesc] = useState(it.description ?? "");
+  const [ePart, setEPart] = useState(it.part_number ?? "");
+  const [eQty, setEQty] = useState(Number(it.quantity) || 1);
+  const [eUnit, setEUnit] = useState(it.unit ?? "ea");
+  const [eCost, setECost] = useState(Number(it.unit_cost) || 0);
+
+  function startEdit() {
+    setEDesc(it.description ?? "");
+    setEPart(it.part_number ?? "");
+    setEQty(Number(it.quantity) || 1);
+    setEUnit(it.unit ?? "ea");
+    setECost(Number(it.unit_cost) || 0);
+    setEditing(true);
+  }
+
+  function saveEdit() {
+    if (!eDesc.trim()) return;
+    start(async () => {
+      const res = await updatePoItem(it.id, poId, {
+        description: eDesc,
+        part_number: ePart || null,
+        quantity: eQty || 1,
+        unit: eUnit || "ea",
+        unit_cost: eCost || 0,
+      });
+      if (res?.error) { alert(res.error); return; }
+      setEditing(false);
+      refresh();
+    });
+  }
+
   function receive() {
     const entered = Math.min(Math.max(0, recv), remaining);
     if (entered <= 0) return;
@@ -200,6 +241,44 @@ function PoLine({
       if (res?.error) { alert(res.error); return; }
       refresh();
     });
+  }
+
+  if (editing) {
+    return (
+      <li className="space-y-2 bg-slate-50/60 px-4 py-3 text-sm">
+        <div className="flex gap-2">
+          <Input
+            placeholder="Description…"
+            value={eDesc}
+            onChange={(e) => setEDesc(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && saveEdit()}
+            className="flex-1"
+          />
+          <Input placeholder="Part #" value={ePart} onChange={(e) => setEPart(e.target.value)} className="w-24 shrink-0" />
+        </div>
+        <div className="flex items-center gap-2">
+          <NumberInput value={eQty} onValueChange={setEQty} className="w-20 text-center" placeholder="Qty" />
+          <Input value={eUnit} onChange={(e) => setEUnit(e.target.value)} className="w-16 text-center" placeholder="Unit" aria-label="Unit" />
+          <span className="text-slate-400">×</span>
+          <NumberInput value={eCost} onValueChange={setECost} className="flex-1 text-right" placeholder="Unit cost" />
+          <Button onClick={saveEdit} disabled={pending || !eDesc.trim()}>
+            <Check className="h-4 w-4" /> Save
+          </Button>
+          <button
+            type="button"
+            onClick={() => setEditing(false)}
+            disabled={pending}
+            className="shrink-0 text-slate-400 hover:text-slate-700"
+            aria-label="Cancel edit"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        {Number(it.received_qty) > 0 && (
+          <p className="text-xs text-slate-400">{it.received_qty} already received — receiving history is kept.</p>
+        )}
+      </li>
+    );
   }
 
   return (
@@ -237,6 +316,14 @@ function PoLine({
       ) : null}
       <div className="shrink-0 font-medium text-slate-900">{formatCurrency(it.line_total)}</div>
       <button
+        onClick={startEdit}
+        disabled={pending}
+        className="shrink-0 text-slate-400 hover:text-brand"
+        aria-label="Edit line"
+      >
+        <Pencil className="h-4 w-4" />
+      </button>
+      <button
         onClick={() => {
           if (!confirm("Remove this line?")) return;
           start(async () => {
@@ -252,5 +339,95 @@ function PoLine({
         <Trash2 className="h-4 w-4" />
       </button>
     </li>
+  );
+}
+
+/** Edit a PO's header (vendor + linked job) — reuses the new-PO vendor Input + job Select. */
+export function EditPoButton({
+  poId,
+  vendor: initialVendor,
+  jobId: initialJobId,
+  jobs,
+}: {
+  poId: string;
+  vendor: string;
+  jobId: string | null;
+  jobs: { id: string; job_number: string; name: string }[];
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [vendor, setVendor] = useState(initialVendor ?? "");
+  const [jobId, setJobId] = useState(initialJobId ?? "");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+
+  function openModal() {
+    setVendor(initialVendor ?? "");
+    setJobId(initialJobId ?? "");
+    setError(null);
+    setOpen(true);
+  }
+
+  function onSave() {
+    setError(null);
+    start(async () => {
+      const res = await updatePurchaseOrder(poId, {
+        vendor,
+        job_id: jobId || null,
+      });
+      if (!res.ok) {
+        setError(res.error ?? "Could not update PO.");
+        return;
+      }
+      setOpen(false);
+      router.refresh();
+    });
+  }
+
+  return (
+    <>
+      <Button variant="secondary" size="sm" onClick={openModal}>
+        <Pencil className="h-4 w-4" /> Edit PO
+      </Button>
+
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Edit purchase order"
+        footer={
+          <ModalActions
+            onCancel={() => setOpen(false)}
+            onSave={onSave}
+            saving={pending}
+            saveLabel="Save changes"
+          />
+        }
+      >
+        <div className="space-y-4">
+          {error && (
+            <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+              {error}
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label htmlFor="edit-po-vendor">Vendor</Label>
+              <Input id="edit-po-vendor" value={vendor} onChange={(e) => setVendor(e.target.value)} />
+            </div>
+            <div>
+              <Label htmlFor="edit-po-job">Job (optional)</Label>
+              <Select id="edit-po-job" value={jobId} onChange={(e) => setJobId(e.target.value)}>
+                <option value="">— None —</option>
+                {jobs.map((j) => (
+                  <option key={j.id} value={j.id}>
+                    {j.job_number} · {j.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </div>
+        </div>
+      </Modal>
+    </>
   );
 }

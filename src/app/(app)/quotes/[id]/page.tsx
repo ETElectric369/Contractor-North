@@ -1,18 +1,19 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, User } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
 import { StatusControl } from "./status-control";
 import { QuoteItemsEditor } from "./quote-items-editor";
+import { CustomerSelect } from "./customer-select";
+import { DuplicateQuoteButton } from "./duplicate-quote-button";
 import { EmailButton } from "@/components/email-button";
 import { SectionActionsMenu } from "@/components/section-actions-menu";
 import { QuoteTypeToggle } from "./quote-type-toggle";
 import type { NavTree } from "@/lib/nav-tree";
 import { DeleteButton } from "@/components/delete-button";
-import { EditCustomerButton } from "../../crm/[id]/edit-customer-button";
 import { createJobFromQuote, deleteQuote } from "../actions";
 import { createMaterialListFromQuote } from "../../materials/actions";
 import { createWorkOrderFromQuote } from "../../work-orders/actions";
@@ -48,11 +49,13 @@ export default async function QuoteDetailPage({
   const lineItems = (items ?? []) as QuoteLineItem[];
 
   // Has this quote already been turned into these records? (Drives idempotent UI:
-  // the map shows "View …" instead of minting a duplicate.)
-  const [{ data: existingInv }, { data: existingWo }, { data: existingMl }] = await Promise.all([
+  // the map shows "View …" instead of minting a duplicate.) Plus the org's
+  // customers so the attached customer can be changed inline.
+  const [{ data: existingInv }, { data: existingWo }, { data: existingMl }, { data: customers }] = await Promise.all([
     supabase.from("invoices").select("id").eq("quote_id", id).limit(1).maybeSingle(),
     supabase.from("work_orders").select("id").eq("quote_id", id).limit(1).maybeSingle(),
     supabase.from("material_lists").select("id").eq("quote_id", id).limit(1).maybeSingle(),
+    supabase.from("customers").select("id, name, company_name").order("name"),
   ]);
 
   // The quote's whole "neighborhood" — what it connects to AND what it can
@@ -107,6 +110,7 @@ export default async function QuoteDetailPage({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <EmailButton id={q.id} kind="quote" />
+          <DuplicateQuoteButton id={q.id} />
           <SectionActionsMenu tree={quoteMap} label="Convert / connect" />
           <StatusControl id={q.id} status={q.status} />
           <DeleteButton
@@ -119,29 +123,11 @@ export default async function QuoteDetailPage({
 
       <Card className="mb-6">
         <CardContent className="py-5">
-          {q.customers ? (
-            <div className="flex items-center justify-between gap-3">
-              <Link
-                href={`/crm/${q.customers.id}`}
-                className="flex items-center gap-3 hover:text-brand"
-              >
-                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100">
-                  <User className="h-4 w-4 text-slate-500" />
-                </div>
-                <div>
-                  <div className="text-sm font-medium text-slate-900">
-                    {q.customers.name}
-                  </div>
-                  <div className="text-xs text-slate-400">
-                    {q.customers.email ?? q.customers.phone ?? q.customers.company_name ?? ""}
-                  </div>
-                </div>
-              </Link>
-              <EditCustomerButton customer={q.customers} />
-            </div>
-          ) : (
-            <p className="text-sm text-slate-400">No customer attached.</p>
-          )}
+          <CustomerSelect
+            quoteId={q.id}
+            customer={q.customers ?? null}
+            customers={(customers ?? []) as { id: string; name: string; company_name: string | null }[]}
+          />
         </CardContent>
       </Card>
 

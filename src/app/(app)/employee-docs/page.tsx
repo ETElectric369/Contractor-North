@@ -21,7 +21,7 @@ export default async function EmployeeDocsPage() {
     supabase.from("profiles").select("id, full_name").order("full_name"),
     supabase
       .from("employee_documents")
-      .select("id, profile_id, type, name, file_url, expires_date, created_at")
+      .select("id, profile_id, type, name, file_url, expires_date, notes, created_at")
       .order("created_at", { ascending: false }),
   ]);
 

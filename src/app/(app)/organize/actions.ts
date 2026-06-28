@@ -636,6 +636,60 @@ export async function saveVoiceNote(text: string): Promise<Result> {
   return { ok: true };
 }
 
+/**
+ * Correct an item's AI-extracted fields before (or after) filing. The owner can
+ * fix what Claude misread — title, vendor, amount, date, category, summary — so a
+ * read-only mis-extraction is never a dead end. Org-safe via RLS (the .eq("id")
+ * update only matches rows visible to this org); requireStaff gates it to office.
+ * Does NOT re-file or move money — it only edits the organized_items row itself.
+ */
+export async function updateOrganizedItem(
+  id: string,
+  fields: {
+    title?: string;
+    vendor?: string | null;
+    amount?: number | null;
+    item_date?: string | null;
+    category?: string | null;
+    summary?: string | null;
+  },
+): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+
+  const { data: item } = await supabase.from("organized_items").select("id").eq("id", id).maybeSingle();
+  if (!item) return { ok: false, error: "Item not found." };
+
+  const title = String(fields.title ?? "").trim();
+  if (!title) return { ok: false, error: "Title can't be empty." };
+
+  // Mirror analyzeAndFile's validation: clamp lengths, coerce amount to a real
+  // number or null, and keep item_date as a clean YYYY-MM-DD string or null.
+  const amount =
+    fields.amount != null && !isNaN(Number(fields.amount)) ? Number(fields.amount) : null;
+  const itemDate = /^\d{4}-\d{2}-\d{2}$/.test(String(fields.item_date ?? "")) ? fields.item_date : null;
+  const vendor = fields.vendor ? String(fields.vendor).slice(0, 200) : null;
+  const category = fields.category ? String(fields.category).slice(0, 60) : null;
+  const summary = fields.summary ? String(fields.summary).slice(0, 4000) : null;
+
+  const { error } = await supabase
+    .from("organized_items")
+    .update({
+      title: title.slice(0, 200),
+      vendor,
+      amount,
+      item_date: itemDate,
+      category,
+      summary,
+    })
+    .eq("id", id);
+  if (error) return { ok: false, error: error.message };
+
+  revalidatePath("/organize");
+  return { ok: true };
+}
+
 /** Set an item aside without filing it (moves it to the Archive). */
 export async function archiveItem(id: string): Promise<Result> {
   const supabase = await createClient();

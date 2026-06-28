@@ -2,15 +2,16 @@
 
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Upload, Trash2, FileText, Loader2, Camera } from "lucide-react";
+import { Upload, Trash2, FileText, Loader2, Camera, Pencil } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Input, Label, Select } from "@/components/ui/input";
+import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { Modal, ModalActions } from "@/components/ui/modal";
 import { CameraCapture } from "@/components/camera-capture";
 import { formatDate, initials } from "@/lib/utils";
-import { addEmployeeDoc, deleteEmployeeDoc } from "./actions";
+import { addEmployeeDoc, deleteEmployeeDoc, updateEmployeeDoc } from "./actions";
 
 interface Employee { id: string; full_name: string | null; }
 interface Doc {
@@ -20,6 +21,7 @@ interface Doc {
   name: string;
   file_url: string;
   expires_date: string | null;
+  notes: string | null;
   signedUrl: string | null;
 }
 
@@ -52,6 +54,7 @@ export function EmployeeDocsManager({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showCamera, setShowCamera] = useState(false);
+  const [editing, setEditing] = useState<Doc | null>(null);
 
   async function uploadFiles(files: File[]) {
     if (!files.length) return;
@@ -115,6 +118,10 @@ export function EmployeeDocsManager({
         <CameraCapture onCapture={(file) => { setShowCamera(false); uploadFiles([file]); }} onClose={() => setShowCamera(false)} />
       )}
 
+      {editing && (
+        <EditDocModal doc={editing} employees={employees} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); router.refresh(); }} />
+      )}
+
       <div className="space-y-4">
         {byEmp.map(({ emp: e, items }) => (
           <Card key={e.id} className="overflow-hidden">
@@ -138,7 +145,8 @@ export function EmployeeDocsManager({
                       <div className="text-xs text-slate-400">{d.type}{d.expires_date ? ` · ${formatDate(d.expires_date)}` : ""}</div>
                     </div>
                     {ex && <Badge tone={ex.tone}>{ex.label}</Badge>}
-                    <button onClick={() => start(async () => { await deleteEmployeeDoc(d.id, d.file_url); router.refresh(); })} className="text-slate-300 hover:text-red-600" title="Delete"><Trash2 className="h-4 w-4" /></button>
+                    <button onClick={() => setEditing(d)} className="text-slate-300 hover:text-brand" title="Edit"><Pencil className="h-4 w-4" /></button>
+                    <button onClick={() => { if (!confirm(`Delete "${d.name}"? The stored file is removed too.`)) return; start(async () => { const res = await deleteEmployeeDoc(d.id, d.file_url); if (!res.ok) { setError(res.error ?? "Delete failed."); return; } router.refresh(); }); }} className="text-slate-300 hover:text-red-600" title="Delete"><Trash2 className="h-4 w-4" /></button>
                   </li>
                 );
               })}
@@ -148,5 +156,78 @@ export function EmployeeDocsManager({
         ))}
       </div>
     </div>
+  );
+}
+
+function EditDocModal({
+  doc,
+  employees,
+  onClose,
+  onSaved,
+}: {
+  doc: Doc;
+  employees: Employee[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [profileId, setProfileId] = useState(doc.profile_id);
+  const [type, setType] = useState(TYPES.includes(doc.type) ? doc.type : "Other");
+  const [name, setName] = useState(doc.name);
+  const [expires, setExpires] = useState(doc.expires_date ?? "");
+  const [notes, setNotes] = useState(doc.notes ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save() {
+    setError(null);
+    setSaving(true);
+    const res = await updateEmployeeDoc(doc.id, {
+      profile_id: profileId,
+      type,
+      name,
+      expires_date: expires || null,
+      notes: notes || null,
+    });
+    setSaving(false);
+    if (!res.ok) { setError(res.error ?? "Save failed."); return; }
+    onSaved();
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Edit document"
+      footer={<ModalActions onCancel={onClose} onSave={save} saving={saving} disabled={!name.trim() || !profileId} />}
+    >
+      <div className="space-y-4">
+        {error && <p className="text-sm text-red-600">{error}</p>}
+        <p className="text-xs text-slate-400">The stored file isn’t changed — only its details and who it’s assigned to.</p>
+        <div>
+          <Label htmlFor="edoc-emp">Employee</Label>
+          <Select id="edoc-emp" value={profileId} onChange={(e) => setProfileId(e.target.value)}>
+            {employees.map((e) => <option key={e.id} value={e.id}>{e.full_name ?? "Unnamed"}</option>)}
+          </Select>
+        </div>
+        <div>
+          <Label htmlFor="edoc-type">Type</Label>
+          <Select id="edoc-type" value={type} onChange={(e) => setType(e.target.value)}>
+            {TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+          </Select>
+        </div>
+        <div>
+          <Label htmlFor="edoc-name">Name</Label>
+          <Input id="edoc-name" value={name} onChange={(e) => setName(e.target.value)} />
+        </div>
+        <div>
+          <Label htmlFor="edoc-exp">Expires (optional)</Label>
+          <Input id="edoc-exp" type="date" value={expires} onChange={(e) => setExpires(e.target.value)} />
+        </div>
+        <div>
+          <Label htmlFor="edoc-notes">Notes (optional)</Label>
+          <Textarea id="edoc-notes" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
+        </div>
+      </div>
+    </Modal>
   );
 }

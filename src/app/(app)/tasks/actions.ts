@@ -73,6 +73,7 @@ export async function updateTask(
   patch: {
     title?: string;
     category?: TaskCategory;
+    job_id?: string | null;
     due_date?: string | null;
     priority?: number;
     assigned_to?: string | null;
@@ -85,6 +86,16 @@ export async function updateTask(
   const clean: Record<string, unknown> = {};
   if (patch.title !== undefined) clean.title = patch.title.trim();
   if (patch.category !== undefined) clean.category = patch.category;
+  if (patch.job_id !== undefined) {
+    // Persist a job link only if it's actually in the caller's org (the RLS-scoped
+    // jobs read returns nothing for a foreign/crafted id) — never a cross-org id.
+    let jobId: string | null = patch.job_id || null;
+    if (jobId) {
+      const { data: j } = await supabase.from("jobs").select("id").eq("id", jobId).maybeSingle();
+      jobId = j ? jobId : null;
+    }
+    clean.job_id = jobId;
+  }
   if (patch.due_date !== undefined) clean.due_date = patch.due_date || null;
   if (patch.priority !== undefined) clean.priority = patch.priority;
   if (patch.assigned_to !== undefined) {
@@ -106,6 +117,9 @@ export async function updateTask(
   const { error } = await supabase.from("tasks").update(clean).eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidateTaskViews(opts?.category, opts?.jobId);
+  // If the task was re-linked to a different job, refresh that job's page too.
+  const newJobId = clean.job_id as string | null | undefined;
+  if (newJobId && newJobId !== opts?.jobId) revalidatePath(`/jobs/${newJobId}`);
   return { ok: true };
 }
 

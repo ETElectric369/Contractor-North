@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
+import { visibleJobIdOrNull } from "@/lib/job-visibility";
 
 export interface DraftMaterial {
   description: string;
@@ -157,6 +158,32 @@ export async function renameMaterialList(listId: string, name: string): Promise<
   const clean = name.trim();
   if (!clean) return { ok: false, error: "Name is required." };
   const { error } = await supabase.from("material_lists").update({ name: clean }).eq("id", listId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath(`/materials/${listId}`);
+  revalidatePath("/materials");
+  return { ok: true };
+}
+
+/** Edit a list's name AND its job link in one shot — so a list saved to the
+ *  wrong job (or unlinked) can be re-pointed or detached, not just renamed.
+ *  Mirrors renameMaterialList's guard (RLS-only) but validates the job_id is
+ *  visible to the caller (visibleJobIdOrNull) so a foreign/crafted job id can
+ *  never persist as a cross-org dangling FK. Pass job_id: null to detach. */
+export async function updateMaterialList(
+  listId: string,
+  patch: { name?: string; job_id?: string | null },
+): Promise<Result> {
+  const supabase = await createClient();
+  const clean: Record<string, unknown> = {};
+  if (patch.name !== undefined) {
+    const name = patch.name.trim();
+    if (!name) return { ok: false, error: "Name is required." };
+    clean.name = name;
+  }
+  if (patch.job_id !== undefined) {
+    clean.job_id = await visibleJobIdOrNull(supabase, patch.job_id);
+  }
+  const { error } = await supabase.from("material_lists").update(clean).eq("id", listId);
   if (error) return { ok: false, error: error.message };
   revalidatePath(`/materials/${listId}`);
   revalidatePath("/materials");

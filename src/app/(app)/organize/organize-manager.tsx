@@ -19,10 +19,13 @@ import {
   AlertCircle,
   Archive,
   RotateCcw,
+  Pencil,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Select } from "@/components/ui/input";
+import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
+import { Modal, ModalActions } from "@/components/ui/modal";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Tabs } from "@/components/tabs";
@@ -33,12 +36,17 @@ import {
   analyzeAndFile,
   fileItem,
   deleteOrganizedItem,
+  updateOrganizedItem,
   saveVoiceNote,
   archiveItem,
   unarchiveItem,
   aiReviewItem,
 } from "./actions";
 import { OVERHEAD_CATEGORIES } from "./constants";
+
+// The categories Claude assigns during extraction — offered so the owner can
+// correct a mis-classified item to any valid kind. Mirrors analyzeAndFile.
+const ITEM_CATEGORIES = ["Receipt", "Bill", "Invoice", "Photo", "Plan", "Permit", "Note", "Other"];
 
 export interface OrganizedItemRow {
   id: string;
@@ -88,6 +96,7 @@ export function OrganizeManager({
   const [listening, setListening] = useState(false);
   const [aiBusy, setAiBusy] = useState<string | null>(null);
   const [aiMsg, setAiMsg] = useState<Record<string, string>>({});
+  const [editing, setEditing] = useState<OrganizedItemRow | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const captureRef = useRef<HTMLInputElement>(null);
   const recogRef = useRef<any>(null);
@@ -327,6 +336,9 @@ export function OrganizeManager({
                   <Coins className="h-3.5 w-3.5" /> Petty cash
                 </Button>
               )}
+              <Button size="sm" variant="outline" onClick={() => setEditing(item)} disabled={pending}>
+                <Pencil className="h-3.5 w-3.5" /> Edit
+              </Button>
               <Button size="sm" variant="outline" onClick={() => archive(item)} disabled={pending}>
                 <Archive className="h-3.5 w-3.5" /> Archive
               </Button>
@@ -366,11 +378,94 @@ export function OrganizeManager({
           <button onClick={() => restore(item)} disabled={pending} className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Back to needs-attention">
             <RotateCcw className="h-4 w-4" />
           </button>
+          <button onClick={() => setEditing(item)} disabled={pending} className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Edit details">
+            <Pencil className="h-4 w-4" />
+          </button>
+          <button onClick={() => restore(item)} disabled={pending} className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Back to needs-attention">
+            <RotateCcw className="h-4 w-4" />
+          </button>
           <button onClick={() => remove(item)} disabled={pending} className="rounded-md p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" title="Delete">
             <Trash2 className="h-4 w-4" />
           </button>
         </div>
       </Card>
+    );
+  }
+
+  /** Edit dialog: correct the AI-extracted fields before/after filing. */
+  function EditModal({ item }: { item: OrganizedItemRow }) {
+    const [title, setTitle] = useState(item.title ?? "");
+    const [vendor, setVendor] = useState(item.vendor ?? "");
+    const [amount, setAmount] = useState<number>(item.amount ?? 0);
+    const [itemDate, setItemDate] = useState(item.item_date ?? "");
+    const [category, setCategory] = useState(item.category ?? "");
+    const [summary, setSummary] = useState(item.summary ?? "");
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+
+    async function save() {
+      setSaving(true);
+      setError(null);
+      const res = await updateOrganizedItem(item.id, {
+        title,
+        vendor: vendor.trim() || null,
+        amount: amount || null,
+        item_date: itemDate || null,
+        category: category || null,
+        summary: summary.trim() || null,
+      });
+      setSaving(false);
+      if (!res.ok) {
+        setError(res.error ?? "Couldn't save.");
+        return;
+      }
+      setEditing(null);
+      router.refresh();
+    }
+
+    return (
+      <Modal
+        open
+        onClose={() => setEditing(null)}
+        title="Edit details"
+        footer={<ModalActions onCancel={() => setEditing(null)} onSave={save} saving={saving} />}
+      >
+        <div className="space-y-4">
+          {error && (
+            <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
+          )}
+          <div>
+            <Label htmlFor="oi-title">Title</Label>
+            <Input id="oi-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Short label" />
+          </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <Label htmlFor="oi-vendor">Vendor</Label>
+              <Input id="oi-vendor" value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder="Store / supplier" />
+            </div>
+            <div>
+              <Label htmlFor="oi-amount">Amount</Label>
+              <NumberInput id="oi-amount" value={amount} onValueChange={setAmount} placeholder="0.00" />
+            </div>
+            <div>
+              <Label htmlFor="oi-date">Date</Label>
+              <Input id="oi-date" type="date" value={itemDate} onChange={(e) => setItemDate(e.target.value)} />
+            </div>
+            <div>
+              <Label htmlFor="oi-category">Category</Label>
+              <Select id="oi-category" value={category} onChange={(e) => setCategory(e.target.value)}>
+                <option value="">None</option>
+                {ITEM_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                {category && !ITEM_CATEGORIES.includes(category) && <option value={category}>{category}</option>}
+              </Select>
+            </div>
+          </div>
+          <div>
+            <Label htmlFor="oi-summary">{item.kind === "note" ? "Note" : "Summary"}</Label>
+            <Textarea id="oi-summary" value={summary} onChange={(e) => setSummary(e.target.value)} placeholder="What's on it…" />
+          </div>
+        </div>
+      </Modal>
     );
   }
 
@@ -468,6 +563,8 @@ export function OrganizeManager({
           onClose={() => setShowCamera(false)}
         />
       )}
+
+      {editing && <EditModal key={editing.id} item={editing} />}
     </div>
   );
 }

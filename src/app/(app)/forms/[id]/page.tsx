@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { formatDateTime } from "@/lib/utils";
 import { FillForm } from "./fill-form";
 import { DeleteFormButton } from "./delete-form-button";
+import { DeleteSubmissionButton } from "./delete-submission-button";
 import type { FormField } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -92,7 +93,10 @@ export default async function FormDetailPage({
                 <li key={s.id} className="px-5 py-3">
                   <div className="mb-1 flex items-center justify-between text-xs text-slate-400">
                     <span>{s.profiles?.full_name ?? "—"}</span>
-                    <span>{formatDateTime(s.created_at)}</span>
+                    <div className="flex items-center gap-1.5">
+                      <span>{formatDateTime(s.created_at)}</span>
+                      <DeleteSubmissionButton submissionId={s.id} formId={form.id} />
+                    </div>
                   </div>
                   {s.jobs?.name && (
                     <Link href={`/jobs/${s.job_id}`} className="mb-1 block text-xs font-medium text-slate-600 hover:text-brand">

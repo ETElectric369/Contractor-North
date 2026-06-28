@@ -1093,6 +1093,96 @@ export async function setInvoiceDescription(
   return { ok: true };
 }
 
+/** Edit the invoice's title (the short label shown in the header / lists). */
+export async function setInvoiceTitle(
+  invoiceId: string,
+  title: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { error } = await ctx.supabase
+    .from("invoices")
+    .update({ title: title.trim() || null })
+    .eq("id", invoiceId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath(`/billing/${invoiceId}`);
+  revalidatePath("/billing");
+  return { ok: true };
+}
+
+/** Set (or clear) the invoice due date — the field the Overdue tracker reads.
+ *  Stamps a "YYYY-MM-DD" input to noon in the org tz, same as payment dates. */
+export async function setInvoiceDueDate(
+  invoiceId: string,
+  date: string | null,
+): Promise<{ ok: boolean; error?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const dueDate = date ? dateToIso(date, await orgTz(supabase)) ?? null : null;
+  const { error } = await supabase
+    .from("invoices")
+    .update({ due_date: dueDate })
+    .eq("id", invoiceId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath(`/billing/${invoiceId}`);
+  revalidatePath("/billing");
+  return { ok: true };
+}
+
+/** Correct the customer/job link on a DRAFT invoice. Draft-only: once sent, the
+ *  billing relationship is locked (a draw job is also blocked — its draw is itemized
+ *  at creation). Any chosen ids must be visible to this org (RLS filters the lookup,
+ *  so an id from another tenant resolves to null and is rejected). */
+export async function setInvoiceCustomerJob(
+  invoiceId: string,
+  link: { customer_id: string | null; job_id: string | null },
+): Promise<{ ok: boolean; error?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+
+  // Header edits to the billing relationship are only safe while it's a draft.
+  const draftBlock = await requireDraftInvoice(supabase, invoiceId);
+  if (draftBlock) return draftBlock;
+
+  // H4: don't re-point a draft onto a job already on the draw path.
+  const drawBlock = await blockStandardCreateOnDrawJob(supabase, link.job_id);
+  if (drawBlock) return drawBlock;
+
+  // Validate any chosen ids are visible to this org (RLS scopes the read).
+  let customerId = link.customer_id || null;
+  let jobId = link.job_id || null;
+  if (jobId) {
+    const { data: job } = await supabase
+      .from("jobs")
+      .select("id, customer_id")
+      .eq("id", jobId)
+      .maybeSingle();
+    if (!job) return { ok: false, error: "That job isn't available." };
+    // Keep the invoice attached to the job's customer so revenue/costs roll up.
+    if (!customerId) customerId = job.customer_id ?? null;
+  }
+  if (customerId) {
+    const { data: cust } = await supabase
+      .from("customers")
+      .select("id")
+      .eq("id", customerId)
+      .maybeSingle();
+    if (!cust) return { ok: false, error: "That customer isn't available." };
+  }
+
+  const { error } = await supabase
+    .from("invoices")
+    .update({ customer_id: customerId, job_id: jobId })
+    .eq("id", invoiceId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath(`/billing/${invoiceId}`);
+  revalidatePath("/billing");
+  if (jobId) revalidatePath(`/jobs/${jobId}`);
+  return { ok: true };
+}
+
 /** Recompute totals from items + payments, and auto-advance paid status. */
 async function recalcInvoice(supabase: any, invoiceId: string) {
   const [{ data: items }, { data: pays }, { data: inv }] = await Promise.all([

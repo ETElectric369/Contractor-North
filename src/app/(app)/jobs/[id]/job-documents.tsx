@@ -2,16 +2,17 @@
 
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Upload, Camera, Trash2, Loader2, FileText, DollarSign } from "lucide-react";
+import { Upload, Camera, Trash2, Loader2, FileText, DollarSign, Pencil } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Select } from "@/components/ui/input";
+import { Input, Label, Select } from "@/components/ui/input";
+import { Modal, ModalActions } from "@/components/ui/modal";
 import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { CameraCapture } from "@/components/camera-capture";
 import { MediaLightbox } from "@/components/media-lightbox";
 import { prepareImageForUpload } from "@/lib/image-prep";
-import { addDocument, deleteDocument } from "../actions";
+import { addDocument, deleteDocument, updateDocument } from "../actions";
 import { billJobReceipt } from "../../organize/actions";
 
 const COSTABLE = (c: string | null) => c === "Receipt" || c === "Bill";
@@ -63,6 +64,12 @@ export function JobDocuments({
   const captureRef = useRef<HTMLInputElement>(null);
   const [showCamera, setShowCamera] = useState(false);
   const [viewing, setViewing] = useState<Doc | null>(null);
+  // Inline rename / re-categorize editor — null when closed.
+  const [editing, setEditing] = useState<Doc | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editCategory, setEditCategory] = useState("Receipt");
+  const [editErr, setEditErr] = useState<string | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
   // Per-document "recorded as a job cost" status, keyed by document id.
   const [billing, setBilling] = useState<string | null>(null);
   const [billMsg, setBillMsg] = useState<Record<string, string>>({});
@@ -167,6 +174,35 @@ export function JobDocuments({
     });
   }
 
+  function openEdit(d: Doc) {
+    setEditing(d);
+    setEditName(d.name);
+    setEditCategory(d.category ?? "Other");
+    setEditErr(null);
+  }
+
+  async function saveEdit() {
+    if (!editing) return;
+    if (!editName.trim()) {
+      setEditErr("Name is required.");
+      return;
+    }
+    setSavingEdit(true);
+    setEditErr(null);
+    const res = await updateDocument(
+      editing.id,
+      { name: editName, category: editCategory },
+      jobId,
+    );
+    setSavingEdit(false);
+    if (!res.ok) {
+      setEditErr(res.error ?? "Couldn't save changes.");
+      return;
+    }
+    setEditing(null);
+    router.refresh();
+  }
+
   return (
     <div>
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -198,6 +234,46 @@ export function JobDocuments({
       {viewing?.signedUrl && (
         <MediaLightbox url={viewing.signedUrl} name={viewing.name} onClose={() => setViewing(null)} />
       )}
+
+      <Modal
+        open={!!editing}
+        onClose={() => setEditing(null)}
+        title="Edit document"
+        size="sm"
+        footer={
+          <ModalActions
+            onCancel={() => setEditing(null)}
+            onSave={saveEdit}
+            saving={savingEdit}
+          />
+        }
+      >
+        <div className="space-y-4">
+          <div>
+            <Label htmlFor="doc-name">Name</Label>
+            <Input
+              id="doc-name"
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              placeholder="Document name"
+            />
+          </div>
+          <div>
+            <Label htmlFor="doc-category">Category</Label>
+            <Select
+              id="doc-category"
+              value={editCategory}
+              onChange={(e) => setEditCategory(e.target.value)}
+            >
+              {CATEGORIES.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </Select>
+          </div>
+          {editErr && <p className="text-sm text-red-600">{editErr}</p>}
+        </div>
+      </Modal>
+
       {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
 
       {docs.length === 0 ? (
@@ -244,6 +320,13 @@ export function JobDocuments({
                   </button>
                 )}
                 {d.category && <Badge tone="blue">{d.category}</Badge>}
+                <button
+                  onClick={() => openEdit(d)}
+                  className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                  title="Rename or re-categorize"
+                >
+                  <Pencil className="h-4 w-4" />
+                </button>
                 <button
                   onClick={() => remove(d)}
                   disabled={pending}
