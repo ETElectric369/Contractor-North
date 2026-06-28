@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Send, Sparkles, Loader2, Mic, Check, Square, FileText } from "lucide-react";
+import { Send, Sparkles, Loader2, Mic, Check, Square, FileText, ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
 import { speakSmart, unlockAudio, stopSpeaking } from "@/lib/tts";
@@ -165,6 +165,18 @@ export function AssistantChat({ autoStart = false, glass = false }: { autoStart?
     window.addEventListener("cn:assistant-stop", stop);
     return () => window.removeEventListener("cn:assistant-stop", stop);
   }, []);
+
+  // Glass slim view: by default only two lines show (the estimate summary + a live status line);
+  // the full conversation expands underneath. elapsed/tokens drive the status line like Claude's.
+  const [expanded, setExpanded] = useState(false);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const [tokens, setTokens] = useState(0);
+  const turnStartRef = useRef(0);
+  useEffect(() => {
+    if (!streaming) return;
+    const id = setInterval(() => setElapsedMs(Date.now() - turnStartRef.current), 400);
+    return () => clearInterval(id);
+  }, [streaming]);
   const router = useRouter();
 
   // Finalize the live draft → real quote, then flip to the actual quote page (filled out).
@@ -281,6 +293,9 @@ export function AssistantChat({ autoStart = false, glass = false }: { autoStart?
     setMessages(next);
     setInput("");
     setStreaming(true);
+    turnStartRef.current = Date.now();
+    setElapsedMs(0);
+    setTokens(0);
     scrollToBottom();
 
     abortRef.current = new AbortController();
@@ -312,6 +327,7 @@ export function AssistantChat({ autoStart = false, glass = false }: { autoStart?
         const { text: visible, draft: liveDraft, status: liveStatus } = parseStream(full);
         if (liveDraft) setDraft(liveDraft); // the quote fills in live as blocks arrive
         setStatus(liveStatus); // transient "Searching…" pill while a tool runs
+        setTokens(Math.max(1, Math.round(visible.length / 4))); // rough live token count for the status line
         setMessages((m) => {
           const copy = [...m];
           copy[copy.length - 1] = { role: "assistant", content: visible };
@@ -488,62 +504,97 @@ export function AssistantChat({ autoStart = false, glass = false }: { autoStart?
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const elapsedStr = (() => { const s = Math.floor(elapsedMs / 1000); return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`; })();
+  const statusText = status ?? (streaming ? (tokens > 2 ? "responding…" : "thinking…") : listening ? "listening…" : speaking ? "talking…" : null);
+  const slim = glass && !expanded; // glass collapsed = the two-line summary view
+
   return (
-    <div className={`flex min-h-0 flex-1 flex-col overflow-hidden ${glass ? "bg-transparent" : "rounded-xl border border-slate-200 bg-white"}`}>
-      {messages.length > 0 && (
-        <div className="flex shrink-0 justify-end px-3 pt-1">
-          <button onClick={newChat} className="text-xs font-medium text-slate-400 hover:text-brand">+ New chat</button>
+    <div className={`flex min-h-0 flex-col overflow-hidden ${slim ? "" : "flex-1"} ${glass ? "bg-transparent" : "rounded-xl border border-slate-200 bg-white"}`}>
+      {/* GLASS: the two slim lines (estimate summary + live status) cascade from the Talk button — the
+          default view. The full conversation + estimate card expand underneath. */}
+      {glass && (
+        <div className="shrink-0 border-b border-slate-100 bg-white/40">
+          {draft && (
+            <button onClick={() => setExpanded((e) => !e)} className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-white/60">
+              <FileText className="h-4 w-4 shrink-0 text-brand" />
+              <span className="truncate text-sm">
+                <span className="font-semibold text-brand">ESTIMATOR</span>
+                {draft.title ? <span className="text-slate-700"> · {draft.title}</span> : null}
+                {draft.customer_name ? <span className="text-slate-400"> · {draft.customer_name}</span> : null}
+              </span>
+            </button>
+          )}
+          {statusText ? (
+            <div className="flex items-center gap-2 px-3 py-2">
+              <Sparkles className="h-4 w-4 shrink-0 animate-pulse text-orange-500" />
+              <span className="truncate text-sm text-slate-500">{elapsedStr} · {tokens} tokens · {statusText}</span>
+            </div>
+          ) : !draft && messages.length === 0 ? (
+            <div className="px-3 py-2 text-sm text-slate-400">What can I help you with?</div>
+          ) : null}
+          {messages.length > 0 && (
+            <button onClick={() => setExpanded((e) => !e)} className="flex w-full items-center justify-center gap-1 py-1 text-[11px] font-medium text-slate-400 hover:text-brand">
+              {expanded ? <>Hide <ChevronUp className="h-3 w-3" /></> : <>Show conversation <ChevronDown className="h-3 w-3" /></>}
+            </button>
+          )}
         </div>
       )}
-      <div ref={scrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
-        {messages.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center text-center">
-            <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-light">
-              <Sparkles className="h-6 w-6 text-brand" />
-            </div>
-            <h3 className="text-sm font-semibold text-slate-900">
-              How can I help?
-            </h3>
-            <p className="mt-1 max-w-sm text-sm text-slate-500">
-              I can pull up your jobs, quotes, invoices, schedule, and who&apos;s
-              clocked in, draft quotes &amp; take-offs, and help with scopes and code.
-              {voiceOn && " Tap the mic and just talk — I'll read replies back."}
-            </p>
-            <div className="mt-5 grid w-full max-w-lg gap-2 sm:grid-cols-2">
-              {SUGGESTIONS.map((s) => (
-                <button
-                  key={s}
-                  onClick={() => send(s)}
-                  className="rounded-lg border border-slate-200 px-3 py-2 text-left text-xs text-slate-600 hover:border-brand hover:bg-brand-light/40"
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : (
-          messages.map((m, i) => (
-            <div
-              key={i}
-              className={m.role === "user" ? "flex justify-end" : "flex justify-start"}
-            >
-              <div
-                className={
-                  m.role === "user"
-                    ? "max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-sm bg-brand px-4 py-2.5 text-sm text-white"
-                    : "max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-bl-sm bg-slate-100 px-4 py-2.5 text-sm text-slate-800"
-                }
-              >
-                {m.content || (
-                  <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
-                )}
-              </div>
-            </div>
-          ))
-        )}
-      </div>
 
-      {status && streaming ? (
+      {/* The conversation — always on the full /assistant page; only when EXPANDED in the glass drawer */}
+      {!slim && (
+        <>
+          {!glass && messages.length > 0 && (
+            <div className="flex shrink-0 justify-end px-3 pt-1">
+              <button onClick={newChat} className="text-xs font-medium text-slate-400 hover:text-brand">+ New chat</button>
+            </div>
+          )}
+          <div ref={scrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+            {messages.length === 0 ? (
+              glass ? null : (
+                <div className="flex h-full flex-col items-center justify-center text-center">
+                  <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-light">
+                    <Sparkles className="h-6 w-6 text-brand" />
+                  </div>
+                  <h3 className="text-sm font-semibold text-slate-900">How can I help?</h3>
+                  <p className="mt-1 max-w-sm text-sm text-slate-500">
+                    I can pull up your jobs, quotes, invoices, schedule, and who&apos;s
+                    clocked in, draft quotes &amp; take-offs, and help with scopes and code.
+                    {voiceOn && " Tap the mic and just talk — I'll read replies back."}
+                  </p>
+                  <div className="mt-5 grid w-full max-w-lg gap-2 sm:grid-cols-2">
+                    {SUGGESTIONS.map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => send(s)}
+                        className="rounded-lg border border-slate-200 px-3 py-2 text-left text-xs text-slate-600 hover:border-brand hover:bg-brand-light/40"
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )
+            ) : (
+              messages.map((m, i) => (
+                <div key={i} className={m.role === "user" ? "flex justify-end" : "flex justify-start"}>
+                  <div
+                    className={
+                      m.role === "user"
+                        ? "max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-sm bg-brand px-4 py-2.5 text-sm text-white"
+                        : "max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-bl-sm bg-slate-100 px-4 py-2.5 text-sm text-slate-800"
+                    }
+                  >
+                    {m.content || <Loader2 className="h-4 w-4 animate-spin text-slate-400" />}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </>
+      )}
+
+      {/* non-glass status pill (the glass drawer shows the status LINE above instead) */}
+      {status && streaming && !glass ? (
         <div className="border-t border-slate-100 px-4 py-1.5">
           <span className="inline-flex items-center gap-1.5 text-xs italic text-slate-400">
             <Loader2 className="h-3 w-3 animate-spin" /> {status}
@@ -551,7 +602,8 @@ export function AssistantChat({ autoStart = false, glass = false }: { autoStart?
         </div>
       ) : null}
 
-      {draft ? <LiveQuote draft={draft} onSave={saveDraft} saving={savingDraft} /> : null}
+      {/* The full estimate card — non-glass always; glass only when expanded (the slim line covers it). */}
+      {draft && (!glass || expanded) ? <LiveQuote draft={draft} onSave={saveDraft} saving={savingDraft} /> : null}
 
       {pendingPick ? (
         <ContactPicker
@@ -588,31 +640,51 @@ export function AssistantChat({ autoStart = false, glass = false }: { autoStart?
           </div>
         </div>
       ) : voiceMode ? (
-        // Voice mode — chat-style. It listens / thinks / talks; the big mic is "your turn"
-        // (auto-reopens on desktop, one tap on iPhone), and End closes the conversation.
-        <div className="flex flex-col items-center gap-2 border-t border-slate-100 p-4">
-          <VoiceWave active={listening || speaking} />
-          <div className="text-sm font-medium text-slate-600">
-            {streaming ? "Thinking…" : listening ? "Listening…" : speaking ? "Talking…" : "Your turn — tap the mic"}
+        glass ? (
+          // Compact voice control for the slim drawer — the status LINE up top already shows
+          // listening/thinking/talking, so just a small mic + end down here.
+          <div className="flex items-center justify-center gap-3 border-t border-slate-100 p-2">
+            <button
+              type="button"
+              onClick={voiceTap}
+              aria-label={listening ? "Stop listening" : "Talk"}
+              className={`flex h-11 w-11 items-center justify-center rounded-full text-white shadow transition active:scale-95 ${
+                listening ? "animate-pulse bg-red-600" : "bg-brand hover:bg-brand-dark"
+              }`}
+            >
+              <Mic className="h-5 w-5" />
+            </button>
+            <button type="button" onClick={stopVoice} className="text-xs font-medium text-slate-400 hover:text-red-600">
+              End
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={voiceTap}
-            aria-label={listening ? "Stop listening" : "Talk"}
-            className={`mt-1 flex h-16 w-16 items-center justify-center rounded-full text-white shadow-lg transition active:scale-95 ${
-              listening ? "animate-pulse bg-red-600" : "bg-brand hover:bg-brand-dark"
-            }`}
-          >
-            <Mic className="h-7 w-7" />
-          </button>
-          <button
-            type="button"
-            onClick={stopVoice}
-            className="mt-1 inline-flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-red-600"
-          >
-            <Square className="h-3 w-3" fill="currentColor" /> End conversation
-          </button>
-        </div>
+        ) : (
+          // Voice mode — chat-style. It listens / thinks / talks; the big mic is "your turn"
+          // (auto-reopens on desktop, one tap on iPhone), and End closes the conversation.
+          <div className="flex flex-col items-center gap-2 border-t border-slate-100 p-4">
+            <VoiceWave active={listening || speaking} />
+            <div className="text-sm font-medium text-slate-600">
+              {streaming ? "Thinking…" : listening ? "Listening…" : speaking ? "Talking…" : "Your turn — tap the mic"}
+            </div>
+            <button
+              type="button"
+              onClick={voiceTap}
+              aria-label={listening ? "Stop listening" : "Talk"}
+              className={`mt-1 flex h-16 w-16 items-center justify-center rounded-full text-white shadow-lg transition active:scale-95 ${
+                listening ? "animate-pulse bg-red-600" : "bg-brand hover:bg-brand-dark"
+              }`}
+            >
+              <Mic className="h-7 w-7" />
+            </button>
+            <button
+              type="button"
+              onClick={stopVoice}
+              className="mt-1 inline-flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-red-600"
+            >
+              <Square className="h-3 w-3" fill="currentColor" /> End conversation
+            </button>
+          </div>
+        )
       ) : (
         <form
           onSubmit={(e) => {

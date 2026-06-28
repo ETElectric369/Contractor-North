@@ -4,9 +4,7 @@ import { useEffect, useState } from "react";
 import { AudioLines, X, Square } from "lucide-react";
 import { AssistantChat } from "@/app/(app)/assistant/assistant-chat";
 import { unlockAudio, stopSpeaking } from "@/lib/tts";
-import { useEstimator, draftTotal } from "@/lib/estimator-store";
-
-const compactMoney = (n: number) => "$" + Math.round(n).toLocaleString();
+import { useEstimator } from "@/lib/estimator-store";
 
 /**
  * ONE assistant, everywhere. The topbar launcher opens the full conversational Claude (the
@@ -15,8 +13,7 @@ const compactMoney = (n: number) => "$" + Math.round(n).toLocaleString();
  */
 export function GlobalAssistant() {
   const [open, setOpen] = useState(false);
-  const { draft, speaking, streaming } = useEstimator(); // the live estimate + assistant activity
-  const items = draft?.items?.length ?? 0;
+  const { speaking, streaming } = useEstimator(); // assistant activity
   const active = speaking || streaming; // CIB is working or talking → the button is a red STOP
 
   function launch() {
@@ -43,35 +40,15 @@ export function GlobalAssistant() {
   return (
     <>
       {active ? (
-        // CIB is working or talking → the waveform flips to a red STOP (square in the circle). One
-        // tap aborts the stream + cuts the voice. Tap the rest of the pill to see what's happening.
-        <div className="btn-gloss inline-flex h-10 items-center gap-0.5 rounded-full bg-red-600 px-1 text-white shadow-sm">
-          <button
-            onClick={() => window.dispatchEvent(new Event("cn:assistant-stop"))}
-            title="Stop"
-            aria-label="Stop the assistant"
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-white/15 transition-colors hover:bg-white/30"
-          >
-            <Square className="h-4 w-4 fill-current" />
-          </button>
-          {items > 0 && (
-            <button onClick={launch} aria-label="Open the estimate" className="flex h-8 items-center rounded-full px-2 transition-colors hover:bg-white/10">
-              <span className="text-sm font-semibold tabular-nums">{compactMoney(draftTotal(draft))}</span>
-            </button>
-          )}
-        </div>
-      ) : items > 0 && !open ? (
-        // COMPACTED ESTIMATOR: estimate building + drawer closed → the Talk button hosts the running
-        // total + item count. Tap to expand the full Estimator back open.
+        // CIB is working or talking → a red STOP. One tap aborts the stream + cuts the voice. No data
+        // on the button — the live status + estimate summary are the two lines in the dropdown.
         <button
-          onClick={launch}
-          title="Open the estimate"
-          aria-label="Open the estimate"
-          className="btn-gloss inline-flex h-10 items-center gap-1.5 rounded-full bg-brand px-3 text-white shadow-sm transition-colors hover:bg-brand-dark"
+          onClick={() => window.dispatchEvent(new Event("cn:assistant-stop"))}
+          title="Stop"
+          aria-label="Stop the assistant"
+          className="btn-gloss inline-flex h-10 w-10 items-center justify-center rounded-full bg-red-600 text-white shadow-sm transition-colors hover:bg-red-700"
         >
-          <AudioLines className="h-4 w-4 shrink-0" />
-          <span className="text-sm font-semibold tabular-nums">{compactMoney(draftTotal(draft))}</span>
-          <span className="hidden text-[11px] text-white/70 sm:inline">{items} item{items === 1 ? "" : "s"}</span>
+          <Square className="h-4 w-4 fill-current" />
         </button>
       ) : (
         <button
