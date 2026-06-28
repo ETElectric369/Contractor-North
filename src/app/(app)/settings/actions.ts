@@ -591,6 +591,27 @@ export async function createTaxRate(input: {
   return { ok: true };
 }
 
+export async function updateTaxRate(
+  id: string,
+  patch: { name: string; rate: number },
+): Promise<Result> {
+  const supabase = await createClient();
+  const orgId = await myOrgId(supabase);
+  if (!orgId) return { ok: false, error: "No organization." };
+  if (!patch.name.trim()) return { ok: false, error: "Name is required." };
+  const { error } = await supabase
+    .from("tax_rates")
+    .update({
+      name: patch.name.trim(),
+      rate: Number.isFinite(patch.rate) ? patch.rate : 0,
+    })
+    .eq("id", id)
+    .eq("org_id", orgId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/settings");
+  return { ok: true };
+}
+
 export async function setDefaultTaxRate(id: string): Promise<Result> {
   const supabase = await createClient();
   const orgId = await myOrgId(supabase);
@@ -632,6 +653,27 @@ export async function createPricingLevel(input: {
   return { ok: true };
 }
 
+export async function updatePricingLevel(
+  id: string,
+  patch: { name: string; markup_pct: number },
+): Promise<Result> {
+  const supabase = await createClient();
+  const orgId = await myOrgId(supabase);
+  if (!orgId) return { ok: false, error: "No organization." };
+  if (!patch.name.trim()) return { ok: false, error: "Name is required." };
+  const { error } = await supabase
+    .from("pricing_levels")
+    .update({
+      name: patch.name.trim(),
+      markup_pct: Number.isFinite(patch.markup_pct) ? patch.markup_pct : 0,
+    })
+    .eq("id", id)
+    .eq("org_id", orgId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/settings");
+  return { ok: true };
+}
+
 export async function setDefaultPricingLevel(id: string): Promise<Result> {
   const supabase = await createClient();
   const orgId = await myOrgId(supabase);
@@ -648,6 +690,73 @@ export async function deletePricingLevel(id: string): Promise<Result> {
   const { error } = await supabase.from("pricing_levels").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/settings");
+  return { ok: true };
+}
+
+/** Create or update a job code (the cost/labor codes the timeclock uses).
+ *  Staff only — RLS also scopes it to the caller's org. Inserts when no id,
+ *  updates when id present. Codes show on /timeclock, so revalidate it too. */
+export async function saveJobCode(input: {
+  id?: string | null;
+  code: string;
+  description: string;
+  billable?: boolean;
+  active?: boolean;
+}): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { supabase } = ctx;
+  // job_codes has NO set_org_id trigger (unlike tax_rates/pricing_levels), so the
+  // org_id must be set explicitly on insert — otherwise the new code lands org-less
+  // and is invisible under RLS. Also scope the update to the org for defense-in-depth.
+  const orgId = await myOrgId(supabase);
+  if (!orgId) return { ok: false, error: "No organization." };
+
+  const code = (input.code || "").trim();
+  const description = (input.description || "").trim();
+  if (!code) return { ok: false, error: "Code is required." };
+  if (!description) return { ok: false, error: "Description is required." };
+  const billable = input.billable ?? true;
+  const active = input.active ?? true;
+
+  if (input.id) {
+    const { error } = await supabase
+      .from("job_codes")
+      .update({ code, description, billable, active })
+      .eq("id", input.id)
+      .eq("org_id", orgId);
+    if (error) return { ok: false, error: error.message };
+  } else {
+    const { error } = await supabase
+      .from("job_codes")
+      .insert({ org_id: orgId, code, description, billable, active });
+    if (error) return { ok: false, error: error.message };
+  }
+  revalidatePath("/settings");
+  revalidatePath("/timeclock");
+  return { ok: true };
+}
+
+/** Flip a job code's active flag (soft enable/disable — inactive codes drop out
+ *  of the timeclock picker). Staff only; RLS scopes it to the org. */
+export async function setJobCodeActive(id: string, active: boolean): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { error } = await ctx.supabase.from("job_codes").update({ active }).eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/settings");
+  revalidatePath("/timeclock");
+  return { ok: true };
+}
+
+/** Hard-delete a job code. Staff only; RLS scopes it to the org. */
+export async function deleteJobCode(id: string): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { error } = await ctx.supabase.from("job_codes").delete().eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/settings");
+  revalidatePath("/timeclock");
   return { ok: true };
 }
 

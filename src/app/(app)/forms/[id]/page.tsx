@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatDateTime } from "@/lib/utils";
 import { FillForm } from "./fill-form";
+import { EditFormButton } from "./edit-form-button";
 import { DeleteFormButton } from "./delete-form-button";
 import { DeleteSubmissionButton } from "./delete-submission-button";
 import type { FormField } from "../actions";
@@ -66,7 +67,15 @@ export default async function FormDetailPage({
             <p className="mt-1 text-sm text-slate-500">{form.description}</p>
           )}
         </div>
-        <DeleteFormButton formId={form.id} />
+        <div className="flex items-center gap-1">
+          <EditFormButton
+            formId={form.id}
+            name={form.name}
+            description={form.description}
+            fields={fields}
+          />
+          <DeleteFormButton formId={form.id} />
+        </div>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-5">

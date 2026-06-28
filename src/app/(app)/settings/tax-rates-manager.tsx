@@ -2,15 +2,15 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Check, Star } from "lucide-react";
+import { Plus, Trash2, Check, Star, Pencil, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Badge } from "@/components/ui/badge";
 import type { OrgSettings } from "@/lib/org-settings";
 import {
-  createTaxRate, setDefaultTaxRate, deleteTaxRate, updateOrgSettings,
-  createPricingLevel, setDefaultPricingLevel, deletePricingLevel,
+  createTaxRate, updateTaxRate, setDefaultTaxRate, deleteTaxRate, updateOrgSettings,
+  createPricingLevel, updatePricingLevel, setDefaultPricingLevel, deletePricingLevel,
 } from "./actions";
 
 interface TaxRate {
@@ -39,6 +39,7 @@ export function TaxRatesManager({
   const [pending, start] = useTransition();
   const [name, setName] = useState("");
   const [rate, setRate] = useState(0);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [laborRate, setLaborRate] = useState(settings.default_labor_rate);
@@ -49,25 +50,53 @@ export function TaxRatesManager({
 
   const [levelName, setLevelName] = useState("");
   const [levelMarkup, setLevelMarkup] = useState(0);
+  const [editingLevelId, setEditingLevelId] = useState<string | null>(null);
+
+  function editLevel(l: PricingLevel) {
+    setEditingLevelId(l.id);
+    setLevelName(l.name);
+    setLevelMarkup(Number(l.markup_pct));
+  }
+  function cancelEditLevel() {
+    setEditingLevelId(null);
+    setLevelName("");
+    setLevelMarkup(0);
+  }
 
   function addLevel() {
     if (!levelName.trim()) return;
     start(async () => {
-      await createPricingLevel({ name: levelName, markup_pct: levelMarkup, is_default: pricingLevels.length === 0 });
-      setLevelName("");
-      setLevelMarkup(0);
+      const res = editingLevelId
+        ? await updatePricingLevel(editingLevelId, { name: levelName, markup_pct: levelMarkup })
+        : await createPricingLevel({ name: levelName, markup_pct: levelMarkup, is_default: pricingLevels.length === 0 });
+      if (!res.ok) { setError(res.error ?? "Could not save."); return; }
+      cancelEditLevel();
       router.refresh();
     });
+  }
+
+  function editRate(t: TaxRate) {
+    setError(null);
+    setEditingId(t.id);
+    setName(t.name);
+    setRate(Number(t.rate));
+  }
+  function cancelEdit() {
+    setEditingId(null);
+    setName("");
+    setRate(0);
+    setError(null);
   }
 
   function add() {
     setError(null);
     if (!name.trim()) return setError("Name is required.");
     start(async () => {
-      const res = await createTaxRate({ name, rate, is_default: taxRates.length === 0 });
+      const res = editingId
+        ? await updateTaxRate(editingId, { name, rate })
+        : await createTaxRate({ name, rate, is_default: taxRates.length === 0 });
       if (!res.ok) return setError(res.error ?? "Could not save.");
-      setName("");
-      setRate(0);
+      cancelEdit();
       router.refresh();
     });
   }
@@ -98,7 +127,15 @@ export function TaxRatesManager({
                   </button>
                 )}
                 <button
-                  onClick={() => start(async () => { await deleteTaxRate(t.id); router.refresh(); })}
+                  onClick={() => editRate(t)}
+                  className="text-slate-400 hover:text-brand"
+                  title="Edit"
+                  aria-label="Edit tax rate"
+                >
+                  <Pencil className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => { if (confirm("Delete this tax rate?")) start(async () => { await deleteTaxRate(t.id); if (editingId === t.id) cancelEdit(); router.refresh(); }); }}
                   className="text-slate-400 hover:text-red-600"
                   title="Delete"
                 >
@@ -118,8 +155,13 @@ export function TaxRatesManager({
             <NumberInput id="tr-rate" value={rate} onValueChange={setRate} />
           </div>
           <Button size="sm" onClick={add} disabled={pending || !name.trim()}>
-            <Plus className="h-3.5 w-3.5" /> Add
+            {editingId ? <><Check className="h-3.5 w-3.5" /> Save</> : <><Plus className="h-3.5 w-3.5" /> Add</>}
           </Button>
+          {editingId && (
+            <Button size="sm" variant="outline" onClick={cancelEdit} disabled={pending} title="Cancel edit">
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          )}
         </div>
       </div>
 
@@ -169,7 +211,8 @@ export function TaxRatesManager({
                 ) : (
                   <button onClick={() => start(async () => { await setDefaultPricingLevel(l.id); router.refresh(); })} className="text-slate-400 hover:text-amber-500" title="Make default"><Star className="h-4 w-4" /></button>
                 )}
-                <button onClick={() => start(async () => { await deletePricingLevel(l.id); router.refresh(); })} className="text-slate-400 hover:text-red-600" title="Delete"><Trash2 className="h-4 w-4" /></button>
+                <button onClick={() => editLevel(l)} className="text-slate-400 hover:text-brand" title="Edit" aria-label="Edit pricing level"><Pencil className="h-4 w-4" /></button>
+                <button onClick={() => { if (confirm("Delete this pricing level?")) start(async () => { await deletePricingLevel(l.id); if (editingLevelId === l.id) cancelEditLevel(); router.refresh(); }); }} className="text-slate-400 hover:text-red-600" title="Delete"><Trash2 className="h-4 w-4" /></button>
               </li>
             ))}
           </ul>
@@ -177,7 +220,8 @@ export function TaxRatesManager({
         <div className="flex items-end gap-2">
           <div className="flex-1"><Label htmlFor="pl-name">Name</Label><Input id="pl-name" value={levelName} onChange={(e) => setLevelName(e.target.value)} placeholder="e.g. Trade / Builder" /></div>
           <div className="w-28"><Label htmlFor="pl-markup">Markup %</Label><NumberInput id="pl-markup" value={levelMarkup} onValueChange={setLevelMarkup} /></div>
-          <Button size="sm" onClick={addLevel} disabled={pending || !levelName.trim()}><Plus className="h-3.5 w-3.5" /> Add</Button>
+          <Button size="sm" onClick={addLevel} disabled={pending || !levelName.trim()}>{editingLevelId ? <><Check className="h-3.5 w-3.5" /> Save</> : <><Plus className="h-3.5 w-3.5" /> Add</>}</Button>
+          {editingLevelId && <Button size="sm" variant="outline" onClick={cancelEditLevel} disabled={pending} title="Cancel edit"><X className="h-3.5 w-3.5" /></Button>}
         </div>
       </div>
     </div>

@@ -19,6 +19,7 @@ import { SchedulingSettings } from "./scheduling-settings";
 import { PaymentMethods } from "./payment-methods";
 import { AutomationSettings } from "./automation-settings";
 import { TaxRatesManager } from "./tax-rates-manager";
+import { JobCodesManager } from "./job-codes-manager";
 import { SplashSettings } from "./splash-settings";
 import { AiStatus } from "./ai-status";
 import { QuotePlaybookForm } from "./quote-playbook-form";
@@ -90,7 +91,7 @@ export default async function SettingsPage({
     supabase.from("tax_rates").select("id, name, rate, is_default").order("created_at"),
     supabase.from("pricing_levels").select("id, name, markup_pct, is_default").order("created_at"),
     supabase.from("job_code_templates").select("id, name, codes").order("name"),
-    supabase.from("job_codes").select("code, description").eq("active", true).order("code"),
+    supabase.from("job_codes").select("id, code, description, billable, active").order("code"),
   ]);
 
   const members = (team ?? []) as Profile[];
@@ -306,10 +307,15 @@ export default async function SettingsPage({
                   ownerName={members.find((m) => m.role === "owner")?.full_name ?? undefined}
                 />
               </Section>
+              <Section title="Job codes">
+                <JobCodesManager
+                  jobCodes={(jobCodes ?? []) as { id: string; code: string; description: string; billable: boolean; active: boolean }[]}
+                />
+              </Section>
               <Section title="Job-code templates">
                 <CodeTemplatesManager
                   templates={(codeTemplates ?? []) as { id: string; name: string; codes: string[] }[]}
-                  codes={(jobCodes ?? []) as { code: string; description: string }[]}
+                  codes={((jobCodes ?? []) as { code: string; description: string; active: boolean }[]).filter((c) => c.active).map((c) => ({ code: c.code, description: c.description }))}
                 />
               </Section>
             </>

@@ -67,6 +67,51 @@ export async function createForm(input: {
   return { ok: true, id: data.id };
 }
 
+export async function updateForm(
+  id: string,
+  input: {
+    name: string;
+    description: string;
+    fields: { label: string; type: FieldType; options?: string }[];
+  },
+): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+
+  const name = input.name.trim();
+  if (!name) return { ok: false, error: "Form name is required." };
+
+  const schema: FormField[] = input.fields
+    .filter((f) => f.label.trim())
+    .map((f, i) => ({
+      key: slug(f.label, i),
+      label: f.label.trim(),
+      type: f.type,
+      ...(f.type === "select" && f.options
+        ? { options: f.options.split(",").map((o) => o.trim()).filter(Boolean) }
+        : {}),
+    }));
+
+  if (schema.length === 0)
+    return { ok: false, error: "Add at least one field." };
+
+  // RLS isolates by org; the id match scopes the update to this form.
+  const { error } = await supabase
+    .from("forms")
+    .update({
+      name,
+      description: input.description.trim() || null,
+      schema,
+    })
+    .eq("id", id);
+
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/forms");
+  revalidatePath(`/forms/${id}`);
+  return { ok: true, id };
+}
+
 export async function submitForm(input: {
   form_id: string;
   job_id: string | null;
