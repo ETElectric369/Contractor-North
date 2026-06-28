@@ -15,6 +15,21 @@ export async function visibleJobIdOrNull(
 }
 
 /**
+ * Same guard for a customer id — return it only when the caller's RLS-scoped client can
+ * see it (a foreign-org customer resolves to nothing). Use before re-pointing a row onto a
+ * customer (quote/invoice reassignment, merge target) so a crafted/foreign id can never
+ * persist as a cross-org reference. The twin of visibleJobIdOrNull.
+ */
+export async function visibleCustomerIdOrNull(
+  supabase: { from: (t: string) => any },
+  customerId: string | null | undefined,
+): Promise<string | null> {
+  if (!customerId) return null;
+  const { data } = await supabase.from("customers").select("id").eq("id", customerId).maybeSingle();
+  return data ? customerId : null;
+}
+
+/**
  * Same guard for a job-code template id — return it only when the caller's RLS-scoped
  * client can see it (a foreign-org template resolves to nothing). Use before writing
  * jobs.code_template_id so a job can never reference another org's template.

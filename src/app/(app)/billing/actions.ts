@@ -1173,14 +1173,18 @@ export async function setInvoiceCustomerJob(
     if (!cust) return { ok: false, error: "That customer isn't available." };
   }
 
+  // Grab the OLD job first so re-pointing the invoice refreshes BOTH job pages — else the
+  // old job keeps showing the moved invoice in its billing/financials.
+  const { data: prevInv } = await supabase.from("invoices").select("job_id").eq("id", invoiceId).maybeSingle();
+  const oldJobId = (prevInv as { job_id: string | null } | null)?.job_id ?? null;
+
   const { error } = await supabase
     .from("invoices")
     .update({ customer_id: customerId, job_id: jobId })
     .eq("id", invoiceId);
   if (error) return { ok: false, error: error.message };
   revalidateMoney(invoiceId);
-  revalidateMoney();
-  if (jobId) revalidatePath(`/jobs/${jobId}`);
+  for (const jid of new Set([oldJobId, jobId].filter(Boolean) as string[])) revalidatePath(`/jobs/${jid}`);
   return { ok: true };
 }
 

@@ -324,10 +324,19 @@ export async function updateBill(
   if (patch.category !== undefined) clean.category = patch.category ?? null;
   if (patch.job_id !== undefined) clean.job_id = patch.job_id || null;
 
+  // If the bill is being re-pointed to a different job, refresh the OLD job too (its
+  // cost rollup must drop the moved bill), not just the new one.
+  let oldJobId: string | null = null;
+  if (patch.job_id !== undefined) {
+    const { data: prev } = await supabase.from("bills").select("job_id").eq("id", id).maybeSingle();
+    oldJobId = (prev as { job_id: string | null } | null)?.job_id ?? null;
+  }
+
   const { data, error } = await supabase.from("bills").update(clean).eq("id", id).select("job_id").maybeSingle();
   if (error) return { ok: false, error: error.message };
-  if ((data as any)?.job_id) revalidatePath(`/jobs/${(data as any).job_id}`);
+  for (const jid of new Set([oldJobId, (data as any)?.job_id].filter(Boolean) as string[])) revalidatePath(`/jobs/${jid}`);
   revalidatePath("/bills");
+  revalidatePath("/analytics"); // bill cost moves job profitability
   return { ok: true };
 }
 

@@ -672,7 +672,7 @@ export async function runDataTool(
       }
 
       case "list_forms": {
-        const { data, error } = await supabase.from("forms").select("id, name, schema").order("name");
+        const { data, error } = await supabase.from("forms").select("id, name, schema").eq("active", true).order("name");
         if (error) throw error;
         return JSON.stringify({
           count: data?.length ?? 0,
@@ -848,7 +848,7 @@ export async function runDataTool(
       }
 
       case "list_team": {
-        const { data, error } = await supabase.from("profiles").select("id, full_name, role").order("full_name");
+        const { data, error } = await supabase.from("profiles").select("id, full_name, role").eq("active", true).order("full_name");
         if (error) throw error;
         return JSON.stringify({
           count: data?.length ?? 0,
