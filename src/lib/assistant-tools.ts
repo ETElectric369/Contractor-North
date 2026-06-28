@@ -1,9 +1,12 @@
 import "server-only";
 import type Anthropic from "@anthropic-ai/sdk";
-import { tzDayStartUtc } from "@/lib/tz";
+import { tzDayStartUtc, todayStrInTz, payPeriodForOffset } from "@/lib/tz";
 import { escapeLike } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
+import { getMoneyPipeline } from "@/lib/billing-pipeline";
+import { invoiceBalance } from "@/lib/invoice-math";
+import { aggregatePayrollEntries } from "@/lib/payroll-math";
 
 /**
  * Read-only data tools for the in-app assistant.
@@ -61,13 +64,17 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "list_invoices",
     description:
-      "List invoices with status, total, amount paid, and remaining balance. Use for 'who owes me money', 'show unpaid invoices', 'what's outstanding', 'what does Jackie owe' (pass customer_id).",
+      "List invoices with status, total, amount paid, remaining balance, and an OVERDUE flag (past its due date with a balance). Use for 'who owes me money', 'show unpaid invoices', 'what's outstanding', 'what's overdue' (pass overdue_only), 'what does Jackie owe' (pass customer_id). Overdue invoices sort first; the result carries total_overdue.",
     input_schema: {
       type: "object",
       properties: {
         unpaid_only: {
           type: "boolean",
           description: "When true, only return invoices with a remaining balance (default false).",
+        },
+        overdue_only: {
+          type: "boolean",
+          description: "When true, only return invoices that are past their due date AND still owe a balance (default false).",
         },
         customer_id: { type: "string", description: "Optional — only this customer's invoices (resolve the name with list_customers first)." },
         limit: { type: "integer", description: "Max rows (default 15, max 40)." },
@@ -374,9 +381,61 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
       "The reverse of list_job_contacts: every job a given contact is linked to as a sub / supplier / inspector, with their role. Use for 'what jobs is Joe's plumbing on', 'which jobs does this sub work'. Pass a customer_id (from list_customers).",
     input_schema: { type: "object", properties: { customer_id: { type: "string" } }, required: ["customer_id"] },
   },
+  {
+    name: "money_pipeline",
+    description:
+      "THE owner's money board (single source of truth, matches /billing + My Day). Returns the three money-action stages — jobs DONE but NOT INVOICED (need an invoice), DRAFT invoices (review & send), and UNPAID sent/partial invoices (with an overdue flag) — plus the four headline totals: to_invoice, drafts, outstanding, and overdue. Use for 'what do I need to invoice', 'what's overdue', 'how much is outstanding', 'show me the money pipeline'.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "payroll_summary",
+    description:
+      "Payroll for the CURRENT pay period: per-employee hours, gross pay, mileage, and what's already paid vs unpaid — using the company's pay schedule (the same numbers as the Payroll page). Use for 'what's payroll this period', 'how much do I owe the crew', 'gross pay this pay period'. Gross pay only — tax/withholding is the accountant's job.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "get_bill",
+    description:
+      "Read ONE supplier BILL in full — supplier, amount, status, category, the linked job, and every line item (qty, unit price, amount). Pass a bill_id (from list_bills). Use to read a bill's breakdown back before paying or categorizing it.",
+    input_schema: { type: "object", properties: { bill_id: { type: "string", description: "The bill's id (from list_bills)." } }, required: ["bill_id"] },
+  },
+  {
+    name: "get_purchase_order",
+    description:
+      "Read ONE PURCHASE ORDER in full — vendor, status, total, the linked job, and every line item WITH its ordered qty, received_qty, and remaining (still to be delivered). Pass a po_id (from list_purchase_orders). Use for 'what's still outstanding on that PO', 'has the CED order come in'.",
+    input_schema: { type: "object", properties: { po_id: { type: "string", description: "The purchase order's id (from list_purchase_orders)." } }, required: ["po_id"] },
+  },
+  {
+    name: "list_kits",
+    description:
+      "List the company's KITS — saved bundles of material/labor lines (assemblies) dropped onto a quote to speed up quoting common services. Returns each kit's id, name, category, and item count. Use for 'what kits do we have', 'is there a kit for a service upgrade'.",
+    input_schema: { type: "object", properties: { search: { type: "string", description: "Optional text to match against kit name or category." }, limit: { type: "integer", description: "Max rows (default 20, max 40)." } } },
+  },
+  {
+    name: "list_organize",
+    description:
+      "List the Organize inbox — receipts / notes / job documents that were photographed and read, each with its id, kind, title, vendor, amount, and whether it's filed or still in the 'needs attention' tray. Use for 'what's in my inbox', 'what receipts still need filing', 'what's waiting to be organized' (pass status='needs_review' for just the tray).",
+    input_schema: { type: "object", properties: { status: { type: "string", description: "Optional — 'filed' or 'needs_review' (the tray)." }, limit: { type: "integer", description: "Max rows (default 30, max 40)." } } },
+  },
 ];
 
 const VALID_TOOL_NAMES = new Set(DATA_TOOLS.map((t) => t.name));
+
+/**
+ * Data tools that expose FINANCIAL / office-only information and must NOT be offered to a
+ * field-tech caller. The chat route gates its tool surface on this (least-privilege at the tool
+ * layer; the DB RLS already returns zero rows to a tech, this is defense-in-depth). Kept here,
+ * next to the tool definitions, so adding a money tool can't forget to gate it. The route's own
+ * STAFF_ONLY_READ set should union this in.
+ */
+export const STAFF_ONLY_DATA_TOOLS = new Set<string>([
+  "money_pipeline", // to-invoice / drafts / outstanding / overdue — the owner's money board
+  "payroll_summary", // per-employee gross pay + hours
+  "get_bill", // supplier bill + its cost breakdown
+  "get_purchase_order", // vendor PO + costs (unit_cost is buy-side pricing)
+  "list_kits", // saved quote-bundle pricing
+  "list_organize", // receipts/notes inbox — carries vendor + amounts
+]);
 
 /** Strip characters that would break a PostgREST `.or()` filter expression. */
 function sanitize(s: unknown): string {
@@ -509,6 +568,10 @@ export async function runDataTool(
 
       case "list_invoices": {
         const lim = clampLimit(input.limit, 15);
+        // Org-local "today" for the overdue rule — a UTC midnight would mis-flag afternoon
+        // due-today invoices for non-UTC orgs. Mirrors billing-pipeline's overdue definition.
+        const { data: orgInv } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+        const today = todayStrInTz(getOrgSettings((orgInv as any)?.settings).timezone);
         let q = supabase
           .from("invoices")
           .select("id, invoice_number, status, total, amount_paid, due_date, created_at, customers(name)")
@@ -520,22 +583,29 @@ export async function runDataTool(
         let rows = (data ?? []).map((r: any) => {
           const total = money(r.total);
           const paid = money(r.amount_paid);
+          const balance = invoiceBalance(r.total, r.amount_paid); // SSOT balance — same rounding as the pipeline/portal
           return {
             id: r.id, // pass to get_invoice / payment.record
             invoice: r.invoice_number,
             status: r.status,
             total,
             paid,
-            balance: money(total - paid),
+            balance,
             due_date: r.due_date,
+            // Overdue = has a due date in the past AND still owes money. Mirrors getMoneyPipeline.
+            overdue: !!r.due_date && r.due_date < today && balance > 0.005,
             customer: embedName(r.customers),
           };
         });
         if (input.unpaid_only) rows = rows.filter((r: any) => r.balance > 0.005);
+        if (input.overdue_only) rows = rows.filter((r: any) => r.overdue);
+        rows.sort((a: any, b: any) => (a.overdue === b.overdue ? 0 : a.overdue ? -1 : 1)); // overdue first
         const outstanding = rows.reduce((s: number, r: any) => s + (r.balance > 0 ? r.balance : 0), 0);
+        const overdueTotal = rows.reduce((s: number, r: any) => s + (r.overdue ? r.balance : 0), 0);
         return JSON.stringify({
           count: rows.length,
           total_outstanding: money(outstanding),
+          total_overdue: money(overdueTotal),
           invoices: rows.slice(0, lim),
         });
       }
@@ -1233,6 +1303,10 @@ export async function runDataTool(
         if (!inv) return JSON.stringify({ found: false, message: "Invoice not found." });
         const total = money(inv.total);
         const paid = money(inv.amount_paid);
+        const balance = invoiceBalance(inv.total, inv.amount_paid); // SSOT balance
+        // Org-local "today" for overdue — mirrors getMoneyPipeline / list_invoices.
+        const { data: orgInv } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+        const today = todayStrInTz(getOrgSettings((orgInv as any)?.settings).timezone);
         return JSON.stringify({
           found: true,
           invoice_id: inv.id, // pass to invoice.addItem / payment.record
@@ -1243,7 +1317,9 @@ export async function runDataTool(
           tax: money(inv.tax),
           total,
           paid,
-          balance: money(total - paid),
+          balance,
+          due_date: (inv as any).due_date,
+          overdue: !!(inv as any).due_date && (inv as any).due_date < today && balance > 0.005,
           items: ((inv as any).invoice_items ?? []).map((it: any) => ({
             item_id: it.id, // needed for invoice.updateItem / invoice.deleteItem
             description: it.description,
@@ -1369,27 +1445,32 @@ export async function runDataTool(
 
       case "business_summary": {
         const head = { count: "exact" as const, head: true };
-        const [activeJobs, openQuotes, clockedIn, invoices] = await Promise.all([
+        // Outstanding/overdue/to-invoice come from getMoneyPipeline — the SAME source as /billing,
+        // My Day, and money_pipeline — so the headline can't drift. (The old inline reduce counted
+        // DRAFT invoices into "outstanding"; the pipeline excludes drafts, matching what the owner
+        // actually sees as owed.)
+        const [activeJobs, openQuotes, clockedIn, pipeline] = await Promise.all([
           supabase
             .from("jobs")
             .select("id", head)
             .in("status", ACTIVE_JOB_STATUSES),
           supabase.from("quotes").select("id", head).in("status", ["draft", "sent"]),
           supabase.from("time_entries").select("id", head).is("clock_out", null),
-          supabase.from("invoices").select("total, amount_paid, status").limit(1000),
+          getMoneyPipeline(supabase),
         ]);
         // Don't coerce a failed query into a confident "0 jobs / $0 outstanding" — the model would
-        // state that as fact. If any of the four failed (transient / RLS hiccup), surface it instead.
-        const sumErr = activeJobs.error || openQuotes.error || clockedIn.error || invoices.error;
+        // state that as fact. If any of the three counts failed (transient / RLS hiccup), surface it.
+        const sumErr = activeJobs.error || openQuotes.error || clockedIn.error;
         if (sumErr) throw sumErr;
-        const outstanding = (invoices.data ?? [])
-          .filter((r: any) => !["paid", "void", "cancelled"].includes(r.status))
-          .reduce((s: number, r: any) => s + Math.max(0, money(r.total) - money(r.amount_paid)), 0);
         return JSON.stringify({
           active_jobs: activeJobs.count ?? 0,
           open_quotes: openQuotes.count ?? 0,
           people_clocked_in: clockedIn.count ?? 0,
-          unpaid_invoice_balance: money(outstanding),
+          unpaid_invoice_balance: money(pipeline.outstandingTotal),
+          overdue_balance: money(pipeline.overdueTotal),
+          overdue_count: pipeline.overdueCount,
+          to_invoice_total: money(pipeline.toInvoiceTotal), // completed jobs with no invoice yet
+          jobs_to_invoice: pipeline.doneNotInvoiced.length,
         });
       }
 
@@ -1415,6 +1496,218 @@ export async function runDataTool(
             // sell = buy × (1 + markup%) — the same math the quote builder uses.
             sell_price: money(Number(r.buy_price) * (1 + Number(r.markup_pct) / 100)),
             supplier: r.supplier,
+          })),
+        });
+      }
+
+      case "money_pipeline": {
+        // THE single source of truth for the owner's money board — same helper /billing + My Day use.
+        const p = await getMoneyPipeline(supabase);
+        return JSON.stringify({
+          to_invoice: {
+            total: money(p.toInvoiceTotal),
+            count: p.doneNotInvoiced.length,
+            // Completed jobs with NO invoice — the silent gap; each needs an invoice created.
+            jobs: p.doneNotInvoiced.map((j) => ({
+              job_id: j.id, // pass to invoice.create / get_invoice
+              job: j.job_number,
+              name: j.name,
+              customer: j.customer,
+              estimated_value: money(j.value),
+            })),
+          },
+          drafts: {
+            total: money(p.draftTotal),
+            count: p.drafts.length,
+            invoices: p.drafts.map((i) => ({
+              invoice_id: i.id, // pass to get_invoice / invoice.send
+              invoice: i.invoice_number,
+              total: money(i.total),
+              balance: money(i.balance),
+              customer: i.customer,
+              job: i.job,
+            })),
+          },
+          unpaid: {
+            outstanding_total: money(p.outstandingTotal),
+            overdue_total: money(p.overdueTotal),
+            overdue_count: p.overdueCount,
+            count: p.unpaid.length,
+            invoices: p.unpaid.map((i) => ({
+              invoice_id: i.id, // pass to payment.record
+              invoice: i.invoice_number,
+              status: i.status,
+              total: money(i.total),
+              balance: money(i.balance),
+              due_date: i.due_date,
+              overdue: i.overdue,
+              customer: i.customer,
+              job: i.job,
+            })),
+          },
+        });
+      }
+
+      case "payroll_summary": {
+        // The CURRENT pay period, derived exactly like the Payroll page (org pay schedule + tz),
+        // then aggregated with the SAME aggregatePayrollEntries helper — no re-derived gross.
+        const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+        const settings = getOrgSettings((org as any)?.settings);
+        const period = payPeriodForOffset(settings.pay_schedule, settings.pay_anchor, todayStrInTz(settings.timezone), 0);
+        const startIso = tzDayStartUtc(period.start, settings.timezone).toISOString();
+        const endIso = tzDayStartUtc(period.end, settings.timezone).toISOString();
+        const { data: entries, error } = await supabase
+          .from("time_entries")
+          .select("profile_id, clock_in, clock_out, lunch_minutes, miles, paid_at, rate_override, profiles(full_name, hourly_rate)")
+          .eq("status", "closed")
+          .not("clock_out", "is", null)
+          .gte("clock_in", startIso)
+          .lt("clock_in", endIso);
+        if (error) throw error;
+        const rows = aggregatePayrollEntries((entries ?? []) as any[]);
+        const round = (n: number) => Math.round(n * 100) / 100;
+        const mileageRate = settings.mileage_rate;
+        return JSON.stringify({
+          period: { start: period.start, end: period.end },
+          mileage_rate: mileageRate,
+          // Totals (gross pay only — tax/withholding is the accountant's, by design).
+          unpaid_gross: money(rows.reduce((s, r) => s + r.unpaidGross, 0)),
+          unpaid_hours: round(rows.reduce((s, r) => s + r.unpaidHours, 0)),
+          unpaid_miles: round(rows.reduce((s, r) => s + r.unpaidMiles, 0)),
+          paid_gross: money(rows.reduce((s, r) => s + r.paidGross, 0)),
+          by_employee: rows.map((r) => ({
+            id: r.profileId, // pass to payroll.markPaid
+            name: r.name,
+            rate: money(r.rate),
+            unpaid_hours: round(r.unpaidHours),
+            unpaid_gross: money(r.unpaidGross),
+            unpaid_miles: round(r.unpaidMiles),
+            paid_hours: round(r.paidHours),
+            paid_gross: money(r.paidGross),
+            paid_miles: round(r.paidMiles),
+          })),
+        });
+      }
+
+      case "get_bill": {
+        const bid = sanitize(input.bill_id);
+        if (!bid) return JSON.stringify({ error: "Provide a bill_id." });
+        const { data: bill, error } = await supabase
+          .from("bills")
+          .select("id, supplier, bill_number, amount, status, category, bill_date, notes, jobs(name), bill_line_items(id, description, quantity, unit_price, amount, category)")
+          .eq("id", bid)
+          .maybeSingle();
+        if (error) throw error;
+        if (!bill) return JSON.stringify({ found: false, message: "Bill not found." });
+        const b = bill as any;
+        return JSON.stringify({
+          found: true,
+          bill_id: b.id,
+          supplier: b.supplier,
+          bill_number: b.bill_number,
+          amount: money(b.amount),
+          status: b.status,
+          category: b.category,
+          bill_date: b.bill_date,
+          notes: b.notes,
+          job: embedName(b.jobs),
+          items: (b.bill_line_items ?? []).map((it: any) => ({
+            item_id: it.id,
+            description: it.description,
+            quantity: it.quantity,
+            unit_price: money(it.unit_price),
+            amount: money(it.amount),
+            category: it.category,
+          })),
+        });
+      }
+
+      case "get_purchase_order": {
+        const pid = sanitize(input.po_id);
+        if (!pid) return JSON.stringify({ error: "Provide a po_id." });
+        const { data: po, error } = await supabase
+          .from("purchase_orders")
+          .select("id, po_number, vendor, status, subtotal, total, ordered_at, notes, jobs(name), purchase_order_items(id, description, part_number, quantity, unit, unit_cost, line_total, received_qty)")
+          .eq("id", pid)
+          .maybeSingle();
+        if (error) throw error;
+        if (!po) return JSON.stringify({ found: false, message: "Purchase order not found." });
+        const p = po as any;
+        return JSON.stringify({
+          found: true,
+          po_id: p.id,
+          po_number: p.po_number,
+          vendor: p.vendor,
+          status: p.status,
+          subtotal: money(p.subtotal),
+          total: money(p.total),
+          ordered_at: p.ordered_at,
+          notes: p.notes,
+          job: embedName(p.jobs),
+          items: (p.purchase_order_items ?? []).map((it: any) => {
+            const ordered = Number(it.quantity) || 0;
+            const received = Number(it.received_qty) || 0;
+            return {
+              item_id: it.id,
+              description: it.description,
+              part_number: it.part_number,
+              unit: it.unit,
+              unit_cost: money(it.unit_cost),
+              line_total: money(it.line_total),
+              ordered_qty: ordered,
+              received_qty: received,
+              remaining_qty: Math.round((ordered - received) * 100) / 100, // still to be delivered
+            };
+          }),
+        });
+      }
+
+      case "list_kits": {
+        const lim = clampLimit(input.limit, 20);
+        const s = sanitize(input.search);
+        let q = supabase
+          .from("kits")
+          .select("id, name, category, kit_items(id)")
+          .order("name")
+          .limit(lim);
+        if (s) q = q.or(`name.ilike.%${s}%,category.ilike.%${s}%`);
+        const { data, error } = await q;
+        if (error) throw error;
+        return JSON.stringify({
+          count: data?.length ?? 0,
+          kits: (data ?? []).map((k: any) => ({
+            id: k.id,
+            name: k.name,
+            category: k.category,
+            items: k.kit_items?.length ?? 0,
+          })),
+        });
+      }
+
+      case "list_organize": {
+        const lim = clampLimit(input.limit, 30);
+        let q = supabase
+          .from("organized_items")
+          .select("id, kind, title, vendor, amount, item_date, category, status, confidence, jobs(job_number, name)")
+          .order("created_at", { ascending: false })
+          .limit(lim);
+        const st = sanitize(input.status);
+        if (st) q = q.eq("status", st); // 'needs_review' = the tray
+        const { data, error } = await q;
+        if (error) throw error;
+        return JSON.stringify({
+          count: data?.length ?? 0,
+          items: (data ?? []).map((i: any) => ({
+            id: i.id, // pass to organize file/assign actions
+            kind: i.kind,
+            title: i.title,
+            vendor: i.vendor,
+            amount: i.amount == null ? null : money(i.amount),
+            date: i.item_date,
+            category: i.category,
+            status: i.status,
+            confidence: i.confidence,
+            job: i.jobs ? `${i.jobs.job_number} ${i.jobs.name}` : null,
           })),
         });
       }

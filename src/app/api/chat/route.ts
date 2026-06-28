@@ -6,7 +6,7 @@ import {
   ASSISTANT_SYSTEM_PROMPT,
 } from "@/lib/anthropic";
 import { getOrgSettings } from "@/lib/org-settings";
-import { DATA_TOOLS, runDataTool } from "@/lib/assistant-tools";
+import { DATA_TOOLS, runDataTool, STAFF_ONLY_DATA_TOOLS } from "@/lib/assistant-tools";
 import { CALC_TOOLS, runCalc, CALC_TOOL_NAMES } from "@/lib/electrical-calc";
 import { agentWriteToolsForRole } from "@/lib/actions/agent-tools";
 import { executeAction } from "@/lib/actions/execute";
@@ -140,7 +140,10 @@ export async function POST(req: Request) {
   const STAFF_ONLY_READ = new Set(["list_invoices", "get_invoice", "list_quotes", "get_quote", "business_summary", "search_price_list", "list_bug_reports", "list_customers", "get_customer", "list_inquiries", "list_payments", "list_bills", "list_purchase_orders", "list_work_orders", "list_material_lists", "list_change_orders", "list_inventory", "list_petty_cash", "list_recurring", "list_compliance", "list_liens", "list_contracts", "hours_summary", "get_payment_schedule",
     // get_job exposes billing_type (fixed vs T&M — pricing strategy); list_team exposes the org's
     // role structure. Both are office concerns — keep them off the field-tech agent surface.
-    "get_job", "list_team"]);
+    "get_job", "list_team",
+    // The B8 money/office read tools (money_pipeline, payroll_summary, get_bill, get_purchase_order,
+    // list_kits, list_organize) — staff-only, kept next to their defs in assistant-tools.
+    ...STAFF_ONLY_DATA_TOOLS]);
   const isStaffCaller = ["owner", "admin", "office"].includes(role ?? "");
   const dataTools = isStaffCaller ? DATA_TOOLS : DATA_TOOLS.filter((t) => !STAFF_ONLY_READ.has(t.name));
   const orgS = getOrgSettings((org as any)?.settings);

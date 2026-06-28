@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { getOrgSettings } from "@/lib/org-settings";
-import { sendEmail, renderDocEmail, ownerBcc } from "@/lib/email";
+import { sendEmail, renderQuoteNoticeEmail, ownerBcc } from "@/lib/email";
 import { sendSms } from "@/lib/sms";
 import { createWorkOrderFromQuote } from "../work-orders/actions";
 import { createMaterialListFromQuote } from "../materials/actions";
@@ -73,12 +73,15 @@ export async function emailQuote(
   const link = publicQuoteLink((quote as any).public_token);
   const label = ((quote as any).doc_type ?? "quote") === "estimate" ? "Estimate" : "Quote";
 
-  const [{ data: items }, { data: org }] = await Promise.all([
-    supabase.from("quote_line_items").select("*").eq("quote_id", id).order("sort_order"),
-    supabase.from("organizations").select("name, brand_color, phone, email, settings").maybeSingle(),
-  ]);
+  const { data: org } = await supabase
+    .from("organizations")
+    .select("name, brand_color, phone, email, settings")
+    .maybeSingle();
 
-  const html = renderDocEmail({
+  // Link-only notice (no re-rendered line-item table): the canonical document
+  // lives at the /q link, so the email can never drift from the print/portal
+  // view — mirrors the renderInvoiceNoticeEmail decision.
+  const html = renderQuoteNoticeEmail({
     docType: label,
     number: quote.quote_number,
     company: {
@@ -89,18 +92,8 @@ export async function emailQuote(
     },
     customerName: customer.name,
     title: quote.title,
-    items: (items ?? []).map((i: any) => ({
-      description: i.description,
-      quantity: i.quantity,
-      unit: i.unit,
-      price: i.unit_price,
-      total: i.line_total,
-    })),
-    subtotal: quote.subtotal,
-    tax: quote.tax,
     total: quote.total,
-    notes: quote.notes,
-    link,
+    quoteLink: link,
   });
 
   const res = await sendEmail({

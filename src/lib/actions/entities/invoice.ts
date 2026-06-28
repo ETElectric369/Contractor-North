@@ -7,6 +7,10 @@ import {
   recordPayment,
   setPaymentSchedule,
   requestNextPayment,
+  setInvoiceDueDate,
+  setInvoiceTitle,
+  setInvoiceCustomerJob,
+  setInvoiceStatus,
 } from "@/app/(app)/billing/actions";
 import { createInvoiceForJob } from "@/app/(app)/jobs/actions";
 import type { ActionDef } from "../types";
@@ -122,6 +126,60 @@ export const invoiceActions: Record<string, ActionDef> = {
       if (!r.ok) return { ok: false, error: r.error };
       return { ok: true, speak: "Line removed." };
     },
+  },
+  // Header / field edits on a DRAFT invoice — reversible, nothing sent, no money moved,
+  // so tier-1 (auth:"staff", no confirm). Each WRAPS the existing billing server action,
+  // which carries the requireStaff + RLS + draft-only + recalc/revalidate logic.
+  "invoice.setDueDate": {
+    name: "invoice.setDueDate",
+    group: "invoice",
+    label: "Set invoice due date",
+    description:
+      "Set (or clear) an invoice's DUE DATE — the field the Overdue tracker reads. Pass the invoice_id (from get_invoice or list_invoices) and a due_date as YYYY-MM-DD, or null to clear it. 'Make the Jones invoice due July 15.'",
+    input: z.object({ invoice_id: z.string(), due_date: z.string().nullable().default(null) }),
+    auth: "staff",
+    effect: "write",
+    handler: (i) => setInvoiceDueDate(i.invoice_id, i.due_date ?? null),
+  },
+  "invoice.setTitle": {
+    name: "invoice.setTitle",
+    group: "invoice",
+    label: "Set invoice title",
+    description:
+      "Edit an invoice's TITLE — the short label shown in the header and lists. Pass the invoice_id (from get_invoice or list_invoices) and the new title. 'Rename the invoice to Kitchen remodel — final.'",
+    input: z.object({ invoice_id: z.string(), title: z.string().default("") }),
+    auth: "staff",
+    effect: "write",
+    handler: (i) => setInvoiceTitle(i.invoice_id, i.title ?? ""),
+  },
+  "invoice.setCustomerJob": {
+    name: "invoice.setCustomerJob",
+    group: "invoice",
+    label: "Re-point invoice customer/job",
+    description:
+      "Correct the customer/job link on a DRAFT invoice (draft-only — once sent, the billing relationship is locked). Pass the invoice_id plus customer_id and/or job_id (resolve them with list_customers / list_jobs); pass null to clear. The job's customer is kept in sync by the action.",
+    input: z.object({
+      invoice_id: z.string(),
+      customer_id: z.string().nullable().default(null),
+      job_id: z.string().nullable().default(null),
+    }),
+    auth: "staff",
+    effect: "write",
+    handler: (i) =>
+      setInvoiceCustomerJob(i.invoice_id, { customer_id: i.customer_id ?? null, job_id: i.job_id ?? null }),
+  },
+  "invoice.setStatus": {
+    name: "invoice.setStatus",
+    group: "invoice",
+    label: "Set invoice status",
+    description:
+      "Set an invoice's STATUS — e.g. mark it sent, paid, or void. Resolve the invoice with get_invoice or list_invoices first. Voiding a milestone draw re-opens its milestone. This changes the books, so the app asks the user to confirm before it runs.",
+    input: z.object({ id: z.string(), status: z.string() }),
+    auth: "staff",
+    effect: "write",
+    confirm: "financial", // flips an invoice's money state (paid/void) → tier 2, gated like payment.record
+    describe: (i) => `Set this invoice's status to "${i.status}" — say yes to confirm.`,
+    handler: (i) => setInvoiceStatus(i.id, i.status),
   },
   "payment.record": {
     name: "payment.record",

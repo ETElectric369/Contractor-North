@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { saveQuote, addQuoteItem, updateQuoteItem, deleteQuoteItem, createJobFromQuote, updateQuoteStatus, setQuoteType } from "@/app/(app)/quotes/actions";
+import { saveQuote, addQuoteItem, updateQuoteItem, deleteQuoteItem, createJobFromQuote, updateQuoteStatus, setQuoteType, updateQuoteMeta, setQuoteCustomer, duplicateQuote } from "@/app/(app)/quotes/actions";
 import type { ActionDef } from "../types";
 
 export const quoteActions: Record<string, ActionDef> = {
@@ -77,6 +77,55 @@ export const quoteActions: Record<string, ActionDef> = {
     auth: "staff",
     effect: "write",
     handler: (i) => deleteQuoteItem(i.item_id, i.quote_id),
+  },
+  "quote.update": {
+    name: "quote.update",
+    group: "quote",
+    label: "Edit quote header",
+    description:
+      "Edit a quote/estimate's HEADER fields — title, notes, tax rate, and valid-until — 'rename the Jones estimate and set it to expire July 31'. Resolve the quote with list_quotes or get_quote and pass its id. tax_rate is a FRACTION, not a percent (8.25% = 0.0825); valid_until is YYYY-MM-DD or null. Reversible draft edit — line items are edited with quote.addItem/updateItem/deleteItem.",
+    input: z.object({
+      id: z.string(),
+      title: z.string().default(""),
+      notes: z.string().default(""),
+      tax_rate: z.number().default(0),
+      valid_until: z.string().nullable().default(null),
+    }),
+    auth: "staff",
+    effect: "write",
+    handler: (i) =>
+      updateQuoteMeta(i.id, {
+        title: i.title ?? "",
+        notes: i.notes ?? "",
+        tax_rate: i.tax_rate ?? 0,
+        valid_until: i.valid_until ?? null,
+      }),
+  },
+  "quote.setCustomer": {
+    name: "quote.setCustomer",
+    group: "quote",
+    label: "Set quote customer",
+    description:
+      "Change a saved quote's CUSTOMER — 'attach the Miller estimate to the new Miller customer'. Resolve the quote with list_quotes and the customer with list_customers, then pass the quote id and customer_id (or null to detach). Reversible draft edit.",
+    input: z.object({ id: z.string(), customer_id: z.string().nullable().default(null) }),
+    auth: "staff",
+    effect: "write",
+    handler: (i) => setQuoteCustomer(i.id, i.customer_id ?? null),
+  },
+  "quote.duplicate": {
+    name: "quote.duplicate",
+    group: "quote",
+    label: "Duplicate quote",
+    description:
+      "Clone a quote (header + all line items) into a fresh DRAFT titled '… (copy)' — 'copy the Jones estimate so I can tweak it'. Resolve the quote with list_quotes and pass its id. Returns the new quote's id; the copy stands on its own (not tied to the original's job).",
+    input: z.object({ id: z.string() }),
+    auth: "staff",
+    effect: "write",
+    handler: async (i) => {
+      const r = await duplicateQuote(i.id);
+      if (!r.ok) return { ok: false, error: r.error };
+      return { ok: true, data: { id: r.id }, speak: "Quote duplicated as a new draft." };
+    },
   },
   "quote.create": {
     name: "quote.create",

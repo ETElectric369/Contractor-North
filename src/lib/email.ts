@@ -59,69 +59,6 @@ export function money(n: number | null | undefined): string {
   })}`;
 }
 
-/** Build a simple branded HTML document email for a quote or invoice. */
-export function renderDocEmail(input: {
-  docType: "Quote" | "Estimate" | "Invoice";
-  number: string;
-  company: { name: string; brand: string; phone?: string | null; email?: string | null };
-  customerName: string;
-  title?: string | null;
-  items: { description: string; quantity: number; unit?: string | null; price: number; total: number }[];
-  subtotal: number;
-  tax: number;
-  total: number;
-  balance?: number | null;
-  notes?: string | null;
-  link?: string;
-}): string {
-  const rows = input.items
-    .map(
-      (it) => `
-      <tr>
-        <td style="padding:8px 0;border-bottom:1px solid #eee;color:#334155">${escape(it.description)}</td>
-        <td style="padding:8px 0;border-bottom:1px solid #eee;text-align:right;color:#64748b">${it.quantity} ${escape(it.unit ?? "")}</td>
-        <td style="padding:8px 0;border-bottom:1px solid #eee;text-align:right;color:#64748b">${money(it.price)}</td>
-        <td style="padding:8px 0;border-bottom:1px solid #eee;text-align:right;color:#0f172a;font-weight:600">${money(it.total)}</td>
-      </tr>`,
-    )
-    .join("");
-
-  const balanceRow =
-    input.balance != null
-      ? `<tr><td colspan="3" style="text-align:right;padding:4px 0;color:#0f172a;font-weight:700">Balance due</td><td style="text-align:right;padding:4px 0;color:#0f172a;font-weight:700">${money(input.balance)}</td></tr>`
-      : "";
-
-  return `
-  <div style="font-family:ui-sans-serif,system-ui,Arial,sans-serif;max-width:600px;margin:0 auto;color:#0f172a">
-    <div style="border-bottom:3px solid ${input.company.brand};padding-bottom:12px;margin-bottom:16px">
-      <div style="font-size:20px;font-weight:700">${escape(input.company.name)}</div>
-      <div style="font-size:12px;color:#64748b">${[input.company.phone, input.company.email].filter(Boolean).map(escape).join(" · ")}</div>
-    </div>
-    <p style="font-size:14px">Hi ${escape(input.customerName)},</p>
-    <p style="font-size:14px;color:#475569">Please find your ${input.docType.toLowerCase()} <strong>${escape(input.number)}</strong>${input.title ? ` — ${escape(input.title)}` : ""} below.</p>
-    ${input.link ? `<p style="margin:14px 0"><a href="${input.link}" style="display:inline-block;background:${input.company.brand};color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-size:14px;font-weight:600">View ${input.docType.toLowerCase()} online</a></p>` : ""}
-    <table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:12px">
-      <thead>
-        <tr>
-          <th style="text-align:left;padding-bottom:6px;border-bottom:2px solid #cbd5e1;color:#64748b;font-size:11px;text-transform:uppercase">Description</th>
-          <th style="text-align:right;padding-bottom:6px;border-bottom:2px solid #cbd5e1;color:#64748b;font-size:11px;text-transform:uppercase">Qty</th>
-          <th style="text-align:right;padding-bottom:6px;border-bottom:2px solid #cbd5e1;color:#64748b;font-size:11px;text-transform:uppercase">Price</th>
-          <th style="text-align:right;padding-bottom:6px;border-bottom:2px solid #cbd5e1;color:#64748b;font-size:11px;text-transform:uppercase">Amount</th>
-        </tr>
-      </thead>
-      <tbody>${rows}</tbody>
-      <tfoot>
-        <tr><td colspan="3" style="text-align:right;padding:8px 0 2px;color:#64748b">Subtotal</td><td style="text-align:right;padding:8px 0 2px;color:#64748b">${money(input.subtotal)}</td></tr>
-        <tr><td colspan="3" style="text-align:right;padding:2px 0;color:#64748b">Tax</td><td style="text-align:right;padding:2px 0;color:#64748b">${money(input.tax)}</td></tr>
-        <tr><td colspan="3" style="text-align:right;padding:4px 0;color:#0f172a;font-weight:700;border-top:1px solid #cbd5e1">Total</td><td style="text-align:right;padding:4px 0;color:#0f172a;font-weight:700;border-top:1px solid #cbd5e1">${money(input.total)}</td></tr>
-        ${balanceRow}
-      </tfoot>
-    </table>
-    ${input.notes ? `<p style="font-size:13px;color:#475569;margin-top:16px"><strong>Notes:</strong><br/>${escape(input.notes).replace(/\n/g, "<br/>")}</p>` : ""}
-    <p style="font-size:13px;color:#64748b;margin-top:24px">Thank you for your business.<br/>${escape(input.company.name)}</p>
-  </div>`;
-}
-
 /**
  * Invoice notification email — a basic greeting + the balance + a button to the one
  * canonical invoice document (the /i link, which is viewable, printable to the same
@@ -164,9 +101,53 @@ export function renderInvoiceNoticeEmail(input: {
   </div>`;
 }
 
+/**
+ * Quote / Estimate notification email — a greeting + the number/title/total + a
+ * button to the one canonical public quote document (the /q link, which is
+ * viewable, printable to the same PDF, and acceptable). Deliberately does NOT
+ * re-render the line items: the document lives at the link, so the email can
+ * never drift from the print/portal view (the recurring "print ≠ email" bug,
+ * the exact decision made for renderInvoiceNoticeEmail).
+ */
+export function renderQuoteNoticeEmail(input: {
+  docType: "Quote" | "Estimate";
+  company: { name: string; brand: string; tagline?: string | null; phone?: string | null; email?: string | null };
+  /** The grouped letterhead (same companyBlock() the printed document uses) — address,
+   *  then phone/email behind a brand accent rule, then the license. Keeps email == print. */
+  letterhead?: { address: string[]; contact: string[]; license: string | null };
+  customerName: string;
+  number: string;
+  title?: string | null;
+  total: number;
+  quoteLink: string;
+  portalLink?: string;
+}): string {
+  const c = safeColor(input.company.brand);
+  const lh = input.letterhead;
+  const noun = input.docType.toLowerCase();
+  const line = (s: string, style: string) => `<div style="font-size:12px;${style}">${escape(s)}</div>`;
+  const contact = lh
+    ? `${lh.address.length ? `<div style="line-height:1.5">${lh.address.map((l) => line(l, "color:#64748b")).join("")}</div>` : ""}` +
+      `${lh.contact.length || lh.license ? `<div style="border-left:2px solid ${c};padding-left:9px;margin-top:7px;line-height:1.5">${lh.contact.map((l) => line(l, "color:#475569")).join("")}${lh.license ? line(lh.license, "color:#0f172a;font-weight:600") : ""}</div>` : ""}`
+    : `<div style="font-size:12px;color:#64748b">${[input.company.phone, input.company.email].filter(Boolean).map(escape).join(" · ")}</div>`;
+  return `
+  <div style="font-family:ui-sans-serif,system-ui,Arial,sans-serif;max-width:560px;margin:0 auto;color:#0f172a">
+    <div style="border-bottom:3px solid ${c};padding-bottom:12px;margin-bottom:16px">
+      <div style="font-size:20px;font-weight:700">${escape(input.company.name)}</div>
+      ${input.company.tagline ? `<div style="font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:#94a3b8;margin-bottom:6px">${escape(input.company.tagline)}</div>` : `<div style="height:6px"></div>`}
+      ${contact}
+    </div>
+    <p style="font-size:14px;margin:0 0 8px">Hi ${escape(input.customerName)},</p>
+    <p style="font-size:14px;color:#475569;margin:0">Your ${noun} <strong>${escape(input.number)}</strong>${input.title ? ` — ${escape(input.title)}` : ""} is ready. Total: <strong style="color:#0f172a">${money(input.total)}</strong>.</p>
+    <p style="margin:18px 0"><a href="${input.quoteLink}" style="display:inline-block;background:${c};color:#fff;text-decoration:none;padding:11px 20px;border-radius:8px;font-size:14px;font-weight:600">View &amp; accept ${noun}</a></p>
+    ${input.portalLink ? `<p style="font-size:13px;color:#475569;margin:0">Or see all your quotes, invoices, and documents — and print a PDF — in <a href="${input.portalLink}" style="color:${c};font-weight:600">your customer portal</a>.</p>` : ""}
+    <p style="font-size:13px;color:#64748b;margin-top:24px">Thank you for the opportunity to earn your business,<br/>${escape(input.company.name)}</p>
+  </div>`;
+}
+
 /** A light branded "nudge" email — payment reminder, quote follow-up, appointment
  *  reminder. Header + heading + a short message + optional button. Same brand header
- *  as renderDocEmail so reminders look like the rest of the contractor's mail. */
+ *  as the notice emails so reminders look like the rest of the contractor's mail. */
 export function renderReminderEmail(input: {
   company: { name: string; brand: string; phone?: string | null; email?: string | null };
   customerName: string;
