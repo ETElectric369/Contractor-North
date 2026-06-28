@@ -350,6 +350,13 @@ export async function createManualEntry(input: {
 
   revalidatePath("/timeclock");
   revalidatePath("/timecards");
+  revalidatePath("/planner"); // a manual entry changes hours on My Day
+  if (jobId) {
+    // The entry is billable labor on this job — refresh its Time tab + labor totals
+    // so "Create invoice" sees it immediately.
+    revalidatePath(`/jobs/${jobId}`);
+    revalidatePath("/jobs");
+  }
   return { ok: true };
 }
 
