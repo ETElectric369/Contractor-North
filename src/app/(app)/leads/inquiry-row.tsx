@@ -2,13 +2,13 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Phone, Mail, CheckCircle2, Globe } from "lucide-react";
+import { Phone, Mail, CheckCircle2, Globe, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Input, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { InquiryModal } from "./inquiry-modal";
 import { ConvertMenu } from "./convert-menu";
-import { markInquiryContacted } from "./actions";
+import { markInquiryContacted, setInquiryStatus } from "./actions";
 import { formatDate } from "@/lib/utils";
 import type { Inquiry } from "@/lib/types";
 
@@ -19,6 +19,8 @@ const statusTone: Record<string, "blue" | "amber" | "indigo" | "green" | "slate"
   won: "green",
   lost: "slate",
 };
+
+const STATUSES = ["new", "contacted", "quoted", "won", "lost"];
 
 export function InquiryRow({
   inquiry,
@@ -37,6 +39,17 @@ export function InquiryRow({
   function contacted() {
     start(async () => {
       await markInquiryContacted(inquiry.id, followUp || null);
+      router.refresh();
+    });
+  }
+
+  function changeStatus(status: string) {
+    start(async () => {
+      const res = await setInquiryStatus(inquiry.id, status);
+      if (!res.ok) {
+        alert(res.error ?? "Couldn't update status.");
+        return;
+      }
       router.refresh();
     });
   }
@@ -78,6 +91,31 @@ export function InquiryRow({
         <Button size="sm" variant="outline" onClick={contacted} disabled={pending}>
           <CheckCircle2 className="h-3.5 w-3.5" /> Contacted
         </Button>
+        <div className="text-right">
+          <label className="mb-0.5 block text-[10px] uppercase tracking-wide text-slate-400">Status</label>
+          <Select
+            value={inquiry.status}
+            disabled={pending}
+            className="h-8 w-32 text-xs"
+            onChange={(e) => changeStatus(e.target.value)}
+          >
+            {STATUSES.map((s) => (
+              <option key={s} value={s}>
+                {s.replace(/^\w/, (c) => c.toUpperCase())}
+              </option>
+            ))}
+          </Select>
+        </div>
+        {inquiry.status !== "lost" && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => changeStatus("lost")}
+            disabled={pending}
+          >
+            <XCircle className="h-3.5 w-3.5" /> Mark lost
+          </Button>
+        )}
         <InquiryModal inquiry={inquiry} mode="edit" />
         <ConvertMenu inquiryId={inquiry.id} inquiryName={inquiry.name} customers={customers} />
       </div>

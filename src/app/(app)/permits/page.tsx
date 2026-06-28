@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { AddPermitButton } from "./add-permit-button";
+import { EditPermitButton } from "./edit-permit-button";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +21,7 @@ export default async function PermitsPage() {
   const supabase = await createClient();
   const { data: permits } = await supabase
     .from("permits")
-    .select("id, permit_number, type, authority, status, inspection_date, inspection_result, job_id, portal_url, jobs(job_number, name)")
+    .select("id, permit_number, type, authority, status, applied_date, issued_date, expires_date, inspection_date, inspector, inspection_result, notes, job_id, portal_url, jobs(job_number, name)")
     .order("inspection_date", { ascending: true, nullsFirst: false })
     .order("created_at", { ascending: false });
 
@@ -79,6 +80,7 @@ export default async function PermitsPage() {
                 <div className="col-span-3 flex items-center justify-end gap-2">
                   <Badge tone={p.inspection_result === "passed" ? "green" : p.inspection_result === "failed" ? "red" : "slate"}>{p.inspection_result}</Badge>
                   <Badge tone={statusTone(p.status)}>{p.status.replace("_", " ")}</Badge>
+                  <EditPermitButton permit={p} jobId={p.job_id} />
                 </div>
               </li>
             ))}

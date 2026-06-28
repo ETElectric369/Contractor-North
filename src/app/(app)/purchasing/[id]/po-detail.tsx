@@ -138,42 +138,17 @@ export function PoDetail({
 
       <div className="rounded-xl border border-slate-200 bg-white">
         <ul className="divide-y divide-slate-100">
-          {items.map((it) => {
-            const fully = Number(it.received_qty) >= Number(it.quantity);
-            return (
-              <li key={it.id} className="flex items-center gap-3 px-4 py-3 text-sm">
-                <div className="min-w-0 flex-1">
-                  <div className="font-medium text-slate-800">{it.description}</div>
-                  <div className="text-xs text-slate-400">
-                    {it.part_number ? `#${it.part_number} · ` : ""}
-                    {it.quantity} {it.unit} × {formatCurrency(it.unit_cost)}
-                  </div>
-                </div>
-                {fully ? (
-                  <Badge tone="green" className="shrink-0 gap-1">
-                    <Check className="h-3 w-3" /> {it.received_qty}
-                  </Badge>
-                ) : canReceive ? (
-                  <button
-                    onClick={() => start(async () => { await receiveItem(it.id, po.id, it.quantity); refresh(); })}
-                    disabled={pending}
-                    className="inline-flex shrink-0 items-center gap-1 rounded-md bg-brand-light px-2 py-1 text-xs font-medium text-brand hover:bg-brand-light/70"
-                  >
-                    <PackageCheck className="h-3.5 w-3.5" /> Receive
-                  </button>
-                ) : null}
-                <div className="shrink-0 font-medium text-slate-900">{formatCurrency(it.line_total)}</div>
-                <button
-                  onClick={() => start(async () => { await deletePoItem(it.id, po.id); refresh(); })}
-                  disabled={pending}
-                  className="shrink-0 text-slate-400 hover:text-red-600"
-                  aria-label="Remove"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </li>
-            );
-          })}
+          {items.map((it) => (
+            <PoLine
+              key={it.id}
+              it={it}
+              poId={po.id}
+              canReceive={canReceive}
+              pending={pending}
+              start={start}
+              refresh={refresh}
+            />
+          ))}
           {items.length === 0 && (
             <li className="px-4 py-6 text-center text-slate-400">No items yet — add one below.</li>
           )}
@@ -195,5 +170,87 @@ export function PoDetail({
         </div>
       </div>
     </div>
+  );
+}
+
+function PoLine({
+  it,
+  poId,
+  canReceive,
+  pending,
+  start,
+  refresh,
+}: {
+  it: PurchaseOrderItem;
+  poId: string;
+  canReceive: boolean;
+  pending: boolean;
+  start: (cb: () => void) => void;
+  refresh: () => void;
+}) {
+  const remaining = Math.max(0, Number(it.quantity) - Number(it.received_qty));
+  const fully = Number(it.received_qty) >= Number(it.quantity);
+  const [recv, setRecv] = useState(remaining);
+
+  function receive() {
+    const entered = Math.min(Math.max(0, recv), remaining);
+    if (entered <= 0) return;
+    start(async () => {
+      const res = await receiveItem(it.id, poId, Number(it.received_qty) + entered);
+      if (res?.error) { alert(res.error); return; }
+      refresh();
+    });
+  }
+
+  return (
+    <li className="flex items-center gap-3 px-4 py-3 text-sm">
+      <div className="min-w-0 flex-1">
+        <div className="font-medium text-slate-800">{it.description}</div>
+        <div className="text-xs text-slate-400">
+          {it.part_number ? `#${it.part_number} · ` : ""}
+          {it.quantity} {it.unit} × {formatCurrency(it.unit_cost)}
+          {!fully && Number(it.received_qty) > 0 ? ` · ${it.received_qty} received` : ""}
+        </div>
+      </div>
+      {fully ? (
+        <Badge tone="green" className="shrink-0 gap-1">
+          <Check className="h-3 w-3" /> {it.received_qty}
+        </Badge>
+      ) : canReceive ? (
+        <div className="flex shrink-0 items-center gap-1">
+          <NumberInput
+            value={recv}
+            onValueChange={setRecv}
+            min={0}
+            max={remaining}
+            className="w-16 text-center"
+            aria-label="Quantity to receive"
+          />
+          <button
+            onClick={receive}
+            disabled={pending || recv <= 0}
+            className="inline-flex items-center gap-1 rounded-md bg-brand-light px-2 py-1 text-xs font-medium text-brand hover:bg-brand-light/70 disabled:opacity-50"
+          >
+            <PackageCheck className="h-3.5 w-3.5" /> Receive
+          </button>
+        </div>
+      ) : null}
+      <div className="shrink-0 font-medium text-slate-900">{formatCurrency(it.line_total)}</div>
+      <button
+        onClick={() => {
+          if (!confirm("Remove this line?")) return;
+          start(async () => {
+            const res = await deletePoItem(it.id, poId);
+            if (res?.error) { alert(res.error); return; }
+            refresh();
+          });
+        }}
+        disabled={pending}
+        className="shrink-0 text-slate-400 hover:text-red-600"
+        aria-label="Remove"
+      >
+        <Trash2 className="h-4 w-4" />
+      </button>
+    </li>
   );
 }

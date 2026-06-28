@@ -3,18 +3,22 @@
 import { useRef, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { Plus, Trash2, Upload, Camera, Loader2, FileText } from "lucide-react";
+import { Plus, Trash2, Upload, Camera, Loader2, FileText, Pencil } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { Modal, ModalActions } from "@/components/ui/modal";
 import { Tabs } from "@/components/tabs";
 import { CameraCapture } from "@/components/camera-capture";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { createBill, setBillStatus, deleteBill, addDocument, deleteDocument } from "../jobs/actions";
+import { executeAction } from "@/lib/actions/execute";
 import { NewPoButton } from "../purchasing/new-po-button";
+
+const OVERHEAD_CATEGORIES = ["Fuel", "Shop supplies", "Tools", "Office", "Insurance", "Vehicle", "Other"];
 
 interface JobOption {
   id: string;
@@ -97,6 +101,7 @@ export function BillsReceipts({
   const [billCategory, setBillCategory] = useState("Shop supplies");
   const [billFilter, setBillFilter] = useState<"all" | "jobs" | "overhead">("all");
   const [billError, setBillError] = useState<string | null>(null);
+  const [editBill, setEditBill] = useState<BillRow | null>(null);
 
   const shownBills =
     billFilter === "all" ? bills : bills.filter((b) => (billFilter === "jobs" ? b.job_id : !b.job_id));
@@ -312,8 +317,11 @@ export function BillsReceipts({
                     >
                       <Badge tone={b.status === "paid" ? "green" : "amber"}>{b.status}</Badge>
                     </button>
+                    <button onClick={() => setEditBill(b)} className="text-slate-400 hover:text-brand" title="Edit">
+                      <Pencil className="h-4 w-4" />
+                    </button>
                     <button
-                      onClick={() => start(async () => { await deleteBill(b.id, b.job_id ?? ""); router.refresh(); })}
+                      onClick={() => { if (confirm(`Delete bill from "${b.supplier}"?`)) start(async () => { await deleteBill(b.id, b.job_id ?? ""); router.refresh(); }); }}
                       className="text-slate-400 hover:text-red-600"
                       title="Delete"
                     >
@@ -336,6 +344,10 @@ export function BillsReceipts({
                 </li>
               ))}
             </ul>
+          )}
+
+          {editBill && (
+            <BillEditModal key={editBill.id} bill={editBill} jobs={jobs} onClose={() => setEditBill(null)} />
           )}
         </Card>
       )}
@@ -406,5 +418,109 @@ export function BillsReceipts({
         </Card>
       )}
     </div>
+  );
+}
+
+/** Edit a supplier bill from the central list. Routes through the unified Action
+ *  Registry (executeAction → "bill.update") — the same capability the AI agent calls.
+ *  Beyond the job-tab editor this also exposes job link + overhead category so an
+ *  overhead bill can be corrected to a job (or vice-versa) right from here. */
+function BillEditModal({
+  bill,
+  jobs,
+  onClose,
+}: {
+  bill: BillRow;
+  jobs: JobOption[];
+  onClose: () => void;
+}) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const [supplier, setSupplier] = useState(bill.supplier);
+  const [billNumber, setBillNumber] = useState(bill.bill_number ?? "");
+  const [amount, setAmount] = useState(Number(bill.amount));
+  const [status, setStatus] = useState(bill.status);
+  const [billDate, setBillDate] = useState(bill.bill_date ?? "");
+  const [billJob, setBillJob] = useState(bill.job_id ?? "__overhead");
+  const [billCategory, setBillCategory] = useState(bill.category ?? "Shop supplies");
+  const [error, setError] = useState<string | null>(null);
+
+  const isOverhead = billJob === "__overhead";
+
+  function save() {
+    if (!supplier.trim()) return setError("Supplier is required.");
+    setError(null);
+    start(async () => {
+      const res = await executeAction("bill.update", {
+        id: bill.id,
+        supplier,
+        bill_number: billNumber,
+        amount,
+        status,
+        bill_date: billDate || null,
+        job_id: isOverhead ? null : billJob,
+        category: isOverhead ? billCategory : null,
+      });
+      if (!res.ok) return setError(res.error ?? "Could not save.");
+      onClose();
+      router.refresh();
+    });
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Edit bill"
+      footer={<ModalActions onCancel={onClose} onSave={save} saving={pending} disabled={!supplier.trim()} saveLabel="Save changes" />}
+    >
+      <div className="space-y-3">
+        {error && <p className="text-sm text-red-600">{error}</p>}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="col-span-2">
+            <Label htmlFor="be-supplier">Supplier *</Label>
+            <Input id="be-supplier" value={supplier} onChange={(e) => setSupplier(e.target.value)} autoFocus />
+          </div>
+          <div className="col-span-2">
+            <Label htmlFor="be-job">Job</Label>
+            <Select id="be-job" value={billJob} onChange={(e) => setBillJob(e.target.value)}>
+              <option value="__overhead">Overhead (no job)</option>
+              {jobs.map((j) => (
+                <option key={j.id} value={j.id}>{j.job_number} · {j.name}</option>
+              ))}
+            </Select>
+          </div>
+          {isOverhead && (
+            <div className="col-span-2">
+              <Label htmlFor="be-cat">Overhead category</Label>
+              <Select id="be-cat" value={billCategory} onChange={(e) => setBillCategory(e.target.value)}>
+                {OVERHEAD_CATEGORIES.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </Select>
+            </div>
+          )}
+          <div>
+            <Label htmlFor="be-num">Bill #</Label>
+            <Input id="be-num" value={billNumber} onChange={(e) => setBillNumber(e.target.value)} />
+          </div>
+          <div>
+            <Label htmlFor="be-amt">Amount</Label>
+            <NumberInput id="be-amt" value={amount} onValueChange={setAmount} />
+          </div>
+          <div>
+            <Label htmlFor="be-date">Bill date</Label>
+            <Input id="be-date" type="date" value={billDate} onChange={(e) => setBillDate(e.target.value)} />
+          </div>
+          <div>
+            <Label htmlFor="be-status">Status</Label>
+            <Select id="be-status" value={status} onChange={(e) => setStatus(e.target.value)}>
+              <option value="unpaid">Unpaid</option>
+              <option value="paid">Paid</option>
+            </Select>
+          </div>
+        </div>
+      </div>
+    </Modal>
   );
 }

@@ -10,6 +10,7 @@ import { Modal } from "@/components/ui/modal";
 import { Card } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/utils";
 import { createPriceItem, deletePriceItem, bulkImportPriceItems, type PriceItemInput } from "./actions";
+import { EditPriceItemButton } from "./edit-price-item-button";
 
 interface PriceItem {
   id: string;
@@ -184,8 +185,17 @@ export function PriceListManager({ items }: { items: PriceItem[] }) {
               <div className="col-span-1 text-right text-slate-600">{formatCurrency(i.buy_price)}</div>
               <div className="col-span-1 text-right text-slate-500">{Number(i.markup_pct)}%</div>
               <div className="col-span-1 text-right font-medium text-slate-900">{formatCurrency(sell(i.buy_price, i.markup_pct))}</div>
-              <div className="col-span-1 text-right">
-                <button onClick={() => start(async () => { await deletePriceItem(i.id); router.refresh(); })} className="text-slate-400 hover:text-red-600" title="Delete">
+              <div className="col-span-1 flex items-center justify-end gap-1">
+                <EditPriceItemButton item={i} />
+                <button
+                  onClick={() => {
+                    if (!confirm(`Delete "${i.description}" from the price list?`)) return;
+                    start(async () => { await deletePriceItem(i.id); router.refresh(); });
+                  }}
+                  disabled={pending}
+                  className="rounded-md p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                  title="Delete"
+                >
                   <Trash2 className="h-4 w-4" />
                 </button>
               </div>

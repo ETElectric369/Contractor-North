@@ -2,12 +2,12 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Search, Phone, Mail, Globe, MapPin } from "lucide-react";
+import { Plus, Pencil, Trash2, Search, Phone, Mail, Globe, MapPin } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { createResource, deleteResource } from "./actions";
+import { createResource, updateResource, deleteResource } from "./actions";
 
 export interface Resource {
   id: string;
@@ -41,6 +41,7 @@ export function ResourcesManager({ resources }: { resources: Resource[] }) {
   const [pending, start] = useTransition();
   const [q, setQ] = useState("");
   const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [name, setName] = useState("");
@@ -70,14 +71,39 @@ export function ResourcesManager({ resources }: { resources: Resource[] }) {
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   }, [filtered]);
 
-  function add() {
+  function resetForm() {
+    setName(""); setCategory("Building Department"); setContact(""); setPhone(""); setEmail(""); setWebsite(""); setAddress(""); setNotes("");
+  }
+
+  function closeForm() {
+    setAdding(false);
+    setEditingId(null);
+    setError(null);
+    resetForm();
+  }
+
+  function startEdit(r: Resource) {
+    setError(null);
+    setAdding(false);
+    setEditingId(r.id);
+    setName(r.name);
+    setCategory(r.category || "Building Department");
+    setContact(r.contact_name ?? "");
+    setPhone(r.phone ?? "");
+    setEmail(r.email ?? "");
+    setWebsite(r.website ?? "");
+    setAddress(r.address ?? "");
+    setNotes(r.notes ?? "");
+  }
+
+  function save() {
     setError(null);
     if (!name.trim()) return setError("Name is required.");
+    const input = { name, category, contact_name: contact, phone, email, website, address, notes };
     start(async () => {
-      const res = await createResource({ name, category, contact_name: contact, phone, email, website, address, notes });
+      const res = editingId ? await updateResource(editingId, input) : await createResource(input);
       if (!res.ok) return setError(res.error ?? "Could not save.");
-      setName(""); setContact(""); setPhone(""); setEmail(""); setWebsite(""); setAddress(""); setNotes("");
-      setAdding(false);
+      closeForm();
       router.refresh();
     });
   }
@@ -89,11 +115,12 @@ export function ResourcesManager({ resources }: { resources: Resource[] }) {
           <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search contacts…" className="pl-9" />
         </div>
-        <Button size="sm" onClick={() => setAdding((a) => !a)}><Plus className="h-3.5 w-3.5" /> Add contact</Button>
+        <Button size="sm" onClick={() => { if (adding) { closeForm(); } else { setEditingId(null); setError(null); resetForm(); setAdding(true); } }}><Plus className="h-3.5 w-3.5" /> Add contact</Button>
       </div>
 
-      {adding && (
+      {(adding || editingId) && (
         <Card className="space-y-3 p-4">
+          <div className="text-sm font-semibold text-slate-700">{editingId ? "Edit contact" : "New contact"}</div>
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <div className="col-span-2 sm:col-span-1"><Label htmlFor="r-name">Name *</Label><Input id="r-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Washoe County Building" /></div>
@@ -106,8 +133,8 @@ export function ResourcesManager({ resources }: { resources: Resource[] }) {
           </div>
           <div><Label htmlFor="r-notes">Notes</Label><Textarea id="r-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Hours, account #, inspection request line, etc." /></div>
           <div className="flex justify-end gap-2">
-            <Button size="sm" variant="outline" onClick={() => setAdding(false)}>Cancel</Button>
-            <Button size="sm" onClick={add} disabled={pending || !name.trim()}>{pending ? "Saving…" : "Save contact"}</Button>
+            <Button size="sm" variant="outline" onClick={closeForm}>Cancel</Button>
+            <Button size="sm" onClick={save} disabled={pending || !name.trim()}>{pending ? "Saving…" : editingId ? "Save changes" : "Save contact"}</Button>
           </div>
         </Card>
       )}
@@ -131,7 +158,10 @@ export function ResourcesManager({ resources }: { resources: Resource[] }) {
                       <div className="font-medium text-slate-900">{r.name}</div>
                       {r.contact_name && <div className="text-xs text-slate-400">{r.contact_name}</div>}
                     </div>
-                    <button onClick={() => start(async () => { await deleteResource(r.id); router.refresh(); })} className="text-slate-300 hover:text-red-600" title="Delete"><Trash2 className="h-4 w-4" /></button>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <button onClick={() => startEdit(r)} className="text-slate-300 hover:text-brand" title="Edit"><Pencil className="h-4 w-4" /></button>
+                      <button onClick={() => { if (confirm(`Delete ${r.name}?`)) start(async () => { await deleteResource(r.id); router.refresh(); }); }} className="text-slate-300 hover:text-red-600" title="Delete"><Trash2 className="h-4 w-4" /></button>
+                    </div>
                   </div>
                   <div className="mt-2 space-y-1 text-sm">
                     {r.phone && <a href={`tel:${r.phone}`} className="flex items-center gap-2 text-slate-600 hover:text-brand"><Phone className="h-3.5 w-3.5 text-slate-400" /> {r.phone}</a>}

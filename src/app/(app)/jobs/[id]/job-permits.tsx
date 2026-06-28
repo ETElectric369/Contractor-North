@@ -9,6 +9,7 @@ import { NumberInput } from "@/components/ui/number-input";
 import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { createPermit, updatePermit, deletePermit } from "../../permits/actions";
+import { EditPermitButton } from "../../permits/edit-permit-button";
 
 export interface Permit {
   id: string;
@@ -164,7 +165,8 @@ export function JobPermits({ jobId, permits }: { jobId: string; permits: Permit[
                   <div className="flex items-center gap-2">
                     <Badge tone={statusTone(p.status)}>{p.status.replace("_", " ")}</Badge>
                     <Badge tone={resultTone(p.inspection_result)}>{p.inspection_result}</Badge>
-                    <button onClick={() => start(async () => { await deletePermit(p.id, jobId); router.refresh(); })} className="text-slate-400 hover:text-red-600" title="Delete"><Trash2 className="h-4 w-4" /></button>
+                    <EditPermitButton permit={p as any} jobId={jobId} />
+                    <button onClick={() => { if (confirm("Delete this permit?")) start(async () => { await deletePermit(p.id, jobId); router.refresh(); }); }} className="text-slate-400 hover:text-red-600" title="Delete"><Trash2 className="h-4 w-4" /></button>
                   </div>
                 </div>
               </div>

@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatDateTime } from "@/lib/utils";
 import { FillForm } from "./fill-form";
+import { DeleteFormButton } from "./delete-form-button";
 import type { FormField } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -57,11 +58,14 @@ export default async function FormDetailPage({
         <ArrowLeft className="h-4 w-4" /> Back to forms
       </Link>
 
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-900">{form.name}</h1>
-        {form.description && (
-          <p className="mt-1 text-sm text-slate-500">{form.description}</p>
-        )}
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">{form.name}</h1>
+          {form.description && (
+            <p className="mt-1 text-sm text-slate-500">{form.description}</p>
+          )}
+        </div>
+        <DeleteFormButton formId={form.id} />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-5">

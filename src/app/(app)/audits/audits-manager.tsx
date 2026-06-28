@@ -2,13 +2,14 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, ClipboardCheck } from "lucide-react";
+import { Plus, Pencil, Trash2, ClipboardCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Modal, ModalActions } from "@/components/ui/modal";
 import { formatDate } from "@/lib/utils";
-import { createCompliance, deleteCompliance } from "../compliance/actions";
+import { createCompliance, updateCompliance, deleteCompliance } from "../compliance/actions";
 import { daysUntil, type ComplianceItem } from "../compliance/compliance-manager";
 import { AUDIT_TYPES } from "@/lib/compliance-types";
 
@@ -33,6 +34,25 @@ export function AuditsManager({ items }: { items: ComplianceItem[] }) {
   const [nextDue, setNextDue] = useState("");
   const [findings, setFindings] = useState("");
 
+  const [editing, setEditing] = useState<ComplianceItem | null>(null);
+  const [eType, setEType] = useState("");
+  const [eName, setEName] = useState("");
+  const [eRef, setERef] = useState("");
+  const [eDate, setEDate] = useState("");
+  const [eNextDue, setENextDue] = useState("");
+  const [eFindings, setEFindings] = useState("");
+
+  function openEdit(c: ComplianceItem) {
+    setError(null);
+    setEditing(c);
+    setEType(c.type);
+    setEName(c.name);
+    setERef(c.policy_number ?? "");
+    setEDate(c.issued_date ?? "");
+    setENextDue(c.expires_date ?? "");
+    setEFindings(c.notes ?? "");
+  }
+
   function add() {
     setError(null);
     if (!name.trim()) return setError("Subject / auditor is required.");
@@ -41,6 +61,18 @@ export function AuditsManager({ items }: { items: ComplianceItem[] }) {
       if (!res.ok) return setError(res.error ?? "Could not save.");
       setName(""); setRef(""); setDate(""); setNextDue(""); setFindings("");
       setAdding(false);
+      router.refresh();
+    });
+  }
+
+  function saveEdit() {
+    if (!editing) return;
+    setError(null);
+    if (!eName.trim()) return setError("Subject / auditor is required.");
+    start(async () => {
+      const res = await updateCompliance(editing.id, { type: eType, name: eName, policy_number: eRef, issued_date: eDate || null, expires_date: eNextDue || null, notes: eFindings });
+      if (!res.ok) return setError(res.error ?? "Could not save.");
+      setEditing(null);
       router.refresh();
     });
   }
@@ -97,7 +129,10 @@ export function AuditsManager({ items }: { items: ComplianceItem[] }) {
                       {c.issued_date ? ` · ${formatDate(c.issued_date)}` : ""}
                     </div>
                   </div>
-                  <button onClick={() => start(async () => { await deleteCompliance(c.id); router.refresh(); })} className="text-slate-300 hover:text-red-600" title="Delete"><Trash2 className="h-4 w-4" /></button>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => openEdit(c)} className="text-slate-300 hover:text-slate-700" title="Edit"><Pencil className="h-4 w-4" /></button>
+                    <button onClick={() => { if (!confirm("Delete this audit?")) return; start(async () => { await deleteCompliance(c.id); router.refresh(); }); }} className="text-slate-300 hover:text-red-600" title="Delete"><Trash2 className="h-4 w-4" /></button>
+                  </div>
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
                   <Badge tone={b.tone}>{b.label}</Badge>
@@ -109,6 +144,23 @@ export function AuditsManager({ items }: { items: ComplianceItem[] }) {
           })}
         </div>
       )}
+
+      <Modal
+        open={!!editing}
+        onClose={() => setEditing(null)}
+        title="Edit audit"
+        footer={<ModalActions onCancel={() => setEditing(null)} onSave={saveEdit} saving={pending} disabled={!eName.trim()} />}
+      >
+        {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <div><Label htmlFor="ae-type">Audit type</Label><Select id="ae-type" value={eType} onChange={(e) => setEType(e.target.value)}>{AUDIT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}</Select></div>
+          <div className="col-span-2 sm:col-span-1"><Label htmlFor="ae-name">Subject / auditor *</Label><Input id="ae-name" value={eName} onChange={(e) => setEName(e.target.value)} placeholder="e.g. OSHA inspector, Internal" /></div>
+          <div><Label htmlFor="ae-ref">Report / ref #</Label><Input id="ae-ref" value={eRef} onChange={(e) => setERef(e.target.value)} /></div>
+          <div><Label htmlFor="ae-date">Audit date</Label><Input id="ae-date" type="date" value={eDate} onChange={(e) => setEDate(e.target.value)} /></div>
+          <div><Label htmlFor="ae-due">Next due / follow-up</Label><Input id="ae-due" type="date" value={eNextDue} onChange={(e) => setENextDue(e.target.value)} /></div>
+        </div>
+        <div className="mt-3"><Label htmlFor="ae-find">Findings / result</Label><Textarea id="ae-find" rows={2} value={eFindings} onChange={(e) => setEFindings(e.target.value)} placeholder="Pass / fail, corrective actions, deadlines…" /></div>
+      </Modal>
     </div>
   );
 }

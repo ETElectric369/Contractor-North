@@ -3,14 +3,15 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, AlertTriangle, Users } from "lucide-react";
+import { Plus, Pencil, Trash2, AlertTriangle, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Modal, ModalActions } from "@/components/ui/modal";
 import { Tabs } from "@/components/tabs";
 import { formatDate } from "@/lib/utils";
-import { addSafetyRecord, deleteSafetyRecord } from "./actions";
+import { addSafetyRecord, updateSafetyRecord, deleteSafetyRecord } from "./actions";
 
 interface Person { id: string; full_name: string | null; }
 interface JobOpt { id: string; job_number: string; name: string; }
@@ -158,7 +159,8 @@ function SafetyPanel({
                 <div className="flex items-center gap-2">
                   {r.severity && SEV[r.severity] && <Badge tone={SEV[r.severity].tone}>{SEV[r.severity].label}</Badge>}
                   {r.recordable && <Badge tone="red">OSHA 300</Badge>}
-                  <button onClick={() => start(async () => { await deleteSafetyRecord(r.id); router.refresh(); })} className="text-slate-300 hover:text-red-600" title="Delete"><Trash2 className="h-4 w-4" /></button>
+                  <EditSafetyButton kind={kind} employees={employees} jobs={jobs} record={r} />
+                  <button onClick={() => { if (!confirm("Delete this safety record? This removes a legal OSHA record.")) return; start(async () => { const res = await deleteSafetyRecord(r.id); if (!res.ok) return alert(res.error ?? "Could not delete."); router.refresh(); }); }} className="text-slate-300 hover:text-red-600" title="Delete"><Trash2 className="h-4 w-4" /></button>
                 </div>
               </div>
             </Card>
@@ -169,5 +171,97 @@ function SafetyPanel({
         )}
       </ul>
     </div>
+  );
+}
+
+function EditSafetyButton({
+  kind,
+  employees,
+  jobs,
+  record,
+}: {
+  kind: "incident" | "toolbox";
+  employees: Person[];
+  jobs: JobOpt[];
+  record: Rec;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  const [date, setDate] = useState(record.record_date);
+  const [title, setTitle] = useState(record.title);
+  const [profileId, setProfileId] = useState(record.profile_id ?? "");
+  const [jobId, setJobId] = useState(record.job_id ?? "");
+  const [severity, setSeverity] = useState(record.severity ?? "first_aid");
+  const [recordable, setRecordable] = useState(record.recordable);
+  const [attendees, setAttendees] = useState(record.attendees ?? "");
+  const [description, setDescription] = useState(record.description ?? "");
+
+  const isIncident = kind === "incident";
+
+  function reset() {
+    setDate(record.record_date);
+    setTitle(record.title);
+    setProfileId(record.profile_id ?? "");
+    setJobId(record.job_id ?? "");
+    setSeverity(record.severity ?? "first_aid");
+    setRecordable(record.recordable);
+    setAttendees(record.attendees ?? "");
+    setDescription(record.description ?? "");
+    setError(null);
+  }
+
+  function save() {
+    setError(null);
+    if (!title.trim()) return setError("Title is required.");
+    start(async () => {
+      const res = await updateSafetyRecord(record.id, {
+        kind,
+        record_date: date,
+        title,
+        profile_id: isIncident ? profileId || null : null,
+        job_id: isIncident ? jobId || null : null,
+        severity: isIncident ? severity : null,
+        recordable: isIncident ? recordable : false,
+        attendees: isIncident ? null : attendees,
+        description,
+      });
+      if (!res.ok) return setError(res.error ?? "Could not save.");
+      setOpen(false);
+      router.refresh();
+    });
+  }
+
+  return (
+    <>
+      <button onClick={() => { reset(); setOpen(true); }} className="text-slate-300 hover:text-brand" title="Edit"><Pencil className="h-4 w-4" /></button>
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        title={isIncident ? "Edit incident" : "Edit toolbox talk"}
+        footer={<ModalActions onCancel={() => setOpen(false)} onSave={save} saving={pending} disabled={!title.trim()} />}
+      >
+        <div className="space-y-3">
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div><Label htmlFor="e-date">Date</Label><Input id="e-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div>
+            <div className="col-span-2 sm:col-span-3"><Label htmlFor="e-title">{isIncident ? "What happened *" : "Topic *"}</Label><Input id="e-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={isIncident ? "e.g. Cut hand on conduit" : "e.g. Ladder safety"} /></div>
+            {isIncident ? (
+              <>
+                <div><Label htmlFor="e-emp">Employee</Label><Select id="e-emp" value={profileId} onChange={(e) => setProfileId(e.target.value)}><option value="">—</option>{employees.map((e) => <option key={e.id} value={e.id}>{e.full_name ?? "Unnamed"}</option>)}</Select></div>
+                <div><Label htmlFor="e-job">Job</Label><Select id="e-job" value={jobId} onChange={(e) => setJobId(e.target.value)}><option value="">—</option>{jobs.map((j) => <option key={j.id} value={j.id}>{j.job_number} · {j.name}</option>)}</Select></div>
+                <div><Label htmlFor="e-sev">Severity</Label><Select id="e-sev" value={severity} onChange={(e) => setSeverity(e.target.value)}><option value="first_aid">First aid only</option><option value="recordable">OSHA recordable</option><option value="lost_time">Lost time</option></Select></div>
+                <label className="flex items-end gap-2 pb-2 text-sm text-slate-600"><input type="checkbox" checked={recordable} onChange={(e) => setRecordable(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand" /> OSHA 300 recordable</label>
+              </>
+            ) : (
+              <div className="col-span-2 sm:col-span-4"><Label htmlFor="e-att">Attendees</Label><Input id="e-att" value={attendees} onChange={(e) => setAttendees(e.target.value)} placeholder="Names of crew present" /></div>
+            )}
+          </div>
+          <div><Label htmlFor="e-desc">{isIncident ? "Details / corrective action" : "Notes"}</Label><Textarea id="e-desc" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} /></div>
+        </div>
+      </Modal>
+    </>
   );
 }

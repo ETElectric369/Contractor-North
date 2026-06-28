@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Plus, Trash2, Flag, Briefcase, Pencil, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input, Label, Select } from "@/components/ui/input";
+import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Card } from "@/components/ui/card";
 import { formatDate } from "@/lib/utils";
@@ -20,6 +20,7 @@ export interface ViewTask {
   due_date: string | null;
   job_id: string | null;
   assigned_to: string | null;
+  notes?: string | null;
   parent_id?: string | null;
   tags?: string[] | null;
   jobs?: { job_number: string; name: string } | null;
@@ -165,6 +166,7 @@ function TaskEditModal({
   const [priority, setPriority] = useState(t.priority);
   const [assignedTo, setAssignedTo] = useState(t.assigned_to ?? "");
   const [tags, setTags] = useState((t.tags ?? []).join(", "));
+  const [notes, setNotes] = useState(t.notes ?? "");
   const [error, setError] = useState<string | null>(null);
 
   function save() {
@@ -179,6 +181,7 @@ function TaskEditModal({
           priority,
           assigned_to: assignedTo || null,
           tags: tags.split(",").map((s) => s.trim()).filter(Boolean),
+          notes: notes || null,
         },
         { category },
       );
@@ -227,6 +230,10 @@ function TaskEditModal({
         <div>
           <Label htmlFor="te-tags">Tags</Label>
           <Input id="te-tags" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="comma, separated, tags" />
+        </div>
+        <div>
+          <Label htmlFor="te-notes">Notes</Label>
+          <Textarea id="te-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={4} placeholder="Add any details or context…" />
         </div>
       </div>
     </Modal>

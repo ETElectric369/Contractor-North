@@ -36,6 +36,7 @@ export function ItemEditor({ listId, items }: { listId: string; items: Item[] })
   const [part, setPart] = useState("");
   const [qty, setQty] = useState(1);
   const [unit, setUnit] = useState("ea");
+  const [vendor, setVendor] = useState("");
   const [cost, setCost] = useState(0);
   // edit
   const [editId, setEditId] = useState<string | null>(null);
@@ -43,6 +44,7 @@ export function ItemEditor({ listId, items }: { listId: string; items: Item[] })
   const [ePart, setEPart] = useState("");
   const [eQty, setEQty] = useState(1);
   const [eUnit, setEUnit] = useState("ea");
+  const [eVendor, setEVendor] = useState("");
   const [eCost, setECost] = useState(0);
 
   const total = items.reduce((s, i) => s + (i.est_cost ?? 0) * i.quantity, 0);
@@ -57,7 +59,7 @@ export function ItemEditor({ listId, items }: { listId: string; items: Item[] })
         part_number: part || null,
         quantity: qty || 1,
         unit: unit || "ea",
-        vendor: null,
+        vendor: vendor || null,
         est_cost: cost || null,
       });
       if (!res.ok) return setError(res.error ?? "Could not add the item.");
@@ -65,6 +67,7 @@ export function ItemEditor({ listId, items }: { listId: string; items: Item[] })
       setPart("");
       setQty(1);
       setUnit("ea");
+      setVendor("");
       setCost(0);
       router.refresh();
     });
@@ -112,6 +115,7 @@ export function ItemEditor({ listId, items }: { listId: string; items: Item[] })
         <div className="flex items-center gap-2">
           <NumberInput value={eQty} onValueChange={setEQty} className="w-16 text-center" />
           <Input value={eUnit} onChange={(e) => setEUnit(e.target.value)} className="w-16 shrink-0" />
+          <Input value={eVendor} onChange={(e) => setEVendor(e.target.value)} className="flex-1" placeholder="Vendor" />
           <NumberInput value={eCost} onValueChange={setECost} className="flex-1 text-right" placeholder="Est. cost" />
           <button onClick={saveEdit} disabled={pending} className="rounded-md bg-brand p-2 text-white disabled:opacity-50" aria-label="Save">
             <Check className="h-4 w-4" />
@@ -166,6 +170,7 @@ export function ItemEditor({ listId, items }: { listId: string; items: Item[] })
     setEPart(it.part_number ?? "");
     setEQty(it.quantity);
     setEUnit(it.unit ?? "ea");
+    setEVendor(it.vendor ?? "");
     setECost(it.est_cost ?? 0);
   }
 
@@ -178,6 +183,7 @@ export function ItemEditor({ listId, items }: { listId: string; items: Item[] })
         part_number: ePart || null,
         quantity: eQty || 1,
         unit: eUnit || "ea",
+        vendor: eVendor || null,
         est_cost: eCost || null,
       });
       if (!res.ok) return setError(res.error ?? "Could not save.");
@@ -219,6 +225,7 @@ export function ItemEditor({ listId, items }: { listId: string; items: Item[] })
         <div className="flex items-center gap-2">
           <NumberInput value={qty} onValueChange={setQty} className="w-16 text-center" placeholder="Qty" />
           <Input value={unit} onChange={(e) => setUnit(e.target.value)} className="w-16 shrink-0" placeholder="ea" />
+          <Input value={vendor} onChange={(e) => setVendor(e.target.value)} className="flex-1" placeholder="Vendor" />
           <NumberInput value={cost} onValueChange={setCost} className="flex-1 text-right" placeholder="Est. cost" />
           <Button onClick={add} disabled={pending || !desc.trim()}>
             <Plus className="h-4 w-4" /> Add

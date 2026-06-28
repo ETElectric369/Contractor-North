@@ -2,14 +2,15 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, ShieldCheck } from "lucide-react";
+import { Plus, Pencil, Trash2, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Modal, ModalActions } from "@/components/ui/modal";
 import { formatCurrency, formatDate } from "@/lib/utils";
-import { createCompliance, deleteCompliance } from "./actions";
+import { createCompliance, updateCompliance, deleteCompliance } from "./actions";
 
 export interface ComplianceItem {
   id: string;
@@ -53,6 +54,27 @@ export function ComplianceManager({ items }: { items: ComplianceItem[] }) {
   const [expires, setExpires] = useState("");
   const [notes, setNotes] = useState("");
 
+  const [editing, setEditing] = useState<ComplianceItem | null>(null);
+  const [eType, setEType] = useState("");
+  const [eName, setEName] = useState("");
+  const [ePolicy, setEPolicy] = useState("");
+  const [eAmount, setEAmount] = useState(0);
+  const [eIssued, setEIssued] = useState("");
+  const [eExpires, setEExpires] = useState("");
+  const [eNotes, setENotes] = useState("");
+
+  function openEdit(c: ComplianceItem) {
+    setError(null);
+    setEditing(c);
+    setEType(c.type);
+    setEName(c.name);
+    setEPolicy(c.policy_number ?? "");
+    setEAmount(Number(c.amount) || 0);
+    setEIssued(c.issued_date ?? "");
+    setEExpires(c.expires_date ?? "");
+    setENotes(c.notes ?? "");
+  }
+
   function add() {
     setError(null);
     if (!name.trim()) return setError("Name / provider is required.");
@@ -61,6 +83,18 @@ export function ComplianceManager({ items }: { items: ComplianceItem[] }) {
       if (!res.ok) return setError(res.error ?? "Could not save.");
       setName(""); setPolicy(""); setAmount(0); setIssued(""); setExpires(""); setNotes("");
       setAdding(false);
+      router.refresh();
+    });
+  }
+
+  function saveEdit() {
+    if (!editing) return;
+    setError(null);
+    if (!eName.trim()) return setError("Name / provider is required.");
+    start(async () => {
+      const res = await updateCompliance(editing.id, { type: eType, name: eName, policy_number: ePolicy, amount: eAmount, issued_date: eIssued || null, expires_date: eExpires || null, notes: eNotes });
+      if (!res.ok) return setError(res.error ?? "Could not save.");
+      setEditing(null);
       router.refresh();
     });
   }
@@ -117,7 +151,10 @@ export function ComplianceManager({ items }: { items: ComplianceItem[] }) {
                       {c.type}{c.policy_number ? ` · #${c.policy_number}` : ""}
                     </div>
                   </div>
-                  <button onClick={() => start(async () => { await deleteCompliance(c.id); router.refresh(); })} className="text-slate-300 hover:text-red-600" title="Delete"><Trash2 className="h-4 w-4" /></button>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => openEdit(c)} className="text-slate-300 hover:text-slate-700" title="Edit"><Pencil className="h-4 w-4" /></button>
+                    <button onClick={() => { if (!confirm("Delete this item?")) return; start(async () => { await deleteCompliance(c.id); router.refresh(); }); }} className="text-slate-300 hover:text-red-600" title="Delete"><Trash2 className="h-4 w-4" /></button>
+                  </div>
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
                   <Badge tone={b.tone}>{b.label}</Badge>
@@ -130,6 +167,24 @@ export function ComplianceManager({ items }: { items: ComplianceItem[] }) {
           })}
         </div>
       )}
+
+      <Modal
+        open={!!editing}
+        onClose={() => setEditing(null)}
+        title="Edit item"
+        footer={<ModalActions onCancel={() => setEditing(null)} onSave={saveEdit} saving={pending} disabled={!eName.trim()} />}
+      >
+        {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <div><Label htmlFor="ce-type">Type</Label><Select id="ce-type" value={eType} onChange={(e) => setEType(e.target.value)}>{TYPES.map((t) => <option key={t} value={t}>{t}</option>)}</Select></div>
+          <div className="col-span-2 sm:col-span-1"><Label htmlFor="ce-name">Provider / name *</Label><Input id="ce-name" value={eName} onChange={(e) => setEName(e.target.value)} placeholder="e.g. State Farm GL" /></div>
+          <div><Label htmlFor="ce-policy">Policy / # </Label><Input id="ce-policy" value={ePolicy} onChange={(e) => setEPolicy(e.target.value)} /></div>
+          <div><Label htmlFor="ce-amount">Annual cost</Label><NumberInput id="ce-amount" value={eAmount} onValueChange={setEAmount} /></div>
+          <div><Label htmlFor="ce-issued">Issued</Label><Input id="ce-issued" type="date" value={eIssued} onChange={(e) => setEIssued(e.target.value)} /></div>
+          <div><Label htmlFor="ce-expires">Expires</Label><Input id="ce-expires" type="date" value={eExpires} onChange={(e) => setEExpires(e.target.value)} /></div>
+        </div>
+        <div className="mt-3"><Label htmlFor="ce-notes">Notes</Label><Textarea id="ce-notes" rows={2} value={eNotes} onChange={(e) => setENotes(e.target.value)} placeholder="Agent, renewal contact, submission portal…" /></div>
+      </Modal>
     </div>
   );
 }
