@@ -266,13 +266,29 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     setVoiceOn(speech.speechSupported());
     speech.setResultHandler((t) => sendRef.current?.(t, true));
     const unsub = speech.onListeningState(setListening);
+    speech.onStatus?.((s) => setStatus(s)); // show each voice step so a failure is visible, not silent
     setListening(speech.isListening()); // catch an in-gesture start that already happened (first open)
     return () => {
       speech.setResultHandler(null);
+      speech.onStatus?.(null);
       unsub();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Live mic-input level (0..1) while in voice mode — the diagnostic that proves whether the mic is
+  // actually hearing sound (a flat bar = the stream is "on" but capturing nothing).
+  const [micLevel, setMicLevel] = useState(0);
+  useEffect(() => {
+    if (!voiceMode) { setMicLevel(0); return; }
+    let raf = 0;
+    const loop = () => {
+      setMicLevel(speech.currentLevel?.() ?? 0);
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [voiceMode]);
 
   // Voice-first: the topbar tap ALREADY started the mic in-gesture (global-assistant launch →
   // speech.startListening) — iOS only honors a start inside the gesture. So here we just enter voice
@@ -572,9 +588,23 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
               <Sparkles className="h-4 w-4 shrink-0 animate-pulse text-orange-500" />
               <span className="truncate text-sm text-slate-500">{elapsedStr} · {tokens} tokens · {statusText}</span>
             </div>
-          ) : !draft && messages.length === 0 ? (
+          ) : !draft && messages.length === 0 && !voiceMode ? (
             <div className="px-3 py-2.5 text-sm text-slate-400">What can I help you with?</div>
           ) : null}
+          {voiceMode && (
+            // Live mic-input meter — if this bar stays flat while you talk, the mic isn't reaching
+            // the app (the iOS silent-PWA case); if it moves, capture is working and any failure is
+            // downstream (transcription). The single clue that tells us where it breaks.
+            <div className="flex shrink-0 items-center gap-2 px-3 pb-2" aria-hidden>
+              <Mic className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+              <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-200">
+                <div
+                  className="h-full rounded-full bg-emerald-500"
+                  style={{ width: `${Math.min(100, Math.round((micLevel || 0) * 600))}%` }}
+                />
+              </div>
+            </div>
+          )}
           {messages.length > 0 && (
             <div ref={scrollRef} className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 pb-2 pt-0.5">
               {messages.map((m, i) => (

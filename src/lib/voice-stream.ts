@@ -25,6 +25,24 @@ let mimeType = "";
 let handler: ResultCb | null = null;
 const stateSubs = new Set<StateCb>();
 
+// Diagnostics so the user (and we) can SEE what the mic is doing — the only way to debug a device
+// I can't run: a live input LEVEL (is the mic actually hearing sound?) and a step STATUS string.
+let level = 0;
+let statusCb: ((s: string) => void) | null = null;
+export function currentLevel(): number {
+  return level;
+}
+export function onStatus(cb: ((s: string) => void) | null) {
+  statusCb = cb;
+}
+function status(s: string) {
+  try {
+    statusCb?.(s);
+  } catch {
+    /* ignore */
+  }
+}
+
 export function speechSupported(): boolean {
   if (typeof window === "undefined") return false;
   const ac = (window as any).AudioContext || (window as any).webkitAudioContext;
@@ -86,6 +104,7 @@ export function startListening(_lang?: string): boolean {
     return true;
   }
   wantStream = true;
+  status("Connecting to the mic…");
   navigator.mediaDevices
     .getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
     .then((s) => {
@@ -96,16 +115,20 @@ export function startListening(_lang?: string): boolean {
       stream = s;
       const AC = (window as any).AudioContext || (window as any).webkitAudioContext;
       audioCtx = new AC();
+      void audioCtx!.resume?.(); // iOS suspends a fresh AudioContext until you resume it in-gesture
       const src = audioCtx!.createMediaStreamSource(s);
       analyser = audioCtx!.createAnalyser();
       analyser.fftSize = 2048;
       src.connect(analyser);
       mimeType = pickMime();
+      status("Mic ready — go ahead");
       beginTurn();
     })
-    .catch(() => {
+    .catch((err) => {
       wantStream = false;
       active = false;
+      const msg = String(err?.name || err || "");
+      status(/NotAllowed|Permission|Denied/i.test(msg) ? "Mic blocked — allow it in Settings → Safari" : `Mic unavailable (${msg || "no audio"})`);
       emit();
     });
   return true;
@@ -142,10 +165,12 @@ function beginTurn() {
   active = true;
   emit();
 
+  status("Listening — go ahead");
   const buf = new Uint8Array(analyser.frequencyBinCount);
   let spoke = false;
   let silenceStart = 0;
   const startedAt = Date.now();
+  const SPEAK = 0.01; // RMS that counts as speech (lowered — 0.018 may have been above a soft voice)
   const tick = () => {
     if (!active || !recorder || recorder.state === "inactive" || !analyser) return;
     analyser.getByteTimeDomainData(buf);
@@ -155,10 +180,12 @@ function beginTurn() {
       sum += v * v;
     }
     const rms = Math.sqrt(sum / buf.length);
+    level = rms; // live meter — proves whether the mic is hearing ANYTHING
     const now = Date.now();
     if (muted) {
       silenceStart = 0;
-    } else if (rms > 0.018) {
+    } else if (rms > SPEAK) {
+      if (!spoke) status("Hearing you…");
       spoke = true;
       silenceStart = 0;
     } else if (spoke) {
@@ -189,21 +216,33 @@ function stopTurn() {
 
 async function finishTurn() {
   cancelAnimationFrame(rafId);
+  level = 0;
   active = false;
   emit();
   const blob = new Blob(chunks, { type: mimeType || "audio/webm" });
   chunks = [];
-  if (blob.size < 1400) return; // too short → noise, not speech. The chat re-listens on its own.
+  if (blob.size < 1200) {
+    // Nothing usable was recorded — almost always the silent-PWA mic (stream "on" but capturing
+    // nothing) or a permission gap. Say so plainly instead of failing silently.
+    status(`No audio captured (${blob.size} bytes). If the level meter stayed flat, the mic isn't reaching the app.`);
+    return;
+  }
+  status(`Sending ${(blob.size / 1024) | 0}KB to transcribe…`);
   try {
     const fd = new FormData();
     const ext = mimeType.includes("mp4") || mimeType.includes("aac") ? "mp4" : mimeType.includes("mpeg") ? "mp3" : "webm";
     fd.append("audio", blob, `turn.${ext}`);
     const r = await fetch("/api/transcribe", { method: "POST", body: fd });
     const j = await r.json().catch(() => null);
+    if (!r.ok) {
+      status(`Transcribe error: ${j?.error ?? r.status}`);
+      return;
+    }
     const text = String(j?.text ?? "").trim();
     if (text && handler) handler(text);
-  } catch {
-    /* network/transcribe failure — the chat's status handles the silence */
+    else status("Heard sound but no words — try speaking a bit louder.");
+  } catch (e: any) {
+    status(`Couldn't reach transcription (${e?.message ?? "network"}).`);
   }
 }
 

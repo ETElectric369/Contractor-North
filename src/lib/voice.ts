@@ -34,3 +34,14 @@ export function setMuted(b: boolean) {
   // Both expose setMuted; call the active one (calling both is harmless).
   backend().setMuted?.(b);
 }
+
+/** Diagnostics — only the getUserMedia backend exposes them (the webkit one has no audio level). */
+export function onStatus(cb: ((s: string) => void) | null) {
+  (streamBackend as any).onStatus?.(cb);
+}
+export function currentLevel(): number {
+  return (streamBackend as any).currentLevel?.() ?? 0;
+}
+export function usingStreamBackend(): boolean {
+  return streamBackend.speechSupported();
+}
