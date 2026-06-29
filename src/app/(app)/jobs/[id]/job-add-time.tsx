@@ -58,8 +58,11 @@ export function JobAddTimeEntry({
   const [profileId, setProfileId] = useState(defaultProfileId);
   const [jobCode, setJobCode] = useState("");
   const [rate, setRate] = useState(0); // 0 = use the employee's default rate
-  const [lunchTaken, setLunchTaken] = useState(false);
-  const [breaksTaken, setBreaksTaken] = useState(false);
+  // Default to "taken" so a normal workday entry saves in one tap; uncheck if the
+  // person actually skipped them. (Unchecked-by-default silently blocked saves on
+  // any shift over 5 hrs — same fix the timeclock add-entry form already has.)
+  const [lunchTaken, setLunchTaken] = useState(true);
+  const [breaksTaken, setBreaksTaken] = useState(true);
   const [notes, setNotes] = useState("");
 
   // Mileage origin: the selected employee's home address if set, else the company address.

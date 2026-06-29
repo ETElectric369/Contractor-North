@@ -5,8 +5,23 @@ import { emptyToNull } from "@/lib/forms";
 import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
 import { drawAmount } from "@/lib/invoice-math";
+import { getOrgSettings } from "@/lib/org-settings";
+import { tzLocalHourUtc, todayStrInTz } from "@/lib/tz";
 import { standardBillingBlockerOnJob, standardBillingConflictError } from "@/lib/billing-guards";
 import { runTemplate, runInvoiceTemplate, generateDueTemplates } from "@/lib/recurring-engine";
+
+/** Default invoice due date = today (org tz) + the org's net terms (invoice_due_days, else
+ *  Net 30), stamped to NOON in the org tz — same convention billing/actions uses. A draw
+ *  with no due date is invisible to the Overdue tracker, so this stamps one at creation. */
+async function defaultDueDateIso(supabase: { from: (t: string) => any }): Promise<string> {
+  const { data } = await supabase.from("organizations").select("settings").maybeSingle();
+  const settings = getOrgSettings((data as { settings?: unknown } | null)?.settings);
+  const tz = settings.timezone || "America/Los_Angeles";
+  const netDays = settings.invoice_due_days > 0 ? settings.invoice_due_days : 30;
+  const todayStart = tzLocalHourUtc(todayStrInTz(tz), 0, tz);
+  const dueStr = todayStrInTz(tz, new Date(todayStart.getTime() + netDays * 86_400_000));
+  return tzLocalHourUtc(dueStr, 12, tz).toISOString();
+}
 
 export type Result = { ok: boolean; error?: string; id?: string; count?: number };
 
@@ -202,6 +217,7 @@ export async function createProgressInvoice(
   if (!(amount > 0)) return { ok: false, error: "Enter an amount above $0." };
   if (amount > 9_999_999) return { ok: false, error: "That amount is too large." };
 
+  const dueDate = await defaultDueDateIso(supabase);
   const { data: inv, error } = await supabase
     .from("invoices")
     .insert({
@@ -214,6 +230,7 @@ export async function createProgressInvoice(
       subtotal: amount,
       tax: 0,
       total: amount,
+      due_date: dueDate,
     })
     .select("id")
     .single();

@@ -115,7 +115,9 @@ export default async function InvoicePage({
         </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 self-start">
-          {billingEnabled && Number(inv.total) - Number(inv.amount_paid) > 0 && (
+          {/* Collect-payment is only meaningful once the invoice is actually billed:
+              you can't collect on an unsent draft. Hidden until it leaves draft. */}
+          {billingEnabled && !isDraft && Number(inv.total) - Number(inv.amount_paid) > 0 && (
             <a
               href={`/api/pay/${(inv as any).public_token}`}
               target="_blank"
@@ -125,7 +127,12 @@ export default async function InvoicePage({
               <CreditCard className="h-4 w-4" /> Collect payment
             </a>
           )}
-          <EmailButton id={inv.id} kind="invoice" />
+          <EmailButton
+            id={inv.id}
+            kind="invoice"
+            customerName={inv.customers?.name ?? null}
+            amount={Number(inv.total)}
+          />
           <CreditButton
             invoiceId={inv.id}
             defaultAmount={Math.max(0, Number(inv.amount_paid) - Number(inv.total))}

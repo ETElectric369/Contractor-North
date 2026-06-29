@@ -1558,13 +1558,15 @@ export async function runDataTool(
         const endIso = tzDayStartUtc(period.end, settings.timezone).toISOString();
         const { data: entries, error } = await supabase
           .from("time_entries")
-          .select("profile_id, clock_in, clock_out, lunch_minutes, miles, paid_at, rate_override, profiles(full_name, hourly_rate)")
+          .select("profile_id, clock_in, clock_out, lunch_minutes, miles, paid_at, rate_override, profiles(full_name, hourly_rate, commute_baseline_miles)")
           .eq("status", "closed")
           .not("clock_out", "is", null)
           .gte("clock_in", startIso)
           .lt("clock_in", endIso);
         if (error) throw error;
-        const rows = aggregatePayrollEntries((entries ?? []) as any[]);
+        // Pass the org tz so mileage pay reimburses BUSINESS miles (net of each person's
+        // daily commute baseline), matching the timecard + tax report — not raw logged miles.
+        const rows = aggregatePayrollEntries((entries ?? []) as any[], settings.timezone);
         const round = (n: number) => Math.round(n * 100) / 100;
         const mileageRate = settings.mileage_rate;
         return JSON.stringify({

@@ -42,7 +42,8 @@ export function InviteManager({
     });
   }
 
-  function remove(id: string) {
+  function remove(id: string, email: string) {
+    if (!confirm(`Revoke the invite for ${email}? The signup link will stop working.`)) return;
     start(async () => {
       await deleteInvitation(id);
       router.refresh();
@@ -114,7 +115,7 @@ export function InviteManager({
                     )}
                   </button>
                   <button
-                    onClick={() => remove(inv.id)}
+                    onClick={() => remove(inv.id, inv.email)}
                     disabled={pending}
                     className="rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
                     title="Revoke invite"

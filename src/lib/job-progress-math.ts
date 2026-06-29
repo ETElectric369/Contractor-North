@@ -2,6 +2,8 @@
  *  estimate / invoiced / collected / work-to-date computation is unit-testable
  *  without a DB. The server fn does the fetching, then calls this. */
 
+import { contractTotalFromQuotes } from "@/lib/payment-schedule-math";
+
 export type JobProgressFinancials = {
   /** Sum of the job's quotes — the agreed estimate (a cap on fixed-price, a
    *  reference on Time & Material). */
@@ -28,7 +30,7 @@ const cents = (n: number) => Math.round(n * 100) / 100;
  *  importCostsIntoInvoice; invoiced excludes void/draft; collected excludes void. */
 export function computeJobProgress(input: {
   billingTypeRaw: string | null | undefined;
-  quotes: { total: number | null }[];
+  quotes: { total: number | null; status?: string | null }[];
   invoices: { total: number | null; status: string; amount_paid: number | null }[];
   billableLabor: number;
   pos: { total: number | null }[];
@@ -37,7 +39,10 @@ export function computeJobProgress(input: {
 }): JobProgressFinancials {
   const billingType: "fixed" | "tm" = input.billingTypeRaw === "tm" ? "tm" : "fixed";
 
-  const estimate = cents((input.quotes ?? []).reduce((s, q) => s + num(q.total), 0));
+  // Estimate base = the ACCEPTED contract (accepted quote[s] only; falls back to all
+  // quotes when none accepted yet) via the one shared rule — so a superseded revision
+  // can't inflate the base. Same helper the job page + billing + contracts use.
+  const estimate = contractTotalFromQuotes(input.quotes ?? []);
   const invoiced = cents(
     (input.invoices ?? []).reduce(
       (s, i) => (i.status !== "void" && i.status !== "draft" ? s + num(i.total) : s),

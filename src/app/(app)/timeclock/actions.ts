@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { visibleJobIdOrNull } from "@/lib/job-visibility";
 import { requireStaff } from "@/lib/staff-guard";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
+import { hoursBetween } from "@/lib/utils";
 import type { GeoPoint } from "@/lib/types";
 
 export type ClockResult = { ok: boolean; error?: string };
@@ -100,6 +101,33 @@ export interface JobAllocationInput {
   description: string;
 }
 
+/**
+ * Server-side guard for the split-across-jobs hours (the C7 fix). The client
+ * (edit-entry-button.tsx) blocks a split whose hours exceed the worked shift, but
+ * every OTHER write path — voice ("clock me out, 9 hours on rough-in"), the action
+ * registry, crafted calls — reaches clockOut/updateTimeEntry directly with
+ * caller-supplied allocations, so billing/cost could be charged at hours that don't
+ * match payroll. We re-derive the billable shift here from clock_in/clock_out/lunch
+ * (the same hoursBetween() payroll uses) and proportionally SCALE the allocation
+ * hours down so their sum never exceeds the worked hours. Under-allocation is left
+ * alone (unallocated time is paid but not billed). A 0.01h tolerance mirrors the
+ * client's rounding slack so a legitimate exact-fill split isn't touched.
+ */
+function clampAllocationHours<T extends { hours: number }>(
+  allocations: T[],
+  workedHrs: number,
+): T[] {
+  const sum = allocations.reduce((s, a) => s + (Number(a.hours) || 0), 0);
+  if (sum <= workedHrs + 0.01 || sum <= 0) return allocations;
+  // Sum overshoots the billable shift — scale every row by worked/sum so the total
+  // lands exactly on workedHrs, preserving each job's share. Keep cents (2-dp) rounding.
+  const scale = workedHrs / sum;
+  return allocations.map((a) => ({
+    ...a,
+    hours: Math.round((Number(a.hours) || 0) * scale * 100) / 100,
+  }));
+}
+
 export async function clockOut(input: {
   entry_id: string;
   lunch_minutes: number;
@@ -163,9 +191,25 @@ export async function clockOut(input: {
   // Replace any existing allocations with the submitted set. INSERT the new rows
   // BEFORE deleting the old ones, so a failed insert can't wipe the entry's
   // allocations (the JS client has no multi-statement transaction).
-  const allocations = (input.allocations ?? []).filter(
+  let allocations = (input.allocations ?? []).filter(
     (a) => a.hours > 0 || a.description.trim() || a.job_id || a.job_code,
   );
+  // C7: clamp the caller-supplied split to the entry's worked hours BEFORE persisting,
+  // so a voice/registry/crafted call can't bill/cost more hours than payroll pays.
+  // Re-read clock_in (so we don't trust the caller for the shift bounds) and use the
+  // final clock_out + lunch we're about to write — the same gross-minus-lunch payroll uses.
+  if (allocations.length) {
+    const { data: ent } = await supabase
+      .from("time_entries")
+      .select("clock_in")
+      .eq("id", input.entry_id)
+      .eq("profile_id", user.id)
+      .maybeSingle();
+    if (ent?.clock_in) {
+      const workedHrs = hoursBetween(ent.clock_in, clockOutIso, input.lunch_minutes || 0);
+      allocations = clampAllocationHours(allocations, workedHrs);
+    }
+  }
   const { data: oldAllocs } = await supabase
     .from("time_allocations")
     .select("id")
@@ -273,7 +317,7 @@ export async function completeAutoClockOut(input: {
 
   const { data: entry } = await supabase
     .from("time_entries")
-    .select("id")
+    .select("id, clock_in, clock_out")
     .eq("id", input.entry_id)
     .eq("profile_id", user.id)
     .eq("status", "closed")
@@ -283,7 +327,13 @@ export async function completeAutoClockOut(input: {
   const lunch = Math.max(0, Math.round(Number(input.lunch_minutes) || 0));
   await supabase.from("time_entries").update({ lunch_minutes: lunch }).eq("id", input.entry_id);
 
-  const allocations = (input.allocations ?? []).filter((a) => a.job_code || a.hours);
+  let allocations = (input.allocations ?? []).filter((a) => a.job_code || a.hours);
+  // C7: clamp the post-hoc code split to the entry's worked hours. The geofence locked
+  // the clock in/out times; lunch can only reduce hours — so bill/cost can't exceed payroll.
+  if (allocations.length && entry.clock_in && entry.clock_out) {
+    const workedHrs = hoursBetween(entry.clock_in, entry.clock_out, lunch);
+    allocations = clampAllocationHours(allocations, workedHrs);
+  }
   if (allocations.length) {
     const rows = await Promise.all(
       allocations.map(async (a, idx) => ({
@@ -443,7 +493,12 @@ export async function updateTimeEntry(input: {
   // Insert the new rows BEFORE deleting the old (a failed insert can't wipe the
   // split), and refresh every job touched on either side so labor totals move.
   if (input.allocations !== undefined) {
-    const allocs = input.allocations.filter((a) => (a.hours ?? 0) > 0 || a.job_id || a.job_code || a.description?.trim());
+    let allocs = input.allocations.filter((a) => (a.hours ?? 0) > 0 || a.job_id || a.job_code || a.description?.trim());
+    // C7: clamp the split to the entry's worked hours server-side (the client guard in
+    // edit-entry-button.tsx is advisory — voice/registry/crafted calls bypass it). Worked
+    // hours come from the times we just validated above (ci/co + lunch), same as payroll.
+    const workedHrs = hoursBetween(input.clock_in, input.clock_out, input.lunch_minutes || 0);
+    allocs = clampAllocationHours(allocs, workedHrs);
     const { data: oldAllocs } = await supabase.from("time_allocations").select("id, job_id").eq("time_entry_id", input.id);
     const oldIds = (oldAllocs ?? []).map((a: { id: string }) => a.id);
     const touched = new Set<string>((oldAllocs ?? []).map((a: { job_id: string | null }) => a.job_id).filter(Boolean) as string[]);

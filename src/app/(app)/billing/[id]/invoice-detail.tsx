@@ -351,6 +351,12 @@ export function InvoiceDetail({
           )}
         </div>
 
+        {/* Status is mostly system-derived: "Sent" comes from actually sending the
+            invoice, and "Paid"/"Partial" from recorded payments — letting the user
+            pick those by hand fakes money/send state (a "Sent" with no email, a
+            "Paid" with no payment row so Collected never moves). The manual menu is
+            limited to Draft and Void; the live status still shows as a locked option
+            when it's one the system owns. */}
         <div className="flex flex-wrap items-center gap-3">
           <span className="text-sm text-slate-500">Status</span>
           <Select
@@ -365,10 +371,12 @@ export function InvoiceDetail({
             }
           >
             <option value="draft">Draft</option>
-            <option value="sent">Sent</option>
-            <option value="partial">Partial</option>
-            <option value="paid">Paid</option>
-            <option value="overdue">Overdue</option>
+            {/* Keep the current status visible even though it isn't a manual choice. */}
+            {!["draft", "void"].includes(invoice.status) && (
+              <option value={invoice.status} disabled>
+                {invoice.status.charAt(0).toUpperCase() + invoice.status.slice(1)}
+              </option>
+            )}
             <option value="void">Void</option>
           </Select>
         </div>
@@ -589,6 +597,16 @@ export function InvoiceDetail({
         <Card>
           <CardContent className="space-y-3 py-5">
             <h3 className="text-sm font-semibold text-slate-900">Record payment</h3>
+            {/* You can't collect on an invoice you haven't billed yet. On an unsent
+                draft the form is de-emphasized behind a "send it first" hint so a
+                payment is never recorded against an invoice the customer never got. */}
+            {isDraft ? (
+              <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-500">
+                Send this invoice first — once it&apos;s billed to the customer you can
+                record payments here.
+              </p>
+            ) : (
+            <>
             {payError && <p className="text-sm text-red-600">{payError}</p>}
             <div className="grid grid-cols-2 gap-2">
               <div>
@@ -630,6 +648,8 @@ export function InvoiceDetail({
             <Button className="w-full" onClick={pay} disabled={pending}>
               {pending ? "Saving…" : "Record payment"}
             </Button>
+            </>
+            )}
           </CardContent>
         </Card>
 

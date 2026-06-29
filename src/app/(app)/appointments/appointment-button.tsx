@@ -163,6 +163,7 @@ export function AppointmentButton({
 
   function remove() {
     if (!appointment) return;
+    if (!confirm(`Delete the appointment "${appointment.title}"? This can't be undone.`)) return;
     start(async () => {
       await deleteAppointment(appointment.id);
       setOpen(false);

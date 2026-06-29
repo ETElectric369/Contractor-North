@@ -67,6 +67,7 @@ export function RecurringButton({
   }
   function remove() {
     if (!template) return;
+    if (!confirm(`Delete the recurring "${template.title}"? It will stop generating going forward.`)) return;
     start(async () => {
       await deleteRecurring(template.id);
       setOpen(false);

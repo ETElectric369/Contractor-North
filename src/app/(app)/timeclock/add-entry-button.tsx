@@ -8,6 +8,7 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { createManualEntry } from "./actions";
+import { todayStrInTz } from "@/lib/tz";
 import type { JobCode } from "@/lib/types";
 
 interface JobOption {
@@ -25,18 +26,22 @@ export function AddEntryButton({
   members,
   jobCodes,
   jobs,
+  tz = "America/Los_Angeles",
 }: {
   isStaff: boolean;
   members: Member[];
   jobCodes: JobCode[];
   jobs: JobOption[];
+  /** Org IANA timezone, so the default date is the business's local "today"
+   *  rather than the browser/UTC day. Defaults to the org-settings default. */
+  tz?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayStrInTz(tz);
   const [member, setMember] = useState("");
   const [date, setDate] = useState(today);
   const [startT, setStartT] = useState("08:00");

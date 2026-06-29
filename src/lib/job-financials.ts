@@ -13,7 +13,7 @@ export async function jobProgressFinancials(supabase: any, jobId: string): Promi
   const [{ data: job }, { data: quotes }, { data: invoices }, labor, { data: pos }, { data: bills }, { data: org }] =
     await Promise.all([
       supabase.from("jobs").select("billing_type").eq("id", jobId).maybeSingle(),
-      supabase.from("quotes").select("total").eq("job_id", jobId),
+      supabase.from("quotes").select("total, status").eq("job_id", jobId),
       supabase.from("invoices").select("total, status, amount_paid").eq("job_id", jobId),
       fetchJobLaborRows(supabase, jobId),
       supabase.from("purchase_orders").select("total").eq("job_id", jobId),

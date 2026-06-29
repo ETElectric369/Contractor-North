@@ -6,6 +6,7 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { tzDayStartUtc } from "@/lib/tz";
 import { hoursBetween } from "@/lib/utils";
 import { payRateForEntry } from "@/lib/payroll-math";
+import { summarizeMileage } from "@/lib/mileage-math";
 
 export type Result = { ok: boolean; error?: string };
 
@@ -38,8 +39,11 @@ export async function markPeriodPaid(input: {
   const { supabase, userId } = ctx;
 
   const { startIso, endIso } = await periodInstants(supabase, input.periodStart, input.periodEnd);
-  const { data: prof } = await supabase.from("profiles").select("hourly_rate").eq("id", input.profileId).maybeSingle();
+  const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+  const tz = getOrgSettings((org as any)?.settings).timezone;
+  const { data: prof } = await supabase.from("profiles").select("hourly_rate, commute_baseline_miles").eq("id", input.profileId).maybeSingle();
   const rate = Number(prof?.hourly_rate ?? 0);
+  const baseline = Math.max(0, Number(prof?.commute_baseline_miles ?? 0));
 
   const { data: entries } = await supabase
     .from("time_entries")
@@ -56,13 +60,15 @@ export async function markPeriodPaid(input: {
   // Accumulate gross PER ENTRY at its own pay rate (rate_override ?? base) — the exact same
   // resolver the approval screen uses, so the snapshot the accountant exports can't diverge
   // from what the owner approved, and a mixed-rate week is paid correctly.
-  let hours = 0, miles = 0, gross = 0;
+  let hours = 0, gross = 0;
   for (const e of list) {
     const h = hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes);
     hours += h;
-    miles += Number(e.miles ?? 0);
     gross += h * payRateForEntry(e, rate);
   }
+  // Reimbursable mileage = BUSINESS miles (logged net of the daily commute baseline), the same
+  // netting the approval screen + tax report use — so the exported run can't overpay the commute.
+  const miles = summarizeMileage(list, baseline, tz).business;
   const r2 = (n: number) => Math.round(n * 100) / 100;
 
   const { error: upErr } = await supabase

@@ -17,9 +17,12 @@ const variants: Record<Variant, string> = {
 
 const sizes: Record<Size, string> = {
   sm: "h-8 px-3 text-sm",
-  md: "h-10 px-4 text-sm",
+  // md is the DEFAULT button. Bumped 40px → 44px so every default control (e.g. the My Day
+  // clock in/out) clears the 44px touch-target minimum for gloved field hands on a phone.
+  md: "h-11 px-4 text-sm",
   lg: "h-12 px-6 text-base",
-  icon: "h-10 w-10",
+  // Icon buttons sit at the same 44px touch target so a tap doesn't miss.
+  icon: "h-11 w-11",
 };
 
 export interface ButtonProps

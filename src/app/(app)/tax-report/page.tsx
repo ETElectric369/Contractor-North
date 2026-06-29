@@ -72,16 +72,18 @@ export default async function TaxReportPage({
     rec.entries.push(e);
     byPerson.set(e.profile_id, rec);
   }
-  let businessMiles = 0;
-  let loggedMiles = 0;
+  let businessMilesRaw = 0;
+  let loggedMilesRaw = 0;
   for (const rec of byPerson.values()) {
     const s = summarizeMileage(rec.entries, rec.baseline, settings.timezone);
-    businessMiles += s.business;
-    loggedMiles += s.recorded;
+    businessMilesRaw += s.business;
+    loggedMilesRaw += s.recorded;
   }
-  businessMiles = Math.round(businessMiles * 10) / 10;
-  loggedMiles = Math.round(loggedMiles * 10) / 10;
-  const mileageDeduction = Math.round(businessMiles * (settings.mileage_rate || 0) * 100) / 100;
+  // Apply the rate to the un-rounded business-miles SUM (round once, at the dollar), so
+  // the deduction isn't skewed by rounding each person's tenth-of-a-mile twice.
+  const mileageDeduction = Math.round(businessMilesRaw * (settings.mileage_rate || 0) * 100) / 100;
+  const businessMiles = Math.round(businessMilesRaw * 10) / 10; // display only
+  const loggedMiles = Math.round(loggedMilesRaw * 10) / 10; // display only
 
   // Only count real (issued) invoices — exclude drafts & voids.
   const real = (invoices ?? []).filter((i: any) => !["void", "draft"].includes(i.status));
@@ -105,7 +107,10 @@ export default async function TaxReportPage({
     g.tax += Number(i.tax ?? 0);
     g.count += 1;
     groups.set(key, g);
-    totalTaxable += Number(i.subtotal ?? 0);
+    // "Taxable sales" = sales that actually carry tax. A 0% / exempt invoice is part of
+    // total sales but NOT taxable — counting it here would overstate the taxable base
+    // and mismatch what's owed. (It still shows in the per-rate breakdown under "No tax".)
+    if (rateDec > 0) totalTaxable += Number(i.subtotal ?? 0);
     totalTax += Number(i.tax ?? 0);
   }
   const rows = [...groups.values()].sort((a, b) => b.tax - a.tax);

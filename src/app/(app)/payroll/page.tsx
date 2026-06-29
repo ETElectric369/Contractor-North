@@ -31,13 +31,14 @@ export default async function PayrollPage({
 
   const { data: entries } = await supabase
     .from("time_entries")
-    .select("profile_id, clock_in, clock_out, lunch_minutes, miles, paid_at, rate_override, profiles(full_name, hourly_rate)")
+    .select("profile_id, clock_in, clock_out, lunch_minutes, miles, paid_at, rate_override, profiles(full_name, hourly_rate, commute_baseline_miles)")
     .eq("status", "closed")
     .not("clock_out", "is", null)
     .gte("clock_in", startIso)
     .lt("clock_in", endIso);
 
-  const rows = aggregatePayrollEntries((entries ?? []) as any[]);
+  // Pass the org tz so mileage pay nets the per-person daily commute baseline correctly.
+  const rows = aggregatePayrollEntries((entries ?? []) as any[], settings.timezone);
 
   return (
     <div className="mx-auto max-w-4xl">

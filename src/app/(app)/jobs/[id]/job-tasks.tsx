@@ -85,12 +85,13 @@ export function JobTasks({ jobId, tasks }: { jobId: string; tasks: Task[] }) {
           <Pencil className="h-4 w-4" />
         </button>
         <button
-          onClick={() =>
+          onClick={() => {
+            if (!confirm(`Delete "${t.title}"? This can't be undone.`)) return;
             start(async () => {
               await deleteTask(t.id, { jobId });
               router.refresh();
-            })
-          }
+            });
+          }}
           className="text-slate-400 hover:text-red-600"
           title="Delete"
         >

@@ -6,13 +6,17 @@ import { Plus, ListTodo, Briefcase, CalendarPlus, FileText, Receipt, Camera, Use
 
 // Add-cost is NOT here — it lives on My Day's Now card + the job header (job-scoped,
 // works cleanly). A self-loading copy in this dropdown was redundant + fiddly.
+// Every verb lands on the CREATE affordance, not a list to hunt through: a
+// ?new=1 param the target page reads to auto-open its "new" modal (the pattern
+// /crm already uses), or a route that IS the form (/quotes/new). Don't drop the
+// user on a list and make them find the + again.
 const ACTIONS = [
-  { label: "New task", href: "/tasks", icon: ListTodo },
+  { label: "New task", href: "/tasks?new=1", icon: ListTodo },
   { label: "New customer", href: "/crm?new=1", icon: UserPlus },
-  { label: "New job", href: "/jobs", icon: Briefcase },
-  { label: "New appointment", href: "/schedule?view=appointments", icon: CalendarPlus },
+  { label: "New job", href: "/jobs?new=1", icon: Briefcase },
+  { label: "New appointment", href: "/schedule?view=appointments&new=1", icon: CalendarPlus },
   { label: "New estimate", href: "/quotes/new", icon: FileText },
-  { label: "New invoice", href: "/billing", icon: Receipt },
+  { label: "New invoice", href: "/billing?new=1", icon: Receipt },
   { label: "Snap & file (Organize My)", href: "/organize", icon: Camera },
 ];
 

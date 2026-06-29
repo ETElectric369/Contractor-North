@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select } from "@/components/ui/input";
 import { formatCurrency } from "@/lib/utils";
+import { createClient } from "@/lib/supabase/client";
 import { createInvoiceFromQuote, createBlankInvoice } from "./actions";
 
 interface QuoteOption {
@@ -43,13 +44,31 @@ export function NewInvoiceButton({
   const [customerId, setCustomerId] = useState("");
   const [jobId, setJobId] = useState("");
   const [title, setTitle] = useState("");
+  // Seeded from the org's default tax rate on open (a fraction, e.g. 0.0825) so a
+  // blank invoice isn't silently zero-tax — the #1 "wrong number" on hand-typed
+  // invoices. Self-loaded once, mirroring quick-cost-button's self-load.
   const [taxRate, setTaxRate] = useState(0);
+  const [taxSeeded, setTaxSeeded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const router = useRouter();
 
   // Jobs to offer: those for the chosen customer (or all, if no customer yet).
   const jobChoices = customerId ? jobs.filter((j) => j.customer_id === customerId) : jobs;
+
+  async function openModal() {
+    setOpen(true);
+    if (taxSeeded) return; // only seed once; don't stomp a value the user already typed
+    setTaxSeeded(true);
+    const supabase = createClient();
+    const { data } = await supabase
+      .from("organizations")
+      .select("default_tax_rate")
+      .limit(1)
+      .maybeSingle();
+    const rate = Number((data as any)?.default_tax_rate);
+    if (Number.isFinite(rate) && rate > 0) setTaxRate(rate);
+  }
 
   function onCreate() {
     setError(null);
@@ -74,7 +93,7 @@ export function NewInvoiceButton({
 
   return (
     <>
-      <Button onClick={() => setOpen(true)}>
+      <Button onClick={openModal}>
         <Plus className="h-4 w-4" /> New invoice
       </Button>
 
@@ -202,6 +221,9 @@ export function NewInvoiceButton({
                     type="number"
                     step="any"
                     placeholder="8.25"
+                    // Show as a percent; state holds the fraction. Seeded from the
+                    // org default on open so the field isn't a blank 0.
+                    value={taxRate ? +(taxRate * 100).toFixed(4) : ""}
                     onChange={(e) =>
                       setTaxRate((Number(e.target.value) || 0) / 100)
                     }

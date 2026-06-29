@@ -5,7 +5,35 @@ import { useRouter } from "next/navigation";
 import { Search, Sparkles, Plus, ArrowRight } from "lucide-react";
 import { DOCK } from "@/lib/dock";
 
-type Item = { kind: string; label: string; sub?: string; href: string; staffOnly?: boolean };
+type Item = { kind: string; label: string; sub?: string; href: string; staffOnly?: boolean; aliases?: string[] };
+
+// Synonyms so search finds a page by what the owner CALLS it, not just its label. Keyed by the
+// page's href (the stable id) so it survives label/section renames. Lowercase; matched as
+// substrings, same as the label. Extend freely — this is the one place aliases live.
+const NAV_ALIASES: Record<string, string[]> = {
+  "/billing": ["ar", "owed", "receivables", "accounts receivable", "money", "billing"],
+  "/payments": ["paid", "received", "deposit", "collections"],
+  "/bills": ["ap", "accounts payable", "purchase order", "po", "vendor", "expense"],
+  "/payroll": ["wages", "pay", "salary", "paycheck", "hours pay"],
+  "/tax-report": ["taxes", "1099", "irs", "tax"],
+  "/analytics": ["reports", "reporting", "kpi", "dashboard", "numbers", "profit"],
+  "/recurring": ["subscription", "repeat invoice", "auto invoice"],
+  "/petty-cash": ["cash", "reimbursement"],
+  "/price-list": ["pricing", "rates", "catalog"],
+  "/leads": ["prospects", "inquiries", "pipeline"],
+  "/quotes": ["estimate", "proposal", "bid"],
+  "/crm": ["customers", "clients", "people", "contact"],
+  "/timeclock": ["clock in", "punch", "clock"],
+  "/timecards": ["hours", "timesheet"],
+  "/schedule": ["calendar", "dispatch", "appointments"],
+  "/jobs": ["projects", "work"],
+  "/inventory": ["stock", "warehouse", "parts"],
+  "/compliance": ["osha", "liability", "regulations"],
+  "/insurance": ["workers comp", "coverage", "liability"],
+  "/safety": ["osha", "incident", "hazard"],
+  "/tools": ["calculator", "calculators", "nec", "wire size"],
+  "/plans": ["lidar", "scan", "blueprint", "drawing", "take-off", "takeoff", "markup"],
+};
 
 // ONE source of truth: the command bar's "go to" list is derived from the SAME dock that
 // drives the dock + sub-nav, so they can never drift again. Carry staffOnly (section OR item)
@@ -16,7 +44,7 @@ function navLeaves(nodes: DockLeaf[], sub: string, sectionStaff?: boolean): Item
     n.children?.length
       ? navLeaves(n.children, n.label, sectionStaff || n.staffOnly)
       : n.href
-        ? [{ kind: "Go to", label: n.label, sub, href: n.href, staffOnly: sectionStaff || n.staffOnly }]
+        ? [{ kind: "Go to", label: n.label, sub, href: n.href, staffOnly: sectionStaff || n.staffOnly, aliases: NAV_ALIASES[n.href] }]
         : [],
   );
 }
@@ -103,7 +131,18 @@ export function CommandBar({ isStaff }: { isStaff?: boolean }) {
   const staticMatches = useMemo(() => {
     const term = q.trim().toLowerCase();
     if (!term) return navItems.slice(0, 7);
-    return navItems.filter((i) => i.label.toLowerCase().includes(term)).slice(0, 6);
+    // Match the label, the parent section, OR any synonym — so "owed"/"AR" finds Invoices and
+    // "wages" finds Payroll. Label hits rank above alias-only hits.
+    const scored = navItems
+      .map((i) => {
+        const label = i.label.toLowerCase().includes(term);
+        const sub = i.sub?.toLowerCase().includes(term) ?? false;
+        const alias = i.aliases?.some((a) => a.includes(term) || term.includes(a)) ?? false;
+        return { i, hit: label || sub || alias, rank: label ? 0 : sub ? 1 : 2 };
+      })
+      .filter((s) => s.hit)
+      .sort((a, b) => a.rank - b.rank);
+    return scored.slice(0, 6).map((s) => s.i);
   }, [q, navItems]);
 
   const askItem: Item | null = q.trim()

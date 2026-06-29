@@ -52,8 +52,8 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   // rounds (day data → current job + week total → form/snapshot options). Latency audit 2026-06-27.
   const [
     { data: jobs }, { data: segJobs }, { data: appts }, { data: tasks }, { data: entries }, { data: openRows },
-    { data: curRows }, { data: weekEntries },
-    { data: customers }, { data: staff }, { data: jobOptRows }, { data: me }, leadsCount, { data: invRows },
+    { data: weekEntries },
+    { data: customers }, { data: staff }, { data: jobOptRows }, { data: me }, leadsCount,
   ] = await Promise.all([
     supabase.from("jobs").select("id, job_number, name, status, address, scheduled_start, customers(name)").gte("scheduled_start", dayStart.toISOString()).lt("scheduled_start", dayEnd.toISOString()).order("scheduled_start"),
     // Multi-range jobs whose segment covers today.
@@ -61,10 +61,10 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     supabase.from("appointments").select("id, type, title, starts_at, ends_at, location, notes, status, job_id, customer_id, assigned_to").gte("starts_at", dayStart.toISOString()).lt("starts_at", dayEnd.toISOString()).neq("status", "cancelled").order("starts_at"),
     supabase.from("tasks").select("id, title, category, status, priority, due_date, job_id, assigned_to, jobs(job_number, name), assignee:assigned_to(full_name)").eq("status", "open").lte("due_date", todayStr).order("priority", { ascending: false }),
     supabase.from("time_entries").select("id, job_id, clock_in, clock_out, lunch_minutes, status").eq("profile_id", user?.id ?? "").gte("clock_in", dayStart.toISOString()).lt("clock_in", dayEnd.toISOString()),
-    // The open entry, regardless of when it started (overnight shift, etc.).
+    // The open entry, regardless of when it started (overnight shift, etc.). The job
+    // on THIS entry is the "Now" hero — scoped to the caller, not the org's latest
+    // in_progress job (which could be a coworker's site across town).
     supabase.from("time_entries").select("id, job_id, clock_in, clock_out, lunch_minutes, status").eq("profile_id", user?.id ?? "").eq("status", "open").order("clock_in", { ascending: false }).limit(1),
-    // The job you're actually on right now.
-    supabase.from("jobs").select("id, job_number, name, status, address, customers(name)").eq("status", "in_progress").order("scheduled_start", { ascending: false }).limit(1),
     // This week's logged hours.
     supabase.from("time_entries").select("clock_in, clock_out, lunch_minutes, status").eq("profile_id", user?.id ?? "").gte("clock_in", weekStartUtc.toISOString()).lt("clock_in", dayEnd.toISOString()),
     // Options for the inline add/edit controls + the owner snapshot.
@@ -73,14 +73,25 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     supabase.from("jobs").select("id, job_number, name, address").order("created_at", { ascending: false }).limit(200),
     supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle(),
     supabase.from("inquiries").select("id", { count: "exact", head: true }).is("converted_at", null).neq("status", "lost"),
-    supabase.from("invoices").select("total, amount_paid, status"),
   ]);
 
-  const currentJob = (curRows ?? [])[0] as any | undefined;
+  const openEntry = (openRows ?? [])[0] as any | undefined;
   const isStaff = ["owner", "admin", "office"].includes((me as any)?.role ?? "");
 
-  // The two reads that depend on a result above — the current job's materials (needs its id) and the
-  // "Needs action" inbox (needs the role) — run together in one final round instead of two more awaits.
+  // The reads that depend on a result above — the caller's current job (the job on
+  // their OWN open time entry, so the "Now" hero is their site, not a coworker's),
+  // and the staff-only money pipeline — run together in one final round.
+  const [curJobRes, pipeline] = await Promise.all([
+    openEntry?.job_id
+      ? supabase.from("jobs").select("id, job_number, name, status, address, customers(name)").eq("id", openEntry.job_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+    // Money pipeline (staff only) — the daily "nothing got missed" nudge.
+    isStaff ? getMoneyPipeline(supabase) : Promise.resolve(null),
+  ]);
+  const currentJob = ((curJobRes as any)?.data as any) ?? undefined;
+
+  // The current job's materials (needs its id) and the "Needs action" inbox (needs
+  // the role) — one final round instead of two more awaits.
   const [mlRes, actionItems] = await Promise.all([
     currentJob
       ? supabase.from("material_lists").select("id, name").eq("job_id", currentJob.id).order("id", { ascending: false }).limit(1).maybeSingle()
@@ -88,8 +99,6 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     getActionItems({ todayStr, isStaff, userId: user?.id ?? "" }),
   ]);
   const currentMaterials: { id: string; name: string } | null = ((mlRes as any)?.data as any) ?? null;
-  // Money pipeline (staff only) — the daily "nothing got missed" nudge.
-  const pipeline = isStaff ? await getMoneyPipeline(supabase) : null;
 
   // ── derived (no awaits) ──
   // Merge scheduled-today jobs + segment-today jobs (dedup).
@@ -111,7 +120,6 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       e.status === "closed" && e.clock_out ? sum + hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes) : sum,
     0,
   );
-  const openEntry = (openRows ?? [])[0] as any | undefined;
   const findJob = (id: string) => jobMap.get(id) ?? (currentJob?.id === id ? currentJob : null);
   const openJobLabel =
     openEntry?.job_id && findJob(openEntry.job_id)
@@ -136,9 +144,10 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   const staffOpts = toStaffOptions(staff);
   const people = (staff ?? []).map((s: any) => ({ id: s.id, full_name: s.full_name }));
   const openInquiries = leadsCount.count ?? 0;
-  const outstanding = (invRows ?? [])
-    .filter((i: any) => !["paid", "void"].includes(i.status))
-    .reduce((s: number, i: any) => s + (Number(i.total) - Number(i.amount_paid)), 0);
+  // ONE outstanding number: the snapshot stat reads the SAME pipeline as the money
+  // line above, so both agree (unpaid balances, drafts excluded). Was a parallel
+  // sum that counted drafts and disagreed with the money line.
+  const outstanding = pipeline?.outstandingTotal ?? 0;
 
   const niceDay = prettyDay(todayStr);
   const empty = (label: string) => <p className="px-5 py-6 text-center text-sm text-slate-400">{label}</p>;

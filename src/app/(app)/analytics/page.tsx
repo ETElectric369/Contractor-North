@@ -27,12 +27,14 @@ export default async function AnalyticsPage() {
   yearAgo.setMonth(yearAgo.getMonth() - 11);
   yearAgo.setDate(1);
 
-  const [{ data: payments }, { data: invoices }, { data: quotes }, { data: jobs }, { data: entries }, { data: pos }, { data: bills }, { data: refunds }] =
+  const [{ data: payments }, { data: invoices }, { data: quotes }, { data: jobs }, { data: entries }, { data: pos }, { data: bills }, { data: refunds }, { data: jobRefunds }] =
     await Promise.all([
       supabase.from("payments").select("amount, paid_at, invoices(status)").gte("paid_at", yearAgo.toISOString()),
       supabase.from("invoices").select("id, invoice_number, job_id, status, total, amount_paid, due_date, created_at, customers(name)"),
       supabase.from("quotes").select("status, total"),
-      supabase.from("jobs").select("id, job_number, name, status").order("created_at", { ascending: false }).limit(100),
+      // No .limit() — job profitability must rank over ALL jobs, not just the 100 newest
+      // (the slice to the top 8 happens AFTER sorting on profit, below).
+      supabase.from("jobs").select("id, job_number, name, status").order("created_at", { ascending: false }),
       supabase
         .from("time_entries")
         .select("job_id, clock_in, clock_out, lunch_minutes, status, rate_override, profiles(hourly_rate), time_allocations(job_id, hours)")
@@ -41,6 +43,9 @@ export default async function AnalyticsPage() {
       supabase.from("purchase_orders").select("job_id, total"),
       supabase.from("bills").select("job_id, amount, category"),
       supabase.from("customer_credits").select("amount, created_at").eq("disposition", "refund").gte("created_at", yearAgo.toISOString()),
+      // Per-job refunds (all-time, with the invoice they reversed) so job profitability
+      // nets refunds the SAME way the job hub does — keyed to a job via its invoice.
+      supabase.from("customer_credits").select("amount, invoices(job_id)").eq("disposition", "refund"),
     ]);
 
   // ── Revenue by month (collected payments, last 12 months) ────────────────
@@ -102,11 +107,24 @@ export default async function AnalyticsPage() {
     if (!id) return;
     matCost.set(id, (matCost.get(id) ?? 0) + v);
   };
+  // KNOWN DOUBLE-COUNT (mirrored on the job hub): a cost entered as BOTH a purchase
+  // order AND a supplier bill is counted twice (PO total + bill amount) — there's no
+  // FK linking a bill to the PO it pays, so we can't dedupe yet. Recording one or the
+  // other (not both) keeps this honest. Fix is a po_id on bills.
   for (const p of (pos ?? []) as any[]) addMat(p.job_id, Number(p.total));
   for (const b of (bills ?? []) as any[]) addMat(b.job_id, Number(b.amount));
 
-  // Revenue per job = CASH COLLECTED (amount_paid on non-void invoices), not the
-  // sum of invoice totals — otherwise a progress invoice + the final double-count.
+  // Refunds per job — netted out of revenue exactly like the job hub does (revenue =
+  // collected − refunds), so the same job shows the same profit on both surfaces. A
+  // refund is keyed to a job through the invoice it reversed.
+  const refundByJob = new Map<string, number>();
+  for (const r of (jobRefunds ?? []) as any[]) {
+    const jid = r.invoices?.job_id;
+    if (jid) refundByJob.set(jid, (refundByJob.get(jid) ?? 0) + Number(r.amount ?? 0));
+  }
+
+  // Revenue per job = CASH COLLECTED (amount_paid on non-void invoices) net of refunds,
+  // not the sum of invoice totals — otherwise a progress invoice + the final double-count.
   const revenueByJob = new Map<string, number>();
   for (const i of (invoices ?? []) as any[]) {
     if (i.job_id && i.status !== "void")
@@ -114,7 +132,8 @@ export default async function AnalyticsPage() {
   }
   const jobRows = ((jobs ?? []) as any[])
     .map((j) => {
-      const rev = revenueByJob.get(j.id) ?? 0;
+      // Match the job hub: revenue = max(0, collected − refunds).
+      const rev = Math.max(0, (revenueByJob.get(j.id) ?? 0) - (refundByJob.get(j.id) ?? 0));
       const c = laborCostForJob((entries ?? []) as any[], j.id).cost + (matCost.get(j.id) ?? 0);
       return { ...j, rev, cost: c, profit: rev - c };
     })

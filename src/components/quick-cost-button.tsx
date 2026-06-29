@@ -7,6 +7,8 @@ import { createClient } from "@/lib/supabase/client";
 import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Modal, ModalActions } from "@/components/ui/modal";
+import { todayStrInTz } from "@/lib/tz";
+import { getOrgSettings } from "@/lib/org-settings";
 import { createBill, addDocument } from "@/app/(app)/jobs/actions";
 
 const CATEGORIES = ["Materials", "Fuel", "Shop supplies", "Tools", "Subcontractor", "Permit", "Equipment rental", "Office", "Other"];
@@ -55,7 +57,10 @@ export function QuickCostButton({
   const [open, setOpen] = useState(false);
   const [supplier, setSupplier] = useState("");
   const [amount, setAmount] = useState(0);
-  const [billDate, setBillDate] = useState("");
+  // Default the date to today so a cost lands on the right day in one tap — blank
+  // was dropping a known value. Seeded to the browser's local day immediately,
+  // then refined to the org's timezone once settings load on open.
+  const [billDate, setBillDate] = useState(() => todayStrInTz(getOrgSettings(null).timezone));
   const [category, setCategory] = useState("Materials");
   const [paid, setPaid] = useState(false);
   const [job, setJob] = useState(jobId ?? "");
@@ -68,6 +73,9 @@ export function QuickCostButton({
   // Self-loaded context when not passed in (global + menu use).
   const [autoOrg, setAutoOrg] = useState("");
   const [autoJobs, setAutoJobs] = useState<{ id: string; label: string }[] | null>(null);
+  // The org's timezone, loaded once on first open, so the seeded cost date is the
+  // org's "today" (not the device's). Falls back to the default tz until loaded.
+  const orgTz = useRef<string | null>(null);
 
   const effectiveOrg = orgId || autoOrg;
   const pickerJobs = jobs ?? autoJobs ?? undefined;
@@ -76,7 +84,7 @@ export function QuickCostButton({
   function reset() {
     setSupplier("");
     setAmount(0);
-    setBillDate("");
+    setBillDate(todayStrInTz(orgTz.current ?? getOrgSettings(null).timezone));
     setCategory("Materials");
     setPaid(false);
     setJob(jobId ?? "");
@@ -91,11 +99,14 @@ export function QuickCostButton({
     reset();
     onOpen?.();
     setOpen(true);
-    // Self-load context when dropped somewhere without it (e.g. the global + menu).
-    if (!orgId && !autoOrg) {
+    // Load the org's timezone once so the seeded date is the org's "today" — even
+    // when orgId was passed in (job-scoped use), where the id self-load is skipped.
+    if (orgTz.current == null) {
       const supabase = createClient();
-      const { data } = await supabase.from("organizations").select("id").limit(1).maybeSingle();
-      if ((data as any)?.id) setAutoOrg((data as any).id);
+      const { data } = await supabase.from("organizations").select("id, settings").limit(1).maybeSingle();
+      if (!orgId && (data as any)?.id) setAutoOrg((data as any).id);
+      orgTz.current = getOrgSettings((data as any)?.settings).timezone;
+      setBillDate(todayStrInTz(orgTz.current));
     }
     if (!jobId && !jobs && !autoJobs) {
       const supabase = createClient();

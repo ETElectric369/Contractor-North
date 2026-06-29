@@ -47,9 +47,18 @@ interface JobOption {
 // Route through the shared geo helper (one option set, real secure-context/permission handling) instead
 // of a third hand-rolled getCurrentPosition. Still returns null on failure — but the caller now SHOWS
 // that the punch wasn't GPS-stamped instead of silently stamping gps:null.
-async function getGps(): Promise<GeoPoint | null> {
-  const r = await getPosition({ enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 });
-  return r.status === "ok" ? { lat: r.coords.lat, lng: r.coords.lng, accuracy: r.accuracy } : null;
+//
+// `capMs` caps how long the PUNCH waits on GPS. The clock-in punch passes a short cap so the field crew
+// isn't held hostage by an 8s highAccuracy fix on bad reception (the other two clock-in surfaces punch
+// instantly with no GPS at all) — if the fix lands inside the window it's stamped, otherwise we punch
+// now and warn that the punch isn't location-stamped. Clock-out keeps the full round-trip.
+async function getGps(capMs?: number): Promise<GeoPoint | null> {
+  const fix = getPosition({ enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }).then((r) =>
+    r.status === "ok" ? { lat: r.coords.lat, lng: r.coords.lng, accuracy: r.accuracy } : null,
+  );
+  if (!capMs) return fix;
+  // Race the real fix against a short cap; whichever resolves first wins (null = punch now, no GPS).
+  return Promise.race([fix, new Promise<GeoPoint | null>((res) => setTimeout(() => res(null), capMs))]);
 }
 
 export function TimeclockPanel({
@@ -182,7 +191,10 @@ export function TimeclockPanel({
     setError(null);
     setGpsNote(null);
     start(async () => {
-      const gps = await getGps();
+      // PUNCH FIRST. Don't make the crew wait out an 8s highAccuracy fix to start their day —
+      // give GPS a short window (2.5s) and punch regardless; if the fix lands in time it's
+      // stamped, otherwise the entry is created now and we warn it isn't location-stamped.
+      const gps = await getGps(2500);
       const res = await clockIn({
         job_id: jobId || null,
         job_code: jobCode || null,
@@ -190,9 +202,10 @@ export function TimeclockPanel({
         clock_in_at: startAt || null,
       });
       if (!res.ok) setError(res.error ?? "Could not clock in.");
-      // GPS is optional, but don't pretend it was captured — if it's off/denied, say the punch
-      // isn't location-stamped (this used to fall through to gps:null silently).
-      else if (!gps) setGpsNote("Clocked in — location was off, so this punch isn't GPS-stamped.");
+      // GPS is optional, but don't pretend it was captured — if it's off/denied/slow, say the
+      // punch isn't location-stamped (this used to fall through to gps:null silently). The note
+      // now renders in the clocked-in view too, so the crew actually sees it post-punch.
+      else if (!gps) setGpsNote("Clocked in — location wasn't ready, so this punch isn't GPS-stamped.");
     });
   }
 
@@ -279,6 +292,14 @@ export function TimeclockPanel({
             </div>
           </div>
 
+          {/* Surface the "punch wasn't GPS-stamped" warning HERE — after a punch the panel
+              re-renders into this clocked-in branch, so the note set on clock-in is now visible. */}
+          {gpsNote && (
+            <p className="flex items-center justify-center gap-1.5 text-center text-sm text-amber-600">
+              <MapPin className="h-4 w-4 shrink-0" /> {gpsNote}
+            </p>
+          )}
+
           <label className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm ${requiredMeal && !lunchTaken ? "border-amber-300 bg-amber-50" : "border-slate-200"}`}>
             <input type="checkbox" checked={lunchTaken} onChange={(e) => setLunchTaken(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand" />
             <Coffee className="h-4 w-4 text-slate-400" />
@@ -314,11 +335,13 @@ export function TimeclockPanel({
               <div className="space-y-2">
                 {allocations.map((a, i) => (
                   <div key={i} className="space-y-2 rounded-lg border border-slate-100 p-2">
+                    {/* Row 1: the job + remove. Job select takes the full width so the
+                        long "number · name" label is readable on a phone. */}
                     <div className="flex items-center gap-2">
                       <Select
                         value={a.job_id}
                         onChange={(e) => updateAlloc(i, { job_id: e.target.value })}
-                        className="h-9 flex-1"
+                        className="h-11 min-w-0 flex-1"
                       >
                         <option value="">— Job —</option>
                         {jobs.map((j) => (
@@ -327,10 +350,23 @@ export function TimeclockPanel({
                           </option>
                         ))}
                       </Select>
+                      <button
+                        type="button"
+                        onClick={() => setAllocations((p) => p.filter((_, idx) => idx !== i))}
+                        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600"
+                        aria-label="Remove job"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                    {/* Row 2: code + hours/minutes. STACKS under the job on a narrow phone
+                        (instead of cramming 5 controls into one 327px row, where a minute
+                        got typed into the hours box). The h/m boxes are wider here too. */}
+                    <div className="flex items-center gap-2">
                       <Select
                         value={a.job_code}
                         onChange={(e) => updateAlloc(i, { job_code: e.target.value })}
-                        className="h-9 w-28"
+                        className="h-11 min-w-0 flex-1"
                       >
                         <option value="">Code</option>
                         {codesForJob(a.job_id).map((c) => (
@@ -339,30 +375,24 @@ export function TimeclockPanel({
                           </option>
                         ))}
                       </Select>
-                      <div className="flex items-center gap-1">
+                      <div className="flex shrink-0 items-center gap-1">
                         <NumberInput
                           value={a.hours}
                           onValueChange={(n) => updateAlloc(i, { hours: n })}
-                          className="h-9 w-12 text-center"
+                          className="h-11 w-14 text-center"
                           placeholder="h"
+                          aria-label="Hours"
                         />
                         <span className="text-xs text-slate-400">h</span>
                         <NumberInput
                           value={a.minutes}
                           onValueChange={(n) => updateAlloc(i, { minutes: n })}
-                          className="h-9 w-12 text-center"
+                          className="h-11 w-14 text-center"
                           placeholder="m"
+                          aria-label="Minutes"
                         />
                         <span className="text-xs text-slate-400">m</span>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setAllocations((p) => p.filter((_, idx) => idx !== i))}
-                        className="text-slate-400 hover:text-red-600"
-                        aria-label="Remove job"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
                     </div>
                     <Input
                       placeholder={t("tc_whatDone")}

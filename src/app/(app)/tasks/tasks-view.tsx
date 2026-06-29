@@ -321,7 +321,10 @@ export function TaskRow({
           <Pencil className="h-4 w-4" />
         </button>
         <button
-          onClick={() => start(async () => { await deleteTask(t.id, { category }); router.refresh(); })}
+          onClick={() => {
+            if (!confirm(`Delete "${t.title}"? This can't be undone.`)) return;
+            start(async () => { await deleteTask(t.id, { category }); router.refresh(); });
+          }}
           disabled={pending}
           className="text-slate-300 hover:text-red-600"
           title="Delete"
@@ -344,7 +347,13 @@ export function TaskRow({
                 className="h-3.5 w-3.5 rounded border-slate-300 text-brand focus:ring-brand"
               />
               <span className={`flex-1 ${st.status === "done" ? "text-slate-400 line-through" : "text-slate-700"}`}>{st.title}</span>
-              <button onClick={() => start(async () => { await deleteTask(st.id, { category }); router.refresh(); })} className="text-slate-300 hover:text-red-600">
+              <button
+                onClick={() => {
+                  if (!confirm(`Delete subtask "${st.title}"? This can't be undone.`)) return;
+                  start(async () => { await deleteTask(st.id, { category }); router.refresh(); });
+                }}
+                className="text-slate-300 hover:text-red-600"
+              >
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
             </li>

@@ -7,7 +7,7 @@ import { deliverInvoiceEmail } from "@/lib/invoice-email";
 import { sendSms } from "@/lib/sms";
 import { pushInvoiceToQbo } from "@/lib/quickbooks";
 import { getOrgSettings } from "@/lib/org-settings";
-import { tzLocalHourUtc } from "@/lib/tz";
+import { tzLocalHourUtc, todayStrInTz } from "@/lib/tz";
 import { requireStaff } from "@/lib/staff-guard";
 import { computeJobLaborBilling, fetchJobLaborRows } from "@/lib/labor-billing";
 import { recalcTotals, resolveDrawCredit, shouldBlockStandardImport } from "@/lib/invoice-math";
@@ -48,7 +48,12 @@ export async function createCustomerCredit(
     created_by: ctx.userId,
   });
   if (error) return { ok: false, error: error.message };
+  // C6: a credit on account reduces what the customer owes — fold it into amount_paid via
+  // recalc so the balance + collected reflect it (recalcInvoice now sums open credits as
+  // payments). A refund is a cash-OUT, tracked in `collected` already, so it doesn't recalc.
+  if (disposition === "credit") await recalcInvoice(supabase, invoiceId);
   revalidateMoney(invoiceId);
+  revalidateMoney();
   if (inv?.customer_id) revalidatePath(`/crm/${inv.customer_id}`);
   return { ok: true };
 }
@@ -109,6 +114,22 @@ export async function emailInvoice(
 
 export type Result = { ok: boolean; error?: string; id?: string };
 
+/** Default invoice due date = today (in the org tz) + the org's net terms, stamped to
+ *  NOON in the org tz (same convention as setInvoiceDueDate / payment dates). Without a
+ *  due date the Overdue tracker never fires, so EVERY creation path stamps one. Net terms
+ *  come from the org's invoice_due_days setting; if it's unset/0 we fall back to Net 30. */
+async function defaultDueDateIso(supabase: { from: (t: string) => any }): Promise<string> {
+  const { data } = await supabase.from("organizations").select("settings").maybeSingle();
+  const settings = getOrgSettings((data as { settings?: unknown } | null)?.settings);
+  const tz = settings.timezone || "America/Los_Angeles";
+  const netDays = settings.invoice_due_days > 0 ? settings.invoice_due_days : 30;
+  // Start from today in the org tz so "+net days" lands on the right calendar day, then
+  // shift forward by netDays of local-midnight days and stamp noon in the org tz.
+  const todayStart = tzLocalHourUtc(todayStrInTz(tz), 0, tz);
+  const dueStr = todayStrInTz(tz, new Date(todayStart.getTime() + netDays * 86_400_000));
+  return tzLocalHourUtc(dueStr, 12, tz).toISOString();
+}
+
 /** Convert an accepted (or any) quote into a draft invoice, copying line items. */
 export async function createInvoiceFromQuote(quoteId: string): Promise<Result> {
   const ctx = await requireStaff();
@@ -137,6 +158,7 @@ export async function createInvoiceFromQuote(quoteId: string): Promise<Result> {
   const drawBlock = await blockStandardCreateOnDrawJob(supabase, quote.job_id);
   if (drawBlock) return drawBlock;
 
+  const dueDate = await defaultDueDateIso(supabase);
   const { data: invoice, error } = await supabase
     .from("invoices")
     .insert({
@@ -149,6 +171,7 @@ export async function createInvoiceFromQuote(quoteId: string): Promise<Result> {
       subtotal: quote.subtotal,
       tax: quote.tax,
       total: quote.total,
+      due_date: dueDate,
       status: "draft",
       created_by: ctx.userId,
     })
@@ -211,6 +234,7 @@ export async function createBlankInvoice(input: {
     }
   }
 
+  const dueDate = await defaultDueDateIso(supabase);
   const { data, error } = await supabase
     .from("invoices")
     .insert({
@@ -219,6 +243,7 @@ export async function createBlankInvoice(input: {
       title: title || null,
       description: input.description ?? null,
       tax_rate: input.tax_rate || 0,
+      due_date: dueDate,
       status: "draft",
       created_by: ctx.userId,
     })
@@ -541,7 +566,9 @@ export async function createProgressReportInvoice(
   // draw here would re-import and double-bill the same work. Block before creating it.
   const stdBlocker = await standardBillingBlockerOnJob(supabase, jobId);
   if (stdBlocker) return standardBillingConflictError(stdBlocker);
-  const markup = getOrgSettings((org as any)?.settings).material_markup_percent;
+  const settings = getOrgSettings((org as any)?.settings);
+  const markup = settings.material_markup_percent;
+  const dueDate = await defaultDueDateIso(supabase);
 
   const { data: inv, error } = await supabase
     .from("invoices")
@@ -555,6 +582,7 @@ export async function createProgressReportInvoice(
       subtotal: 0,
       tax: 0,
       total: 0,
+      due_date: dueDate,
     })
     .select("id")
     .single();
@@ -678,11 +706,25 @@ export async function setPaymentSchedule(
     return { ok: true };
   }
 
-  // Percent-based milestones partition the contract — they can't sum past 100% (each draws as its
-  // own invoice, so >100% would silently overbill the contract). Amount-based rows are exempt.
-  const pctSum = rows.reduce((s, m) => s + (m.percent ?? 0), 0);
-  if (pctSum > 100.01)
-    return { ok: false, error: `Those milestones add up to ${Math.round(pctSum)}% — a draw schedule can't exceed 100% of the contract.` };
+  // C5: a schedule partitions the contract — its draws (percent AND fixed-amount, each its
+  // own invoice) can't sum past the contract or they silently over-bill. Cap the TOTAL
+  // scheduled $ (so a MIXED percent+fixed schedule can't slip past a percent-only check),
+  // and surface a percent schedule that sums UNDER 100% as a silent underbill.
+  const contract = await jobContractTotal(supabase, jobId);
+  const sched = scheduleStatus(rows as Milestone[], contract);
+  if (sched.overContract)
+    return {
+      ok: false,
+      error: `Those milestones total ${formatCurrency(sched.scheduledTotal)} — more than the ${formatCurrency(contract)} contract. Lower the percentages or amounts so they don't exceed it.`,
+    };
+  // Percent-only over-bill (no contract yet to price the dollars against): keep the 100% cap.
+  if (sched.scheduledPct > 100.01)
+    return { ok: false, error: `Those milestones add up to ${Math.round(sched.scheduledPct)}% — a draw schedule can't exceed 100% of the contract.` };
+  if (sched.percentUnder)
+    return {
+      ok: false,
+      error: `Those milestones add up to ${Math.round(sched.scheduledPct)}% — they don't cover the full contract. Add up to 100% so nothing goes unbilled.`,
+    };
 
   const { error } = await supabase.from("payment_milestones").insert(rows); // org_id via trigger
   if (error) return { ok: false, error: error.message };
@@ -754,6 +796,7 @@ async function createMilestoneDraw(
 
   const count = status.rows.length;
   const payNum = next.index + 1;
+  const dueDate = await defaultDueDateIso(supabase);
   const { data: inv, error } = await supabase
     .from("invoices")
     .insert({
@@ -766,6 +809,7 @@ async function createMilestoneDraw(
       subtotal: 0,
       tax: 0,
       total: 0,
+      due_date: dueDate,
     })
     .select("id")
     .single();
@@ -1188,17 +1232,25 @@ export async function setInvoiceCustomerJob(
   return { ok: true };
 }
 
-/** Recompute totals from items + payments, and auto-advance paid status. */
+/** Recompute totals from items + payments, and auto-advance paid status. Applied
+ *  customer credits (disposition "credit", still open) count toward amount_paid the
+ *  same as a payment — a credit on account reduces the balance the customer owes — so
+ *  they're folded into the payments side here and survive every recalc. (Refunds are a
+ *  cash-OUT, tracked separately in `collected`, and never reduce this balance.) */
 async function recalcInvoice(supabase: any, invoiceId: string) {
-  const [{ data: items }, { data: pays }, { data: inv }] = await Promise.all([
+  const [{ data: items }, { data: pays }, { data: credits }, { data: inv }] = await Promise.all([
     supabase.from("invoice_items").select("line_total").eq("invoice_id", invoiceId),
     supabase.from("payments").select("amount").eq("invoice_id", invoiceId),
+    supabase.from("customer_credits").select("amount").eq("invoice_id", invoiceId).eq("disposition", "credit").eq("status", "open"),
     supabase.from("invoices").select("tax_rate, status").eq("id", invoiceId).single(),
   ]);
 
   const { subtotal, tax, total, amountPaid, status } = recalcTotals(
     (items ?? []).map((i: any) => Number(i.line_total ?? 0)),
-    (pays ?? []).map((p: any) => Number(p.amount ?? 0)),
+    [
+      ...(pays ?? []).map((p: any) => Number(p.amount ?? 0)),
+      ...(credits ?? []).map((c: any) => Number(c.amount ?? 0)),
+    ],
     Number(inv?.tax_rate ?? 0),
     inv?.status ?? "draft",
   );

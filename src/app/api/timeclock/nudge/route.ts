@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { sendSms } from "@/lib/sms";
+import { getOrgSettings } from "@/lib/org-settings";
+import { todayBoundsInTz } from "@/lib/tz";
 
 /**
  * "If no clock-in, send text" — runs on a schedule (Vercel Cron). For each org
@@ -27,9 +29,6 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "SUPABASE_SERVICE_ROLE_KEY not configured." }, { status: 500 });
   }
 
-  const startOfDay = new Date();
-  startOfDay.setHours(0, 0, 0, 0);
-
   const { data: orgs } = await supabase.from("organizations").select("id, settings");
   let checked = 0;
   let texted = 0;
@@ -44,11 +43,14 @@ export async function GET(request: Request) {
       .eq("role", "tech");
     if (!techs?.length) continue;
 
+    // "Today" is the org's LOCAL day, not the (UTC-on-Vercel) server day, so an
+    // early/late clock-in counts against the right calendar day.
+    const { dayStart } = todayBoundsInTz(getOrgSettings(org.settings).timezone);
     const { data: clockedIn } = await supabase
       .from("time_entries")
       .select("profile_id")
       .eq("org_id", org.id)
-      .gte("clock_in", startOfDay.toISOString());
+      .gte("clock_in", dayStart.toISOString());
     const clockedSet = new Set((clockedIn ?? []).map((e: any) => e.profile_id));
 
     checked += techs.length;

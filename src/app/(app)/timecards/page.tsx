@@ -22,14 +22,18 @@ import type { JobCode } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-function weekRange(offset: number) {
-  const now = new Date();
-  const day = (now.getDay() + 6) % 7; // Monday = 0
-  const start = new Date(now);
-  start.setHours(0, 0, 0, 0);
-  start.setDate(now.getDate() - day - offset * 7);
-  const end = new Date(start);
-  end.setDate(start.getDate() + 7);
+// Mon→Sun week window as UTC instants, anchored on the org's LOCAL day — not the
+// (UTC-on-Vercel) server day — so a Pacific evening shift buckets into the right
+// week. `start`/`end` are the UTC instants of local midnight, end exclusive.
+function weekRange(offset: number, tz: string) {
+  const todayStr = todayStrInTz(tz);
+  const dow = (new Date(`${todayStr}T00:00:00Z`).getUTCDay() + 6) % 7; // Monday = 0
+  const startDate = new Date(`${todayStr}T00:00:00Z`);
+  startDate.setUTCDate(startDate.getUTCDate() - dow - offset * 7);
+  const start = tzDayStartUtc(startDate.toISOString().slice(0, 10), tz);
+  const endDate = new Date(startDate);
+  endDate.setUTCDate(endDate.getUTCDate() + 7);
+  const end = tzDayStartUtc(endDate.toISOString().slice(0, 10), tz);
   return { start, end };
 }
 
@@ -69,7 +73,7 @@ export default async function TimecardsPage({
   // matches the (browser-local) edit modal instead of being hours off.
   const tz = getOrgSettings((org as any)?.settings).timezone;
 
-  const { start, end } = weekRange(offset);
+  const { start, end } = weekRange(offset, tz);
 
   const { data: entries } = await supabase
     .from("time_entries")
@@ -165,6 +169,7 @@ export default async function TimecardsPage({
             members={members ?? []}
             jobCodes={(jobCodes ?? []) as JobCode[]}
             jobs={jobs ?? []}
+            tz={tz}
           />
           <Link
             href={`/timecards?week=${offset + 1}`}

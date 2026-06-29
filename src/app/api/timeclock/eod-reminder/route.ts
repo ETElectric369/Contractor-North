@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { sendSms } from "@/lib/sms";
+import { getOrgSettings } from "@/lib/org-settings";
+import { todayBoundsInTz } from "@/lib/tz";
 
 /**
  * End-of-day "fill out your form" reminder. Runs on an evening schedule (Vercel
@@ -29,15 +31,15 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "SUPABASE_SERVICE_ROLE_KEY not configured." }, { status: 500 });
   }
 
-  const startOfDay = new Date();
-  startOfDay.setHours(0, 0, 0, 0);
-
   const { data: orgs } = await supabase.from("organizations").select("id, settings");
   let checked = 0;
   let reminded = 0;
 
   for (const org of orgs ?? []) {
     if ((org.settings ?? {}).remind_timeclock === false) continue; // per-org opt-out
+    // "Today" is the org's LOCAL day, not the (UTC-on-Vercel) server day, so a
+    // Pacific evening shift counts toward today rather than tomorrow.
+    const { dayStart } = todayBoundsInTz(getOrgSettings(org.settings).timezone);
     const [{ data: techs }, { data: entries }] = await Promise.all([
       supabase
         .from("profiles")
@@ -49,7 +51,7 @@ export async function GET(request: Request) {
         .from("time_entries")
         .select("profile_id, status, notes, time_allocations(id)")
         .eq("org_id", org.id)
-        .gte("clock_in", startOfDay.toISOString()),
+        .gte("clock_in", dayStart.toISOString()),
     ]);
     if (!techs?.length) continue;
 

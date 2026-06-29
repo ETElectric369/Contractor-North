@@ -60,6 +60,14 @@ export type ScheduleStatus = {
   next: (Milestone & { dollars: number; index: number; kind: "deposit" | "progress" | "final" }) | null;
   /** True when percents are set and don't add to ~100 — surface a gentle warning. */
   percentOff: boolean;
+  /** Percents are set and sum to UNDER 100% — a silent underbill (the contract is never
+   *  fully drawn). Distinct from percentOff (any deviation) so the UI can flag underbill
+   *  specifically rather than only ever warning about overage. */
+  percentUnder: boolean;
+  /** Total scheduled $ (percent + fixed-amount milestones combined) exceeds the contract
+   *  total — a MIXED schedule that would over-bill. Only meaningful when there's a
+   *  contract to compare against (contractTotal > 0). */
+  overContract: boolean;
 };
 
 /** Decorate a schedule with computed $ + flags and surface the next pending milestone. */
@@ -82,6 +90,7 @@ export function scheduleStatus(milestones: Milestone[], contractTotal: number): 
   const billedTotal = cents(rows.filter((r) => r.billed).reduce((s, r) => s + r.dollars, 0));
   const next = rows.find((r) => !r.billed) ?? null;
   const usesPercent = rows.some((r) => fin(r.percent) > 0);
+  const contract = fin(contractTotal);
   return {
     rows,
     scheduledPct,
@@ -90,6 +99,11 @@ export function scheduleStatus(milestones: Milestone[], contractTotal: number): 
     remaining: cents(scheduledTotal - billedTotal),
     next: next ? { ...next } : null,
     percentOff: usesPercent && Math.abs(scheduledPct - 100) > 0.5,
+    // Silent underbill: percents are set but leave part of the contract un-drawn.
+    percentUnder: usesPercent && scheduledPct < 100 - 0.5,
+    // Mixed-schedule over-bill: the dollars (percent + fixed combined) exceed the contract.
+    // Guard on contract > 0 so a job without a quote yet doesn't false-positive.
+    overContract: contract > 0.005 && scheduledTotal > contract + 0.01,
   };
 }
 

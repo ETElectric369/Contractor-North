@@ -221,6 +221,10 @@ export default async function JobDetailPage({
   // (bill rate) — the latter feeds the estimate-vs-actual draw tracking.
   // laborCost (what we PAY) via the shared allocation-aware helper — identical math to /analytics.
   const { hours: laborHours, cost: laborCost } = laborCostForJob(entries ?? [], id);
+  // KNOWN DOUBLE-COUNT (mirrored on /analytics): a cost entered as BOTH a purchase
+  // order AND a supplier bill is counted twice here (materialCost + billsCost). There's
+  // no FK linking a bill to the PO it pays, so we can't dedupe yet — recording either
+  // the PO or the bill (not both) keeps the number honest. Fix is a po_id on bills.
   const materialCost = (pos ?? []).reduce((s: number, p: any) => s + Number(p.total ?? 0), 0);
   const billsCost = (bills ?? []).reduce((s: number, b: any) => s + Number(b.amount ?? 0), 0);
   // Billable work to date — computed with the SAME shared helpers importLabor/
@@ -242,7 +246,11 @@ export default async function JobDetailPage({
   // totals (which double-counts a progress invoice + the final). invoiced/quoted
   // stay for context only.
   const invoiced = (invoices ?? []).reduce((s: number, i: any) => s + Number(i.total ?? 0), 0);
-  const quoted = (quotes ?? []).reduce((s: number, q: any) => s + Number(q.total ?? 0), 0);
+  // Estimate base = the ACCEPTED contract via the one shared rule (accepted quote[s]
+  // only; falls back to all quotes when none accepted yet) — so a superseded quote
+  // revision can't inflate the "estimate" the progress-invoice draw tracks against.
+  // Same value as contractTotal below; kept as a named alias for the draw UI.
+  const quoted = contractTotalFromQuotes((quotes ?? []) as any);
   // Contract base for the payment schedule (shared rule with billing + contracts).
   const contractTotal = contractTotalFromQuotes((quotes ?? []) as any);
   // Billed-to-date for progress payments = invoices actually SENT to the customer
@@ -270,7 +278,12 @@ export default async function JobDetailPage({
     : { data: [] as any[] };
   const jobRefunds = (refundRows ?? []).reduce((s: number, r: any) => s + Number(r.amount ?? 0), 0);
   const revenue = Math.max(0, collected - jobRefunds);
-  const profit = revenue - laborCost - materialCost - billsCost - mileageCost;
+  // Profit excludes mileage on PURPOSE so this hub and /analytics show the SAME number
+  // for the same job: mileage is a per-entry value that isn't allocation-aware (a split
+  // shift can't apportion its miles across jobs), and /analytics doesn't carry it. Mileage
+  // is still surfaced as its own cost stat below for visibility — it just doesn't move the
+  // headline profit. If mileage is ever folded back in, it must be added to BOTH surfaces.
+  const profit = revenue - laborCost - materialCost - billsCost;
   const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
 
   const docs = await Promise.all(

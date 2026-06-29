@@ -26,6 +26,11 @@ const ORGANIZE_LABEL: Record<string, string> = {
   job_document: "Document to file",
 };
 
+// An unpaid invoice this many days old (by created_at) reaches the inbox even when
+// it has no due_date set yet — net-30 is the common term, so 30 days unpaid is the
+// point it's worth chasing regardless of whether a due_date was ever entered.
+const INVOICE_STALE_DAYS = 30;
+
 /**
  * THE single union behind the "Needs action" inbox. Projects rows from five
  * existing tables onto one ActionItem[] — no new tables. RLS already scopes to
@@ -91,15 +96,17 @@ export async function getActionItems(ctx: {
           .order("created_at", { ascending: false })
           .limit(50)
       : empty,
-    // Money/legal — staff only. Overdue invoices (A/R) past their due date.
+    // Money/legal — staff only. Unpaid invoices (A/R) that need chasing: either
+    // past their due date, OR simply old — sent/created AGE_DAYS+ ago — so an unpaid
+    // invoice still reaches the inbox even before due_date logic fully populates
+    // (no due_date UI yet → the Overdue-by-due-date gate alone never fires). The
+    // age cut is applied per-row below; the query just pulls the open A/R.
     isStaff
       ? supabase
           .from("invoices")
-          .select("id, invoice_number, total, amount_paid, due_date, status, customers(name)")
+          .select("id, invoice_number, total, amount_paid, due_date, status, created_at, customers(name)")
           .in("status", ["sent", "partial", "overdue"])
-          .not("due_date", "is", null)
-          .lt("due_date", todayStr)
-          .order("due_date", { ascending: true })
+          .order("created_at", { ascending: true })
           .limit(50)
       : empty,
     // Contracts sent to the customer but not yet signed (chase the signature).
@@ -216,19 +223,30 @@ export async function getActionItems(ctx: {
     });
   }
 
-  // Overdue invoices (A/R) — the money the business is owed past its due date.
+  // Unpaid invoices (A/R) — the money the business is owed. Surfaced when past their
+  // due date OR simply old (created INVOICE_STALE_DAYS+ ago), so an unpaid invoice
+  // reaches the inbox by AGE even before a due_date is entered.
+  const todayMs = Date.parse(todayStr);
   for (const inv of (invR.data ?? []) as any[]) {
     const balance = Number(inv.total ?? 0) - Number(inv.amount_paid ?? 0);
     if (balance < 0.005) continue; // effectively paid; status just lagging
-    const daysOver = Math.floor((Date.parse(todayStr) - Date.parse(inv.due_date)) / 86_400_000);
+    // Days past due (only when a due_date is set) and days since created.
+    const daysOverDue = inv.due_date ? Math.floor((todayMs - Date.parse(inv.due_date)) / 86_400_000) : null;
+    const daysOld = inv.created_at ? Math.floor((todayMs - Date.parse(inv.created_at)) / 86_400_000) : 0;
+    const pastDue = daysOverDue != null && daysOverDue > 0;
+    const stale = daysOld >= INVOICE_STALE_DAYS;
+    if (!pastDue && !stale) continue; // not yet worth chasing
+    // Urgency tracks the worse of the two clocks: very overdue, or very old.
+    const overWindow = Math.max(daysOverDue ?? 0, stale ? daysOld - INVOICE_STALE_DAYS : 0);
     items.push({
       id: inv.id,
       kind: "invoice_overdue",
       title: `${inv.invoice_number} · ${formatCurrency(balance)} due`,
       subtitle: inv.customers?.name ?? null,
       who: null,
-      when: inv.due_date,
-      urgency: daysOver > 14 ? 2 : 1,
+      // Prefer the due date for the "when"; fall back to created so undated rows still sort by age.
+      when: inv.due_date ?? inv.created_at ?? null,
+      urgency: overWindow > 14 ? 2 : 1,
       done: false,
       href: `/billing/${inv.id}`,
       affordances: AFFORDANCES.invoice_overdue,
