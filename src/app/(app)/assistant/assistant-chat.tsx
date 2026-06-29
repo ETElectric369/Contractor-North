@@ -236,10 +236,15 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
   }
 
   // Speak a reply, tracking the speaking state, then run `after` (usually re-open the mic).
+  // MUTE the live mic session while speaking so the assistant's own TTS isn't transcribed back —
+  // the recognizer keeps running, so `after` (startMic) just unmutes the SAME session instead of
+  // doing a fresh .start() that iOS rejects off-gesture. THIS is what lost the user's answer.
   function say(text: string, after?: () => void) {
     setSpeaking(true);
+    speech.setMuted(true);
     speakSmart(text, () => {
       setSpeaking(false);
+      speech.setMuted(false);
       after?.();
     });
   }
@@ -278,7 +283,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     // The mic was started in-gesture by the topbar tap. If it took, mirror "listening"; if it didn't
     // (no mic, or iOS rejected even the in-gesture start), nudge to tap Talk rather than sit silent.
     if (speech.isListening()) setListening(true);
-    else setStatus("Tap Talk to speak");
+    else setStatus("Tap the mic to answer");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoStart]);
 
@@ -332,6 +337,10 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     const content = text.trim();
     if (!content || streaming) return;
     if (!viaVoice) setVoiceMode(false); // typing leaves voice mode
+    // Mute the (still-live) mic while we process this turn so background noise / the user thinking
+    // out loud during the reply isn't captured as a second turn. The re-listen after the reply
+    // unmutes it — we never stop/restart the session (iOS rejects an off-gesture restart).
+    if (viaVoice) speech.setMuted(true);
 
     const next: Msg[] = [...messages, { role: "user", content }];
     setMessages(next);
@@ -426,11 +435,16 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         // No directive — read the whole reply aloud, then re-open the mic for the next turn.
         const clean = visibleText.replace(/\s*\[[^\]]*\]\s*$/, "").trim();
         if (clean) say(clean, () => { if (voiceModeRef.current) startMic(); });
+        // A reply with nothing to read (action-only) still has to unmute + re-listen, or the
+        // session sits muted and the next answer is silently dropped.
+        else if (voiceModeRef.current) startMic();
       }
     } catch (e: any) {
       // A user-initiated stop (abort) is not an error — leave the partial reply as-is.
       if (e?.name !== "AbortError") {
         setMessages((m) => [...m, { role: "assistant", content: `Error: ${e?.message ?? "unknown"}` }]);
+        // Re-open the mic after an error so a voice turn isn't left muted/stuck.
+        if (viaVoice && voiceModeRef.current) startMic();
       }
     } finally {
       setStreaming(false);
@@ -444,7 +458,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
   // callback, outside the gesture), fall back to a "tap Talk" nudge instead of dying silently.
   function startMic() {
     speech.setResultHandler((t) => sendRef.current?.(t, true)); // normal mode (confirmListen may have changed it)
-    if (!speech.startListening()) setStatus("Tap Talk to speak");
+    if (!speech.startListening()) setStatus("Tap the mic to answer");
   }
 
   // Enter voice mode from the text composer's Talk button. (Leaving is the Stop button →
@@ -471,7 +485,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
       else if (/\b(yes|yeah|yep|yup|confirm|do it|go ahead|sure|okay|ok|save it|sounds good)\b/.test(low)) resolveConfirm(true);
       else say("Say yes or no.", () => { if (voiceModeRef.current && confirmRef.current) confirmListen(); });
     });
-    if (!speech.startListening()) setStatus("Tap Talk to speak");
+    if (!speech.startListening()) setStatus("Tap the mic to answer");
   }
 
   // Resolve a pending confirm: run it (yes) or drop it (no). Nothing wrote until here.

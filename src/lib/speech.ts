@@ -19,6 +19,12 @@ type StateCb = (listening: boolean) => void;
 let recog: any = null;
 let listeningNow = false;
 let handler: ResultCb | null = null;
+// muted = the session is alive but we're ignoring what it hears (while the assistant is SPEAKING,
+// so its own TTS voice isn't transcribed back as a user turn). wantActive = we intend to keep
+// listening across turns, so an iOS/desktop auto-`onend` should try to revive the SAME session
+// instead of dying — that's how we avoid the off-gesture `.start()` that iOS rejects after TTS.
+let muted = false;
+let wantActive = false;
 const stateSubs = new Set<StateCb>();
 
 function getSR(): any {
@@ -61,6 +67,13 @@ export function setResultHandler(cb: ResultCb | null) {
   handler = cb;
 }
 
+/** Mute/unmute the LIVE session while the assistant speaks, so its TTS isn't transcribed back.
+ *  The recognizer keeps running (so no off-gesture restart is needed after the reply) — we just
+ *  drop what it hears until we unmute. */
+export function setMuted(b: boolean) {
+  muted = b;
+}
+
 /**
  * START THE MIC. MUST be called inside a user gesture (a tap) to work on iOS. Returns false when speech
  * isn't supported OR start() threw (the off-gesture rejection), so the caller can show "tap Talk to speak".
@@ -68,6 +81,14 @@ export function setResultHandler(cb: ResultCb | null) {
 export function startListening(lang = "en-US"): boolean {
   const SR = getSR();
   if (!SR) return false;
+  // A continuous session is already alive (mid-conversation) — just UNMUTE and reuse it. This is
+  // the key to the conversational loop on iOS: after the assistant speaks, we re-listen WITHOUT a
+  // fresh .start() (which iOS rejects off-gesture), because the gesture-started session never stopped.
+  if (recog && listeningNow) {
+    muted = false;
+    wantActive = true;
+    return true;
+  }
   try {
     recog?.stop();
   } catch {
@@ -75,10 +96,11 @@ export function startListening(lang = "en-US"): boolean {
   }
   try {
     const r = new SR();
-    r.continuous = false;
+    r.continuous = true; // keep listening across turns (was false → ended after one sentence)
     r.interimResults = false;
     r.lang = lang;
     r.onresult = (e: any) => {
+      if (muted) return; // ignore the assistant's own TTS while it's speaking
       let t = "";
       for (let i = e.resultIndex; i < e.results.length; i++) t += e.results[i][0].transcript;
       t = t.trim();
@@ -89,12 +111,25 @@ export function startListening(lang = "en-US"): boolean {
       emit();
     };
     r.onend = () => {
+      // The platform ended the session (iOS does this after silence). If we still mean to be
+      // listening, try to revive the SAME recognizer (works on desktop; on iOS it's off-gesture
+      // and may throw — then we surface not-listening so the UI can prompt a tap to answer).
+      if (wantActive) {
+        try {
+          r.start();
+          return;
+        } catch {
+          /* off-gesture revive rejected — fall through to "stopped" */
+        }
+      }
       listeningNow = false;
       emit();
     };
     r.start();
     recog = r;
     listeningNow = true;
+    muted = false;
+    wantActive = true;
     emit();
     return true;
   } catch {
@@ -105,11 +140,14 @@ export function startListening(lang = "en-US"): boolean {
 }
 
 export function stopListening() {
+  wantActive = false; // a real stop — don't auto-revive
   try {
     recog?.stop();
   } catch {
     /* ignore */
   }
+  recog = null;
   listeningNow = false;
+  muted = false;
   emit();
 }
