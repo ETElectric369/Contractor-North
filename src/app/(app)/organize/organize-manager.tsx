@@ -30,6 +30,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Tabs } from "@/components/tabs";
 import { CameraCapture } from "@/components/camera-capture";
+import { useToast } from "@/components/toast";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { prepareImageForUpload } from "@/lib/image-prep";
 import {
@@ -91,6 +92,7 @@ export function OrganizeManager({
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
+  const toast = useToast();
   const [uploads, setUploads] = useState<UploadState[]>([]);
   const [showCamera, setShowCamera] = useState(false);
   const [listening, setListening] = useState(false);
@@ -135,7 +137,13 @@ export function OrganizeManager({
     r.onend = () => {
       setListening(false);
       const text = acc.trim();
-      if (text) start(async () => { await saveVoiceNote(text); router.refresh(); });
+      if (text)
+        start(async () => {
+          const res = await saveVoiceNote(text);
+          if (!res?.ok) { toast(res?.error ?? "Couldn't save voice note — try again.", "error"); return; }
+          toast("Voice note saved", "success");
+          router.refresh();
+        });
     };
     r.start();
     recogRef.current = r;
@@ -194,21 +202,27 @@ export function OrganizeManager({
 
   function file(item: OrganizedItemRow, dest: Parameters<typeof fileItem>[1]) {
     start(async () => {
-      await fileItem(item.id, dest);
+      const res = await fileItem(item.id, dest);
+      if (!res?.ok) { toast(res?.error ?? "Couldn't file item — try again.", "error"); return; }
+      toast(dest.type === "unfiled" ? "Moved to unfiled" : "Filed", "success");
       router.refresh();
     });
   }
 
   function archive(item: OrganizedItemRow) {
     start(async () => {
-      await archiveItem(item.id);
+      const res = await archiveItem(item.id);
+      if (!res?.ok) { toast(res?.error ?? "Couldn't archive — try again.", "error"); return; }
+      toast("Archived", "success");
       router.refresh();
     });
   }
 
   function restore(item: OrganizedItemRow) {
     start(async () => {
-      await unarchiveItem(item.id);
+      const res = await unarchiveItem(item.id);
+      if (!res?.ok) { toast(res?.error ?? "Couldn't restore — try again.", "error"); return; }
+      toast("Moved back to needs-attention", "success");
       router.refresh();
     });
   }
@@ -216,15 +230,20 @@ export function OrganizeManager({
   async function aiReview(item: OrganizedItemRow) {
     setAiBusy(item.id);
     const res = await aiReviewItem(item.id);
-    setAiMsg((m) => ({ ...m, [item.id]: res.message }));
     setAiBusy(null);
+    if (!res?.ok) { toast(res?.message ?? "AI review failed — try again.", "error"); return; }
+    // Success: the verdict is informative content, so keep it in the inline panel
+    // (it's a read, not a fire-and-forget confirmation) rather than a transient toast.
+    setAiMsg((m) => ({ ...m, [item.id]: res.message }));
     router.refresh();
   }
 
   function remove(item: OrganizedItemRow) {
     if (!confirm(`Delete "${item.title}"? This also removes whatever it filed.`)) return;
     start(async () => {
-      await deleteOrganizedItem(item.id);
+      const res = await deleteOrganizedItem(item.id);
+      if (!res?.ok) { toast(res?.error ?? "Couldn't delete — try again.", "error"); return; }
+      toast("Deleted", "success");
       router.refresh();
     });
   }

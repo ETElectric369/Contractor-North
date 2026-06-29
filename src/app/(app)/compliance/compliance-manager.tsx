@@ -10,6 +10,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { useToast } from "@/components/toast";
 import { createCompliance, updateCompliance, deleteCompliance } from "./actions";
 
 export interface ComplianceItem {
@@ -42,6 +43,7 @@ export function expiryBadge(date: string | null) {
 
 export function ComplianceManager({ items }: { items: ComplianceItem[] }) {
   const router = useRouter();
+  const toast = useToast();
   const [pending, start] = useTransition();
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -153,7 +155,7 @@ export function ComplianceManager({ items }: { items: ComplianceItem[] }) {
                   </div>
                   <div className="flex items-center gap-1">
                     <button onClick={() => openEdit(c)} className="text-slate-300 hover:text-slate-700" title="Edit"><Pencil className="h-4 w-4" /></button>
-                    <button onClick={() => { if (!confirm("Delete this item?")) return; start(async () => { await deleteCompliance(c.id); router.refresh(); }); }} className="text-slate-300 hover:text-red-600" title="Delete"><Trash2 className="h-4 w-4" /></button>
+                    <button onClick={() => { if (!confirm("Delete this item?")) return; start(async () => { const res = await deleteCompliance(c.id); if (!res?.ok) { toast(res?.error ?? "Couldn't delete — try again.", "error"); return; } toast("Item deleted", "success"); router.refresh(); }); }} className="text-slate-300 hover:text-red-600" title="Delete"><Trash2 className="h-4 w-4" /></button>
                   </div>
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">

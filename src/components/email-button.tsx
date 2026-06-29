@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Mail, MessageSquare, Check, Loader2 } from "lucide-react";
+import { Mail, MessageSquare, Loader2 } from "lucide-react";
+import { useToast } from "@/components/toast";
 import { emailQuote, textQuote } from "@/app/(app)/quotes/actions";
 import { emailInvoice, textInvoice } from "@/app/(app)/billing/actions";
 
@@ -13,6 +14,7 @@ function SendChip({
   icon: Icon,
   run,
   confirmText,
+  successText,
   onDone,
   primary = false,
 }: {
@@ -21,54 +23,47 @@ function SendChip({
   run: () => Promise<Result>;
   /** Spelled-out confirm (e.g. "Email this $1,240.00 invoice to Acme Co?"). */
   confirmText?: string;
+  /** Past-tense toast on success (e.g. "Invoice emailed"). */
+  successText: string;
   /** Called after a successful send so the caller can refresh status. */
   onDone?: () => void;
   /** Render as a filled primary action instead of an outlined chip. */
   primary?: boolean;
 }) {
-  const [state, setState] = useState<"idle" | "busy" | "done" | "error">("idle");
-  const [msg, setMsg] = useState<string | null>(null);
+  const toast = useToast();
+  // Busy state only — success/failure now report through the app-wide toast so a
+  // stale green check can't keep claiming "Sent" after the page state moves on.
+  const [busy, setBusy] = useState(false);
 
   async function go() {
     if (!confirm(confirmText ?? `${label}?`)) return;
-    setState("busy");
-    setMsg(null);
-    const res = await run();
-    if (res.ok) {
-      setState("done");
+    setBusy(true);
+    try {
+      const res = await run();
+      if (!res?.ok) {
+        toast(res?.error ?? "Couldn't send — try again.", "error");
+        return;
+      }
+      toast(successText, "success");
       onDone?.();
-    } else {
-      setState("error");
-      setMsg(res.error ?? "Could not send.");
+    } finally {
+      setBusy(false);
     }
   }
 
   return (
-    <div className="relative">
-      <button
-        onClick={go}
-        disabled={state === "busy"}
-        className={
-          primary
-            ? "inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
-            : "inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-60"
-        }
-      >
-        {state === "busy" ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
-        ) : state === "done" ? (
-          <Check className={`h-4 w-4 ${primary ? "text-white" : "text-green-600"}`} />
-        ) : (
-          <Icon className="h-4 w-4" />
-        )}
-        {state === "done" && primary ? "Sent" : label}
-      </button>
-      {state === "error" && msg && (
-        <div className="absolute right-0 top-full z-10 mt-1 w-64 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 shadow">
-          {msg}
-        </div>
-      )}
-    </div>
+    <button
+      onClick={go}
+      disabled={busy}
+      className={
+        primary
+          ? "inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
+          : "inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-60"
+      }
+    >
+      {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-4 w-4" />}
+      {label}
+    </button>
   );
 }
 
@@ -109,6 +104,7 @@ export function EmailButton({
         icon={Mail}
         primary={isInvoice}
         confirmText={emailConfirm}
+        successText={isInvoice ? "Invoice emailed" : "Estimate emailed"}
         onDone={isInvoice ? () => router.refresh() : undefined}
         run={() => (kind === "quote" ? emailQuote(id) : emailInvoice(id))}
       />
@@ -116,6 +112,7 @@ export function EmailButton({
         label="Text"
         icon={MessageSquare}
         confirmText={textConfirm}
+        successText={isInvoice ? "Invoice texted" : "Estimate texted"}
         onDone={isInvoice ? () => router.refresh() : undefined}
         run={() => (kind === "quote" ? textQuote(id) : textInvoice(id))}
       />

@@ -8,6 +8,7 @@ import { Input, Label, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { formatDate } from "@/lib/utils";
+import { useToast } from "@/components/toast";
 import { createTask, toggleTask, deleteTask, updateTask, type TaskCategory } from "../../tasks/actions";
 
 interface Task {
@@ -21,6 +22,7 @@ interface Task {
 
 export function JobTasks({ jobId, tasks }: { jobId: string; tasks: Task[] }) {
   const router = useRouter();
+  const toast = useToast();
   const [pending, start] = useTransition();
   const [title, setTitle] = useState("");
   const [dueDate, setDueDate] = useState("");
@@ -57,12 +59,14 @@ export function JobTasks({ jobId, tasks }: { jobId: string; tasks: Task[] }) {
         <input
           type="checkbox"
           checked={t.status === "done"}
-          onChange={(e) =>
+          onChange={(e) => {
+            const checked = e.target.checked;
             start(async () => {
-              await toggleTask(t.id, e.target.checked, { jobId });
+              const res = await toggleTask(t.id, checked, { jobId });
+              if (!res?.ok) { toast(res?.error ?? "Couldn't update task — try again.", "error"); return; }
               router.refresh();
-            })
-          }
+            });
+          }}
           className="h-4 w-4 shrink-0 rounded border-slate-300 text-brand focus:ring-brand"
         />
         <div className="min-w-0 flex-1">
@@ -88,7 +92,9 @@ export function JobTasks({ jobId, tasks }: { jobId: string; tasks: Task[] }) {
           onClick={() => {
             if (!confirm(`Delete "${t.title}"? This can't be undone.`)) return;
             start(async () => {
-              await deleteTask(t.id, { jobId });
+              const res = await deleteTask(t.id, { jobId });
+              if (!res?.ok) { toast(res?.error ?? "Couldn't delete task — try again.", "error"); return; }
+              toast("Task deleted", "success");
               router.refresh();
             });
           }}

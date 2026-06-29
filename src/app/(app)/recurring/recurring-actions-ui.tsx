@@ -1,15 +1,16 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Play, Pause, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/components/toast";
 import { generateDue, generateOne, setRecurringActive } from "./actions";
 
 export function GenerateDueButton({ count }: { count: number }) {
   const router = useRouter();
   const [pending, start] = useTransition();
-  const [msg, setMsg] = useState<string | null>(null);
+  const toast = useToast();
   return (
     <div className="relative">
       <Button
@@ -17,8 +18,9 @@ export function GenerateDueButton({ count }: { count: number }) {
         onClick={() =>
           start(async () => {
             const res = await generateDue();
-            setMsg(res.ok ? `Generated ${res.count ?? 0}` : res.error ?? "Failed");
-            setTimeout(() => setMsg(null), 2500);
+            if (!res?.ok) { toast(res?.error ?? "Couldn't generate — try again.", "error"); return; }
+            const n = res.count ?? 0;
+            toast(n === 1 ? "Generated 1 invoice" : `Generated ${n} invoices`, "success");
             router.refresh();
           })
         }
@@ -26,7 +28,6 @@ export function GenerateDueButton({ count }: { count: number }) {
       >
         <Zap className="h-4 w-4" /> {pending ? "Generating…" : `Generate ${count} due`}
       </Button>
-      {msg && <span className="absolute left-0 top-full mt-1 text-xs text-green-600">{msg}</span>}
     </div>
   );
 }
@@ -34,10 +35,18 @@ export function GenerateDueButton({ count }: { count: number }) {
 export function RecurringRowActions({ id, active }: { id: string; active: boolean }) {
   const router = useRouter();
   const [pending, start] = useTransition();
+  const toast = useToast();
   return (
     <div className="flex items-center gap-1">
       <button
-        onClick={() => start(async () => { await generateOne(id); router.refresh(); })}
+        onClick={() =>
+          start(async () => {
+            const res = await generateOne(id);
+            if (!res?.ok) { toast(res?.error ?? "Couldn't generate — try again.", "error"); return; }
+            toast("Invoice generated", "success");
+            router.refresh();
+          })
+        }
         disabled={pending}
         className="rounded-md p-1 text-slate-400 hover:bg-brand/10 hover:text-brand"
         title="Generate one now"
@@ -45,7 +54,13 @@ export function RecurringRowActions({ id, active }: { id: string; active: boolea
         <Zap className="h-4 w-4" />
       </button>
       <button
-        onClick={() => start(async () => { await setRecurringActive(id, !active); router.refresh(); })}
+        onClick={() =>
+          start(async () => {
+            const res = await setRecurringActive(id, !active);
+            if (!res?.ok) { toast(res?.error ?? "Couldn't update — try again.", "error"); return; }
+            router.refresh();
+          })
+        }
         disabled={pending}
         className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
         title={active ? "Pause" : "Resume"}

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { useToast } from "@/components/toast";
 import { createResource, updateResource, deleteResource } from "./actions";
 
 export interface Resource {
@@ -38,6 +39,7 @@ function withProtocol(url: string) {
 
 export function ResourcesManager({ resources }: { resources: Resource[] }) {
   const router = useRouter();
+  const toast = useToast();
   const [pending, start] = useTransition();
   const [q, setQ] = useState("");
   const [adding, setAdding] = useState(false);
@@ -160,7 +162,7 @@ export function ResourcesManager({ resources }: { resources: Resource[] }) {
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
                       <button onClick={() => startEdit(r)} className="text-slate-300 hover:text-brand" title="Edit"><Pencil className="h-4 w-4" /></button>
-                      <button onClick={() => { if (confirm(`Delete ${r.name}?`)) start(async () => { await deleteResource(r.id); router.refresh(); }); }} className="text-slate-300 hover:text-red-600" title="Delete"><Trash2 className="h-4 w-4" /></button>
+                      <button onClick={() => { if (confirm(`Delete ${r.name}?`)) start(async () => { const res = await deleteResource(r.id); if (!res?.ok) { toast(res?.error ?? "Couldn't delete — try again.", "error"); return; } toast("Contact deleted", "success"); router.refresh(); }); }} className="text-slate-300 hover:text-red-600" title="Delete"><Trash2 className="h-4 w-4" /></button>
                     </div>
                   </div>
                   <div className="mt-2 space-y-1 text-sm">

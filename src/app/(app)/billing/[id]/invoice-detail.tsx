@@ -8,6 +8,7 @@ import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Card, CardContent } from "@/components/ui/card";
+import { useToast } from "@/components/toast";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { LineItemText } from "@/components/line-item-text";
 import { CostBreakdown } from "@/components/cost-breakdown";
@@ -68,6 +69,7 @@ export function InvoiceDetail({
   jobs?: JobLite[];
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [pending, start] = useTransition();
   const refresh = () => router.refresh();
 
@@ -80,7 +82,8 @@ export function InvoiceDetail({
   function saveDescr() {
     setDescrSaved(false);
     start(async () => {
-      await setInvoiceDescription(invoice.id, descr);
+      const res = await setInvoiceDescription(invoice.id, descr);
+      if (!res?.ok) { toast(res?.error ?? "Couldn't save the description — try again.", "error"); return; }
       setDescrSaved(true);
       setTimeout(() => setDescrSaved(false), 2000);
     });
@@ -165,7 +168,14 @@ export function InvoiceDetail({
     setImportMsg(null);
     start(async () => {
       const res = await fn(invoice.id);
-      setImportMsg(res.ok ? `${label} imported.` : res.error ?? "Import failed.");
+      if (!res.ok) {
+        setImportMsg(res.error ?? "Import failed.");
+        toast(res.error ?? `Couldn't import ${label.toLowerCase()} — try again.`, "error");
+        setTimeout(() => setImportMsg(null), 5000);
+        return;
+      }
+      setImportMsg(`${label} imported.`);
+      toast(`${label} imported`, "success");
       setTimeout(() => setImportMsg(null), 5000);
       refresh();
     });
@@ -194,11 +204,12 @@ export function InvoiceDetail({
   function saveEdit() {
     if (!editId) return;
     start(async () => {
-      await updateInvoiceItem(editId, invoice.id, {
+      const res = await updateInvoiceItem(editId, invoice.id, {
         description: editDesc,
         quantity: editQty,
         unit_price: editPrice,
       });
+      if (!res?.ok) { toast(res?.error ?? "Couldn't save the line item — try again.", "error"); return; }
       setEditId(null);
       refresh();
     });
@@ -209,12 +220,13 @@ export function InvoiceDetail({
     : [];
   function addFromPrice(p: PriceItemLite) {
     start(async () => {
-      await addInvoiceItem(invoice.id, {
+      const res = await addInvoiceItem(invoice.id, {
         description: p.code ? `${p.code} — ${p.description}` : p.description,
         quantity: 1,
         unit: p.unit || "ea",
         unit_price: Number(sellPrice(p.buy_price, p.markup_pct).toFixed(2)),
       });
+      if (!res?.ok) { toast(res?.error ?? "Couldn't add the line item — try again.", "error"); return; }
       setPlQuery("");
       setPlOpen(false);
       refresh();
@@ -227,12 +239,13 @@ export function InvoiceDetail({
   function addItem() {
     if (!desc.trim()) return;
     start(async () => {
-      await addInvoiceItem(invoice.id, {
+      const res = await addInvoiceItem(invoice.id, {
         description: desc,
         quantity: qty || 1,
         unit,
         unit_price: price || 0,
       });
+      if (!res?.ok) { toast(res?.error ?? "Couldn't add the line item — try again.", "error"); return; }
       setDesc("");
       setQty(1);
       setUnit("ea");
@@ -253,8 +266,10 @@ export function InvoiceDetail({
       });
       if (!res.ok) {
         setPayError(res.error ?? "Could not record payment.");
+        toast(res.error ?? "Couldn't record the payment — try again.", "error");
         return;
       }
+      toast("Payment recorded", "success");
       setPayNote("");
       setPayDate("");
       refresh();
@@ -363,12 +378,15 @@ export function InvoiceDetail({
             value={invoice.status}
             className="w-36"
             disabled={pending}
-            onChange={(e) =>
+            onChange={(e) => {
+              const next = e.target.value;
               start(async () => {
-                await setInvoiceStatus(invoice.id, e.target.value);
+                const res = await setInvoiceStatus(invoice.id, next);
+                if (!res?.ok) { toast(res?.error ?? "Couldn't change the status — try again.", "error"); return; }
+                toast(next === "void" ? "Invoice voided" : "Status updated", "success");
                 refresh();
-              })
-            }
+              });
+            }}
           >
             <option value="draft">Draft</option>
             {/* Keep the current status visible even though it isn't a manual choice. */}
@@ -512,7 +530,7 @@ export function InvoiceDetail({
                     <Pencil className="h-4 w-4" />
                   </button>
                   <button
-                    onClick={() => start(async () => { await deleteInvoiceItem(it.id, invoice.id); refresh(); })}
+                    onClick={() => start(async () => { const res = await deleteInvoiceItem(it.id, invoice.id); if (!res?.ok) { toast(res?.error ?? "Couldn't remove the line item — try again.", "error"); return; } refresh(); })}
                     disabled={pending}
                     className="shrink-0 text-slate-500 hover:text-red-600"
                     aria-label="Remove"
@@ -564,7 +582,8 @@ export function InvoiceDetail({
                   onChange={(e) =>
                     start(async () => {
                       const r = taxRates.find((t) => t.id === e.target.value);
-                      await setInvoiceTaxRate(invoice.id, r ? Number(r.rate) : 0);
+                      const res = await setInvoiceTaxRate(invoice.id, r ? Number(r.rate) : 0);
+                      if (!res?.ok) { toast(res?.error ?? "Couldn't change the tax rate — try again.", "error"); return; }
                       refresh();
                     })
                   }
@@ -682,7 +701,9 @@ export function InvoiceDetail({
                       <button
                         onClick={() =>
                           start(async () => {
-                            await updatePayment(p.id, invoice.id, { amount: payEditAmount, method: payEditMethod, note: payEditNote, paid_at: payEditDate });
+                            const res = await updatePayment(p.id, invoice.id, { amount: payEditAmount, method: payEditMethod, note: payEditNote, paid_at: payEditDate });
+                            if (!res?.ok) { toast(res?.error ?? "Couldn't update the payment — try again.", "error"); return; }
+                            toast("Payment updated", "success");
                             setPayEditId(null);
                             refresh();
                           })
@@ -729,7 +750,9 @@ export function InvoiceDetail({
                       onClick={() => {
                         if (!confirm(`Delete this ${formatCurrency(p.amount)} payment? The invoice balance recalculates.`)) return;
                         start(async () => {
-                          await deletePayment(p.id, invoice.id);
+                          const res = await deletePayment(p.id, invoice.id);
+                          if (!res?.ok) { toast(res?.error ?? "Couldn't delete the payment — try again.", "error"); return; }
+                          toast("Payment deleted", "success");
                           refresh();
                         });
                       }}

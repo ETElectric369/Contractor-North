@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { InquiryModal } from "./inquiry-modal";
 import { ConvertMenu } from "./convert-menu";
 import { markInquiryContacted, setInquiryStatus } from "./actions";
+import { useToast } from "@/components/toast";
 import { formatDate } from "@/lib/utils";
 import type { Inquiry } from "@/lib/types";
 
@@ -32,13 +33,16 @@ export function InquiryRow({
   const router = useRouter();
   const [pending, start] = useTransition();
   const [followUp, setFollowUp] = useState(inquiry.next_follow_up_at ?? "");
+  const toast = useToast();
 
   const overdue =
     inquiry.next_follow_up_at && new Date(inquiry.next_follow_up_at) < new Date(new Date().toDateString());
 
   function contacted() {
     start(async () => {
-      await markInquiryContacted(inquiry.id, followUp || null);
+      const res = await markInquiryContacted(inquiry.id, followUp || null);
+      if (!res?.ok) { toast(res?.error ?? "Couldn't mark contacted — try again.", "error"); return; }
+      toast("Marked contacted", "success");
       router.refresh();
     });
   }
@@ -46,10 +50,7 @@ export function InquiryRow({
   function changeStatus(status: string) {
     start(async () => {
       const res = await setInquiryStatus(inquiry.id, status);
-      if (!res.ok) {
-        alert(res.error ?? "Couldn't update status.");
-        return;
-      }
+      if (!res?.ok) { toast(res?.error ?? "Couldn't update status — try again.", "error"); return; }
       router.refresh();
     });
   }

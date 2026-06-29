@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Card } from "@/components/ui/card";
+import { useToast } from "@/components/toast";
 import { formatDate } from "@/lib/utils";
 import { createTask, toggleTask, deleteTask, updateTask, type TaskCategory } from "./actions";
 
@@ -267,6 +268,7 @@ export function TaskRow({
   subtasks?: ViewTask[];
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [pending, start] = useTransition();
   const [editing, setEditing] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -275,7 +277,8 @@ export function TaskRow({
   function addSub() {
     if (!subTitle.trim()) return;
     start(async () => {
-      await createTask({ title: subTitle, category, parent_id: t.id });
+      const res = await createTask({ title: subTitle, category, parent_id: t.id });
+      if (!res?.ok) { toast(res?.error ?? "Couldn't add subtask — try again.", "error"); return; }
       setSubTitle("");
       setAdding(false);
       router.refresh();
@@ -288,7 +291,7 @@ export function TaskRow({
         <input
           type="checkbox"
           checked={t.status === "done"}
-          onChange={(e) => start(async () => { await toggleTask(t.id, e.target.checked, { category }); router.refresh(); })}
+          onChange={(e) => start(async () => { const res = await toggleTask(t.id, e.target.checked, { category }); if (!res?.ok) { toast(res?.error ?? "Couldn't update task — try again.", "error"); return; } router.refresh(); })}
           className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-brand focus:ring-brand"
         />
         <div className="min-w-0 flex-1">
@@ -323,7 +326,7 @@ export function TaskRow({
         <button
           onClick={() => {
             if (!confirm(`Delete "${t.title}"? This can't be undone.`)) return;
-            start(async () => { await deleteTask(t.id, { category }); router.refresh(); });
+            start(async () => { const res = await deleteTask(t.id, { category }); if (!res?.ok) { toast(res?.error ?? "Couldn't delete task — try again.", "error"); return; } toast("Task deleted", "success"); router.refresh(); });
           }}
           disabled={pending}
           className="text-slate-300 hover:text-red-600"
@@ -343,14 +346,14 @@ export function TaskRow({
               <input
                 type="checkbox"
                 checked={st.status === "done"}
-                onChange={(e) => start(async () => { await toggleTask(st.id, e.target.checked, { category }); router.refresh(); })}
+                onChange={(e) => start(async () => { const res = await toggleTask(st.id, e.target.checked, { category }); if (!res?.ok) { toast(res?.error ?? "Couldn't update subtask — try again.", "error"); return; } router.refresh(); })}
                 className="h-3.5 w-3.5 rounded border-slate-300 text-brand focus:ring-brand"
               />
               <span className={`flex-1 ${st.status === "done" ? "text-slate-400 line-through" : "text-slate-700"}`}>{st.title}</span>
               <button
                 onClick={() => {
                   if (!confirm(`Delete subtask "${st.title}"? This can't be undone.`)) return;
-                  start(async () => { await deleteTask(st.id, { category }); router.refresh(); });
+                  start(async () => { const res = await deleteTask(st.id, { category }); if (!res?.ok) { toast(res?.error ?? "Couldn't delete subtask — try again.", "error"); return; } toast("Subtask deleted", "success"); router.refresh(); });
                 }}
                 className="text-slate-300 hover:text-red-600"
               >

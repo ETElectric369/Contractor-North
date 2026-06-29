@@ -7,6 +7,7 @@ import { Plus, Trash2, HardHat } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label, Select } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
+import { useToast } from "@/components/toast";
 import { linkJobContact, unlinkJobContact } from "./job-contacts-actions";
 
 export type LinkedContact = { id: string; role: string; customer_id: string; name: string; phone: string | null };
@@ -24,6 +25,7 @@ export function JobContacts({
   options: ContactOption[];
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [pending, start] = useTransition();
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +41,7 @@ export function JobContacts({
       setCustomerId("");
       setRole("Subcontractor");
       setAdding(false);
+      toast("Contact linked", "success");
       router.refresh();
     });
   }
@@ -105,7 +108,7 @@ export function JobContacts({
                 {c.phone && <span className="ml-2 text-xs text-slate-400">{c.phone}</span>}
               </div>
               <button
-                onClick={() => start(async () => { await unlinkJobContact(c.id, jobId); router.refresh(); })}
+                onClick={() => start(async () => { const res = await unlinkJobContact(c.id, jobId); if (!res?.ok) { toast(res?.error ?? "Couldn't remove contact — try again.", "error"); return; } toast("Contact removed", "success"); router.refresh(); })}
                 className="text-slate-300 hover:text-red-600"
                 title="Remove"
               >

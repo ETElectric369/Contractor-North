@@ -10,6 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { useToast } from "@/components/toast";
 import { addPettyCash, updatePettyCash, deletePettyCash } from "./actions";
 
 export interface PettyTx {
@@ -23,6 +24,7 @@ export interface PettyTx {
 
 export function PettyCashManager({ items, balance }: { items: PettyTx[]; balance: number }) {
   const router = useRouter();
+  const toast = useToast();
   const [pending, start] = useTransition();
   const [kind, setKind] = useState<"expense" | "replenish">("expense");
   const [amount, setAmount] = useState(0);
@@ -86,7 +88,7 @@ export function PettyCashManager({ items, balance }: { items: PettyTx[]; balance
                 {i.kind === "replenish" ? "+" : "−"}{formatCurrency(i.amount)}
               </span>
               <EditPettyCashButton tx={i} />
-              <button onClick={() => { if (!confirm("Delete this entry?")) return; start(async () => { await deletePettyCash(i.id); router.refresh(); }); }} className="text-slate-300 hover:text-red-600" title="Delete"><Trash2 className="h-4 w-4" /></button>
+              <button onClick={() => { if (!confirm("Delete this entry?")) return; start(async () => { const res = await deletePettyCash(i.id); if (!res?.ok) { toast(res?.error ?? "Couldn't delete — try again.", "error"); return; } toast("Entry deleted", "success"); router.refresh(); }); }} className="text-slate-300 hover:text-red-600" title="Delete"><Trash2 className="h-4 w-4" /></button>
             </li>
           ))}
           {items.length === 0 && <li className="px-4 py-10 text-center text-sm text-slate-400">No transactions yet. Add cash to your box, then log expenses as you spend.</li>}

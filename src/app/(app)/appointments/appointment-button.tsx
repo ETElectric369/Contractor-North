@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { useToast } from "@/components/toast";
 import {
   createAppointment,
   updateAppointment,
@@ -71,6 +72,7 @@ export function AppointmentButton({
   compact?: boolean;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const editing = !!appointment;
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
@@ -165,7 +167,9 @@ export function AppointmentButton({
     if (!appointment) return;
     if (!confirm(`Delete the appointment "${appointment.title}"? This can't be undone.`)) return;
     start(async () => {
-      await deleteAppointment(appointment.id);
+      const res = await deleteAppointment(appointment.id);
+      if (!res?.ok) { toast(res?.error ?? "Couldn't delete appointment — try again.", "error"); return; }
+      toast("Appointment deleted", "success");
       setOpen(false);
       router.refresh();
     });

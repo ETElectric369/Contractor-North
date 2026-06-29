@@ -12,6 +12,7 @@ import { Badge, statusTone } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Tabs } from "@/components/tabs";
+import { useToast } from "@/components/toast";
 import { CameraCapture } from "@/components/camera-capture";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { createBill, setBillStatus, deleteBill, addDocument, deleteDocument } from "../jobs/actions";
@@ -84,6 +85,7 @@ export function BillsReceipts({
   docs: DocRow[];
 }) {
   const router = useRouter();
+  const toast = useToast();
   // Open straight to a tab from a deep link (the quick-add "New cost" → ?tab=bills).
   const spTab = useSearchParams().get("tab");
   const [tab, setTab] = useState<"po" | "bills" | "receipts">(
@@ -312,7 +314,15 @@ export function BillsReceipts({
                     </div>
                     <span className="font-medium text-slate-800">{formatCurrency(b.amount)}</span>
                     <button
-                      onClick={() => start(async () => { await setBillStatus(b.id, b.status === "paid" ? "unpaid" : "paid", b.job_id ?? ""); router.refresh(); })}
+                      onClick={() => {
+                        const next = b.status === "paid" ? "unpaid" : "paid";
+                        start(async () => {
+                          const res = await setBillStatus(b.id, next, b.job_id ?? "");
+                          if (!res?.ok) { toast(res?.error ?? "Couldn't update the bill — try again.", "error"); return; }
+                          toast(next === "paid" ? "Bill marked paid" : "Bill marked unpaid", "success");
+                          router.refresh();
+                        });
+                      }}
                       title="Toggle paid/unpaid"
                     >
                       <Badge tone={b.status === "paid" ? "green" : "amber"}>{b.status}</Badge>
@@ -321,7 +331,7 @@ export function BillsReceipts({
                       <Pencil className="h-4 w-4" />
                     </button>
                     <button
-                      onClick={() => { if (confirm(`Delete bill from "${b.supplier}"?`)) start(async () => { await deleteBill(b.id, b.job_id ?? ""); router.refresh(); }); }}
+                      onClick={() => { if (confirm(`Delete bill from "${b.supplier}"?`)) start(async () => { const res = await deleteBill(b.id, b.job_id ?? ""); if (!res?.ok) { toast(res?.error ?? "Couldn't delete the bill — try again.", "error"); return; } toast("Bill deleted", "success"); router.refresh(); }); }}
                       className="text-slate-400 hover:text-red-600"
                       title="Delete"
                     >
@@ -405,7 +415,7 @@ export function BillsReceipts({
                   </div>
                   {d.category && <Badge tone="blue">{d.category}</Badge>}
                   <button
-                    onClick={() => { if (confirm(`Delete "${d.name}"?`)) start(async () => { await deleteDocument(d.id, d.file_url, d.job_id ?? ""); router.refresh(); }); }}
+                    onClick={() => { if (confirm(`Delete "${d.name}"?`)) start(async () => { const res = await deleteDocument(d.id, d.file_url, d.job_id ?? ""); if (!res?.ok) { toast(res?.error ?? "Couldn't delete — try again.", "error"); return; } toast("Deleted", "success"); router.refresh(); }); }}
                     className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
                     title="Delete"
                   >

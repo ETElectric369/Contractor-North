@@ -8,6 +8,7 @@ import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
+import { useToast } from "@/components/toast";
 import { createPermit, updatePermit, deletePermit } from "../../permits/actions";
 import { EditPermitButton } from "../../permits/edit-permit-button";
 // Canonical permit options + tones (the inline dropdown now writes the same status keys the
@@ -38,6 +39,7 @@ export interface Permit {
 
 export function JobPermits({ jobId, permits }: { jobId: string; permits: Permit[] }) {
   const router = useRouter();
+  const toast = useToast();
   const [pending, start] = useTransition();
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -65,6 +67,7 @@ export function JobPermits({ jobId, permits }: { jobId: string; permits: Permit[
       if (!res.ok) return setError(res.error ?? "Could not save.");
       setNum(""); setAuthority(""); setApplied(""); setFee(0); setInspDate(""); setInspector(""); setNotes(""); setPortalUrl("");
       setAdding(false);
+      toast("Permit added", "success");
       router.refresh();
     });
   }
@@ -138,7 +141,7 @@ export function JobPermits({ jobId, permits }: { jobId: string; permits: Permit[
                   <Select
                     value={p.status}
                     className="h-7 w-40 text-xs"
-                    onChange={(e) => start(async () => { await updatePermit(p.id, { status: e.target.value, job_id: jobId }); router.refresh(); })}
+                    onChange={(e) => { const v = e.target.value; start(async () => { const res = await updatePermit(p.id, { status: v, job_id: jobId }); if (!res?.ok) { toast(res?.error ?? "Couldn't update status — try again.", "error"); return; } router.refresh(); }); }}
                   >
                     {STATUSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                   </Select>
@@ -146,7 +149,7 @@ export function JobPermits({ jobId, permits }: { jobId: string; permits: Permit[
                     <Badge tone={statusTone(p.status)}>{p.status.replace("_", " ")}</Badge>
                     <Badge tone={resultTone(p.inspection_result)}>{p.inspection_result}</Badge>
                     <EditPermitButton permit={p as any} jobId={jobId} />
-                    <button onClick={() => { if (confirm("Delete this permit?")) start(async () => { await deletePermit(p.id, jobId); router.refresh(); }); }} className="text-slate-400 hover:text-red-600" title="Delete"><Trash2 className="h-4 w-4" /></button>
+                    <button onClick={() => { if (confirm("Delete this permit?")) start(async () => { const res = await deletePermit(p.id, jobId); if (!res?.ok) { toast(res?.error ?? "Couldn't delete permit — try again.", "error"); return; } toast("Permit deleted", "success"); router.refresh(); }); }} className="text-slate-400 hover:text-red-600" title="Delete"><Trash2 className="h-4 w-4" /></button>
                   </div>
                 </div>
               </div>

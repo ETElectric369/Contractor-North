@@ -12,6 +12,7 @@ import { todayStrInTz } from "@/lib/tz";
 import { GeofenceMonitor } from "@/components/geofence-monitor";
 import { BugReporter } from "@/components/bug-reporter";
 import { SectionSubnav } from "@/components/section-subnav";
+import { ToastProvider } from "@/components/toast";
 import { Suspense } from "react";
 import type { Profile, GeoPoint } from "@/lib/types";
 
@@ -115,7 +116,7 @@ export default async function AppLayout({
           <Suspense fallback={null}>
             <SectionSubnav isStaff={isStaff} />
           </Suspense>
-          {children}
+          <ToastProvider>{children}</ToastProvider>
         </main>
       </div>
       <CommandBar isStaff={isStaff} />

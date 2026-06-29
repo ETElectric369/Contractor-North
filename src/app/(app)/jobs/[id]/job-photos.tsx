@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { MediaLightbox } from "@/components/media-lightbox";
 import { prepareImageForUpload } from "@/lib/image-prep";
+import { useToast } from "@/components/toast";
 import { addDocument, deleteDocument } from "../actions";
 
 interface Doc {
@@ -31,6 +32,7 @@ function onPhone() {
 /** Photos tab: every job photo as a tappable thumbnail grid. */
 export function JobPhotos({ orgId, jobId, docs }: { orgId: string; jobId: string; docs: Doc[] }) {
   const router = useRouter();
+  const toast = useToast();
   const photos = docs.filter(isImage);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,7 +73,9 @@ export function JobPhotos({ orgId, jobId, docs }: { orgId: string; jobId: string
   function remove(d: Doc) {
     if (!confirm("Delete this photo?")) return;
     start(async () => {
-      await deleteDocument(d.id, d.file_url, jobId);
+      const res = await deleteDocument(d.id, d.file_url, jobId);
+      if (!res?.ok) { toast(res?.error ?? "Couldn't delete photo — try again.", "error"); return; }
+      toast("Photo deleted", "success");
       router.refresh();
     });
   }

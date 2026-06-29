@@ -8,6 +8,7 @@ import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Badge } from "@/components/ui/badge";
 import { Modal, ModalActions } from "@/components/ui/modal";
+import { useToast } from "@/components/toast";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { createBill, setBillStatus, deleteBill } from "../actions";
 import { executeAction } from "@/lib/actions/execute";
@@ -23,6 +24,7 @@ interface Bill {
 
 export function JobBills({ jobId, bills }: { jobId: string; bills: Bill[] }) {
   const router = useRouter();
+  const toast = useToast();
   const [pending, start] = useTransition();
   const [adding, setAdding] = useState(false);
   const [editBill, setEditBill] = useState<Bill | null>(null);
@@ -129,7 +131,10 @@ export function JobBills({ jobId, bills }: { jobId: string; bills: Bill[] }) {
               <button
                 onClick={() =>
                   start(async () => {
-                    await setBillStatus(b.id, b.status === "paid" ? "unpaid" : "paid", jobId);
+                    const next = b.status === "paid" ? "unpaid" : "paid";
+                    const res = await setBillStatus(b.id, next, jobId);
+                    if (!res?.ok) { toast(res?.error ?? "Couldn't update bill — try again.", "error"); return; }
+                    toast(next === "paid" ? "Bill marked paid" : "Bill marked unpaid", "success");
                     router.refresh();
                   })
                 }
@@ -143,7 +148,9 @@ export function JobBills({ jobId, bills }: { jobId: string; bills: Bill[] }) {
               <button
                 onClick={() =>
                   start(async () => {
-                    await deleteBill(b.id, jobId);
+                    const res = await deleteBill(b.id, jobId);
+                    if (!res?.ok) { toast(res?.error ?? "Couldn't delete bill — try again.", "error"); return; }
+                    toast("Bill deleted", "success");
                     router.refresh();
                   })
                 }

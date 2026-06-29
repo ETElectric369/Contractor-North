@@ -6,6 +6,7 @@ import { Plus, Trash2, Mail, Copy, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { useToast } from "@/components/toast";
 import { formatDate } from "@/lib/utils";
 import { createInvitation, deleteInvitation } from "./actions";
 
@@ -26,6 +27,7 @@ export function InviteManager({
   siteUrl: string;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -45,7 +47,9 @@ export function InviteManager({
   function remove(id: string, email: string) {
     if (!confirm(`Revoke the invite for ${email}? The signup link will stop working.`)) return;
     start(async () => {
-      await deleteInvitation(id);
+      const res = await deleteInvitation(id);
+      if (!res?.ok) { toast(res?.error ?? "Couldn't revoke invite — try again.", "error"); return; }
+      toast("Invite revoked", "success");
       router.refresh();
     });
   }
