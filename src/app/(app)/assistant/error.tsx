@@ -33,7 +33,7 @@ export default function AssistantError({
         onClick={reset}
         className="mt-5 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark"
       >
-        Restart the assistant
+        Restart Nort
       </button>
     </div>
   );

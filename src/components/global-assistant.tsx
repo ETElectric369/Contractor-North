@@ -126,7 +126,7 @@ export function GlobalAssistant() {
         <button
           onClick={() => window.dispatchEvent(new Event("cn:assistant-stop"))}
           title="Stop"
-          aria-label="Stop the assistant"
+          aria-label="Stop Nort"
           className="btn-gloss inline-flex h-10 w-10 items-center justify-center rounded-full bg-red-600 text-white shadow-sm transition-colors hover:bg-red-700"
         >
           <Square className="h-4 w-4 fill-current" />
@@ -134,8 +134,8 @@ export function GlobalAssistant() {
       ) : (
         <button
           onClick={launch}
-          title="Talk to the assistant"
-          aria-label="Open the assistant"
+          title="Talk to Nort"
+          aria-label="Open Nort"
           className="btn-gloss inline-flex h-10 w-10 items-center justify-center rounded-full bg-brand text-white shadow-sm transition-colors hover:bg-brand-dark"
         >
           <AudioLines className="h-5 w-5" />
@@ -146,7 +146,7 @@ export function GlobalAssistant() {
         <div
           ref={panelRef}
           role="dialog"
-          aria-label="Assistant"
+          aria-label="Nort"
           className="fixed z-[120] flex max-h-[75vh] flex-col overflow-hidden rounded-2xl border border-white/50 bg-white/90 shadow-2xl backdrop-blur-xl"
           style={{ left: p.x, top: p.y, width: `min(${PANEL_W}px, calc(100vw - 1rem))` }}
         >

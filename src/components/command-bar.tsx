@@ -146,7 +146,7 @@ export function CommandBar({ isStaff }: { isStaff?: boolean }) {
   }, [q, navItems]);
 
   const askItem: Item | null = q.trim()
-    ? { kind: "Assistant", label: `Ask the assistant: “${q.trim()}”`, href: `/assistant?q=${encodeURIComponent(q.trim())}` }
+    ? { kind: "Assistant", label: `Ask Nort: “${q.trim()}”`, href: `/assistant?q=${encodeURIComponent(q.trim())}` }
     : null;
 
   const flat: Item[] = useMemo(
@@ -206,7 +206,7 @@ export function CommandBar({ isStaff }: { isStaff?: boolean }) {
         <div className="max-h-[55vh] overflow-y-auto py-1">
           {flat.length === 0 && (
             <div className="px-4 py-6 text-center text-sm text-slate-400">
-              No matches. Press Enter to ask the assistant.
+              No matches. Press Enter to ask Nort.
             </div>
           )}
           {flat.map((it, i) => (
