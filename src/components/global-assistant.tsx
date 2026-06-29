@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { AudioLines, Square, X, ChevronDown, ChevronUp, GripHorizontal } from "lucide-react";
 import { AssistantChat } from "@/app/(app)/assistant/assistant-chat";
 import { unlockAudio, stopSpeaking } from "@/lib/tts";
-import * as speech from "@/lib/speech";
+import * as speech from "@/lib/voice";
 import { useEstimator } from "@/lib/estimator-store";
 
 const PANEL_W = 384; // 24rem

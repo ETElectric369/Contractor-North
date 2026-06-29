@@ -6,7 +6,7 @@ import { Send, Sparkles, Loader2, Mic, Check, Square, FileText } from "lucide-re
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
 import { speakSmart, unlockAudio, stopSpeaking } from "@/lib/tts";
-import * as speech from "@/lib/speech";
+import * as speech from "@/lib/voice";
 import {
   CONFIRM_MARKER, OPEN_MARKER, PICK_MARKER, STATUS_OPEN, STATUS_CLOSE, DRAFT_OPEN, DRAFT_CLOSE,
   type AgentConfirm, type AgentOpen, type AgentPick, type AgentDraft,

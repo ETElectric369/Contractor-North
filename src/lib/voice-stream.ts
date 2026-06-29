@@ -1,0 +1,235 @@
+/**
+ * Hands-free voice input via getUserMedia + server transcription — the RELIABLE path on iOS PWAs,
+ * where webkitSpeechRecognition cannot do a multi-turn conversation (it ends after one utterance and
+ * iOS refuses to restart it off a user gesture, so the answer after the assistant's question is lost).
+ *
+ * Here, the mic is granted ONCE inside the Talk tap (getUserMedia); the MediaStream then stays alive,
+ * so every later turn records straight from it with NO new tap. Each turn: record → detect end-of-speech
+ * (a stretch of silence after the user spoke) → POST the audio to /api/transcribe (Whisper) → deliver the
+ * transcript. Exposes the SAME surface as lib/speech.ts, so the assistant swaps backends via the import.
+ */
+
+type ResultCb = (text: string) => void;
+type StateCb = (listening: boolean) => void;
+
+let stream: MediaStream | null = null;
+let audioCtx: AudioContext | null = null;
+let analyser: AnalyserNode | null = null;
+let recorder: MediaRecorder | null = null;
+let chunks: BlobPart[] = [];
+let rafId = 0;
+let active = false; // a turn is recording/listening right now
+let wantStream = false; // we intend to hold the mic open across turns
+let muted = false;
+let mimeType = "";
+let handler: ResultCb | null = null;
+const stateSubs = new Set<StateCb>();
+
+export function speechSupported(): boolean {
+  if (typeof window === "undefined") return false;
+  const ac = (window as any).AudioContext || (window as any).webkitAudioContext;
+  return !!navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== "undefined" && !!ac;
+}
+
+export function isListening(): boolean {
+  return active;
+}
+
+export function onListeningState(cb: StateCb): () => void {
+  stateSubs.add(cb);
+  return () => {
+    stateSubs.delete(cb);
+  };
+}
+
+function emit() {
+  stateSubs.forEach((f) => {
+    try {
+      f(active);
+    } catch {
+      /* ignore */
+    }
+  });
+}
+
+export function setResultHandler(cb: ResultCb | null) {
+  handler = cb;
+}
+
+/** Pause capture while the assistant speaks (so its TTS isn't recorded). Turns are chat-triggered
+ *  AFTER the reply, so this is mostly a safety net. */
+export function setMuted(b: boolean) {
+  muted = b;
+}
+
+function pickMime(): string {
+  for (const t of ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/aac", "audio/mpeg"]) {
+    try {
+      if (MediaRecorder.isTypeSupported(t)) return t;
+    } catch {
+      /* ignore */
+    }
+  }
+  return "";
+}
+
+/**
+ * START. The FIRST call must run inside a user gesture (the mic-permission prompt). It kicks off
+ * getUserMedia (async) and returns true; once the stream is live, recording turns no longer need a
+ * gesture. A later call with the stream already alive just records the next turn.
+ */
+export function startListening(_lang?: string): boolean {
+  if (!speechSupported()) return false;
+  muted = false;
+  if (stream && audioCtx && analyser) {
+    beginTurn(); // stream alive (mid-conversation) → record the next answer, no gesture needed
+    return true;
+  }
+  wantStream = true;
+  navigator.mediaDevices
+    .getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
+    .then((s) => {
+      if (!wantStream) {
+        s.getTracks().forEach((t) => t.stop());
+        return;
+      }
+      stream = s;
+      const AC = (window as any).AudioContext || (window as any).webkitAudioContext;
+      audioCtx = new AC();
+      const src = audioCtx!.createMediaStreamSource(s);
+      analyser = audioCtx!.createAnalyser();
+      analyser.fftSize = 2048;
+      src.connect(analyser);
+      mimeType = pickMime();
+      beginTurn();
+    })
+    .catch(() => {
+      wantStream = false;
+      active = false;
+      emit();
+    });
+  return true;
+}
+
+function beginTurn() {
+  if (!wantStream || !stream || !analyser) return;
+  try {
+    if (recorder && recorder.state !== "inactive") recorder.stop();
+  } catch {
+    /* ignore */
+  }
+  chunks = [];
+  try {
+    recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+  } catch {
+    try {
+      recorder = new MediaRecorder(stream);
+    } catch {
+      return;
+    }
+  }
+  recorder.ondataavailable = (e) => {
+    if (e.data && e.data.size) chunks.push(e.data);
+  };
+  recorder.onstop = () => {
+    void finishTurn();
+  };
+  try {
+    recorder.start();
+  } catch {
+    return;
+  }
+  active = true;
+  emit();
+
+  const buf = new Uint8Array(analyser.frequencyBinCount);
+  let spoke = false;
+  let silenceStart = 0;
+  const startedAt = Date.now();
+  const tick = () => {
+    if (!active || !recorder || recorder.state === "inactive" || !analyser) return;
+    analyser.getByteTimeDomainData(buf);
+    let sum = 0;
+    for (let i = 0; i < buf.length; i++) {
+      const v = (buf[i] - 128) / 128;
+      sum += v * v;
+    }
+    const rms = Math.sqrt(sum / buf.length);
+    const now = Date.now();
+    if (muted) {
+      silenceStart = 0;
+    } else if (rms > 0.018) {
+      spoke = true;
+      silenceStart = 0;
+    } else if (spoke) {
+      if (!silenceStart) silenceStart = now;
+      else if (now - silenceStart > 1300) {
+        stopTurn(); // ~1.3s of quiet after speech → end of the utterance
+        return;
+      }
+    }
+    // Safety caps: never run a single turn forever; give up a turn with no speech at all.
+    if (now - startedAt > 18000 || (!spoke && now - startedAt > 9000)) {
+      stopTurn();
+      return;
+    }
+    rafId = requestAnimationFrame(tick);
+  };
+  rafId = requestAnimationFrame(tick);
+}
+
+function stopTurn() {
+  cancelAnimationFrame(rafId);
+  try {
+    if (recorder && recorder.state !== "inactive") recorder.stop(); // → onstop → finishTurn
+  } catch {
+    /* ignore */
+  }
+}
+
+async function finishTurn() {
+  cancelAnimationFrame(rafId);
+  active = false;
+  emit();
+  const blob = new Blob(chunks, { type: mimeType || "audio/webm" });
+  chunks = [];
+  if (blob.size < 1400) return; // too short → noise, not speech. The chat re-listens on its own.
+  try {
+    const fd = new FormData();
+    const ext = mimeType.includes("mp4") || mimeType.includes("aac") ? "mp4" : mimeType.includes("mpeg") ? "mp3" : "webm";
+    fd.append("audio", blob, `turn.${ext}`);
+    const r = await fetch("/api/transcribe", { method: "POST", body: fd });
+    const j = await r.json().catch(() => null);
+    const text = String(j?.text ?? "").trim();
+    if (text && handler) handler(text);
+  } catch {
+    /* network/transcribe failure — the chat's status handles the silence */
+  }
+}
+
+export function stopListening() {
+  wantStream = false;
+  active = false;
+  cancelAnimationFrame(rafId);
+  try {
+    if (recorder && recorder.state !== "inactive") recorder.stop();
+  } catch {
+    /* ignore */
+  }
+  try {
+    stream?.getTracks().forEach((t) => t.stop());
+  } catch {
+    /* ignore */
+  }
+  try {
+    void audioCtx?.close();
+  } catch {
+    /* ignore */
+  }
+  recorder = null;
+  stream = null;
+  analyser = null;
+  audioCtx = null;
+  chunks = [];
+  emit();
+}
