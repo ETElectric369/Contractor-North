@@ -74,10 +74,16 @@ export function EditEntryButton({
   const [endT, setEndT] = useState(outP.time || inP.time);
   const [jobId, setJobId] = useState(entry.job_id ?? "");
   const [jobCode, setJobCode] = useState(entry.job_code ?? "");
-  const [lunchTaken, setLunchTaken] = useState((entry.lunch_minutes ?? 0) >= 30);
+  // Real lunch MINUTES (not a 30/0 boolean) so editing an unrelated field can't silently
+  // collapse a stored 45/60-min lunch down to 30 and mis-state paid hours (the wage bug).
+  const [lunchMin, setLunchMin] = useState(entry.lunch_minutes ?? 0);
+  const lunchTaken = lunchMin > 0;
   const [breaksTaken, setBreaksTaken] = useState(true);
   const [miles, setMiles] = useState(entry.miles ?? 0);
+  // rate_override is only WRITTEN when the user actually edits the Rate field — an unrelated
+  // save must never silently clear a supervisor override back to base pay.
   const [rate, setRate] = useState(entry.rate_override ?? 0);
+  const [rateDirty, setRateDirty] = useState(false);
   const [notes, setNotes] = useState(entry.notes ?? "");
   // Split-across-jobs rows (pre-filled from existing allocations so save round-trips them).
   const [splits, setSplits] = useState<{ job_id: string; hours: number; description: string }[]>(() =>
@@ -97,8 +103,8 @@ export function EditEntryButton({
   const lunchRequired = grossHrs > 5;
   const breaksRequired = grossHrs > 3.5;
   const twoBreaks = grossHrs > 5;
-  const lunchHrs = lunchTaken ? 0.5 : 0;
-  const workedHrs = Math.max(0, grossHrs - lunchHrs); // billable shift = gross minus lunch
+  const lunchHrs = lunchMin / 60;
+  const workedHrs = Math.max(0, grossHrs - lunchHrs); // billable shift = gross minus the real lunch
   const allocated = splits.reduce((s, r) => s + (Number(r.hours) || 0), 0);
   const remainder = Math.round((workedHrs - allocated) * 100) / 100;
 
@@ -119,13 +125,14 @@ export function EditEntryButton({
         id: entry.id,
         clock_in: ci.toISOString(),
         clock_out: co.toISOString(),
-        lunch_minutes: lunchTaken ? 30 : 0,
+        lunch_minutes: lunchMin,
         job_id: jobId || null,
         job_code: jobCode || null,
         notes,
         miles,
-        // Blank/0 ⇒ default rate (clear any override); a positive number sets it.
-        rate_override: rate > 0 ? rate : null,
+        // Only touch the override when the user actually edited the field; otherwise round-trip
+        // the stored value so an unrelated edit can't wipe a supervisor rate.
+        rate_override: rateDirty ? (rate > 0 ? rate : null) : (entry.rate_override ?? null),
         profile_id: profileId || undefined,
         allocations,
       });
@@ -299,12 +306,23 @@ export function EditEntryButton({
             </div>
             <div>
               <Label htmlFor="e-rate">Rate ($/hr, blank/0 = default)</Label>
-              <NumberInput id="e-rate" value={rate} onValueChange={setRate} step={0.5} />
+              <NumberInput id="e-rate" value={rate} onValueChange={(v) => { setRate(v); setRateDirty(true); }} step={0.5} />
             </div>
           </div>
           <label className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${lunchRequired && !lunchTaken ? "border-amber-300 bg-amber-50" : "border-slate-200"}`}>
-            <input type="checkbox" checked={lunchTaken} onChange={(e) => setLunchTaken(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand" />
-            <span className="text-slate-700">Took a 30-minute lunch{lunchRequired ? <span className="font-medium text-amber-700"> · required (over 5 hrs)</span> : null}</span>
+            <input
+              type="checkbox"
+              checked={lunchTaken}
+              onChange={(e) => setLunchMin(e.target.checked ? Math.max(30, entry.lunch_minutes ?? 30) : 0)}
+              className="h-4 w-4 rounded border-slate-300 text-brand"
+            />
+            <span className="text-slate-700">Took a lunch{lunchRequired ? <span className="font-medium text-amber-700"> · required (over 5 hrs)</span> : null}</span>
+            {lunchTaken && (
+              <span className="ml-auto flex items-center gap-1 text-slate-600">
+                <span className="w-16"><NumberInput value={lunchMin} onValueChange={setLunchMin} step={15} aria-label="Lunch minutes" /></span>
+                min
+              </span>
+            )}
           </label>
           <label className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${breaksRequired && !breaksTaken ? "border-amber-300 bg-amber-50" : "border-slate-200"}`}>
             <input type="checkbox" checked={breaksTaken} onChange={(e) => setBreaksTaken(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand" />

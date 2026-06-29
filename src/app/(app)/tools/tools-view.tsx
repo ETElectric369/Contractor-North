@@ -37,11 +37,13 @@ const AMPACITY_CU: Record<string, number> = {
   "300": 285, "350": 310, "500": 380,
 };
 const AMPACITY_AL: Record<string, number> = {
-  "12": 20, "10": 30, "8": 40, "6": 50, "4": 65, "3": 75, "2": 90, "1": 100,
+  "12": 20, "10": 35, "8": 40, "6": 50, "4": 65, "3": 75, "2": 90, "1": 100,
   "1/0": 120, "2/0": 135, "3/0": 155, "4/0": 180, "250": 205, "300": 230,
   "350": 250, "500": 310,
 };
-const SIZES = Object.keys(CMIL);
+// Smallest→largest in AWG/kcmil order. NOT Object.keys(CMIL) — that sorts the integer-string
+// keys numerically (1,2,3,…,12,14, then kcmil), so .find() returned #1 AWG for nearly every load.
+const SIZES = ["14", "12", "10", "8", "6", "4", "3", "2", "1", "1/0", "2/0", "3/0", "4/0", "250", "300", "350", "500"].filter((s) => s in CMIL);
 /* Per-conductor volume allowance, in³ (NEC 314.16(B) table). */
 const BOX_VOL: Record<string, number> = { "14": 2.0, "12": 2.25, "10": 2.5, "8": 3.0, "6": 5.0 };
 /* Common metal boxes, usable in³ (NEC 314.16(A)). */

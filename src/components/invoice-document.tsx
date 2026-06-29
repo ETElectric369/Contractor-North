@@ -3,7 +3,7 @@ import { DocHeader } from "@/components/doc-templates";
 import { LineItemText } from "@/components/line-item-text";
 import { CostBreakdown } from "@/components/cost-breakdown";
 import { ProgressReportCard } from "@/components/progress-report-card";
-import type { InvoiceLine } from "@/lib/invoice-math";
+import { invoiceBalance, type InvoiceLine } from "@/lib/invoice-math";
 
 /**
  * THE single invoice document body. Every read-only surface — the print/PDF page,
@@ -76,7 +76,7 @@ export function InvoiceDocument({
   progress?: { estimate: number; workToDate: number; received: number; thisAmount: number; billingType: any } | null;
 }) {
   const c = customer;
-  const balance = Number(total) - Number(amountPaid);
+  const balance = invoiceBalance(total, amountPaid); // floored at 0 — never a negative "Please remit"
 
   return (
     <div className="print-page mx-auto max-w-3xl bg-white p-10 shadow-sm">

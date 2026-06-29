@@ -3,6 +3,7 @@ import { sendEmail, renderInvoiceNoticeEmail, ownerBcc } from "@/lib/email";
 import { getOrgSettings } from "@/lib/org-settings";
 import { companyFromOrg } from "@/components/doc-letterhead";
 import { companyBlock } from "@/lib/company-lines";
+import { invoiceBalance } from "@/lib/invoice-math";
 
 /**
  * Render + send an invoice email to the customer and mark a draft "sent".
@@ -37,7 +38,7 @@ export async function deliverInvoiceEmail(
   const site = process.env.NEXT_PUBLIC_SITE_URL || "https://contractor-north.vercel.app";
   const link = `${site}/i/${(invoice as any).public_token}`;
   const portalLink = customer.portal_token ? `${site}/portal/${customer.portal_token}` : undefined;
-  const balance = Number(invoice.total) - Number(invoice.amount_paid);
+  const balance = invoiceBalance(invoice.total, invoice.amount_paid);
   // A basic greeting + the balance + a button to the ONE canonical invoice document
   // (viewable, printable, payable) and the portal — never a re-rendered copy of the
   // invoice, so the email can't drift from the print/portal view.
