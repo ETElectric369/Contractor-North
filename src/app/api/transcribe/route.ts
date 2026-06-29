@@ -36,6 +36,8 @@ export async function POST(req: Request) {
       const fd = new FormData();
       fd.append("file", audio, name);
       fd.append("model_id", process.env.ELEVENLABS_STT_MODEL || "scribe_v1");
+      fd.append("language_code", "eng"); // force English — auto-detect was guessing Portuguese on noisy audio
+      fd.append("tag_audio_events", "false"); // don't emit "(applause)" / "(sound of water)" sound-effect tags
       const r = await fetch("https://api.elevenlabs.io/v1/speech-to-text", {
         method: "POST",
         headers: { "xi-api-key": elKey },
