@@ -62,10 +62,31 @@ export async function clearConversation(): Promise<{ ok: boolean }> {
 export async function saveQuoteFromDraft(
   draft: AgentDraft,
 ): Promise<{ ok: boolean; id?: string; error?: string }> {
+  // Nort builds an estimate "for Jackie Burks" (a NAME) but may not carry her customer_id — so the
+  // saved quote was landing "No customer attached". Resolve the name to a real customer: match an
+  // existing one first (case-insensitive, exact then contains), and only create a new record if there's
+  // genuinely no match. That way the quote is always attached and we don't spawn duplicate customers.
+  let customerId = draft.customer_id ?? null;
+  const custName = (draft.customer_name ?? "").trim();
+  if (!customerId && custName) {
+    const supabase = await createClient();
+    const esc = custName.replace(/[\\%_]/g, (m) => "\\" + m);
+    const exact = await supabase.from("customers").select("id").ilike("name", esc).limit(1).maybeSingle();
+    customerId = (exact.data as { id?: string } | null)?.id ?? null;
+    if (!customerId) {
+      const partial = await supabase.from("customers").select("id").ilike("name", `%${esc}%`).limit(1).maybeSingle();
+      customerId = (partial.data as { id?: string } | null)?.id ?? null;
+    }
+    if (!customerId) {
+      const made = await executeAction("customer.create", { name: custName }, { source: "ui" });
+      if (made.ok) customerId = (made.data as { id?: string } | undefined)?.id ?? null;
+    }
+  }
+
   const res = await executeAction(
     "quote.create",
     {
-      customer_id: draft.customer_id ?? null,
+      customer_id: customerId,
       job_id: draft.job_id ?? null,
       title: draft.title ?? "",
       notes: "",
