@@ -148,6 +148,9 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
   const [speaking, setSpeaking] = useState(false); // Claude's reply is currently playing
   const [draft, setDraft] = useState<AgentDraft | null>(null); // the live quote being built
   const [savingDraft, setSavingDraft] = useState(false);
+  // Estimates saved THIS session — each collapses the live numbers into a clickable line that
+  // links to the quote (the permanent log in /quotes).
+  const [saved, setSaved] = useState<{ id: string; title: string; total: number; customer?: string }[]>([]);
 
   // Publish the live estimate + speaking state to the shared store so the COMPACTED Estimator
   // (total + stop) can live on the topbar Talk button even when this drawer is closed.
@@ -217,9 +220,14 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     try {
       const res = await saveQuoteFromDraft(draft);
       if (res.ok && res.id) {
+        // Collapse the live numbers to a compact, clickable "saved" line that stays in the chat
+        // and links to the quote (the permanent log in /quotes) — instead of wiping it and yanking
+        // you out to the quote page. You keep talking; the estimate is logged + one tap away.
+        const items = (Array.isArray(draft.items) ? draft.items : []).filter((i) => i && typeof i === "object");
+        const sub = items.reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0);
+        const total = Math.round(sub * (1 + (Number(draft.tax_rate) || 0)) * 100) / 100;
+        setSaved((sv) => [...sv, { id: res.id!, title: draft.title || "Estimate", total, customer: draft.customer_name ?? undefined }]);
         setDraft(null);
-        stopVoice();
-        router.push(`/quotes/${res.id}`);
       } else {
         setMessages((m) => [...m, { role: "assistant", content: res.error ? `Couldn't save: ${res.error}` : "Couldn't save the quote." }]);
       }
@@ -570,16 +578,29 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
                 </span>
               </div>
               {(draft.items ?? []).length > 0 && (
-                <div className="max-h-[22vh] space-y-0.5 overflow-y-auto px-3 pb-1.5">
-                  {(draft.items ?? []).map((it, i) => (
-                    <div key={i} className="flex items-baseline justify-between gap-2 text-xs">
-                      <span className="truncate text-slate-500">{it.description || "item"}</span>
-                      <span className="shrink-0 tabular-nums text-slate-400">
-                        {Number(it.quantity) || 1}×${Math.round(Number(it.unit_price) || 0)}
-                      </span>
-                    </div>
-                  ))}
-                </div>
+                <>
+                  <div className="max-h-[22vh] space-y-0.5 overflow-y-auto px-3 pb-1.5">
+                    {(draft.items ?? []).map((it, i) => (
+                      <div key={i} className="flex items-baseline justify-between gap-2 text-xs">
+                        <span className="truncate text-slate-500">{it.description || "item"}</span>
+                        <span className="shrink-0 tabular-nums text-slate-400">
+                          {Number(it.quantity) || 1}×${Math.round(Number(it.unit_price) || 0)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Save right here in the drawer — on save the numbers collapse to a clickable line below. */}
+                  <div className="px-3 pb-2">
+                    <Button
+                      onClick={saveDraft}
+                      disabled={savingDraft}
+                      size="sm"
+                      className={`w-full ${draft.status === "ready" ? "bg-green-600 hover:bg-green-500" : ""}`}
+                    >
+                      {savingDraft ? <Loader2 className="h-4 w-4 animate-spin" /> : draft.status === "ready" ? "Save estimate →" : "Save draft →"}
+                    </Button>
+                  </div>
+                </>
               )}
             </div>
           )}
@@ -685,6 +706,28 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
 
       {/* The full estimate card — non-glass only; the glass drawer shows the ESTIMATOR line + items. */}
       {draft && !glass ? <LiveQuote draft={draft} onSave={saveDraft} saving={savingDraft} /> : null}
+
+      {/* Saved-this-session estimates: the live numbers collapse to ONE clickable line each, linking to
+          the quote in /quotes (the permanent log). Newest first. */}
+      {saved.length > 0 && (
+        <div className="mx-2 mb-2 space-y-1.5">
+          {[...saved].reverse().map((s) => (
+            <a
+              key={s.id}
+              href={`/quotes/${s.id}`}
+              className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-sm hover:bg-emerald-50"
+            >
+              <Check className="h-4 w-4 shrink-0 text-emerald-600" />
+              <span className="min-w-0 flex-1 truncate font-medium text-slate-800">
+                {s.title}
+                {s.customer ? <span className="font-normal text-slate-400"> · {s.customer}</span> : null}
+              </span>
+              <span className="shrink-0 font-semibold text-slate-900">{money(s.total)}</span>
+              <span className="shrink-0 text-xs font-medium text-brand">View →</span>
+            </a>
+          ))}
+        </div>
+      )}
 
       {pendingPick ? (
         <ContactPicker
