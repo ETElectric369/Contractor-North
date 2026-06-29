@@ -24,9 +24,18 @@ export function AutomationSettings({ settings }: { settings: OrgSettings }) {
   const [autoSend, setAutoSend] = useState(settings.auto_send_invoice_on_complete);
   const [copyOwner, setCopyOwner] = useState(settings.copy_owner_on_emails);
   const [, start] = useTransition();
+  const [err, setErr] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
 
-  function set(patch: Record<string, boolean>) {
-    start(async () => { await updateOrgSettings(patch); });
+  // Save a toggle. On failure REVERT the optimistic flip + surface the error, so the switch
+  // can never sit showing a state that didn't actually save (these gate real customer email).
+  function set(patch: Record<string, boolean>, revert: () => void) {
+    setErr(null);
+    start(async () => {
+      const res = await updateOrgSettings(patch);
+      if (!res.ok) { revert(); setErr(res.error ?? "Couldn't save — try again."); }
+      else { setSaved(true); setTimeout(() => setSaved(false), 1500); }
+    });
   }
 
   const rows: { label: string; desc: string; on: boolean; set: (v: boolean) => void; key: string }[] = [
@@ -50,10 +59,12 @@ export function AutomationSettings({ settings }: { settings: OrgSettings }) {
               <div className="text-sm font-medium text-slate-900">{r.label}</div>
               <div className="text-xs text-slate-400">{r.desc}</div>
             </div>
-            <Toggle on={r.on} onChange={(v) => { r.set(v); set({ [r.key]: v }); }} />
+            <Toggle on={r.on} onChange={(v) => { const prev = r.on; r.set(v); set({ [r.key]: v }, () => r.set(prev)); }} />
           </li>
         ))}
       </ul>
+      {err && <p className="text-sm text-red-600">{err}</p>}
+      {saved && <p className="text-sm font-medium text-green-600">Saved</p>}
     </div>
   );
 }
