@@ -5,8 +5,12 @@ import { InquiryForm } from "./inquiry-form";
 
 export const dynamic = "force-dynamic";
 
-export default async function InquirePage({ params }: { params: Promise<{ org: string }> }) {
+export default async function InquirePage({ params, searchParams }: { params: Promise<{ org: string }>; searchParams?: Promise<{ ref?: string }> }) {
   const { org } = await params;
+  // Referral attribution ("Brian at the bar"): an employee's shared link carries ?ref={profile_id}.
+  // Validated server-side in submit_inquiry (must be a profile in this org) — pass through as-is.
+  const refRaw = (await searchParams)?.ref ?? "";
+  const ref = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(refRaw) ? refRaw : null;
   const supabase = await createClient();
   const { data } = await supabase.rpc("public_org", { p_org: org });
   const o = (data ?? null) as any;
@@ -102,7 +106,7 @@ export default async function InquirePage({ params }: { params: Promise<{ org: s
         </div>
 
         <div className="w-full md:max-w-sm md:justify-self-end md:translate-x-4 lg:translate-x-10">
-          <InquiryForm org={org} brandColor={brand} />
+          <InquiryForm org={org} brandColor={brand} refId={ref} />
         </div>
       </div>
 

@@ -67,6 +67,10 @@ export function InquiryRow({
               <Globe className="mr-1 inline h-3 w-3" />web
             </Badge>
           )}
+          {/* Referral credit ("Brian at the bar") — who shared the link this lead came through. */}
+          {(inquiry as any).referrer?.full_name && (
+            <Badge tone="green">referred by {(inquiry as any).referrer.full_name}</Badge>
+          )}
         </div>
         <div className="mt-0.5 flex flex-wrap items-center gap-3 text-xs text-slate-500">
           {inquiry.phone && (

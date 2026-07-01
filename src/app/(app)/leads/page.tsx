@@ -14,7 +14,7 @@ export default async function InquiriesPage() {
   const [{ data: inqData }, { data: custData }] = await Promise.all([
     supabase
       .from("inquiries")
-      .select("*")
+      .select("*, referrer:profiles!inquiries_referred_by_fkey(full_name)")
       .is("converted_at", null)
       .neq("status", "lost")
       .order("next_follow_up_at", { ascending: true, nullsFirst: false })

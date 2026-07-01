@@ -5,6 +5,7 @@ import { LogOut, ArrowLeft, ArrowRight, Search } from "lucide-react";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { GlobalAssistant } from "@/components/global-assistant";
 import { GlobalQuickAdd } from "@/components/global-quick-add";
+import { ShareQrButton } from "@/components/share-qr-button";
 import { initials } from "@/lib/utils";
 import { signOut } from "@/app/login/actions";
 import type { Profile } from "@/lib/types";
@@ -49,6 +50,8 @@ export function Topbar({
           {/* ONE assistant — voice + chat + actions — reachable from every screen. */}
           <GlobalAssistant />
           <GlobalQuickAdd placement="topbar" />
+          {/* Every employee's personal estimate link/QR — leads through it are credited to them. */}
+          <ShareQrButton />
           <button
             onClick={() => window.dispatchEvent(new Event("cn:command"))}
             className="flex items-center gap-2 rounded-lg border border-slate-200 px-2.5 py-2 text-slate-500 hover:bg-slate-50 sm:px-3"

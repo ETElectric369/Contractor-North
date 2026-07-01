@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { notifyNewInquiry } from "./actions";
 
-export function InquiryForm({ org, brandColor }: { org: string; brandColor: string }) {
+export function InquiryForm({ org, brandColor, refId = null }: { org: string; brandColor: string; refId?: string | null }) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
@@ -39,6 +39,7 @@ export function InquiryForm({ org, brandColor }: { org: string; brandColor: stri
         p_city: city || null,
         p_state: stateName || null,
         p_zip: zip || null,
+        p_ref: refId, // referral attribution — validated org-side, never blocks the lead
       });
       if (rpcErr) throw rpcErr;
       setDone(true);
