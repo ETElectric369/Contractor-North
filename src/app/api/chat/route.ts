@@ -241,10 +241,38 @@ export async function POST(req: Request) {
     content: m.content,
   }));
 
+  // PROMPT CACHING — the prefix (tools → system → conversation-so-far) is byte-identical across
+  // the up-to-6 tool rounds of ONE request and across a conversation's turns, but was re-billed at
+  // full input price on every call. Two breakpoints fix that: one on the system block (caches the
+  // tool definitions + the whole system prompt — the deliberately timestamp-free stable prefix),
+  // and one re-marked onto the TAIL of the conversation before each round so the growing history
+  // caches incrementally (round N+1 reads what round N wrote; cache reads bill at ~10%).
+  // Old markers are stripped first — the API allows max 4 breakpoints, so exactly one tail marker
+  // lives at a time. NOTE the sliding MAX_MESSAGES window: once a conversation exceeds 20 messages
+  // the prefix shifts each turn and history-cache hits stop — acceptable; system+tools still hit.
+  const markCacheTail = (msgs: Anthropic.MessageParam[]): Anthropic.MessageParam[] => {
+    for (const m of msgs) {
+      if (Array.isArray(m.content)) for (const b of m.content) delete (b as { cache_control?: unknown }).cache_control;
+    }
+    const last = msgs[msgs.length - 1];
+    if (last) {
+      if (typeof last.content === "string") {
+        last.content = [{ type: "text", text: last.content, cache_control: { type: "ephemeral" } }];
+      } else if (Array.isArray(last.content) && last.content.length) {
+        (last.content[last.content.length - 1] as { cache_control?: unknown }).cache_control = { type: "ephemeral" };
+      }
+    }
+    return msgs;
+  };
+
   const stream = new ReadableStream({
     async start(controller) {
       const emit = (t: string) => controller.enqueue(encoder.encode(t));
       const toolsUsed = new Set<string>();
+      // Cache telemetry for the audit row — lets us verify hits from the DB (cache_read > 0).
+      let cacheRead = 0;
+      let cacheWrite = 0;
+      let inputUncached = 0;
       // Cap agent writes per request so a prompt-injection in tool-returned data can't
       // mass-create — bounds the blast radius of the tier-1 write exposure.
       const MAX_WRITES = 3;
@@ -254,13 +282,15 @@ export async function POST(req: Request) {
           const turn = client.messages.stream({
             model: DEFAULT_MODEL,
             max_tokens: 2048,
-            system: systemPrompt,
+            // Block form so the system prompt carries the cache breakpoint (covers tools too —
+            // tools render before system, so one marker here caches both).
+            system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
             // Native web search (server-side, autonomous) so the assistant can research
             // LIVE prices, specs, and code while estimating — the core "do it like Claude
             // did the Tao Zhu quote" capability. Results are untrusted web text (the
             // input-is-data rule in the system prompt covers them).
             tools: [...dataTools, ...writeTools, ...CALC_TOOLS, OPEN_MAPS_TOOL, QUOTE_DRAFT_TOOL, REMEMBER_TOOL, ...(isStaffCaller ? [REQUEST_CONTACT_TOOL] : []), { type: "web_search_20250305", name: "web_search", max_uses: 6 }] as any,
-            messages: convo,
+            messages: markCacheTail(convo),
           });
           // Strip the directive markers from MODEL text so a prompt-injection can't forge a
           // confirm card, a maps-open, or a fake quote preview — markers are only ever emitted
@@ -278,6 +308,11 @@ export async function POST(req: Request) {
             ),
           );
           const final = await turn.finalMessage();
+          // Accumulate cache telemetry across rounds (usage fields are 0/undefined pre-caching).
+          const u = final.usage as unknown as { cache_read_input_tokens?: number; cache_creation_input_tokens?: number; input_tokens?: number };
+          cacheRead += u?.cache_read_input_tokens ?? 0;
+          cacheWrite += u?.cache_creation_input_tokens ?? 0;
+          inputUncached += u?.input_tokens ?? 0;
           convo.push({ role: "assistant", content: final.content });
 
           if (final.stop_reason !== "tool_use") break;
@@ -446,7 +481,7 @@ export async function POST(req: Request) {
               risk: 0,
               effect: "read",
               ok: true,
-              input_summary: { tools: [...toolsUsed] },
+              input_summary: { tools: [...toolsUsed], cache: { read: cacheRead, write: cacheWrite, uncached: inputUncached } },
               source: "agent",
             });
           } catch {
