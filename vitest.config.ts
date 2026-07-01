@@ -16,6 +16,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts"],
+    // tests/ holds meta-tests about the harness itself (the CI-creds guard).
+    include: ["src/**/*.test.ts", "tests/**/*.test.ts"],
   },
 });

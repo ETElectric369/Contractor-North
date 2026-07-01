@@ -94,6 +94,112 @@ export async function clockIn(input: {
   return { ok: true };
 }
 
+export type SwitchJobResult = ClockResult & {
+  /** The entry's notes AFTER the breadcrumb was appended — the client syncs its textarea to this. */
+  notes?: string;
+  /** Hours recorded for the outgoing job's segment — the client mirrors the split locally. */
+  segment_hours?: number;
+};
+
+/**
+ * Mid-shift job switch — records the OUTGOING job's hours as a time allocation and
+ * re-points the open entry at the new job, so the day's split is captured AS IT
+ * HAPPENS instead of being reconstructed from memory at clock-out (that
+ * reconstruction is how wrong hours reached the wrong jobs). Self-scoped to the
+ * caller's own OPEN entry. The current segment's start is derived from what's
+ * already allocated (clock_in + previously recorded switch hours), so repeated
+ * switches chain correctly even across app restarts. A human-readable breadcrumb
+ * ("[switched to <job> at <ISO>]") is also appended to the notes so the office can
+ * always re-derive the split in the edit modal, even if the allocations get replaced.
+ */
+export async function switchJob(input: {
+  entry_id: string;
+  job_id: string;
+  job_code?: string | null;
+  /** The tech's CURRENT notes text (may hold unsaved typing) — the breadcrumb is appended to this. */
+  notes?: string;
+}): Promise<SwitchJobResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  // Self-scoped: only the caller's own OPEN entry can be switched.
+  const { data: entry } = await supabase
+    .from("time_entries")
+    .select("id, clock_in, job_id, job_code, notes")
+    .eq("id", input.entry_id)
+    .eq("profile_id", user.id)
+    .eq("status", "open")
+    .maybeSingle();
+  if (!entry) return { ok: false, error: "No open entry to switch." };
+
+  // The new job must be visible to the caller (RLS-scoped) — never re-point an
+  // entry at a foreign/stray job id.
+  const jobId = await visibleJobIdOrNull(supabase, input.job_id);
+  if (!jobId) return { ok: false, error: "That job isn't available." };
+  if (jobId === entry.job_id) return { ok: false, error: "You're already clocked into that job." };
+
+  // The current segment started where the recorded switches left off: clock_in +
+  // the hours already allocated by earlier switches. (An open entry has no other
+  // allocation writers — clock-out replaces the whole set at close.)
+  const { data: priorAllocs } = await supabase
+    .from("time_allocations")
+    .select("hours")
+    .eq("time_entry_id", entry.id);
+  const priorHours = (priorAllocs ?? []).reduce(
+    (s: number, a: { hours: number | null }) => s + (Number(a.hours) || 0),
+    0,
+  );
+  const segStartMs = new Date(entry.clock_in).getTime() + priorHours * 3_600_000;
+  const segmentHours = Math.max(0, Math.round(((Date.now() - segStartMs) / 3_600_000) * 100) / 100);
+
+  // Record the outgoing job's segment FIRST — a failed insert leaves the entry
+  // untouched (still on the old job), so no time is ever attributed wrong.
+  const { error: allocErr } = await supabase.from("time_allocations").insert({
+    time_entry_id: entry.id,
+    job_id: entry.job_id,
+    job_code: entry.job_code,
+    hours: segmentHours,
+    description: "before switching jobs",
+    sort_order: (priorAllocs ?? []).length,
+  });
+  if (allocErr) return { ok: false, error: allocErr.message };
+
+  // Breadcrumb — human-readable AND parseable, appended to the tech's current note.
+  const { data: j } = await supabase
+    .from("jobs")
+    .select("job_number, name")
+    .eq("id", jobId)
+    .maybeSingle();
+  const label = j ? `${(j as any).job_number} · ${(j as any).name}` : "another job";
+  const base = (input.notes ?? entry.notes ?? "").trim();
+  const crumb = `[switched to ${label} at ${new Date().toISOString()}]`;
+  const notes = base ? `${base}\n${crumb}` : crumb;
+
+  const { error } = await supabase
+    .from("time_entries")
+    .update({ job_id: jobId, job_code: input.job_code ?? null, notes })
+    .eq("id", entry.id)
+    .eq("profile_id", user.id);
+  if (error) return { ok: false, error: error.message };
+
+  // Switching into a job means work has started there — promote it to in_progress
+  // (same rule as clock-in; never un-complete a finished/cancelled job).
+  await supabase
+    .from("jobs")
+    .update({ status: "in_progress" })
+    .eq("id", jobId)
+    .in("status", ACTIVE_JOB_STATUSES.filter((s) => s !== "in_progress"));
+  revalidatePath(`/jobs/${jobId}`);
+  if (entry.job_id) revalidatePath(`/jobs/${entry.job_id}`);
+  revalidatePath("/jobs");
+  revalidatePath("/timeclock");
+  revalidatePath("/planner"); // who's-on-which-job shows on My Day
+  return { ok: true, notes, segment_hours: segmentHours };
+}
+
 export interface JobAllocationInput {
   job_id: string | null;
   job_code: string | null;

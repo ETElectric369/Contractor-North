@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import Link from "next/link";
 import { Plus, Trash2, Flag, Briefcase, Pencil, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -62,6 +62,8 @@ export function NewTaskBox({
   defaultCategory?: TaskCategory;
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
   const [pending, start] = useTransition();
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState<TaskCategory>(defaultCategory ?? "office");
@@ -70,6 +72,18 @@ export function NewTaskBox({
   const [priority, setPriority] = useState(0);
   const [assignedTo, setAssignedTo] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const titleRef = useRef<HTMLInputElement>(null);
+
+  // Land ready to type from the quick-add menu's "New task" (/tasks?new=1),
+  // then strip the param so a refresh doesn't re-grab focus.
+  useEffect(() => {
+    if (searchParams.get("new") !== "1") return;
+    titleRef.current?.focus();
+    const params = new URLSearchParams(Array.from(searchParams.entries()));
+    params.delete("new");
+    const qs = params.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  }, [searchParams, pathname, router]);
 
   function add() {
     if (!title.trim()) return;
@@ -99,6 +113,7 @@ export function NewTaskBox({
         {error && <p className="text-sm text-red-600">{error}</p>}
         <div className="flex flex-wrap gap-2">
           <Input
+            ref={titleRef}
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && add()}

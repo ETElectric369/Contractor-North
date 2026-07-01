@@ -34,7 +34,7 @@ export async function textQuote(
   const supabase = await createClient();
   const { data: quote } = await supabase
     .from("quotes")
-    .select("quote_number, total, public_token, doc_type, customers(name, phone)")
+    .select("quote_number, total, public_token, doc_type, status, customers(name, phone)")
     .eq("id", id)
     .maybeSingle();
   if (!quote) return { ok: false, error: "Quote not found." };
@@ -50,9 +50,12 @@ export async function textQuote(
   const sent = await sendSms(customer.phone, body);
   if (!sent)
     return { ok: false, error: "Text not sent — add your Twilio account to enable SMS." };
+  // Mark as sent once texted (unless already accepted/declined) — mirrors emailQuote.
   if (["draft"].includes((quote as any).status ?? "")) {
     await supabase.from("quotes").update({ status: "sent" }).eq("id", id);
   }
+  revalidatePath(`/quotes/${id}`);
+  revalidatePath("/quotes");
   return { ok: true };
 }
 

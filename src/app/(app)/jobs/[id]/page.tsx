@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Home, ChevronRight, MapPin, Calendar, Receipt, Plus, Printer } from "lucide-react";
+import { Home, ChevronRight, MapPin, Calendar, Receipt, Plus, Printer, Phone } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
@@ -51,6 +51,7 @@ import { createInvoiceForJob, deleteJob } from "../actions";
 import { getOrgSettings } from "@/lib/org-settings";
 import { computeJobLaborBilling, fetchJobLaborRows, laborCostForJob } from "@/lib/labor-billing";
 import { formatDateTz } from "@/lib/tz";
+import { NavLink } from "@/components/nav-link";
 import type { Customer } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -320,6 +321,12 @@ export default async function JobDetailPage({
                       <span className="text-sm text-slate-400">—</span>
                     )}
                   </div>
+                  {/* Tap-to-call: one of the two things a job gets opened for from the truck. */}
+                  {j.customers?.phone && (
+                    <a href={`tel:${j.customers.phone}`} className="flex min-h-[44px] items-center gap-1.5 text-sm text-slate-600 hover:text-brand">
+                      <Phone className="h-3.5 w-3.5 text-slate-400" /> {j.customers.phone}
+                    </a>
+                  )}
                 </div>
                 <div>
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Status</div>
@@ -329,14 +336,15 @@ export default async function JobDetailPage({
                 </div>
                 <div>
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Address</div>
-                  <div className="mt-1 flex items-center gap-1 text-sm text-slate-700">
+                  <div className="mt-1 text-sm text-slate-700">
                     {j.address ? (
-                      <>
-                        <MapPin className="h-3.5 w-3.5 text-slate-400" /> {j.address}
+                      // Tap-to-navigate: the address opens guided directions in the user's maps app.
+                      <NavLink address={jobAddress} className="flex min-h-[44px] items-center gap-1 text-left hover:text-brand">
+                        <MapPin className="h-3.5 w-3.5 shrink-0 text-slate-400" /> {j.address}
                         {[j.city, j.state, j.zip].filter(Boolean).length > 0 && (
                           <span>· {[j.city, j.state, j.zip].filter(Boolean).join(", ")}</span>
                         )}
-                      </>
+                      </NavLink>
                     ) : "—"}
                   </div>
                 </div>

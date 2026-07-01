@@ -16,6 +16,37 @@ export function PwaRegister() {
     const hadController = !!navigator.serviceWorker.controller;
     let sawFirstClaim = false;
     let refreshing = false;
+
+    // A deploy reload must never eat what the user is typing. If a modal is up
+    // (`modal-open` on <body> — every overlay sets it via modal-lock) or any
+    // field has focus, HOLD the reload and retry on a short interval — it then
+    // fires the moment the user is between screens instead of mid-form. The
+    // typed content itself is also draft-persisted (useDraft), but not every
+    // form is wired, so the gate is the first line of defense.
+    const midTyping = () => {
+      if (document.body.classList.contains("modal-open")) return true;
+      const el = document.activeElement as HTMLElement | null;
+      if (!el) return false;
+      return (
+        el.tagName === "INPUT" ||
+        el.tagName === "TEXTAREA" ||
+        el.tagName === "SELECT" ||
+        el.isContentEditable
+      );
+    };
+    let deferredReload: ReturnType<typeof setInterval> | undefined;
+    const reloadWhenSafe = () => {
+      if (!midTyping()) {
+        window.location.reload();
+        return;
+      }
+      deferredReload = setInterval(() => {
+        if (midTyping()) return;
+        clearInterval(deferredReload);
+        window.location.reload();
+      }, 3000);
+    };
+
     const onControllerChange = () => {
       // On a fresh, uncontrolled first load the very first controllerchange is
       // just the SW claiming this page — not an update. Skip that one only.
@@ -25,7 +56,7 @@ export function PwaRegister() {
       }
       if (refreshing) return;
       refreshing = true;
-      window.location.reload();
+      reloadWhenSafe();
     };
     navigator.serviceWorker.addEventListener("controllerchange", onControllerChange);
 
@@ -58,6 +89,7 @@ export function PwaRegister() {
       window.removeEventListener("load", onLoad);
       if (interval) clearInterval(interval);
       if (onFocus) window.removeEventListener("focus", onFocus);
+      if (deferredReload) clearInterval(deferredReload);
     };
   }, []);
   return null;

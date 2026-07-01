@@ -1,13 +1,14 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { Plus, Pencil, Copy, Check, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/toast";
+import { useDraft } from "@/lib/use-draft";
 import {
   createAppointment,
   updateAppointment,
@@ -54,6 +55,28 @@ function toLocal(iso: string | null): { date: string; time: string } {
   };
 }
 
+// The whole form as ONE serializable object so useDraft can mirror it. All
+// fields keep their `name` attributes — controlled values still serialize
+// into the <form>'s FormData.
+interface ApptForm {
+  type: string;
+  assigned_to: string;
+  title: string;
+  date: string;
+  start_time: string;
+  end_time: string;
+  customer_id: string;
+  job_id: string;
+  new_customer_name: string;
+  new_customer_phone: string;
+  location: string;
+  notes: string;
+}
+
+// A page can mount several "new appointment" buttons; only the FIRST mounted
+// instance may answer ?new=1 or two modals would stack.
+let newParamClaimed = false;
+
 /** Create or edit an appointment / inspection. */
 export function AppointmentButton({
   jobs,
@@ -72,24 +95,88 @@ export function AppointmentButton({
   compact?: boolean;
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
   const toast = useToast();
   const editing = !!appointment;
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [newCust, setNewCust] = useState(false);
-  // Location is controlled so picking a job can auto-fill it from the job address.
-  const [location, setLocation] = useState(appointment?.location ?? "");
   // "Propose times" mode: offer the customer up to 3 date+time slots to pick.
   const [mode, setMode] = useState<"set" | "propose">("set");
   const [slots, setSlots] = useState(defaultSlots);
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  const origin = typeof window !== "undefined" ? window.location.origin : "";
-  const pickLink = linkToken && origin ? `${origin}/pick/${linkToken}` : null;
+  const emptyForm = (): ApptForm => {
+    const st = appointment ? toLocal(appointment.starts_at) : { date: defaultDate ?? "", time: "08:00" };
+    const en = appointment ? toLocal(appointment.ends_at) : { date: "", time: "" };
+    return {
+      type: appointment?.type ?? "quote",
+      assigned_to: appointment?.assigned_to ?? "",
+      title: appointment?.title ?? "",
+      date: st.date,
+      start_time: st.time || "08:00",
+      end_time: en.time,
+      customer_id: appointment?.customer_id ?? "",
+      job_id: appointment?.job_id ?? "",
+      new_customer_name: "",
+      new_customer_phone: "",
+      location: appointment?.location ?? "",
+      notes: appointment?.notes ?? "",
+    };
+  };
+  const [form, setForm] = useState<ApptForm>(emptyForm);
+  const patch = (p: Partial<ApptForm>) => setForm((f) => ({ ...f, ...p }));
+  const newCust = form.customer_id === "__new__";
 
+  // Interruption recovery: a deploy reload / iOS killing the tab restores the
+  // half-typed appointment (fields + propose-times slots). Keyed per record
+  // when editing so two appointments never share a draft.
+  const draftState = useMemo(() => ({ form, mode, slots }), [form, mode, slots]);
+  const draft = useDraft(
+    editing ? "appt-edit:" + appointment!.id : "appt-new",
+    draftState,
+    (d) => {
+      setForm({ ...emptyForm(), ...(d.form ?? {}) });
+      setMode(d.mode === "propose" ? "propose" : "set");
+      setSlots(Array.isArray(d.slots) && d.slots.length ? d.slots : defaultSlots());
+    },
+  );
+  // Dirty = anything differs from a fresh form (covers typed input AND a
+  // restored draft). The link-ready screen has nothing left to lose.
+  const initialSnap = useRef<string | null>(null);
+  if (initialSnap.current === null) initialSnap.current = JSON.stringify(draftState);
+  const dirty = !linkToken && JSON.stringify(draftState) !== initialSnap.current;
+
+  // Open straight from the quick-add menu's "New appointment"
+  // (/schedule?view=appointments&new=1), then strip the param so a refresh or
+  // back-button doesn't reopen the form. Edit instances never answer it.
+  useEffect(() => {
+    if (editing) return;
+    if (searchParams.get("new") !== "1") {
+      newParamClaimed = false; // param gone → release for the next quick-add tap
+      return;
+    }
+    if (newParamClaimed) return;
+    newParamClaimed = true;
+    setOpen(true);
+    const params = new URLSearchParams(Array.from(searchParams.entries()));
+    params.delete("new");
+    const qs = params.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  }, [searchParams, pathname, router, editing]);
+
+  function openModal() {
+    if (draft.restored && dirty) toast("Draft restored — pick up where you left off", "info");
+    setOpen(true);
+  }
+
+  // Confirmed close (the Modal's two-tap guard has already asked when dirty) —
+  // an explicit discard, so the stored draft goes too and the form resets.
   function closeAll() {
+    draft.clear();
+    setForm(emptyForm());
     setOpen(false);
     setLinkToken(null);
     setMode("set");
@@ -107,9 +194,6 @@ export function AppointmentButton({
     });
   }
 
-  const s = appointment ? toLocal(appointment.starts_at) : { date: defaultDate ?? "", time: "08:00" };
-  const e = appointment ? toLocal(appointment.ends_at) : { date: "", time: "" };
-
   function submit(formData: FormData) {
     setError(null);
 
@@ -123,6 +207,7 @@ export function AppointmentButton({
       start(async () => {
         const res = await createAppointmentProposal(formData);
         if (!res.ok || !res.token) return setError(res.error ?? "Could not create the link.");
+        draft.clear();
         setLinkToken(res.token);
         router.refresh();
       });
@@ -147,10 +232,23 @@ export function AppointmentButton({
         ? await updateAppointment(appointment!.id, formData)
         : await createAppointment(formData);
       if (!res.ok) return setError(res.error ?? "Could not save.");
+      // Saved — drop the draft. New mode resets so reopening doesn't offer a
+      // duplicate; edit mode keeps the just-saved values as the new baseline.
+      draft.clear();
+      if (editing) {
+        initialSnap.current = JSON.stringify(draftState);
+      } else {
+        setForm(emptyForm());
+        setMode("set");
+        setSlots(defaultSlots());
+      }
       setOpen(false);
       router.refresh();
     });
   }
+
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const pickLink = linkToken && origin ? `${origin}/pick/${linkToken}` : null;
 
   async function copyLink() {
     if (!pickLink) return;
@@ -169,6 +267,7 @@ export function AppointmentButton({
     start(async () => {
       const res = await deleteAppointment(appointment.id);
       if (!res?.ok) { toast(res?.error ?? "Couldn't delete appointment — try again.", "error"); return; }
+      draft.clear();
       toast("Appointment deleted", "success");
       setOpen(false);
       router.refresh();
@@ -178,11 +277,11 @@ export function AppointmentButton({
   return (
     <>
       {editing ? (
-        <button onClick={() => setOpen(true)} className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Edit">
+        <button onClick={openModal} className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Edit">
           <Pencil className="h-4 w-4" />
         </button>
       ) : (
-        <Button onClick={() => setOpen(true)} size={compact ? "sm" : undefined} className="shrink-0 whitespace-nowrap">
+        <Button onClick={openModal} size={compact ? "sm" : undefined} className="shrink-0 whitespace-nowrap">
           <Plus className="h-4 w-4" /> New Appointment
         </Button>
       )}
@@ -191,6 +290,7 @@ export function AppointmentButton({
         open={open}
         onClose={closeAll}
         title={editing ? "Edit appointment" : linkToken ? "Text the customer these times" : "New appointment"}
+        dirty={dirty}
         footer={
           linkToken ? (
             <ModalActions onCancel={closeAll} onSave={closeAll} saveLabel="Done" hideCancel />
@@ -245,7 +345,7 @@ export function AppointmentButton({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label htmlFor="ap-type">Type</Label>
-              <Select id="ap-type" name="type" defaultValue={appointment?.type ?? "quote"}>
+              <Select id="ap-type" name="type" value={form.type} onChange={(e) => patch({ type: e.target.value })}>
                 <option value="quote">Quote / estimate a job</option>
                 <option value="meeting">Meet with client</option>
                 <option value="inspection">Inspection</option>
@@ -255,7 +355,7 @@ export function AppointmentButton({
             </div>
             <div>
               <Label htmlFor="ap-assigned">Assigned to</Label>
-              <Select id="ap-assigned" name="assigned_to" defaultValue={appointment?.assigned_to ?? ""}>
+              <Select id="ap-assigned" name="assigned_to" value={form.assigned_to} onChange={(e) => patch({ assigned_to: e.target.value })}>
                 <option value="">— Anyone —</option>
                 {staff.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
               </Select>
@@ -264,7 +364,7 @@ export function AppointmentButton({
 
           <div>
             <Label htmlFor="ap-title">Title</Label>
-            <Input id="ap-title" name="title" defaultValue={appointment?.title ?? ""} placeholder="e.g. Rough-in inspection, estimate walk-through" required />
+            <Input id="ap-title" name="title" value={form.title} onChange={(e) => patch({ title: e.target.value })} placeholder="e.g. Rough-in inspection, estimate walk-through" required />
           </div>
 
           {!editing && (
@@ -283,15 +383,15 @@ export function AppointmentButton({
             <div className="grid grid-cols-3 gap-3">
               <div>
                 <Label htmlFor="ap-date">Date</Label>
-                <Input id="ap-date" name="date" type="date" defaultValue={s.date} required />
+                <Input id="ap-date" name="date" type="date" value={form.date} onChange={(e) => patch({ date: e.target.value })} required />
               </div>
               <div>
                 <Label htmlFor="ap-start">Start</Label>
-                <Input id="ap-start" name="start_time" type="time" defaultValue={s.time || "08:00"} />
+                <Input id="ap-start" name="start_time" type="time" value={form.start_time} onChange={(e) => patch({ start_time: e.target.value })} />
               </div>
               <div>
                 <Label htmlFor="ap-end">End</Label>
-                <Input id="ap-end" name="end_time" type="time" defaultValue={e.time} />
+                <Input id="ap-end" name="end_time" type="time" value={form.end_time} onChange={(e) => patch({ end_time: e.target.value })} />
               </div>
             </div>
           ) : (
@@ -322,8 +422,8 @@ export function AppointmentButton({
               <Select
                 id="ap-cust"
                 name="customer_id"
-                defaultValue={appointment?.customer_id ?? ""}
-                onChange={(e) => setNewCust(e.target.value === "__new__")}
+                value={form.customer_id}
+                onChange={(e) => patch({ customer_id: e.target.value })}
               >
                 <option value="">—</option>
                 {customers.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
@@ -335,11 +435,14 @@ export function AppointmentButton({
               <Select
                 id="ap-job"
                 name="job_id"
-                defaultValue={appointment?.job_id ?? ""}
+                value={form.job_id}
                 onChange={(e) => {
                   // Auto-fill the location from the job's address when it's empty.
                   const job = jobs.find((j) => j.id === e.target.value);
-                  if (job?.address && !location.trim()) setLocation(job.address);
+                  patch({
+                    job_id: e.target.value,
+                    ...(job?.address && !form.location.trim() ? { location: job.address } : {}),
+                  });
                 }}
               >
                 <option value="">—</option>
@@ -352,22 +455,22 @@ export function AppointmentButton({
             <div className="grid grid-cols-2 gap-3 rounded-lg border border-brand/30 bg-brand-light/30 p-3">
               <div>
                 <Label htmlFor="ap-newname">New customer name</Label>
-                <Input id="ap-newname" name="new_customer_name" placeholder="Name" required />
+                <Input id="ap-newname" name="new_customer_name" value={form.new_customer_name} onChange={(e) => patch({ new_customer_name: e.target.value })} placeholder="Name" required />
               </div>
               <div>
                 <Label htmlFor="ap-newphone">Phone</Label>
-                <Input id="ap-newphone" name="new_customer_phone" type="tel" placeholder="Optional" />
+                <Input id="ap-newphone" name="new_customer_phone" type="tel" value={form.new_customer_phone} onChange={(e) => patch({ new_customer_phone: e.target.value })} placeholder="Optional" />
               </div>
             </div>
           )}
 
           <div>
             <Label htmlFor="ap-loc">Location</Label>
-            <Input id="ap-loc" name="location" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Address or site" />
+            <Input id="ap-loc" name="location" value={form.location} onChange={(e) => patch({ location: e.target.value })} placeholder="Address or site" />
           </div>
           <div>
             <Label htmlFor="ap-notes">Notes</Label>
-            <Textarea id="ap-notes" name="notes" rows={2} defaultValue={appointment?.notes ?? ""} />
+            <Textarea id="ap-notes" name="notes" rows={2} value={form.notes} onChange={(e) => patch({ notes: e.target.value })} />
           </div>
 
           {editing && appointment && !appointment.job_id && (

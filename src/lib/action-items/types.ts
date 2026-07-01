@@ -11,6 +11,8 @@ export type ActionKind =
   | "appointment" // a scheduled appt awaiting completion
   | "organize" // a capture (receipt/note/doc) needing a filing decision
   | "invoice_overdue" // a sent/partial invoice past its due date (A/R)
+  | "quote_awaiting" // a sent quote/estimate gone quiet or nearing its valid-until
+  | "invoice_draft" // a draft invoice never sent (billed-up money sitting in limbo)
   | "lien_deadline" // a lien prelim/recording deadline coming due or past
   | "contract_unsigned" // a contract sent but not yet signed
   | "bug_report"; // an open bug reported from the field (owner watch)
@@ -46,6 +48,8 @@ export const KIND_META: Record<ActionKind, { label: string; tone: "slate" | "blu
   appointment: { label: "Appointment", tone: "blue" },
   organize: { label: "To file", tone: "slate" },
   invoice_overdue: { label: "Overdue invoice", tone: "amber" },
+  quote_awaiting: { label: "Awaiting reply", tone: "green" },
+  invoice_draft: { label: "Draft invoice", tone: "slate" },
   lien_deadline: { label: "Lien deadline", tone: "amber" },
   contract_unsigned: { label: "Unsigned contract", tone: "blue" },
   bug_report: { label: "Bug report", tone: "amber" },
@@ -64,6 +68,11 @@ export const AFFORDANCES: Record<ActionKind, Affordance[]> = {
   // Money/legal items drill into their own surface to act (record a payment, serve a
   // notice, chase a signature) — no generic "do"/"dismiss" that would mislabel them.
   invoice_overdue: ["open"],
+  // No snooze on quotes: valid_until is the CUSTOMER-facing offer window (it's on the
+  // public share), so bumping it would change the offer, not defer the reminder —
+  // open-only until quotes grow a follow-up field.
+  quote_awaiting: ["open"],
+  invoice_draft: ["open"],
   lien_deadline: ["open"],
   contract_unsigned: ["open"],
   bug_report: ["open"], // triage on the Bug watch page

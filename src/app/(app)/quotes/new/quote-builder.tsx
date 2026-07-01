@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2, Sparkles, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { formatCurrency } from "@/lib/utils";
+import { useDraft } from "@/lib/use-draft";
+import { useToast } from "@/components/toast";
 import {
   saveQuote,
   generateQuoteDraft,
@@ -133,6 +135,36 @@ export function QuoteBuilder({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [generating, startGenerate] = useTransition();
   const [saving, startSave] = useTransition();
+  const toast = useToast();
+
+  // Interruption recovery: a deploy reload / iOS killing the tab restores the
+  // half-built estimate (scope, details, every line item). Keyed by launch
+  // context (the props, not live state — a mid-edit customer switch must not
+  // orphan the draft) so quotes started from different jobs/customers never
+  // share.
+  const draftState = useMemo(
+    () => ({ customerId, title, notes, taxRate, taxChoice, validUntil, items, scope }),
+    [customerId, title, notes, taxRate, taxChoice, validUntil, items, scope],
+  );
+  const draft = useDraft(
+    "quote-builder:" + (jobId ?? preselected ?? "new"),
+    draftState,
+    (d) => {
+      setCustomerId(d.customerId ?? preselected ?? "");
+      setTitle(d.title ?? "");
+      setNotes(d.notes ?? "");
+      if (typeof d.taxRate === "number") setTaxRate(d.taxRate);
+      setTaxChoice(d.taxChoice ?? "");
+      if (d.validUntil) setValidUntil(d.validUntil);
+      if (Array.isArray(d.items) && d.items.length) setItems(d.items);
+      setScope(d.scope ?? "");
+    },
+  );
+  // The builder is a full page (not a modal), so say it out loud when a draft
+  // comes back — otherwise the refilled form just looks like déjà vu.
+  useEffect(() => {
+    if (draft.restored) toast("Draft restored — pick up where you left off", "info");
+  }, [draft.restored, toast]);
 
   const subtotal = items.reduce((s, i) => s + i.quantity * i.unit_price, 0);
   const tax = subtotal * (taxRate || 0);
@@ -179,6 +211,8 @@ export function QuoteBuilder({
         setSaveError(res.error ?? "Could not save the quote.");
         return;
       }
+      // Saved — drop the draft so the next visit to the builder starts clean.
+      draft.clear();
       router.push(`/quotes/${res.id}`);
     });
   }

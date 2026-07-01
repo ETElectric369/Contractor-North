@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ChevronLeft, ChevronRight, Clock } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight, Clock } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
@@ -83,6 +83,23 @@ export default async function TimecardsPage({
     .gte("clock_in", start.toISOString())
     .lt("clock_in", end.toISOString())
     .order("clock_in", { ascending: true });
+
+  // "Needs attention" pull — open entries that should have been closed: anything
+  // still open from a PAST day (a forgotten clock-out) or open more than 12 hours
+  // today. One cheap org-wide query (open entries are a handful at most), so the
+  // strip works regardless of which week is being viewed.
+  const { data: openNow } = await supabase
+    .from("time_entries")
+    .select(
+      "id, profile_id, clock_in, clock_out, lunch_minutes, miles, job_id, job_code, status, notes, source, rate_override, profiles:profile_id(full_name), job:job_id(job_number, name), time_allocations(job_id, job_code, hours, description)",
+    )
+    .eq("status", "open")
+    .order("clock_in", { ascending: true });
+  const todayStartMs = tzDayStartUtc(todayStrInTz(tz), tz).getTime();
+  const needsAttention = (openNow ?? []).filter((e: any) => {
+    const inMs = new Date(e.clock_in).getTime();
+    return inMs < todayStartMs || Date.now() - inMs > 12 * 3_600_000;
+  });
 
   // Group by tech.
   const byTech = new Map<string, { name: string; entries: any[]; hours: number; miles: number }>();
@@ -192,6 +209,43 @@ export default async function TimecardsPage({
           </Link>
         </div>
       </PageHeader>
+
+      {/* Forgotten clock-outs inflate hours until someone closes them — surface
+          them HERE, where payroll reviews, instead of waiting to be stumbled on. */}
+      {needsAttention.length > 0 && (
+        <Card className="mb-4 border-amber-200 bg-amber-50/60">
+          <CardContent className="py-4">
+            <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-amber-700">
+              <AlertTriangle className="h-3.5 w-3.5" /> Needs attention
+            </div>
+            <ul className="divide-y divide-amber-200/60">
+              {needsAttention.map((e: any) => {
+                const openHrs = hoursBetween(e.clock_in, new Date(), 0);
+                const pastDay = new Date(e.clock_in).getTime() < todayStartMs;
+                return (
+                  <li key={e.id} className="flex items-center justify-between gap-2 py-2 text-sm">
+                    <div className="min-w-0 text-slate-700">
+                      <span className="font-medium">{e.profiles?.full_name ?? "—"}</span>
+                      <span className="text-slate-500"> · in {formatDateTimeTz(e.clock_in, tz)}</span>
+                      {e.job && <span className="text-slate-500"> · {e.job.job_number}</span>}
+                      <Badge tone="amber" className="ml-2">
+                        {pastDay ? `open ${formatDuration(openHrs)} · past day` : `open ${formatDuration(openHrs)}`}
+                      </Badge>
+                    </div>
+                    <EditEntryButton
+                      entry={e}
+                      jobCodes={(jobCodes ?? []) as JobCode[]}
+                      jobs={jobs ?? []}
+                      members={members ?? []}
+                      isStaff
+                    />
+                  </li>
+                );
+              })}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="mb-4 grid grid-cols-3 gap-4 sm:max-w-2xl">
         <Card>

@@ -43,7 +43,9 @@ export default async function TimeclockPage() {
   const [openRes, codesRes, jobsRes, weekRes, orgRes] = await Promise.all([
     supabase
       .from("time_entries")
-      .select("*")
+      // Include any mid-shift switch segments already recorded on the open entry,
+      // so the panel re-seeds the split after a page reload instead of losing it.
+      .select("*, time_allocations(job_id, job_code, hours, description, sort_order)")
       .eq("profile_id", user?.id ?? "")
       .eq("status", "open")
       .maybeSingle(),
@@ -73,6 +75,16 @@ export default async function TimeclockPage() {
   }));
 
   const openEntry = (openRes.data as TimeEntry) ?? null;
+  // The open entry's switch-recorded allocations, in the order they were written.
+  const openAllocations = (((openRes.data as any)?.time_allocations ?? []) as any[])
+    .slice()
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+    .map((a) => ({
+      job_id: (a.job_id ?? null) as string | null,
+      job_code: (a.job_code ?? null) as string | null,
+      hours: Number(a.hours) || 0,
+      description: (a.description ?? null) as string | null,
+    }));
   const week = (weekRes.data ?? []) as TimeEntry[];
 
   // Geofence auto-clock-out completion: the tech's most recent auto-closed entry that
@@ -152,6 +164,7 @@ export default async function TimeclockPage() {
           )}
           <TimeclockPanel
             openEntry={openEntry}
+            openAllocations={openAllocations}
             jobCodes={(codesRes.data ?? []) as JobCode[]}
             jobs={jobOptions}
             lang={lang}

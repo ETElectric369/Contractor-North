@@ -235,8 +235,12 @@ export default async function SettingsPage({
                 </code>
                 <div className="mt-4 flex flex-wrap items-center gap-4">
                   {inquiryQr && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={inquiryQr} alt="Inquiry page QR code" className="h-28 w-28 rounded-lg border border-slate-200" />
+                    // Tappable, not just scannable: on a screen (texted screenshot, the digital card)
+                    // nobody can scan the QR they're looking at — tapping it opens the same page.
+                    <a href={inquiryUrl} target="_blank" rel="noopener noreferrer" title="Open the inquiry page">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={inquiryQr} alt="Inquiry page QR code — tap to open" className="h-28 w-28 rounded-lg border border-slate-200" />
+                    </a>
                   )}
                   <div className="space-y-2 text-sm">
                     <p className="text-slate-500">

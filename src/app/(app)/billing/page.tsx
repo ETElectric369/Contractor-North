@@ -71,14 +71,22 @@ export default async function BillingPage() {
 
       {/* STAGE 1 — done, not invoiced (the silent gap) */}
       {doneNotInvoiced.length > 0 && (
-        <Stage tone="rose" icon={<Receipt className="h-4 w-4" />} title="Done — not invoiced" count={doneNotInvoiced.length} sub="Finished jobs with no invoice yet. Bill them before they slip.">
+        <Stage tone="rose" icon={<Receipt className="h-4 w-4" />} title="Done — not invoiced" count={doneNotInvoiced.length} sub="Finished jobs with no invoice — or a payment schedule not fully drawn. Bill them before they slip.">
           {doneNotInvoiced.map((j) => (
             <li key={j.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
               <Link href={`/jobs/${j.id}`} className="min-w-0 hover:underline">
                 <div className="truncate text-sm font-medium text-slate-900">{j.customer ?? "—"}</div>
                 <div className="truncate text-xs text-slate-500">{j.name ?? j.job_number}{j.value > 0 ? ` · est. ${money(j.value)}` : ""}</div>
               </Link>
-              <InvoiceJobButton jobId={j.id} />
+              {j.draw ? (
+                // Schedule job → draws bill via "Request next payment" on the job's payment
+                // schedule, not a standard invoice (createInvoiceForJob rejects schedule jobs).
+                <Link href={`/jobs/${j.id}?tab=invoices`} className="shrink-0 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-dark">
+                  Request payment →
+                </Link>
+              ) : (
+                <InvoiceJobButton jobId={j.id} />
+              )}
             </li>
           ))}
         </Stage>

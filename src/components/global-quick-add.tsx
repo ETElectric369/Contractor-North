@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, ListTodo, Briefcase, CalendarPlus, FileText, Receipt, Camera, UserPlus, X } from "lucide-react";
+import { Plus, ListTodo, Briefcase, CalendarPlus, FileText, Receipt, Camera, UserPlus, UserSearch, X } from "lucide-react";
 
 // Add-cost is NOT here — it lives on My Day's Now card + the job header (job-scoped,
 // works cleanly). A self-loading copy in this dropdown was redundant + fiddly.
@@ -12,6 +12,7 @@ import { Plus, ListTodo, Briefcase, CalendarPlus, FileText, Receipt, Camera, Use
 // user on a list and make them find the + again.
 const ACTIONS = [
   { label: "New task", href: "/tasks?new=1", icon: ListTodo },
+  { label: "New lead", href: "/leads?new=1", icon: UserSearch },
   { label: "New customer", href: "/crm?new=1", icon: UserPlus },
   { label: "New job", href: "/jobs?new=1", icon: Briefcase },
   { label: "New appointment", href: "/schedule?view=appointments&new=1", icon: CalendarPlus },

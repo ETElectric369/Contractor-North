@@ -31,8 +31,15 @@ const ORGANIZE_LABEL: Record<string, string> = {
 // point it's worth chasing regardless of whether a due_date was ever entered.
 const INVOICE_STALE_DAYS = 30;
 
+// A sent quote/estimate with no reply for this many days has gone quiet — time to
+// nudge the customer before the lead cools off entirely.
+const QUOTE_QUIET_DAYS = 7;
+// ...and one whose valid-until window closes within this many days (or already
+// passed) is urgent regardless of age — the offer is about to die on the vine.
+const QUOTE_EXPIRY_SOON_DAYS = 5;
+
 /**
- * THE single union behind the "Needs action" inbox. Projects rows from five
+ * THE single union behind the "Needs action" inbox. Projects rows from the
  * existing tables onto one ActionItem[] — no new tables. RLS already scopes to
  * the org; we additionally scope tech (non-staff) views to their own items.
  */
@@ -46,18 +53,21 @@ export async function getActionItems(ctx: {
   const endOfToday = `${todayStr}T23:59:59`;
   const clamp = (p: number): 0 | 1 | 2 => (p >= 2 ? 2 : p >= 1 ? 1 : 0);
 
-  // Open to-dos due today/overdue. Techs see only their own.
+  // Open to-dos due today/overdue — PLUS undated ones, treated as due-now. Every
+  // fast capture path (voice, quick-add) creates tasks without a due_date; a plain
+  // lte() filter silently dropped them, so captured work never reached the inbox.
+  // Undated items sort last (when: null) via the universal ordering rule.
   let taskQ = supabase
     .from("tasks")
     .select("id, title, category, status, priority, due_date, job_id, assignee:assigned_to(full_name), jobs(job_number, name)")
     .eq("status", "open")
-    .lte("due_date", todayStr)
+    .or(`due_date.is.null,due_date.lte.${todayStr}`)
     .order("priority", { ascending: false });
   if (!isStaff) taskQ = taskQ.eq("assigned_to", userId);
 
   const empty = Promise.resolve({ data: [] as any[] });
 
-  const [tasksR, jobsR, inqR, apptR, orgR, invR, conR, lienR, bugR] = await Promise.all([
+  const [tasksR, jobsR, inqR, apptR, orgR, invR, quoteR, draftR, conR, lienR, bugR] = await Promise.all([
     taskQ,
     // Unscheduled jobs — staff only (the "resting place" for things needing a date).
     isStaff
@@ -69,13 +79,18 @@ export async function getActionItems(ctx: {
           .order("created_at", { ascending: false })
           .limit(50)
       : empty,
-    // New/uncontacted inquiries due for follow-up — staff only.
+    // New/uncontacted inquiries due for follow-up — staff only. A snoozed lead
+    // (the snooze verb writes status='contacted' + a future next_follow_up_at via
+    // inquiry.contact) stays OUT until its date — pulling it straight back made
+    // snooze a no-op. 'new' leads always show; contacted ones show when their
+    // follow-up is unset or due.
     isStaff
       ? supabase
           .from("inquiries")
           .select("id, name, status, next_follow_up_at, converted_at")
           .in("status", ["new", "contacted"])
           .is("converted_at", null)
+          .or(`status.eq.new,next_follow_up_at.is.null,next_follow_up_at.lte.${todayStr}`)
           .order("created_at", { ascending: true })
           .limit(50)
       : empty,
@@ -106,6 +121,26 @@ export async function getActionItems(ctx: {
           .from("invoices")
           .select("id, invoice_number, total, amount_paid, due_date, status, created_at, customers(name)")
           .in("status", ["sent", "partial", "overdue"])
+          .order("created_at", { ascending: true })
+          .limit(50)
+      : empty,
+    // Quotes/estimates sent but not answered — the middle of the funnel. The
+    // gone-quiet / expiring-soon cut is applied per-row below; the query just
+    // pulls the open sent docs.
+    isStaff
+      ? supabase
+          .from("quotes")
+          .select("id, quote_number, doc_type, status, total, valid_until, created_at, customers(name)")
+          .eq("status", "sent")
+          .order("created_at", { ascending: true })
+          .limit(50)
+      : empty,
+    // Draft invoices — billed-up work that never went out the door.
+    isStaff
+      ? supabase
+          .from("invoices")
+          .select("id, invoice_number, total, status, created_at, customers(name)")
+          .eq("status", "draft")
           .order("created_at", { ascending: true })
           .limit(50)
       : empty,
@@ -250,6 +285,50 @@ export async function getActionItems(ctx: {
       done: false,
       href: `/billing/${inv.id}`,
       affordances: AFFORDANCES.invoice_overdue,
+    });
+  }
+
+  // Sent quotes/estimates gone quiet — surfaced once the customer has had it
+  // QUOTE_QUIET_DAYS+ with no answer, or the valid-until window is closing/past.
+  // Open-only: acting on a quote (resend, follow up, mark declined) happens on
+  // its own page, and there's no snooze field that wouldn't alter the offer.
+  for (const q of (quoteR.data ?? []) as any[]) {
+    const daysOut = q.created_at ? Math.floor((todayMs - Date.parse(q.created_at)) / 86_400_000) : 0;
+    const daysToExpiry = q.valid_until ? Math.floor((Date.parse(q.valid_until) - todayMs) / 86_400_000) : null;
+    const quiet = daysOut >= QUOTE_QUIET_DAYS;
+    const expiring = daysToExpiry != null && daysToExpiry <= QUOTE_EXPIRY_SOON_DAYS;
+    if (!quiet && !expiring) continue; // still fresh — give the customer room
+    items.push({
+      id: q.id,
+      kind: "quote_awaiting",
+      title: `${(q.doc_type ?? "quote") === "estimate" ? "Estimate" : "Quote"} ${q.quote_number} awaiting reply`,
+      subtitle: q.customers?.name ?? formatCurrency(Number(q.total ?? 0)),
+      who: null,
+      // Prefer the expiry for the "when" (that's the clock that matters); fall
+      // back to created so undated offers still sort by age.
+      when: q.valid_until ?? q.created_at ?? null,
+      // Past its valid-until the offer is dying — bump it above the routine chase.
+      urgency: daysToExpiry != null && daysToExpiry < 0 ? 2 : 1,
+      done: false,
+      href: `/quotes/${q.id}`,
+      affordances: AFFORDANCES.quote_awaiting,
+    });
+  }
+
+  // Draft invoices — money one tap from "sent" sitting in limbo. Every draft
+  // surfaces (no age cut): it either goes out or gets deleted, never forgotten.
+  for (const d of (draftR.data ?? []) as any[]) {
+    items.push({
+      id: d.id,
+      kind: "invoice_draft",
+      title: `Draft invoice ${d.invoice_number}`,
+      subtitle: d.customers?.name ?? formatCurrency(Number(d.total ?? 0)),
+      who: null,
+      when: d.created_at ?? null,
+      urgency: 0,
+      done: false,
+      href: `/billing/${d.id}`,
+      affordances: AFFORDANCES.invoice_draft,
     });
   }
 

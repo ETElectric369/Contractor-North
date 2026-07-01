@@ -381,7 +381,10 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         method: "POST",
         signal: abortRef.current.signal,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: next, voice: viaVoice }),
+        // Round-trip the LIVE draft (restored or in-progress) so resuming an estimate CONTINUES
+        // from what's on screen instead of restarting it, + the current page so "this job"/"this
+        // invoice" resolves. The route injects both at the cache-safe message tail.
+        body: JSON.stringify({ messages: next, voice: viaVoice, draft, path: window.location.pathname }),
       });
 
       if (!res.ok || !res.body) {

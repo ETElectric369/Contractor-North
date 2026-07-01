@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { Button } from "./button";
 import { lockBodyForModal, unlockBodyForModal } from "./modal-lock";
@@ -12,6 +12,7 @@ export function Modal({
   children,
   footer,
   size = "lg",
+  dirty = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -22,7 +23,40 @@ export function Modal({
    *  even on a short phone with the keyboard up. Use <ModalActions>. */
   footer?: React.ReactNode;
   size?: "sm" | "md" | "lg" | "xl";
+  /** Pass the form's "has the user typed anything" flag. While true, a
+   *  backdrop tap / Escape / the header X can't close silently: the first
+   *  attempt arms an inline "Tap again to discard" notice and only a second
+   *  dismissal within a few seconds actually closes — a fat-finger mis-tap on
+   *  a phone can't eat a half-filled form. Footer buttons (Cancel/Save) are
+   *  caller-owned and bypass the guard. Default (absent) behavior unchanged. */
+  dirty?: boolean;
 }) {
+  // Two-tap discard guard state. Auto-disarms after a beat so a stray first
+  // tap doesn't leave the modal permanently one tap away from discarding.
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const disarmTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const requestClose = () => {
+    if (dirty && !confirmDiscard) {
+      setConfirmDiscard(true);
+      if (disarmTimer.current) clearTimeout(disarmTimer.current);
+      disarmTimer.current = setTimeout(() => setConfirmDiscard(false), 3000);
+      return;
+    }
+    onClose();
+  };
+  // Ref so the Escape listener below always sees the CURRENT dirty/armed state
+  // without re-binding the listener on every render.
+  const requestCloseRef = useRef(requestClose);
+  requestCloseRef.current = requestClose;
+
+  // Disarm whenever the modal opens or closes — a fresh open starts clean.
+  useEffect(() => {
+    setConfirmDiscard(false);
+    return () => {
+      if (disarmTimer.current) clearTimeout(disarmTimer.current);
+    };
+  }, [open]);
+
   // Rendered IN-PLACE (not portaled). While open, <body> gets `modal-open`, which
   // hides the fixed mobile bottom nav (globals.css) so it can't cover the Save
   // button. NOTE: do NOT portal this to <body> — many callers wrap the <Modal> in
@@ -30,14 +64,14 @@ export function Modal({
   // Save silently does nothing. The nav-hide alone fixes the original bug.
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && requestCloseRef.current();
     window.addEventListener("keydown", onKey);
     lockBodyForModal();
     return () => {
       window.removeEventListener("keydown", onKey);
       unlockBodyForModal();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 
@@ -46,7 +80,7 @@ export function Modal({
 
   return (
     <div className="fixed inset-0 z-[120] flex items-start justify-center p-3 sm:items-center">
-      <div className="absolute inset-0 bg-slate-900/40" onClick={onClose} />
+      <div className="absolute inset-0 bg-slate-900/40" onClick={requestClose} />
       {/* Cap the panel to the viewport: the HEADER and FOOTER are fixed (shrink-0)
           and only the middle BODY scrolls, so the action row is always reachable
           on a short phone (esp. with the keyboard up). */}
@@ -54,13 +88,19 @@ export function Modal({
         <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-6 py-4">
           <h2 className="text-base font-semibold text-slate-900">{title}</h2>
           <button
-            onClick={onClose}
+            onClick={requestClose}
             className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
             aria-label="Close"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
+        {/* Armed discard notice — fixed (shrink-0) so it can't scroll away. */}
+        {confirmDiscard && (
+          <div className="shrink-0 border-b border-amber-100 bg-amber-50 px-6 py-2 text-sm font-medium text-amber-700">
+            Tap again to discard what you typed
+          </div>
+        )}
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">{children}</div>
         {footer && (
           <div className="flex shrink-0 items-center justify-end gap-2 rounded-b-2xl border-t border-slate-100 bg-white px-6 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">

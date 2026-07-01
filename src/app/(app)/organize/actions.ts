@@ -155,6 +155,33 @@ export async function analyzeAndFile(input: {
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
 
+  // Cheap input validation first — junk input gets a clean rejection, no row.
+  const isImage = IMAGE_TYPES.includes(input.mime);
+  const isPdf = input.mime === "application/pdf";
+  if (!isImage && !isPdf) {
+    return { ok: false, error: "Use a photo (JPG/PNG) or PDF — other file types can't be read yet." };
+  }
+  if (input.size > 8 * 1024 * 1024) return { ok: false, error: "File is over 8 MB — try a smaller photo." };
+
+  // Save the capture BEFORE the AI ever runs: a needs_review placeholder row goes
+  // in the moment the upload is confirmed, so a failed AI read (or the PWA getting
+  // suspended mid-analyze) can never silently lose a photographed receipt — worst
+  // case the raw capture waits in the tray for a manual file or an AI retry.
+  const { data: placeholder, error: phErr } = await supabase
+    .from("organized_items")
+    .insert({
+      kind: "job_document", // best guess until the AI has looked
+      title: String(input.name).slice(0, 200),
+      confidence: "low",
+      status: "needs_review",
+      file_url: input.path,
+      created_by: ctx.userId,
+    })
+    .select("id")
+    .single();
+  if (phErr || !placeholder) return { ok: false, error: phErr?.message ?? "Could not save the upload." };
+  const itemId: string = placeholder.id;
+
   // Candidate jobs for matching (recent, active-ish).
   const { data: jobs } = await supabase
     .from("jobs")
@@ -169,15 +196,11 @@ export async function analyzeAndFile(input: {
 
   // Pull the uploaded file back out of storage for Claude to look at.
   const { data: blob, error: dlErr } = await supabase.storage.from("documents").download(input.path);
-  if (dlErr || !blob) return { ok: false, error: dlErr?.message ?? "Could not read the upload." };
-  if (input.size > 8 * 1024 * 1024) return { ok: false, error: "File is over 8 MB — try a smaller photo." };
-  const base64 = Buffer.from(await blob.arrayBuffer()).toString("base64");
-
-  const isImage = IMAGE_TYPES.includes(input.mime);
-  const isPdf = input.mime === "application/pdf";
-  if (!isImage && !isPdf) {
-    return { ok: false, error: "Use a photo (JPG/PNG) or PDF — other file types can't be read yet." };
+  if (dlErr || !blob) {
+    revalidatePath("/organize"); // the placeholder stays in the tray
+    return { ok: false, error: `${dlErr?.message ?? "Could not read the upload."} Saved to the review tray.` };
   }
+  const base64 = Buffer.from(await blob.arrayBuffer()).toString("base64");
 
   const mediaBlock: any = isImage
     ? { type: "image", source: { type: "base64", media_type: input.mime, data: base64 } }
@@ -221,7 +244,9 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
     const text = msg.content.find((b) => b.type === "text") as { text: string } | undefined;
     parsed = await parseAiJson(client, text?.text ?? "");
   } catch (e: any) {
-    return { ok: false, error: e?.message ?? "AI could not read this file." };
+    // The capture is NOT lost — the placeholder row stays needs_review in the tray.
+    revalidatePath("/organize");
+    return { ok: false, error: `${e?.message ?? "AI could not read this file."} Saved to the review tray.` };
   }
 
   const kind = ["receipt", "note", "job_document"].includes(parsed.kind) ? parsed.kind : "job_document";
@@ -294,9 +319,11 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
     );
   }
 
-  const { data: item, error } = await supabase
+  // Upgrade the placeholder row with the AI's read (UPDATE, not a second insert,
+  // so a retry or crash never leaves duplicates).
+  const { error } = await supabase
     .from("organized_items")
-    .insert({
+    .update({
       kind,
       title,
       summary: parsed.summary ? String(parsed.summary).slice(0, 4000) : null,
@@ -310,11 +337,8 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
       document_id: documentId,
       bill_id: billId,
       line_items: lines.length ? lines : null,
-      file_url: input.path,
-      created_by: ctx.userId,
     })
-    .select("id")
-    .single();
+    .eq("id", itemId);
   if (error) return { ok: false, error: error.message };
 
   revalidatePath("/organize");
@@ -324,7 +348,7 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
   return {
     ok: true,
     item: {
-      id: item.id,
+      id: itemId,
       kind,
       title,
       summary: parsed.summary ?? null,

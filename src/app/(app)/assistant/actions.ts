@@ -4,6 +4,7 @@ import { executeAction } from "@/lib/actions/execute";
 import { AGENT_WRITE_ALLOWED } from "@/lib/actions/agent-tools";
 import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
+import { getOrgSettings } from "@/lib/org-settings";
 import type { AgentDraft } from "@/lib/assistant-protocol";
 
 type StoredMsg = { role: "user" | "assistant"; content: string };
@@ -38,6 +39,20 @@ export async function saveConversation(messages: StoredMsg[], draft: AgentDraft 
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { ok: false };
   const capped = (messages ?? []).slice(-40).map((m) => ({ role: m.role, content: String(m.content ?? "").slice(0, 8000) }));
+  // The glass drawer opens FRESH (it doesn't load the message backlog into state) but still restores
+  // an open draft — its first auto-save would then upsert messages: [] and WIPE the saved history.
+  // Guard: never overwrite a non-empty stored history with an empty in-memory list; update only the
+  // draft. (New chat still clears via clearConversation, which deletes the row.)
+  if (capped.length === 0) {
+    const { data: existing } = await supabase.from("assistant_state").select("messages").eq("user_id", user.id).maybeSingle();
+    if (((existing?.messages as StoredMsg[] | null) ?? []).length > 0) {
+      const { error } = await supabase
+        .from("assistant_state")
+        .update({ draft: draft ?? null, updated_at: new Date().toISOString() })
+        .eq("user_id", user.id);
+      return { ok: !error };
+    }
+  }
   const { error } = await supabase.from("assistant_state").upsert({
     user_id: user.id,
     messages: capped,
@@ -62,6 +77,7 @@ export async function clearConversation(): Promise<{ ok: boolean }> {
 export async function saveQuoteFromDraft(
   draft: AgentDraft,
 ): Promise<{ ok: boolean; id?: string; error?: string }> {
+  const supabase = await createClient();
   // Nort builds an estimate "for Jackie Burks" (a NAME) but may not carry her customer_id — so the
   // saved quote was landing "No customer attached". Resolve the name to a real customer: match an
   // existing one first (case-insensitive, exact then contains), and only create a new record if there's
@@ -69,7 +85,6 @@ export async function saveQuoteFromDraft(
   let customerId = draft.customer_id ?? null;
   const custName = (draft.customer_name ?? "").trim();
   if (!customerId && custName) {
-    const supabase = await createClient();
     const esc = custName.replace(/[\\%_]/g, (m) => "\\" + m);
     const exact = await supabase.from("customers").select("id").ilike("name", esc).limit(1).maybeSingle();
     customerId = (exact.data as { id?: string } | null)?.id ?? null;
@@ -83,6 +98,22 @@ export async function saveQuoteFromDraft(
     }
   }
 
+  // The manual builder (quotes/new) seeds tax from the org's DEFAULT tax rate and expiry from
+  // quote_expiry_days — the agent path was saving a thinner document (tax 0, no expiry). Mirror
+  // those org defaults here, but only where the draft doesn't already carry a value.
+  const [{ data: defTax }, { data: org }] = await Promise.all([
+    supabase.from("tax_rates").select("rate").eq("is_default", true).limit(1).maybeSingle(),
+    supabase.from("organizations").select("settings").limit(1).maybeSingle(),
+  ]);
+  const taxRate =
+    draft.tax_rate != null ? draft.tax_rate : defTax ? Number((defTax as { rate: number }).rate) / 100 : 0;
+  const expiryDays = getOrgSettings((org as { settings?: unknown } | null)?.settings).quote_expiry_days;
+  const validUntil = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() + (expiryDays || 30));
+    return d.toISOString().slice(0, 10);
+  })();
+
   const res = await executeAction(
     "quote.create",
     {
@@ -90,8 +121,8 @@ export async function saveQuoteFromDraft(
       job_id: draft.job_id ?? null,
       title: draft.title ?? "",
       notes: "",
-      tax_rate: draft.tax_rate ?? 0,
-      valid_until: null,
+      tax_rate: taxRate,
+      valid_until: validUntil,
       items: (draft.items ?? []).map((i) => ({
         description: i.description,
         quantity: Number(i.quantity) || 1,

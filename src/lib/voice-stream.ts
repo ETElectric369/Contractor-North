@@ -43,6 +43,22 @@ function status(s: string) {
   }
 }
 
+// Voice resilience: a silent turn (the 9s no-speech cap, an empty blob, a no-words transcription,
+// a transcribe error) used to end the conversation MUTE — the mic stayed granted but nothing ever
+// re-armed it. Retry a bounded number of CONSECUTIVE silent turns while the stream is still wanted,
+// then hand control back with a clear "tap the mic" status instead of dying silently.
+const MAX_SILENT_RETRIES = 2;
+let silentTurns = 0;
+function retryOrGiveUp(detail: string) {
+  if (wantStream && silentTurns < MAX_SILENT_RETRIES) {
+    silentTurns++;
+    status(detail);
+    beginTurn();
+    return;
+  }
+  status(wantStream ? `${detail} Tap the mic when you're ready.` : detail);
+}
+
 export function speechSupported(): boolean {
   if (typeof window === "undefined") return false;
   const ac = (window as any).AudioContext || (window as any).webkitAudioContext;
@@ -99,6 +115,7 @@ function pickMime(): string {
 export function startListening(_lang?: string): boolean {
   if (!speechSupported()) return false;
   muted = false;
+  silentTurns = 0; // a fresh (user-initiated) start resets the silent-retry budget
   if (stream && audioCtx && analyser) {
     beginTurn(); // stream alive (mid-conversation) → record the next answer, no gesture needed
     return true;
@@ -223,8 +240,8 @@ async function finishTurn() {
   chunks = [];
   if (blob.size < 1200) {
     // Nothing usable was recorded — almost always the silent-PWA mic (stream "on" but capturing
-    // nothing) or a permission gap. Say so plainly instead of failing silently.
-    status(`No audio captured (${blob.size} bytes). If the level meter stayed flat, the mic isn't reaching the app.`);
+    // nothing) or a permission gap. Say so plainly, and re-arm the mic if the stream is still wanted.
+    retryOrGiveUp(`No audio captured (${blob.size} bytes). If the level meter stayed flat, the mic isn't reaching the app.`);
     return;
   }
   status(`Sending ${(blob.size / 1024) | 0}KB to transcribe…`);
@@ -235,14 +252,16 @@ async function finishTurn() {
     const r = await fetch("/api/transcribe", { method: "POST", body: fd });
     const j = await r.json().catch(() => null);
     if (!r.ok) {
-      status(`Transcribe error: ${j?.error ?? r.status}`);
+      retryOrGiveUp(`Transcribe error: ${j?.error ?? r.status}.`);
       return;
     }
     const text = String(j?.text ?? "").trim();
-    if (text && handler) handler(text);
-    else status("Heard sound but no words — try speaking a bit louder.");
+    if (text && handler) {
+      silentTurns = 0; // real words made it through — reset the retry budget
+      handler(text);
+    } else retryOrGiveUp("Heard sound but no words — try speaking a bit louder.");
   } catch (e: any) {
-    status(`Couldn't reach transcription (${e?.message ?? "network"}).`);
+    retryOrGiveUp(`Couldn't reach transcription (${e?.message ?? "network"}).`);
   }
 }
 

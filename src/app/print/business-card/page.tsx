@@ -62,8 +62,11 @@ export default async function BusinessCardPage() {
         </div>
       </div>
       <div className="flex w-[1.15in] flex-col items-center justify-center gap-1 p-2" style={{ background: `${o?.brand_color || "#0b57c4"}10` }}>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={qr} alt="Request an estimate QR" className="h-[0.95in] w-[0.95in]" />
+        {/* Tappable when the card is viewed on a screen (shared digitally); inert in print. */}
+        <a href={inquiryUrl} target="_blank" rel="noopener noreferrer">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={qr} alt="Request an estimate QR — tap to open" className="h-[0.95in] w-[0.95in]" />
+        </a>
         <div className="text-center text-[7px] font-medium leading-tight text-slate-600">Scan for a free estimate</div>
       </div>
     </div>

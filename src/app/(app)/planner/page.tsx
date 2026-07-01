@@ -23,8 +23,8 @@ export const dynamic = "force-dynamic";
 
 const fmtTime = (iso: string) => formatTime(iso);
 
-export default async function PlannerPage({ searchParams }: { searchParams: Promise<{ view?: string }> }) {
-  const { view: viewRaw } = await searchParams;
+export default async function PlannerPage({ searchParams }: { searchParams: Promise<{ view?: string; actions?: string }> }) {
+  const { view: viewRaw, actions: actionsRaw } = await searchParams;
   const view = viewRaw === "week" ? "week" : "day";
   const supabase = await createClient();
   const {
@@ -151,6 +151,11 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
 
   const niceDay = prettyDay(todayStr);
   const empty = (label: string) => <p className="px-5 py-6 text-center text-sm text-slate-400">{label}</p>;
+
+  // Needs-action shows the top 5 (the query already sorts urgent-first);
+  // ?actions=all expands to the full list without a client component.
+  const showAllActions = actionsRaw === "all";
+  const visibleActions = showAllActions ? actionItems : actionItems.slice(0, 5);
 
   // ── Agenda (Now / Next / Later) ─────────────────────────────────────────────
   // One chronological stream of the day — timed jobs + appointments. (Tasks live in
@@ -340,7 +345,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       </div>
 
       {/* MONEY LINE — the daily "nothing slipped" nudge. Stays until every job is invoiced + paid. */}
-      {pipeline && (pipeline.doneNotInvoiced.length > 0 || pipeline.unpaid.length > 0) && (
+      {pipeline && (pipeline.doneNotInvoiced.length > 0 || pipeline.drafts.length > 0 || pipeline.unpaid.length > 0) && (
         <Link
           href="/billing"
           className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm hover:bg-slate-50"
@@ -348,6 +353,9 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           <span className="flex items-center gap-1.5 font-semibold text-slate-900"><Receipt className="h-4 w-4 text-brand" /> Money</span>
           {pipeline.doneNotInvoiced.length > 0 && (
             <span className="text-rose-700"><strong>{pipeline.doneNotInvoiced.length}</strong> to invoice{pipeline.toInvoiceTotal > 0 ? ` · ${formatCurrency(pipeline.toInvoiceTotal)}` : ""}</span>
+          )}
+          {pipeline.drafts.length > 0 && (
+            <span className="text-amber-700"><strong>{pipeline.drafts.length}</strong> draft{pipeline.drafts.length === 1 ? "" : "s"} to send{pipeline.draftTotal > 0 ? ` · ${formatCurrency(pipeline.draftTotal)}` : ""}</span>
           )}
           {pipeline.unpaid.length > 0 && (
             <span className="text-slate-600"><strong>{pipeline.unpaid.length}</strong> unpaid · {formatCurrency(pipeline.outstandingTotal)}</span>
@@ -358,6 +366,34 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           <span className="ml-auto text-xs font-medium text-brand">Open Billing →</span>
         </Link>
       )}
+
+      {/* Needs action — the one unified inbox (tasks, jobs to schedule,
+          inquiries, appointments to finish, captures to file). Sits right under
+          the money line so the pull surface is never below the fold. */}
+      {actionItems.length > 0 && (
+        <Card className="mb-4 overflow-hidden">
+          <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
+            <h2 className="text-sm font-semibold text-slate-900">Needs action</h2>
+            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">
+              {actionItems.length}
+            </span>
+          </div>
+          <div className="p-3">
+            <ActionList items={visibleActions} people={people} />
+          </div>
+          {!showAllActions && actionItems.length > 5 && (
+            <Link
+              href={view === "week" ? "/planner?view=week&actions=all" : "/planner?actions=all"}
+              className="block border-t border-slate-100 px-5 py-2.5 text-center text-sm font-medium text-brand hover:bg-slate-50"
+            >
+              Show all {actionItems.length} →
+            </Link>
+          )}
+        </Card>
+      )}
+
+      {/* Quick add-a-task box — lives next to the inbox it feeds. */}
+      <NewTaskBox jobs={(jobOptRows ?? []) as any} people={people} />
 
       <p className="mb-4 text-center text-sm italic text-slate-400">&ldquo;{dailyQuote}&rdquo;</p>
 
@@ -474,22 +510,6 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         isStaff={isStaff}
       />
 
-      {/* Needs action — the one unified inbox (tasks, jobs to schedule,
-          inquiries, appointments to finish, captures to file). */}
-      {actionItems.length > 0 && (
-        <Card className="mb-4 overflow-hidden">
-          <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
-            <h2 className="text-sm font-semibold text-slate-900">Needs action</h2>
-            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">
-              {actionItems.length}
-            </span>
-          </div>
-          <div className="p-3">
-            <ActionList items={actionItems} people={people} />
-          </div>
-        </Card>
-      )}
-
       {/* Quick stats */}
       <div className="mb-4 grid grid-cols-2 gap-3">
         <Card className="flex flex-col items-center py-4">
@@ -528,9 +548,6 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         </div>
       )}
 
-      {/* Tasks due now live in the unified "Needs action" inbox above; this just
-          keeps a quick add-a-task box on My Day. */}
-      <NewTaskBox jobs={(jobOptRows ?? []) as any} people={people} />
     </div>
   );
 }

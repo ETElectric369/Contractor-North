@@ -195,7 +195,7 @@ export async function POST(req: Request) {
     /* memory is best-effort */
   }
 
-  let body: { messages: ChatMessage[]; voice?: boolean };
+  let body: { messages: ChatMessage[]; voice?: boolean; draft?: Record<string, unknown> | null; path?: string };
   try {
     body = await req.json();
   } catch {
@@ -240,6 +240,37 @@ export async function POST(req: Request) {
     role: m.role,
     content: m.content,
   }));
+
+  // DYNAMIC CONTEXT — tail-injected ONLY (the cache invariant): the tools + system prompt are the
+  // byte-stable cached prefix, so per-request context (the live draft on screen, the current page)
+  // is appended to the LAST user message instead. Without the draft round-trip, resuming a restored
+  // estimate silently restarted it — the model never saw the lines already on screen.
+  const tailContext: string[] = [];
+  if (body.draft && typeof body.draft === "object") {
+    // Compact + cap (~2KB): drop trailing line items until it fits so a huge draft can't bloat the turn.
+    const d = body.draft as Record<string, unknown>;
+    const items = Array.isArray(d.items) ? [...d.items] : [];
+    let json = JSON.stringify({ ...d, items });
+    while (json.length > 2048 && items.length) {
+      items.pop();
+      json = JSON.stringify({ ...d, items, items_truncated: true });
+    }
+    if (json.length <= 2048) {
+      tailContext.push(`CANONICAL DRAFT currently on screen (treat as the quote so far — continue from it, do not restart): ${json}`);
+    }
+  }
+  if (typeof body.path === "string" && body.path.startsWith("/") && body.path.length <= 200) {
+    tailContext.push(`User is currently viewing ${body.path}`);
+  }
+  if (tailContext.length) {
+    for (let i = convo.length - 1; i >= 0; i--) {
+      const m = convo[i];
+      if (m.role === "user" && typeof m.content === "string") {
+        m.content = `${m.content}\n\n[App context — not the user's words]\n${tailContext.join("\n")}`;
+        break;
+      }
+    }
+  }
 
   // PROMPT CACHING — the prefix (tools → system → conversation-so-far) is byte-identical across
   // the up-to-6 tool rounds of ONE request and across a conversation's turns, but was re-billed at

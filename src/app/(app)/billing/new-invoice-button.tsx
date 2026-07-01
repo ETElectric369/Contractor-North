@@ -1,14 +1,20 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState, useTransition } from "react";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select } from "@/components/ui/input";
 import { formatCurrency } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
+import { useDraft } from "@/lib/use-draft";
+import { useToast } from "@/components/toast";
 import { createInvoiceFromQuote, createBlankInvoice } from "./actions";
+
+// The billing page mounts this button TWICE (header + empty state); only the
+// FIRST mounted instance may answer ?new=1 or two modals would stack.
+let newParamClaimed = false;
 
 interface QuoteOption {
   id: string;
@@ -52,11 +58,32 @@ export function NewInvoiceButton({
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
+  const toast = useToast();
 
   // Jobs to offer: those for the chosen customer (or all, if no customer yet).
   const jobChoices = customerId ? jobs.filter((j) => j.customer_id === customerId) : jobs;
 
+  // Interruption recovery: a deploy reload / iOS killing the tab restores the
+  // picks. taxRate stays out on purpose — it's auto-seeded from the org default,
+  // so mirroring it would plant a "draft" from merely opening the modal.
+  const draftState = useMemo(
+    () => ({ mode, quoteId, customerId, jobId, title }),
+    [mode, quoteId, customerId, jobId, title],
+  );
+  const draft = useDraft("invoice-new", draftState, (d) => {
+    setMode(d.mode === "quote" ? "quote" : "blank");
+    setQuoteId(d.quoteId ?? "");
+    setCustomerId(d.customerId ?? "");
+    setJobId(d.jobId ?? "");
+    setTitle(d.title ?? "");
+  });
+  // Dirty = the user actually picked/typed something (mode alone isn't content).
+  const dirty = !!(quoteId || customerId || jobId || title);
+
   async function openModal() {
+    if (draft.restored && dirty) toast("Draft restored — pick up where you left off", "info");
     setOpen(true);
     if (taxSeeded) return; // only seed once; don't stomp a value the user already typed
     setTaxSeeded(true);
@@ -68,6 +95,35 @@ export function NewInvoiceButton({
       .maybeSingle();
     const rate = Number((data as any)?.default_tax_rate);
     if (Number.isFinite(rate) && rate > 0) setTaxRate(rate);
+  }
+
+  // Open straight from the quick-add menu's "New invoice" (/billing?new=1), then
+  // strip the param so a refresh or back-button doesn't reopen the form.
+  useEffect(() => {
+    if (searchParams.get("new") !== "1") {
+      newParamClaimed = false; // param gone → release for the next quick-add tap
+      return;
+    }
+    if (newParamClaimed) return;
+    newParamClaimed = true;
+    void openModal();
+    const params = new URLSearchParams(Array.from(searchParams.entries()));
+    params.delete("new");
+    const qs = params.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    // openModal is stable enough for this once-per-param effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, pathname, router]);
+
+  // Confirmed close (the Modal's two-tap guard has already asked when dirty) —
+  // an explicit discard, so the stored draft goes too.
+  function discard() {
+    draft.clear();
+    setQuoteId("");
+    setCustomerId("");
+    setJobId("");
+    setTitle("");
+    setOpen(false);
   }
 
   function onCreate() {
@@ -86,6 +142,7 @@ export function NewInvoiceButton({
         setError(res.error ?? "Could not create invoice.");
         return;
       }
+      draft.clear();
       setOpen(false);
       if (res.id) router.push(`/billing/${res.id}`);
     });
@@ -99,11 +156,12 @@ export function NewInvoiceButton({
 
       <Modal
         open={open}
-        onClose={() => setOpen(false)}
+        onClose={discard}
         title="New invoice"
+        dirty={dirty}
         footer={
           <ModalActions
-            onCancel={() => setOpen(false)}
+            onCancel={discard}
             onSave={onCreate}
             saving={pending}
             disabled={mode === "quote" && !quoteId}
