@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { dispatchAction } from "@/lib/action-items/dispatch";
-import { KIND_META, sortActionItems, type ActionItem, type Affordance } from "@/lib/action-items/types";
+import { KIND_META, KIND_STREAM, STREAM_LABEL, STREAM_ORDER, sortActionItems, type ActionItem, type Affordance } from "@/lib/action-items/types";
 
 function ymd(d: Date) {
   const p = (n: number) => String(n).padStart(2, "0");
@@ -65,6 +65,16 @@ export function ActionList({
   const visible = sortActionItems(
     items.filter((i) => !removedIds.has(i.id)).map((i) => ({ ...i, done: i.done || doneIds.has(i.id) })),
   );
+
+  // The four urgency streams, rendered as titled sections in fixed order —
+  // Money / Leads / Today / Waiting — with empty groups hidden. Grouping runs on
+  // whatever items arrived (a pre-sliced My Day list groups just its slice) and
+  // the universal ordering rule still holds within each group. The KIND_STREAM
+  // fallback covers any item that reaches us without a stamped stream.
+  const groups = STREAM_ORDER.map((stream) => ({
+    stream,
+    items: visible.filter((i) => (i.stream ?? KIND_STREAM[i.kind]) === stream),
+  })).filter((g) => g.items.length > 0);
 
   async function run(
     item: ActionItem,
@@ -145,78 +155,85 @@ export function ActionList({
   return (
     <div className="space-y-1.5">
       {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-      {visible.map((item) => {
-        const can = (v: Affordance) => item.affordances.includes(v);
-        const meta = KIND_META[item.kind];
-        const when = prettyWhen(item.when);
-        const overdue = item.when && !item.when.includes("T") && item.when < ymd(new Date());
-        return (
-          <div
-            key={item.id}
-            className={`flex items-center gap-2 rounded-xl border bg-white px-3 py-2 ${
-              item.done ? "border-slate-100 opacity-55" : "border-slate-200"
-            }`}
-          >
-            {can("do") && (
-              <button
-                onClick={() => onDo(item)}
-                disabled={busyId === item.id || item.done}
-                className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border ${
-                  item.done ? "border-brand bg-brand text-white" : "border-slate-300 hover:border-brand"
-                }`}
-                title="Mark done"
-                aria-label="Mark done"
-              >
-                {item.done && <Check className="h-3.5 w-3.5" />}
-              </button>
-            )}
-
-            <button onClick={() => router.push(item.href)} className="min-w-0 flex-1 text-left">
-              <div className={`truncate text-sm ${item.done ? "text-slate-400 line-through" : "font-medium text-slate-900"}`}>
-                {item.urgency >= 2 && !item.done && <span className="mr-1 text-red-500">!</span>}
-                {item.title}
-              </div>
-              <div className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-slate-500">
-                <Badge tone={meta.tone}>{meta.label}</Badge>
-                {item.subtitle && <span className="truncate">{item.subtitle}</span>}
-                {when && <span className={overdue ? "font-medium text-red-600" : ""}>· {when}</span>}
-                {item.who && <span className="truncate">· {item.who}</span>}
-              </div>
-            </button>
-
-            <div className="flex shrink-0 items-center gap-0.5">
-              {can("schedule") && (
-                <button onClick={() => openDate(item, "schedule")} disabled={busyId === item.id} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-brand" title="Schedule / set a date">
-                  <CalendarPlus className="h-4 w-4" />
-                </button>
-              )}
-              {can("assign") && (
-                <button onClick={() => openAssign(item)} disabled={busyId === item.id} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-brand" title="Assign to someone">
-                  <UserPlus className="h-4 w-4" />
-                </button>
-              )}
-              {can("convert") && (
-                <button onClick={() => setConverting(item)} disabled={busyId === item.id} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-brand" title="Convert">
-                  <ArrowRightLeft className="h-4 w-4" />
-                </button>
-              )}
-              {can("snooze") && (
-                <button onClick={() => openDate(item, "snooze")} disabled={busyId === item.id} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Snooze to a later date">
-                  <Clock3 className="h-4 w-4" />
-                </button>
-              )}
-              {can("dismiss") && (
-                <button onClick={() => onDismiss(item)} disabled={busyId === item.id} className="rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600" title="Dismiss">
-                  <X className="h-4 w-4" />
-                </button>
-              )}
-              <button onClick={() => router.push(item.href)} className="rounded-md p-1.5 text-slate-300 hover:bg-slate-100 hover:text-slate-600" title="Open">
-                <ChevronRight className="h-4 w-4" />
-              </button>
-            </div>
+      {groups.map(({ stream, items: groupItems }) => (
+        <div key={stream} className="space-y-1.5">
+          <div className="px-1 pt-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+            {STREAM_LABEL[stream]}
           </div>
-        );
-      })}
+          {groupItems.map((item) => {
+            const can = (v: Affordance) => item.affordances.includes(v);
+            const meta = KIND_META[item.kind];
+            const when = prettyWhen(item.when);
+            const overdue = item.when && !item.when.includes("T") && item.when < ymd(new Date());
+            return (
+              <div
+                key={item.id}
+                className={`flex items-center gap-2 rounded-xl border bg-white px-3 py-2 ${
+                  item.done ? "border-slate-100 opacity-55" : "border-slate-200"
+                }`}
+              >
+                {can("do") && (
+                  <button
+                    onClick={() => onDo(item)}
+                    disabled={busyId === item.id || item.done}
+                    className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border ${
+                      item.done ? "border-brand bg-brand text-white" : "border-slate-300 hover:border-brand"
+                    }`}
+                    title="Mark done"
+                    aria-label="Mark done"
+                  >
+                    {item.done && <Check className="h-3.5 w-3.5" />}
+                  </button>
+                )}
+
+                <button onClick={() => router.push(item.href)} className="min-w-0 flex-1 text-left">
+                  <div className={`truncate text-sm ${item.done ? "text-slate-400 line-through" : "font-medium text-slate-900"}`}>
+                    {item.urgency >= 2 && !item.done && <span className="mr-1 text-red-500">!</span>}
+                    {item.title}
+                  </div>
+                  <div className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-slate-500">
+                    <Badge tone={meta.tone}>{meta.label}</Badge>
+                    {item.subtitle && <span className="truncate">{item.subtitle}</span>}
+                    {when && <span className={overdue ? "font-medium text-red-600" : ""}>· {when}</span>}
+                    {item.who && <span className="truncate">· {item.who}</span>}
+                  </div>
+                </button>
+
+                <div className="flex shrink-0 items-center gap-0.5">
+                  {can("schedule") && (
+                    <button onClick={() => openDate(item, "schedule")} disabled={busyId === item.id} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-brand" title="Schedule / set a date">
+                      <CalendarPlus className="h-4 w-4" />
+                    </button>
+                  )}
+                  {can("assign") && (
+                    <button onClick={() => openAssign(item)} disabled={busyId === item.id} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-brand" title="Assign to someone">
+                      <UserPlus className="h-4 w-4" />
+                    </button>
+                  )}
+                  {can("convert") && (
+                    <button onClick={() => setConverting(item)} disabled={busyId === item.id} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-brand" title="Convert">
+                      <ArrowRightLeft className="h-4 w-4" />
+                    </button>
+                  )}
+                  {can("snooze") && (
+                    <button onClick={() => openDate(item, "snooze")} disabled={busyId === item.id} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Snooze to a later date">
+                      <Clock3 className="h-4 w-4" />
+                    </button>
+                  )}
+                  {can("dismiss") && (
+                    <button onClick={() => onDismiss(item)} disabled={busyId === item.id} className="rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600" title="Dismiss">
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                  <button onClick={() => router.push(item.href)} className="rounded-md p-1.5 text-slate-300 hover:bg-slate-100 hover:text-slate-600" title="Open">
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ))}
 
       <Modal
         open={!!dating}

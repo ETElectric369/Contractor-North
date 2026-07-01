@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import type { ActionItem, ActionKind } from "./types";
-import { AFFORDANCES } from "./types";
+import { AFFORDANCES, KIND_STREAM } from "./types";
 import { lienStatus } from "@/lib/lien-math";
 import { formatCurrency } from "@/lib/utils";
 
@@ -172,7 +172,9 @@ export async function getActionItems(ctx: {
       : empty,
   ]);
 
-  const items: ActionItem[] = [];
+  // Built without `stream`, stamped once at the return from KIND_STREAM — one
+  // assignment site means a new kind can't ship with a forgotten/mismatched stream.
+  const items: Omit<ActionItem, "stream">[] = [];
 
   for (const t of (tasksR.data ?? []) as any[]) {
     // A task is a task — even when it belongs to a job. (Previously a job_id
@@ -405,5 +407,5 @@ export async function getActionItems(ctx: {
     });
   }
 
-  return items;
+  return items.map((it) => ({ ...it, stream: KIND_STREAM[it.kind] }));
 }

@@ -10,6 +10,10 @@ export type ActionResult = {
   ok: boolean;
   error?: string;
   data?: unknown;
+  /** Set by executeAction when validation failed because required fields are ABSENT —
+   *  dot-joined schema paths (e.g. ["hours", "allocations.0.job_code"]). The surface can
+   *  say "I've got the job — still need the hours" instead of the bare zod "Required". */
+  missingFields?: string[];
   /** Driver-friendly sentence for voice/TTS read-back. */
   speak?: string;
   /** Set by executeAction when a confirm/tier-2 action was invoked by the agent/voice

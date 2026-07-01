@@ -39,10 +39,13 @@ export const workOrderActions: Record<string, ActionDef> = {
     group: "workorder",
     label: "Edit work order",
     description:
-      "Edit a WORK ORDER's core fields — title (required), description, job_id (customer follows the job), assigned_to, scheduled_for (ISO datetime). Resolve the work order's id first. Reversible field edit.",
+      "Edit a WORK ORDER's core fields — title, description, job_id (customer follows the job), assigned_to, scheduled_for (ISO datetime). Resolve the work order's id first and pass ONLY the fields to change (an omitted field is left alone; an explicit null clears one). Reversible field edit.",
+    // A true PATCH: title used to be required and the handler dropped every omitted
+    // field from the FormData, which the old updateWorkOrder then WROTE as null —
+    // wiping the description/assignee/schedule on any partial edit.
     input: z.object({
       id: z.string(),
-      title: z.string().min(1),
+      title: z.string().min(1).optional(),
       description: z.string().nullable().optional(),
       job_id: z.string().nullable().optional(),
       assigned_to: z.string().nullable().optional(),
@@ -51,12 +54,14 @@ export const workOrderActions: Record<string, ActionDef> = {
     auth: "staff",
     effect: "write",
     handler: (i) => {
+      // Only append the keys actually present — updateWorkOrder patches by fd.has();
+      // an explicit null becomes "" which the action stores as null (a clear).
       const fd = new FormData();
-      fd.set("title", i.title);
-      if (i.description) fd.set("description", i.description);
-      if (i.job_id) fd.set("job_id", i.job_id);
-      if (i.assigned_to) fd.set("assigned_to", i.assigned_to);
-      if (i.scheduled_for) fd.set("scheduled_for", i.scheduled_for);
+      if (i.title !== undefined) fd.set("title", i.title);
+      if (i.description !== undefined) fd.set("description", i.description ?? "");
+      if (i.job_id !== undefined) fd.set("job_id", i.job_id ?? "");
+      if (i.assigned_to !== undefined) fd.set("assigned_to", i.assigned_to ?? "");
+      if (i.scheduled_for !== undefined) fd.set("scheduled_for", i.scheduled_for ?? "");
       return updateWorkOrder(i.id, fd);
     },
   },

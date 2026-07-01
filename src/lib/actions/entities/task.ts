@@ -8,11 +8,29 @@ export const taskActions: Record<string, ActionDef> = {
     name: "task.create",
     group: "task",
     label: "Add task",
-    description: "Create a task with a title and category (office | operations | sales).",
-    input: z.object({ title: z.string().min(1), category: z.enum(["office", "operations", "sales"]).default("operations") }),
+    description:
+      "Create a task with a title and category (office | operations | sales). Optionally capture whatever else was given: due_date (YYYY-MM-DD), job_id (resolve with list_jobs), assigned_to (a profile id), notes.",
+    // Fragment-first: createTask already takes all of these — the old 2-field schema
+    // silently DROPPED a spoken due date / job / assignee / note.
+    input: z.object({
+      title: z.string().min(1),
+      category: z.enum(["office", "operations", "sales"]).default("operations"),
+      due_date: z.string().nullable().optional(),
+      job_id: z.string().nullable().optional(),
+      assigned_to: z.string().nullable().optional(),
+      notes: z.string().nullable().optional(),
+    }),
     auth: "any",
     effect: "write",
-    handler: (i) => createTask({ title: i.title, category: i.category }),
+    handler: (i) =>
+      createTask({
+        title: i.title,
+        category: i.category,
+        due_date: i.due_date ?? null,
+        job_id: i.job_id ?? null,
+        assigned_to: i.assigned_to ?? null,
+        notes: i.notes ?? null,
+      }),
   },
   "task.complete": {
     name: "task.complete",

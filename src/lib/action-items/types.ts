@@ -17,6 +17,37 @@ export type ActionKind =
   | "contract_unsigned" // a contract sent but not yet signed
   | "bug_report"; // an open bug reported from the field (owner watch)
 
+/** The four urgency streams the inbox renders under. Order is the render order:
+ *  money first (chase the dollars), then fresh leads, then today's work, then
+ *  the things we're waiting on someone else for. */
+export type Stream = "money" | "leads" | "today" | "waiting";
+
+export const STREAM_ORDER: Stream[] = ["money", "leads", "today", "waiting"];
+
+export const STREAM_LABEL: Record<Stream, string> = {
+  money: "Money",
+  leads: "Leads",
+  today: "Today",
+  waiting: "Waiting",
+};
+
+/** Which stream each kind belongs to — assigned per-kind in ONE place so the
+ *  grouped inbox and any digest/summary surface can never disagree. */
+export const KIND_STREAM: Record<ActionKind, Stream> = {
+  task: "today",
+  work_order: "today",
+  job_to_schedule: "today",
+  inquiry: "leads",
+  appointment: "today",
+  organize: "waiting",
+  invoice_overdue: "money",
+  quote_awaiting: "money",
+  invoice_draft: "money",
+  lien_deadline: "waiting", // compliance clock — legal, not A/R
+  contract_unsigned: "waiting",
+  bug_report: "waiting",
+};
+
 /** The canonical verbs. Each maps to an existing server action in dispatch.ts. */
 export type Affordance =
   | "do" // mark complete / contacted
@@ -30,6 +61,7 @@ export type Affordance =
 export interface ActionItem {
   id: string;
   kind: ActionKind;
+  stream: Stream; // urgency stream (money/leads/today/waiting) — derived from kind via KIND_STREAM
   title: string;
   subtitle?: string | null; // customer / job / vendor line
   who?: string | null; // assignee name

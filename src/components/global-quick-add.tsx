@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, ListTodo, Briefcase, CalendarPlus, FileText, Receipt, Camera, UserPlus, UserSearch, X } from "lucide-react";
+import { Plus, Zap, ListTodo, Briefcase, CalendarPlus, FileText, Receipt, Camera, UserPlus, UserSearch, X } from "lucide-react";
+import { QuickCaptureSheet } from "@/components/quick-capture";
 
 // Add-cost is NOT here — it lives on My Day's Now card + the job header (job-scoped,
 // works cleanly). A self-loading copy in this dropdown was redundant + fiddly.
@@ -27,6 +28,7 @@ export function GlobalQuickAdd({ placement = "fab" }: { placement?: "fab" | "top
   const router = useRouter();
   const [pos, setPos] = useState({ x: 20, y: 168 }); // above the mic, clearing the floating glass bottom nav
   const [open, setOpen] = useState(false);
+  const [captureOpen, setCaptureOpen] = useState(false);
   const drag = useRef<{ sx: number; sy: number; bx: number; by: number; moved: boolean } | null>(null);
 
   useEffect(() => {
@@ -36,18 +38,37 @@ export function GlobalQuickAdd({ placement = "fab" }: { placement?: "fab" | "top
     } catch {}
   }, []);
 
-  const items = ACTIONS.map((a) => (
-    <button
-      key={a.href}
-      onClick={() => {
-        setOpen(false);
-        router.push(a.href);
-      }}
-      className="relative z-10 flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15"
-    >
-      <a.icon className="h-4 w-4 text-[rgb(var(--glass-ink))]" /> {a.label}
-    </button>
-  ));
+  const items = (
+    <>
+      {/* The one-field front door — FIRST, above the typed creates: any fragment is a
+          valid record. Opens the capture sheet IN PLACE (a client sheet, not a nav),
+          so the thought is saved before it can evaporate on a page load. */}
+      <button
+        onClick={() => {
+          setOpen(false);
+          setCaptureOpen(true);
+        }}
+        className="relative z-10 flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15"
+      >
+        <Zap className="h-4 w-4 text-[rgb(var(--glass-ink))]" /> Capture anything
+      </button>
+      {ACTIONS.map((a) => (
+        <button
+          key={a.href}
+          onClick={() => {
+            setOpen(false);
+            router.push(a.href);
+          }}
+          className="relative z-10 flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15"
+        >
+          <a.icon className="h-4 w-4 text-[rgb(var(--glass-ink))]" /> {a.label}
+        </button>
+      ))}
+    </>
+  );
+
+  // Rendered in BOTH placements (Modal renders null while closed — costless).
+  const captureSheet = <QuickCaptureSheet open={captureOpen} onClose={() => setCaptureOpen(false)} />;
 
   // Top-bar variant: inline + button with a dropdown anchored below it.
   if (placement === "topbar") {
@@ -77,6 +98,7 @@ export function GlobalQuickAdd({ placement = "fab" }: { placement?: "fab" | "top
             </div>
           </>
         )}
+        {captureSheet}
       </div>
     );
   }
@@ -122,6 +144,7 @@ export function GlobalQuickAdd({ placement = "fab" }: { placement?: "fab" | "top
       >
         {open ? <X className="h-5 w-5" /> : <Plus className="h-5 w-5" />}
       </button>
+      {captureSheet}
     </>
   );
 }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { generateDueTemplates } from "@/lib/recurring-engine";
 import { sendDueReminders } from "@/lib/reminders-engine";
+import { sendDayAheadDigests } from "@/lib/action-items/digest";
 import { reportError } from "@/lib/observe";
 
 export const runtime = "nodejs";
@@ -10,7 +11,8 @@ export const runtime = "nodejs";
  * The daily automation runner (Vercel Cron). One scheduled endpoint that does the
  * org-wide background work the app can't do interactively:
  *   - generate due recurring jobs/expenses (all orgs),
- *   - (next) send opt-in customer reminders (quote follow-up / invoice due / appts).
+ *   - send opt-in customer reminders (quote follow-up / invoice due / appts),
+ *   - push the staff "day ahead" digest (needs-action count + top items → /planner).
  *
  * Protected by CRON_SECRET (Vercel sends it automatically):
  *   GET /api/automations/daily   Authorization: Bearer <CRON_SECRET>
@@ -44,6 +46,14 @@ export async function GET(request: Request) {
   } catch (e: any) {
     result.reminders_error = e?.message ?? "failed";
     reportError("cron-reminders", e);
+  }
+  try {
+    // Staff "day ahead" push digest — opt-in per user (push_prefs.day_ahead,
+    // enforced inside sendPushToProfiles); an org with no open items sends nothing.
+    result.day_ahead = await sendDayAheadDigests(supabase);
+  } catch (e: any) {
+    result.day_ahead_error = e?.message ?? "failed";
+    reportError("cron-day-ahead", e);
   }
 
   return NextResponse.json(result);

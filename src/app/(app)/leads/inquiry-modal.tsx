@@ -81,6 +81,12 @@ export function InquiryModal({ inquiry, mode = "new" }: { inquiry?: Inquiry; mod
 
   function onSubmit(formData: FormData) {
     setError(null);
+    // Fragment-first: ANY of name / phone / message makes a valid lead (the
+    // missed-call case is a bare phone number) — only a fully empty form blocks.
+    if (!form.name.trim() && !form.phone.trim() && !form.message.trim()) {
+      setError("Add a name, phone number, or note to save this lead.");
+      return;
+    }
     start(async () => {
       const res = editing ? await updateInquiry(inquiry!.id, formData) : await createInquiry(formData);
       if (!res.ok) {

@@ -105,8 +105,10 @@ export const jobActions: Record<string, ActionDef> = {
     name: "job.assign",
     group: "job",
     label: "Assign job",
-    description: "Assign a job to a single employee (profile id), or empty to clear.",
-    input: z.object({ id: z.string(), assignee: z.string().nullable().default("") }),
+    description: "Assign a job to a single employee (profile id), or an explicit null/empty to clear.",
+    // assignee is REQUIRED (nullable): the old .default("") silently UNASSIGNED the job
+    // whenever the field was omitted. Now omitting it asks instead of wiping.
+    input: z.object({ id: z.string(), assignee: z.string().nullable() }),
     auth: "staff", // jobs are staff-only in RLS — the registry gate now matches (Phase C)
     effect: "write",
     handler: (i) => setJobAssignee(i.id, i.assignee ?? ""),

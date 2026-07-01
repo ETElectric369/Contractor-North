@@ -33,10 +33,13 @@ export async function createInquiry(formData: FormData): Promise<Result> {
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
 
-  const name = String(formData.get("name") ?? "").trim();
-  if (!name) return { ok: false, error: "Name is required." };
-
   const fields = inquiryFields(formData);
+  // Fragment-first: a bare phone number is a valid lead (the missed-call case) —
+  // default the name instead of blocking the capture.
+  let name = String(formData.get("name") ?? "").trim();
+  if (!name && (fields.phone || fields.message)) name = fields.phone ?? "Unknown caller";
+  if (!name) return { ok: false, error: "Add a name, phone, or note to save the lead." };
+
   const { data, error } = await supabase
     .from("inquiries")
     .insert({ name, ...fields, source: "manual", status: "new", created_by: ctx.userId })
@@ -67,12 +70,15 @@ export async function updateInquiry(id: string, formData: FormData): Promise<Res
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
-  const name = String(formData.get("name") ?? "").trim();
-  if (!name) return { ok: false, error: "Name is required." };
+  const fields = inquiryFields(formData);
+  // Fragment-first: same defaulting as create — a phone-only lead stays editable.
+  let name = String(formData.get("name") ?? "").trim();
+  if (!name && (fields.phone || fields.message)) name = fields.phone ?? "Unknown caller";
+  if (!name) return { ok: false, error: "Add a name, phone, or note to save the lead." };
 
   const { error } = await supabase
     .from("inquiries")
-    .update({ name, ...inquiryFields(formData), updated_at: new Date().toISOString() })
+    .update({ name, ...fields, updated_at: new Date().toISOString() })
     .eq("id", id);
   if (error) return { ok: false, error: error.message };
 

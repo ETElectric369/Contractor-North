@@ -92,22 +92,20 @@ export const invoiceActions: Record<string, ActionDef> = {
     group: "invoice",
     label: "Edit an invoice line",
     description:
-      "Change an existing invoice line (its description, quantity, or price). You need BOTH the line's item_id AND its invoice_id — get them from get_invoice first. Pass the full new description, quantity, and unit_price.",
+      "Change an existing invoice line — 'bump the panel line to $1,800'. You need BOTH the line's item_id AND its invoice_id — get them from get_invoice first. Pass ONLY the fields to change (description / quantity / unit_price); anything you omit stays as it is.",
+    // A true PATCH: an omitted field must never touch the column (the old defaults
+    // silently reset quantity to 1 / price to $0 on a "just fix the description" call).
     input: z.object({
       item_id: z.string(),
       invoice_id: z.string(),
-      description: z.string().min(1),
-      quantity: z.number().default(1),
-      unit_price: z.number().default(0),
+      description: z.string().min(1).optional(),
+      quantity: z.number().optional(),
+      unit_price: z.number().optional(),
     }),
     auth: "staff",
     effect: "write",
-    handler: async (i) => {
-      const r = await updateInvoiceItem(i.item_id, i.invoice_id, {
-        description: i.description,
-        quantity: i.quantity ?? 1,
-        unit_price: i.unit_price ?? 0,
-      });
+    handler: async ({ item_id, invoice_id, ...patch }) => {
+      const r = await updateInvoiceItem(item_id, invoice_id, patch);
       if (!r.ok) return { ok: false, error: r.error };
       return { ok: true, speak: "Line updated." };
     },
@@ -135,38 +133,42 @@ export const invoiceActions: Record<string, ActionDef> = {
     group: "invoice",
     label: "Set invoice due date",
     description:
-      "Set (or clear) an invoice's DUE DATE — the field the Overdue tracker reads. Pass the invoice_id (from get_invoice or list_invoices) and a due_date as YYYY-MM-DD, or null to clear it. 'Make the Jones invoice due July 15.'",
-    input: z.object({ invoice_id: z.string(), due_date: z.string().nullable().default(null) }),
+      "Set (or clear) an invoice's DUE DATE — the field the Overdue tracker reads. Pass the invoice_id (from get_invoice or list_invoices) and a due_date as YYYY-MM-DD, or an explicit null to clear it. 'Make the Jones invoice due July 15.'",
+    // due_date is REQUIRED (nullable): the old .default(null) silently CLEARED the due
+    // date whenever the field was omitted — killing the Overdue pipeline for that invoice.
+    input: z.object({ invoice_id: z.string(), due_date: z.string().nullable() }),
     auth: "staff",
     effect: "write",
-    handler: (i) => setInvoiceDueDate(i.invoice_id, i.due_date ?? null),
+    handler: (i) => setInvoiceDueDate(i.invoice_id, i.due_date),
   },
   "invoice.setTitle": {
     name: "invoice.setTitle",
     group: "invoice",
     label: "Set invoice title",
     description:
-      "Edit an invoice's TITLE — the short label shown in the header and lists. Pass the invoice_id (from get_invoice or list_invoices) and the new title. 'Rename the invoice to Kitchen remodel — final.'",
-    input: z.object({ invoice_id: z.string(), title: z.string().default("") }),
+      "Edit an invoice's TITLE — the short label shown in the header and lists. Pass the invoice_id (from get_invoice or list_invoices) and the new title (an explicit \"\" clears it). 'Rename the invoice to Kitchen remodel — final.'",
+    // title is REQUIRED: the old .default("") silently BLANKED the title when omitted.
+    input: z.object({ invoice_id: z.string(), title: z.string() }),
     auth: "staff",
     effect: "write",
-    handler: (i) => setInvoiceTitle(i.invoice_id, i.title ?? ""),
+    handler: (i) => setInvoiceTitle(i.invoice_id, i.title),
   },
   "invoice.setCustomerJob": {
     name: "invoice.setCustomerJob",
     group: "invoice",
     label: "Re-point invoice customer/job",
     description:
-      "Correct the customer/job link on a DRAFT invoice (draft-only — once sent, the billing relationship is locked). Pass the invoice_id plus customer_id and/or job_id (resolve them with list_customers / list_jobs); pass null to clear. The job's customer is kept in sync by the action.",
+      "Correct the customer/job link on a DRAFT invoice (draft-only — once sent, the billing relationship is locked). Pass the invoice_id plus ONLY the link(s) to change: customer_id and/or job_id (resolve them with list_customers / list_jobs); pass an explicit null to clear one, omit it to leave it alone. The job's customer is kept in sync by the action.",
+    // A true PATCH: the old .default(null) silently UNLINKED both the customer and the
+    // job whenever either field was omitted. Omitted = untouched; explicit null clears.
     input: z.object({
       invoice_id: z.string(),
-      customer_id: z.string().nullable().default(null),
-      job_id: z.string().nullable().default(null),
+      customer_id: z.string().nullable().optional(),
+      job_id: z.string().nullable().optional(),
     }),
     auth: "staff",
     effect: "write",
-    handler: (i) =>
-      setInvoiceCustomerJob(i.invoice_id, { customer_id: i.customer_id ?? null, job_id: i.job_id ?? null }),
+    handler: ({ invoice_id, ...link }) => setInvoiceCustomerJob(invoice_id, link),
   },
   "invoice.setStatus": {
     name: "invoice.setStatus",

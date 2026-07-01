@@ -4,6 +4,7 @@ import { REGISTRY } from "./registry";
 import { actionRisk, needsConsent } from "./risk";
 import { stepUpGate } from "@/lib/webauthn/stepup";
 import { roleCanRun } from "./perms";
+import { missingFieldPaths } from "./readiness";
 import { buildActionCtx } from "./context";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionCtx, ActionDef, ActionResult } from "./types";
@@ -74,7 +75,17 @@ export async function executeAction(
 
   const parsed = def.input.safeParse(rawInput);
   if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
+    // Fragment kernel: never surface the bare zod word ("Required") — voice speaks this.
+    // Name the ABSENT fields so the caller can ask for exactly what's still needed
+    // ("I've got the job — still need the hours"); a present-but-invalid value falls
+    // back to "<path>: <message>". missingFields rides along for the agent/voice loop.
+    const missing = missingFieldPaths(parsed.error);
+    if (missing.length) return { ok: false, missingFields: missing, error: `Missing: ${missing.join(", ")}` };
+    const first = parsed.error.issues[0];
+    return {
+      ok: false,
+      error: first ? `${first.path.join(".") || "input"}: ${first.message}` : "Invalid input.",
+    };
   }
 
   // Step-up + confirm gate (framework §3) — makes def.confirm / the risk tier load-bearing

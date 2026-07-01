@@ -117,36 +117,42 @@ export async function createWorkOrderFromQuote(quoteId: string): Promise<Result>
   return { ok: true, id: data.id };
 }
 
-/** Edit a work order's core fields; customer follows the linked job. */
+/** Edit a work order's core fields; customer follows the linked job.
+ *  PATCH semantics: only the fields present in the FormData are written — an absent key
+ *  never touches its column (it used to null the description/assignee/schedule on any
+ *  partial edit). The edit form submits every field, so the UI is unchanged. */
 export async function updateWorkOrder(id: string, formData: FormData): Promise<Result> {
   const supabase = await createClient();
-  const title = String(formData.get("title") ?? "").trim();
-  if (!title) return { ok: false, error: "Title is required." };
+  const clean: Record<string, unknown> = {};
 
-  const jobId = emptyToNull(formData.get("job_id"));
-  const scheduled = String(formData.get("scheduled_for") ?? "");
-
-  let customerId: string | null = null;
-  if (jobId) {
-    const { data: job } = await supabase
-      .from("jobs")
-      .select("customer_id")
-      .eq("id", jobId)
-      .maybeSingle();
-    customerId = job?.customer_id ?? null;
+  if (formData.has("title")) {
+    const title = String(formData.get("title") ?? "").trim();
+    if (!title) return { ok: false, error: "Title is required." };
+    clean.title = title;
   }
+  if (formData.has("description")) clean.description = emptyToNull(formData.get("description"));
+  if (formData.has("job_id")) {
+    const jobId = emptyToNull(formData.get("job_id"));
+    let customerId: string | null = null;
+    if (jobId) {
+      const { data: job } = await supabase
+        .from("jobs")
+        .select("customer_id")
+        .eq("id", jobId)
+        .maybeSingle();
+      customerId = job?.customer_id ?? null;
+    }
+    clean.job_id = jobId;
+    clean.customer_id = customerId; // customer follows the job (null job → no customer)
+  }
+  if (formData.has("assigned_to")) clean.assigned_to = emptyToNull(formData.get("assigned_to"));
+  if (formData.has("scheduled_for")) {
+    const scheduled = String(formData.get("scheduled_for") ?? "");
+    clean.scheduled_for = scheduled ? new Date(scheduled).toISOString() : null;
+  }
+  if (Object.keys(clean).length === 0) return { ok: false, error: "Nothing to update." };
 
-  const { error } = await supabase
-    .from("work_orders")
-    .update({
-      title,
-      description: emptyToNull(formData.get("description")),
-      job_id: jobId,
-      customer_id: customerId,
-      assigned_to: emptyToNull(formData.get("assigned_to")),
-      scheduled_for: scheduled ? new Date(scheduled).toISOString() : null,
-    })
-    .eq("id", id);
+  const { error } = await supabase.from("work_orders").update(clean).eq("id", id);
   if (error) return { ok: false, error: error.message };
 
   revalidatePath("/work-orders");

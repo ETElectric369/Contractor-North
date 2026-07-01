@@ -56,17 +56,20 @@ export const quoteActions: Record<string, ActionDef> = {
     group: "quote",
     label: "Edit a quote line",
     description:
-      "Change an existing quote line (description / quantity / price) — 'bump the panel line to $1,800'. You need BOTH the line's item_id AND its quote_id — get them from get_quote first.",
+      "Change an existing quote line — 'bump the panel line to $1,800'. You need BOTH the line's item_id AND its quote_id — get them from get_quote first. Pass ONLY the fields to change (description / quantity / unit / unit_price); anything you omit stays as it is.",
+    // A true PATCH: an omitted field must never touch the column (the old defaults
+    // silently reset quantity to 1 / price to $0 on a "just bump the price" call).
     input: z.object({
       item_id: z.string(),
       quote_id: z.string(),
-      description: z.string().min(1),
-      quantity: z.number().default(1),
-      unit_price: z.number().default(0),
+      description: z.string().min(1).optional(),
+      quantity: z.number().optional(),
+      unit: z.string().optional(),
+      unit_price: z.number().optional(),
     }),
     auth: "staff",
     effect: "write",
-    handler: (i) => updateQuoteItem(i.item_id, i.quote_id, { description: i.description, quantity: i.quantity ?? 1, unit_price: i.unit_price ?? 0 }),
+    handler: ({ item_id, quote_id, ...patch }) => updateQuoteItem(item_id, quote_id, patch),
   },
   "quote.deleteItem": {
     name: "quote.deleteItem",
@@ -83,34 +86,32 @@ export const quoteActions: Record<string, ActionDef> = {
     group: "quote",
     label: "Edit quote header",
     description:
-      "Edit a quote/estimate's HEADER fields — title, notes, tax rate, and valid-until — 'rename the Jones estimate and set it to expire July 31'. Resolve the quote with list_quotes or get_quote and pass its id. tax_rate is a FRACTION, not a percent (8.25% = 0.0825); valid_until is YYYY-MM-DD or null. Reversible draft edit — line items are edited with quote.addItem/updateItem/deleteItem.",
+      "Edit a quote/estimate's HEADER fields — title, notes, tax rate, and valid-until — 'rename the Jones estimate and set it to expire July 31'. Resolve the quote with list_quotes or get_quote and pass its id, plus ONLY the fields to change (an omitted field is left alone). tax_rate is a FRACTION, not a percent (8.25% = 0.0825); valid_until is YYYY-MM-DD or null to clear. Reversible draft edit — line items are edited with quote.addItem/updateItem/deleteItem.",
+    // A true PATCH: the old .default("")/.default(0) wiped the title, notes, tax rate
+    // and expiry of any field the caller didn't repeat. Omitted = untouched.
     input: z.object({
       id: z.string(),
-      title: z.string().default(""),
-      notes: z.string().default(""),
-      tax_rate: z.number().default(0),
-      valid_until: z.string().nullable().default(null),
+      title: z.string().optional(),
+      notes: z.string().optional(),
+      tax_rate: z.number().optional(),
+      valid_until: z.string().nullable().optional(),
     }),
     auth: "staff",
     effect: "write",
-    handler: (i) =>
-      updateQuoteMeta(i.id, {
-        title: i.title ?? "",
-        notes: i.notes ?? "",
-        tax_rate: i.tax_rate ?? 0,
-        valid_until: i.valid_until ?? null,
-      }),
+    handler: ({ id, ...patch }) => updateQuoteMeta(id, patch),
   },
   "quote.setCustomer": {
     name: "quote.setCustomer",
     group: "quote",
     label: "Set quote customer",
     description:
-      "Change a saved quote's CUSTOMER — 'attach the Miller estimate to the new Miller customer'. Resolve the quote with list_quotes and the customer with list_customers, then pass the quote id and customer_id (or null to detach). Reversible draft edit.",
-    input: z.object({ id: z.string(), customer_id: z.string().nullable().default(null) }),
+      "Change a saved quote's CUSTOMER — 'attach the Miller estimate to the new Miller customer'. Resolve the quote with list_quotes and the customer with list_customers, then pass the quote id and customer_id (or an explicit null to detach). Reversible draft edit.",
+    // customer_id is REQUIRED (nullable): the old .default(null) silently DETACHED the
+    // customer whenever the field was omitted. Now omitting it asks instead of wiping.
+    input: z.object({ id: z.string(), customer_id: z.string().nullable() }),
     auth: "staff",
     effect: "write",
-    handler: (i) => setQuoteCustomer(i.id, i.customer_id ?? null),
+    handler: (i) => setQuoteCustomer(i.id, i.customer_id),
   },
   "quote.duplicate": {
     name: "quote.duplicate",

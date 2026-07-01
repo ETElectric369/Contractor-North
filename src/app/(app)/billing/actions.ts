@@ -860,22 +860,27 @@ async function createMilestoneDraw(
 export async function updateInvoiceItem(
   itemId: string,
   invoiceId: string,
-  item: { description: string; quantity: number; unit_price: number },
+  item: { description?: string; quantity?: number; unit_price?: number },
 ): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
-  if (!item.description.trim()) return { ok: false, error: "Description is required." };
   const block = await requireDraftInvoice(supabase, invoiceId);
   if (block) return block; // M1: draft-only edits
   if (await isProtectedCreditLine(supabase, itemId)) return CREDIT_LINE_LOCKED;
+  // PATCH semantics (mirrors updateBill): write ONLY the keys the caller sent — an
+  // omitted field never touches its column (it used to reset qty to 1 / price to $0).
+  const clean: Record<string, unknown> = {};
+  if (item.description !== undefined) {
+    if (!item.description.trim()) return { ok: false, error: "Description is required." };
+    clean.description = item.description.trim();
+  }
+  if (item.quantity !== undefined) clean.quantity = item.quantity || 1;
+  if (item.unit_price !== undefined) clean.unit_price = item.unit_price || 0;
+  if (Object.keys(clean).length === 0) return { ok: false, error: "Nothing to update." };
   const { error } = await supabase
     .from("invoice_items")
-    .update({
-      description: item.description.trim(),
-      quantity: item.quantity || 1,
-      unit_price: item.unit_price || 0,
-    })
+    .update(clean)
     .eq("id", itemId)
     .eq("invoice_id", invoiceId); // L3: the item must belong to THIS invoice
   if (error) return { ok: false, error: error.message };
@@ -1178,26 +1183,32 @@ export async function setInvoiceDueDate(
 /** Correct the customer/job link on a DRAFT invoice. Draft-only: once sent, the
  *  billing relationship is locked (a draw job is also blocked — its draw is itemized
  *  at creation). Any chosen ids must be visible to this org (RLS filters the lookup,
- *  so an id from another tenant resolves to null and is rejected). */
+ *  so an id from another tenant resolves to null and is rejected).
+ *  PATCH semantics: only the keys the caller sent are written — an omitted link is
+ *  left alone (it used to unlink BOTH); an explicit null clears it. */
 export async function setInvoiceCustomerJob(
   invoiceId: string,
-  link: { customer_id: string | null; job_id: string | null },
+  link: { customer_id?: string | null; job_id?: string | null },
 ): Promise<{ ok: boolean; error?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  if (link.customer_id === undefined && link.job_id === undefined)
+    return { ok: false, error: "Nothing to update." };
 
   // Header edits to the billing relationship are only safe while it's a draft.
   const draftBlock = await requireDraftInvoice(supabase, invoiceId);
   if (draftBlock) return draftBlock;
 
   // H4: don't re-point a draft onto a job already on the draw path.
-  const drawBlock = await blockStandardCreateOnDrawJob(supabase, link.job_id);
+  const drawBlock = await blockStandardCreateOnDrawJob(supabase, link.job_id ?? null);
   if (drawBlock) return drawBlock;
+
+  const clean: Record<string, unknown> = {};
 
   // Validate any chosen ids are visible to this org (RLS scopes the read).
   let customerId = link.customer_id || null;
-  let jobId = link.job_id || null;
+  const jobId = link.job_id || null;
   if (jobId) {
     const { data: job } = await supabase
       .from("jobs")
@@ -1216,6 +1227,9 @@ export async function setInvoiceCustomerJob(
       .maybeSingle();
     if (!cust) return { ok: false, error: "That customer isn't available." };
   }
+  if (link.job_id !== undefined) clean.job_id = jobId;
+  // The customer also moves when a re-pointed job carries its own customer along.
+  if (link.customer_id !== undefined || (jobId && customerId)) clean.customer_id = customerId;
 
   // Grab the OLD job first so re-pointing the invoice refreshes BOTH job pages — else the
   // old job keeps showing the moved invoice in its billing/financials.
@@ -1224,7 +1238,7 @@ export async function setInvoiceCustomerJob(
 
   const { error } = await supabase
     .from("invoices")
-    .update({ customer_id: customerId, job_id: jobId })
+    .update(clean)
     .eq("id", invoiceId);
   if (error) return { ok: false, error: error.message };
   revalidateMoney(invoiceId);

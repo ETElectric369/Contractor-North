@@ -18,11 +18,20 @@ export const appointmentActions: Record<string, ActionDef> = {
     name: "appointment.create",
     group: "appointment",
     label: "Add appointment",
-    description: "Create an appointment or inspection with a title and ISO start time.",
+    description:
+      "Create an appointment or inspection with a title and ISO start time. Optionally capture whatever else was given: job_id (resolve with list_jobs), customer_id (resolve with list_customers), location, ends_at (ISO), notes.",
+    // Fragment-first: the columns are nullable and createAppointment already reads every
+    // one of these — the old 3-field schema silently DROPPED a spoken job/location/end time.
+    // Only starts_at stays required (an appointment without a time isn't schedulable).
     input: z.object({
       title: z.string().trim().min(1),
       type: z.enum(["appointment", "inspection"]).default("appointment"),
       starts_at: z.string().min(1),
+      ends_at: z.string().nullable().optional(),
+      job_id: z.string().nullable().optional(),
+      customer_id: z.string().nullable().optional(),
+      location: z.string().nullable().optional(),
+      notes: z.string().nullable().optional(),
     }),
     auth: "staff",
     effect: "write",
@@ -33,6 +42,11 @@ export const appointmentActions: Record<string, ActionDef> = {
       fd.set("title", i.title);
       fd.set("type", i.type);
       fd.set("starts_at_iso", i.starts_at);
+      if (i.ends_at) fd.set("ends_at_iso", i.ends_at);
+      if (i.job_id) fd.set("job_id", i.job_id);
+      if (i.customer_id) fd.set("customer_id", i.customer_id);
+      if (i.location) fd.set("location", i.location);
+      if (i.notes) fd.set("notes", i.notes);
       return createAppointment(fd);
     },
   },

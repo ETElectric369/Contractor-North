@@ -6,6 +6,8 @@ import { visibleJobIdOrNull } from "@/lib/job-visibility";
 import { requireStaff } from "@/lib/staff-guard";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { hoursBetween } from "@/lib/utils";
+import { getOrgSettings } from "@/lib/org-settings";
+import { tzDateTimeUtc } from "@/lib/tz";
 import type { GeoPoint } from "@/lib/types";
 
 export type ClockResult = { ok: boolean; error?: string };
@@ -464,11 +466,19 @@ export async function completeAutoClockOut(input: {
  * back-dated manual entry is exactly what mis-billed jobs; techs clock in/out live
  * (rounding the start back to the half hour at most). The office adds corrections
  * here, for any crew member.
+ *
+ * Two input shapes: exact times (clock_in + clock_out ISO timestamps), or a DURATION
+ * (work_date + hours — "Brian worked 6 hours Tuesday"). The duration shape expands to a
+ * span centered on midday in the ORG timezone (lengthened by any lunch so the paid hours
+ * equal the stated hours) and is flagged in notes as duration-entered. `hours` must be
+ * the user's stated number — the fragment kernel never infers a payroll figure.
  */
 export async function createManualEntry(input: {
   profile_id: string;
-  clock_in: string;
-  clock_out: string;
+  clock_in?: string;
+  clock_out?: string;
+  work_date?: string; // YYYY-MM-DD (duration shape)
+  hours?: number; // explicit, user-stated worked hours (duration shape)
   job_id: string | null;
   job_code: string | null;
   lunch_minutes: number;
@@ -481,8 +491,30 @@ export async function createManualEntry(input: {
   const supabase = ctx.supabase;
   const profileId = input.profile_id || ctx.userId;
 
-  const ci = new Date(input.clock_in);
-  const co = new Date(input.clock_out);
+  let clockIn = input.clock_in;
+  let clockOut = input.clock_out;
+  let notes = input.notes;
+  if ((!clockIn || !clockOut) && input.work_date && input.hours != null) {
+    if (!(input.hours > 0 && input.hours <= 24)) return { ok: false, error: "Hours must be between 0 and 24." };
+    // Center the span on midday in the ORG tz; add the unpaid lunch to the span so the
+    // net paid hours come out exactly as stated (payroll deducts lunch from the span).
+    const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+    const tz = getOrgSettings((org as { settings?: unknown } | null)?.settings).timezone;
+    const spanMin = Math.round(input.hours * 60) + (input.lunch_minutes || 0);
+    const startMin = Math.max(0, 12 * 60 - Math.round(spanMin / 2));
+    const hh = String(Math.floor(startMin / 60)).padStart(2, "0");
+    const mm = String(startMin % 60).padStart(2, "0");
+    const startIso = tzDateTimeUtc(input.work_date, `${hh}:${mm}`, tz);
+    if (!startIso) return { ok: false, error: "I couldn't read that date." };
+    clockIn = startIso;
+    clockOut = new Date(new Date(startIso).getTime() + spanMin * 60_000).toISOString();
+    // Flag it so a reviewer knows the times are a placeholder span, not observed times.
+    notes = [notes?.trim(), `[duration-entered: ${input.hours}h]`].filter(Boolean).join(" ");
+  }
+  if (!clockIn || !clockOut) return { ok: false, error: "Need clock in & out times, or a work date + hours." };
+
+  const ci = new Date(clockIn);
+  const co = new Date(clockOut);
   if (isNaN(ci.getTime()) || isNaN(co.getTime())) {
     return { ok: false, error: "Invalid date/time." };
   }
@@ -499,7 +531,7 @@ export async function createManualEntry(input: {
     clock_in: ci.toISOString(),
     clock_out: co.toISOString(),
     lunch_minutes: input.lunch_minutes || 0,
-    notes: input.notes || null,
+    notes: notes || null,
     miles: input.miles ?? 0,
     rate_override: input.rate_override ?? null,
     status: "closed",

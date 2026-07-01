@@ -37,21 +37,24 @@ export const changeOrderActions: Record<string, ActionDef> = {
     group: "changeorder",
     label: "Edit change order",
     description:
-      "Edit a CHANGE ORDER's description, amount, or job_id. Resolve its id first. Edits a money amount, so the app asks the user to confirm before it runs.",
+      "Edit a CHANGE ORDER's description, amount, or job_id. Resolve its id first and pass ONLY the fields to change (an omitted field is left alone; job_id null unlinks the job). Edits a money amount, so the app asks the user to confirm before it runs.",
+    // A true PATCH: the old .default(0) silently ZEROED the dollar amount whenever an
+    // edit didn't repeat it (and an omitted job_id unlinked the job). Omitted = untouched.
     input: z.object({
       id: z.string(),
-      description: z.string().min(1),
-      amount: z.number().optional().default(0),
+      description: z.string().min(1).optional(),
+      amount: z.number().optional(),
       job_id: z.string().nullable().optional(),
     }),
     auth: "staff",
     effect: "write",
     confirm: "financial", // edits the dollar amount of a money record → tier 2
     handler: (i) => {
+      // Only append the keys actually present — updateChangeOrder patches by fd.has().
       const fd = new FormData();
-      fd.set("description", i.description);
-      fd.set("amount", String(i.amount ?? 0));
-      if (i.job_id) fd.set("job_id", i.job_id);
+      if (i.description !== undefined) fd.set("description", i.description);
+      if (i.amount !== undefined) fd.set("amount", String(i.amount));
+      if (i.job_id !== undefined) fd.set("job_id", i.job_id ?? ""); // "" → null (explicit unlink)
       return updateChangeOrder(i.id, fd);
     },
   },

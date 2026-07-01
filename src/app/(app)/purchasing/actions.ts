@@ -138,10 +138,12 @@ export async function setPoStatus(id: string, status: string): Promise<Result> {
   return { ok: true };
 }
 
-/** Edit a PO's header (vendor + linked job). Job id validated as visible via RLS. */
+/** Edit a PO's header (vendor + linked job). Job id validated as visible via RLS.
+ *  PATCH semantics: only the keys the caller sent are written — an omitted field never
+ *  touches its column (it used to reset the vendor to CED and unlink the job). */
 export async function updatePurchaseOrder(
   id: string,
-  patch: { vendor: string; job_id: string | null },
+  patch: { vendor?: string; job_id?: string | null },
 ): Promise<Result> {
   const supabase = await createClient();
   const {
@@ -149,20 +151,26 @@ export async function updatePurchaseOrder(
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
 
-  // Only accept a job the caller can actually see (RLS-scoped); otherwise clear it.
-  let jobId: string | null = null;
-  if (patch.job_id) {
-    const { data: job } = await supabase
-      .from("jobs")
-      .select("id")
-      .eq("id", patch.job_id)
-      .maybeSingle();
-    jobId = job?.id ?? null;
+  const clean: Record<string, unknown> = {};
+  if (patch.vendor !== undefined) clean.vendor = patch.vendor.trim() || "CED";
+  if (patch.job_id !== undefined) {
+    // Only accept a job the caller can actually see (RLS-scoped); otherwise clear it.
+    let jobId: string | null = null;
+    if (patch.job_id) {
+      const { data: job } = await supabase
+        .from("jobs")
+        .select("id")
+        .eq("id", patch.job_id)
+        .maybeSingle();
+      jobId = job?.id ?? null;
+    }
+    clean.job_id = jobId;
   }
+  if (Object.keys(clean).length === 0) return { ok: false, error: "Nothing to update." };
 
   const { error } = await supabase
     .from("purchase_orders")
-    .update({ vendor: patch.vendor.trim() || "CED", job_id: jobId })
+    .update(clean)
     .eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/purchasing");

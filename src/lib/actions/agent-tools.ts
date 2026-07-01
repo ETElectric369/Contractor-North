@@ -87,6 +87,10 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   "payment.requestNext",
   // Bug-watch: CIB can triage its own bug list (mark fixed / won't-fix).
   "bug.resolve",
+  // The one-field front door: any fragment → a private needs_review stub in the
+  // review inbox. Pure local insert (no AI call, nothing sent, no money) — tier-1,
+  // open to every role, so Nort can always "just write that down".
+  "capture.quick",
 ]);
 
 // Registry names are group.verb (a dot); Anthropic tool names can't contain dots.

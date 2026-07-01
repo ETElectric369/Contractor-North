@@ -50,8 +50,10 @@ export function InquiryFields({
   return (
     <div className="grid grid-cols-2 gap-3">
       <div className="col-span-2">
-        <Label htmlFor="name">Name *</Label>
-        <Input id="name" name="name" required value={value.name} onChange={(e) => onChange({ name: e.target.value })} placeholder="Contact name" />
+        {/* Fragment-first: a bare phone or note is a valid lead — name alone is
+            no longer required (the modal checks for ANY of name/phone/message). */}
+        <Label htmlFor="name">Name</Label>
+        <Input id="name" name="name" value={value.name} onChange={(e) => onChange({ name: e.target.value })} placeholder="Contact name (phone or note alone works)" />
       </div>
       <div className="col-span-2">
         <Label htmlFor="company_name">Company</Label>

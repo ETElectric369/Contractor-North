@@ -54,7 +54,10 @@ export async function createCustomer(formData: FormData): Promise<ActionResult> 
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
 
-  const name = String(formData.get("name") ?? "").trim();
+  const phone = orNull(formatPhone(String(formData.get("phone") ?? "")));
+  // Fragment-first: a bare phone number is a valid customer — default the name to it.
+  let name = String(formData.get("name") ?? "").trim();
+  if (!name && phone) name = phone;
   if (!name) return { ok: false, error: "Name is required." };
 
   const { data, error } = await supabase
@@ -65,7 +68,7 @@ export async function createCustomer(formData: FormData): Promise<ActionResult> 
       type: String(formData.get("type") ?? "residential"),
       status: String(formData.get("status") ?? "active"),
       email: emptyToNull(formData.get("email")),
-      phone: orNull(formatPhone(String(formData.get("phone") ?? ""))),
+      phone,
       address: emptyToNull(formData.get("address")),
       city: orNull(titleCase(String(formData.get("city") ?? ""))),
       state: orNull(formatState(String(formData.get("state") ?? ""))),
@@ -123,7 +126,9 @@ export async function updateCustomer(
 }
 
 /** Partial update — only the fields provided change (so the agent can fix a misspelled
- *  name or add a phone without wiping everything else). RLS scopes it to the org. */
+ *  name or add a phone without wiping everything else). An ABSENT key never touches its
+ *  column; an EXPLICIT null clears one (the old `!= null` checks silently ignored a
+ *  deliberate "remove their email"). RLS scopes it to the org. */
 export async function patchCustomer(
   id: string,
   patch: {
@@ -136,16 +141,16 @@ export async function patchCustomer(
   if ("error" in guard) return { ok: false, error: guard.error };
   const supabase = await createClient();
   const upd: Record<string, unknown> = {};
-  if (patch.type != null) upd.type = patch.type; // residential | commercial | industrial | subcontractor
-  if (patch.name != null) { const n = String(patch.name).trim(); if (!n) return { ok: false, error: "Name can't be empty." }; upd.name = n; }
-  if (patch.phone != null) upd.phone = orNull(formatPhone(String(patch.phone)));
-  if (patch.email != null) upd.email = emptyToNull(patch.email);
-  if (patch.company_name != null) upd.company_name = emptyToNull(patch.company_name);
-  if (patch.address != null) upd.address = emptyToNull(patch.address);
-  if (patch.city != null) upd.city = orNull(titleCase(String(patch.city)));
-  if (patch.state != null) upd.state = orNull(formatState(String(patch.state)));
-  if (patch.zip != null) upd.zip = orNull(formatZip(String(patch.zip)));
-  if (patch.notes != null) upd.notes = emptyToNull(patch.notes);
+  if (patch.type !== undefined) upd.type = patch.type; // residential | commercial | industrial | subcontractor
+  if (patch.name !== undefined) { const n = String(patch.name ?? "").trim(); if (!n) return { ok: false, error: "Name can't be empty." }; upd.name = n; }
+  if (patch.phone !== undefined) upd.phone = patch.phone == null ? null : orNull(formatPhone(String(patch.phone)));
+  if (patch.email !== undefined) upd.email = emptyToNull(patch.email);
+  if (patch.company_name !== undefined) upd.company_name = emptyToNull(patch.company_name);
+  if (patch.address !== undefined) upd.address = emptyToNull(patch.address);
+  if (patch.city !== undefined) upd.city = patch.city == null ? null : orNull(titleCase(String(patch.city)));
+  if (patch.state !== undefined) upd.state = patch.state == null ? null : orNull(formatState(String(patch.state)));
+  if (patch.zip !== undefined) upd.zip = patch.zip == null ? null : orNull(formatZip(String(patch.zip)));
+  if (patch.notes !== undefined) upd.notes = emptyToNull(patch.notes);
   if (Object.keys(upd).length === 0) return { ok: false, error: "Nothing to update." };
   const { error } = await supabase.from("customers").update(upd).eq("id", id);
   if (error) return { ok: false, error: error.message };

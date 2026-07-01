@@ -8,19 +8,35 @@ export const customerActions: Record<string, ActionDef> = {
     group: "customer",
     label: "Add customer",
     description:
-      "Create a contact record. Speech mangles names, so CONFIRM the spelling with the user before calling this (read it back, or have them spell a tricky one). Name + optional phone. Set type to 'subcontractor' for a sub / supplier / inspector (vs a residential/commercial/industrial client) so they can be linked to jobs.",
+      "Create a contact record. Speech mangles names, so CONFIRM the spelling with the user before calling this (read it back, or have them spell a tricky one). Name + whatever else was given — phone, email, company, address/city/state/zip, notes. Set type to 'subcontractor' for a sub / supplier / inspector (vs a residential/commercial/industrial client) so they can be linked to jobs.",
+    // Fragment-first: the columns are all nullable and createCustomer already reads every
+    // one of these — the old 3-field schema silently DROPPED a spoken address/email.
     input: z.object({
       name: z.string().min(1),
       phone: z.string().nullable().optional(),
+      email: z.string().nullable().optional(),
+      company_name: z.string().nullable().optional(),
+      address: z.string().nullable().optional(),
+      city: z.string().nullable().optional(),
+      state: z.string().nullable().optional(),
+      zip: z.string().nullable().optional(),
+      notes: z.string().nullable().optional(),
       type: z.enum(["residential", "commercial", "industrial", "subcontractor"]).optional(),
     }),
     auth: "staff",
     effect: "write",
-    // Reuse the canonical createCustomer (phone formatting, defaults) via a FormData.
+    // Reuse the canonical createCustomer (phone/state/zip formatting, defaults) via a FormData.
     handler: (i) => {
       const fd = new FormData();
       fd.set("name", i.name);
       if (i.phone) fd.set("phone", i.phone);
+      if (i.email) fd.set("email", i.email);
+      if (i.company_name) fd.set("company_name", i.company_name);
+      if (i.address) fd.set("address", i.address);
+      if (i.city) fd.set("city", i.city);
+      if (i.state) fd.set("state", i.state);
+      if (i.zip) fd.set("zip", i.zip);
+      if (i.notes) fd.set("notes", i.notes);
       if (i.type) fd.set("type", i.type);
       return createCustomer(fd);
     },

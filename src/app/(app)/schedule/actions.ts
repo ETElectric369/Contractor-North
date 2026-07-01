@@ -5,7 +5,7 @@ import { emptyToNull } from "@/lib/forms";
 import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
 import { getOrgSettings } from "@/lib/org-settings";
-import { tzLocalHourUtc } from "@/lib/tz";
+import { todayStrInTz, tzLocalHourUtc } from "@/lib/tz";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type Result = { ok: boolean; error?: string; id?: string };
@@ -38,10 +38,8 @@ export async function createJob(formData: FormData): Promise<Result> {
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
 
-  const name = String(formData.get("name") ?? "").trim();
-  if (!name) return { ok: false, error: "Job name is required." };
-
   const start = String(formData.get("scheduled_start") ?? "");
+  const address = emptyToNull(formData.get("address"));
 
   // Optionally create a customer inline (when no existing one is selected).
   let customerId = emptyToNull(formData.get("customer_id"));
@@ -62,6 +60,24 @@ export async function createJob(formData: FormData): Promise<Result> {
     customerId = cust.id;
   }
 
+  // Fragment-first: a bare address (or just a customer) is a valid start — never
+  // make the caller invent a name. Default: address → customer's name → dated stub.
+  let name = String(formData.get("name") ?? "").trim();
+  if (!name && address) name = address;
+  if (!name && customerId) {
+    if (newCustomerName) {
+      name = newCustomerName;
+    } else {
+      const { data: cust } = await supabase.from("customers").select("name").eq("id", customerId).maybeSingle();
+      name = String(cust?.name ?? "").trim();
+    }
+  }
+  if (!name) {
+    const tz = await orgTimezone(supabase); // org-local date, not the server's UTC day
+    const day = new Date(`${todayStrInTz(tz)}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+    name = `New job — ${day}`;
+  }
+
   const { data, error } = await supabase
     .from("jobs")
     .insert({
@@ -70,7 +86,7 @@ export async function createJob(formData: FormData): Promise<Result> {
       description: emptyToNull(formData.get("description")),
       status: String(formData.get("status") ?? "estimate"),
       billing_type: String(formData.get("billing_type") ?? "tm"), // T&M is the default now (Estimate); switch to fixed per job
-      address: emptyToNull(formData.get("address")),
+      address,
       scheduled_start: start ? new Date(start).toISOString() : null,
       created_by: ctx.userId,
     })

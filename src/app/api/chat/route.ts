@@ -453,7 +453,14 @@ export async function POST(req: Request) {
                   };
                   out = JSON.stringify({ ok: false, awaitingUserConfirmation: true });
                 } else {
-                  out = JSON.stringify({ ok: res.ok, error: res.error ?? null, ...(res.data ? { data: res.data } : {}) });
+                  // missingFields rides through so Nort can ask for exactly what's absent
+                  // ("I've got the job — still need the hours") instead of parroting "Required".
+                  out = JSON.stringify({
+                    ok: res.ok,
+                    error: res.error ?? null,
+                    ...(res.missingFields?.length ? { missingFields: res.missingFields } : {}),
+                    ...(res.data ? { data: res.data } : {}),
+                  });
                 }
               }
             } else {

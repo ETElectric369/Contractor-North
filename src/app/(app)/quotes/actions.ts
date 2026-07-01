@@ -185,20 +185,25 @@ export async function addQuoteItem(
 export async function updateQuoteItem(
   itemId: string,
   quoteId: string,
-  item: { description: string; quantity: number; unit?: string; unit_price: number },
+  item: { description?: string; quantity?: number; unit?: string; unit_price?: number },
 ): Promise<{ ok: boolean; error?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
-  if (!item.description.trim()) return { ok: false, error: "Description is required." };
+  // PATCH semantics (mirrors updateBill): write ONLY the keys the caller sent — an
+  // omitted field never touches its column (it used to reset unit to "ea", qty to 1…).
+  const clean: Record<string, unknown> = {};
+  if (item.description !== undefined) {
+    if (!item.description.trim()) return { ok: false, error: "Description is required." };
+    clean.description = item.description.trim();
+  }
+  if (item.quantity !== undefined) clean.quantity = item.quantity || 1;
+  if (item.unit !== undefined) clean.unit = item.unit.trim() || "ea";
+  if (item.unit_price !== undefined) clean.unit_price = item.unit_price || 0;
+  if (Object.keys(clean).length === 0) return { ok: false, error: "Nothing to update." };
   const { error } = await supabase
     .from("quote_line_items")
-    .update({
-      description: item.description.trim(),
-      quantity: item.quantity || 1,
-      unit: item.unit?.trim() || "ea",
-      unit_price: item.unit_price || 0,
-    })
+    .update(clean)
     .eq("id", itemId);
   if (error) return { ok: false, error: error.message };
   await recalcQuote(supabase, quoteId);
@@ -222,22 +227,25 @@ export async function deleteQuoteItem(
   return { ok: true };
 }
 
-/** Edit quote header fields: title, notes, tax rate (fraction), valid-until. */
+/** Edit quote header fields: title, notes, tax rate (fraction), valid-until.
+ *  PATCH semantics (mirrors updateBill): only the keys the caller sent are written —
+ *  an omitted field never touches its column. An explicit "" / null clears. */
 export async function updateQuoteMeta(
   quoteId: string,
-  meta: { title: string; notes: string; tax_rate: number; valid_until: string | null },
+  meta: { title?: string; notes?: string; tax_rate?: number; valid_until?: string | null },
 ): Promise<{ ok: boolean; error?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  const clean: Record<string, unknown> = {};
+  if (meta.title !== undefined) clean.title = meta.title.trim() || null;
+  if (meta.notes !== undefined) clean.notes = meta.notes.trim() || null;
+  if (meta.tax_rate !== undefined) clean.tax_rate = meta.tax_rate || 0;
+  if (meta.valid_until !== undefined) clean.valid_until = meta.valid_until;
+  if (Object.keys(clean).length === 0) return { ok: false, error: "Nothing to update." };
   const { error } = await supabase
     .from("quotes")
-    .update({
-      title: meta.title.trim() || null,
-      notes: meta.notes.trim() || null,
-      tax_rate: meta.tax_rate || 0,
-      valid_until: meta.valid_until,
-    })
+    .update(clean)
     .eq("id", quoteId);
   if (error) return { ok: false, error: error.message };
   await recalcQuote(supabase, quoteId);
