@@ -9,7 +9,6 @@ import { WoStatusControl } from "./wo-status-control";
 import { WoEditButton } from "./wo-edit-button";
 import { SectionActionsMenu } from "@/components/section-actions-menu";
 import { workOrderSectionTree } from "@/lib/nav-tree";
-import { DeleteButton } from "@/components/delete-button";
 import { deleteWorkOrder } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -63,15 +62,11 @@ export default async function WorkOrderDetailPage({
           </div>
           <p className="mt-1 text-lg text-slate-700">{w.title}</p>
         </div>
+        {/* Impulse verbs stay visible (Print / advance status); the ⋯ Actions menu
+            rides LAST as the seek door — Edit (modal-owning menu row), the source
+            estimate, and Delete (danger, last). Job/Customer links live in the
+            cards below, so they're not duplicated here. */}
         <div className="flex flex-wrap items-center gap-2">
-          <SectionActionsMenu
-            tree={workOrderSectionTree(w.id, w.wo_number, {
-              jobId: w.jobs?.id ?? null,
-              customerId: w.customers?.id ?? null,
-              quoteId: (w as any).quote_id ?? null,
-            })}
-          />
-          <WoEditButton wo={w} jobs={jobs ?? []} techs={techs ?? []} />
           <Link
             href={`/print/work-order/${w.id}`}
             className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
@@ -79,11 +74,18 @@ export default async function WorkOrderDetailPage({
             <Printer className="h-4 w-4" /> Print / PDF
           </Link>
           <WoStatusControl id={w.id} status={w.status} />
-          <DeleteButton
-            run={deleteWorkOrder.bind(null, w.id)}
-            confirmText={`Delete work order ${w.wo_number}?`}
-            redirectTo="/work-orders"
-          />
+          <SectionActionsMenu
+            tree={workOrderSectionTree(
+              w.wo_number,
+              { quoteId: (w as any).quote_id ?? null },
+              {
+                run: deleteWorkOrder.bind(null, w.id),
+                confirm: `Delete work order ${w.wo_number}?`,
+              },
+            )}
+          >
+            <WoEditButton menuItem wo={w} jobs={jobs ?? []} techs={techs ?? []} />
+          </SectionActionsMenu>
         </div>
       </div>
 

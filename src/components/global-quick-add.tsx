@@ -2,29 +2,41 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Zap, ListTodo, Briefcase, CalendarPlus, FileText, Receipt, Camera, UserPlus, UserSearch, X } from "lucide-react";
+import { Plus, Zap, ListTodo, Briefcase, CalendarPlus, FileText, Receipt, UserPlus, UserSearch, X, type LucideIcon } from "lucide-react";
 import { QuickCaptureSheet } from "@/components/quick-capture";
 
 // Add-cost is NOT here — it lives on My Day's Now card + the job header (job-scoped,
 // works cleanly). A self-loading copy in this dropdown was redundant + fiddly.
+// "Snap & file (Organize My)" is gone too: it was a second door into the same
+// organized_items inbox "Capture anything" already feeds — one capture door;
+// /organize stays one dock tap away under Today.
 // Every verb lands on the CREATE affordance, not a list to hunt through: a
 // ?new=1 param the target page reads to auto-open its "new" modal (the pattern
 // /crm already uses), or a route that IS the form (/quotes/new). Don't drop the
 // user on a list and make them find the + again.
-const ACTIONS = [
+// staffOnly mirrors the dock/strip/palette gating — a tech tapping "New appointment"
+// was silently redirected to /planner by the staff gate; techs create tasks + jobs.
+const ACTIONS: { label: string; href: string; icon: LucideIcon; staffOnly?: boolean }[] = [
   { label: "New task", href: "/tasks?new=1", icon: ListTodo },
-  { label: "New lead", href: "/leads?new=1", icon: UserSearch },
-  { label: "New customer", href: "/crm?new=1", icon: UserPlus },
+  { label: "New lead", href: "/leads?new=1", icon: UserSearch, staffOnly: true },
+  { label: "New customer", href: "/crm?new=1", icon: UserPlus, staffOnly: true },
   { label: "New job", href: "/jobs?new=1", icon: Briefcase },
-  { label: "New appointment", href: "/schedule?view=appointments&new=1", icon: CalendarPlus },
-  { label: "New estimate", href: "/quotes/new", icon: FileText },
-  { label: "New invoice", href: "/billing?new=1", icon: Receipt },
-  { label: "Snap & file (Organize My)", href: "/organize", icon: Camera },
+  { label: "New appointment", href: "/schedule?view=appointments&new=1", icon: CalendarPlus, staffOnly: true },
+  { label: "New estimate", href: "/quotes/new", icon: FileText, staffOnly: true },
+  { label: "New invoice", href: "/billing?new=1", icon: Receipt, staffOnly: true },
 ];
 
 /** Quick "+" create menu. `placement="topbar"` renders an inline button with a
- *  dropdown; the default is a movable floating FAB. */
-export function GlobalQuickAdd({ placement = "fab" }: { placement?: "fab" | "topbar" }) {
+ *  dropdown; the default is a movable floating FAB. `isStaff` gates the staff-only
+ *  creates the same way the dock/strip/palette already do (defaults to false —
+ *  the mount site passes the role, so an unwired mount never over-shows). */
+export function GlobalQuickAdd({
+  placement = "fab",
+  isStaff = false,
+}: {
+  placement?: "fab" | "topbar";
+  isStaff?: boolean;
+}) {
   const router = useRouter();
   const [pos, setPos] = useState({ x: 20, y: 168 }); // above the mic, clearing the floating glass bottom nav
   const [open, setOpen] = useState(false);
@@ -52,7 +64,7 @@ export function GlobalQuickAdd({ placement = "fab" }: { placement?: "fab" | "top
       >
         <Zap className="h-4 w-4 text-[rgb(var(--glass-ink))]" /> Capture anything
       </button>
-      {ACTIONS.map((a) => (
+      {ACTIONS.filter((a) => isStaff || !a.staffOnly).map((a) => (
         <button
           key={a.href}
           onClick={() => {

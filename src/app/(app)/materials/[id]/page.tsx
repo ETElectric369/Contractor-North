@@ -4,11 +4,11 @@ import { ArrowLeft, Briefcase, ListChecks } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { formatDate } from "@/lib/utils";
 import { ItemEditor } from "./item-editor";
-import { DeleteListButton } from "./delete-list-button";
 import { RenameListButton } from "./rename-list-button";
 import { NewPoButton } from "../../purchasing/new-po-button";
 import { SectionActionsMenu } from "@/components/section-actions-menu";
 import { materialListSectionTree } from "@/lib/nav-tree";
+import { deleteMaterialList } from "../actions";
 
 export const dynamic = "force-dynamic";
 
@@ -72,8 +72,10 @@ export default async function MaterialListPage({
             )}
           </div>
         </div>
+        {/* Impulse verbs stay visible (Pick list / New PO); the ⋯ Actions menu
+            rides LAST as the seek door — source estimate + Delete (danger, last).
+            The job link lives in the meta row above, so it's not duplicated. */}
         <div className="flex flex-wrap items-center gap-2">
-          <SectionActionsMenu tree={materialListSectionTree(l.id, l.name, { jobId: l.jobs?.id ?? null, quoteId: (l as any).quote_id ?? null })} />
           <Link
             href={`/print/material-list/${l.id}`}
             className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
@@ -84,7 +86,16 @@ export default async function MaterialListPage({
             jobs={l.jobs ? [{ id: l.jobs.id, job_number: l.jobs.job_number, name: l.jobs.name }] : []}
             lists={[{ id: l.id, name: l.name }]}
           />
-          <DeleteListButton listId={l.id} />
+          <SectionActionsMenu
+            tree={materialListSectionTree(
+              l.name,
+              { quoteId: (l as any).quote_id ?? null },
+              {
+                run: deleteMaterialList.bind(null, l.id),
+                confirm: "Delete this material list and all its items?",
+              },
+            )}
+          />
         </div>
       </div>
 

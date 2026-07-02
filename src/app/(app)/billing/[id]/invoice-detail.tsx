@@ -613,7 +613,9 @@ export function InvoiceDetail({
           </CardContent>
         </Card>
 
-        <Card>
+        {/* id + scroll-mt: the header's "Record payment" impulse button anchor-jumps
+            here (at 375px this card stacks below the whole line-items editor). */}
+        <Card id="record-payment" className="scroll-mt-24">
           <CardContent className="space-y-3 py-5">
             <h3 className="text-sm font-semibold text-slate-900">Record payment</h3>
             {/* You can't collect on an invoice you haven't billed yet. On an unsent

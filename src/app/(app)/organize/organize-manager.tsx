@@ -282,7 +282,8 @@ export function OrganizeManager({
     );
   }
 
-  /** Needs-attention card: full filing exits + AI review + archive + delete. */
+  /** Needs-attention card: full filing exits + AI review + archive. Archive is the
+   *  safe inline remove — hard Delete lives only on archived (already-triaged) cards. */
   function AttentionCard({ item }: { item: OrganizedItemRow }) {
     const meta = KIND_META[item.kind] ?? KIND_META.job_document;
     return (
@@ -361,14 +362,6 @@ export function OrganizeManager({
               <Button size="sm" variant="outline" onClick={() => archive(item)} disabled={pending}>
                 <Archive className="h-3.5 w-3.5" /> Archive
               </Button>
-              <button
-                onClick={() => remove(item)}
-                disabled={pending}
-                className="ml-auto rounded-md p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                title="Delete"
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
             </div>
           </div>
         </div>
@@ -399,9 +392,6 @@ export function OrganizeManager({
           </button>
           <button onClick={() => setEditing(item)} disabled={pending} className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Edit details">
             <Pencil className="h-4 w-4" />
-          </button>
-          <button onClick={() => restore(item)} disabled={pending} className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Back to needs-attention">
-            <RotateCcw className="h-4 w-4" />
           </button>
           <button onClick={() => remove(item)} disabled={pending} className="rounded-md p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" title="Delete">
             <Trash2 className="h-4 w-4" />

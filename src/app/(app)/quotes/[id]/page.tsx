@@ -13,7 +13,6 @@ import { EmailButton } from "@/components/email-button";
 import { SectionActionsMenu } from "@/components/section-actions-menu";
 import { QuoteTypeToggle } from "./quote-type-toggle";
 import type { NavTree } from "@/lib/nav-tree";
-import { DeleteButton } from "@/components/delete-button";
 import { createJobFromQuote, deleteQuote } from "../actions";
 import { createMaterialListFromQuote } from "../../materials/actions";
 import { createWorkOrderFromQuote } from "../../work-orders/actions";
@@ -58,13 +57,14 @@ export default async function QuoteDetailPage({
     supabase.from("customers").select("id, name, company_name").order("name"),
   ]);
 
-  // The quote's whole "neighborhood" — what it connects to AND what it can
-  // become — as one map. Conversion nodes (with `run`) create the record then
-  // open it; relationship nodes navigate.
+  // The quote's seek door: what it can BECOME (idempotent conversion nodes —
+  // `run` creates the record then opens it; once minted they flip to "View …")
+  // plus Print (the page's only print door) and Delete, danger-styled, last.
+  // The Customer and All-quotes links were pruned: the CustomerSelect card and
+  // the Back breadcrumb already carry them on-page (one map per territory).
   const quoteMap: NavTree = {
     center: { label: q.quote_number, icon: "fileText" },
     nodes: [
-      ...(q.customers ? [{ id: "qm-cust", label: "Customer", icon: "users", href: `/crm/${q.customers.id}` }] : []),
       existingInv
         ? { id: "qm-inv", label: "View invoice", icon: "receipt", href: `/billing/${existingInv.id}` }
         : { id: "qm-inv", label: "Create invoice", icon: "receipt", run: createInvoiceFromQuote.bind(null, q.id), hrefPrefix: "/billing/" },
@@ -82,7 +82,15 @@ export default async function QuoteDetailPage({
           ]
         : []),
       { id: "qm-print", label: "Print / PDF", icon: "fileSpreadsheet", href: `/print/quote/${q.id}` },
-      { id: "qm-all", label: "All quotes", icon: "list", href: "/quotes" },
+      {
+        id: "qm-del",
+        label: "Delete quote",
+        icon: "trash",
+        danger: true,
+        confirmText: `Delete quote ${q.quote_number}? Its line items go with it.`,
+        run: deleteQuote.bind(null, q.id),
+        href: "/quotes",
+      },
     ],
   };
 
@@ -108,16 +116,13 @@ export default async function QuoteDetailPage({
             {q.valid_until ? ` · Valid until ${formatDate(q.valid_until)}` : ""}
           </p>
         </div>
+        {/* Impulse verbs first (Send / advance status / Duplicate); the ⋯ Actions
+            menu rides LAST — the one seek door, holding conversions + Delete. */}
         <div className="flex flex-wrap items-center gap-2">
           <EmailButton id={q.id} kind="quote" />
-          <DuplicateQuoteButton id={q.id} />
-          <SectionActionsMenu tree={quoteMap} label="Convert / connect" />
           <StatusControl id={q.id} status={q.status} />
-          <DeleteButton
-            run={deleteQuote.bind(null, q.id)}
-            confirmText={`Delete quote ${q.quote_number}? Its line items go with it.`}
-            redirectTo="/quotes"
-          />
+          <DuplicateQuoteButton id={q.id} />
+          <SectionActionsMenu tree={quoteMap} />
         </div>
       </div>
 

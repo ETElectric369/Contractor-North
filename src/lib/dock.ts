@@ -56,6 +56,10 @@ export interface DockNode {
   header?: boolean;
   /** Hidden from techs (office/admin/owner only). */
   staffOnly?: boolean;
+  /** Extra route prefixes this page owns for active-section matching — routes that live
+   *  under a different path than the child's href (e.g. Bills & POs owns /purchasing:
+   *  PO detail pages live there but belong to Money). Never rendered as links. */
+  owns?: string[];
 }
 
 /** A top-level dock section. `href` is where a one-click on the title goes; `children`
@@ -169,7 +173,7 @@ export const DOCK: DockSection[] = [
       { id: "m-billing-h", label: "Billing", icon: Receipt, header: true },
       { id: "m-inv", label: "Invoices", icon: Receipt, href: "/billing" },
       { id: "m-pay", label: "Payments", icon: CreditCard, href: "/payments" },
-      { id: "m-bills", label: "Bills & POs", icon: Wallet, href: "/bills" },
+      { id: "m-bills", label: "Bills & POs", icon: Wallet, href: "/bills", owns: ["/purchasing"] },
       { id: "m-price", label: "Price list", icon: Tags, href: "/price-list" },
       // Money admin — promoted out of Office (Alexa's open "under billing?" call, now answered).
       { id: "m-ma-h", label: "Money admin", icon: Calculator, header: true },
@@ -235,3 +239,34 @@ export const DOCK: DockSection[] = [
     children: [{ id: "tl-all", label: "Calculators & tools", icon: Wrench, href: "/tools" }],
   },
 ];
+
+/** Path part of an href — the bit before any ?query (shared by every dock renderer). */
+export const basePath = (href: string) => href.split("?")[0];
+
+/**
+ * THE active-section matcher — the single copy used by the desktop dock rail, the phone
+ * bottom tiles AND the mobile SectionSubnav strip. (It was triplicated across those three
+ * and drifting: none prefix-matched child routes, so /quotes/abc lit "Today" on desktop,
+ * zero tiles on mobile, and the strip vanished by accident.)
+ *
+ * A section owns a pathname when the pathname is the section href, sits under it, is one
+ * of the section's child pages, sits under one of them (the detail routes: /quotes/[id],
+ * /work-orders/[id], /forms/[id]…), or matches a child's `owns` alias prefixes
+ * (/purchasing/[id] belongs to Money's Bills & POs).
+ *
+ * Returns undefined when nothing owns the route — light NOTHING rather than lie. (The old
+ * dock.tsx `?? sections[0]` fallback lit "Today" on every orphan route: an actively wrong
+ * map.) Pass the role-filtered section list so a tech never lights a staff-only tile.
+ * Guarded by dock.test.ts — one case per [id] route family.
+ */
+export function activeSection(
+  pathname: string,
+  sections: DockSection[] = DOCK,
+): DockSection | undefined {
+  const under = (base: string) => pathname === base || pathname.startsWith(base + "/");
+  return sections.find(
+    (s) =>
+      under(s.href) ||
+      s.children.some((c) => (c.href ? under(basePath(c.href)) : false) || c.owns?.some(under)),
+  );
+}

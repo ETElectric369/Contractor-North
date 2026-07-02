@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, User, FileText, Printer, CreditCard } from "lucide-react";
+import { ArrowLeft, User, FileText, Printer, CreditCard, Banknote } from "lucide-react";
 import { billingEnabled } from "@/lib/stripe";
 import { qboConfigured } from "@/lib/quickbooks";
 import { QboInvoiceButton } from "./qbo-button";
@@ -12,7 +12,6 @@ import { CreditButton } from "./credit-button";
 import { EmailButton } from "@/components/email-button";
 import { SectionActionsMenu } from "@/components/section-actions-menu";
 import { invoiceSectionTree } from "@/lib/nav-tree";
-import { DeleteButton } from "@/components/delete-button";
 import { deleteInvoice } from "../actions";
 import { getOrgSettings } from "@/lib/org-settings";
 import { jobProgressFinancials } from "@/lib/job-financials";
@@ -114,6 +113,9 @@ export default async function InvoicePage({
           )}
         </div>
         </div>
+        {/* The impulse row holds the frequent verbs (Send / Record payment / Print);
+            the ⋯ Actions menu (last) is the seek door for the rare deliberate ones —
+            Credit/refund, QuickBooks, the Job link, and Delete (danger, last). */}
         <div className="flex flex-wrap items-center gap-2 self-start">
           {/* Collect-payment is only meaningful once the invoice is actually billed:
               you can't collect on an unsent draft. Hidden until it leaves draft. */}
@@ -133,29 +135,40 @@ export default async function InvoicePage({
             customerName={inv.customers?.name ?? null}
             amount={Number(inv.total)}
           />
-          <CreditButton
-            invoiceId={inv.id}
-            defaultAmount={Math.max(0, Number(inv.amount_paid) - Number(inv.total))}
-          />
-          <SectionActionsMenu
-            tree={invoiceSectionTree(inv.id, inv.invoice_number, {
-              customerId: inv.customers?.id ?? null,
-              quoteId: inv.quotes?.id ?? null,
-              jobId: (inv as any).job_id ?? null,
-            })}
-          />
+          {/* Record payment — THE gloves-on invoice verb — jumps to the existing
+              form (right column, several screens down at 375px). Like the in-body
+              form it only exists once the invoice has left draft. */}
+          {!isDraft && (
+            <a
+              href="#record-payment"
+              className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark"
+            >
+              <Banknote className="h-4 w-4" /> Record payment
+            </a>
+          )}
           <Link
             href={`/print/invoice/${inv.id}`}
             className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
           >
             <Printer className="h-4 w-4" /> Preview / Print
           </Link>
-          {qboConfigured() && <QboInvoiceButton id={inv.id} />}
-          <DeleteButton
-            run={deleteInvoice.bind(null, inv.id)}
-            confirmText={`Delete ${inv.invoice_number}? Only allowed while no payments are recorded.`}
-            redirectTo="/billing"
-          />
+          <SectionActionsMenu
+            tree={invoiceSectionTree(
+              inv.invoice_number,
+              { jobId: (inv as any).job_id ?? null },
+              {
+                run: deleteInvoice.bind(null, inv.id),
+                confirm: `Delete ${inv.invoice_number}? Only allowed while no payments are recorded.`,
+              },
+            )}
+          >
+            <CreditButton
+              menuItem
+              invoiceId={inv.id}
+              defaultAmount={Math.max(0, Number(inv.amount_paid) - Number(inv.total))}
+            />
+            {qboConfigured() && <QboInvoiceButton menuItem id={inv.id} />}
+          </SectionActionsMenu>
         </div>
       </div>
 

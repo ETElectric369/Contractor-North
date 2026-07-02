@@ -72,6 +72,9 @@ export function NewTaskBox({
   const [priority, setPriority] = useState(0);
   const [assignedTo, setAssignedTo] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // Collapsed by default: one "Add a task…" field + Add. The category/job/assignee/
+  // due/priority details reveal on focus — the quick capture stays a ~60px row.
+  const [expanded, setExpanded] = useState(false);
   const titleRef = useRef<HTMLInputElement>(null);
 
   // Land ready to type from the quick-add menu's "New task" (/tasks?new=1),
@@ -116,46 +119,51 @@ export function NewTaskBox({
             ref={titleRef}
             value={title}
             onChange={(e) => setTitle(e.target.value)}
+            onFocus={() => setExpanded(true)}
             onKeyDown={(e) => e.key === "Enter" && add()}
             placeholder="Add a task…"
             className="min-w-[200px] flex-1"
           />
-          <Select
-            value={category}
-            onChange={(e) => setCategory(e.target.value as TaskCategory)}
-            className="w-36"
-            aria-label="Category"
-          >
-            {CATEGORIES.map((c) => (
-              <option key={c.id} value={c.id}>{c.label}</option>
-            ))}
-          </Select>
+          {expanded && (
+            <Select
+              value={category}
+              onChange={(e) => setCategory(e.target.value as TaskCategory)}
+              className="w-36"
+              aria-label="Category"
+            >
+              {CATEGORIES.map((c) => (
+                <option key={c.id} value={c.id}>{c.label}</option>
+              ))}
+            </Select>
+          )}
           <Button onClick={add} disabled={pending || !title.trim()}>
             <Plus className="h-4 w-4" /> Add
           </Button>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Select value={jobId} onChange={(e) => setJobId(e.target.value)} className="w-48 text-xs" aria-label="Job">
-            <option value="">No job</option>
-            {jobs.map((j) => (
-              <option key={j.id} value={j.id}>{j.job_number} · {j.name}</option>
-            ))}
-          </Select>
-          {people.length > 0 && (
-            <Select value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)} className="w-40 text-xs" aria-label="Assigned to">
-              <option value="">Unassigned</option>
-              {people.map((p) => (
-                <option key={p.id} value={p.id}>{p.full_name ?? "Unnamed"}</option>
+        {expanded && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Select value={jobId} onChange={(e) => setJobId(e.target.value)} className="w-48 text-xs" aria-label="Job">
+              <option value="">No job</option>
+              {jobs.map((j) => (
+                <option key={j.id} value={j.id}>{j.job_number} · {j.name}</option>
               ))}
             </Select>
-          )}
-          <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="w-40 text-xs" aria-label="Due date" />
-          <Select value={priority} onChange={(e) => setPriority(Number(e.target.value))} className="w-28 text-xs" aria-label="Priority">
-            {PRIORITIES.map((p) => (
-              <option key={p.value} value={p.value}>{p.label}</option>
-            ))}
-          </Select>
-        </div>
+            {people.length > 0 && (
+              <Select value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)} className="w-40 text-xs" aria-label="Assigned to">
+                <option value="">Unassigned</option>
+                {people.map((p) => (
+                  <option key={p.id} value={p.id}>{p.full_name ?? "Unnamed"}</option>
+                ))}
+              </Select>
+            )}
+            <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="w-40 text-xs" aria-label="Due date" />
+            <Select value={priority} onChange={(e) => setPriority(Number(e.target.value))} className="w-28 text-xs" aria-label="Priority">
+              {PRIORITIES.map((p) => (
+                <option key={p.value} value={p.value}>{p.label}</option>
+              ))}
+            </Select>
+          </div>
+        )}
       </div>
     </Card>
   );

@@ -144,10 +144,6 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   const staffOpts = toStaffOptions(staff);
   const people = (staff ?? []).map((s: any) => ({ id: s.id, full_name: s.full_name }));
   const openInquiries = leadsCount.count ?? 0;
-  // ONE outstanding number: the snapshot stat reads the SAME pipeline as the money
-  // line above, so both agree (unpaid balances, drafts excluded). Was a parallel
-  // sum that counted drafts and disagreed with the money line.
-  const outstanding = pipeline?.outstandingTotal ?? 0;
 
   const niceDay = prettyDay(todayStr);
   const empty = (label: string) => <p className="px-5 py-6 text-center text-sm text-slate-400">{label}</p>;
@@ -322,13 +318,28 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       <RefreshOnVisible />
       <PageHeader title="My Day" description={niceDay} />
 
-      <div className="mb-3 flex gap-1">
+      {/* Live time clock — clock in/out is the app's #1 impulse verb, so it sits
+          first, at scroll position zero, doubling as the on-the-clock status line. */}
+      <DayClock
+        open={openEntry ? { id: openEntry.id, clock_in: openEntry.clock_in, jobLabel: openJobLabel } : null}
+        closedHoursToday={hoursToday}
+        closedHoursWeek={hoursWeek}
+        currentJobId={currentJob?.id ?? ""}
+        jobs={clockJobs}
+        isStaff={isStaff}
+      />
+
+      {/* Day/Week view toggle — one joined segmented control, deliberately NOT the
+          nav-pill grammar: the "My day" strip pill above stays the only brand-lit
+          indicator on this surface. */}
+      <div className="mb-3 inline-flex items-center rounded-lg border border-slate-200 bg-white p-0.5">
         {(["day", "week"] as const).map((v) => (
           <Link
             key={v}
             href={`/planner?view=${v}`}
-            className={`rounded-lg px-3.5 py-1.5 text-sm font-medium ${
-              view === v ? "bg-brand text-white shadow-sm" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+            aria-current={view === v ? "page" : undefined}
+            className={`rounded-md px-3.5 py-1 text-sm font-medium ${
+              view === v ? "bg-slate-100 text-slate-900" : "text-slate-500 hover:text-slate-700"
             }`}
           >
             {v === "day" ? "Day" : "Week"}
@@ -344,8 +355,12 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         />
       </div>
 
-      {/* MONEY LINE — the daily "nothing slipped" nudge. Stays until every job is invoiced + paid. */}
-      {pipeline && (pipeline.doneNotInvoiced.length > 0 || pipeline.drafts.length > 0 || pipeline.unpaid.length > 0) && (
+      {/* MONEY LINE — the daily "nothing slipped" nudge. ONE money map on My Day:
+          this line carries the pipeline totals (to invoice + unpaid/outstanding);
+          draft/overdue invoices are NOT re-counted here — they surface as actionable
+          rows in the Needs-action inbox below. Two maps of /billing on one page
+          already disagreed once (the old parallel Outstanding sum). */}
+      {pipeline && (pipeline.doneNotInvoiced.length > 0 || pipeline.unpaid.length > 0) && (
         <Link
           href="/billing"
           className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm hover:bg-slate-50"
@@ -354,14 +369,8 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           {pipeline.doneNotInvoiced.length > 0 && (
             <span className="text-rose-700"><strong>{pipeline.doneNotInvoiced.length}</strong> to invoice{pipeline.toInvoiceTotal > 0 ? ` · ${formatCurrency(pipeline.toInvoiceTotal)}` : ""}</span>
           )}
-          {pipeline.drafts.length > 0 && (
-            <span className="text-amber-700"><strong>{pipeline.drafts.length}</strong> draft{pipeline.drafts.length === 1 ? "" : "s"} to send{pipeline.draftTotal > 0 ? ` · ${formatCurrency(pipeline.draftTotal)}` : ""}</span>
-          )}
           {pipeline.unpaid.length > 0 && (
             <span className="text-slate-600"><strong>{pipeline.unpaid.length}</strong> unpaid · {formatCurrency(pipeline.outstandingTotal)}</span>
-          )}
-          {pipeline.overdueCount > 0 && (
-            <span className="font-semibold text-red-600"><strong>{pipeline.overdueCount}</strong> overdue · {formatCurrency(pipeline.overdueTotal)}</span>
           )}
           <span className="ml-auto text-xs font-medium text-brand">Open Billing →</span>
         </Link>
@@ -500,16 +509,6 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         </Card>
       )}
 
-      {/* Live time clock — tick + one-tap clock in/out */}
-      <DayClock
-        open={openEntry ? { id: openEntry.id, clock_in: openEntry.clock_in, jobLabel: openJobLabel } : null}
-        closedHoursToday={hoursToday}
-        closedHoursWeek={hoursWeek}
-        currentJobId={currentJob?.id ?? ""}
-        jobs={clockJobs}
-        isStaff={isStaff}
-      />
-
       {/* Quick stats */}
       <div className="mb-4 grid grid-cols-2 gap-3">
         <Card className="flex flex-col items-center py-4">
@@ -524,7 +523,8 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         </Card>
       </div>
 
-      {/* Owner snapshot — what "Overview" used to surface, folded into My Day */}
+      {/* Owner snapshot — what "Overview" used to surface, folded into My Day.
+          No Outstanding card here: the money line up top is the ONE money map. */}
       {isStaff && (
         <div className="mb-4 grid grid-cols-2 gap-3">
           <Link href="/leads" className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 hover:bg-slate-50">
@@ -534,15 +534,6 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
             <div>
               <div className="text-lg font-bold text-slate-900">{openInquiries}</div>
               <div className="text-xs text-slate-500">Open leads</div>
-            </div>
-          </Link>
-          <Link href="/billing" className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 hover:bg-slate-50">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-red-50 text-red-600">
-              <Receipt className="h-4 w-4" />
-            </span>
-            <div>
-              <div className="text-lg font-bold text-slate-900">{formatCurrency(outstanding)}</div>
-              <div className="text-xs text-slate-500">Outstanding</div>
             </div>
           </Link>
         </div>

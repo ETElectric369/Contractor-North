@@ -6,10 +6,21 @@ import { RotateCcw } from "lucide-react";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Label, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
+import { ACTIONS_ROW_CLS } from "@/components/section-actions-menu";
 import { createCustomerCredit } from "../actions";
 
-/** Post a credit/refund to the customer's account from this invoice. */
-export function CreditButton({ invoiceId, defaultAmount }: { invoiceId: string; defaultAmount?: number }) {
+/** Post a credit/refund to the customer's account from this invoice.
+ *  With `menuItem` the trigger renders as an Actions-menu row (the rare
+ *  accounting verb lives behind the ⋯ seek door, not the header). */
+export function CreditButton({
+  invoiceId,
+  defaultAmount,
+  menuItem = false,
+}: {
+  invoiceId: string;
+  defaultAmount?: number;
+  menuItem?: boolean;
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState(defaultAmount && defaultAmount > 0 ? defaultAmount : 0);
@@ -41,12 +52,18 @@ export function CreditButton({ invoiceId, defaultAmount }: { invoiceId: string; 
 
   return (
     <>
-      <button
-        onClick={() => setOpen(true)}
-        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-      >
-        <RotateCcw className="h-4 w-4" /> Credit / refund
-      </button>
+      {menuItem ? (
+        <button type="button" onClick={() => setOpen(true)} className={ACTIONS_ROW_CLS}>
+          <RotateCcw className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Credit / refund
+        </button>
+      ) : (
+        <button
+          onClick={() => setOpen(true)}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+        >
+          <RotateCcw className="h-4 w-4" /> Credit / refund
+        </button>
+      )}
       <Modal
         open={open}
         onClose={() => setOpen(false)}

@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Phone, Mail, CheckCircle2, Globe, XCircle } from "lucide-react";
+import { Phone, Mail, CheckCircle2, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -51,6 +51,8 @@ export function InquiryRow({
     start(async () => {
       const res = await setInquiryStatus(inquiry.id, status);
       if (!res?.ok) { toast(res?.error ?? "Couldn't update status — try again.", "error"); return; }
+      // The list filters lost leads out, so the row vanishes — say it worked.
+      if (status === "lost") toast("Marked lost", "success");
       router.refresh();
     });
   }
@@ -111,16 +113,9 @@ export function InquiryRow({
             ))}
           </Select>
         </div>
-        {inquiry.status !== "lost" && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => changeStatus("lost")}
-            disabled={pending}
-          >
-            <XCircle className="h-3.5 w-3.5" /> Mark lost
-          </Button>
-        )}
+        {/* "Lost" lives ONLY in the Status select (a deliberate two-tap pick) —
+            the old one-tap "Mark lost" button duplicated it mid-cluster and
+            vanished the row from a mis-tap beside Edit/Convert. */}
         <InquiryModal inquiry={inquiry} mode="edit" />
         <ConvertMenu inquiryId={inquiry.id} inquiryName={inquiry.name} customers={customers} />
       </div>

@@ -38,12 +38,15 @@ const NAV_ALIASES: Record<string, string[]> = {
 // ONE source of truth: the command bar's "go to" list is derived from the SAME dock that
 // drives the dock + sub-nav, so they can never drift again. Carry staffOnly (section OR item)
 // so we can role-filter — a tech shouldn't be shown Payroll / Tax / Invoices (L11).
+// Query-param children (the generated /jobs?status=… filters) stay OUT of the palette:
+// stripped of their section context they collide — "est" surfaced "Estimate · Jobs" (a jobs
+// filter) beside "Estimates · Sales" (/quotes). Status filtering is the dock/strip's job.
 type DockLeaf = { label: string; href?: string; children?: DockLeaf[]; staffOnly?: boolean };
 function navLeaves(nodes: DockLeaf[], sub: string, sectionStaff?: boolean): Item[] {
   return nodes.flatMap((n) =>
     n.children?.length
       ? navLeaves(n.children, n.label, sectionStaff || n.staffOnly)
-      : n.href
+      : n.href && !n.href.includes("?")
         ? [{ kind: "Go to", label: n.label, sub, href: n.href, staffOnly: sectionStaff || n.staffOnly, aliases: NAV_ALIASES[n.href] }]
         : [],
   );

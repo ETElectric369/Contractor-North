@@ -123,16 +123,15 @@ export default async function TimeclockPage() {
     }
   }
 
-  // Recent entries table: staff see the whole crew (with names + edit), everyone
-  // else sees their own. Editable inline.
-  let recentQ = supabase
+  // Recent entries table: personal for EVERYONE — /timecards is the one crew-wide
+  // map (staff get a link under the table). Editable inline.
+  const { data: recentData } = await supabase
     .from("time_entries")
-    .select("*, profiles:profile_id(full_name), job:job_id(job_number, name)")
+    .select("*, job:job_id(job_number, name)")
+    .eq("profile_id", user?.id ?? "")
     .gte("clock_in", weekAgo)
     .order("clock_in", { ascending: false })
     .limit(60);
-  if (!isStaff) recentQ = recentQ.eq("profile_id", user?.id ?? "");
-  const { data: recentData } = await recentQ;
   const recent = (recentData ?? []) as any[];
 
   // Aggregate hours per job code for the week (closed entries only).
@@ -211,7 +210,6 @@ export default async function TimeclockPage() {
         <table className="w-full min-w-[520px] text-sm">
           <thead className="border-b border-slate-100 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-400">
             <tr>
-              {isStaff && <th className="px-5 py-2.5 font-semibold">Who</th>}
               <th className="px-5 py-2.5 font-semibold">Clock in</th>
               <th className="px-3 py-2.5 font-semibold">Clock out</th>
               <th className="px-3 py-2.5 font-semibold">Code</th>
@@ -223,9 +221,6 @@ export default async function TimeclockPage() {
           <tbody className="divide-y divide-slate-100">
             {recent.map((e) => (
               <tr key={e.id}>
-                {isStaff && (
-                  <td className="px-5 py-2.5 font-medium text-slate-700">{e.profiles?.full_name ?? "—"}</td>
-                )}
                 <td className="px-5 py-2.5 text-slate-700">{formatDateTimeTz(e.clock_in, orgSettings.timezone)}</td>
                 <td className="px-3 py-2.5 text-slate-500">
                   {e.clock_out ? formatDateTimeTz(e.clock_out, orgSettings.timezone) : <Badge tone="green">{t("tc_open")}</Badge>}
@@ -250,7 +245,7 @@ export default async function TimeclockPage() {
             ))}
             {recent.length === 0 && (
               <tr>
-                <td colSpan={isStaff ? 7 : 6} className="px-5 py-6 text-center text-slate-400">
+                <td colSpan={6} className="px-5 py-6 text-center text-slate-400">
                   {t("tc_noEntries")}
                 </td>
               </tr>
@@ -258,6 +253,13 @@ export default async function TimeclockPage() {
           </tbody>
         </table>
         </div>
+        {isStaff && (
+          <div className="border-t border-slate-100 px-5 py-3">
+            <Link href="/timecards" className="text-sm font-medium text-brand hover:underline">
+              Crew hours →
+            </Link>
+          </div>
+        )}
       </Card>
     </div>
   );

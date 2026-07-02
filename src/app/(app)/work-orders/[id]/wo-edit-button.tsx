@@ -6,6 +6,7 @@ import { Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { ACTIONS_ROW_CLS } from "@/components/section-actions-menu";
 import { updateWorkOrder } from "../actions";
 
 function toLocalInput(iso: string | null): string {
@@ -19,6 +20,7 @@ export function WoEditButton({
   wo,
   jobs,
   techs,
+  menuItem = false,
 }: {
   wo: {
     id: string;
@@ -30,6 +32,8 @@ export function WoEditButton({
   };
   jobs: { id: string; job_number: string; name: string }[];
   techs: { id: string; full_name: string | null }[];
+  /** Render the trigger as an Actions-menu row instead of a standalone button. */
+  menuItem?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,9 +55,15 @@ export function WoEditButton({
 
   return (
     <>
-      <Button variant="outline" onClick={() => setOpen(true)}>
-        <Pencil className="h-4 w-4" /> Edit
-      </Button>
+      {menuItem ? (
+        <button type="button" onClick={() => setOpen(true)} className={ACTIONS_ROW_CLS}>
+          <Pencil className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Edit
+        </button>
+      ) : (
+        <Button variant="outline" onClick={() => setOpen(true)}>
+          <Pencil className="h-4 w-4" /> Edit
+        </Button>
+      )}
 
       <form action={onSubmit}>
         <Modal

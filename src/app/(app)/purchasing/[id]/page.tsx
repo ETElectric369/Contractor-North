@@ -5,7 +5,6 @@ import { createClient } from "@/lib/supabase/server";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { PoDetail, EditPoButton } from "./po-detail";
-import { DeleteButton } from "@/components/delete-button";
 import { SectionActionsMenu } from "@/components/section-actions-menu";
 import { purchaseOrderSectionTree } from "@/lib/nav-tree";
 import { deletePurchaseOrder } from "../actions";
@@ -64,6 +63,9 @@ export default async function PurchaseOrderPage({
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-2xl font-bold text-slate-900">{p.po_number}</h1>
           <Badge tone={statusTone(p.status)}>{p.status}</Badge>
+          {/* Edit stays visible; the ⋯ Actions menu rides LAST as the seek door
+              holding Delete (danger). The job link lives in the meta row below
+              and Back owns the list, so neither is duplicated in the menu. */}
           <div className="ml-auto flex items-center gap-2">
             <EditPoButton
               poId={p.id}
@@ -72,13 +74,10 @@ export default async function PurchaseOrderPage({
               jobs={(jobs ?? []) as { id: string; job_number: string; name: string }[]}
             />
             <SectionActionsMenu
-              tree={purchaseOrderSectionTree(p.id, p.po_number, { jobId: p.jobs?.id ?? null })}
-            />
-            <DeleteButton
-              run={deletePurchaseOrder.bind(null, p.id)}
-              confirmText={`Delete ${p.po_number}? Its line items go with it.`}
-              redirectTo="/bills"
-              size="sm"
+              tree={purchaseOrderSectionTree(p.po_number, {
+                run: deletePurchaseOrder.bind(null, p.id),
+                confirm: `Delete ${p.po_number}? Its line items go with it.`,
+              })}
             />
           </div>
         </div>

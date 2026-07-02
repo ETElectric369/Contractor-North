@@ -11,7 +11,6 @@ import { formatCurrency, formatDate } from "@/lib/utils";
 import { EditCustomerButton } from "./edit-customer-button";
 import { MergeCustomerButton } from "./merge-customer-button";
 import { PortalLinkButton } from "./portal-link-button";
-import { DeleteButton } from "@/components/delete-button";
 import { SectionActionsMenu } from "@/components/section-actions-menu";
 import { customerSectionTree } from "@/lib/nav-tree";
 import { NewJobButton } from "../../schedule/new-job-button";
@@ -127,6 +126,23 @@ export default async function CustomerDetailPage({
             {!c.email && !c.phone && !c.address && !c.notes && (
               <p className="text-slate-400">No contact details yet — use Edit to add them.</p>
             )}
+            {/* Maintenance verbs live WITH the details they maintain (moved out of
+                the header impulse row): Edit + the portal link, and — staff-only,
+                heavy-confirm — Merge, the cleanup verb for duplicate records. */}
+            <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
+              <EditCustomerButton customer={c} pricingLevels={(pricingLevels ?? []) as any} />
+              <PortalLinkButton
+                customerId={c.id}
+                portalToken={(customer as any).portal_token}
+                hasEmail={!!(customer as any).email}
+              />
+              {viewerIsStaff && (
+                <MergeCustomerButton
+                  customer={{ id: c.id, name: c.name }}
+                  others={(otherCustomers ?? []) as { id: string; name: string }[]}
+                />
+              )}
+            </div>
           </CardContent>
         </Card>
       ),
@@ -237,14 +253,18 @@ export default async function CustomerDetailPage({
           {c.company_name && <p className="mt-1 text-sm text-slate-500">{c.company_name}</p>}
           <Badge tone="slate" className="mt-2">{c.type}</Badge>
         </div>
+        {/* The impulse row: the gloves-on customer verbs (Call / New job / New
+            estimate) plus the ⋯ Actions seek door, LAST — New invoice + Delete
+            (danger). Edit / Portal / Merge moved into the Details tab, with the
+            details they maintain. */}
         <div className="flex flex-wrap items-center gap-2">
-          <SectionActionsMenu tree={customerSectionTree(c.id, c.name)} isStaff={viewerIsStaff} />
-          <EditCustomerButton customer={c} pricingLevels={(pricingLevels ?? []) as any} />
-          {viewerIsStaff && (
-            <MergeCustomerButton
-              customer={{ id: c.id, name: c.name }}
-              others={(otherCustomers ?? []) as { id: string; name: string }[]}
-            />
+          {c.phone && (
+            <a
+              href={`tel:${c.phone}`}
+              className="btn-gloss inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-brand-dark"
+            >
+              <Phone className="h-4 w-4" /> Call
+            </a>
           )}
           <NewJobButton customers={[{ id: c.id, name: c.name }]} defaultCustomerId={c.id} />
           <Link href={`/quotes/new?customer=${c.id}`}>
@@ -252,11 +272,12 @@ export default async function CustomerDetailPage({
               <Plus className="h-4 w-4" /> New estimate
             </Button>
           </Link>
-          <PortalLinkButton customerId={c.id} portalToken={(customer as any).portal_token} hasEmail={!!(customer as any).email} />
-          <DeleteButton
-            run={deleteCustomer.bind(null, c.id)}
-            confirmText={`Delete ${c.name}? This only works when no jobs, estimates, or invoices reference them.`}
-            redirectTo="/crm"
+          <SectionActionsMenu
+            tree={customerSectionTree(c.name, {
+              run: deleteCustomer.bind(null, c.id),
+              confirm: `Delete ${c.name}? This only works when no jobs, estimates, or invoices reference them.`,
+            })}
+            isStaff={viewerIsStaff}
           />
         </div>
       </div>

@@ -2,9 +2,12 @@
 
 import { useState } from "react";
 import { Check, Loader2, BookOpen } from "lucide-react";
+import { ACTIONS_ROW_CLS } from "@/components/section-actions-menu";
 import { sendInvoiceToQuickbooks } from "../actions";
 
-export function QboInvoiceButton({ id }: { id: string }) {
+/** Push this invoice to QuickBooks. With `menuItem` the trigger renders as an
+ *  Actions-menu row (a rare deliberate verb behind the ⋯ seek door). */
+export function QboInvoiceButton({ id, menuItem = false }: { id: string; menuItem?: boolean }) {
   const [state, setState] = useState<"idle" | "busy" | "done" | "error">("idle");
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -17,6 +20,26 @@ export function QboInvoiceButton({ id }: { id: string }) {
       setState("error");
       setMsg(res.error ?? "Could not send.");
     }
+  }
+
+  if (menuItem) {
+    return (
+      <>
+        <button type="button" onClick={send} disabled={state === "busy"} className={ACTIONS_ROW_CLS}>
+          {state === "busy" ? (
+            <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[rgb(var(--glass-ink))]" />
+          ) : state === "done" ? (
+            <Check className="h-4 w-4 shrink-0 text-green-600" />
+          ) : (
+            <BookOpen className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" />
+          )}
+          {state === "done" ? "Sent to QuickBooks" : "Send to QuickBooks"}
+        </button>
+        {state === "error" && msg && (
+          <div className="relative z-10 px-4 py-1.5 text-xs text-red-600">{msg}</div>
+        )}
+      </>
+    );
   }
 
   return (

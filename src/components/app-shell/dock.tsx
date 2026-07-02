@@ -3,9 +3,7 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { DOCK } from "@/lib/dock";
-
-const basePath = (href: string) => href.split("?")[0];
+import { DOCK, activeSection, basePath } from "@/lib/dock";
 
 type DockProps = {
   branding?: { name: string | null; logo: string | null };
@@ -36,14 +34,12 @@ function DockInner({ branding, role, badges }: DockProps) {
   const isStaff = role === "owner" || role === "admin" || role === "office";
   const logo = branding?.logo;
   const sections = DOCK.filter((s) => isStaff || !s.staffOnly);
-  const active =
-    sections.find(
-      (s) =>
-        pathname === s.href ||
-        pathname.startsWith(s.href + "/") ||
-        s.children.some((c) => c.href && basePath(c.href) === pathname),
-    ) ?? sections[0];
-  const items = active.children.filter((c) => isStaff || !c.staffOnly);
+  // THE shared matcher (src/lib/dock.ts) — child detail routes (/quotes/[id], /forms/[id],
+  // /purchasing/[id]…) light their owning section. No match → NOTHING lit and no rail: the
+  // old `?? sections[0]` fallback lit "Today" (and railed My day/Tasks/Organize) on every
+  // orphan route — an actively wrong map, never a lie again.
+  const active = activeSection(pathname, sections);
+  const items = (active?.children ?? []).filter((c) => isStaff || !c.staffOnly);
   // Exactly ONE rail row lights: prefer the exact href-with-query match (the ?status=
   // children), else the query-less page whose base path matches — SectionSubnav's rule.
   // (The old basePath-only compare lit All jobs + every status row at once on /jobs.)
@@ -67,7 +63,7 @@ function DockInner({ branding, role, badges }: DockProps) {
         <div className="flex flex-1 flex-col items-center gap-0.5 overflow-y-auto">
           {sections.map((s) => {
             const Icon = s.icon;
-            const on = s.key === active.key;
+            const on = s.key === active?.key;
             const badge = s.children.reduce((sum, c) => sum + (c.href ? badges?.[c.href] ?? 0 : 0), 0);
             return (
               <Link
@@ -96,7 +92,7 @@ function DockInner({ branding, role, badges }: DockProps) {
       {/* The inside-left nav — now shown for EVERY section with more than one page (not just
           Office), so the section's siblings are always one glance away on desktop. The mobile
           counterpart is SectionSubnav's top strip (which hides itself on lg+ to avoid doubling). */}
-      {items.filter((c) => c.href).length > 1 && (
+      {active && items.filter((c) => c.href).length > 1 && (
         <nav className="flex h-full w-[186px] shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-slate-200/80 bg-white/55 px-2.5 py-3 backdrop-blur-sm">
           <div className="px-2 pb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">{active.label}</div>
           {items.map((c) => {

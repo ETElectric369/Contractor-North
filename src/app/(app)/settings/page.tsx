@@ -78,6 +78,9 @@ export default async function SettingsPage({
   const { data: me } = await supabase.from("profiles").select("*").eq("id", user?.id ?? "").single();
   const profile = me as Profile | null;
   const isAdmin = profile?.role === "owner" || profile?.role === "admin";
+  // Office (Alexa's control plane: Numbering, Scheduling & timesheets, Automation)
+  // keeps the org-settings cluster; only techs are gated out of it.
+  const isStaff = isAdmin || profile?.role === "office";
   const t = translator(profile?.language);
 
   const [{ data: org }, { data: team }, { data: invites }, { data: taxRates }, { data: pricingLevels }, { data: codeTemplates }, { data: jobCodes }] = await Promise.all([
@@ -212,11 +215,15 @@ export default async function SettingsPage({
     ),
   };
 
-  const adminTabs = org
+  const adminTabs = org && isStaff
     ? [
         {
           id: "company",
           label: "Company",
+          // Set-once tabs live in the labeled "More" group so the visible strip
+          // leads with the tabs touched weekly/daily (frequency law).
+          tier: "overflow" as const,
+          group: "Set once",
           content: (
             <div className="space-y-6">
               <Section title="Company details"><OrgSettingsForm org={org as Organization} /></Section>
@@ -338,6 +345,8 @@ export default async function SettingsPage({
         {
           id: "integrations",
           label: "Integrations",
+          tier: "overflow" as const,
+          group: "Set once",
           content: (
             <div className="space-y-6">
             <Section title="AI assistant">
@@ -379,6 +388,8 @@ export default async function SettingsPage({
         {
           id: "plan",
           label: "Plan & Billing",
+          tier: "overflow" as const,
+          group: "Set once",
           content: (
             <Section title="Subscription">
               {billing === "success" && (
@@ -413,7 +424,11 @@ export default async function SettingsPage({
       ]
     : [];
 
-  const tabs = [...adminTabs, teamTab, notificationsTab, profileTab];
+  // Frequency-sorted: the tabs touched weekly/daily lead; the set-once admin
+  // cluster follows (staff only — techs get just their three personal tabs).
+  const tabs = isStaff
+    ? [teamTab, ...adminTabs, notificationsTab, profileTab]
+    : [profileTab, notificationsTab, teamTab];
 
   return (
     <div className="mx-auto max-w-3xl">
