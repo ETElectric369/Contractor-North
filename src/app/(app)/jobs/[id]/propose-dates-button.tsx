@@ -6,6 +6,7 @@ import { CalendarPlus, Copy, MessageSquare, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label } from "@/components/ui/input";
+import { MANAGE_ROW_CLS } from "./job-manage-menu";
 import { createScheduleProposal, cancelScheduleProposal } from "../../schedule/actions";
 
 type Slot = { date: string; time: string };
@@ -37,10 +38,13 @@ export function ProposeDatesButton({
   jobId,
   customerPhone,
   pending: pendingProposal,
+  menuItem = false,
 }: {
   jobId: string;
   customerPhone?: string | null;
   pending?: { id: string; token: string; dates: (string | Slot)[] } | null;
+  /** Render the trigger as a Manage-menu row instead of a standalone button. */
+  menuItem?: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -90,10 +94,17 @@ export function ProposeDatesButton({
 
   return (
     <>
-      <Button variant="outline" onClick={() => setOpen(true)}>
-        <CalendarPlus className="h-4 w-4" />
-        {pendingProposal ? "Dates offered…" : "Propose dates"}
-      </Button>
+      {menuItem ? (
+        <button type="button" onClick={() => setOpen(true)} className={MANAGE_ROW_CLS}>
+          <CalendarPlus className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" />
+          {pendingProposal ? "Dates offered…" : "Propose dates"}
+        </button>
+      ) : (
+        <Button variant="outline" onClick={() => setOpen(true)}>
+          <CalendarPlus className="h-4 w-4" />
+          {pendingProposal ? "Dates offered…" : "Propose dates"}
+        </Button>
+      )}
 
       <Modal
         open={open}

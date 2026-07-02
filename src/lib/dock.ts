@@ -2,7 +2,9 @@ import {
   Sun,
   ListChecks,
   Wand2,
+  Ban,
   Briefcase,
+  Layers,
   Play,
   CalendarDays,
   CalendarClock,
@@ -42,6 +44,7 @@ import {
   ScanLine,
   type LucideIcon,
 } from "lucide-react";
+import { JOB_STATUSES, jobStatusLabel, type JobStatus } from "./job-status";
 
 /** A leaf in a dock section — a single page. A node with `header: true` (and no href) is a
  *  non-clickable sub-group label inside the section's nav (e.g. "Money admin" within Office). */
@@ -69,6 +72,21 @@ export interface DockSection {
   staffOnly?: boolean;
 }
 
+/** First-letter cap for generated labels ("in progress" → "In progress"). The words stay
+ *  single-sourced in jobStatusLabel so the dock's copy can't drift from the spine again. */
+const capFirst = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** Icon per job status — the one presentation-only bit the job-status spine doesn't carry. */
+const JOB_STATUS_ICONS: Record<JobStatus, LucideIcon> = {
+  estimate: FileText,
+  scheduled: CalendarDays,
+  in_progress: Play,
+  on_hold: Pause,
+  complete: CheckCircle2,
+  invoiced: Receipt,
+  cancelled: Ban,
+};
+
 // The dock, re-nerved to Alexa's office-designed map (June 26). Flat sections — every title is
 // ONE CLICK to its main page; its pages live in the left sidebar (desktop) or the top strip
 // (mobile). The big move: Customers (CRM) is promoted out of Sales into its own bottom section,
@@ -92,16 +110,20 @@ export const DOCK: DockSection[] = [
     icon: Briefcase,
     href: "/jobs",
     children: [
-      // The job lifecycle, in order (Alexa: Estimate → Scheduled → In progress → On hold → Completed).
       { id: "j-all", label: "All jobs", icon: Briefcase, href: "/jobs" },
-      { id: "j-est", label: "Estimate", icon: FileText, href: "/jobs?status=estimate" },
-      { id: "j-sched", label: "Scheduled", icon: CalendarDays, href: "/jobs?status=scheduled" },
-      { id: "j-prog", label: "In progress", icon: Play, href: "/jobs?status=in_progress" },
-      { id: "j-hold", label: "On hold", icon: Pause, href: "/jobs?status=on_hold" },
-      { id: "j-done", label: "Completed", icon: CheckCircle2, href: "/jobs?status=complete" },
-      // Permits live under active jobs now (moved out of Office per Alexa).
-      { id: "j-permits", label: "Permits", icon: Stamp, href: "/permits", staffOnly: true },
+      // The job lifecycle, GENERATED from the canonical JOB_STATUSES spine (its order IS the
+      // lifecycle) so this list can't drift from the enum again — it had: missing invoiced +
+      // cancelled, and a hand-written "Completed" vs canonical "complete". Guarded by dock.test.ts.
+      ...JOB_STATUSES.map((s) => ({
+        id: `j-${s}`,
+        label: capFirst(jobStatusLabel(s)),
+        icon: JOB_STATUS_ICONS[s],
+        href: `/jobs?status=${s}`,
+      })),
       // Cross-job views (office/dispatch) — the same records live on each job's tabs too.
+      // Permits live under active jobs now (moved out of Office per Alexa).
+      { id: "j-across-h", label: "Across all jobs", icon: Layers, header: true, staffOnly: true },
+      { id: "j-permits", label: "Permits", icon: Stamp, href: "/permits", staffOnly: true },
       { id: "j-wo", label: "Work orders", icon: Wrench, href: "/work-orders", staffOnly: true },
       { id: "j-mat", label: "Materials", icon: Boxes, href: "/materials", staffOnly: true },
       { id: "j-co", label: "Change orders", icon: FileText, href: "/change-orders", staffOnly: true },

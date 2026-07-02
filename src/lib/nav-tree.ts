@@ -26,82 +26,6 @@ export type NavTree = {
   nodes: TreeNode[];
 };
 
-export const NAV_TREE: NavTree = {
-  center: { label: "Home", icon: "home", href: "/planner" },
-  nodes: [
-    {
-      id: "myday",
-      label: "My Day",
-      icon: "sun",
-      children: [
-        { id: "md-today", label: "Today's jobs", icon: "checkbox", href: "/planner" },
-        { id: "md-hours", label: "My hours", icon: "clock", href: "/timeclock" },
-        { id: "md-tasks", label: "My tasks", icon: "listCheck", href: "/tasks" },
-      ],
-    },
-    {
-      id: "jobs",
-      label: "Jobs",
-      icon: "briefcase",
-      countKey: "jobs",
-      children: [
-        { id: "j-all", label: "All jobs", icon: "list", href: "/jobs" },
-        { id: "j-prog", label: "In progress", icon: "play", href: "/jobs?status=in_progress" },
-        { id: "j-sched", label: "Scheduled", icon: "calendar", href: "/jobs?status=scheduled" },
-        { id: "j-est", label: "Estimates", icon: "fileText", href: "/jobs?status=estimate" },
-      ],
-    },
-    {
-      id: "schedule",
-      label: "Schedule",
-      icon: "calendar",
-      children: [
-        { id: "s-cal", label: "Calendar", icon: "calendar", href: "/schedule" },
-        { id: "s-appt", label: "Appointments", icon: "clipboardCheck", href: "/schedule?view=appointments" },
-        { id: "s-map", label: "Map", icon: "map", href: "/schedule?view=map" },
-      ],
-    },
-    {
-      id: "customers",
-      label: "Contacts",
-      icon: "users",
-      countKey: "customers",
-      children: [
-        { id: "c-all", label: "All contacts", icon: "users", href: "/crm" },
-        { id: "c-inq", label: "Leads", icon: "mail", href: "/leads" },
-        { id: "c-quotes", label: "Estimates", icon: "fileText", href: "/quotes", countKey: "quotes" },
-      ],
-    },
-    {
-      id: "money",
-      label: "Invoices",
-      icon: "receipt",
-      countKey: "money",
-      children: [
-        { id: "m-inv", label: "Invoices", icon: "receipt", href: "/billing" },
-        { id: "m-bills", label: "Bills & POs", icon: "wallet", href: "/bills" },
-        { id: "m-price", label: "Price list", icon: "tags", href: "/price-list" },
-        { id: "m-stock", label: "Inventory", icon: "boxes", href: "/inventory" },
-        { id: "m-tax", label: "Tax report", icon: "calculator", href: "/tax-report" },
-      ],
-    },
-    {
-      id: "office",
-      label: "Office",
-      icon: "settings",
-      children: [
-        { id: "o-permits", label: "Permits", icon: "stamp", href: "/permits" },
-        { id: "o-safety", label: "Safety", icon: "hardhat", href: "/safety" },
-        { id: "o-handbook", label: "Handbook", icon: "bookOpen", href: "/handbook" },
-        { id: "o-forms", label: "Forms", icon: "fileSpreadsheet", href: "/forms" },
-        { id: "o-tools", label: "Tools", icon: "wrench", href: "/tools" },
-        { id: "o-settings", label: "Settings", icon: "settings", href: "/settings" },
-      ],
-    },
-    { id: "organize", label: "Organize", icon: "wand", href: "/organize" },
-  ],
-};
-
 /** An invoice's relationships as a mind-map. */
 export function invoiceSectionTree(
   invoiceId: string,
@@ -168,31 +92,7 @@ export function customerSectionTree(custId: string, custLabel: string): NavTree 
   };
 }
 
-/** A job's hub actions + relationships as a mind-map. Verbs first (DO things — one
- *  real one-click "Clock in here", plus deep-links to the tab whose form does the
- *  rest), then the related records. The financial verbs are staff-gated. */
-export function jobSectionTree(
-  jobId: string,
-  label: string,
-  rel: { customerId?: string | null; jobCode?: string | null },
-): NavTree {
-  const tab = (t: string) => `/jobs/${jobId}?tab=${t}`;
-  const nodes: TreeNode[] = [
-    {
-      id: "jb-clockin",
-      label: "Clock in here",
-      icon: "play",
-      action: { name: "time.clockIn", input: { job_id: jobId, job_code: rel.jobCode ?? null } },
-      href: "/timeclock",
-    },
-    { id: "jb-cost", label: "Add a cost", icon: "wallet", href: tab("costs"), staffOnly: true },
-    { id: "jb-time", label: "Log time", icon: "clock", href: tab("time") },
-    { id: "jb-quote", label: "New estimate", icon: "fileText", href: tab("quotes"), staffOnly: true },
-    { id: "jb-inv", label: "New invoice", icon: "receipt", href: tab("invoices"), staffOnly: true },
-    { id: "jb-appt", label: "Schedule a visit", icon: "clipboardCheck", href: tab("appointments") },
-    { id: "jb-photo", label: "Add photos", icon: "wand", href: tab("photos") },
-  ];
-  if (rel.customerId) nodes.push({ id: "jb-cust", label: "Customer", icon: "users", href: `/crm/${rel.customerId}` });
-  nodes.push({ id: "jb-all", label: "All jobs", icon: "list", href: "/jobs" });
-  return { center: { label, icon: "briefcase" }, nodes };
-}
+// NOTE: the job hub no longer has a section tree — its actions live in the
+// action dock (job-action-dock.tsx) and its Manage ⋯ menu (job-manage-menu.tsx).
+// The dormant global NAV_TREE (the incomplete mind-map twin of the dock) was
+// deleted with it; the invoice/WO/material/PO/customer trees above stay live.

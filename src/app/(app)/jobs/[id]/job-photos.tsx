@@ -3,12 +3,11 @@
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Camera, Upload, Trash2, Loader2, ImageOff } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { MediaLightbox } from "@/components/media-lightbox";
-import { prepareImageForUpload } from "@/lib/image-prep";
 import { useToast } from "@/components/toast";
-import { addDocument, deleteDocument } from "../actions";
+import { deleteDocument } from "../actions";
+import { uploadJobPhotos } from "./upload-job-photos";
 
 interface Doc {
   id: string;
@@ -46,16 +45,8 @@ export function JobPhotos({ orgId, jobId, docs }: { orgId: string; jobId: string
     setBusy(true);
     setError(null);
     try {
-      const supabase = createClient();
-      for (const raw of files) {
-        const file = await prepareImageForUpload(raw);
-        const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-        const path = `${orgId}/${jobId}/${Date.now()}-${safe}`;
-        const { error: upErr } = await supabase.storage.from("documents").upload(path, file, { upsert: false });
-        if (upErr) throw upErr;
-        const res = await addDocument({ job_id: jobId, name: file.name, category: "Photo", file_url: path, size_bytes: file.size });
-        if (!res.ok) throw new Error(res.error);
-      }
+      // The one shared pipeline (also used by the action dock's quick Photo button).
+      await uploadJobPhotos(orgId, jobId, files);
       router.refresh();
     } catch (e: any) {
       setError(e?.message ?? "Upload failed.");

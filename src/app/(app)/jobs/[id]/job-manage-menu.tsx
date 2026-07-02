@@ -1,0 +1,185 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { MoreHorizontal, Loader2, Receipt, Users, List, Trash2 } from "lucide-react";
+
+/** The one menu-row style — shared with the modal-owning items (Edit / Propose /
+ *  Finish) composed in as children, so every row in the panel looks identical. */
+export const MANAGE_ROW_CLS =
+  "relative z-10 flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15 disabled:opacity-50";
+
+/**
+ * The job hub's "Manage ⋯" menu — absorbs everything demoted from the old
+ * 7-control header row: Edit / Propose dates / Finish job (modal-owning items,
+ * composed server-side and passed as `children`), Create invoice, the Customer +
+ * All jobs links, and Delete (danger-styled, LAST). Replaces SectionActionsMenu +
+ * jobSectionTree on this page (whose "Clock in here" ejected you to /timeclock —
+ * the TIME button keeps you on the job now).
+ *
+ * THE MODAL RULE: the Modal is rendered IN-PLACE (not portaled), so the children
+ * that own modals must stay MOUNTED while their modal is open. The panel therefore
+ * never closes itself while <body> has `modal-open` (Modal always sets it): the
+ * outside-click and Escape close handlers bail — including the click on a modal's
+ * own backdrop — and the z-[120] modal overlay simply covers the z-[90] panel.
+ * Do NOT "fix" this with conditional rendering or display:none on the panel; both
+ * silently destroy a half-filled form mid-edit (the documented Save-eating bug).
+ */
+export function JobManageMenu({
+  isStaff,
+  customerId,
+  jobNumber,
+  createInvoice,
+  deleteJob,
+  triggerClassName,
+  children,
+}: {
+  isStaff: boolean;
+  customerId?: string | null;
+  jobNumber: string;
+  /** Bound server action — creates the invoice, returns its id (staff). */
+  createInvoice?: () => Promise<{ ok: boolean; error?: string; id?: string }>;
+  /** Bound server action — deletes the job (staff). */
+  deleteJob?: () => Promise<{ ok: boolean; error?: string }>;
+  triggerClassName?: string;
+  /** Staff modal-owning menu items (JobEditButton etc. with `menuItem`). */
+  children?: React.ReactNode;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const modalOpen = () => document.body.classList.contains("modal-open");
+    const onDoc = (e: MouseEvent) => {
+      // A child item's Modal is open (in-place, above us at z-[120]) — never close
+      // underneath it; unmounting the panel would kill the modal mid-edit.
+      if (modalOpen()) return;
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (modalOpen()) return; // Escape belongs to the open modal, not the panel
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  async function runCreateInvoice() {
+    if (!createInvoice) return;
+    setErr(null);
+    setBusy("invoice");
+    try {
+      const res = await createInvoice();
+      if (res.ok && res.id) {
+        setOpen(false);
+        router.push(`/billing/${res.id}`);
+        return;
+      }
+      setErr(res.error ?? "Couldn't create the invoice.");
+    } catch {
+      setErr("Couldn't create the invoice.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function runDelete() {
+    if (!deleteJob) return;
+    if (!confirm(`Delete job ${jobNumber}? Time entries, estimates, and invoices keep their data but lose the job link.`)) return;
+    setErr(null);
+    setBusy("delete");
+    try {
+      const res = await deleteJob();
+      if (res.ok) {
+        setOpen(false);
+        router.push("/jobs");
+        return;
+      }
+      setErr(res.error ?? "Could not delete.");
+    } catch {
+      setErr("Could not delete.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function go(href: string) {
+    setOpen(false);
+    router.push(href);
+  }
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-label="Manage job"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Manage job"
+        className={
+          triggerClassName ??
+          "inline-flex h-11 w-11 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
+        }
+      >
+        <MoreHorizontal className="h-5 w-5" />
+      </button>
+      {open && (
+        // position set inline because .glass-gloss forces position:relative, which
+        // would override a Tailwind `absolute` (the documented gotcha). Right-anchored:
+        // Manage is the dock's rightmost control.
+        <div
+          style={{ position: "absolute", right: 0, top: "calc(100% + 0.25rem)" }}
+          className="glass glass-gloss glass-menu z-[90] w-60 overflow-hidden rounded-lg py-1.5 shadow-xl"
+        >
+          {children}
+          {isStaff && createInvoice && (
+            <button onClick={runCreateInvoice} disabled={busy !== null} className={MANAGE_ROW_CLS}>
+              {busy === "invoice" ? (
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[rgb(var(--glass-ink))]" />
+              ) : (
+                <Receipt className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" />
+              )}
+              Create invoice
+            </button>
+          )}
+          {/* Techs see just the clean short list (Customer + All jobs) — no divider needed. */}
+          {isStaff && <div className="relative z-10 my-1 border-t border-white/50" />}
+          {customerId && (
+            <button onClick={() => go(`/crm/${customerId}`)} className={MANAGE_ROW_CLS}>
+              <Users className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Customer
+            </button>
+          )}
+          <button onClick={() => go("/jobs")} className={MANAGE_ROW_CLS}>
+            <List className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> All jobs
+          </button>
+          {isStaff && deleteJob && (
+            <>
+              <div className="relative z-10 my-1 border-t border-white/50" />
+              <button
+                onClick={runDelete}
+                disabled={busy !== null}
+                className="relative z-10 flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50/60 disabled:opacity-50"
+              >
+                {busy === "delete" ? (
+                  <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                ) : (
+                  <Trash2 className="h-4 w-4 shrink-0" />
+                )}
+                Delete job
+              </button>
+            </>
+          )}
+          {err && <div className="relative z-10 px-4 py-1.5 text-xs text-red-600">{err}</div>}
+        </div>
+      )}
+    </div>
+  );
+}

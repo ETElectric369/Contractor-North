@@ -1,10 +1,10 @@
 import Link from "next/link";
-import { Briefcase, MapPin } from "lucide-react";
+import { Briefcase, MapPin, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
-import { JOB_STATUSES, JOB_STATUS_PRIORITY, jobStatusLabel } from "@/lib/job-status";
+import { JOB_STATUS_PRIORITY, jobStatusLabel } from "@/lib/job-status";
 import { formatDate } from "@/lib/utils";
 import { NewJobButton } from "../schedule/new-job-button";
 import { JobImportButton } from "./job-import-button";
@@ -43,9 +43,6 @@ export default async function JobsPage({
     jobs.sort((a, b) => (JOB_STATUS_PRIORITY[a.status] ?? 9) - (JOB_STATUS_PRIORITY[b.status] ?? 9));
   }
 
-  // Filter strip is the canonical status list (so 'cancelled' can't silently vanish again).
-  const STATUSES = JOB_STATUSES;
-
   return (
     <div>
       <PageHeader title="Jobs" description="All jobs across the business.">
@@ -55,36 +52,19 @@ export default async function JobsPage({
         </div>
       </PageHeader>
 
-      <div className="mb-4 flex flex-wrap gap-1.5">
-        <Link
-          href="/jobs"
-          className={`rounded-lg px-3 py-1.5 text-xs font-medium ${!status ? "bg-brand text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
-        >
-          All
-        </Link>
-        {STATUSES.map((s) => (
+      {/* Status nav lives in ONE place per breakpoint now — the desktop rail / the mobile
+          SectionSubnav strip, both generated from JOB_STATUSES via the dock. The page keeps
+          reading ?status= and shows just a dismissible chip so the filter is visible + clearable. */}
+      {status && (
+        <div className="mb-4">
           <Link
-            key={s}
-            href={`/jobs?status=${s}`}
-            className={`rounded-lg px-3 py-1.5 text-xs font-medium capitalize ${status === s ? "bg-brand text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+            href="/jobs"
+            title="Clear filter"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white shadow-sm"
           >
-            {s.replace("_", " ")}
+            Filtered: {jobStatusLabel(status)}
+            <X className="h-3.5 w-3.5" />
           </Link>
-        ))}
-      </div>
-
-      {isStaff && (
-        <div className="mb-4 flex flex-wrap items-center gap-1.5 text-xs">
-          <span className="mr-0.5 text-slate-400">Across all jobs:</span>
-          {[
-            ["Work orders", "/work-orders"],
-            ["Materials", "/materials"],
-            ["Change orders", "/change-orders"],
-          ].map(([label, href]) => (
-            <Link key={href} href={href} className="rounded-lg border border-slate-200 px-3 py-1.5 font-medium text-slate-600 hover:bg-slate-50">
-              {label}
-            </Link>
-          ))}
         </div>
       )}
 

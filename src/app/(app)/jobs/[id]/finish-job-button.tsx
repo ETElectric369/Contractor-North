@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
+import { MANAGE_ROW_CLS } from "./job-manage-menu";
 import { finishJob } from "../actions";
 
 /** "Finish job" — quick end-of-job questions, then marks the job complete and
@@ -17,11 +18,14 @@ export function FinishJobButton({
   hasQuote,
   defaultSendInvoice = false,
   isDrawBilled = false,
+  menuItem = false,
 }: {
   jobId: string;
   hasQuote: boolean;
   defaultSendInvoice?: boolean;
   isDrawBilled?: boolean;
+  /** Render the trigger as a Manage-menu row instead of a standalone button. */
+  menuItem?: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -64,9 +68,15 @@ export function FinishJobButton({
 
   return (
     <>
-      <Button onClick={() => setOpen(true)}>
-        <CheckCircle2 className="h-4 w-4" /> Finish job
-      </Button>
+      {menuItem ? (
+        <button type="button" onClick={() => setOpen(true)} className={MANAGE_ROW_CLS}>
+          <CheckCircle2 className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Finish job
+        </button>
+      ) : (
+        <Button onClick={() => setOpen(true)}>
+          <CheckCircle2 className="h-4 w-4" /> Finish job
+        </Button>
+      )}
 
       <Modal
         open={open}

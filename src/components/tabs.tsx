@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { isValidElement, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /** A tab in the shared strip. `href` makes it a <Link> (server-rendered/link
@@ -12,13 +12,34 @@ export interface TabBarItem {
   id: string;
   label: string;
   count?: number;
-  icon?: React.ReactNode;
+  /** Two shapes, two homes: an already-rendered ELEMENT (e.g. <Archive className=… />)
+   *  shows inline in the strip as before; a LucideIcon COMPONENT reference shows ONLY
+   *  in the "More" panel as a chamfered glass chip — width-neutral for the strip and
+   *  its measuring ghost, so passing it never changes how many tabs fit. */
+  icon?: React.ReactNode | LucideIcon;
+  /** Cluster header in the "More" overflow (uppercase rail-style row). Ungrouped
+   *  items list first; groups follow in first-appearance order. */
+  group?: string;
   href?: string;
   /** Hidden from non-staff (techs). */
   staffOnly?: boolean;
   /** "overflow" tabs collapse into the "More" menu; "primary" stays visible.
    *  If no tab sets a tier, the strip auto-overflows past `maxVisible`. */
   tier?: "primary" | "overflow";
+}
+
+/** A component reference (vs a rendered element) is menu-only chrome. Lucide icons
+ *  are forwardRef exotics (objects, not functions), so check both shapes. */
+function componentIcon(icon: TabBarItem["icon"]): LucideIcon | null {
+  if (icon == null || typeof icon === "string" || typeof icon === "number" || typeof icon === "boolean") return null;
+  if (isValidElement(icon) || Array.isArray(icon)) return null;
+  if (typeof icon === "function" || typeof icon === "object") return icon as LucideIcon;
+  return null;
+}
+
+/** What the strip (and its measuring ghost) renders — element icons only. */
+function inlineIcon(icon: TabBarItem["icon"]): React.ReactNode {
+  return componentIcon(icon) ? null : (icon as React.ReactNode);
 }
 
 export interface TabDef extends TabBarItem {
@@ -181,7 +202,7 @@ export function TabBar({
       <div ref={ghostRef} aria-hidden className="invisible pointer-events-none absolute -left-[9999px] top-0 flex gap-1">
         {ordered.map((t) => (
           <span key={t.id} data-gtab className={TAB_CLS}>
-            {t.icon}
+            {inlineIcon(t.icon)}
             {t.label}
             <CountBadge count={t.count} active={false} />
           </span>
@@ -243,7 +264,7 @@ function ScrollStrip({ items, activeId, onSelect }: { items: TabBarItem[]; activ
           const active = activeId === t.id;
           const inner = (
             <>
-              {t.icon}
+              {inlineIcon(t.icon)}
               {t.label}
               <CountBadge count={t.count} active={active} />
             </>
@@ -265,7 +286,10 @@ function ScrollStrip({ items, activeId, onSelect }: { items: TabBarItem[]; activ
   );
 }
 
-/** The trailing "More ▾" menu holding overflow tabs (always visible, never faded). */
+/** The trailing "More ▾" menu holding overflow tabs (always visible, never faded).
+ *  Skinned with the glass-menu recipe (the + quick-add / ⋯ actions grammar); items
+ *  with a `group` render under uppercase cluster headers — the dock rail's exact
+ *  header style — ungrouped items first, groups in first-appearance order. */
 function MoreMenu({ items, activeId, onSelect }: { items: TabBarItem[]; activeId?: string; onSelect?: (id: string) => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -273,10 +297,17 @@ function MoreMenu({ items, activeId, onSelect }: { items: TabBarItem[]; activeId
 
   useEffect(() => {
     if (!open) return;
+    // THE MODAL RULE: the app's Modal is in-place (not portaled), so never close —
+    // and thereby unmount panel contents — while one is open. Its z-[120] overlay
+    // covers this panel; bail until body.modal-open clears.
     const onDoc = (e: MouseEvent) => {
+      if (document.body.classList.contains("modal-open")) return;
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    const onKey = (e: KeyboardEvent) => {
+      if (document.body.classList.contains("modal-open")) return;
+      if (e.key === "Escape") setOpen(false);
+    };
     document.addEventListener("mousedown", onDoc);
     document.addEventListener("keydown", onKey);
     return () => {
@@ -285,10 +316,20 @@ function MoreMenu({ items, activeId, onSelect }: { items: TabBarItem[]; activeId
     };
   }, [open]);
 
+  // Ungrouped items lead (no header), then each group in first-appearance order.
+  const sections: { group?: string; items: TabBarItem[] }[] = [{ items: items.filter((t) => !t.group) }];
+  for (const t of items) {
+    if (!t.group) continue;
+    const s = sections.find((x) => x.group === t.group);
+    if (s) s.items.push(t);
+    else sections.push({ group: t.group, items: [t] });
+  }
+
+  // relative z-10 lifts rows above the .glass-gloss sheen (its ::before overlays inset-0).
   const itemCls = (active: boolean) =>
     cn(
-      "flex w-full items-center gap-2 px-3 py-2 text-left text-sm",
-      active ? "bg-brand-light/40 font-medium text-brand-dark" : "text-slate-700 hover:bg-slate-50",
+      "relative z-10 flex w-full items-center gap-2 px-3 py-2 text-left text-sm",
+      active ? "bg-brand-light/40 font-medium text-brand-dark" : "text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15",
     );
 
   return (
@@ -305,35 +346,66 @@ function MoreMenu({ items, activeId, onSelect }: { items: TabBarItem[]; activeId
         More <ChevronDown className="h-3.5 w-3.5" />
       </button>
       {open && (
-        <div className="absolute right-0 z-30 mt-1 min-w-[180px] overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg">
-          {items.map((t) => {
-            const active = t.id === activeId;
-            const inner = (
-              <>
-                {t.icon}
-                <span className="flex-1">{t.label}</span>
-                {typeof t.count === "number" && t.count > 0 && (
-                  <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">{t.count}</span>
-                )}
-              </>
-            );
-            return t.href ? (
-              <Link key={t.id} href={t.href} scroll={false} className={itemCls(active)} onClick={() => setOpen(false)}>
-                {inner}
-              </Link>
-            ) : (
-              <button
-                key={t.id}
-                onClick={() => {
-                  onSelect?.(t.id);
-                  setOpen(false);
-                }}
-                className={itemCls(active)}
-              >
-                {inner}
-              </button>
-            );
-          })}
+        // position set inline because .glass-gloss forces position:relative, which
+        // would override a Tailwind `absolute` (the SectionActionsMenu gotcha).
+        <div
+          style={{ position: "absolute", right: 0, top: "calc(100% + 0.25rem)" }}
+          className="glass glass-gloss glass-menu z-30 min-w-[180px] overflow-hidden rounded-xl py-1 shadow-xl"
+        >
+          {sections.map(
+            (s, si) =>
+              s.items.length > 0 && (
+                <div key={s.group ?? "ungrouped"}>
+                  {s.group && (
+                    <div
+                      className={cn(
+                        "relative z-10 px-3 pb-0.5 pt-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400",
+                        // Breathing room, but only when rows rendered above this header.
+                        (sections[0].items.length > 0 || si > 1) && "mt-2",
+                      )}
+                    >
+                      {s.group}
+                    </div>
+                  )}
+                  {s.items.map((t) => {
+                    const active = t.id === activeId;
+                    const MenuIcon = componentIcon(t.icon);
+                    const inner = (
+                      <>
+                        {MenuIcon ? (
+                          // The bloom node grammar: a chamfered glass-tint chip.
+                          <span className="cn-cut glass-tint flex h-7 w-7 shrink-0 items-center justify-center">
+                            <MenuIcon className="h-3.5 w-3.5 text-[rgb(var(--glass-ink))]" />
+                          </span>
+                        ) : (
+                          inlineIcon(t.icon)
+                        )}
+                        <span className="flex-1">{t.label}</span>
+                        {typeof t.count === "number" && t.count > 0 && (
+                          <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">{t.count}</span>
+                        )}
+                      </>
+                    );
+                    return t.href ? (
+                      <Link key={t.id} href={t.href} scroll={false} className={itemCls(active)} onClick={() => setOpen(false)}>
+                        {inner}
+                      </Link>
+                    ) : (
+                      <button
+                        key={t.id}
+                        onClick={() => {
+                          onSelect?.(t.id);
+                          setOpen(false);
+                        }}
+                        className={itemCls(active)}
+                      >
+                        {inner}
+                      </button>
+                    );
+                  })}
+                </div>
+              ),
+          )}
         </div>
       )}
     </div>

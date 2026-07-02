@@ -1,26 +1,38 @@
 "use client";
 
+import { Suspense } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { DOCK } from "@/lib/dock";
 
 const basePath = (href: string) => href.split("?")[0];
+
+type DockProps = {
+  branding?: { name: string | null; logo: string | null };
+  role?: string;
+  badges?: Record<string, number>;
+};
 
 /**
  * Desktop nav: the icon DOCK stays (one click = go to that section), and an inside-left
  * NAV column sits right beside it, listing the pages of whatever section you're in — no
  * bloom. The mobile bottom dock + slide-in drawer are the small-screen counterpart.
+ *
+ * useSearchParams (the rail's exact active-match needs the ?status= query) requires a
+ * Suspense boundary at prerender — it lives HERE so the layout call-site stays <Dock />.
  */
-export function Dock({
-  branding,
-  role,
-  badges,
-}: {
-  branding?: { name: string | null; logo: string | null };
-  role?: string;
-  badges?: Record<string, number>;
-}) {
+export function Dock(props: DockProps) {
+  return (
+    <Suspense fallback={null}>
+      <DockInner {...props} />
+    </Suspense>
+  );
+}
+
+function DockInner({ branding, role, badges }: DockProps) {
   const pathname = usePathname();
+  const search = useSearchParams();
+  const current = pathname + (search.toString() ? `?${search.toString()}` : "");
   const isStaff = role === "owner" || role === "admin" || role === "office";
   const logo = branding?.logo;
   const sections = DOCK.filter((s) => isStaff || !s.staffOnly);
@@ -32,6 +44,13 @@ export function Dock({
         s.children.some((c) => c.href && basePath(c.href) === pathname),
     ) ?? sections[0];
   const items = active.children.filter((c) => isStaff || !c.staffOnly);
+  // Exactly ONE rail row lights: prefer the exact href-with-query match (the ?status=
+  // children), else the query-less page whose base path matches — SectionSubnav's rule.
+  // (The old basePath-only compare lit All jobs + every status row at once on /jobs.)
+  const exact = items.find((c) => c.href === current);
+  const activeHref =
+    exact?.href ??
+    items.find((c) => c.href && basePath(c.href) === pathname && !c.href.includes("?"))?.href;
 
   return (
     <div className="hidden h-full lg:flex">
@@ -90,7 +109,7 @@ export function Dock({
                 </div>
               );
             }
-            const cur = basePath(c.href) === pathname;
+            const cur = c.href === activeHref;
             return (
               <Link
                 key={c.id}

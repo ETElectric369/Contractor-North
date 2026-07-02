@@ -8,6 +8,7 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Textarea, Select } from "@/components/ui/input";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { StateSelect } from "@/components/ui/state-select";
+import { MANAGE_ROW_CLS } from "./job-manage-menu";
 import { updateJob } from "../actions";
 import type { Job } from "@/lib/types";
 
@@ -32,11 +33,14 @@ export function JobEditButton({
   customers,
   techs,
   templates = [],
+  menuItem = false,
 }: {
   job: Job;
   customers: { id: string; name: string }[];
   techs: { id: string; full_name: string | null }[];
   templates?: { id: string; name: string }[];
+  /** Render the trigger as a Manage-menu row instead of a standalone button. */
+  menuItem?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,9 +74,15 @@ export function JobEditButton({
 
   return (
     <>
-      <Button variant="outline" onClick={() => setOpen(true)}>
-        <Pencil className="h-4 w-4" /> Edit job
-      </Button>
+      {menuItem ? (
+        <button type="button" onClick={() => setOpen(true)} className={MANAGE_ROW_CLS}>
+          <Pencil className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Edit job
+        </button>
+      ) : (
+        <Button variant="outline" onClick={() => setOpen(true)}>
+          <Pencil className="h-4 w-4" /> Edit job
+        </Button>
+      )}
 
       <form action={onSubmit}>
         <Modal

@@ -1,6 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Home, ChevronRight, MapPin, Calendar, Receipt, Plus, Printer, Phone } from "lucide-react";
+import { Home, ChevronRight, MapPin, Receipt, Plus, Printer, Phone, type LucideIcon } from "lucide-react";
+// The More-panel chip icons must come through a "use client" re-export so the
+// component REFERENCES survive the server→client serialization into <Tabs>.
+import {
+  LayoutDashboard, Clock, Package, Camera, ListChecks, CalendarDays,
+  ClipboardCheck, FileText, Wallet, Receipt as ReceiptTab, StickyNote, Stamp, FileDiff,
+} from "./job-tab-icons";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
@@ -23,16 +29,14 @@ import { JobAddTimeEntry } from "./job-add-time";
 import { JobClockButton } from "./job-clock-button";
 import { EditEntryButton } from "../../timecards/edit-entry-button";
 import { JobStatusControl } from "./job-status-control";
-import { JobEditButton } from "./job-edit-button";
 import { JobContacts } from "./job-contacts";
 import { JobScheduleControl } from "./job-schedule-control";
-import { FinishJobButton } from "./finish-job-button";
+import { JobActionDock } from "./job-action-dock";
 import { PaymentScheduleCard } from "./payment-schedule-card";
 import { ContractCard } from "./contract-card";
 import { LienInsuranceCard } from "./lien-insurance-card";
 import { JobDescription } from "./job-description";
 import { contractTotalFromQuotes } from "@/lib/payment-schedule-math";
-import { ProposeDatesButton } from "./propose-dates-button";
 import { ProgressInvoiceButton } from "./progress-invoice-button";
 import { NewWorkOrderButton } from "../../work-orders/new-wo-button";
 import { NewChangeOrderButton } from "../../change-orders/new-co-button";
@@ -41,13 +45,7 @@ import { CoRowActions } from "../../change-orders/co-row-actions";
 import { NewListButton } from "../../materials/new-list-button";
 import { AppointmentButton } from "../../appointments/appointment-button";
 import { NewPoButton } from "../../purchasing/new-po-button";
-import { ConvertButton } from "@/components/convert-button";
-import { SectionActionsMenu } from "@/components/section-actions-menu";
-import { jobSectionTree } from "@/lib/nav-tree";
-import { QuickCostButton } from "@/components/quick-cost-button";
-import { DeleteButton } from "@/components/delete-button";
 import { EditCustomerButton } from "../../crm/[id]/edit-customer-button";
-import { createInvoiceForJob, deleteJob } from "../actions";
 import { getOrgSettings } from "@/lib/org-settings";
 import { computeJobLaborBilling, fetchJobLaborRows, laborCostForJob } from "@/lib/labor-billing";
 import { formatDateTz } from "@/lib/tz";
@@ -56,23 +54,45 @@ import type { Customer } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-// In-page nav order, grouped frequency-of-use then role. The tabs a tech touches
-// every visit stay visible; everything financial/closeout collapses into "More".
-// Materials rides up front (2nd) — it's a daily-use take-off list.
+// In-page nav order — the lifecycle-honest strip. The Work core (Overview, Time,
+// Materials, Photos) prefers to stay inline (TIME rides 2nd so it never hides in
+// "More" on a phone); everything financial/closeout clusters into the More menu.
 const JOB_TAB_ORDER = [
-  "job", "materials", "tasks", "photos", "time", "appointments", "notes",
-  "permits", "quotes", "costs", "invoices", "change-orders", "wos",
+  "job", "time", "materials", "photos", "tasks", "appointments", "notes",
+  "quotes", "costs", "invoices", "change-orders", "permits", "wos",
 ];
-const JOB_PRIMARY = new Set(["job", "materials", "tasks", "photos", "time", "appointments", "notes"]);
+const JOB_PRIMARY = new Set(["job", "time", "materials", "photos"]);
 const JOB_STAFF_ONLY = new Set(["costs", "quotes", "invoices", "change-orders"]);
 
-/** Order the job tabs and tag each with its tier + staff-gating, so <Tabs> shows
- *  6 primary tabs + a "More" menu and hides money tabs from techs itself. */
+// The More panel's mini-map: cluster header + chamfered glass chip icon per tab.
+// A LucideIcon COMPONENT reference renders ONLY in the More panel (width-neutral
+// for the strip and its measuring ghost — the 375px fit is untouched). The whole
+// Money cluster is staffOnly, so it vanishes for techs as a unit.
+const JOB_TAB_META: Record<string, { group?: string; icon?: LucideIcon }> = {
+  job: { icon: LayoutDashboard },
+  time: { icon: Clock },
+  materials: { icon: Package },
+  photos: { group: "Docs", icon: Camera },
+  tasks: { group: "Work", icon: ListChecks },
+  appointments: { group: "Work", icon: CalendarDays },
+  wos: { group: "Work", icon: ClipboardCheck },
+  quotes: { group: "Money", icon: FileText },
+  costs: { group: "Money", icon: Wallet },
+  invoices: { group: "Money", icon: ReceiptTab },
+  "change-orders": { group: "Money", icon: FileDiff },
+  notes: { group: "Docs", icon: StickyNote },
+  permits: { group: "Docs", icon: Stamp },
+};
+
+/** Order the job tabs and tag each with its tier + cluster + staff-gating, so
+ *  <Tabs> keeps the Work core visible and folds the rest into a clustered,
+ *  bloom-skinned "More" menu (and hides money tabs from techs itself). */
 function arrangeJobTabs(tabs: TabDef[]): TabDef[] {
   return [...tabs]
     .sort((a, b) => JOB_TAB_ORDER.indexOf(a.id) - JOB_TAB_ORDER.indexOf(b.id))
     .map((t) => ({
       ...t,
+      ...(JOB_TAB_META[t.id] ?? {}),
       tier: JOB_PRIMARY.has(t.id) ? ("primary" as const) : ("overflow" as const),
       staffOnly: JOB_STAFF_ONLY.has(t.id),
     }));
@@ -184,7 +204,7 @@ export default async function JobDetailPage({
   } = await supabase.auth.getUser();
   const { data: meRow } = await supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle();
   const viewerIsStaff = ["owner", "admin", "office"].includes((meRow as any)?.role ?? "");
-  const [{ data: techs }, { data: jobCodes }, { data: lists }, { data: org }, { data: allCustomers }, { data: allJobs }, { data: codeTemplates }] = await Promise.all([
+  const [{ data: techs }, { data: jobCodes }, { data: lists }, { data: org }, { data: allCustomers }, { data: allJobs }, { data: codeTemplates }, { data: openEntryRow }] = await Promise.all([
     supabase.from("profiles").select("id, full_name, home_address").order("full_name"),
     supabase.from("job_codes").select("*").order("code"),
     supabase.from("material_lists").select("id, name").order("created_at", { ascending: false }).limit(100),
@@ -192,7 +212,26 @@ export default async function JobDetailPage({
     supabase.from("customers").select("id, name, type").order("name"),
     supabase.from("jobs").select("id, job_number, name").order("created_at", { ascending: false }).limit(100),
     supabase.from("job_code_templates").select("id, name").order("name"),
+    // The viewer's OPEN time entry (drives the action dock's 3-state TIME button).
+    // Summed time_allocations = hours already recorded by mid-shift switches, so a
+    // "Switch here" confirm can honestly name the outgoing segment's hours.
+    supabase
+      .from("time_entries")
+      .select("id, clock_in, job_id, job:job_id(job_number, name), time_allocations(hours)")
+      .eq("profile_id", user?.id ?? "")
+      .eq("status", "open")
+      .maybeSingle(),
   ]);
+  const oe = openEntryRow as any;
+  const openEntry = oe
+    ? {
+        id: oe.id as string,
+        clock_in: oe.clock_in as string,
+        job_id: (oe.job_id ?? null) as string | null,
+        jobLabel: oe.job ? `${oe.job.job_number} · ${oe.job.name}` : null,
+        allocatedHours: (oe.time_allocations ?? []).reduce((s: number, a: any) => s + (Number(a.hours) || 0), 0),
+      }
+    : null;
   // Subs & contacts linked to THIS job (many-to-many). Graceful: if job_contacts doesn't exist yet
   // (migration 0087 not applied), the query errors and we just show an empty card — no crash.
   const { data: jobContactsRaw } = await supabase
@@ -648,13 +687,10 @@ export default async function JobDetailPage({
         <div className="space-y-3">
           {/* Lead with the INVOICES (this is the Invoices tab) — the contract / payment
               schedule / lien cards live below, since they're supporting deal-to-cash context. */}
+          {/* Plain "Create invoice" lives ONCE now — in the action dock's Manage ⋯ menu
+              (the header/tab duplicate pair collapsed to one bound action). */}
           <div className="flex justify-end gap-2">
             <ProgressInvoiceButton jobId={j.id} billingType={(j as any).billing_type ?? "fixed"} estimate={quoted} worked={workedToDate} invoiced={billedToDate} paid={collected} openInvoices={openInvoices} scheduleActive={((paymentMilestones as any) ?? []).length > 0} />
-            <ConvertButton
-              label="Create invoice"
-              run={createInvoiceForJob.bind(null, j.id)}
-              hrefPrefix="/billing/"
-            />
           </div>
           <Card className="overflow-hidden">
           <ul className="divide-y divide-slate-100">
@@ -769,51 +805,34 @@ export default async function JobDetailPage({
         <span className="font-medium text-slate-700">{j.job_number}</span>
       </div>
 
-      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">{j.name}</h1>
-          <div className="mt-1 flex items-center gap-2 text-sm text-slate-400">
-            <span>{j.job_number}</span>
-            <Badge tone={statusTone(j.status)}>{j.status.replace("_", " ")}</Badge>
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {viewerIsStaff && <QuickCostButton jobId={j.id} />}
-          {j.status !== "complete" && j.status !== "invoiced" && j.status !== "cancelled" && (
-            <>
-              <ProposeDatesButton
-                jobId={j.id}
-                customerPhone={j.customers?.phone}
-                pending={(pendingProposal as any) ?? null}
-              />
-              <FinishJobButton
-                jobId={j.id}
-                hasQuote={(quotes ?? []).length > 0}
-                defaultSendInvoice={getOrgSettings((org as any)?.settings).auto_send_invoice_on_complete}
-                isDrawBilled={(invoices ?? []).some(
-                  (i: any) => ["deposit", "progress", "final"].includes(i.invoice_kind) && i.status !== "void",
-                )}
-              />
-            </>
-          )}
-          <JobEditButton job={j} customers={allCustomers ?? []} techs={techs ?? []} templates={(codeTemplates ?? []) as { id: string; name: string }[]} />
-          <ConvertButton
-            label="Create invoice"
-            run={createInvoiceForJob.bind(null, j.id)}
-            hrefPrefix="/billing/"
-          />
-          <DeleteButton
-            run={deleteJob.bind(null, j.id)}
-            confirmText={`Delete job ${j.job_number}? Time entries, estimates, and invoices keep their data but lose the job link.`}
-            redirectTo="/jobs"
-          />
-          {/* The ⋯ actions menu sits on the far right (clean kebab, no noodles). */}
-          <SectionActionsMenu
-            tree={jobSectionTree(j.id, j.name, { customerId: j.customer_id, jobCode: j.job_number })}
-            isStaff={viewerIsStaff}
-          />
+      <div className="mb-4">
+        <h1 className="text-2xl font-bold text-slate-900">{j.name}</h1>
+        <div className="mt-1 flex items-center gap-2 text-sm text-slate-400">
+          <span>{j.job_number}</span>
+          <Badge tone={statusTone(j.status)}>{j.status.replace("_", " ")}</Badge>
         </div>
       </div>
+
+      {/* The action dock — one sticky glass bar replacing the old 7-control row:
+          TIME (the only filled button) · Add cost · Photo · Call · Navigate · Manage ⋯ */}
+      <JobActionDock
+        job={j}
+        viewerIsStaff={viewerIsStaff}
+        tz={tz}
+        openEntry={openEntry}
+        techs={techs ?? []}
+        defaultProfileId={user?.id ?? ""}
+        jobAddress={jobAddress}
+        customerPhone={j.customers?.phone ?? null}
+        pendingProposal={(pendingProposal as any) ?? null}
+        hasQuote={(quotes ?? []).length > 0}
+        defaultSendInvoice={getOrgSettings((org as any)?.settings).auto_send_invoice_on_complete}
+        isDrawBilled={(invoices ?? []).some(
+          (i: any) => ["deposit", "progress", "final"].includes(i.invoice_kind) && i.status !== "void",
+        )}
+        customers={allCustomers ?? []}
+        templates={(codeTemplates ?? []) as { id: string; name: string }[]}
+      />
 
       <Tabs tabs={arrangeJobTabs(tabs)} viewerIsStaff={viewerIsStaff} urlSync />
     </div>
