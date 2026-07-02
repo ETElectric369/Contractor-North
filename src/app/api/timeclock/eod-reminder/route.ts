@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { sendSms } from "@/lib/sms";
 import { getOrgSettings } from "@/lib/org-settings";
+import { sendCloseOutNudges } from "@/lib/action-items/eod-sweep";
 import { todayBoundsInTz } from "@/lib/tz";
 
 /**
@@ -86,5 +87,15 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.json({ checked, reminded });
+  // NIGHT DEBRIEF NUDGE (Erik: "i want a night debrief") — this cron already fires at the end
+  // of the workday (01:00 UTC ≈ 6pm PT), so the "Close out your day" push rides it: staff get the
+  // day's money leaks + a deep link to /planner?debrief=1, which opens Nort's debrief interview.
+  let close_out: unknown = null;
+  try {
+    close_out = await sendCloseOutNudges(supabase);
+  } catch {
+    close_out = "failed";
+  }
+
+  return NextResponse.json({ checked, reminded, close_out });
 }

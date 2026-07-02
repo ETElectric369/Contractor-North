@@ -3,7 +3,6 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { generateDueTemplates } from "@/lib/recurring-engine";
 import { sendDueReminders } from "@/lib/reminders-engine";
 import { sendDayAheadDigests } from "@/lib/action-items/digest";
-import { sendCloseOutNudges } from "@/lib/action-items/eod-sweep";
 import { reportError } from "@/lib/observe";
 
 export const runtime = "nodejs";
@@ -58,14 +57,8 @@ export async function GET(request: Request) {
     result.day_ahead_error = e?.message ?? "failed";
     reportError("cron-day-ahead", e);
   }
-  try {
-    // "Close out your day" money-leak nudge — same opt-in toggle as the digest;
-    // an org whose detectors found nothing sends nothing.
-    result.close_out = await sendCloseOutNudges(supabase);
-  } catch (e: any) {
-    result.close_out_error = e?.message ?? "failed";
-    reportError("cron-close-out", e);
-  }
+  // The "Close out your day" nudge moved to the EVENING cron (eod-reminder, 6pm local-ish) —
+  // Erik: the debrief is a NIGHT ritual; mornings keep the day-ahead digest only.
 
   return NextResponse.json(result);
 }

@@ -202,8 +202,9 @@ export async function POST(req: Request) {
       "\n- 'Anything else billable today?' (extra work, a service call, a change the customer asked for → task.create or capture.quick so it isn't lost)." +
       "\n- Each crew mismatch you found: 'X was clocked in at Y — were you there too?' or 'X's entry is still open — did they stay longer?' Report what you see and ASK; NEVER silently edit another person's time." +
       "\n3. FILE EACH ANSWER IMMEDIATELY with its tool and a one-line readback before the next question — never stack answers up to file at the end." +
-      "\n4. END WITH TOMORROW, one line: what's scheduled (schedule_overview) and what to pick up (open tasks due) — the debrief sets up the next day." +
-      "\n5. LAST: if the interview revealed a durable pattern about how THIS business runs (usual crew hours, a supplier habit, a billing rhythm), save ONE fact with remember — this is how you learn the business." +
+      "\n4. THEN SET UP TOMORROW — same rhythm, one question at a time, and FILE each answer: 'Which job first tomorrow — and who's on it?' (job.scheduleDay / job.assign when they answer); 'Any materials to pick up on the way?' (task.create due tomorrow, linked to that job); 'Anyone to call or anything to schedule before morning?' (task.create or appointment.create). Skip any question the schedule already answers — don't ask what schedule_overview just told you." +
+      "\n5. CLOSE WITH THE PLAN, one line: tomorrow's first job, the pickup list, the one thing that can't slip." +
+      "\n6. LAST: if the interview revealed a durable pattern about how THIS business runs (usual crew hours, a supplier habit, a billing rhythm), save ONE fact with remember — this is how you learn the business." +
       "\nIn voice mode keep every question to one short sentence.";
     // The fake-capture incident (2026-07-01): Nort told Erik a feature idea was "captured" without
     // calling ANY tool — nothing was saved anywhere. These two rules close both halves of that hole.
