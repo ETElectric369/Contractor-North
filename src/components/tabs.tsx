@@ -352,6 +352,14 @@ function MoreMenu({ items, activeId, onSelect }: { items: TabBarItem[]; activeId
           style={{ position: "absolute", right: 0, top: "calc(100% + 0.25rem)" }}
           className="glass glass-gloss glass-menu z-30 min-w-[180px] overflow-hidden rounded-xl py-1 shadow-xl"
         >
+          {/* Opaque backing — the job-manage-menu.tsx pattern (cn-v315's "ghost Edit
+              pill" root cause). glass-menu's 40% white let the page's cards/buttons
+              read straight through the panel wherever a backdrop-filter ancestor (the
+              job hub's sticky glass dock, any glass card) breaks the panel's own blur
+              (a nested backdrop root can't sample the page). Near-solid white + tint
+              behind the rows, under the .glass-gloss sheen (-z-10 vs the z-10 rows). */}
+          <div aria-hidden className="absolute inset-0 -z-10 bg-white/85" />
+          <div aria-hidden className="absolute inset-0 -z-10 bg-[rgb(var(--glass-tint))]/10" />
           {sections.map(
             (s, si) =>
               s.items.length > 0 && (

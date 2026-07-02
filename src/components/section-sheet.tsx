@@ -124,7 +124,18 @@ export function SectionSheet({
             <X className="h-5 w-5" />
           </button>
         </div>
-        <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+        {/* Bottom padding must clear the FLOATING BOTTOM NAV, not just the safe area:
+            the nav (fixed bottom-2, z-[70], backdrop-filter + translateZ) wins iOS
+            compositing against overlays even at higher z (the documented Save-hidden
+            bug — Modal solves it by setting body.modal-open, which this sheet doesn't).
+            With only 0.5rem the last rows (Office's Settings) scrolled TO the bottom
+            edge but stayed covered by the bar. ~5rem = bar height + its 0.5rem inset +
+            breathing room, the same trick as <main>'s own pb-[calc(7.5rem+…)].
+            WebkitOverflowScrolling inline: globals.css only grants momentum to `main`. */}
+        <nav
+          style={{ WebkitOverflowScrolling: "touch" }}
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 py-2 pb-[calc(5rem+env(safe-area-inset-bottom))]"
+        >
           {items.map((c) => {
             const CIcon = c.icon;
             // Headers flatten away in the strip, but HERE they earn their keep as

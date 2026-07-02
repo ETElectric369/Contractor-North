@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import { Search, X, User } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { searchContacts, type PickerContact } from "./actions";
@@ -29,7 +30,29 @@ export function ContactPicker({
     return () => clearTimeout(t);
   }, [query, pick.type]);
 
-  return (
+  // Escape = Cancel, the standard popover dismissal (outside tap + X already work).
+  // stopPropagation keeps the keypress from ALSO reaching an open Modal's window
+  // listener underneath (this sheet sits above it at z-[130]) — one press, one close;
+  // the modal-open rule stays intact because the event never leaks past us.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      onCancel();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+
+  // PORTALED to <body> — the ShareQrButton exception to the in-place rule. This picker's
+  // only mount is INSIDE the floating Nort panel (global-assistant.tsx), whose
+  // backdrop-blur-xl makes the panel the CONTAINING BLOCK for fixed descendants
+  // (filter-effects-2 spec) and whose overflow-hidden clips them: the "fixed inset-0"
+  // scrim only covered the 384px panel, so tapping the page around it never hit the
+  // scrim — Erik's "contact picker won't go away". The portal lifts the sheet to the
+  // real viewport. Safe: no <form> wraps it (the documented no-portal hazard), and it
+  // renders only after a stream directive, never during SSR.
+  return createPortal(
     <div className="fixed inset-0 z-[130] flex items-end justify-center bg-black/30 p-0 sm:items-center sm:p-4" onClick={onCancel}>
       <div className="w-full max-w-md rounded-t-2xl bg-white p-4 shadow-2xl sm:rounded-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-center justify-between">
@@ -74,6 +97,7 @@ export function ContactPicker({
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
