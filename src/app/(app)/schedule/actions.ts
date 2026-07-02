@@ -252,6 +252,10 @@ async function loadJobDaySegments(
   const segments = (segRows ?? []).map((s: any) => ({ start: s.start_date as string, end: s.end_date as string }));
   if (segments.length) return { segments };
   const { data: job } = await supabase.from("jobs").select("scheduled_start, scheduled_end").eq("id", jobId).maybeSingle();
+  // No segments AND no visible job = the id isn't ours (RLS) or doesn't exist. Bail
+  // so movers/placers can't write an orphan segment row against a foreign job id
+  // (audit cn-v328: the insert would org-stamp to the CALLER and pass WITH CHECK).
+  if (!job) return { segments: [], error: "Job not found." };
   if (job?.scheduled_start) {
     const tz = await orgTimezone(supabase);
     const start = todayStrInTz(tz, new Date(job.scheduled_start));
