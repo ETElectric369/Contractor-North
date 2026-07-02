@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { X } from "lucide-react";
+import { ChevronRight, X } from "lucide-react";
 import type { DockNode, DockSection } from "@/lib/dock";
 
 /**
@@ -85,6 +85,12 @@ export function SectionSheet({
         >
           {handleLabel}
         </span>
+        {/* Discoverability (Erik: "only one option shows up"): the handle names WHERE YOU ARE,
+            but nothing said "there's more behind me" — a page count + chevron now do. */}
+        <span className="relative z-10 rounded-full bg-white/70 px-1 text-[10px] font-bold leading-4 text-slate-600">
+          {items.filter((c) => c.href).length}
+        </span>
+        <ChevronRight className="relative z-10 h-3.5 w-3.5 shrink-0 opacity-70" />
       </button>
 
       {/* Scrim — tap anywhere off the sheet to close. Above the bottom nav (70) and
