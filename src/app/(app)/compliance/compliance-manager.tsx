@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Pencil, Trash2, ShieldCheck } from "lucide-react";
+import { FileText, Plus, Pencil, Trash2, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
@@ -12,6 +12,7 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { useToast } from "@/components/toast";
 import { createCompliance, updateCompliance, deleteCompliance } from "./actions";
+import { ImportDocsButton } from "./import-docs-button";
 
 export interface ComplianceItem {
   id: string;
@@ -22,6 +23,9 @@ export interface ComplianceItem {
   issued_date: string | null;
   expires_date: string | null;
   notes: string | null;
+  /** Storage path + signed view link when a document was imported/attached. */
+  file_url?: string | null;
+  signedUrl?: string | null;
 }
 
 import { COMPLIANCE_TYPES as TYPES } from "@/lib/compliance-types";
@@ -41,7 +45,7 @@ export function expiryBadge(date: string | null) {
   return { tone: "green" as const, label: `Active` };
 }
 
-export function ComplianceManager({ items }: { items: ComplianceItem[] }) {
+export function ComplianceManager({ items, orgId }: { items: ComplianceItem[]; orgId: string }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
@@ -79,9 +83,9 @@ export function ComplianceManager({ items }: { items: ComplianceItem[] }) {
 
   function add() {
     setError(null);
-    if (!name.trim()) return setError("Name / provider is required.");
     start(async () => {
-      const res = await createCompliance({ type, name, policy_number: policy, amount, issued_date: issued || null, expires_date: expires || null, notes });
+      // Name is optional — the server defaults a blank one, so a save never blocks on typing.
+      const res = await createCompliance({ type, name: name.trim() || "Untitled policy", policy_number: policy, amount, issued_date: issued || null, expires_date: expires || null, notes });
       if (!res.ok) return setError(res.error ?? "Could not save.");
       setName(""); setPolicy(""); setAmount(0); setIssued(""); setExpires(""); setNotes("");
       setAdding(false);
@@ -92,7 +96,6 @@ export function ComplianceManager({ items }: { items: ComplianceItem[] }) {
   function saveEdit() {
     if (!editing) return;
     setError(null);
-    if (!eName.trim()) return setError("Name / provider is required.");
     start(async () => {
       const res = await updateCompliance(editing.id, { type: eType, name: eName, policy_number: ePolicy, amount: eAmount, issued_date: eIssued || null, expires_date: eExpires || null, notes: eNotes });
       if (!res.ok) return setError(res.error ?? "Could not save.");
@@ -110,7 +113,8 @@ export function ComplianceManager({ items }: { items: ComplianceItem[] }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
+      <div className="flex items-start justify-end gap-2">
+        <ImportDocsButton orgId={orgId} page="Compliance" />
         <Button size="sm" onClick={() => setAdding((a) => !a)}><Plus className="h-3.5 w-3.5" /> Add item</Button>
       </div>
 
@@ -119,7 +123,7 @@ export function ComplianceManager({ items }: { items: ComplianceItem[] }) {
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <div><Label htmlFor="c-type">Type</Label><Select id="c-type" value={type} onChange={(e) => setType(e.target.value)}>{TYPES.map((t) => <option key={t} value={t}>{t}</option>)}</Select></div>
-            <div className="col-span-2 sm:col-span-1"><Label htmlFor="c-name">Provider / name *</Label><Input id="c-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. State Farm GL" /></div>
+            <div className="col-span-2 sm:col-span-1"><Label htmlFor="c-name">Provider / name</Label><Input id="c-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. State Farm GL (optional)" /></div>
             <div><Label htmlFor="c-policy">Policy / # </Label><Input id="c-policy" value={policy} onChange={(e) => setPolicy(e.target.value)} /></div>
             <div><Label htmlFor="c-amount">Annual cost</Label><NumberInput id="c-amount" value={amount} onValueChange={setAmount} /></div>
             <div><Label htmlFor="c-issued">Issued</Label><Input id="c-issued" type="date" value={issued} onChange={(e) => setIssued(e.target.value)} /></div>
@@ -128,7 +132,7 @@ export function ComplianceManager({ items }: { items: ComplianceItem[] }) {
           <div><Label htmlFor="c-notes">Notes</Label><Textarea id="c-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Agent, renewal contact, submission portal…" /></div>
           <div className="flex justify-end gap-2">
             <Button size="sm" variant="outline" onClick={() => setAdding(false)}>Cancel</Button>
-            <Button size="sm" onClick={add} disabled={pending || !name.trim()}>{pending ? "Saving…" : "Save"}</Button>
+            <Button size="sm" onClick={add} disabled={pending}>{pending ? "Saving…" : "Save"}</Button>
           </div>
         </Card>
       )}
@@ -162,6 +166,11 @@ export function ComplianceManager({ items }: { items: ComplianceItem[] }) {
                   <Badge tone={b.tone}>{b.label}</Badge>
                   {c.expires_date && <span>Renews {formatDate(c.expires_date)}</span>}
                   {Number(c.amount) > 0 && <span>· {formatCurrency(c.amount)}/yr</span>}
+                  {c.signedUrl && (
+                    <a href={c.signedUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-medium text-sky-700 hover:underline">
+                      <FileText className="h-3.5 w-3.5" /> Document
+                    </a>
+                  )}
                 </div>
                 {c.notes && <div className="mt-2 whitespace-pre-wrap border-t border-slate-100 pt-2 text-xs text-slate-500">{c.notes}</div>}
               </Card>
@@ -174,12 +183,12 @@ export function ComplianceManager({ items }: { items: ComplianceItem[] }) {
         open={!!editing}
         onClose={() => setEditing(null)}
         title="Edit item"
-        footer={<ModalActions onCancel={() => setEditing(null)} onSave={saveEdit} saving={pending} disabled={!eName.trim()} />}
+        footer={<ModalActions onCancel={() => setEditing(null)} onSave={saveEdit} saving={pending} />}
       >
         {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           <div><Label htmlFor="ce-type">Type</Label><Select id="ce-type" value={eType} onChange={(e) => setEType(e.target.value)}>{TYPES.map((t) => <option key={t} value={t}>{t}</option>)}</Select></div>
-          <div className="col-span-2 sm:col-span-1"><Label htmlFor="ce-name">Provider / name *</Label><Input id="ce-name" value={eName} onChange={(e) => setEName(e.target.value)} placeholder="e.g. State Farm GL" /></div>
+          <div className="col-span-2 sm:col-span-1"><Label htmlFor="ce-name">Provider / name</Label><Input id="ce-name" value={eName} onChange={(e) => setEName(e.target.value)} placeholder="e.g. State Farm GL (optional)" /></div>
           <div><Label htmlFor="ce-policy">Policy / # </Label><Input id="ce-policy" value={ePolicy} onChange={(e) => setEPolicy(e.target.value)} /></div>
           <div><Label htmlFor="ce-amount">Annual cost</Label><NumberInput id="ce-amount" value={eAmount} onValueChange={setEAmount} /></div>
           <div><Label htmlFor="ce-issued">Issued</Label><Input id="ce-issued" type="date" value={eIssued} onChange={(e) => setEIssued(e.target.value)} /></div>

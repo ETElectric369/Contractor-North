@@ -14,6 +14,7 @@ import { useToast } from "@/components/toast";
 import { createClient } from "@/lib/supabase/client";
 import { createCompliance, updateCompliance, deleteCompliance, setComplianceFile } from "../compliance/actions";
 import { daysUntil, expiryBadge, type ComplianceItem } from "../compliance/compliance-manager";
+import { ImportDocsButton } from "../compliance/import-docs-button";
 import { INSURANCE_TYPES } from "@/lib/compliance-types";
 
 type InsuranceItem = ComplianceItem & { file_url?: string | null; signedUrl?: string | null };
@@ -70,7 +71,6 @@ export function InsuranceManager({ items, orgId }: { items: InsuranceItem[]; org
 
   function add() {
     setError(null);
-    if (!name.trim()) return setError("Carrier / policy name is required.");
     start(async () => {
       let file_url: string | null = null;
       if (certFile) {
@@ -80,7 +80,9 @@ export function InsuranceManager({ items, orgId }: { items: InsuranceItem[]; org
           return setError(err?.message ?? "Certificate upload failed.");
         }
       }
-      const res = await createCompliance({ type, name, policy_number: policy, amount, issued_date: issued || null, expires_date: expires || null, notes, file_url });
+      // Name is optional — fall back to the attached file's name so a save never blocks on typing.
+      const finalName = name.trim() || certFile?.name.replace(/\.[^.]+$/, "").trim() || "Untitled policy";
+      const res = await createCompliance({ type, name: finalName, policy_number: policy, amount, issued_date: issued || null, expires_date: expires || null, notes, file_url });
       if (!res.ok) return setError(res.error ?? "Could not save.");
       setName(""); setPolicy(""); setAmount(0); setIssued(""); setExpires(""); setNotes(""); setCertFile(null);
       setAdding(false);
@@ -116,7 +118,6 @@ export function InsuranceManager({ items, orgId }: { items: InsuranceItem[]; org
   function saveEdit() {
     if (!editing) return;
     setError(null);
-    if (!eName.trim()) return setError("Carrier / policy name is required.");
     start(async () => {
       const res = await updateCompliance(editing.id, { type: eType, name: eName, policy_number: ePolicy, amount: eAmount, issued_date: eIssued || null, expires_date: eExpires || null, notes: eNotes });
       if (!res.ok) return setError(res.error ?? "Could not save.");
@@ -134,7 +135,8 @@ export function InsuranceManager({ items, orgId }: { items: InsuranceItem[]; org
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
+      <div className="flex items-start justify-end gap-2">
+        <ImportDocsButton orgId={orgId} page="Insurance" />
         <Button size="sm" onClick={() => setAdding((a) => !a)}><Plus className="h-3.5 w-3.5" /> Add policy</Button>
       </div>
 
@@ -143,7 +145,7 @@ export function InsuranceManager({ items, orgId }: { items: InsuranceItem[]; org
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <div><Label htmlFor="i-type">Policy type</Label><Select id="i-type" value={type} onChange={(e) => setType(e.target.value)}>{INSURANCE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}</Select></div>
-            <div className="col-span-2 sm:col-span-1"><Label htmlFor="i-name">Carrier / name *</Label><Input id="i-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. State Farm" /></div>
+            <div className="col-span-2 sm:col-span-1"><Label htmlFor="i-name">Carrier / name</Label><Input id="i-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. State Farm (optional — file name used if blank)" /></div>
             <div><Label htmlFor="i-policy">Policy #</Label><Input id="i-policy" value={policy} onChange={(e) => setPolicy(e.target.value)} /></div>
             <div><Label htmlFor="i-amount">Annual premium</Label><NumberInput id="i-amount" value={amount} onValueChange={setAmount} /></div>
             <div><Label htmlFor="i-issued">Effective</Label><Input id="i-issued" type="date" value={issued} onChange={(e) => setIssued(e.target.value)} /></div>
@@ -167,7 +169,7 @@ export function InsuranceManager({ items, orgId }: { items: InsuranceItem[]; org
           </div>
           <div className="flex justify-end gap-2">
             <Button size="sm" variant="outline" onClick={() => setAdding(false)}>Cancel</Button>
-            <Button size="sm" onClick={add} disabled={pending || !name.trim()}>{pending ? "Saving…" : "Save"}</Button>
+            <Button size="sm" onClick={add} disabled={pending}>{pending ? "Saving…" : "Save"}</Button>
           </div>
         </Card>
       )}
@@ -218,12 +220,12 @@ export function InsuranceManager({ items, orgId }: { items: InsuranceItem[]; org
         open={!!editing}
         onClose={() => setEditing(null)}
         title="Edit policy"
-        footer={<ModalActions onCancel={() => setEditing(null)} onSave={saveEdit} saving={pending} disabled={!eName.trim()} />}
+        footer={<ModalActions onCancel={() => setEditing(null)} onSave={saveEdit} saving={pending} />}
       >
         {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           <div><Label htmlFor="ie-type">Policy type</Label><Select id="ie-type" value={eType} onChange={(e) => setEType(e.target.value)}>{INSURANCE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}</Select></div>
-          <div className="col-span-2 sm:col-span-1"><Label htmlFor="ie-name">Carrier / name *</Label><Input id="ie-name" value={eName} onChange={(e) => setEName(e.target.value)} placeholder="e.g. State Farm" /></div>
+          <div className="col-span-2 sm:col-span-1"><Label htmlFor="ie-name">Carrier / name</Label><Input id="ie-name" value={eName} onChange={(e) => setEName(e.target.value)} placeholder="e.g. State Farm (optional)" /></div>
           <div><Label htmlFor="ie-policy">Policy #</Label><Input id="ie-policy" value={ePolicy} onChange={(e) => setEPolicy(e.target.value)} /></div>
           <div><Label htmlFor="ie-amount">Annual premium</Label><NumberInput id="ie-amount" value={eAmount} onValueChange={setEAmount} /></div>
           <div><Label htmlFor="ie-issued">Effective</Label><Input id="ie-issued" type="date" value={eIssued} onChange={(e) => setEIssued(e.target.value)} /></div>
