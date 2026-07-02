@@ -127,10 +127,36 @@ export function agentWriteToolsForRole(role: string | null | undefined): {
       description: a.description,
       input_schema: {
         type: "object",
-        properties: schema.properties ?? {},
+        properties: to2020(schema.properties ?? {}) as Record<string, unknown>,
         required: schema.required ?? [],
       },
     };
   });
   return { tools, resolve: (toolName: string) => map.get(toolName) ?? null };
+}
+
+/**
+ * Anthropic validates tool input_schema against JSON Schema draft 2020-12, but
+ * zod-to-json-schema's openApi3 target emits draft-4-style BOOLEAN
+ * exclusiveMinimum/exclusiveMaximum (e.g. z.number().positive() →
+ * { minimum: 0, exclusiveMinimum: true }) — ONE such keyword anywhere in the
+ * tool array 400s the ENTIRE chat request (this took Nort down: tools.84,
+ * time.addEntry's hours>0). Convert to the 2020-12 numeric form everywhere.
+ * (Unknown keywords like openApi3's `nullable` are legal 2020-12 annotations
+ * and pass through untouched.)
+ */
+function to2020(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(to2020);
+  if (!node || typeof node !== "object") return node;
+  const o: Record<string, unknown> = { ...(node as Record<string, unknown>) };
+  if (o.exclusiveMinimum === true && typeof o.minimum === "number") {
+    o.exclusiveMinimum = o.minimum;
+    delete o.minimum;
+  } else if (typeof o.exclusiveMinimum === "boolean") delete o.exclusiveMinimum;
+  if (o.exclusiveMaximum === true && typeof o.maximum === "number") {
+    o.exclusiveMaximum = o.maximum;
+    delete o.maximum;
+  } else if (typeof o.exclusiveMaximum === "boolean") delete o.exclusiveMaximum;
+  for (const k of Object.keys(o)) o[k] = to2020(o[k]);
+  return o;
 }
