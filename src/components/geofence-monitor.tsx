@@ -8,7 +8,7 @@ import { adoptGeofenceAnchor, geoClockOut } from "@/app/(app)/timeclock/actions"
 import { ClockStartPicker } from "@/app/(app)/timeclock/clock-start-picker";
 import { Button } from "@/components/ui/button";
 import { speakSmart } from "@/lib/tts";
-import { getPosition, watchPosition } from "@/lib/geo";
+import { geoPermission, getPosition, watchPosition } from "@/lib/geo";
 import type { GeoPoint } from "@/lib/types";
 
 /** Great-circle distance in meters. */
@@ -294,16 +294,36 @@ export function GeofenceMonitor({
     };
     const opts: PositionOptions = { enableHighAccuracy: true, maximumAge: 30_000, timeout: 60_000 };
 
-    let stop = watchPosition(onFix, onErr, opts);
+    // THE iOS RULE (geo.ts): mounting is NOT a gesture — arming a watch pre-grant would fire an
+    // off-gesture permission prompt, which the installed PWA silently denies and can PERSIST. Only arm
+    // once the permission is granted (live, or memoized by the clock-in tap's fix); until then the
+    // fence stays honestly quiet, and the rearm path below self-heals the moment a grant lands.
+    let disposed = false;
+    let warnedGate = false;
+    let stop: () => void = () => {};
+    const arm = async () => {
+      if (disposed || doneRef.current) return;
+      if ((await geoPermission()) !== "granted") {
+        if (!warnedGate) {
+          warnedGate = true;
+          console.warn("[geofence] location not granted yet — live exit tracking waits for the first granted fix");
+        }
+        return;
+      }
+      if (disposed || doneRef.current) return;
+      stop();
+      stop = watchPosition(onFix, onErr, opts);
+    };
+    void arm();
     // iOS quietly kills the watch when the PWA suspends — re-arm it on every return
     // to the foreground (the old monitor never did, so it went deaf after one pocket).
     const rearm = () => {
       if (document.visibilityState !== "visible" || doneRef.current) return;
-      stop();
-      stop = watchPosition(onFix, onErr, opts);
+      void arm();
     };
     document.addEventListener("visibilitychange", rearm);
     return () => {
+      disposed = true;
       document.removeEventListener("visibilitychange", rearm);
       stop();
     };
@@ -326,6 +346,16 @@ export function GeofenceMonitor({
       lastWakeCheckRef.current = now;
       inFlightStamp = now;
       try {
+        // THE iOS RULE (geo.ts): a wake is NOT a gesture — pre-grant, BOTH fixes below (anchor
+        // adoption and the exit check) would fire an off-gesture permission prompt, which the
+        // installed PWA silently denies and can PERSIST. Gate on granted (live or memoized by the
+        // clock-in tap's fix) and hand the throttle slot back, so the first wake after the grant
+        // isn't muted for 60s.
+        if ((await geoPermission()) !== "granted") {
+          if (lastWakeCheckRef.current === now) lastWakeCheckRef.current = 0;
+          return;
+        }
+        if (cancelled || doneRef.current || phaseRef.current !== "idle") return;
         // No anchor (clock-in couldn't capture GPS) → adopt one from a good fix, but
         // only near clock-in. Past the window the fence stays honestly quiet for this
         // shift — the evening sweep still flags a forgotten entry.

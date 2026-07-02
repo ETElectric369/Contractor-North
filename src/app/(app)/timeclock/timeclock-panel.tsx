@@ -60,6 +60,12 @@ interface JobOption {
 // of a third hand-rolled getCurrentPosition. Still returns null on failure — but the caller now SHOWS
 // that the punch wasn't GPS-stamped instead of silently stamping gps:null.
 //
+// The punch tap is also the app's legitimate FIRST-GRANT moment for location (THE iOS RULE in geo.ts):
+// doClockIn/doClockOut call this synchronously in their tap's transition, so getCurrentPosition fires
+// inside the gesture — the one shape iOS honors with a real permission popup — and a successful fix
+// memoizes the grant (geo:granted) inside geo.ts, which weather + the geofence monitor then read
+// silently forever after. Don't add awaits ahead of this call.
+//
 // `capMs` caps how long the PUNCH waits on GPS. The clock-in punch passes a short cap so the field crew
 // isn't held hostage by an 8s highAccuracy fix on bad reception (the other two clock-in surfaces punch
 // instantly with no GPS at all) — if the fix lands inside the window it's stamped, otherwise we punch
