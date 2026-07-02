@@ -100,14 +100,21 @@ export function purchaseOrderSectionTree(label: string, del: DeleteVerb): NavTre
 }
 
 /** The customer ⋯ — "New invoice" rides the /billing ?new=1 contract (opens the
- *  real create modal). The old New job / New estimate tab-jumps were dropped:
+ *  real create modal) and carries ?customer= so THIS customer arrives preset.
+ *  The old New job / New estimate tab-jumps were dropped:
  *  the header owns the real flows, and the tabs they landed on have no create
  *  button (a dead door). Delete rides last, staff-only like Merge. */
-export function customerSectionTree(label: string, del: DeleteVerb): NavTree {
+export function customerSectionTree(label: string, del: DeleteVerb, customerId?: string): NavTree {
   return {
     center: { label, icon: "users" },
     nodes: [
-      { id: "c-newinv", label: "New invoice", icon: "receipt", href: "/billing?new=1", staffOnly: true },
+      {
+        id: "c-newinv",
+        label: "New invoice",
+        icon: "receipt",
+        href: customerId ? `/billing?new=1&customer=${customerId}` : "/billing?new=1",
+        staffOnly: true,
+      },
       { ...deleteNode("c-del", "Delete customer", del, "/crm"), staffOnly: true },
     ],
   };

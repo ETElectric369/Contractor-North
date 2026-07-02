@@ -273,10 +273,14 @@ export default async function CustomerDetailPage({
             </Button>
           </Link>
           <SectionActionsMenu
-            tree={customerSectionTree(c.name, {
-              run: deleteCustomer.bind(null, c.id),
-              confirm: `Delete ${c.name}? This only works when no jobs, estimates, or invoices reference them.`,
-            })}
+            tree={customerSectionTree(
+              c.name,
+              {
+                run: deleteCustomer.bind(null, c.id),
+                confirm: `Delete ${c.name}? This only works when no jobs, estimates, or invoices reference them.`,
+              },
+              c.id, // → New invoice opens with this customer preset
+            )}
             isStaff={viewerIsStaff}
           />
         </div>

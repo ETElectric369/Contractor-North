@@ -3,6 +3,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { generateDueTemplates } from "@/lib/recurring-engine";
 import { sendDueReminders } from "@/lib/reminders-engine";
 import { sendDayAheadDigests } from "@/lib/action-items/digest";
+import { sendCloseOutNudges } from "@/lib/action-items/eod-sweep";
 import { reportError } from "@/lib/observe";
 
 export const runtime = "nodejs";
@@ -12,7 +13,9 @@ export const runtime = "nodejs";
  * org-wide background work the app can't do interactively:
  *   - generate due recurring jobs/expenses (all orgs),
  *   - send opt-in customer reminders (quote follow-up / invoice due / appts),
- *   - push the staff "day ahead" digest (needs-action count + top items → /planner).
+ *   - push the staff "day ahead" digest (needs-action count + top items → /planner),
+ *   - push the "Close out your day" money-leak nudge (stray time / uncosted work /
+ *     missing return visit — YESTERDAY's gaps, since this cron runs mornings).
  *
  * Protected by CRON_SECRET (Vercel sends it automatically):
  *   GET /api/automations/daily   Authorization: Bearer <CRON_SECRET>
@@ -54,6 +57,14 @@ export async function GET(request: Request) {
   } catch (e: any) {
     result.day_ahead_error = e?.message ?? "failed";
     reportError("cron-day-ahead", e);
+  }
+  try {
+    // "Close out your day" money-leak nudge — same opt-in toggle as the digest;
+    // an org whose detectors found nothing sends nothing.
+    result.close_out = await sendCloseOutNudges(supabase);
+  } catch (e: any) {
+    result.close_out_error = e?.message ?? "failed";
+    reportError("cron-close-out", e);
   }
 
   return NextResponse.json(result);

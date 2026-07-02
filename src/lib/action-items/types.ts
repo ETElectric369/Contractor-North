@@ -15,7 +15,11 @@ export type ActionKind =
   | "invoice_draft" // a draft invoice never sent (billed-up money sitting in limbo)
   | "lien_deadline" // a lien prelim/recording deadline coming due or past
   | "contract_unsigned" // a contract sent but not yet signed
-  | "bug_report"; // an open bug reported from the field (owner watch)
+  | "bug_report" // an open bug reported from the field (owner watch)
+  // ── The end-of-day money-leak sweep (the "Apache Ct" detectors) ──
+  | "time_stray" // a time entry left running past its day, or closed with no job — hours nobody can bill
+  | "job_unbilled_work" // a job worked recently with ZERO costs/materials recorded (the 30'-of-Romex leak)
+  | "job_needs_return"; // a job worked recently with nothing scheduled next (the forgotten return visit)
 
 /** The four urgency streams the inbox renders under. Order is the render order:
  *  money first (chase the dollars), then fresh leads, then today's work, then
@@ -46,6 +50,9 @@ export const KIND_STREAM: Record<ActionKind, Stream> = {
   lien_deadline: "waiting", // compliance clock — legal, not A/R
   contract_unsigned: "waiting",
   bug_report: "waiting",
+  time_stray: "today", // a running/orphaned clock is today's cleanup, not tomorrow's
+  job_unbilled_work: "money", // uncosted work = dollars leaking off the invoice
+  job_needs_return: "today", // the return visit gets scheduled today or it gets forgotten
 };
 
 /** The canonical verbs. Each maps to an existing server action in dispatch.ts. */
@@ -85,6 +92,9 @@ export const KIND_META: Record<ActionKind, { label: string; tone: "slate" | "blu
   lien_deadline: { label: "Lien deadline", tone: "amber" },
   contract_unsigned: { label: "Unsigned contract", tone: "blue" },
   bug_report: { label: "Bug report", tone: "amber" },
+  time_stray: { label: "Stray time", tone: "amber" },
+  job_unbilled_work: { label: "No costs recorded", tone: "amber" },
+  job_needs_return: { label: "Nothing scheduled", tone: "blue" },
 };
 
 // The affordance matrix — which verbs each kind exposes. THE contract, consumed
@@ -108,6 +118,12 @@ export const AFFORDANCES: Record<ActionKind, Affordance[]> = {
   lien_deadline: ["open"],
   contract_unsigned: ["open"],
   bug_report: ["open"], // triage on the Bug watch page
+  // Detector findings are DERIVED rows (a time entry / a job), not their own records —
+  // there's no field a snooze could write, and "dismiss" would hide a real money leak.
+  // Open-only: the fix happens on the timecard / the job's costs tab / the job page.
+  time_stray: ["open"],
+  job_unbilled_work: ["open"],
+  job_needs_return: ["open"],
 };
 
 /**

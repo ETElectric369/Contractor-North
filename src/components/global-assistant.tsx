@@ -1,13 +1,57 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { AudioLines, Square, X, ChevronDown, ChevronUp, GripHorizontal } from "lucide-react";
 import { AssistantChat } from "@/app/(app)/assistant/assistant-chat";
+import { createClient } from "@/lib/supabase/client";
 import { unlockAudio, stopSpeaking } from "@/lib/tts";
 import * as speech from "@/lib/voice";
 import { useEstimator } from "@/lib/estimator-store";
 
 const PANEL_W = 384; // 24rem
+
+// Only ONE effect run may answer ?debrief=1 (the ?new=1 claim-guard pattern) — released
+// once the param is stripped, so the next deep-link tap works again.
+let debriefParamClaimed = false;
+
+/** Renders nothing — watches the URL for ?debrief=1 (the end-of-day push deep-links to
+ *  /planner?debrief=1) and, for staff, launches the assistant with the debrief opener, then
+ *  strips the param so a refresh or back-button doesn't re-run the interview. Lives in its
+ *  own Suspense island because useSearchParams suspends at prerender (the Dock pattern). */
+function DebriefEntry({ onLaunch }: { onLaunch: () => void }) {
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
+  const router = useRouter();
+  useEffect(() => {
+    if (searchParams.get("debrief") !== "1") {
+      debriefParamClaimed = false; // param gone → release for the next deep-link
+      return;
+    }
+    if (debriefParamClaimed) return;
+    debriefParamClaimed = true;
+    // Strip FIRST so the slow role lookup below can't double-fire on a re-render.
+    const params = new URLSearchParams(Array.from(searchParams.entries()));
+    params.delete("debrief");
+    const qs = params.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    // Staff only — the debrief interviews money + crew time; RLS/tool gating already
+    // protects the data, this just keeps the entry off a tech's screen entirely.
+    (async () => {
+      try {
+        const supabase = createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        const { data: prof } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
+        const role = (prof as { role?: string } | null)?.role ?? "";
+        if (["owner", "admin", "office"].includes(role)) onLaunch();
+      } catch {
+        /* best-effort: no debrief beats a crash on open */
+      }
+    })();
+  }, [searchParams, pathname, router, onLaunch]);
+  return null;
+}
 
 /**
  * ONE assistant, everywhere. The topbar waveform is the single source-of-truth control — Talk
@@ -48,6 +92,16 @@ export function GlobalAssistant() {
     if (open) { window.dispatchEvent(new Event("cn:assistant-talk")); setCollapsed(false); return; }
     setPendingQuery(null);
     setVoiceLaunch(true);
+    setCollapsed(false);
+    setPos(centeredPos());
+    setOpen(true);
+  }
+
+  // W5 — the end-of-day debrief deep-link (?debrief=1): open in text mode with the opener
+  // query; the route's DAY DEBRIEF block takes it from there. Same launch shape as Cmd-K.
+  function launchDebrief() {
+    setVoiceLaunch(false);
+    setPendingQuery("Run my end-of-day debrief.");
     setCollapsed(false);
     setPos(centeredPos());
     setOpen(true);
@@ -122,6 +176,9 @@ export function GlobalAssistant() {
 
   return (
     <>
+      <Suspense fallback={null}>
+        <DebriefEntry onLaunch={launchDebrief} />
+      </Suspense>
       {active ? (
         <button
           onClick={() => window.dispatchEvent(new Event("cn:assistant-stop"))}

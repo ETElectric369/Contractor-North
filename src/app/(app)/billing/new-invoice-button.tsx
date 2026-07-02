@@ -99,6 +99,9 @@ export function NewInvoiceButton({
 
   // Open straight from the quick-add menu's "New invoice" (/billing?new=1), then
   // strip the param so a refresh or back-button doesn't reopen the form.
+  // ?customer=<id> may ride along (the customer page's ⋯ New-invoice door) to
+  // preset the customer — it wins over a restored draft because a deep link is
+  // an explicit "invoice THIS customer" intent.
   useEffect(() => {
     if (searchParams.get("new") !== "1") {
       newParamClaimed = false; // param gone → release for the next quick-add tap
@@ -106,9 +109,16 @@ export function NewInvoiceButton({
     }
     if (newParamClaimed) return;
     newParamClaimed = true;
+    const preset = searchParams.get("customer");
+    if (preset && customers.some((c) => c.id === preset)) {
+      setMode("blank"); // the customer select only exists on a blank invoice
+      setCustomerId(preset);
+      setJobId(""); // job list depends on the customer (same rule as the select)
+    }
     void openModal();
     const params = new URLSearchParams(Array.from(searchParams.entries()));
     params.delete("new");
+    params.delete("customer");
     const qs = params.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     // openModal is stable enough for this once-per-param effect.

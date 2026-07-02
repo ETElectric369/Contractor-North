@@ -4,6 +4,7 @@ import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { InquiryModal } from "./inquiry-modal";
 import { InquiryRow } from "./inquiry-row";
+import { ReferralTally } from "./referral-tally";
 import type { Inquiry } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -35,6 +36,11 @@ export default async function InquiriesPage() {
       <PageHeader title="Leads" description="New requests to follow up and convert — nothing converts automatically.">
         <InquiryModal />
       </PageHeader>
+
+      {/* Staff-only commission lookup — renders nothing for crew or when no lead
+          has a referrer. Sits above the open list because converted referrals
+          drop OUT of that list and this is where their credit stays visible. */}
+      <ReferralTally />
 
       {inquiries.length > 0 && (
         <div className="mb-4 grid grid-cols-2 gap-4 sm:max-w-sm">

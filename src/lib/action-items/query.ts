@@ -2,7 +2,16 @@ import { createClient } from "@/lib/supabase/server";
 import type { ActionItem, ActionKind } from "./types";
 import { AFFORDANCES, KIND_STREAM } from "./types";
 import { lienStatus } from "@/lib/lien-math";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, formatDateShort } from "@/lib/utils";
+import {
+  NEEDS_RETURN_DAYS,
+  daysAgoStr,
+  detectNeedsReturn,
+  detectStrayTime,
+  detectUnbilledWork,
+  jobLabel,
+  rollupWorkedJobs,
+} from "./leak-detectors";
 
 /**
  * Count for the dock Home badge. Derived from the SAME projection as the inbox so
@@ -67,7 +76,7 @@ export async function getActionItems(ctx: {
 
   const empty = Promise.resolve({ data: [] as any[] });
 
-  const [tasksR, jobsR, inqR, apptR, orgR, invR, quoteR, draftR, conR, lienR, bugR] = await Promise.all([
+  const [tasksR, jobsR, inqR, apptR, orgR, invR, quoteR, draftR, conR, lienR, bugR, openTimeR, recentTimeR] = await Promise.all([
     taskQ,
     // Unscheduled jobs — staff only (the "resting place" for things needing a date).
     isStaff
@@ -169,6 +178,27 @@ export async function getActionItems(ctx: {
           .eq("status", "open")
           .order("created_at", { ascending: false })
           .limit(50)
+      : empty,
+    // ── The end-of-day money-leak sweep feeders (staff only) ──
+    // Every open clock, whatever its age — a handful of rows at most; the stray
+    // rule (past-day OR 14h+) is applied per-row in detectStrayTime.
+    isStaff
+      ? supabase
+          .from("time_entries")
+          .select("id, status, job_id, clock_in, clock_out, profiles(full_name), time_allocations(job_id)")
+          .eq("status", "open")
+          .order("clock_in", { ascending: true })
+          .limit(50)
+      : empty,
+    // Recent entries (bounded window) — drive the closed-with-no-job stray rule
+    // plus the worked-jobs rollup behind the unbilled-work / needs-return detectors.
+    isStaff
+      ? supabase
+          .from("time_entries")
+          .select("id, status, job_id, clock_in, clock_out, profiles(full_name), time_allocations(job_id)")
+          .gte("clock_in", daysAgoStr(todayStr, NEEDS_RETURN_DAYS))
+          .order("clock_in", { ascending: false })
+          .limit(200)
       : empty,
   ]);
 
@@ -405,6 +435,100 @@ export async function getActionItems(ctx: {
       href: "/bugs",
       affordances: AFFORDANCES.bug_report,
     });
+  }
+
+  // ── The end-of-day money-leak sweep (staff only) — the "Apache Ct" detectors. ──
+  // Detection only, per the hard boundary: each item names the gap and deep-links to
+  // the surface that fixes it; nothing infers hours, dollars, or clock-out times.
+
+  // 1) STRAY TIME — an open clock from a past day, or a past-day close with no job.
+  const strayFindings = detectStrayTime(
+    [...((openTimeR.data ?? []) as any[]), ...((recentTimeR.data ?? []) as any[])],
+    todayStr,
+  );
+  for (const f of strayFindings) {
+    items.push({
+      id: `stray-${f.entryId}`, // synthetic (kind-prefixed) — open-only, no per-row dispatch
+      kind: "time_stray",
+      title: f.openStill
+        ? `${f.name}'s ${formatDateShort(f.when)} entry is still open`
+        : `${f.name}'s ${formatDateShort(f.when)} entry has no job`,
+      subtitle: f.openStill ? "Still clocked in — hours accruing" : "Closed hours nobody can bill",
+      who: f.name,
+      when: f.when,
+      urgency: f.openStill ? 2 : 1, // a running clock is accruing payroll right now
+      done: false,
+      href: "/timecards",
+      affordances: AFFORDANCES.time_stray,
+    });
+  }
+
+  // 2 & 3) Job-level detectors need the worked jobs' costs/schedule — one small
+  // dependent round, bounded by the recent-entries rollup (a couple dozen ids max).
+  const worked = rollupWorkedJobs((recentTimeR.data ?? []) as any[], todayStr);
+  if (isStaff && worked.size > 0) {
+    const jobIds = [...worked.keys()].slice(0, 30);
+    const [wJobsR, wBillsR, wPosR, wMatR, wInvR, wApptR, wSegR] = await Promise.all([
+      supabase.from("jobs").select("id, job_number, name, status, scheduled_start").in("id", jobIds),
+      supabase.from("bills").select("job_id").in("job_id", jobIds).limit(200),
+      supabase.from("purchase_orders").select("job_id").in("job_id", jobIds).limit(200),
+      supabase.from("material_lists").select("job_id, material_list_items(id)").in("job_id", jobIds).limit(100),
+      supabase.from("invoices").select("job_id, status").in("job_id", jobIds).limit(200),
+      supabase
+        .from("appointments")
+        .select("job_id")
+        .in("job_id", jobIds)
+        .eq("status", "scheduled")
+        .gte("starts_at", todayStr)
+        .limit(200),
+      supabase.from("job_schedule_segments").select("job_id").in("job_id", jobIds).gte("end_date", todayStr).limit(200),
+    ]);
+
+    const costedJobIds = new Set<string>([
+      ...((wBillsR.data ?? []) as any[]).map((b) => b.job_id as string),
+      ...((wPosR.data ?? []) as any[]).map((p) => p.job_id as string),
+      ...((wMatR.data ?? []) as any[])
+        .filter((m) => (m.material_list_items?.length ?? 0) > 0)
+        .map((m) => m.job_id as string),
+    ]);
+    const invoicedJobIds = new Set<string>(
+      ((wInvR.data ?? []) as any[]).filter((i) => i.status !== "void" && i.job_id).map((i) => i.job_id as string),
+    );
+    const futureApptJobIds = new Set<string>(((wApptR.data ?? []) as any[]).map((a) => a.job_id as string));
+    const futureSegmentJobIds = new Set<string>(((wSegR.data ?? []) as any[]).map((s) => s.job_id as string));
+    const workedJobs = (wJobsR.data ?? []) as any[];
+
+    // 2) UNBILLED WORK — time on the job, zero costs/POs/materials. The Romex leak.
+    for (const f of detectUnbilledWork({ jobs: workedJobs, worked, costedJobIds, invoicedJobIds })) {
+      items.push({
+        id: `unbilled-${f.job.id}`,
+        kind: "job_unbilled_work",
+        title: `Worked ${jobLabel(f.job)} — no materials/costs recorded yet`,
+        subtitle: f.job.job_number ?? null,
+        who: null,
+        when: f.lastWorked,
+        urgency: 1,
+        done: false,
+        href: `/jobs/${f.job.id}?tab=costs`,
+        affordances: AFFORDANCES.job_unbilled_work,
+      });
+    }
+
+    // 3) NO RETURN VISIT — worked recently, still in flight, nothing on the calendar.
+    for (const f of detectNeedsReturn({ jobs: workedJobs, worked, todayStr, futureApptJobIds, futureSegmentJobIds })) {
+      items.push({
+        id: `return-${f.job.id}`,
+        kind: "job_needs_return",
+        title: `Worked ${jobLabel(f.job)} — nothing scheduled next`,
+        subtitle: f.job.job_number ?? null,
+        who: null,
+        when: f.lastWorked,
+        urgency: 1,
+        done: false,
+        href: `/jobs/${f.job.id}`,
+        affordances: AFFORDANCES.job_needs_return,
+      });
+    }
   }
 
   return items.map((it) => ({ ...it, stream: KIND_STREAM[it.kind] }));

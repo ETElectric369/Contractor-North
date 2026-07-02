@@ -85,8 +85,10 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   // Progress billing: define a draw schedule + draft the next draw (confirm-gated).
   "payment.setSchedule",
   "payment.requestNext",
-  // Bug-watch: CIB can triage its own bug list (mark fixed / won't-fix).
+  // Bug-watch: CIB can triage its own bug list (mark fixed / won't-fix) — and FILE one.
+  // bug.report is auth:"any" so every role gets it; it closes the list-but-can't-file hole.
   "bug.resolve",
+  "bug.report",
   // The one-field front door: any fragment → a private needs_review stub in the
   // review inbox. Pure local insert (no AI call, nothing sent, no money) — tier-1,
   // open to every role, so Nort can always "just write that down".
