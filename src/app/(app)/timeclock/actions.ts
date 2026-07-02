@@ -659,17 +659,55 @@ export async function updateTimeEntry(input: {
   // so older callers that omit it never wipe an existing supervisor rate. `null` clears it.
   if (input.rate_override !== undefined) patch.rate_override = input.rate_override;
 
-  // If the job is changing, grab the previous job first so we can refresh BOTH
-  // the old and new job pages (their Time tab + labor totals), not just the
-  // timecard lists — otherwise a reassigned entry lingers on the old job.
-  let oldJobId: string | null = null;
-  if (input.job_id !== undefined) {
-    const { data: prev } = await supabase
-      .from("time_entries")
-      .select("job_id")
-      .eq("id", input.id)
-      .maybeSingle();
-    oldJobId = (prev as { job_id: string | null } | null)?.job_id ?? null;
+  // One stored-row fetch: the previous job (so a reassign can refresh BOTH job
+  // pages' Time tab + labor totals) plus the pay-relevant fields and the two
+  // payroll locks. A base-paid entry (paid_at) freezes clock in/out, lunch, rate
+  // and person; a mileage-settled entry (mileage_paid_at) freezes miles — for
+  // EVERY caller (modal, registry, voice, crafted; no bypass param), because the
+  // payroll_runs snapshot the accountant exports must keep matching the live
+  // entries. Undo the period on /payroll, fix the entry, re-mark — that records
+  // a truthful new run instead of silently diverging the books.
+  const { data: prev } = await supabase
+    .from("time_entries")
+    .select("job_id, clock_in, clock_out, lunch_minutes, rate_override, profile_id, miles, paid_at, mileage_paid_at")
+    .eq("id", input.id)
+    .maybeSingle();
+  const stored = prev as {
+    job_id: string | null;
+    clock_in: string;
+    clock_out: string | null;
+    lunch_minutes: number | null;
+    rate_override: number | null;
+    profile_id: string;
+    miles: number | null;
+    paid_at: string | null;
+    mileage_paid_at: string | null;
+  } | null;
+  if (!stored) return { ok: false, error: "Entry not found." };
+  const oldJobId: string | null = stored.job_id;
+
+  // The locks trip on VALUE-diff, not field presence — clock_in/out/lunch are
+  // mandatory params the edit modal re-sends on every save, so a notes/job/split
+  // fix on a paid entry must pass untouched. Times compare at minute granularity
+  // (the modal round-trips them with seconds truncated).
+  const timeMoved = (nextIso: string, storedIso: string | null) =>
+    !storedIso || Math.abs(new Date(nextIso).getTime() - new Date(storedIso).getTime()) >= 60_000;
+  if (stored.paid_at) {
+    const oldRate = stored.rate_override == null ? null : Number(stored.rate_override);
+    const newRate = input.rate_override === undefined ? oldRate : (input.rate_override ?? null);
+    const rateMoved =
+      (oldRate == null) !== (newRate == null) ||
+      (oldRate != null && newRate != null && Math.abs(oldRate - newRate) > 0.001);
+    const payMoved =
+      timeMoved(ci.toISOString(), stored.clock_in) ||
+      timeMoved(co.toISOString(), stored.clock_out) ||
+      (input.lunch_minutes || 0) !== (stored.lunch_minutes ?? 0) ||
+      rateMoved ||
+      (!!input.profile_id && input.profile_id !== stored.profile_id);
+    if (payMoved) return { ok: false, error: "Entry is in a paid period — Undo on Payroll first." };
+  }
+  if (stored.mileage_paid_at && Math.abs((input.miles ?? 0) - Number(stored.miles ?? 0)) > 0.001) {
+    return { ok: false, error: "Entry's mileage is settled — Undo on Payroll first." };
   }
 
   const { error } = await supabase
@@ -724,6 +762,17 @@ export async function updateTimeEntry(input: {
 
 export async function deleteTimeEntry(id: string): Promise<ClockResult> {
   const supabase = await createClient();
+  // Payroll locks: a base-paid or mileage-settled entry backs a payroll_runs
+  // snapshot the accountant exports — deleting it would silently diverge the
+  // books. No bypass for any caller: Undo the period on /payroll first.
+  const { data: locked } = await supabase
+    .from("time_entries")
+    .select("paid_at, mileage_paid_at")
+    .eq("id", id)
+    .maybeSingle();
+  const lock = locked as { paid_at: string | null; mileage_paid_at: string | null } | null;
+  if (lock?.paid_at) return { ok: false, error: "Entry is in a paid period — Undo on Payroll first." };
+  if (lock?.mileage_paid_at) return { ok: false, error: "Entry's mileage is settled — Undo on Payroll first." };
   const { error } = await supabase.from("time_entries").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/timecards");

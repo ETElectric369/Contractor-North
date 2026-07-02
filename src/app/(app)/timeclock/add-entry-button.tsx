@@ -19,6 +19,11 @@ interface JobOption {
 interface Member {
   id: string;
   full_name: string | null;
+  // Pay-rate anchor (staff-only pages pass these): the person's real base pay,
+  // plus the customer bill rate so the Rate field can warn when it's typed by
+  // mistake. bill_rate is never offered or defaulted into the pay field.
+  hourly_rate?: number | null;
+  bill_rate?: number | null;
 }
 
 export function AddEntryButton({
@@ -56,6 +61,16 @@ export function AddEntryButton({
   const [miles, setMiles] = useState(0);
   const [rate, setRate] = useState(0);
   const [notes, setNotes] = useState("");
+
+  // Pay-rate guardrails: anchor the free Rate input to the selected person's REAL
+  // base rate, and trip a non-blocking amber warning when the typed value is their
+  // BILL rate — the $75-in-the-pay-slot mistake can never happen silently again.
+  // ("Me" has no anchor — the viewer isn't identified client-side.)
+  const person = members.find((m) => m.id === member);
+  const baseRate = Number(person?.hourly_rate ?? 0);
+  const billRate = Number(person?.bill_rate ?? 0);
+  const billRateTyped =
+    rate > 0 && billRate > 0 && Math.abs(rate - billRate) <= 0.01 && Math.abs(billRate - baseRate) > 0.01;
 
   const grossHrs = (() => {
     const ci = new Date(`${date}T${startT}:00`);
@@ -185,8 +200,16 @@ export function AddEntryButton({
             <div className="col-span-2 sm:col-span-3">
               <Label htmlFor="m-rate">Rate ($/hr, blank/0 = default)</Label>
               <NumberInput id="m-rate" value={rate} onValueChange={setRate} step={0.5} />
+              {baseRate > 0 && (
+                <p className="mt-1 text-xs text-slate-400">{`Base $${baseRate.toFixed(2)}/hr — leave blank to use it`}</p>
+              )}
             </div>
           </div>
+          {billRateTyped && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+              {`That's ${person?.full_name ?? "this person"}'s bill rate (what customers are charged)${baseRate > 0 ? ` — their pay rate is $${baseRate.toFixed(2)}/hr.` : "."}`}
+            </div>
+          )}
           <label className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${lunchRequired && !lunchTaken ? "border-amber-300 bg-amber-50" : "border-slate-200"}`}>
             <input type="checkbox" checked={lunchTaken} onChange={(e) => setLunchTaken(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand" />
             <span className="text-slate-700">Took a 30-minute lunch{lunchRequired ? <span className="font-medium text-amber-700"> · required (over 5 hrs)</span> : null}</span>

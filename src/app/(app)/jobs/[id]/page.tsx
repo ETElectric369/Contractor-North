@@ -206,7 +206,14 @@ export default async function JobDetailPage({
   const { data: meRow } = await supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle();
   const viewerIsStaff = ["owner", "admin", "office"].includes((meRow as any)?.role ?? "");
   const [{ data: techs }, { data: jobCodes }, { data: lists }, { data: org }, { data: allCustomers }, { data: allJobs }, { data: codeTemplates }, { data: openEntryRow }] = await Promise.all([
-    supabase.from("profiles").select("id, full_name, home_address").order("full_name"),
+    // Staff get hourly_rate + bill_rate for the add-time/edit modals' pay-rate
+    // anchor; NON-staff keep the narrow select. The gate matters here: this array
+    // serializes into client-component props (RSC), so an unconditional enrichment
+    // would hand every tech the whole crew's pay + bill rates — "the modal returns
+    // null for non-staff" is not a serialization defense.
+    viewerIsStaff
+      ? supabase.from("profiles").select("id, full_name, home_address, hourly_rate, bill_rate").order("full_name")
+      : supabase.from("profiles").select("id, full_name, home_address").order("full_name"),
     supabase.from("job_codes").select("*").order("code"),
     supabase.from("material_lists").select("id, name").order("created_at", { ascending: false }).limit(100),
     supabase.from("organizations").select("address_line1, city, state, zip, settings").limit(1).maybeSingle(),
@@ -255,7 +262,6 @@ export default async function JobDetailPage({
   const apptStaffOpts = (techs ?? []).map((t: any) => ({ id: t.id, label: t.full_name ?? "Unnamed" }));
   const companyAddress = [org?.address_line1, org?.city, org?.state, org?.zip].filter(Boolean).join(", ");
   const jobAddress = [j.address, j.city, j.state, j.zip].filter(Boolean).join(", ");
-  const mileageRate = getOrgSettings((org as any)?.settings).mileage_rate;
   const tz = getOrgSettings((org as any)?.settings).timezone; // business tz for time-entry dates
 
   // Costing. laborCost = what we PAY (pay rate); billableLabor = what we CHARGE
@@ -281,7 +287,6 @@ export default async function JobDetailPage({
     (bills ?? []).reduce((s: number, b: any) => (Number(b.amount ?? 0) > 0 ? s + mk(Number(b.amount)) : s), 0);
   const workedToDate = Math.round((billableLabor + billableMaterials) * 100) / 100;
   const totalMiles = (entries ?? []).reduce((s: number, e: any) => s + Number(e.miles ?? 0), 0);
-  const mileageCost = totalMiles * mileageRate;
   // Revenue = CASH COLLECTED on this job (Erik's rule): the amount actually paid
   // on the job's non-void invoices, net of refunds — NOT the sum of invoice/quote
   // totals (which double-counts a progress invoice + the final). invoiced/quoted
@@ -322,8 +327,9 @@ export default async function JobDetailPage({
   // Profit excludes mileage on PURPOSE so this hub and /analytics show the SAME number
   // for the same job: mileage is a per-entry value that isn't allocation-aware (a split
   // shift can't apportion its miles across jobs), and /analytics doesn't carry it. Mileage
-  // is still surfaced as its own cost stat below for visibility — it just doesn't move the
-  // headline profit. If mileage is ever folded back in, it must be added to BOTH surfaces.
+  // is surfaced below as MILES ONLY — no app-computed dollars (mileage pay is a human-typed
+  // settlement on /payroll, never rate×miles). If mileage dollars are ever folded back in,
+  // they must be added to BOTH surfaces.
   const profit = revenue - laborCost - materialCost - billsCost;
   const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
 
@@ -485,7 +491,6 @@ export default async function JobDetailPage({
                   defaultProfileId={user?.id ?? ""}
                   companyAddress={companyAddress}
                   jobAddress={jobAddress}
-                  mileageRate={mileageRate}
                 />
               )}
             </div>
@@ -570,7 +575,9 @@ export default async function JobDetailPage({
                   <div><div className="text-base font-semibold text-slate-700">{formatCurrency(laborCost)}</div><div className="text-[11px] uppercase tracking-wide text-slate-400">Labor · {formatDuration(laborHours)}</div></div>
                   <div><div className="text-base font-semibold text-slate-700">{formatCurrency(materialCost)}</div><div className="text-[11px] uppercase tracking-wide text-slate-400">Materials</div></div>
                   <div><div className="text-base font-semibold text-slate-700">{formatCurrency(billsCost)}</div><div className="text-[11px] uppercase tracking-wide text-slate-400">Bills</div></div>
-                  <div><div className="text-base font-semibold text-slate-700">{formatCurrency(mileageCost)}</div><div className="text-[11px] uppercase tracking-wide text-slate-400">Mileage · {totalMiles} mi</div></div>
+                  {/* Miles only — mileage dollars are a /payroll settlement decision,
+                      never an app-computed figure (and never in profit above). */}
+                  <div><div className="text-base font-semibold text-slate-700">{totalMiles.toFixed(1)} mi</div><div className="text-[11px] uppercase tracking-wide text-slate-400">Mileage</div></div>
                 </div>
                 <div className="flex gap-6 border-t border-slate-100 pt-3 sm:border-l sm:border-t-0 sm:pl-6 sm:pt-0">
                   <div><div className={`text-2xl font-bold ${profit >= 0 ? "text-green-600" : "text-red-600"}`}>{formatCurrency(profit)}</div><div className="text-xs font-medium text-slate-500">Profit</div></div>

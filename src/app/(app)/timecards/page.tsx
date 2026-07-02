@@ -8,7 +8,6 @@ import { Badge } from "@/components/ui/badge";
 import {
   formatDuration,
   formatDate,
-  formatCurrency,
   hoursBetween,
   initials,
 } from "@/lib/utils";
@@ -59,7 +58,10 @@ export default async function TimecardsPage({
   }
 
   const [{ data: members }, { data: jobCodes }, { data: jobs }, { data: org }] = await Promise.all([
-    supabase.from("profiles").select("id, full_name").eq("active", true).order("full_name"),
+    // hourly_rate + bill_rate feed the edit/add modals' pay-rate anchor + the
+    // bill-rate tripwire. Safe to select flat here — the page redirects non-staff
+    // above, so the rates never serialize into a tech's props.
+    supabase.from("profiles").select("id, full_name, hourly_rate, bill_rate").eq("active", true).order("full_name"),
     supabase.from("job_codes").select("*").eq("active", true).order("code"),
     supabase
       .from("jobs")
@@ -68,17 +70,20 @@ export default async function TimecardsPage({
       .limit(50),
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),
   ]);
-  const mileageRate = getOrgSettings((org as any)?.settings).mileage_rate;
   // Render times in the BUSINESS timezone, not the UTC server's, so the list
   // matches the (browser-local) edit modal instead of being hours off.
   const tz = getOrgSettings((org as any)?.settings).timezone;
 
   const { start, end } = weekRange(offset, tz);
 
+  // rate_override MUST be selected here: the edit modal round-trips it on save, so
+  // omitting the column made every unrelated week-list edit send undefined→null and
+  // WIPE a supervisor override (the cn-v291 wipe-fix silently defeated). paid_at /
+  // mileage_paid_at let the modal show the payroll locks instead of a save error.
   const { data: entries } = await supabase
     .from("time_entries")
     .select(
-      "id, profile_id, clock_in, clock_out, lunch_minutes, miles, job_id, job_code, status, notes, source, profiles:profile_id(full_name, commute_baseline_miles), job:job_id(job_number, name), time_allocations(job_id, job_code, hours, description)",
+      "id, profile_id, clock_in, clock_out, lunch_minutes, miles, rate_override, paid_at, mileage_paid_at, job_id, job_code, status, notes, source, profiles:profile_id(full_name, commute_baseline_miles), job:job_id(job_number, name), time_allocations(job_id, job_code, hours, description)",
     )
     .gte("clock_in", start.toISOString())
     .lt("clock_in", end.toISOString())
@@ -260,11 +265,13 @@ export default async function TimecardsPage({
             <div className="text-xs text-slate-500">People with entries</div>
           </CardContent>
         </Card>
+        {/* Miles are DATA — no app-computed dollars here. Mileage pay is a
+            human-typed settlement on /payroll, never rate×miles. */}
         <Card>
           <CardContent className="py-4">
             <div className="text-2xl font-bold text-slate-900">{crewBusinessMiles.toFixed(1)} mi</div>
             <div className="text-xs text-slate-500">
-              {mileageRate > 0 ? `${formatCurrency(crewBusinessMiles * mileageRate)} · ` : ""}Business miles
+              Business miles
               {crewMiles > crewBusinessMiles ? <span className="text-slate-400"> · {crewMiles.toFixed(1)} logged</span> : null}
             </div>
           </CardContent>

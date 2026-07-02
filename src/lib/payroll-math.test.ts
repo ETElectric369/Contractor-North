@@ -2,22 +2,29 @@ import { describe, it, expect } from "vitest";
 import { payLine, payLineFromGross, payRateForEntry, aggregatePayrollEntries } from "@/lib/payroll-math";
 
 describe("payLine (gross pay)", () => {
-  it("gross = hours × rate, mileagePay = miles × rate, total = both", () => {
-    expect(payLine(40, 25, 100, 0.65)).toEqual({ gross: 1000, mileagePay: 65, total: 1065 });
+  it("gross = hours × rate, mileagePay = miles × rate — SEPARATE figures, no combined total", () => {
+    // toEqual is exact: a `total` key reappearing here means the buckets got re-fused.
+    expect(payLine(40, 25, 100, 0.65)).toEqual({ gross: 1000, mileagePay: 65 });
   });
   it("rounds to cents", () => {
     expect(payLine(7.5, 33.33, 0, 0).gross).toBe(249.98); // 249.975 → 249.98
   });
   it("zero hours/miles → zero", () => {
-    expect(payLine(0, 25, 0, 0.65)).toEqual({ gross: 0, mileagePay: 0, total: 0 });
+    expect(payLine(0, 25, 0, 0.65)).toEqual({ gross: 0, mileagePay: 0 });
   });
   it("non-finite inputs coerce to 0 (no NaN wages)", () => {
     expect(payLine(NaN, 25, 10, 0.65)).toMatchObject({ gross: 0 });
-    expect(payLine(8, NaN as any, 0, 0)).toMatchObject({ gross: 0, total: 0 });
+    expect(payLine(8, NaN as any, 0, 0)).toMatchObject({ gross: 0, mileagePay: 0 });
   });
 });
 
-describe("aggregatePayrollEntries", () => {
+describe("payLineFromGross", () => {
+  it("rounds an accumulated gross, mileage alongside — never one combined number", () => {
+    expect(payLineFromGross(680, 100, 0.65)).toEqual({ gross: 680, mileagePay: 65 });
+  });
+});
+
+describe("aggregatePayrollEntries — two buckets", () => {
   const entry = (over: Partial<any>) => ({
     profile_id: "p1",
     clock_in: "2026-06-01T08:00:00Z",
@@ -25,6 +32,7 @@ describe("aggregatePayrollEntries", () => {
     lunch_minutes: 0,
     miles: 0,
     paid_at: null,
+    mileage_paid_at: null,
     profiles: { full_name: "Brian", hourly_rate: 25 },
     ...over,
   });
@@ -43,12 +51,50 @@ describe("aggregatePayrollEntries", () => {
     expect(rows[0].unpaidHours).toBe(14.5);
   });
 
-  it("splits paid vs unpaid by paid_at", () => {
+  it("splits paid vs unpaid hours + gross by paid_at", () => {
+    const rows = aggregatePayrollEntries([
+      entry({ paid_at: "2026-06-10T00:00:00Z" }),
+      entry({ rate_override: 50 }),
+    ]);
+    expect(rows[0]).toMatchObject({ paidHours: 8, paidGross: 200, unpaidHours: 8, unpaidGross: 400 });
+  });
+
+  it("BASE PAYMENT DOES NOT MOVE MILES: paid_at leaves miles held (the vanishing-debt fix)", () => {
+    // Base marked paid, mileage never settled — the miles must survive as held,
+    // not silently vanish into a "paid" bucket the way the old paid_at split did.
     const rows = aggregatePayrollEntries([
       entry({ paid_at: "2026-06-10T00:00:00Z", miles: 20 }),
-      entry({ miles: 10 }),
+      entry({ clock_in: "2026-06-02T08:00:00Z", clock_out: "2026-06-02T16:00:00Z", miles: 10 }),
     ]);
-    expect(rows[0]).toMatchObject({ paidHours: 8, paidMiles: 20, unpaidHours: 8, unpaidMiles: 10 });
+    expect(rows[0]).toMatchObject({ paidHours: 8, unpaidHours: 8, heldMiles: 30, settledMiles: 0, loggedMiles: 30 });
+  });
+
+  it("splits miles held vs settled by mileage_paid_at — its own lock, independent of paid_at", () => {
+    const rows = aggregatePayrollEntries([
+      entry({ mileage_paid_at: "2026-06-10T00:00:00Z", miles: 30 }),
+      entry({ clock_in: "2026-06-02T08:00:00Z", clock_out: "2026-06-02T16:00:00Z", miles: 10 }),
+    ]);
+    expect(rows[0]).toMatchObject({ settledMiles: 30, heldMiles: 10, loggedMiles: 40 });
+  });
+
+  it("nets the daily commute baseline off held miles (business, not raw logged)", () => {
+    const rows = aggregatePayrollEntries([
+      entry({ miles: 30, profiles: { full_name: "Brian", hourly_rate: 25, commute_baseline_miles: 10 } }),
+    ]);
+    expect(rows[0]).toMatchObject({ heldMiles: 20, loggedMiles: 30 });
+  });
+
+  it("DAY-STRADDLE (documented limit): a day with both held + settled entries double-subtracts the baseline — held reads LOW, never high", () => {
+    // Same day, one settled entry + one held entry, baseline 10: whole-day truth is
+    // 60 logged − 10 = 50 business, but each group nets the baseline on its own →
+    // 20 + 20 = 40. The undercount is conservative (can't overstate what's owed);
+    // see the note in aggregatePayrollEntries.
+    const withBaseline = { full_name: "Brian", hourly_rate: 25, commute_baseline_miles: 10 };
+    const rows = aggregatePayrollEntries([
+      entry({ miles: 30, mileage_paid_at: "2026-06-10T00:00:00Z", profiles: withBaseline }),
+      entry({ miles: 30, profiles: withBaseline }),
+    ]);
+    expect(rows[0]).toMatchObject({ settledMiles: 20, heldMiles: 20, loggedMiles: 60 });
   });
 
   it("one row per employee, sorted by unpaid hours desc", () => {
@@ -65,7 +111,8 @@ describe("aggregatePayrollEntries", () => {
 
   it("a NaN miles value doesn't poison the row", () => {
     const [r] = aggregatePayrollEntries([entry({ miles: NaN })]);
-    expect(r.unpaidMiles).toBe(0);
+    expect(r.heldMiles).toBe(0);
+    expect(r.loggedMiles).toBe(0);
   });
 
   it("accumulates gross at the base rate when no override (8h × $25)", () => {
@@ -80,12 +127,39 @@ describe("aggregatePayrollEntries", () => {
     expect(r.unpaidGross).toBe(680);
   });
 
-  it("splits gross paid vs unpaid too", () => {
+  it("returns an explicit per-rate hours breakdown, sorted by rate (never a silent blend)", () => {
+    // The 48.24 lesson: (8×75 + 26×40)/34 blended to a number that pointed nowhere.
+    // The breakdown names each rate and its hours so the odd shift points at itself.
+    const [r] = aggregatePayrollEntries([entry({}), entry({ rate_override: 60 })]);
+    expect(r.unpaidRates).toEqual([
+      { rate: 25, hours: 8 },
+      { rate: 60, hours: 8 },
+    ]);
+    expect(r.paidRates).toEqual([]);
+  });
+
+  it("merges same-rate entries into one breakdown line", () => {
+    const [r] = aggregatePayrollEntries([entry({}), entry({ clock_in: "2026-06-02T08:00:00Z", clock_out: "2026-06-02T16:00:00Z" })]);
+    expect(r.unpaidRates).toEqual([{ rate: 25, hours: 16 }]);
+  });
+
+  it("PARTLY PAID: both slices carry their own gross + rate breakdown", () => {
+    // A late entry after a mark-paid: the paid slice must stay visible (with its
+    // dollars) AND the unpaid slice must be independently payable.
     const rows = aggregatePayrollEntries([
       entry({ paid_at: "2026-06-10T00:00:00Z" }), // 8h × 25 = 200 paid
-      entry({ rate_override: 50 }), // 8h × 50 = 400 unpaid
+      entry({ clock_in: "2026-06-02T08:00:00Z", clock_out: "2026-06-02T16:00:00Z", rate_override: 50 }), // 8h × 50 = 400 unpaid
     ]);
-    expect(rows[0]).toMatchObject({ paidGross: 200, unpaidGross: 400 });
+    expect(rows[0]).toMatchObject({ paidHours: 8, paidGross: 200, unpaidHours: 8, unpaidGross: 400 });
+    expect(rows[0].paidRates).toEqual([{ rate: 25, hours: 8 }]);
+    expect(rows[0].unpaidRates).toEqual([{ rate: 50, hours: 8 }]);
+  });
+
+  it("row shape carries NO mileage dollars — miles are data until a human settles them", () => {
+    const [r] = aggregatePayrollEntries([entry({ miles: 42 })]);
+    for (const key of Object.keys(r)) {
+      expect(key).not.toMatch(/mileagePay|mileageAmount|total/i);
+    }
   });
 });
 
@@ -103,11 +177,5 @@ describe("payRateForEntry — pay rate source of truth", () => {
   });
   it("never returns NaN", () => {
     expect(payRateForEntry({ rate_override: "x" } as any)).toBe(0);
-  });
-});
-
-describe("payLineFromGross", () => {
-  it("combines an accumulated gross with mileage, rounded to cents", () => {
-    expect(payLineFromGross(680, 100, 0.65)).toEqual({ gross: 680, mileagePay: 65, total: 745 });
   });
 });

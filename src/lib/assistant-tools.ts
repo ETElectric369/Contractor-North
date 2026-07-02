@@ -1,12 +1,13 @@
 import "server-only";
 import type Anthropic from "@anthropic-ai/sdk";
 import { tzDayStartUtc, todayStrInTz, payPeriodForOffset } from "@/lib/tz";
-import { escapeLike } from "@/lib/utils";
+import { escapeLike, hoursBetween } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { getMoneyPipeline } from "@/lib/billing-pipeline";
 import { invoiceBalance } from "@/lib/invoice-math";
-import { aggregatePayrollEntries } from "@/lib/payroll-math";
+import { aggregatePayrollEntries, payRateForEntry } from "@/lib/payroll-math";
+import { summarizeMileage } from "@/lib/mileage-math";
 
 /**
  * Read-only data tools for the in-app assistant.
@@ -399,7 +400,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "payroll_summary",
     description:
-      "Payroll for the CURRENT pay period: per-employee hours, gross pay, mileage, and what's already paid vs unpaid — using the company's pay schedule (the same numbers as the Payroll page). Use for 'what's payroll this period', 'how much do I owe the crew', 'gross pay this pay period'. Gross pay only — tax/withholding is the accountant's job.",
+      "Payroll for the CURRENT pay period (the same numbers as the Payroll page), in TWO SEPARATE BUCKETS per employee that are NEVER summed together: BASE pay — hours × pay rate → gross, with paid/unpaid/partly-paid status — and MILEAGE — business miles held vs settled. Held miles have NO dollar amount: mileage dollars exist ONLY after a human types a settlement amount on the Payroll page (settled_amount); never compute, estimate, or quote a mileage dollar figure from any rate. Use for 'what's payroll this period', 'how much do I owe the crew' — answer as base gross plus 'N business miles held (no amount set)'. Gross pay only — tax/withholding is the accountant's job.",
     input_schema: { type: "object", properties: {} },
   },
   {
@@ -1606,36 +1607,101 @@ export async function runDataTool(
         const endIso = tzDayStartUtc(period.end, settings.timezone).toISOString();
         const { data: entries, error } = await supabase
           .from("time_entries")
-          .select("profile_id, clock_in, clock_out, lunch_minutes, miles, paid_at, rate_override, profiles(full_name, hourly_rate, commute_baseline_miles)")
+          .select("profile_id, clock_in, clock_out, lunch_minutes, miles, paid_at, mileage_paid_at, rate_override, profiles(full_name, hourly_rate, commute_baseline_miles)")
           .eq("status", "closed")
           .not("clock_out", "is", null)
           .gte("clock_in", startIso)
           .lt("clock_in", endIso);
         if (error) throw error;
-        // Pass the org tz so mileage pay reimburses BUSINESS miles (net of each person's
-        // daily commute baseline), matching the timecard + tax report — not raw logged miles.
+        // TWO BUCKETS, never summed: BASE pay locks on paid_at (aggregatePayrollEntries),
+        // MILEAGE locks on mileage_paid_at (split below). Mileage dollars exist ONLY as the
+        // human-typed amounts recorded in kind='mileage' payroll_runs rows, summed per profile
+        // (a late entry can mean a second settlement act = a second row) — never rate × miles.
+        const { data: runs, error: runsErr } = await supabase
+          .from("payroll_runs")
+          .select("profile_id, mileage_amount")
+          .eq("kind", "mileage")
+          .eq("period_start", period.start)
+          .eq("period_end", period.end);
+        if (runsErr) throw runsErr;
+        const settledAmountBy = new Map<string, number>();
+        for (const run of (runs ?? []) as any[]) {
+          settledAmountBy.set(run.profile_id, (settledAmountBy.get(run.profile_id) ?? 0) + Number(run.mileage_amount ?? 0));
+        }
         const rows = aggregatePayrollEntries((entries ?? []) as any[], settings.timezone);
         const round = (n: number) => Math.round(n * 100) / 100;
-        const mileageRate = settings.mileage_rate;
+        // Per-employee mileage split (held = mileage_paid_at null) + per-rate hours breakdown.
+        // Business miles net the daily commute baseline via the same summarizeMileage the
+        // Payroll page uses. Netting AFTER the held/settled split can subtract the baseline
+        // twice on a day that straddles both groups — a conservative held-miles undercount.
+        type MilesAcc = { baseline: number; all: any[]; held: any[]; settled: any[]; rateHours: Map<number, number> };
+        const byProfile = new Map<string, MilesAcc>();
+        for (const e of (entries ?? []) as any[]) {
+          const acc: MilesAcc = byProfile.get(e.profile_id) ?? {
+            baseline: Math.max(0, Number(e.profiles?.commute_baseline_miles ?? 0)),
+            all: [],
+            held: [],
+            settled: [],
+            rateHours: new Map(),
+          };
+          const m = { clock_in: e.clock_in, miles: Number(e.miles ?? 0) };
+          acc.all.push(m);
+          (e.mileage_paid_at ? acc.settled : acc.held).push(m);
+          const rate = round(payRateForEntry(e));
+          acc.rateHours.set(rate, (acc.rateHours.get(rate) ?? 0) + hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes));
+          byProfile.set(e.profile_id, acc);
+        }
+        const byEmployee = rows.map((r) => {
+          const acc = byProfile.get(r.profileId);
+          const logged = acc ? summarizeMileage(acc.all, acc.baseline, settings.timezone) : { recorded: 0, business: 0 };
+          const heldMiles = acc ? summarizeMileage(acc.held, acc.baseline, settings.timezone).business : 0;
+          const settledMiles = acc ? summarizeMileage(acc.settled, acc.baseline, settings.timezone).business : 0;
+          const settledAmount = settledAmountBy.get(r.profileId);
+          // Plain sorted array (serialization-safe); sent only when the period has MIXED pay
+          // rates — the anomaly cue that points at an overridden shift instead of a blend.
+          const rates = [...(acc?.rateHours ?? [])]
+            .map(([rate, hours]) => ({ rate: money(rate), hours: round(hours) }))
+            .sort((a, b) => a.rate - b.rate);
+          return {
+            id: r.profileId,
+            name: r.name,
+            base: {
+              rate: money(r.rate), // base profile rate — gross honors per-entry overrides
+              ...(rates.length > 1 ? { rates } : {}),
+              unpaid_hours: round(r.unpaidHours),
+              unpaid_gross: money(r.unpaidGross),
+              paid_hours: round(r.paidHours),
+              paid_gross: money(r.paidGross),
+              status: r.unpaidHours > 0 ? (r.paidHours > 0 ? "partly paid" : "unpaid") : "paid",
+            },
+            mileage: {
+              logged_miles: logged.recorded,
+              business_miles: logged.business,
+              held_miles: heldMiles, // awaiting a HUMAN-decided settlement — no dollar figure exists
+              settled_miles: settledMiles,
+              settled_amount: settledAmount != null ? money(settledAmount) : null, // human-typed $ only
+              status: heldMiles > 0 ? (settledMiles > 0 ? "partly settled" : "held") : settledMiles > 0 ? "settled" : "none",
+            },
+          };
+        });
         return JSON.stringify({
           period: { start: period.start, end: period.end },
-          mileage_rate: mileageRate,
-          // Totals (gross pay only — tax/withholding is the accountant's, by design).
-          unpaid_gross: money(rows.reduce((s, r) => s + r.unpaidGross, 0)),
-          unpaid_hours: round(rows.reduce((s, r) => s + r.unpaidHours, 0)),
-          unpaid_miles: round(rows.reduce((s, r) => s + r.unpaidMiles, 0)),
-          paid_gross: money(rows.reduce((s, r) => s + r.paidGross, 0)),
-          by_employee: rows.map((r) => ({
-            id: r.profileId, // pass to payroll.markPaid
-            name: r.name,
-            rate: money(r.rate),
-            unpaid_hours: round(r.unpaidHours),
-            unpaid_gross: money(r.unpaidGross),
-            unpaid_miles: round(r.unpaidMiles),
-            paid_hours: round(r.paidHours),
-            paid_gross: money(r.paidGross),
-            paid_miles: round(r.paidMiles),
-          })),
+          // BASE bucket totals (gross pay only — tax/withholding is the accountant's, by design).
+          base: {
+            unpaid_gross: money(byEmployee.reduce((s, r) => s + r.base.unpaid_gross, 0)),
+            unpaid_hours: round(byEmployee.reduce((s, r) => s + r.base.unpaid_hours, 0)),
+            paid_gross: money(byEmployee.reduce((s, r) => s + r.base.paid_gross, 0)),
+            paid_hours: round(byEmployee.reduce((s, r) => s + r.base.paid_hours, 0)),
+          },
+          // MILEAGE bucket totals — miles as data; dollars ONLY where a human settled them.
+          mileage: {
+            held_business_miles: round(byEmployee.reduce((s, r) => s + r.mileage.held_miles, 0)),
+            settled_business_miles: round(byEmployee.reduce((s, r) => s + r.mileage.settled_miles, 0)),
+            settled_amount: (runs ?? []).length
+              ? money((runs ?? []).reduce((s: number, r: any) => s + Number(r.mileage_amount ?? 0), 0))
+              : null,
+          },
+          by_employee: byEmployee,
         });
       }
 

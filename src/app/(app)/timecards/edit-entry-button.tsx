@@ -20,6 +20,10 @@ interface Entry {
   notes: string | null;
   miles?: number;
   rate_override?: number | null;
+  // Payroll locks — base pay settled / mileage settled. The server hard-blocks
+  // pay-relevant changes on locked entries; these let the modal SAY so up front.
+  paid_at?: string | null;
+  mileage_paid_at?: string | null;
   profile_id?: string;
   profiles?: { full_name: string | null } | null;
   // The entry's current job (joined), so we can keep it as an option even when
@@ -31,6 +35,11 @@ interface Entry {
 interface Member {
   id: string;
   full_name: string | null;
+  // Pay-rate anchor (staff-only pages pass these): the person's real base pay,
+  // plus the customer bill rate so the Rate field can warn when it's typed by
+  // mistake. bill_rate is never offered or defaulted into the pay field.
+  hourly_rate?: number | null;
+  bill_rate?: number | null;
 }
 interface JobOption {
   id: string;
@@ -82,7 +91,7 @@ export function EditEntryButton({
   const [miles, setMiles] = useState(entry.miles ?? 0);
   // rate_override is only WRITTEN when the user actually edits the Rate field — an unrelated
   // save must never silently clear a supervisor override back to base pay.
-  const [rate, setRate] = useState(entry.rate_override ?? 0);
+  const [rate, setRate] = useState(entry.rate_override == null ? 0 : Number(entry.rate_override));
   const [rateDirty, setRateDirty] = useState(false);
   const [notes, setNotes] = useState(entry.notes ?? "");
   // Split-across-jobs rows (pre-filled from existing allocations so save round-trips them).
@@ -93,6 +102,20 @@ export function EditEntryButton({
   const setSplit = (i: number, patch: Partial<{ job_id: string; hours: number; description: string }>) =>
     setSplits((s) => s.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
   const removeSplit = (i: number) => setSplits((s) => s.filter((_, idx) => idx !== i));
+
+  // Pay-rate guardrails: anchor the free Rate input to the selected person's REAL
+  // base rate, and trip a non-blocking amber warning when the typed value is their
+  // BILL rate — the $75-in-the-pay-slot mistake can never happen silently again.
+  // Rates stay human-stated (never inferred); nothing here blocks a save.
+  const person = members.find((m) => m.id === (profileId || entry.profile_id));
+  const baseRate = Number(person?.hourly_rate ?? 0);
+  const billRate = Number(person?.bill_rate ?? 0);
+  const billRateTyped =
+    rate > 0 && billRate > 0 && Math.abs(rate - billRate) <= 0.01 && Math.abs(billRate - baseRate) > 0.01;
+
+  // Payroll locks — surfaced up front so the office doesn't discover them as a save error.
+  const basePaid = !!entry.paid_at;
+  const mileageSettled = !!entry.mileage_paid_at;
 
   const grossHrs = (() => {
     const ci = new Date(`${date}T${startT}:00`);
@@ -131,8 +154,9 @@ export function EditEntryButton({
         notes,
         miles,
         // Only touch the override when the user actually edited the field; otherwise round-trip
-        // the stored value so an unrelated edit can't wipe a supervisor rate.
-        rate_override: rateDirty ? (rate > 0 ? rate : null) : (entry.rate_override ?? null),
+        // the stored value so an unrelated edit can't wipe a supervisor rate. (Number-cast the
+        // seed — a numeric column can arrive as a string and must round-trip as the same value.)
+        rate_override: rateDirty ? (rate > 0 ? rate : null) : entry.rate_override == null ? null : Number(entry.rate_override),
         profile_id: profileId || undefined,
         allocations,
       });
@@ -190,6 +214,15 @@ export function EditEntryButton({
         <div className="space-y-4">
           {error && (
             <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
+          )}
+          {(basePaid || mileageSettled) && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+              {basePaid && mileageSettled
+                ? "Base pay & mileage are settled for this entry — times, rate, person and miles are locked. Undo on Payroll to edit them; notes and job are still editable."
+                : basePaid
+                  ? "This entry is in a paid period — times, rate and person are locked. Undo on Payroll to edit them; notes, job and miles are still editable."
+                  : "Mileage for this entry is settled — miles are locked. Undo on Payroll to edit them; everything else is still editable."}
+            </div>
           )}
           <div>
             <Label htmlFor="e-member">Team member</Label>
@@ -307,8 +340,16 @@ export function EditEntryButton({
             <div>
               <Label htmlFor="e-rate">Rate ($/hr, blank/0 = default)</Label>
               <NumberInput id="e-rate" value={rate} onValueChange={(v) => { setRate(v); setRateDirty(true); }} step={0.5} />
+              {baseRate > 0 && (
+                <p className="mt-1 text-xs text-slate-400">{`Base $${baseRate.toFixed(2)}/hr — leave blank to use it`}</p>
+              )}
             </div>
           </div>
+          {billRateTyped && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+              {`That's ${person?.full_name ?? "this person"}'s bill rate (what customers are charged)${baseRate > 0 ? ` — their pay rate is $${baseRate.toFixed(2)}/hr.` : "."}`}
+            </div>
+          )}
           <label className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${lunchRequired && !lunchTaken ? "border-amber-300 bg-amber-50" : "border-slate-200"}`}>
             <input
               type="checkbox"

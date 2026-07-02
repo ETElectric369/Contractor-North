@@ -15,6 +15,11 @@ interface Tech {
   id: string;
   full_name: string | null;
   home_address?: string | null;
+  // Pay-rate anchor — present only when the viewer is staff (the page enriches the
+  // techs select behind its staff flag, so rates never serialize to a tech's props).
+  // bill_rate is never offered or defaulted into the pay field.
+  hourly_rate?: number | null;
+  bill_rate?: number | null;
 }
 
 export function JobAddTimeEntry({
@@ -24,7 +29,6 @@ export function JobAddTimeEntry({
   defaultProfileId,
   companyAddress,
   jobAddress,
-  mileageRate = 0,
 }: {
   jobId: string;
   techs: Tech[];
@@ -32,7 +36,6 @@ export function JobAddTimeEntry({
   defaultProfileId: string;
   companyAddress?: string;
   jobAddress?: string;
-  mileageRate?: number;
 }) {
   const router = useRouter();
   const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
@@ -67,6 +70,16 @@ export function JobAddTimeEntry({
 
   // Mileage origin: the selected employee's home address if set, else the company address.
   const mileageOrigin = (techs.find((t) => t.id === profileId)?.home_address || companyAddress || "").trim();
+
+  // Pay-rate guardrails: anchor the free rate input to the selected person's REAL
+  // base rate, and trip a non-blocking amber warning when the typed value is their
+  // BILL rate — this billing-context modal is exactly where $75/hr (the customer
+  // labor rate) is the number in the operator's head. Nothing here blocks a save.
+  const person = techs.find((t) => t.id === profileId);
+  const baseRate = Number(person?.hourly_rate ?? 0);
+  const billRate = Number(person?.bill_rate ?? 0);
+  const billRateTyped =
+    rate > 0 && billRate > 0 && Math.abs(rate - billRate) <= 0.01 && Math.abs(billRate - baseRate) > 0.01;
 
   const grossHrs = (() => {
     const ci = new Date(`${date}T${startT}:00`);
@@ -160,12 +173,21 @@ export function JobAddTimeEntry({
           <div>
             <Label htmlFor="at-rate">Pay rate ($/hr) — supervisor / override</Label>
             <NumberInput id="at-rate" value={rate} onValueChange={setRate} placeholder="Default rate" />
-            <p className="mt-1 text-xs text-slate-400">Leave 0 to use this person's default hourly rate.</p>
+            <p className="mt-1 text-xs text-slate-400">
+              {baseRate > 0
+                ? `Base $${baseRate.toFixed(2)}/hr — leave blank to use it`
+                : "Leave 0 to use this person's default hourly rate."}
+            </p>
+            {billRateTyped && (
+              <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                {`That's ${person?.full_name ?? "this person"}'s bill rate (what customers are charged)${baseRate > 0 ? ` — their pay rate is $${baseRate.toFixed(2)}/hr.` : "."}`}
+              </div>
+            )}
           </div>
+          {/* Miles only — no dollar preview; mileage pay is settled on /payroll by a
+              human-typed amount, never an app-computed rate×miles figure. */}
           <div>
-            <Label htmlFor="at-miles">
-              Miles{mileageRate > 0 && miles > 0 ? ` · $${(miles * mileageRate).toFixed(2)}` : ""}
-            </Label>
+            <Label htmlFor="at-miles">Miles</Label>
             <div className="flex gap-2">
               <NumberInput id="at-miles" value={miles} onValueChange={setMiles} />
               {key && mileageOrigin && jobAddress && (

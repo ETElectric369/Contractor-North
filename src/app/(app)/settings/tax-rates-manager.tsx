@@ -193,6 +193,9 @@ export function TaxRatesManager({
           </Button>
           {savedLabor && <span className="flex items-center gap-1 text-sm font-medium text-green-600"><Check className="h-4 w-4" /> Saved</span>}
         </div>
+        <p className="mt-1 text-xs text-slate-500">
+          Mileage rate is used only for the tax-report deduction estimate — payroll mileage is settled separately, by hand.
+        </p>
       </div>
 
       <div className="border-t border-slate-100 pt-4">

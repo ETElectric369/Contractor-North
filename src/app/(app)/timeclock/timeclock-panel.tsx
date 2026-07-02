@@ -94,7 +94,6 @@ export function TimeclockPanel({
   lang,
   autoLunch = false,
   homeAddress = "",
-  mileageRate = 0,
   isStaff = true,
 }: {
   openEntry: TimeEntry | null;
@@ -104,7 +103,6 @@ export function TimeclockPanel({
   lang?: string;
   autoLunch?: boolean;
   homeAddress?: string;
-  mileageRate?: number;
   isStaff?: boolean;
 }) {
   const t = translator(lang);
@@ -631,11 +629,12 @@ export function TimeclockPanel({
           </div>
 
           {/* Mileage — round-trip home → job, captured right on clock-out (it used
-              to only exist on manual entries, so most timecards had none). */}
+              to only exist on manual entries, so most timecards had none). Miles
+              ONLY — no dollar preview: mileage pay is a human decision settled on
+              /payroll, never an app-computed rate×miles promise to the tech. */}
           <div>
             <Label className="mb-1 flex items-center gap-1">
               <MapPin className="h-4 w-4 text-slate-400" /> Miles
-              {mileageRate > 0 && miles > 0 ? <span className="text-slate-400">· ${(miles * mileageRate).toFixed(2)}</span> : null}
             </Label>
             <div className="flex items-center gap-2">
               <NumberInput value={miles} onValueChange={setMiles} className="h-9 w-24" />

@@ -35,7 +35,10 @@ export default async function TimeclockPage() {
   const { data: members } = isStaff
     ? await supabase
         .from("profiles")
-        .select("id, full_name")
+        // hourly_rate + bill_rate feed the add/edit modals' pay-rate anchor and
+        // bill-rate tripwire — selected ONLY inside this staff branch, so the crew's
+        // rates never serialize into a tech's page props.
+        .select("id, full_name, hourly_rate, bill_rate")
         .eq("active", true)
         .order("full_name")
     : { data: [] as { id: string; full_name: string | null }[] };
@@ -169,7 +172,6 @@ export default async function TimeclockPage() {
             lang={lang}
             autoLunch={orgSettings.auto_lunch_30}
             homeAddress={(prof as any)?.home_address ?? ""}
-            mileageRate={orgSettings.mileage_rate ?? 0}
             isStaff={isStaff}
           />
         </div>
