@@ -64,10 +64,13 @@ export function WeatherWidget({
   location,
   label,
   source = "device",
+  compact = false,
 }: {
   location: string | null;
   label?: string;
   source?: "device" | "business";
+  /** One slim inline row (small icon · temp · condition) instead of the full card. */
+  compact?: boolean;
 }) {
   const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
   const [data, setData] = useState<WeatherData | null>(null);
@@ -182,6 +185,32 @@ export function WeatherWidget({
   }, [key, source, fetchWeatherFor, showShop]);
 
   if (!key || status === "error") return null;
+
+  if (compact) {
+    return (
+      <div className="flex min-w-0 shrink-0 items-center gap-1.5 text-xs text-slate-500">
+        {data?.iconUri ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={data.iconUri} alt={data.description} className="h-5 w-5" />
+        ) : (
+          <Cloud className="h-4 w-4 text-sky-400" />
+        )}
+        {status === "loading" || !data ? (
+          <span>—</span>
+        ) : (
+          <>
+            <span className="whitespace-nowrap font-semibold text-slate-700">{data.tempF}°F</span>
+            <span className="max-w-[9rem] truncate">{data.description}</span>
+            {source === "device" && !usingDevice && (
+              <button type="button" onClick={locate} title="Use my location" className="text-slate-300 hover:text-sky-600">
+                <MapPin className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="mb-4 flex items-center gap-4 rounded-xl border border-sky-100 bg-gradient-to-br from-sky-50 to-white px-5 py-4">

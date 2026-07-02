@@ -415,6 +415,19 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       <RefreshOnVisible />
       <PageHeader title="My Day" description={niceDay} />
 
+      {/* Ambience strip (Erik-spec): SMALL weather + the daily quote in one slim line
+          up top — never a card, never competing with the clock. Layout/content here is
+          customize-on-request; tweak freely when he asks. */}
+      <div className="mb-3 flex items-center gap-3">
+        <WeatherWidget
+          compact
+          location={orgLocation}
+          label={(org as any)?.city ?? undefined}
+          source={getOrgSettings((org as any)?.settings).weather_source}
+        />
+        <p className="min-w-0 flex-1 truncate text-right text-xs italic text-slate-400">&ldquo;{dailyQuote}&rdquo;</p>
+      </div>
+
       {/* Live time clock — clock in/out is the app's #1 impulse verb, so it sits
           first, at scroll position zero, doubling as the on-the-clock status line. */}
       <DayClock
@@ -630,16 +643,6 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         </div>
       )}
 
-      {/* Weather + the daily quote — ambience, not execution: they sink below
-          the work so the 3-second glance stays clock + agenda. */}
-      <div className="mb-3">
-        <WeatherWidget
-          location={orgLocation}
-          label={(org as any)?.city ?? undefined}
-          source={getOrgSettings((org as any)?.settings).weather_source}
-        />
-      </div>
-      <p className="mb-4 text-center text-sm italic text-slate-400">&ldquo;{dailyQuote}&rdquo;</p>
 
     </div>
   );
