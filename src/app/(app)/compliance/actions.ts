@@ -206,6 +206,55 @@ Rules: copy numbers and dates exactly as printed — never invent them. If the d
   const expires = /^\d{4}-\d{2}-\d{2}$/.test(String(parsed?.expires_date ?? "")) ? String(parsed.expires_date) : null;
   const notes = parsed?.notes ? String(parsed.notes).slice(0, 600).trim() || null : null;
 
+  // SAVE ONCE (the Spinnaker COI lesson): the same policy number imported again is the
+  // same POLICY. A doc-less match absorbs this file + any blanks; a match that already
+  // holds a document means THIS file is a companion (certificate, endorsement) — file it,
+  // but say so instead of minting what reads as a second policy.
+  if (policy) {
+    const { data: match } = await supabase
+      .from("compliance_items")
+      .select("id, name, amount, issued_date, expires_date, notes, file_url")
+      .eq("policy_number", policy)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (match && !match.file_url) {
+      const { error: upErr } = await supabase
+        .from("compliance_items")
+        .update({
+          file_url: input.path,
+          amount: Number(match.amount) > 0 ? match.amount : amount,
+          issued_date: match.issued_date ?? issued,
+          expires_date: match.expires_date ?? expires,
+          notes: match.notes ?? notes,
+        })
+        .eq("id", match.id);
+      if (!upErr) {
+        revalidate();
+        return { ok: true, id: match.id, type, name: match.name, summary: `attached to the existing ${match.name} (same policy #)` };
+      }
+    } else if (match) {
+      const { data: comp, error: compErr } = await supabase
+        .from("compliance_items")
+        .insert({
+          type,
+          name,
+          policy_number: policy,
+          amount,
+          issued_date: issued,
+          expires_date: expires,
+          notes: `Companion document to "${match.name}" (same policy #). ${notes ?? ""}`.trim().slice(0, 600),
+          file_url: input.path,
+          created_by: ctx.userId,
+        })
+        .select("id")
+        .single();
+      if (compErr || !comp) return fileAnyway();
+      revalidate();
+      return { ok: true, id: comp.id, type, name, summary: `companion doc to ${match.name} (same policy #)` };
+    }
+  }
+
   const { data, error } = await supabase
     .from("compliance_items")
     .insert({
@@ -230,6 +279,205 @@ Rules: copy numbers and dates exactly as printed — never invent them. If the d
     name,
     summary: `${type}${expires ? ` · renews ${expires}` : ""}`,
   };
+}
+
+export interface CslbImportResult {
+  ok: boolean;
+  error?: string;
+  /** One line per compliance item touched, for narration in the import list. */
+  results?: { action: "created" | "updated"; type: string; name: string; detail?: string }[];
+}
+
+/**
+ * Import the company's public CSLB record (cslb.ca.gov/{number} — plain HTML, no JS):
+ * the license itself, the contractor's bond, and workers' comp, filed as compliance
+ * items with dates and numbers ONLY as printed on the board's page. Idempotent on
+ * purpose — re-running UPDATES the same items (matched by org + type + policy number),
+ * so this doubles as the "re-check the board" path. Unlike importPolicyDoc there is no
+ * uploaded document to preserve, so a failed fetch/read errors cleanly and files NOTHING.
+ */
+export async function importFromCslb(licenseNumber: string): Promise<CslbImportResult> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+
+  const licNum = (licenseNumber ?? "").trim();
+  if (!/^\d{4,8}$/.test(licNum)) {
+    return { ok: false, error: "A CSLB license number is 4–8 digits — check it and try again." };
+  }
+  const notALicense = `CSLB didn't return a license page for #${licNum} — check the number.`;
+
+  let html: string;
+  try {
+    const res = await fetch(`https://www.cslb.ca.gov/${licNum}`, {
+      headers: { "user-agent": "Mozilla/5.0" },
+      cache: "no-store",
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) return { ok: false, error: notALicense };
+    html = await res.text();
+  } catch {
+    return { ok: false, error: `Couldn't reach CSLB for #${licNum} — try again in a minute.` };
+  }
+
+  // Strip to plain text for the AI read: drop scripts/styles/tags, decode the common
+  // entities, collapse whitespace, cap the size.
+  const pageText = html
+    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&#0?39;|&apos;/gi, "'")
+    .replace(/&quot;/gi, '"')
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 15_000);
+  if (pageText.length < 300) return { ok: false, error: notALicense };
+
+  let parsed: any;
+  try {
+    const client = getAnthropic();
+    const msg = await client.messages.create({
+      model: DEFAULT_MODEL,
+      max_tokens: 1024,
+      system: `You read the plain text of a public CSLB (California Contractors State License Board) license-detail page and extract the record.
+
+Respond with ONLY a JSON object (no prose):
+{
+  "found": true when the text really is a license detail page for a contractor; false when it is a not-found / error / search page,
+  "business_name": the business name as shown, or null,
+  "license_number": the license number as shown, or null,
+  "status": the license status as one short plain sentence, e.g. "This license is current and active.", or null,
+  "classifications": the classification(s) as one string, e.g. "C-10 Electrical", or null,
+  "license_expires": "YYYY-MM-DD" license expiration date, or null,
+  "bond": { "surety": surety company name, "bond_number": string, "amount": the bond amount as a plain number, or null, "effective": "YYYY-MM-DD" or null } — or null when the page has no contractor's bond section,
+  "workers_comp": { "carrier": insurer name, "policy_number": string, "expires": "YYYY-MM-DD" or null } — or { "exempt": true, "note": the exemption statement in one short line } when the page shows a workers'-comp exemption on file — or null when there is no workers' comp section
+}
+
+Rules: copy names, numbers, and dates EXACTLY as printed — never guess, estimate, or compute anything that is not on the page. Use null for anything not clearly stated.`,
+      messages: [{ role: "user", content: `CSLB page text for license #${licNum}:\n\n${pageText}` }],
+    });
+    const text = msg.content.find((b) => b.type === "text") as { text: string } | undefined;
+    parsed = JSON.parse(extractJsonObject(text?.text ?? ""));
+  } catch {
+    return { ok: false, error: `Couldn't read the CSLB page for #${licNum} — try again in a minute.` };
+  }
+
+  // Validate + clamp everything the model returned — never trust it raw.
+  const dateOf = (v: unknown) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v ?? "")) ? String(v) : null);
+  const strOf = (v: unknown, max: number) => {
+    const s = v == null ? "" : String(v).trim();
+    return s ? s.slice(0, max) : null;
+  };
+
+  const businessName = strOf(parsed?.business_name, 150);
+  if (!parsed?.found || !businessName) return { ok: false, error: notALicense };
+  const status = strOf(parsed?.status, 200);
+  const classifications = strOf(parsed?.classifications, 150);
+  const licenseExpires = dateOf(parsed?.license_expires);
+  const wc = parsed?.workers_comp ?? null;
+  const wcExempt = !!wc?.exempt;
+
+  const results: NonNullable<CslbImportResult["results"]> = [];
+
+  /** Create-or-update, never duplicate: match org (RLS) + type + policy_number,
+   *  falling back to type + name when there's no number. `fields` carries ONLY
+   *  what CSLB actually shows — an update never touches file_url or any field
+   *  the board doesn't publish (a null never wipes a hand-entered value). */
+  async function upsertItem(
+    type: string,
+    name: string,
+    policyNumber: string | null,
+    fields: Record<string, string | number | null>,
+    detail?: string,
+  ): Promise<string | null> {
+    let match = supabase.from("compliance_items").select("id").eq("type", type);
+    match = policyNumber ? match.eq("policy_number", policyNumber) : match.eq("name", name);
+    const { data: existing, error: findErr } = await match.limit(1).maybeSingle();
+    if (findErr) return findErr.message;
+    if (existing) {
+      const patch: Record<string, string | number | null> = { name, ...fields };
+      if (policyNumber) patch.policy_number = policyNumber;
+      const { error } = await supabase.from("compliance_items").update(patch).eq("id", existing.id);
+      if (error) return error.message;
+      results.push({ action: "updated", type, name, detail });
+    } else {
+      const { error } = await supabase
+        .from("compliance_items")
+        .insert({ type, name, policy_number: policyNumber, amount: 0, ...fields, created_by: ctx.userId });
+      if (error) return error.message;
+      results.push({ action: "created", type, name, detail });
+    }
+    return null;
+  }
+
+  // (a) The license itself — classifications + the board's status line live in notes.
+  const licenseNotes =
+    [
+      classifications ? `Classifications: ${classifications}` : null,
+      status,
+      wcExempt ? "CSLB shows a workers'-comp exemption on file." : null,
+    ]
+      .filter(Boolean)
+      .join("\n")
+      .slice(0, 600) || null;
+  let err = await upsertItem(
+    "Contractor License",
+    `${businessName} — CSLB #${licNum}`,
+    licNum,
+    { notes: licenseNotes, ...(licenseExpires ? { expires_date: licenseExpires } : {}) },
+    licenseExpires ? `renews ${licenseExpires}` : undefined,
+  );
+  if (err) {
+    revalidate();
+    return { ok: false, error: err, results };
+  }
+
+  // (b) The contractor's bond — CSLB prints the amount + effective date but NO expiry.
+  const surety = strOf(parsed?.bond?.surety, 150);
+  if (surety) {
+    const bondNumber = strOf(parsed?.bond?.bond_number, 100);
+    const rawAmount = parsed?.bond?.amount != null ? Number(String(parsed.bond.amount).replace(/[$,\s]/g, "")) : NaN;
+    const bondAmount = Number.isFinite(rawAmount) && rawAmount >= 0 ? rawAmount : null;
+    const effective = dateOf(parsed?.bond?.effective);
+    err = await upsertItem(
+      "Bond",
+      surety,
+      bondNumber,
+      {
+        notes: "Bond expiry isn't shown on CSLB — attach the bond paperwork for the renewal date.",
+        ...(bondAmount != null ? { amount: bondAmount } : {}),
+        ...(effective ? { issued_date: effective } : {}),
+      },
+      bondAmount != null ? `$${bondAmount.toLocaleString("en-US")}` : undefined,
+    );
+    if (err) {
+      revalidate();
+      return { ok: false, error: err, results };
+    }
+  }
+
+  // (c) Workers' comp — a carrier files its own item; an exemption is only the
+  //     notes line on the license above, never a separate item.
+  const wcCarrier = wcExempt ? null : strOf(wc?.carrier, 150);
+  if (wcCarrier) {
+    const wcPolicy = strOf(wc?.policy_number, 100);
+    const wcExpires = dateOf(wc?.expires);
+    err = await upsertItem(
+      "Workers' Comp",
+      wcCarrier,
+      wcPolicy,
+      wcExpires ? { expires_date: wcExpires } : {},
+      wcExpires ? `renews ${wcExpires}` : undefined,
+    );
+    if (err) {
+      revalidate();
+      return { ok: false, error: err, results };
+    }
+  }
+
+  revalidate();
+  return { ok: true, results };
 }
 
 export async function deleteCompliance(id: string): Promise<Result> {

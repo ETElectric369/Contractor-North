@@ -143,7 +143,7 @@ export default async function JobDetailPage({
     supabase.from("purchase_orders").select("id, po_number, vendor, status, total").eq("job_id", id),
     supabase
       .from("time_entries")
-      .select("id, profile_id, clock_in, clock_out, lunch_minutes, miles, status, job_id, job_code, notes, rate_override, profiles(full_name, hourly_rate, bill_rate), job:job_id(job_number, name), time_allocations(id, job_id, hours, job_code, description)")
+      .select("id, profile_id, clock_in, clock_out, lunch_minutes, miles, status, job_id, job_code, notes, rate_override, paid_at, mileage_paid_at, profiles(full_name, hourly_rate, bill_rate), job:job_id(job_number, name), time_allocations(id, job_id, hours, job_code, description)")
       .eq("job_id", id)
       .order("clock_in", { ascending: false }),
     supabase
@@ -344,6 +344,51 @@ export default async function JobDetailPage({
     <p className="px-1 py-6 text-center text-sm text-slate-400">No {label} yet.</p>
   );
 
+  // Time-tab serialization gate (same class as the gated techs select above):
+  // `entries` keeps rate_override + the joined hourly_rate/bill_rate because the
+  // server-side cost math (laborCostForJob, totalMiles) needs the full rows, but
+  // each row also serializes into EditEntryButton props on a page techs can view.
+  // Non-staff get an allowlist projection with every pay field stripped; staff
+  // pass the full rows through unchanged (the edit modal's Rate anchor uses them).
+  const timeTabEntries: {
+    id: string;
+    profile_id: string;
+    clock_in: string;
+    clock_out: string | null;
+    lunch_minutes: number;
+    miles?: number; // Entry's shape: DB null → undefined in the projection
+    status: string;
+    job_id: string | null;
+    job_code: string | null;
+    notes: string | null;
+    profiles: { full_name: string | null } | null;
+    job: { job_number: string; name: string } | null;
+    time_allocations: { id: string; job_id: string | null; hours: number | null; job_code: string | null; description: string | null }[];
+    rate_override?: number | null;
+    // The payroll locks aren't pay data — they drive the edit modal's
+    // "paid period" banner, which every role should see before a blocked save.
+    paid_at?: string | null;
+    mileage_paid_at?: string | null;
+  }[] = viewerIsStaff
+    ? ((entries ?? []) as any[])
+    : ((entries ?? []) as any[]).map((e) => ({
+        id: e.id,
+        profile_id: e.profile_id,
+        clock_in: e.clock_in,
+        clock_out: e.clock_out,
+        lunch_minutes: e.lunch_minutes,
+        miles: e.miles ?? undefined,
+        status: e.status,
+        job_id: e.job_id,
+        job_code: e.job_code,
+        notes: e.notes,
+        profiles: e.profiles ? { full_name: e.profiles.full_name ?? null } : null,
+        job: e.job ?? null,
+        time_allocations: e.time_allocations ?? [],
+        paid_at: e.paid_at ?? null,
+        mileage_paid_at: e.mileage_paid_at ?? null,
+      }));
+
   const tabs = [
     {
       id: "job",
@@ -496,7 +541,7 @@ export default async function JobDetailPage({
             </div>
           </div>
           <ul className="divide-y divide-slate-100">
-            {(entries ?? []).map((e: any) => {
+            {timeTabEntries.map((e) => {
               const h = e.status === "closed" && e.clock_out
                 ? hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes) : null;
               return (
