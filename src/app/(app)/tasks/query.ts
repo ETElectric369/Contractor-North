@@ -16,7 +16,7 @@ export const DONE_LIMIT = 30;
 export async function getTasksPageData(
   category: string | null,
   showAllDone: boolean,
-  opts?: { mine?: boolean },
+  opts?: { mine?: boolean; noOffice?: boolean },
 ) {
   const supabase = await createClient();
 
@@ -38,6 +38,9 @@ export async function getTasksPageData(
     .order("priority", { ascending: false });
   if (category) openQ = openQ.eq("category", category);
   if (mineId) openQ = openQ.eq("assigned_to", mineId);
+  // ?else=1 — the staff "Everything else" door counts NON-office tasks, so the
+  // page it opens must exclude office too (else the door number never matches).
+  if (opts?.noOffice) openQ = openQ.neq("category", "office");
 
   let doneQ = supabase
     .from("tasks")
@@ -46,6 +49,7 @@ export async function getTasksPageData(
     .order("completed_at", { ascending: false, nullsFirst: false });
   if (category) doneQ = doneQ.eq("category", category);
   if (mineId) doneQ = doneQ.eq("assigned_to", mineId);
+  if (opts?.noOffice) doneQ = doneQ.neq("category", "office");
   if (!showAllDone) doneQ = doneQ.limit(DONE_LIMIT);
 
   const [{ data: orgRow }, openR, doneR, { data: jobs }, { data: people }] =
@@ -57,11 +61,26 @@ export async function getTasksPageData(
       supabase.from("profiles").select("id, full_name").eq("active", true).order("full_name"),
     ]);
 
+  // The ?mine cut filters by assignee — which drops the UNASSIGNED subtasks of a
+  // tech's own tasks, leaving childless parents + a cascade confirm about invisible
+  // items. Re-fetch children of the fetched top-level tasks with no assignee filter
+  // and merge (deduped) so nesting renders whole.
+  let extraKids: any[] = [];
+  if (mineId) {
+    const fetched = [...(openR.data ?? []), ...(doneR.data ?? [])] as any[];
+    const seen = new Set(fetched.map((t) => t.id));
+    const parentIds = fetched.filter((t) => !t.parent_id).map((t) => t.id);
+    if (parentIds.length) {
+      const { data: kids } = await supabase.from("tasks").select(TASK_SELECT).in("parent_id", parentIds);
+      extraKids = (kids ?? []).filter((k: any) => !seen.has(k.id));
+    }
+  }
+
   const tz = getOrgSettings((orgRow as any)?.settings).timezone || "America/Los_Angeles";
 
   return {
     todayStr: todayStrInTz(tz),
-    tasks: [...(openR.data ?? []), ...(doneR.data ?? [])],
+    tasks: [...(openR.data ?? []), ...(doneR.data ?? []), ...extraKids],
     doneTotal: doneR.count ?? doneR.data?.length ?? 0,
     jobs: jobs ?? [],
     people: people ?? [],

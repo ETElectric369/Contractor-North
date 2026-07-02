@@ -97,7 +97,11 @@ export async function createAppointment(formData: FormData): Promise<Result> {
     void sendPushToProfiles([assignedTo], "assigned", {
       title: "New appointment assigned",
       body: title,
-      url: "/schedule?view=appointments",
+      // Deep-link the appointment's DAY so staff land where its edit/quick actions
+      // live, not the generic week (audit cn-v328). apptDate is the org-local day the
+      // user picked; a tech recipient is still bounced to /planner by the office-only
+      // gate on /schedule — that's a separate, pre-existing constraint.
+      url: apptDate ? `/schedule?view=day&date=${apptDate}` : "/schedule",
     });
   }
 

@@ -7,14 +7,16 @@ export const dynamic = "force-dynamic";
 export default async function TasksPage({
   searchParams,
 }: {
-  searchParams: Promise<{ done?: string; mine?: string }>;
+  searchParams: Promise<{ done?: string; mine?: string; else?: string }>;
 }) {
   const sp = await searchParams;
   const showAllDone = sp?.done === "all";
-  // ?mine=1 — the tech door from My Day: only what's assigned to the caller,
-  // so the door's count matches the page it opens.
+  // ?mine=1 — the tech door from My Day: only what's assigned to the caller.
+  // ?else=1 — the staff "Everything else" door: exclude office so the page
+  // matches the door's non-office count. Both keep the door number honest.
   const mine = sp?.mine === "1";
-  const { todayStr, tasks, doneTotal, jobs, people } = await getTasksPageData(null, showAllDone, { mine });
+  const noOffice = sp?.else === "1";
+  const { todayStr, tasks, doneTotal, jobs, people } = await getTasksPageData(null, showAllDone, { mine, noOffice });
 
   return (
     <div>

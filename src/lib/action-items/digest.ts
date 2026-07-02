@@ -92,8 +92,11 @@ export async function sendDayAheadDigests(supabase: any): Promise<{ orgs: number
       .eq("org_id", org.id)
       .eq("status", "open")
       .is("parent_id", null)
-      .or(`focus_date.eq.${today},due_date.lte.${today},priority.gte.1${onSiteArm}`)
-      .order("due_date", { ascending: true, nullsFirst: false })
+      // Match the planner's poolCut exactly: flagged means UNDATED+priority (a
+      // future-dated flagged row isn't a today candidate). Nulls-first so the
+      // 60-cap keeps pins over dated zombies (audit cn-v328).
+      .or(`focus_date.eq.${today},due_date.lte.${today},and(due_date.is.null,priority.gte.1)${onSiteArm}`)
+      .order("due_date", { ascending: false, nullsFirst: true })
       .limit(60);
 
     const six = rankSix((taskRows ?? []) as any[], { todayStr: today, scheduledJobIds });

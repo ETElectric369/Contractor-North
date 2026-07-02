@@ -48,9 +48,13 @@ describe("badge economy: the inbox is decisions-only (the task feeder stays dead
     expect(dockSrc).toContain('badge > 9 ? "9+" : badge');
   });
 
-  it("the morning digest dropped the undated-tasks arm and ranks with THE shared six", () => {
+  it("the morning digest dropped the UNBOUNDED undated arm and ranks with THE shared six", () => {
     const digestSrc = src("lib/action-items/digest.ts");
-    expect(digestSrc).not.toContain("due_date.is.null");
+    // The old unbounded arm made EVERY undated task a candidate — gone.
+    expect(digestSrc).not.toContain("due_date.is.null,due_date.lte");
+    // Undated may only ride in FLAGGED (priority-gated), exactly matching the
+    // planner's poolCut — so the phone and the app pick the same six.
+    expect(digestSrc).toContain("and(due_date.is.null,priority.gte.1)");
     // The phone's morning number/read-back must come from the same rank as the
     // planner's six — a parallel cut would drift (phone says 18, app says 4).
     expect(digestSrc).toContain('from "@/lib/six-rank"');

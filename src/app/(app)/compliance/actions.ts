@@ -143,7 +143,12 @@ export async function importPolicyDoc(input: {
       })
       .select("id")
       .single();
-    if (error || !data) return { ok: false, error: error?.message ?? "Could not save the import." };
+    if (error || !data) {
+      // The insert definitively failed, so nothing references this upload — remove
+      // the now-orphaned storage object (best-effort; race-free at this point).
+      await supabase.storage.from("documents").remove([input.path]).catch(() => {});
+      return { ok: false, error: error?.message ?? "Could not save the import." };
+    }
     revalidate();
     return { ok: true, id: data.id, type: "Other", name: baseName, summary: "Auto-read failed — filed for review.", reviewNeeded: true };
   }

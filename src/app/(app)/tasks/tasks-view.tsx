@@ -123,13 +123,22 @@ export function NewTaskBox({
       if (res.duplicate) {
         toast(res.speak ?? "Already on the list.", "info");
       } else {
-        const landed =
-          todayStr && dueDate && dueDate <= todayStr
-            ? "Added to today's six"
-            : category === "office"
-              ? "Added to Office"
-              : "Added to Everything else";
-        toast(todayStr ? landed : "Task added", "success");
+        // Keep the destination claim TRUE (audit cn-v328): an assigned task lands on
+        // THAT person's list, not my six; a backdated task can be squeezed out by the
+        // rank-2 overdue cap so we don't promise the six; only an unassigned due-TODAY
+        // task reliably makes the six (rank 3 admits all of today while slots remain).
+        const landed = assignedTo
+          ? "Added to their list"
+          : !todayStr
+            ? "Task added"
+            : dueDate === todayStr
+              ? "Added to today's six"
+              : dueDate && dueDate < todayStr
+                ? "Added — overdue"
+                : category === "office"
+                  ? "Added to Office"
+                  : "Added to Everything else";
+        toast(landed, "success");
       }
       setTitle("");
       setJobId("");

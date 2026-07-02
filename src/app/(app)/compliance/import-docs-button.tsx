@@ -72,7 +72,11 @@ export function ImportDocsButton({ orgId, page }: { orgId: string; page: "Insura
         imported++;
         if (res.reviewNeeded) {
           review++;
-          set("review", `Filed for review: ${res.name ?? f.name}`);
+          // Say WHERE it landed even on review lines — a doc imported from /insurance
+          // that routes to /compliance otherwise looks like nothing happened here.
+          const rdest = destinationFor(res.type ?? "Other");
+          const rwhere = rdest === page ? "Filed for review" : `Filed to ${rdest} for review`;
+          set("review", `${rwhere}: ${res.name ?? f.name}`);
         } else {
           const dest = destinationFor(res.type ?? "Other");
           const where = dest === page ? "Filed" : `Filed to ${dest}`;

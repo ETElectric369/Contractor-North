@@ -60,6 +60,9 @@ export async function createTask(input: {
     .ilike("title", title.replace(/[\\%_]/g, "\\$&"));
   dupQ = input.assigned_to ? dupQ.eq("assigned_to", input.assigned_to) : dupQ.is("assigned_to", null);
   dupQ = input.parent_id ? dupQ.eq("parent_id", input.parent_id) : dupQ.is("parent_id", null);
+  // …and same JOB: a same-title task for a DIFFERENT job is real work, not a twin
+  // ("inspection" on two jobs). Only same-job (or both jobless) collapses.
+  dupQ = input.job_id ? dupQ.eq("job_id", input.job_id) : dupQ.is("job_id", null);
   const { data: dup } = await dupQ.limit(1).maybeSingle();
   if (dup) {
     const openedOn = new Date(dup.created_at as string).toLocaleDateString("en-US", {

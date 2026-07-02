@@ -203,8 +203,16 @@ export async function setJobScheduleRanges(
     scheduled_end: maxEnd ? tzLocalHourUtc(maxEnd, DAY_END_HOUR, tz).toISOString() : null,
     updated_at: new Date().toISOString(),
   };
-  const { error } = await supabase.from("jobs").update(patch).eq("id", jobId);
+  // The mirror update must PROVE it touched a row: an RLS-invisible or nonexistent
+  // job matches zero rows (no error), and without this guard we'd fall through to the
+  // segment insert below, which org-stamps to the CALLER — writing an orphan segment
+  // for a foreign job id. Guarding here (the choke point) covers every caller: the
+  // movers, the calendar undo, the schedule control, the registry verb, and a direct
+  // server-action POST (audit cn-v328 — the loadJobDaySegments guard only caught the
+  // wrappers). See also the belt-and-suspenders note in that audit.
+  const { data: upd, error } = await supabase.from("jobs").update(patch).eq("id", jobId).select("id");
   if (error) return { ok: false, error: error.message };
+  if (!upd?.length) return { ok: false, error: "Job not found." };
   // A scheduled date advances early-stage status (consistent with the other writers).
   if (minStart) await advanceToScheduled(supabase, jobId);
 

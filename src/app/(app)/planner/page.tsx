@@ -139,7 +139,10 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         .is("parent_id", null),
     )
       .or(poolCut)
-      .order("due_date", { ascending: true, nullsFirst: false })
+      // Nulls (pins + flagged-undated) FIRST, then freshest dates — so the 60-cap
+      // trims June zombies, not today's pins. rankSix re-sorts internally, so this
+      // only governs what survives the cap, not display order (audit cn-v328).
+      .order("due_date", { ascending: false, nullsFirst: true })
       .order("priority", { ascending: false })
       .limit(60),
     // "EVERYTHING ELSE" door count — the open top-level backlog. Staff: org-wide
@@ -206,7 +209,9 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   const officeCount = (((officeCountR as any)?.count as number | null) ?? 0);
   const officeDue = (((officeDueR as any)?.count as number | null) ?? 0);
   const doneToday = (((doneTodayR as any)?.count as number | null) ?? 0);
-  const elseHref = isStaff ? "/tasks" : "/tasks?mine=1";
+  // Staff door counts NON-office tasks → open an office-free list (?else=1) so the
+  // number matches the page; techs get their own assigned list (audit cn-v328).
+  const elseHref = isStaff ? "/tasks?else=1" : "/tasks?mine=1";
 
   const hoursToday = (entries ?? []).reduce(
     (sum: number, e: any) =>
@@ -292,7 +297,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       title: a.title,
       sub: a.location ?? null,
       address: a.location ?? null,
-      href: a.job_id ? `/jobs/${a.job_id}` : "/schedule?view=appointments",
+      href: a.job_id ? `/jobs/${a.job_id}` : `/schedule?view=day&date=${todayStr}`,
       apptType: a.type,
       appt: {
         id: a.id,
@@ -379,7 +384,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         title: a.title,
         sub: a.location ?? null,
         address: a.location ?? null,
-        href: a.job_id ? `/jobs/${a.job_id}` : "/schedule?view=appointments",
+        href: a.job_id ? `/jobs/${a.job_id}` : `/schedule?view=day&date=${todayStr}`,
         apptType: a.type,
       })),
     ]
