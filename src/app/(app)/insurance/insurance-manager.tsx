@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Pencil, Trash2, Umbrella } from "lucide-react";
+import { FileText, Paperclip, Plus, Pencil, Trash2, Umbrella, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
@@ -11,16 +11,33 @@ import { Badge } from "@/components/ui/badge";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { useToast } from "@/components/toast";
-import { createCompliance, updateCompliance, deleteCompliance } from "../compliance/actions";
+import { createClient } from "@/lib/supabase/client";
+import { createCompliance, updateCompliance, deleteCompliance, setComplianceFile } from "../compliance/actions";
 import { daysUntil, expiryBadge, type ComplianceItem } from "../compliance/compliance-manager";
 import { INSURANCE_TYPES } from "@/lib/compliance-types";
 
-export function InsuranceManager({ items }: { items: ComplianceItem[] }) {
+type InsuranceItem = ComplianceItem & { file_url?: string | null; signedUrl?: string | null };
+
+/** Certificates ride the private "documents" bucket (org-folder RLS, 0013). */
+async function uploadCertificate(orgId: string, file: File): Promise<string> {
+  if (file.size > 15 * 1024 * 1024) throw new Error(`${file.name} is over 15 MB.`);
+  const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const path = `${orgId}/insurance/${Date.now()}-${safe}`;
+  const supabase = createClient();
+  const { error } = await supabase.storage.from("documents").upload(path, file, { upsert: false });
+  if (error) throw error;
+  return path;
+}
+
+export function InsuranceManager({ items, orgId }: { items: InsuranceItem[]; orgId: string }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [certFile, setCertFile] = useState<File | null>(null);
+  const certInputRef = useRef<HTMLInputElement>(null);
+  const editCertRef = useRef<HTMLInputElement>(null);
 
   const [type, setType] = useState("General Liability");
   const [name, setName] = useState("");
@@ -55,10 +72,43 @@ export function InsuranceManager({ items }: { items: ComplianceItem[] }) {
     setError(null);
     if (!name.trim()) return setError("Carrier / policy name is required.");
     start(async () => {
-      const res = await createCompliance({ type, name, policy_number: policy, amount, issued_date: issued || null, expires_date: expires || null, notes });
+      let file_url: string | null = null;
+      if (certFile) {
+        try {
+          file_url = await uploadCertificate(orgId, certFile);
+        } catch (err: any) {
+          return setError(err?.message ?? "Certificate upload failed.");
+        }
+      }
+      const res = await createCompliance({ type, name, policy_number: policy, amount, issued_date: issued || null, expires_date: expires || null, notes, file_url });
       if (!res.ok) return setError(res.error ?? "Could not save.");
-      setName(""); setPolicy(""); setAmount(0); setIssued(""); setExpires(""); setNotes("");
+      setName(""); setPolicy(""); setAmount(0); setIssued(""); setExpires(""); setNotes(""); setCertFile(null);
       setAdding(false);
+      router.refresh();
+    });
+  }
+
+  function attachTo(item: InsuranceItem, file: File) {
+    setError(null);
+    start(async () => {
+      try {
+        const path = await uploadCertificate(orgId, file);
+        const res = await setComplianceFile(item.id, path);
+        if (!res.ok) throw new Error(res.error);
+        toast(item.file_url ? "Certificate replaced" : "Certificate attached", "success");
+        router.refresh();
+      } catch (err: any) {
+        toast(err?.message ?? "Certificate upload failed.", "error");
+      }
+    });
+  }
+
+  function removeCert(item: InsuranceItem) {
+    if (!confirm("Remove the attached certificate?")) return;
+    start(async () => {
+      const res = await setComplianceFile(item.id, null);
+      if (!res.ok) { toast(res.error ?? "Couldn't remove — try again.", "error"); return; }
+      toast("Certificate removed", "success");
       router.refresh();
     });
   }
@@ -100,6 +150,21 @@ export function InsuranceManager({ items }: { items: ComplianceItem[] }) {
             <div><Label htmlFor="i-expires">Expires</Label><Input id="i-expires" type="date" value={expires} onChange={(e) => setExpires(e.target.value)} /></div>
           </div>
           <div><Label htmlFor="i-notes">Notes</Label><Textarea id="i-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Coverage limit, agent, renewal contact…" /></div>
+          <div>
+            <Label htmlFor="i-cert">Certificate (PDF or photo)</Label>
+            <input ref={certInputRef} id="i-cert" type="file" accept="application/pdf,image/*" className="hidden" onChange={(e) => setCertFile(e.target.files?.[0] ?? null)} />
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" onClick={() => certInputRef.current?.click()}>
+                <Paperclip className="h-3.5 w-3.5" /> {certFile ? "Change file" : "Attach file"}
+              </Button>
+              {certFile && (
+                <span className="flex min-w-0 items-center gap-1 text-xs text-slate-500">
+                  <span className="truncate">{certFile.name}</span>
+                  <button onClick={() => { setCertFile(null); if (certInputRef.current) certInputRef.current.value = ""; }} className="text-slate-300 hover:text-red-600" title="Remove"><X className="h-3.5 w-3.5" /></button>
+                </span>
+              )}
+            </div>
+          </div>
           <div className="flex justify-end gap-2">
             <Button size="sm" variant="outline" onClick={() => setAdding(false)}>Cancel</Button>
             <Button size="sm" onClick={add} disabled={pending || !name.trim()}>{pending ? "Saving…" : "Save"}</Button>
@@ -136,6 +201,11 @@ export function InsuranceManager({ items }: { items: ComplianceItem[] }) {
                   <Badge tone={b.tone}>{b.label}</Badge>
                   {c.expires_date && <span>Renews {formatDate(c.expires_date)}</span>}
                   {Number(c.amount) > 0 && <span>· {formatCurrency(c.amount)}/yr</span>}
+                  {c.signedUrl && (
+                    <a href={c.signedUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-medium text-sky-700 hover:underline">
+                      <FileText className="h-3.5 w-3.5" /> Certificate
+                    </a>
+                  )}
                 </div>
                 {c.notes && <div className="mt-2 whitespace-pre-wrap border-t border-slate-100 pt-2 text-xs text-slate-500">{c.notes}</div>}
               </Card>
@@ -160,6 +230,28 @@ export function InsuranceManager({ items }: { items: ComplianceItem[] }) {
           <div><Label htmlFor="ie-expires">Expires</Label><Input id="ie-expires" type="date" value={eExpires} onChange={(e) => setEExpires(e.target.value)} /></div>
         </div>
         <div className="mt-3"><Label htmlFor="ie-notes">Notes</Label><Textarea id="ie-notes" rows={2} value={eNotes} onChange={(e) => setENotes(e.target.value)} placeholder="Coverage limit, agent, renewal contact…" /></div>
+        {editing && (
+          <div className="mt-3">
+            <Label>Certificate</Label>
+            <input ref={editCertRef} type="file" accept="application/pdf,image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f && editing) attachTo(editing, f); e.target.value = ""; }} />
+            <div className="flex flex-wrap items-center gap-2">
+              {(editing as InsuranceItem).signedUrl && (
+                <a href={(editing as InsuranceItem).signedUrl!} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-sm font-medium text-sky-700 hover:underline">
+                  <FileText className="h-4 w-4" /> View current
+                </a>
+              )}
+              <Button size="sm" variant="outline" onClick={() => editCertRef.current?.click()} disabled={pending}>
+                <Paperclip className="h-3.5 w-3.5" /> {(editing as InsuranceItem).file_url ? "Replace" : "Attach file"}
+              </Button>
+              {(editing as InsuranceItem).file_url && (
+                <Button size="sm" variant="outline" onClick={() => removeCert(editing as InsuranceItem)} disabled={pending}>
+                  <X className="h-3.5 w-3.5" /> Remove
+                </Button>
+              )}
+            </div>
+            <p className="mt-1 text-xs text-slate-400">Uploads save immediately, even before you hit Save.</p>
+          </div>
+        )}
       </Modal>
     </div>
   );

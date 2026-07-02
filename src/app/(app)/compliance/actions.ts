@@ -14,6 +14,9 @@ export interface ComplianceInput {
   issued_date?: string | null;
   expires_date?: string | null;
   notes?: string | null;
+  /** Storage path in the private "documents" bucket. Create-time only —
+   *  updates go through setComplianceFile so a metadata edit can't wipe it. */
+  file_url?: string | null;
 }
 
 function clean(input: ComplianceInput) {
@@ -28,6 +31,11 @@ function clean(input: ComplianceInput) {
   };
 }
 
+function revalidate() {
+  revalidatePath("/compliance");
+  revalidatePath("/insurance");
+}
+
 export async function createCompliance(input: ComplianceInput): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -35,9 +43,9 @@ export async function createCompliance(input: ComplianceInput): Promise<Result> 
   if (!input.name?.trim()) return { ok: false, error: "Name is required." };
   const { error } = await supabase
     .from("compliance_items")
-    .insert({ ...clean(input), created_by: ctx.userId });
+    .insert({ ...clean(input), file_url: input.file_url ?? null, created_by: ctx.userId });
   if (error) return { ok: false, error: error.message };
-  revalidatePath("/compliance");
+  revalidate();
   return { ok: true };
 }
 
@@ -48,7 +56,28 @@ export async function updateCompliance(id: string, input: ComplianceInput): Prom
   if (!input.name?.trim()) return { ok: false, error: "Name is required." };
   const { error } = await supabase.from("compliance_items").update(clean(input)).eq("id", id);
   if (error) return { ok: false, error: error.message };
-  revalidatePath("/compliance");
+  revalidate();
+  return { ok: true };
+}
+
+/** Attach/replace/remove the item's document. Replacing or removing also
+ *  deletes the old storage object so the bucket doesn't collect orphans. */
+export async function setComplianceFile(id: string, fileUrl: string | null): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const { data: existing } = await supabase
+    .from("compliance_items")
+    .select("file_url")
+    .eq("id", id)
+    .maybeSingle();
+  if (!existing) return { ok: false, error: "That item isn't available." };
+  const { error } = await supabase.from("compliance_items").update({ file_url: fileUrl }).eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  if (existing.file_url && existing.file_url !== fileUrl) {
+    await supabase.storage.from("documents").remove([existing.file_url]);
+  }
+  revalidate();
   return { ok: true };
 }
 
@@ -56,8 +85,14 @@ export async function deleteCompliance(id: string): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  const { data: existing } = await supabase
+    .from("compliance_items")
+    .select("file_url")
+    .eq("id", id)
+    .maybeSingle();
   const { error } = await supabase.from("compliance_items").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
-  revalidatePath("/compliance");
+  if (existing?.file_url) await supabase.storage.from("documents").remove([existing.file_url]);
+  revalidate();
   return { ok: true };
 }
