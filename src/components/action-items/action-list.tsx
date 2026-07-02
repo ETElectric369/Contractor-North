@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation";
 import { CalendarPlus, Clock3, X, ChevronRight, Check, UserPlus, ArrowRightLeft } from "lucide-react";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
-import { Input, Label, Select } from "@/components/ui/input";
+import { Label, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { MoveToDay } from "@/components/move-to-day";
 import { dispatchAction } from "@/lib/action-items/dispatch";
 import { KIND_META, KIND_STREAM, STREAM_LABEL, STREAM_ORDER, sortActionItems, type ActionItem, type Affordance } from "@/lib/action-items/types";
 
@@ -53,9 +54,6 @@ export function ActionList({
   const [removedIds, setRemovedIds] = useState<Set<string>>(new Set());
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [dating, setDating] = useState<{ item: ActionItem; verb: "schedule" | "snooze" } | null>(null);
-  const [dateVal, setDateVal] = useState("");
-  const [savingDate, setSavingDate] = useState(false);
   const [assigning, setAssigning] = useState<ActionItem | null>(null);
   const [assigneeVal, setAssigneeVal] = useState("");
   const [savingAssign, setSavingAssign] = useState(false);
@@ -118,18 +116,23 @@ export function ActionList({
     setRemovedIds((s) => new Set(s).add(item.id));
     run(item, "dismiss");
   }
-  function openDate(item: ActionItem, verb: "schedule" | "snooze") {
-    setDateVal(verb === "snooze" ? ymd(new Date(Date.now() + 86_400_000)) : ymd(new Date()));
-    setDating({ item, verb });
-  }
-  async function saveDate() {
-    if (!dating || !dateVal) return;
-    setSavingDate(true);
-    const it = dating.item;
-    setRemovedIds((s) => new Set(s).add(it.id)); // leaves the inbox once dated
-    const ok = await run(it, dating.verb, { date: dateVal });
-    setSavingDate(false);
-    if (ok) setDating(null);
+  // Schedule/snooze go through the shared MoveToDay sheet — the ONE reschedule
+  // idiom app-wide (same dispatchAction payload the old bespoke date modal
+  // sent). Returns the result so the sheet shows its own inline error.
+  async function pickDate(item: ActionItem, verb: "schedule" | "snooze", dateISO: string | null) {
+    if (!dateISO) return { ok: false, error: "Pick a day." };
+    setError(null);
+    setBusyId(item.id);
+    setRemovedIds((s) => new Set(s).add(item.id)); // leaves the inbox once dated
+    const res = await dispatchAction({ kind: item.kind, id: item.id, verb, payload: { date: dateISO } });
+    setBusyId(null);
+    if (!res.ok) {
+      // roll back the optimistic removal
+      setRemovedIds((s) => { const n = new Set(s); n.delete(item.id); return n; });
+      return { ok: false, error: res.error ?? "Couldn't do that." };
+    }
+    router.refresh();
+    return { ok: true };
   }
   function openAssign(item: ActionItem) {
     setAssigneeVal("");
@@ -201,9 +204,13 @@ export function ActionList({
 
                 <div className="flex shrink-0 items-center gap-0.5">
                   {can("schedule") && (
-                    <button onClick={() => openDate(item, "schedule")} disabled={busyId === item.id} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-brand" title="Schedule / set a date">
+                    <MoveToDay
+                      label="Schedule / set a date"
+                      triggerClassName="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-brand"
+                      onPick={(d) => pickDate(item, "schedule", d)}
+                    >
                       <CalendarPlus className="h-4 w-4" />
-                    </button>
+                    </MoveToDay>
                   )}
                   {can("assign") && (
                     <button onClick={() => openAssign(item)} disabled={busyId === item.id} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-brand" title="Assign to someone">
@@ -216,9 +223,13 @@ export function ActionList({
                     </button>
                   )}
                   {can("snooze") && (
-                    <button onClick={() => openDate(item, "snooze")} disabled={busyId === item.id} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Snooze to a later date">
+                    <MoveToDay
+                      label="Snooze until"
+                      triggerClassName="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                      onPick={(d) => pickDate(item, "snooze", d)}
+                    >
                       <Clock3 className="h-4 w-4" />
-                    </button>
+                    </MoveToDay>
                   )}
                   {can("dismiss") && (
                     <button onClick={() => onDismiss(item)} disabled={busyId === item.id} className="rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600" title="Dismiss">
@@ -234,34 +245,6 @@ export function ActionList({
           })}
         </div>
       ))}
-
-      <Modal
-        open={!!dating}
-        onClose={() => setDating(null)}
-        title={dating?.verb === "snooze" ? "Snooze until" : "Set a date"}
-        size="sm"
-        footer={
-          <ModalActions
-            onCancel={() => setDating(null)}
-            onSave={saveDate}
-            saving={savingDate}
-            disabled={!dateVal}
-            saveLabel={dating?.verb === "snooze" ? "Snooze" : "Schedule"}
-          />
-        }
-      >
-        <div className="space-y-3">
-          <div>
-            <Label htmlFor="ai-date">Date</Label>
-            <Input id="ai-date" type="date" value={dateVal} onChange={(e) => setDateVal(e.target.value)} />
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" size="sm" variant="outline" onClick={() => setDateVal(ymd(new Date()))}>Today</Button>
-            <Button type="button" size="sm" variant="outline" onClick={() => setDateVal(ymd(new Date(Date.now() + 86_400_000)))}>Tomorrow</Button>
-            <Button type="button" size="sm" variant="outline" onClick={() => setDateVal(ymd(new Date(Date.now() + 7 * 86_400_000)))}>+1 week</Button>
-          </div>
-        </div>
-      </Modal>
 
       <Modal
         open={!!assigning}

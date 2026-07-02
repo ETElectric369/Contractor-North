@@ -84,6 +84,7 @@ export function AppointmentButton({
   staff,
   appointment,
   defaultDate,
+  defaultCustomerId,
   compact = false,
 }: {
   jobs: Opt[];
@@ -91,6 +92,8 @@ export function AppointmentButton({
   staff: Opt[];
   appointment?: ApptValue;
   defaultDate?: string;
+  /** Preselect a customer in create mode (e.g. mounted on that customer's page). */
+  defaultCustomerId?: string;
   /** Tight card-header variant: small button that stays on one line. */
   compact?: boolean;
 }) {
@@ -118,7 +121,7 @@ export function AppointmentButton({
       date: st.date,
       start_time: st.time || "08:00",
       end_time: en.time,
-      customer_id: appointment?.customer_id ?? "",
+      customer_id: appointment?.customer_id ?? defaultCustomerId ?? "",
       job_id: appointment?.job_id ?? "",
       new_customer_name: "",
       new_customer_phone: "",

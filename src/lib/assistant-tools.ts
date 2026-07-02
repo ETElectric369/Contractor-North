@@ -133,14 +133,23 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "schedule_overview",
     description:
-      "What's scheduled in a time window — jobs and appointments. Use for 'what's on the schedule this week', 'what do I have today', 'anything next week'.",
+      "What's scheduled in a time window — jobs, appointments, and tasks due. Use for 'what's on the schedule this week', 'what do I have today', 'anything next week'. PAST windows work too: for 'when was the Waldow oven visit', pass around (or date) with a past date instead of a named range.",
     input_schema: {
       type: "object",
       properties: {
         range: {
           type: "string",
           enum: ["today", "this_week", "next_week", "this_month"],
-          description: "Which window to look at (default this_week).",
+          description: "Which named window to look at (default this_week).",
+        },
+        date: {
+          type: "string",
+          description: "A specific day, YYYY-MM-DD (past or future) — overrides range.",
+        },
+        around: {
+          type: "string",
+          description:
+            "Look ±2 weeks around this YYYY-MM-DD (past or future) — for finding a visit whose exact day you don't know. Overridden by date.",
         },
       },
     },
@@ -1384,8 +1393,26 @@ export async function runDataTool(
       }
 
       case "schedule_overview": {
-        const { start, end, label } = windowFor(String(input.range ?? "this_week"));
-        const [jobsRes, apptRes] = await Promise.all([
+        // A specific date / an "around" pivot beats the named range — and both may sit in
+        // the PAST (the named ranges are future-biased; "when WAS the Waldow oven visit"
+        // needs to look backward).
+        const day = sanitize(input.date);
+        const pivot = sanitize(input.around);
+        let start: string, end: string, label: string;
+        if (/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+          const s = Date.parse(`${day}T00:00:00Z`);
+          start = new Date(s).toISOString();
+          end = new Date(s + 86_400_000).toISOString();
+          label = day;
+        } else if (/^\d{4}-\d{2}-\d{2}$/.test(pivot)) {
+          const p = Date.parse(`${pivot}T00:00:00Z`);
+          start = new Date(p - 14 * 86_400_000).toISOString();
+          end = new Date(p + 15 * 86_400_000).toISOString(); // ±2 weeks, pivot day inclusive
+          label = `two weeks around ${pivot}`;
+        } else {
+          ({ start, end, label } = windowFor(String(input.range ?? "this_week")));
+        }
+        const [jobsRes, apptRes, taskRes] = await Promise.all([
           supabase
             .from("jobs")
             .select("job_number, name, status, scheduled_start, scheduled_end, customers(name)")
@@ -1398,9 +1425,19 @@ export async function runDataTool(
             .gte("starts_at", start)
             .lt("starts_at", end)
             .order("starts_at"),
+          // Tasks due in-window — the WHEN buckets' cargo, so "what's on Friday"
+          // includes the permit deadline, not just the crew's blocks.
+          supabase
+            .from("tasks")
+            .select("id, title, status, due_date, assignee:assigned_to(full_name), jobs(job_number, name)")
+            .gte("due_date", start.slice(0, 10))
+            .lt("due_date", end.slice(0, 10))
+            .order("due_date")
+            .limit(40),
         ]);
         if (jobsRes.error) throw jobsRes.error;
         if (apptRes.error) throw apptRes.error;
+        if (taskRes.error) throw taskRes.error;
         return JSON.stringify({
           window: label,
           jobs: (jobsRes.data ?? []).map((j: any) => ({
@@ -1421,6 +1458,14 @@ export async function runDataTool(
             status: a.status,
             customer: embedName(a.customers),
             job: embedName(a.jobs),
+          })),
+          tasks_due: (taskRes.data ?? []).map((t: any) => ({
+            id: t.id, // pass to task.complete / task.setDue
+            title: t.title,
+            status: t.status,
+            due: t.due_date,
+            assigned_to: t.assignee?.full_name ?? null,
+            job: t.jobs ? `${t.jobs.job_number} ${t.jobs.name}` : null,
           })),
         });
       }

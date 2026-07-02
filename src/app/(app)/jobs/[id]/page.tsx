@@ -43,7 +43,7 @@ import { NewChangeOrderButton } from "../../change-orders/new-co-button";
 import { CoStatusControl } from "../../change-orders/co-status-control";
 import { CoRowActions } from "../../change-orders/co-row-actions";
 import { NewListButton } from "../../materials/new-list-button";
-import { AppointmentButton } from "../../appointments/appointment-button";
+import { AppointmentButton, type ApptValue } from "../../appointments/appointment-button";
 import { NewPoButton } from "../../purchasing/new-po-button";
 import { EditCustomerButton } from "../../crm/[id]/edit-customer-button";
 import { getOrgSettings } from "@/lib/org-settings";
@@ -192,9 +192,10 @@ export default async function JobDetailPage({
     .eq("job_id", id)
     .order("created_at", { ascending: false });
 
+  // Full ApptValue fields so each row can open the edit modal in place.
   const { data: jobAppts } = await supabase
     .from("appointments")
-    .select("id, type, title, starts_at, ends_at, location, status")
+    .select("id, type, title, starts_at, ends_at, location, notes, status, job_id, customer_id, assigned_to")
     .eq("job_id", id)
     .order("starts_at");
 
@@ -529,16 +530,27 @@ export default async function JobDetailPage({
           </div>
           <Card className="overflow-hidden">
             <ul className="divide-y divide-slate-100">
-              {(jobAppts ?? []).map((a: any) => (
-                <li key={a.id} className="flex items-center justify-between gap-3 px-5 py-3 text-sm">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <Badge tone={a.type === "inspection" ? "amber" : "blue"}>{a.type}</Badge>
-                    <span className="truncate font-medium text-slate-900">{a.title}</span>
-                    {a.status === "completed" && <Badge tone="green">done</Badge>}
-                  </div>
-                  <span className="shrink-0 text-slate-500">{formatDateTime(a.starts_at)}</span>
-                </li>
-              ))}
+              {(jobAppts ?? []).map((a: any) => {
+                // Same edit door the schedule's appointment rows use — the row
+                // is no longer a read-only dead-end.
+                const appt: ApptValue = {
+                  id: a.id, type: a.type, title: a.title, starts_at: a.starts_at, ends_at: a.ends_at,
+                  job_id: a.job_id, customer_id: a.customer_id, location: a.location, notes: a.notes, assigned_to: a.assigned_to,
+                };
+                return (
+                  <li key={a.id} className="flex items-center justify-between gap-3 px-5 py-3 text-sm">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <Badge tone={a.type === "inspection" ? "amber" : "blue"}>{a.type}</Badge>
+                      <span className="truncate font-medium text-slate-900">{a.title}</span>
+                      {a.status === "completed" && <Badge tone="green">done</Badge>}
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <span className="text-slate-500">{formatDateTime(a.starts_at)}</span>
+                      <AppointmentButton jobs={apptJobOpts} customers={apptCustOpts} staff={apptStaffOpts} appointment={appt} />
+                    </div>
+                  </li>
+                );
+              })}
               {(!jobAppts || jobAppts.length === 0) && empty("appointments")}
             </ul>
           </Card>

@@ -261,12 +261,15 @@ export async function setAppointmentStatus(id: string, status: string): Promise<
 
 /** Reschedule an appointment to a new time (partial — keeps everything else). Used by the
  *  voice agent ("move the Smith inspection to Thursday at 9") so a reschedule doesn't force a
- *  cancel+recreate. Org-scoped by RLS (a cross-org id is a clean no-op). */
+ *  cancel+recreate. Org-scoped by RLS (a cross-org id is a clean no-op). Proposal-aware:
+ *  a live "pick a time" link is withdrawn (like setAppointmentStatus does on cancel/complete)
+ *  so the customer's later tap on an OLD option can't silently overwrite this move — the
+ *  returned `note` lets the caller mention the withdrawn link. */
 export async function rescheduleAppointment(
   id: string,
   startsAtIso: string,
   endsAtIso?: string | null,
-): Promise<Result> {
+): Promise<Result & { note?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -283,9 +286,22 @@ export async function rescheduleAppointment(
   const { data, error } = await supabase.from("appointments").update(patch).eq("id", id).select("id");
   if (error) return { ok: false, error: error.message };
   if (!data || !data.length) return { ok: false, error: "Appointment not found." };
+  // The reschedule supersedes any pending pick-a-time link — kill it, or the customer
+  // could tap a stale option later and move the appointment back underneath us.
+  const { data: withdrawn } = await supabase
+    .from("schedule_proposals")
+    .update({ status: "cancelled" })
+    .eq("appointment_id", id)
+    .eq("status", "pending")
+    .select("id");
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
-  return { ok: true };
+  return {
+    ok: true,
+    ...(withdrawn?.length
+      ? { note: "The customer's pick-a-time link for this appointment was withdrawn — offer new times if they still need to choose." }
+      : {}),
+  };
 }
 
 /** Turn an appointment (often a site-visit/estimate walk-through) into a job —

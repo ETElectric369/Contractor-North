@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
-// Appointments is now a view of the unified Schedule hub.
+// Appointments live on the unified Schedule calendar (the week view is the default).
 export default function AppointmentsRedirect() {
-  redirect("/schedule?view=appointments");
+  redirect("/schedule");
 }

@@ -48,7 +48,9 @@ export function DayClock({
 
   const liveMs = open ? Math.max(0, now - new Date(open.clock_in).getTime()) : 0;
   const totalMs = closedHoursToday * 3_600_000 + liveMs;
-  // The open entry started today, so its live time is also part of this week.
+  // The open entry started today, so its live time is also part of the pay week
+  // (closedHoursWeek is the MONDAY-start payroll week — same week a timecard
+  // means; display only, no write path here).
   const totalWeekMs = closedHoursWeek * 3_600_000 + liveMs;
 
   const fmtHm = (ms: number) => {
@@ -86,14 +88,14 @@ export function DayClock({
             <>
               <div className="text-xl font-bold tabular-nums text-slate-900">{fmtHms(liveMs)}</div>
               <div className="truncate text-xs text-slate-500">
-                On the clock{open.jobLabel ? ` · ${open.jobLabel}` : ""} · {fmtHm(totalMs)} today · {fmtHm(totalWeekMs)} week
+                On the clock{open.jobLabel ? ` · ${open.jobLabel}` : ""} · {fmtHm(totalMs)} today · {fmtHm(totalWeekMs)} pay week
               </div>
             </>
           ) : (
             <>
               {/* Two stat units that never break apart: each "value + label" is
                   nowrap, so on a narrow phone they stack cleanly (0h 00m today /
-                  19h 40m this week) instead of orphaning "this week". */}
+                  19h 40m pay week) instead of orphaning "pay week". */}
               <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
                 <span className="whitespace-nowrap">
                   <span className="text-xl font-bold text-slate-900">{fmtHm(totalMs)}</span>
@@ -101,7 +103,7 @@ export function DayClock({
                 </span>
                 <span className="whitespace-nowrap">
                   <span className="text-base font-semibold text-slate-600">{fmtHm(totalWeekMs)}</span>
-                  <span className="ml-1.5 text-xs font-normal text-slate-400">this week</span>
+                  <span className="ml-1.5 text-xs font-normal text-slate-400">pay week</span>
                 </span>
               </div>
               {jobs.length > 0 && (

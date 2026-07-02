@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { setJobScheduleRanges, setJobAssignee, createJob } from "@/app/(app)/schedule/actions";
+import { setJobScheduleRanges, setJobAssignee, createJob, moveJobDay, createScheduleProposal } from "@/app/(app)/schedule/actions";
 import { setJobStatus, finishJob, updateJobDescription } from "@/app/(app)/jobs/actions";
 import { linkJobContact, unlinkJobContact } from "@/app/(app)/jobs/[id]/job-contacts-actions";
 import type { ActionDef } from "../types";
@@ -100,6 +100,56 @@ export const jobActions: Record<string, ActionDef> = {
     auth: "staff", // jobs are staff-only in RLS — the registry gate now matches (Phase C)
     effect: "write",
     handler: (i) => setJobScheduleRanges(i.id, [{ start: i.date, end: i.end || i.date }]),
+  },
+  "job.move": {
+    name: "job.move",
+    group: "job",
+    label: "Move job to a day",
+    description:
+      "Move ONE day/range of a job's schedule to a new day, keeping its length and every other scheduled range — use for 'push the Chmura job to Friday'. (job.scheduleDay REPLACES the whole schedule; this SHIFTS it.) to_date is YYYY-MM-DD; pass from_date (the day it currently sits on) when the job has multiple ranges so the right one moves. If it fails because a date-pick link is out to the customer, ask the user whether to withdraw the link, then retry with cancel_proposals true.",
+    input: z.object({
+      id: z.string(),
+      to_date: z.string(),
+      from_date: z.string().nullable().optional(),
+      cancel_proposals: z.boolean().optional(),
+    }),
+    auth: "staff", // jobs are staff-only in RLS — the registry gate now matches (Phase C)
+    effect: "write",
+    handler: async (i) => {
+      const r = await moveJobDay(i.id, i.from_date ?? null, i.to_date, { cancelProposals: i.cancel_proposals });
+      // Teach the agent the recovery path: confirm with the user, then retry with the flag.
+      if (!r.ok && r.needsProposalConfirm) {
+        return { ...r, error: `${r.error} Ask the user whether to withdraw it, then retry with cancel_proposals: true.` };
+      }
+      return r;
+    },
+  },
+  "job.proposeDates": {
+    name: "job.proposeDates",
+    group: "job",
+    label: "Propose dates to the customer",
+    description:
+      "Offer the customer up to 3 date options for a JOB (each YYYY-MM-DD, optional HH:MM start) — creates a pick-a-date link; the customer's tap schedules the job. NOTHING IS SENT by this action: read the returned link back so the user can share it (it's also on the job page under Manage). Optional note for arrival-window wording. To just set dates yourself, use job.move / job.scheduleDay instead.",
+    input: z.object({
+      id: z.string(),
+      slots: z
+        .array(z.object({ date: z.string(), window: z.string().nullable().optional() }))
+        .min(1)
+        .max(3),
+      note: z.string().nullable().optional(),
+    }),
+    auth: "staff",
+    effect: "write",
+    handler: async (i) => {
+      const r = await createScheduleProposal(
+        i.id,
+        i.slots.map((s: { date: string; window?: string | null }) => ({ date: s.date, time: s.window ?? undefined })),
+        i.note ?? null,
+      );
+      if (!r.ok || !r.token) return r;
+      // Hand back the shareable link — creating it sends nothing; the user shares it.
+      return { ...r, data: { link: `${process.env.NEXT_PUBLIC_SITE_URL || ""}/pick/${r.token}` } };
+    },
   },
   "job.assign": {
     name: "job.assign",

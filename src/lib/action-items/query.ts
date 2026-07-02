@@ -1,8 +1,10 @@
 import { createClient } from "@/lib/supabase/server";
 import type { ActionItem, ActionKind } from "./types";
 import { AFFORDANCES, KIND_STREAM } from "./types";
+import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { lienStatus } from "@/lib/lien-math";
-import { formatCurrency, formatDateShort } from "@/lib/utils";
+import { formatCurrency, formatDateShort, DEFAULT_TIMEZONE } from "@/lib/utils";
+import { todayStrInTz } from "@/lib/tz";
 import {
   NEEDS_RETURN_DAYS,
   daysAgoStr,
@@ -83,12 +85,15 @@ export async function getActionItems(ctx: {
   const [tasksR, jobsR, inqR, apptR, orgR, invR, quoteR, draftR, conR, lienR, bugR, openTimeR, recentTimeR, matJobsR, matSegR] = await Promise.all([
     taskQ,
     // Unscheduled jobs — staff only (the "resting place" for things needing a date).
+    // EVERY still-in-flight dateless job, not just estimate/scheduled: an in_progress
+    // or on_hold job whose date was cleared must not vanish from every scheduling
+    // surface (this feeder is also the calendar tray's source of truth).
     isStaff
       ? supabase
           .from("jobs")
           .select("id, job_number, name, status, scheduled_start, customers(name)")
           .is("scheduled_start", null)
-          .in("status", ["estimate", "scheduled"])
+          .in("status", ACTIVE_JOB_STATUSES)
           .order("created_at", { ascending: false })
           .limit(50)
       : empty,
@@ -292,8 +297,12 @@ export async function getActionItems(ctx: {
       urgency: 0,
       done: false,
       // Open the appointment where it lives: the job's Appointments tab, else the
-      // schedule's appointments view — not the job overview / bare calendar.
-      href: a.job_id ? `/jobs/${a.job_id}?tab=appointments` : "/schedule?view=appointments",
+      // schedule day drill for its date — not the job overview / bare calendar.
+      href: a.job_id
+        ? `/jobs/${a.job_id}?tab=appointments`
+        : a.starts_at
+          ? `/schedule?view=day&date=${todayStrInTz(DEFAULT_TIMEZONE, new Date(a.starts_at))}`
+          : "/schedule",
       affordances: AFFORDANCES.appointment,
     });
   }

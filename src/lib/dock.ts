@@ -104,6 +104,11 @@ export const DOCK: DockSection[] = [
     href: "/planner",
     children: [
       { id: "t-day", label: "My day", icon: Sun, href: "/planner" },
+      // Schedule = planning the WHEN-WILL, so it lives with Today (plan/do), not behind the
+      // timeclock's impulse door — it sat as Clock's 3rd pill and nothing in the dock said
+      // "calendar". Office-only (/schedule redirects techs to /planner). /calendar,
+      // /appointments and /map are server redirects into /schedule, so no owns[] needed.
+      { id: "t-sched", label: "Schedule", icon: CalendarDays, href: "/schedule", staffOnly: true },
       { id: "t-tasks", label: "Tasks", icon: ListChecks, href: "/tasks" },
       { id: "t-org", label: "Organize", icon: Wand2, href: "/organize" },
     ],
@@ -140,11 +145,12 @@ export const DOCK: DockSection[] = [
     key: "clock",
     label: "Clock",
     icon: Clock,
-    href: "/timeclock", // everyone can clock in; timecards + schedule are office-only
+    href: "/timeclock", // everyone can clock in; timecards are office-only
+    // The WHEN-DID pair only: Timeclock + Timecards. Schedule (the WHEN-WILL map) moved
+    // up to Today so a planning surface no longer hides behind the timeclock's door.
     children: [
       { id: "ck-clock", label: "Timeclock", icon: Play, href: "/timeclock" },
       { id: "ck-cards", label: "Timecards", icon: CalendarClock, href: "/timecards", staffOnly: true },
-      { id: "ck-sched", label: "Schedule", icon: CalendarDays, href: "/schedule", staffOnly: true },
     ],
   },
   {

@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
 import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz, tzLocalHourUtc } from "@/lib/tz";
+import { addDaySegment, shiftSegmentCovering } from "@/lib/schedule-math";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type Result = { ok: boolean; error?: string; id?: string };
@@ -164,30 +165,10 @@ export async function cancelScheduleProposal(id: string, jobId: string): Promise
   return { ok: true };
 }
 
-/** Set a job's full schedule window from anywhere (ISO strings or null). */
-export async function setJobSchedule(
-  id: string,
-  startIso: string | null,
-  endIso: string | null,
-): Promise<Result> {
-  const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
-  if ("error" in ctx) return { ok: false, error: ctx.error };
-  const supabase = ctx.supabase;
-  const patch: Record<string, unknown> = {
-    scheduled_start: startIso,
-    scheduled_end: endIso,
-    updated_at: new Date().toISOString(),
-  };
-  const { error } = await supabase.from("jobs").update(patch).eq("id", id);
-  if (error) return { ok: false, error: error.message };
-  // Giving a job a date moves it onto the schedule — advance early-stage status.
-  if (startIso) await advanceToScheduled(supabase, id);
-  revalidatePath("/schedule");
-  revalidatePath("/planner"); // My Day reads today's scheduled jobs — keep it in sync
-  revalidatePath("/jobs");
-  revalidatePath(`/jobs/${id}`);
-  return { ok: true };
-}
+// setJobSchedule (raw scheduled_start/end writer) is GONE: it never touched
+// job_schedule_segments, so the calendar (segments-first) kept drawing a moved
+// multi-range job on its old days — the stale-schedule trap. Day moves go
+// through moveJobDay/placeJobOnDay below; range edits through setJobScheduleRanges.
 
 export type DateRange = { start: string; end: string }; // yyyy-mm-dd each
 
@@ -252,5 +233,89 @@ export async function setJobScheduleRanges(
     return { ok: false, error: "Couldn't save the date range — please try again. The job's overall window was updated." };
   }
   return { ok: true };
+}
+
+/** A job's schedule as date-only segments, for read-modify-write math. Legacy
+ *  fallback: a job scheduled before segments existed (migration 0040) may carry
+ *  only the scheduled_start/end mirror — synthesize that window (org-tz dates)
+ *  so a move/place computed from "no segments" can't drop it. */
+async function loadJobDaySegments(
+  supabase: SupabaseClient,
+  jobId: string,
+): Promise<{ segments: DateRange[]; error?: string }> {
+  const { data: segRows, error } = await supabase
+    .from("job_schedule_segments")
+    .select("start_date, end_date")
+    .eq("job_id", jobId)
+    .order("start_date");
+  if (error) return { segments: [], error: error.message };
+  const segments = (segRows ?? []).map((s: any) => ({ start: s.start_date as string, end: s.end_date as string }));
+  if (segments.length) return { segments };
+  const { data: job } = await supabase.from("jobs").select("scheduled_start, scheduled_end").eq("id", jobId).maybeSingle();
+  if (job?.scheduled_start) {
+    const tz = await orgTimezone(supabase);
+    const start = todayStrInTz(tz, new Date(job.scheduled_start));
+    const end = job.scheduled_end ? todayStrInTz(tz, new Date(job.scheduled_end)) : start;
+    segments.push({ start, end: end < start ? start : end });
+  }
+  return { segments };
+}
+
+/** MOVE one of a job's scheduled ranges to start on a new day, preserving its
+ *  length and every OTHER range. Read-modify-write by construction: it loads ALL
+ *  segments, shifts only the one covering fromDate (null = the earliest/only),
+ *  and writes the FULL set back through setJobScheduleRanges — never just the
+ *  tapped day, which would silently erase multi-range schedules. A pending
+ *  customer date-pick link blocks the move (needsProposalConfirm) until the
+ *  caller confirms withdrawing it, so a later customer tap on an OLD option
+ *  can't silently overwrite the move. */
+export async function moveJobDay(
+  jobId: string,
+  fromDate: string | null,
+  toDate: string,
+  opts?: { cancelProposals?: boolean },
+): Promise<Result & { needsProposalConfirm?: boolean }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(toDate)) return { ok: false, error: "Pick a day to move it to." };
+  const from = fromDate && /^\d{4}-\d{2}-\d{2}$/.test(fromDate) ? fromDate : null;
+
+  const { data: pending } = await supabase
+    .from("schedule_proposals")
+    .select("id")
+    .eq("job_id", jobId)
+    .eq("status", "pending")
+    .limit(1);
+  if (pending?.length) {
+    if (!opts?.cancelProposals) {
+      return {
+        ok: false,
+        needsProposalConfirm: true,
+        error: "A date-pick link is out to the customer for this job — moving it withdraws that link.",
+      };
+    }
+    // Withdraw it the same way createScheduleProposal replaces a pending one.
+    await supabase.from("schedule_proposals").update({ status: "cancelled" }).eq("job_id", jobId).eq("status", "pending");
+  }
+
+  const { segments, error: segErr } = await loadJobDaySegments(supabase, jobId);
+  if (segErr) return { ok: false, error: segErr };
+  // setJobScheduleRanges revalidates /schedule, /planner, /jobs, and the job page.
+  return setJobScheduleRanges(jobId, shiftSegmentCovering(segments, from, toDate));
+}
+
+/** PLACE a job on a day without touching anything already scheduled — the tray
+ *  gesture. UNION, not replace: a needs-return job keeps its worked-history
+ *  segments on the calendar instead of collapsing to the tapped day. */
+export async function placeJobOnDay(jobId: string, dateISO: string): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateISO)) return { ok: false, error: "Pick a day." };
+  const { segments, error: segErr } = await loadJobDaySegments(supabase, jobId);
+  if (segErr) return { ok: false, error: segErr };
+  // setJobScheduleRanges revalidates /schedule, /planner, /jobs, and the job page.
+  return setJobScheduleRanges(jobId, addDaySegment(segments, dateISO));
 }
 

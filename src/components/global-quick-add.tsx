@@ -21,7 +21,7 @@ const ACTIONS: { label: string; href: string; icon: LucideIcon; staffOnly?: bool
   { label: "New lead", href: "/leads?new=1", icon: UserSearch, staffOnly: true },
   { label: "New customer", href: "/crm?new=1", icon: UserPlus, staffOnly: true },
   { label: "New job", href: "/jobs?new=1", icon: Briefcase },
-  { label: "New appointment", href: "/schedule?view=appointments&new=1", icon: CalendarPlus, staffOnly: true },
+  { label: "New appointment", href: "/schedule?new=appointment", icon: CalendarPlus, staffOnly: true },
   { label: "New estimate", href: "/quotes/new", icon: FileText, staffOnly: true },
   { label: "New invoice", href: "/billing?new=1", icon: Receipt, staffOnly: true },
 ];

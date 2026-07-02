@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { DOCK, activeSection } from "@/lib/dock";
+import { DOCK, activeSection, basePath } from "@/lib/dock";
 import { JOB_STATUSES, jobStatusLabel } from "@/lib/job-status";
 
 /** Drift guard: the dock's Jobs sub-nav is GENERATED from the JOB_STATUSES spine. This pins
@@ -40,7 +40,37 @@ describe("DOCK jobs section ← JOB_STATUSES", () => {
   });
 });
 
-/** Drift guard #2: activeSection is THE one matcher behind the desktop rail, the phone
+/** Drift guard #2: the time doors. Schedule (the WHEN-WILL map) lives under TODAY, right
+ *  after My day — it sat as Clock's 3rd pill, a planning surface hidden behind the
+ *  timeclock's impulse door (the time-section gut's "lostness cause a"). Clock keeps
+ *  exactly the WHEN-DID pair. This pins placement, gating AND zero-duplication so a
+ *  future wave can't quietly file the calendar behind the clock again. */
+describe("DOCK time doors — Schedule under Today, Clock keeps the when-did pair", () => {
+  const today = DOCK.find((s) => s.key === "today");
+  const clock = DOCK.find((s) => s.key === "clock");
+
+  it("Schedule sits directly after 'My day' in Today, office-only (/schedule redirects techs)", () => {
+    const ids = (today?.children ?? []).map((c) => c.id);
+    expect(ids.indexOf("t-sched")).toBe(ids.indexOf("t-day") + 1);
+    expect(today?.children.find((c) => c.id === "t-sched")).toMatchObject({
+      href: "/schedule",
+      staffOnly: true,
+    });
+  });
+
+  it("Clock holds exactly Timeclock + Timecards — no planning surface behind the clock door", () => {
+    expect((clock?.children ?? []).map((c) => c.href)).toEqual(["/timeclock", "/timecards"]);
+  });
+
+  it("zero duplication: /schedule has exactly one dock home", () => {
+    const homes = DOCK.flatMap((s) => s.children).filter(
+      (c) => c.href && basePath(c.href) === "/schedule",
+    );
+    expect(homes.map((c) => c.id)).toEqual(["t-sched"]);
+  });
+});
+
+/** Drift guard #3: activeSection is THE one matcher behind the desktop rail, the phone
  *  bottom tiles and the SectionSubnav strip. The original disease was three drifting
  *  copies, none of which prefix-matched child routes — /quotes/abc lit "Today" on desktop
  *  (via a `?? sections[0]` fallback), zero tiles on mobile, and the strip vanished. One
@@ -53,6 +83,12 @@ describe("activeSection — child detail routes light the right section", () => 
     expect(key("/jobs")).toBe("jobs");
     expect(key("/billing")).toBe("invoices");
     expect(key("/compliance")).toBe("office");
+  });
+
+  it("/schedule lights Today (the dock move); the when-did pair still lights Clock", () => {
+    expect(key("/schedule")).toBe("today");
+    expect(key("/timeclock")).toBe("clock");
+    expect(key("/timecards")).toBe("clock");
   });
 
   it("estimate details belong to Sales (section href is /leads — the old matchers missed)", () => {

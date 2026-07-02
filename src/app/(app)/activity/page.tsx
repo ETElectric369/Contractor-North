@@ -4,7 +4,8 @@ import { Briefcase, FileText, Receipt, CalendarCheck, CheckCircle2, Clock } from
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
-import { hoursBetween, formatDuration, formatDateShort } from "@/lib/utils";
+import { hoursBetween, formatDuration, formatDateShort, DEFAULT_TIMEZONE } from "@/lib/utils";
+import { todayStrInTz } from "@/lib/tz";
 
 export const dynamic = "force-dynamic";
 
@@ -51,7 +52,7 @@ export default async function ActivityPage() {
     supabase.from("jobs").select("id, job_number, name, created_at").gte("created_at", since).order("created_at", { ascending: false }).limit(40),
     supabase.from("quotes").select("id, quote_number, status, total, created_at").gte("created_at", since).order("created_at", { ascending: false }).limit(40),
     supabase.from("invoices").select("id, invoice_number, status, total, created_at").gte("created_at", since).order("created_at", { ascending: false }).limit(40),
-    supabase.from("appointments").select("id, type, title, created_at").gte("created_at", since).order("created_at", { ascending: false }).limit(40),
+    supabase.from("appointments").select("id, type, title, starts_at, created_at").gte("created_at", since).order("created_at", { ascending: false }).limit(40),
     supabase.from("tasks").select("id, title, completed_at").eq("status", "done").gte("completed_at", since).order("completed_at", { ascending: false }).limit(40),
     supabase.from("time_entries").select("id, job_id, clock_in, clock_out, lunch_minutes, status, profiles(full_name), jobs(name)").eq("status", "closed").gte("clock_out", since).order("clock_out", { ascending: false }).limit(40),
   ]);
@@ -60,7 +61,8 @@ export default async function ActivityPage() {
   for (const j of jobs.data ?? []) items.push({ when: j.created_at as string, icon: "job", text: `Job created — ${j.job_number} ${j.name}`, href: `/jobs/${j.id}` });
   for (const q of quotes.data ?? []) items.push({ when: q.created_at as string, icon: "quote", text: `Quote ${q.quote_number} (${q.status})`, href: `/quotes/${q.id}` });
   for (const iv of invoices.data ?? []) items.push({ when: iv.created_at as string, icon: "invoice", text: `Invoice ${iv.invoice_number} (${iv.status})`, href: `/billing/${iv.id}` });
-  for (const a of appts.data ?? []) items.push({ when: a.created_at as string, icon: "appt", text: `${a.type === "inspection" ? "Inspection" : "Appointment"} booked — ${a.title}`, href: `/schedule?view=appointments` });
+  // Deep-link to the day the visit HAPPENS (schedule day drill), not a generic list.
+  for (const a of appts.data ?? []) items.push({ when: a.created_at as string, icon: "appt", text: `${a.type === "inspection" ? "Inspection" : "Appointment"} booked — ${a.title}`, href: a.starts_at ? `/schedule?view=day&date=${todayStrInTz(DEFAULT_TIMEZONE, new Date(a.starts_at as string))}` : "/schedule" });
   for (const t of (tasks.data ?? []) as any[]) if (t.completed_at) items.push({ when: t.completed_at, icon: "task", text: `Task done — ${t.title}` });
   for (const e of (times.data ?? []) as any[]) {
     if (!e.clock_out) continue;

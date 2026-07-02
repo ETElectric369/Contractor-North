@@ -14,6 +14,8 @@ import { PortalLinkButton } from "./portal-link-button";
 import { SectionActionsMenu } from "@/components/section-actions-menu";
 import { customerSectionTree } from "@/lib/nav-tree";
 import { NewJobButton } from "../../schedule/new-job-button";
+import { AppointmentButton } from "../../appointments/appointment-button";
+import { toJobOptions, toStaffOptions } from "@/lib/schedule-options";
 import { deleteCustomer } from "../actions";
 import type { Customer, Job, Quote } from "@/lib/types";
 
@@ -42,7 +44,7 @@ export default async function CustomerDetailPage({
   const { data: meRow } = await supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle();
   const viewerIsStaff = ["owner", "admin", "office"].includes((meRow as any)?.role ?? "");
 
-  const [{ data: jobs }, { data: quotes }, { data: invoices }, { data: pricingLevels }, { data: credits }] = await Promise.all([
+  const [{ data: jobs }, { data: quotes }, { data: invoices }, { data: pricingLevels }, { data: credits }, { data: staffRows }] = await Promise.all([
     supabase.from("jobs").select("*").eq("customer_id", id).order("created_at", { ascending: false }),
     supabase.from("quotes").select("*").eq("customer_id", id).order("created_at", { ascending: false }),
     supabase
@@ -56,6 +58,8 @@ export default async function CustomerDetailPage({
       .select("amount, disposition, status")
       .eq("customer_id", id)
       .eq("status", "open"),
+    // Assignee options for the New-appointment modal in the impulse row.
+    supabase.from("profiles").select("id, full_name").eq("active", true).order("full_name"),
   ]);
 
   // The reverse of jobs.customer_id: jobs this contact is LINKED to as a sub / supplier / inspector
@@ -267,6 +271,12 @@ export default async function CustomerDetailPage({
             </a>
           )}
           <NewJobButton customers={[{ id: c.id, name: c.name }]} defaultCustomerId={c.id} />
+          <AppointmentButton
+            jobs={toJobOptions(jobs)}
+            customers={[{ id: c.id, label: c.name }]}
+            staff={toStaffOptions(staffRows)}
+            defaultCustomerId={c.id}
+          />
           <Link href={`/quotes/new?customer=${c.id}`}>
             <Button>
               <Plus className="h-4 w-4" /> New estimate

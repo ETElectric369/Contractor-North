@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { User } from "lucide-react";
+import { User, CalendarSync } from "lucide-react";
 import { Select } from "@/components/ui/input";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { colorForMember } from "@/lib/employee-color";
-import { setJobAssignee, setJobSchedule } from "./actions";
+import { MoveToDay } from "@/components/move-to-day";
+import { setJobAssignee, moveJobDay } from "./actions";
 
 interface Member {
   id: string;
@@ -26,9 +27,13 @@ interface SchedJob {
 export function JobScheduleCard({
   job,
   members,
+  date,
 }: {
   job: SchedJob;
   members: Member[];
+  /** The day (yyyy-mm-dd) this card is rendered on — the range moveJobDay
+   *  shifts. Without it the job's earliest range moves. */
+  date?: string | null;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -74,29 +79,26 @@ export function JobScheduleCard({
         </Select>
       </div>
 
-      <input
-        type="date"
-        defaultValue={job.scheduled_start ? new Date(job.scheduled_start).toISOString().slice(0, 10) : ""}
-        disabled={pending}
-        className="mt-1.5 h-7 w-full rounded-md border border-slate-200 px-2 text-xs text-slate-600"
-        onChange={(e) => {
-          const v = e.target.value;
-          // Canonical writer: sets the day window (timezone-correct, advances
-          // status). Single-day write here intentionally collapses to one window.
-          start(async () => {
-            if (v) {
-              await setJobSchedule(
-                job.id,
-                new Date(`${v}T08:00`).toISOString(),
-                new Date(`${v}T16:00`).toISOString(),
-              );
-            } else {
-              await setJobSchedule(job.id, null, null);
-            }
-            router.refresh();
-          });
+      {/* The ONE reschedule idiom (replaces the raw date input, whose writer
+          collapsed multi-range schedules to a single window): moveJobDay shifts
+          only this day's range, read-modify-write, proposal-aware. Trimming or
+          adding ranges stays on the job page's Scheduled control. */}
+      <MoveToDay
+        label={`Move ${job.name}`}
+        triggerClassName="mt-1.5 flex h-8 w-full items-center justify-center gap-1.5 rounded-md border border-slate-200 text-xs font-medium text-slate-600 hover:border-brand hover:text-brand"
+        onPick={async (iso) => {
+          if (!iso) return { ok: false, error: "Pick a day." };
+          let res = await moveJobDay(job.id, date ?? null, iso);
+          if (!res.ok && res.needsProposalConfirm) {
+            if (!confirm(`${res.error} Move it anyway?`)) return res;
+            res = await moveJobDay(job.id, date ?? null, iso, { cancelProposals: true });
+          }
+          if (res.ok) router.refresh();
+          return res;
         }}
-      />
+      >
+        <CalendarSync className="h-3.5 w-3.5" /> Move to a day
+      </MoveToDay>
     </div>
   );
 }

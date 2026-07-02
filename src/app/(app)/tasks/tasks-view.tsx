@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Card } from "@/components/ui/card";
+import { MoveToDay } from "@/components/move-to-day";
 import { useToast } from "@/components/toast";
 import { formatDate } from "@/lib/utils";
 import { createTask, toggleTask, deleteTask, updateTask, type TaskCategory } from "./actions";
@@ -252,8 +253,21 @@ function TaskEditModal({
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <Label htmlFor="te-due">Due date</Label>
-            <Input id="te-due" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+            <Label>Due date</Label>
+            {/* The one move-to-day sheet, app-wide idiom — picks into local form
+                state here; nothing saves until "Save changes". */}
+            <MoveToDay
+              label="Due date"
+              clearable
+              onPick={(iso) => setDueDate(iso ?? "")}
+              triggerClassName="flex h-10 w-full items-center rounded-lg border border-slate-300 bg-white px-3 text-left text-sm hover:border-brand"
+            >
+              {dueDate ? (
+                <span className="text-slate-900">{formatDate(dueDate)}</span>
+              ) : (
+                <span className="text-slate-400">No due date</span>
+              )}
+            </MoveToDay>
           </div>
           <div>
             <Label htmlFor="te-pri">Priority</Label>

@@ -1,42 +1,29 @@
 import { createClient } from "@/lib/supabase/server";
-import { getOrgSettings } from "@/lib/org-settings";
+import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
+import { getSchedulePickerOptions } from "@/lib/schedule-options";
 import {
   CalendarView,
-  type CalEntry,
   type CalJob,
   type CalSegment,
   type CalAppt,
+  type CalTask,
 } from "../calendar/calendar-view";
 
-/** "08:00" → 8, "09:30" → 9.5 */
-function hourOf(hm: string, fallback: number): number {
-  const m = /^(\d{1,2}):(\d{2})/.exec(hm ?? "");
-  if (!m) return fallback;
-  return Number(m[1]) + Number(m[2]) / 60;
-}
-
-/** Calendar view of the unified Schedule hub (was /calendar). */
+/** Data layer for the /schedule calendar. Forward-looking records only —
+ *  clocked time (WHEN-DID) lives on /timeclock + /timecards, so the old
+ *  time_entries fetch and former-employee roster union are gone. The client
+ *  slices this preloaded ±window into day/week/month; paging never refetches. */
 export async function CalendarPanel() {
   const supabase = await createClient();
 
   const now = Date.now();
-  // Clocked time is historical context — ±60 days is plenty.
-  const from = new Date(now - 60 * 86400_000).toISOString();
-  const to = new Date(now + 60 * 86400_000).toISOString();
-  // Jobs/appointments/segments use a MUCH wider window so far-future bookings
-  // and long in-flight jobs don't silently vanish when you page the calendar
-  // forward (the client handles month/week/day slicing).
+  // A WIDE window so far-future bookings and long in-flight jobs don't silently
+  // vanish when you page the calendar forward (the client handles slicing).
   const jobFrom = new Date(now - 120 * 86400_000).toISOString();
   const jobTo = new Date(now + 400 * 86400_000).toISOString();
 
-  const [{ data: entries }, { data: jobs }, { data: segments }, { data: appointments }, { data: unschedRows }, { data: org }] =
+  const [{ data: jobs }, { data: segments }, { data: appointments }, { data: tasks }, { data: unschedRows }, picker] =
     await Promise.all([
-      supabase
-        .from("time_entries")
-        .select("id, profile_id, clock_in, clock_out, lunch_minutes, status, job_code, job_id, profiles(full_name), jobs(job_number, name)")
-        .gte("clock_in", from)
-        .lte("clock_in", to)
-        .order("clock_in"),
       // Overlap test, not a point test on scheduled_start: a job shows if it
       // STARTS before the window end AND (ends after the window start, or is an
       // open-ended job that started within the window). Closes the "job booked
@@ -52,43 +39,41 @@ export async function CalendarPanel() {
         .select("job_id, start_date, end_date")
         .gte("end_date", jobFrom.slice(0, 10))
         .lte("start_date", jobTo.slice(0, 10)),
+      // Full row (location/notes/links) — the day drill hosts the edit modal
+      // and quick actions now that the appointments tab is gone.
       supabase
         .from("appointments")
-        .select("id, type, title, starts_at, ends_at, status, job_id")
+        .select(
+          "id, type, title, starts_at, ends_at, location, notes, status, job_id, customer_id, assigned_to, jobs(job_number, name), customers(name), profiles!appointments_assigned_to_fkey(full_name)",
+        )
         .gte("starts_at", jobFrom)
         .lte("starts_at", jobTo)
-        .neq("status", "cancelled"),
-      // Jobs with no date yet — the "To schedule" rail. Any still-open job
-      // missing a date (not just estimate/scheduled) — excludes only pre-sale
-      // leads/quotes and finished/cancelled jobs.
+        .neq("status", "cancelled")
+        .order("starts_at"),
+      // Open tasks with a due date in the window — the calendar shows tasks IN
+      // TIME (week "N tasks due" lines + the day drill); /tasks stays the workbench.
+      supabase
+        .from("tasks")
+        .select("id, title, due_date, job_id, category, assigned_to, assignee:assigned_to(full_name), jobs(job_number, name)")
+        .eq("status", "open")
+        .gte("due_date", jobFrom.slice(0, 10))
+        .lte("due_date", jobTo.slice(0, 10))
+        .order("due_date")
+        .limit(500),
+      // "To schedule" tray — the SAME definition as the action-items
+      // job_to_schedule feeder (query.ts): every still-in-flight dateless job,
+      // via the ACTIVE_JOB_STATUSES spine, so the tray and the inbox can't drift.
       supabase
         .from("jobs")
         .select("id, job_number, name, customers(name)")
         .is("scheduled_start", null)
-        .not("status", "in", "(lead,quoted,complete,cancelled,invoiced)")
+        .in("status", ACTIVE_JOB_STATUSES)
         .order("created_at", { ascending: false })
-        .limit(40),
-      supabase.from("organizations").select("settings").limit(1).maybeSingle(),
+        .limit(50),
+      // Jobs/customers/staff option lists for the appointment modal; the staff
+      // rows double as the roster (assignee dropdowns, initials, person filter).
+      getSchedulePickerOptions(supabase),
     ]);
-
-  const { data: memberRows } = await supabase
-    .from("profiles")
-    .select("id, full_name")
-    .eq("active", true)
-    .order("full_name");
-  const activeMembers = (memberRows ?? []) as { id: string; full_name: string | null }[];
-  // Union in any FORMER employee who still has time entries in the window, so
-  // their coloured blocks get a stable slot + legend entry rather than an
-  // off-roster hash colour that can collide with active crew.
-  const seen = new Set(activeMembers.map((m) => m.id));
-  const formerWithTime: { id: string; full_name: string | null }[] = [];
-  for (const e of (entries ?? []) as any[]) {
-    if (e.profile_id && !seen.has(e.profile_id)) {
-      seen.add(e.profile_id);
-      formerWithTime.push({ id: e.profile_id, full_name: e.profiles?.full_name ?? null });
-    }
-  }
-  const members = [...activeMembers, ...formerWithTime];
 
   const unscheduled = (unschedRows ?? []).map((j: any) => ({
     id: j.id,
@@ -97,22 +82,16 @@ export async function CalendarPanel() {
     customer: j.customers?.name ?? null,
   }));
 
-  // Scheduled jobs block off the configured work day (e.g. 9–5), not the whole grid.
-  const s = getOrgSettings((org as any)?.settings);
-  const workStart = hourOf(s.work_day_start, 8);
-  const workEnd = hourOf(s.work_day_end, 17);
-
   return (
     <div className="mx-auto max-w-5xl">
       <CalendarView
-        entries={(entries ?? []) as unknown as CalEntry[]}
         jobs={(jobs ?? []) as unknown as CalJob[]}
         segments={(segments ?? []) as unknown as CalSegment[]}
         appointments={(appointments ?? []) as unknown as CalAppt[]}
+        tasks={(tasks ?? []) as unknown as CalTask[]}
         unscheduled={unscheduled}
-        members={members}
-        workStart={workStart}
-        workEnd={workEnd}
+        members={picker.staff}
+        picker={{ jobs: picker.jobOpts, customers: picker.custOpts, staff: picker.staffOpts }}
         now={new Date().toISOString()}
       />
     </div>

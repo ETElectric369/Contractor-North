@@ -31,7 +31,8 @@ const ROUTES: Record<string, string> = {
   "/jobs": "Jobs",
   "/schedule": "Scheduler",
   "/schedule?view=calendar": "Calendar",
-  "/schedule?view=appointments": "Appointments",
+  // Appointments live on the schedule calendar now — the week view is the browse door.
+  "/schedule?view=week": "Appointments",
   "/crm": "Customers",
   "/quotes": "Quotes",
   "/billing": "Invoices",
@@ -178,7 +179,8 @@ If this is a follow-up (earlier turns are shown), COMBINE everything said so far
       const res = await executeAction("appointment.create", { title, type, starts_at: startIso }, { source: "voice" });
       if (!res.ok) return { ok: false, message: res.error ?? "Couldn't create that appointment." };
       revalidatePath("/schedule");
-      return { ok: true, message: speak, navigate: "/schedule?view=appointments" };
+      // Land on the day the visit was booked for (toIso guaranteed p.date is YYYY-MM-DD).
+      return { ok: true, message: speak, navigate: `/schedule?view=day&date=${p.date}` };
     }
 
     if (intent === "create_customer") {

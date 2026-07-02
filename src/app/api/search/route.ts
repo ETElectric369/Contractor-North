@@ -1,4 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
+import { formatDate, DEFAULT_TIMEZONE } from "@/lib/utils";
+import { todayStrInTz } from "@/lib/tz";
 
 export const runtime = "nodejs";
 
@@ -18,7 +20,7 @@ export async function GET(req: Request) {
   if (!q) return Response.json({ results: [] });
   const like = `%${q}%`;
 
-  const [jobs, customers, quotes, invoices] = await Promise.all([
+  const [jobs, customers, quotes, invoices, appointments] = await Promise.all([
     supabase
       .from("jobs")
       .select("id, job_number, name, status")
@@ -38,6 +40,15 @@ export async function GET(req: Request) {
       .from("invoices")
       .select("id, invoice_number, status")
       .ilike("invoice_number", like)
+      .limit(5),
+    // Past appointments included on purpose — "when WAS the oven visit" is the
+    // seek question; hits deep-link to the calendar's day drill.
+    supabase
+      .from("appointments")
+      .select("id, title, starts_at, customers(name), jobs(job_number, name)")
+      .ilike("title", like)
+      .neq("status", "cancelled")
+      .order("starts_at", { ascending: false })
       .limit(5),
   ]);
 
@@ -65,6 +76,15 @@ export async function GET(req: Request) {
       label: iv.invoice_number,
       sub: iv.status,
       href: `/billing/${iv.id}`,
+    })),
+    ...(appointments.data ?? []).map((a: any) => ({
+      type: "Appointment",
+      label: a.title,
+      // WHEN is the answer being sought — lead the sub with the date.
+      sub: [formatDate(a.starts_at), a.customers?.name ?? (a.jobs ? `${a.jobs.job_number} ${a.jobs.name}` : null)]
+        .filter(Boolean)
+        .join(" · "),
+      href: `/schedule?view=day&date=${todayStrInTz(DEFAULT_TIMEZONE, new Date(a.starts_at))}`,
     })),
   ];
 

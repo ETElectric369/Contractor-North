@@ -75,6 +75,8 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   "job.setStatus",
   "job.finish",
   "job.scheduleDay",
+  "job.move", // shift ONE scheduled range to a new day — read-modify-write, other ranges kept
+  "job.proposeDates", // draft a customer pick-a-date link (creates it; SENDS nothing itself)
   "job.assign",
   "job.setScope",
   // Field capture: a hands-busy voice note + on-site price-list capture + receipt triage.
