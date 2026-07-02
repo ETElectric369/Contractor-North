@@ -1428,13 +1428,16 @@ export async function runDataTool(
       case "who_is_clocked_in": {
         const { data, error } = await supabase
           .from("time_entries")
-          .select("clock_in, status, profiles(full_name), jobs(name, job_number)")
+          .select("id, clock_in, status, profiles(full_name), jobs(name, job_number)")
           .is("clock_out", null)
           .order("clock_in");
         if (error) throw error;
         return JSON.stringify({
           count: data?.length ?? 0,
           clocked_in: (data ?? []).map((t: any) => ({
+            // entry_id is what time.fixEntry needs — without it the agent can't close/correct
+            // a crew entry ("Brian left at 4:30") and guesses a uuid that validate-fails.
+            entry_id: t.id,
             person: embedName(t.profiles),
             job: embedName(t.jobs),
             since: t.clock_in,

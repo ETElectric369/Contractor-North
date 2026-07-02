@@ -32,6 +32,10 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   "time.clockIn",
   "time.clockOut",
   "time.addEntry",
+  // Fix ANOTHER crew member's entry — close an open shift, correct times/lunch/job
+  // ("Brian left at 4:30"). Staff-gated + confirm:"financial" (it edits a wage record),
+  // so the filter below admits it as a confirm-gated tier-2: propose → user says yes.
+  "time.fixEntry",
   "bill.create",
   // The money loop (CIB audit Phase 2 — "fill in the invoice and get it ready, I'll hit
   // Send"). Building/adjusting a DRAFT invoice is tier-1 (reversible, nothing sent, no money

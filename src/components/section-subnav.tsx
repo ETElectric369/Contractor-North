@@ -3,18 +3,24 @@
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { DOCK, activeSection, basePath } from "@/lib/dock";
+import { SectionSheet } from "./section-sheet";
 
-/** A persistent horizontal sub-nav at the top of a section's pages — the siblings of the
- *  current page, pinned in place. It figures out which section the current page belongs to
- *  (via the ONE shared matcher in src/lib/dock.ts) and renders its siblings as tabs (for
- *  Jobs: All + the 7 lifecycle statuses, cancelled last, then the staff cross-job links —
- *  the ONE mobile copy of that nav). Office gets the same strip as everyone: its group
- *  headers carry no href, so they flatten away and the pages scroll as pills, like Jobs'.
+/** The mobile sibling nav at the top of a section's pages. It figures out which section the
+ *  current page belongs to (via the ONE shared matcher in src/lib/dock.ts) and renders its
+ *  siblings — in one of TWO shapes, by how many there are:
+ *
+ *  ≤6 pages (Today, Clock, Sales…): the horizontal pill strip, pinned in place — a few pills
+ *  fit a phone width, so they stay on top where they're glanceable.
+ *
+ *  >6 pages (Jobs' 13, Office's 12, Money's 9): the strip died as a blind sideways scroll,
+ *  so it's replaced 1:1 by <SectionSheet> — a slim left-edge handle (the one lit "where am
+ *  I" chip) opening a vertical slide-over of the same pages, headers as dividers. Never
+ *  both: when the handle renders, no strip does (zero duplication).
  *
  *  MOBILE-ONLY (lg:hidden): on desktop the dock's inside-left rail now lists every section's
- *  pages, so this strip would just double it. On phones (no left rail) it's the only sibling
- *  nav, so it stays — and it persists on detail/sub-routes too (/quotes/[id], /forms/[id],
- *  /purchasing/[id]…), not just on a section's exact landing pages. */
+ *  pages, so either shape would just double it. On phones (no left rail) it's the only
+ *  sibling nav, so it stays — and it persists on detail/sub-routes too (/quotes/[id],
+ *  /forms/[id], /purchasing/[id]…), not just on a section's exact landing pages. */
 export function SectionSubnav({ isStaff }: { isStaff?: boolean }) {
   const pathname = usePathname();
   const search = useSearchParams();
@@ -36,6 +42,20 @@ export function SectionSubnav({ isStaff }: { isStaff?: boolean }) {
   const exact = tabs.find((c) => c.href === current);
   const activeHref =
     exact?.href ?? tabs.find((c) => c.href && basePath(c.href) === pathname && !c.href.includes("?"))?.href;
+
+  // The ADHD principle, doubled down responsively: past 6 pages the strip stops being
+  // scannable and becomes an endless horizontal scroll, so the long sections swap it for
+  // the left-edge handle + vertical sheet. Headers ride along here (the sheet renders
+  // them as dividers, like the desktop rail) — the strip below still flattens them away.
+  if (tabs.length > 6) {
+    return (
+      <SectionSheet
+        group={group}
+        items={group.children.filter((c) => isStaff || !c.staffOnly)}
+        activeHref={activeHref}
+      />
+    );
+  }
 
   return (
     <div className="mb-4 -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 lg:hidden">

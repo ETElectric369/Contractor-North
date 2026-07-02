@@ -1,5 +1,7 @@
 import { z } from "zod";
-import { clockIn, clockOutCurrent, createManualEntry } from "@/app/(app)/timeclock/actions";
+import { clockIn, clockOutCurrent, createManualEntry, updateTimeEntry } from "@/app/(app)/timeclock/actions";
+import { createClient } from "@/lib/supabase/server";
+import { visibleJobIdOrNull } from "@/lib/job-visibility";
 import type { ActionDef } from "../types";
 
 // Time-logging, finally in the registry — so voice ("clock me in / out / add 2 hours
@@ -102,5 +104,96 @@ export const timeActions: Record<string, ActionDef> = {
         notes: i.notes ?? "",
         miles: i.miles,
       }),
+  },
+  "time.fixEntry": {
+    name: "time.fixEntry",
+    group: "time",
+    label: "Fix timecard entry",
+    description:
+      "Fix a crew member's EXISTING timecard entry the user described ('Brian left at 4:30', 'close Brian's open entry', 'his lunch was 45 minutes'). Sets the clock-out (closing an open entry), corrects the clock-in, the lunch minutes, or the entry's job — anything not passed stays exactly as stored. Times and lunch must come FROM THE USER, never inferred (this is payroll); if they didn't say the time, ASK. Resolve entry_id via hours_summary / listed-entries context first — if no entry id is in context or more than one entry could match, say so and ask instead of guessing.",
+    // The other person's-timecard edit (time.addEntry is the CREATE): closing Brian's
+    // still-open shift is the headline case. Fragment-first with the payroll boundary —
+    // at least one CHANGE must be stated; the "Required" message rides the same
+    // missing-fields channel as time.addEntry so voice asks for exactly what's absent.
+    input: z
+      .object({
+        entry_id: z.string().uuid(),
+        clock_in: z.string().optional(),
+        clock_out: z.string().optional(),
+        job_id: z.string().uuid().nullable().optional(),
+        lunch_minutes: z.number().min(0).optional(),
+      })
+      .superRefine((v, ctx) => {
+        if (v.clock_in != null || v.clock_out != null || v.lunch_minutes != null || v.job_id !== undefined) return;
+        // No change stated. The commonest fix is closing an open entry — ask for the
+        // clock-out (zod's "Required" message so executeAction names the missing field).
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["clock_out"], message: "Required" });
+      }),
+    auth: "staff", // editing someone else's times is an office correction, same as addEntry
+    effect: "write",
+    confirm: "financial", // edits a wage record → tier-2: propose, user confirms, then write
+    describe: (i) => {
+      // Read the clock time straight off the ISO as the model passed it (the user's stated
+      // local time) — no server-tz conversion that could read back a shifted hour.
+      const hm = (iso: string) => iso.match(/T(\d{2}:\d{2})/)?.[1] ?? iso;
+      const parts: string[] = [];
+      if (i.clock_in) parts.push(`start ${hm(i.clock_in)}`);
+      if (i.clock_out) parts.push(`clock-out ${hm(i.clock_out)}`);
+      if (i.lunch_minutes != null) parts.push(`lunch ${i.lunch_minutes} min`);
+      if (i.job_id !== undefined) parts.push(i.job_id ? "move it to a different job" : "clear its job");
+      return `Fix this timecard entry — set ${parts.join(", ")} — say yes to confirm. Check the details below.`;
+    },
+    handler: async (i) => {
+      // Resolve the entry through the caller's RLS-scoped client (staff-gated above), merge
+      // the user's stated changes over what's stored, then write through the ONE canonical
+      // office write path — updateTimeEntry, the same the timecards edit modal uses — so the
+      // allocation/lunch/rate semantics are never forked. rate_override / allocations /
+      // profile_id are NOT sent: updateTimeEntry treats omission as "leave untouched"
+      // (the cn-v291 rate-wipe fix depends on exactly that contract).
+      const supabase = await createClient();
+      const { data: entry } = await supabase
+        .from("time_entries")
+        .select("id, clock_in, clock_out, lunch_minutes, job_code, notes, miles, profiles(full_name)")
+        .eq("id", i.entry_id)
+        .maybeSingle();
+      if (!entry) return { ok: false, error: "I can't find that time entry." };
+      const e = entry as unknown as {
+        clock_in: string;
+        clock_out: string | null;
+        lunch_minutes: number | null;
+        job_code: string | null;
+        notes: string | null;
+        miles: number | null;
+        profiles?: { full_name: string | null } | { full_name: string | null }[] | null;
+      };
+
+      const clockOut = i.clock_out ?? e.clock_out;
+      if (!clockOut) {
+        // Open entry and the user didn't say when they left — NEVER invent a clock-out
+        // (the payroll boundary). missingFields lets the surface ask for exactly this.
+        return { ok: false, missingFields: ["clock_out"], error: "That entry is still open — what time did they clock out?" };
+      }
+
+      // A job change must land on a job the caller can actually see — refuse (don't
+      // silently drop to no-job) so the hours never end up attributed nowhere.
+      if (i.job_id) {
+        const visible = await visibleJobIdOrNull(supabase, i.job_id);
+        if (!visible) return { ok: false, error: "That job isn't available." };
+      }
+
+      const res = await updateTimeEntry({
+        id: i.entry_id,
+        clock_in: i.clock_in ?? e.clock_in,
+        clock_out: clockOut,
+        lunch_minutes: i.lunch_minutes ?? e.lunch_minutes ?? 0, // preserve a stored 45/60 lunch — never collapse it
+        ...(i.job_id !== undefined ? { job_id: i.job_id } : {}), // omitted = leave the job alone; null clears it
+        job_code: e.job_code ?? null,
+        notes: e.notes ?? "",
+        miles: e.miles ?? 0,
+      });
+      if (!res.ok) return res;
+      const prof = Array.isArray(e.profiles) ? e.profiles[0] : e.profiles;
+      return { ok: true, speak: `Fixed — ${prof?.full_name ?? "the crew member"}'s timecard entry is updated.` };
+    },
   },
 };

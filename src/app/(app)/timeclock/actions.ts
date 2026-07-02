@@ -683,7 +683,7 @@ export async function duplicateTimeEntry(id: string): Promise<ClockResult> {
 
   const { data: e, error: readErr } = await supabase
     .from("time_entries")
-    .select("profile_id, clock_in, clock_out, lunch_minutes, miles, job_id, job_code, notes, status")
+    .select("profile_id, clock_in, clock_out, lunch_minutes, miles, job_id, job_code, notes, status, rate_override")
     .eq("id", id)
     .single();
   if (readErr || !e) return { ok: false, error: readErr?.message ?? "Entry not found." };
@@ -700,6 +700,9 @@ export async function duplicateTimeEntry(id: string): Promise<ClockResult> {
     job_id: e.job_id,
     job_code: e.job_code,
     notes: e.notes,
+    // A duplicated supervisor-rate shift must PAY like the original — dropping the
+    // override silently paid base rate (the cn-v291 wage-bug family).
+    rate_override: e.rate_override ?? null,
     status: "closed",
     source: "manual",
   });

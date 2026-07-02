@@ -43,7 +43,7 @@ describe("action registry — time entity (Fault #3)", () => {
 
   it("listActions can surface the whole time group", () => {
     const ids = listActions({ group: "time" }).map((a) => a.name).sort();
-    expect(ids).toEqual(["time.addEntry", "time.clockIn", "time.clockOut"]);
+    expect(ids).toEqual(["time.addEntry", "time.clockIn", "time.clockOut", "time.fixEntry"]);
   });
 
   it("time.clockIn validates a minimal (jobless) clock-in", () => {

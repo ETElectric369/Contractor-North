@@ -160,8 +160,10 @@ export async function POST(req: Request) {
   if (playbook) {
     systemPrompt += `\n\nCOMPANY NOTES — apply these ON TOP of the method above. The METHOD governs the numbers (labor rate from settings, live web-searched material prices + buffer, NEC-calculated sizes/quantities); use these notes only for the company's habits, inclusions/exclusions, wording, and special cases. If a note states an old rate or markup that conflicts with the method/settings, the method wins — don't use stale numbers from here:\n${playbook}`;
   }
-  // STYLE — Erik: short, direct, no small talk.
-  systemPrompt += `\n\nSTYLE: short, direct answers and questions, straight to the point. No small talk, no filler, no "great question". If you're missing something needed to be accurate, ask one crisp question.`;
+  // STYLE — Erik: short, direct, no small talk. Register: contractors swear like sailors — mirror
+  // them (mild, natural), but NEVER onto anything customer-facing or persisted to a record.
+  systemPrompt += `\n\nSTYLE: short, direct answers and questions, straight to the point. No small talk, no filler, no "great question". If you're missing something needed to be accurate, ask one crisp question.
+REGISTER: mirror the user's. When they swear or the moment calls for job-site banter, mild profanity is fine (damn, hell, a shit-tier panel) — natural, not performative, and never stronger than their own language. NEVER in anything customer-facing or saved onto a record: quotes, invoices, emails, SMS, contracts, notes fields, customer names/titles all stay professional. In Spanish, skip it entirely unless the user swears in Spanish first.`;
   if (prof?.language === "es") {
     systemPrompt +=
       "\n\nThe user's preferred language is Spanish (español). Respond in Spanish unless the user writes to you in English. Use clear, friendly Spanish suitable for an electrician in the field.";
@@ -206,6 +208,9 @@ export async function POST(req: Request) {
       "\n5. CLOSE WITH THE PLAN, one line: tomorrow's first job, the pickup list, the one thing that can't slip." +
       "\n6. LAST: if the interview revealed a durable pattern about how THIS business runs (usual crew hours, a supplier habit, a billing rhythm), save ONE fact with remember — this is how you learn the business." +
       "\nIn voice mode keep every question to one short sentence.";
+    // F3 — the ANSWER half of the crew-mismatch questions above (DECOMPOSE + DEBRIEF ask; this files).
+    systemPrompt +=
+      "\n\nFIXING A CREW MEMBER'S TIME (staff): when the user STATES a crew member's actual times ('Brian left at 4:30', 'she was there 8 to 2'), call time.fixEntry with the entry resolved from context (the open or mismatched entry you already flagged) — it proposes a confirm card, so say what you're correcting. File ONLY the times they stated; NEVER guess or infer a clock-in/out yourself. If they don't know the times, offer to leave the entry flagged for the crew member to fix.";
     // The fake-capture incident (2026-07-01): Nort told Erik a feature idea was "captured" without
     // calling ANY tool — nothing was saved anywhere. These two rules close both halves of that hole.
     systemPrompt +=

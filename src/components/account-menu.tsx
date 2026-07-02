@@ -15,7 +15,7 @@ import type { Profile } from "@/lib/types";
  * (the app's most destructive one-tap verb, now one deliberate tap away
  * instead of beside Quick-add).
  *
- * THE MODAL RULE: ShareQrButton renders its QR <Modal> IN-PLACE (not portaled),
+ * THE MODAL RULE: ShareQrButton renders its QR <Modal> PORTALED to <body> (fixed-inset inside a backdrop-filter panel would clip),
  * so this panel must stay MOUNTED while that modal is open. The outside-click
  * and Escape close handlers therefore bail while <body> has `modal-open`
  * (Modal always sets it) — the z-[120] modal simply covers the z-[90] panel.

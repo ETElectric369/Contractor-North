@@ -139,6 +139,16 @@ export function JobManageMenu({
           style={{ position: "absolute", right: 0, top: "calc(100% + 0.25rem)" }}
           className="glass glass-gloss glass-menu z-[90] w-60 overflow-hidden rounded-lg py-1.5 shadow-xl"
         >
+          {/* Opaque backing — the "ghost Edit pill" / menu-opacity bug. This panel
+              hangs INSIDE the dock bar, which has its own backdrop-filter; that makes
+              the bar a backdrop root, so the panel's blur can't sample the page behind
+              it and glass-menu's 40% white let the Overview card's outline buttons read
+              straight through the rows. The account menu doesn't need this (its topbar
+              is plain bg-white, so its blur works) — here we back the glass with a
+              near-solid tinted layer instead. -z-10 paints it above the panel's own
+              glass fill but below the .glass-gloss sheen and the z-10 rows. */}
+          <div aria-hidden className="absolute inset-0 -z-10 bg-white/85" />
+          <div aria-hidden className="absolute inset-0 -z-10 bg-[rgb(var(--glass-tint))]/10" />
           {children}
           {isStaff && createInvoice && (
             <button onClick={runCreateInvoice} disabled={busy !== null} className={MANAGE_ROW_CLS}>

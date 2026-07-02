@@ -40,9 +40,25 @@ export default async function PayrollPage({
   // Pass the org tz so mileage pay nets the per-person daily commute baseline correctly.
   const rows = aggregatePayrollEntries((entries ?? []) as any[], settings.timezone);
 
+  // The 48.50 lesson: still-open entries are EXCLUDED from the period by the closed-only
+  // filter above — with zero indication, the period silently under-counts a whole shift.
+  // Name the gap so the number is never trusted blind.
+  const { data: openInPeriod } = await supabase
+    .from("time_entries")
+    .select("id, profiles(full_name)")
+    .is("clock_out", null)
+    .gte("clock_in", startIso)
+    .lt("clock_in", endIso);
+  const openNames = [...new Set((openInPeriod ?? []).map((e: any) => e.profiles?.full_name).filter(Boolean))];
+
   return (
     <div className="mx-auto max-w-4xl">
       <PageHeader title="Payroll" description="Hours, gross pay & mileage per pay period. Mark hours paid when you pay the crew; export for your accountant." />
+      {openNames.length > 0 && (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
+          {openInPeriod!.length} open {openInPeriod!.length === 1 ? "entry" : "entries"} ({openNames.join(", ")}) not counted — close {openInPeriod!.length === 1 ? "it" : "them"} on the timecards page and these totals will update.
+        </div>
+      )}
       <PayrollView
         rows={rows}
         period={period}
