@@ -225,6 +225,18 @@ export function CalendarView({
   const [filterOpen, setFilterOpen] = useState(false);
   const [personFilter, setPersonFilter] = useState<string | null>(null);
 
+  // Filter honesty: a person filter also hides everything with NO assignee —
+  // say so, or an unassigned job silently vanishes from "Mike's week".
+  const unassignedHidden = useMemo(() => {
+    if (!personFilter) return 0;
+    const segJobIds = new Set(segments.map((s) => s.job_id));
+    return (
+      jobs.filter((j) => (j.scheduled_start || segJobIds.has(j.id)) && !(j.assigned_to ?? []).length).length +
+      appointments.filter((a) => !a.assigned_to).length +
+      tasks.filter((t) => !t.assigned_to && isYmd(t.due_date)).length
+    );
+  }, [personFilter, jobs, segments, appointments, tasks]);
+
   // Undo for the tap-tap move — snapshot taken client-side BEFORE the write.
   const [undo, setUndo] = useState<{ label: string; run: () => Promise<{ ok: boolean; error?: string } | void> } | null>(null);
   useEffect(() => {
@@ -307,6 +319,12 @@ export function CalendarView({
   function executeMove(targetYmd: string) {
     if (!armed || pending) return;
     const a = armed;
+    // Moving a job onto the day it's already on is a no-op: just disarm —
+    // no write, no undo pill celebrating nothing.
+    if (a.kind === "job" && a.fromDate === targetYmd) {
+      setArmed(null);
+      return;
+    }
     start(async () => {
       if (a.kind === "place") {
         const prior = snapshotJobRanges(a.id);
@@ -388,6 +406,12 @@ export function CalendarView({
         <Button size="sm" variant="outline" onClick={() => shiftAnchor(1)} aria-label="Next">
           <ChevronRight className="h-4 w-4" />
         </Button>
+        {/* The way back out of the day drill — the PWA has no back chrome. */}
+        {view === "day" && (
+          <button onClick={() => nav("week", anchorK)} className="ml-1 shrink-0 text-xs font-medium text-brand hover:underline">
+            ← Week
+          </button>
+        )}
         <span className="ml-1 min-w-0 flex-1 truncate text-sm font-semibold text-slate-900">{title}</span>
         <Link
           href="/schedule?view=map"
@@ -418,6 +442,21 @@ export function CalendarView({
         ]}
       />
 
+      {/* THE legend — the type-color code, stated once, visible in every zoom.
+          Dot classes mirror the exact chip/dot colors the views render; the
+          hollow ring = a proposed appointment awaiting the customer's pick. */}
+      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 px-1 text-[10px] text-slate-400">
+        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 shrink-0 rounded-full bg-blue-500" />Job</span>
+        <span>·</span>
+        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 shrink-0 rounded-full bg-violet-500" />Appt</span>
+        <span>·</span>
+        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 shrink-0 rounded-full bg-teal-500" />Inspection</span>
+        <span>·</span>
+        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 shrink-0 rounded-full bg-slate-400" />Task</span>
+        <span>·</span>
+        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 shrink-0 rounded-full border-[1.5px] border-violet-500" />awaiting pick</span>
+      </div>
+
       {/* Person filter chips — only when summoned (or active), so the header
           stays three rows. Filtering answers "who works where"; nothing on the
           calendar is color-coded by person anymore. */}
@@ -442,6 +481,9 @@ export function CalendarView({
               {firstNameOf(m.full_name)}
             </button>
           ))}
+          {personFilter && unassignedHidden > 0 && (
+            <span className="shrink-0 text-[11px] text-slate-400">· {unassignedHidden} unassigned hidden</span>
+          )}
         </div>
       )}
 
@@ -487,16 +529,22 @@ export function CalendarView({
           </button>
         ))}
 
-      {/* The armed banner — the move gesture's status line. Open ↗ replaces the
-          old navigate-on-tap; × disarms. Load-bearing, not polish. */}
+      {/* The armed banner — the move gesture's status line, sticky so the mode
+          stays narrated however far the grid scrolls. Open/View day replaces
+          the old navigate-on-tap; × disarms. Load-bearing, not polish. */}
       {armed && (
-        <div className="flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+        <div className="sticky top-2 z-30 flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 shadow-sm">
           <span className="min-w-0 flex-1 truncate">
             {pending ? "Moving" : armed.kind === "place" ? "Placing" : "Moving"} <span className="font-semibold">{armed.label}</span>
             {pending ? "…" : " — tap a day"}
           </span>
-          <Link href={armed.href} className="shrink-0 font-medium underline underline-offset-2 hover:text-amber-900">
-            Open ↗
+          {/* An appointment has no page of its own — its link lands on the day
+              drill, so the button says what it does. */}
+          <Link
+            href={armed.href}
+            className="shrink-0 rounded-full bg-amber-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-amber-700"
+          >
+            {armed.kind === "appt" ? "View day" : "Open ↗"}
           </Link>
           <button onClick={() => setArmed(null)} className="rounded p-1 hover:bg-amber-100" aria-label="Cancel move">
             <X className="h-4 w-4" />
@@ -591,8 +639,8 @@ function MonthGrid({
               ring: a.status === "proposed",
               cls:
                 a.status === "proposed"
-                  ? a.type === "inspection" ? "border-amber-500" : "border-violet-500"
-                  : a.type === "inspection" ? "bg-amber-500" : "bg-violet-500",
+                  ? a.type === "inspection" ? "border-teal-500" : "border-violet-500"
+                  : a.type === "inspection" ? "bg-teal-500" : "bg-violet-500",
             })),
             ...(data?.tasks ?? []).map(() => ({ ring: false, cls: "bg-slate-400" })),
           ];
@@ -759,7 +807,8 @@ function ApptRow({ a, picker }: { a: CalAppt; picker: SchedulePicker }) {
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <Badge tone={a.type === "inspection" ? "amber" : "blue"}>{a.type}</Badge>
+          {/* Inspection = teal everywhere; amber belongs to move-mode alone. */}
+          <Badge tone="blue" className={a.type === "inspection" ? "bg-teal-100 text-teal-800" : undefined}>{a.type}</Badge>
           <span className="truncate text-sm font-medium text-slate-900">{a.title}</span>
           {a.status === "completed" && <Badge tone="green">done</Badge>}
           {a.status === "proposed" && <Badge tone="amber">pending pick</Badge>}
@@ -781,7 +830,7 @@ function ApptRow({ a, picker }: { a: CalAppt; picker: SchedulePicker }) {
         {a.notes && <p className="mt-1 line-clamp-2 whitespace-pre-wrap text-xs text-slate-500">{a.notes}</p>}
       </div>
       <div className="flex items-center gap-1">
-        <ApptQuickActions id={a.id} status={a.status} />
+        <ApptQuickActions id={a.id} status={a.status} title={a.title} />
         <AppointmentButton jobs={picker.jobs} customers={picker.customers} staff={picker.staff} appointment={appt} />
         <MoveToDay
           label={`Move ${a.title}`}

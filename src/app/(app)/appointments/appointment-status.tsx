@@ -6,7 +6,7 @@ import { Check, X } from "lucide-react";
 import { setAppointmentStatus } from "./actions";
 
 /** Quick "mark done" / "cancel" controls for an appointment row. */
-export function ApptQuickActions({ id, status }: { id: string; status: string }) {
+export function ApptQuickActions({ id, status, title }: { id: string; status: string; title: string }) {
   const router = useRouter();
   const [pending, start] = useTransition();
 
@@ -24,7 +24,16 @@ export function ApptQuickActions({ id, status }: { id: string; status: string })
           <Check className="h-4 w-4" />
         </button>
       )}
-      <button onClick={() => set("cancelled")} disabled={pending} className="rounded-md p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" title="Cancel">
+      {/* Cancelling a booking is destructive — one icon tap isn't consent. */}
+      <button
+        onClick={() => {
+          if (!confirm(`Cancel "${title}"?`)) return;
+          set("cancelled");
+        }}
+        disabled={pending}
+        className="rounded-md p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+        title="Cancel"
+      >
         <X className="h-4 w-4" />
       </button>
     </div>

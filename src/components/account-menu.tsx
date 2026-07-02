@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { LogOut } from "lucide-react";
+import Link from "next/link";
+import { LogOut, Settings } from "lucide-react";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { ShareQrButton } from "@/components/share-qr-button";
 import { initials } from "@/lib/utils";
@@ -11,7 +12,8 @@ import type { Profile } from "@/lib/types";
 /**
  * The topbar's ACCOUNT seek door — the avatar, always visible, far right.
  * One small glass menu holds the rare deliberate verbs that used to sit as
- * always-on bar buttons: the estimate QR, the language toggle, and Sign out
+ * always-on bar buttons: the estimate QR, the language toggle, the Settings
+ * door (the phone-app convention — settings live behind the avatar), and Sign out
  * (the app's most destructive one-tap verb, now one deliberate tap away
  * instead of beside Quick-add).
  *
@@ -103,6 +105,15 @@ export function AccountMenu({
             <span className="text-sm font-medium text-slate-700">Language</span>
             <LanguageSwitcher current={lang} />
           </div>
+          {/* THE settings door — every phone app parks Settings behind the avatar.
+              (The Office-list entry stays too; this is the reachable one.) */}
+          <Link
+            href="/settings"
+            onClick={() => setOpen(false)}
+            className="relative z-10 flex min-h-[44px] w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15"
+          >
+            <Settings className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Settings
+          </Link>
           <div className="relative z-10 my-1 border-t border-white/50" />
           <form action={signOut}>
             <button className="relative z-10 flex min-h-[44px] w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15">
