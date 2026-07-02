@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { saveQuote, addQuoteItem, updateQuoteItem, deleteQuoteItem, createJobFromQuote, updateQuoteStatus, setQuoteType, updateQuoteMeta, setQuoteCustomer, duplicateQuote } from "@/app/(app)/quotes/actions";
+import { saveQuote, addQuoteItem, updateQuoteItem, deleteQuoteItem, createJobFromQuote, updateQuoteStatus, setQuoteType, updateQuoteMeta, setQuoteCustomer, setQuoteJob, findRecentDraftQuote, duplicateQuote } from "@/app/(app)/quotes/actions";
 import type { ActionDef } from "../types";
 
 export const quoteActions: Record<string, ActionDef> = {
@@ -128,6 +128,17 @@ export const quoteActions: Record<string, ActionDef> = {
       return { ok: true, data: { id: r.id }, speak: "Quote duplicated as a new draft." };
     },
   },
+  "quote.attachJob": {
+    name: "quote.attachJob",
+    group: "quote",
+    label: "Attach quote to job",
+    description:
+      "Pin an EXISTING quote/estimate to a job (or null to unpin) — 'leave the estimate with the job'. Resolve both ids first (list_quotes, list_jobs) and pass the uuids, never names. The quote then shows on the job's Quotes tab. Use this instead of re-creating a quote that's already saved.",
+    input: z.object({ id: z.string().uuid(), job_id: z.string().uuid().nullable() }),
+    auth: "staff",
+    effect: "write",
+    handler: (i) => setQuoteJob(i.id, i.job_id),
+  },
   "quote.create": {
     name: "quote.create",
     group: "quote",
@@ -158,6 +169,16 @@ export const quoteActions: Record<string, ActionDef> = {
     // DB trigger). No auto follow-up task — the "awaiting reply" inbox item on My Day is
     // the follow-up and self-clears. Map its {ok,id} into the ActionResult shape.
     handler: async (i) => {
+      // One conversation saved the same estimate three times (E-009/E-010/E-011) because
+      // "save it" late in a chat re-fired create. A same-title recent draft IS that document:
+      // refuse and steer to the edit verbs so the number the user already heard stays true.
+      const dup = await findRecentDraftQuote(i.customer_id ?? null, i.title ?? "");
+      if (dup) {
+        return {
+          ok: false,
+          error: `Already saved as ${dup.quote_number ?? "a draft"} ("${dup.title ?? ""}") — do NOT create it again. Update that quote instead: quote.addItem/updateItem/deleteItem for lines, quote.setType, quote.setCustomer, quote.attachJob to pin it to a job. Tell the user it's already saved as ${dup.quote_number ?? "a draft"}.`,
+        };
+      }
       const r = await saveQuote({
         customer_id: i.customer_id ?? null,
         job_id: i.job_id ?? null,

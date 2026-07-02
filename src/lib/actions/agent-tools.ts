@@ -85,6 +85,8 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   // The last filaments: move a quote down the funnel, draft a contract.
   "quote.setStatus",
   "quote.setType", // switch a doc between estimate (T&M) and fixed-price quote
+  "quote.attachJob", // pin a saved estimate to a job ("leave it with the job") — reversible link
+  "quote.setCustomer", // attach/fix the customer on a saved quote without re-creating it
   "quote.convertToJob",
   "contract.generate",
   "form.submit", // fill a checklist by voice

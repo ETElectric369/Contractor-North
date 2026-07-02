@@ -288,6 +288,65 @@ export async function setQuoteCustomer(
   return { ok: true };
 }
 
+/**
+ * Pin a saved quote to a job (or null to unpin) — "leave the estimate with the job".
+ * Same RLS-visibility guard as setQuoteCustomer: a job id the caller can't see is
+ * rejected, so a crafted/foreign id can never persist as a cross-org dangling FK.
+ */
+export async function setQuoteJob(
+  quoteId: string,
+  jobId: string | null,
+): Promise<{ ok: boolean; error?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+
+  if (jobId) {
+    const { data } = await supabase.from("jobs").select("id").eq("id", jobId).maybeSingle();
+    if (!data) return { ok: false, error: "That job isn't available." };
+  }
+
+  const { error } = await supabase
+    .from("quotes")
+    .update({ job_id: jobId, updated_at: new Date().toISOString() })
+    .eq("id", quoteId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath(`/quotes/${quoteId}`);
+  revalidatePath("/quotes");
+  if (jobId) revalidatePath(`/jobs/${jobId}`);
+  return { ok: true };
+}
+
+/**
+ * Agent dedupe guard: a recent DRAFT with the same title for the same (or an
+ * unattached) customer is the same document being saved twice — one Nort
+ * conversation minted E-009/E-010/E-011 for one estimate this way. Returns the
+ * existing draft so quote.create can refuse and steer to editing it instead.
+ */
+export async function findRecentDraftQuote(
+  customerId: string | null,
+  title: string,
+): Promise<{ id: string; quote_number: string | null; title: string | null } | null> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return null;
+  const norm = title.trim().toLowerCase();
+  if (!norm) return null;
+  const since = new Date(Date.now() - 48 * 3600 * 1000).toISOString();
+  const { data } = await ctx.supabase
+    .from("quotes")
+    .select("id, quote_number, title, customer_id")
+    .eq("status", "draft")
+    .gte("created_at", since)
+    .order("created_at", { ascending: false })
+    .limit(25);
+  const hit = (data ?? []).find(
+    (q) =>
+      (q.title ?? "").trim().toLowerCase() === norm &&
+      (customerId == null || q.customer_id == null || q.customer_id === customerId),
+  );
+  return hit ? { id: hit.id, quote_number: hit.quote_number, title: hit.title } : null;
+}
+
 export async function deleteQuote(id: string): Promise<{ ok: boolean; error?: string }> {
   const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
   if ("error" in ctx) return { ok: false, error: ctx.error };
