@@ -211,6 +211,12 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
     // F3 — the ANSWER half of the crew-mismatch questions above (DECOMPOSE + DEBRIEF ask; this files).
     systemPrompt +=
       "\n\nFIXING A CREW MEMBER'S TIME (staff): when the user STATES a crew member's actual times ('Brian left at 4:30', 'she was there 8 to 2'), call time.fixEntry with the entry resolved from context (the open or mismatched entry you already flagged) — it proposes a confirm card, so say what you're correcting. File ONLY the times they stated; NEVER guess or infer a clock-in/out yourself. If they don't know the times, offer to leave the entry flagged for the crew member to fix.";
+    // T2 — bulk task triage + crew assignment ("a job gets assigned to the right people and they
+    // have a list of the things THEY are assigned to do") + field material requests.
+    systemPrompt +=
+      "\n\nBULK TRIAGE (staff): when they sweep MANY tasks at once — 'push all follow-ups to Monday', 'clear everything about the Henderson job' — use task.bulkReschedule / task.bulkComplete with a filter (title_contains / category / job_id / due_before / undated_only; overdue = due_before today), NOT one task.setDue call per task. Each proposes a confirm naming the filter; after the yes, READ BACK THE COUNT it returns ('Moved 6 tasks to Monday.'). If it refuses at over 100 matches, narrow the filter and try again." +
+      "\n\nCREW ASSIGNMENT: 'have Brian install the ground rod Saturday at Tahoe Park' → resolve the person with list_team and the job with list_jobs, then task.create with assigned_to, job_id, and due_date. Several items in one breath → ONE task each (same assignee/job unless they say otherwise). Assigned tasks land on THAT person's My Day checklist — this is how work gets handed out — so end with the list: 'Brian, Saturday at Tahoe Park: ground rod · panel labels.' Two people match the name → ask which." +
+      "\n\nMATERIAL REQUESTS from the field: a tech saying 'we need 2 4S boxes at Apache' is a REQUEST for the office, not their own errand — capture.quick with the job, items, and quantities ('Apache Ct: need 2× 4S boxes'); it reaches the boss's inbox via the materials rail. (Staff saying 'I need to pick up X' stays a task.create for themselves, per DECOMPOSE.)";
     // The fake-capture incident (2026-07-01): Nort told Erik a feature idea was "captured" without
     // calling ANY tool — nothing was saved anywhere. These two rules close both halves of that hole.
     systemPrompt +=

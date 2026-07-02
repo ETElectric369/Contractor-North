@@ -13,6 +13,12 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   "task.complete",
   "task.setDue",
   "task.assign",
+  // Bulk triage (T2): sweep MANY open tasks in one confirmed verb ("push all follow-ups to
+  // Monday", "clear everything about ZZ TEST"). Staff-only + confirm-gated (the describe
+  // names the filter in plain words) + bounded server-side (>100 matches refuses), so one
+  // yes can never silently mow down the whole org's list.
+  "task.bulkComplete",
+  "task.bulkReschedule",
   "customer.create",
   "customer.update", // fix a misspelled name / add contact info (reversible edit)
   "appointment.create",

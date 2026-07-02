@@ -25,14 +25,22 @@ export function ClockStartPicker({
   onChange,
   className = "",
   staff = true,
+  startExpanded = false,
+  caption,
 }: {
   onChange: (iso: string | null) => void;
   className?: string;
   /** Staff get the free date/time picker (backdate corrections). A tech/field
    *  employee can ONLY round the live start back to the nearest half hour. */
   staff?: boolean;
+  /** Open straight into the date+time inputs (e.g. the geofence "pick when you
+   *  left" sheet, where the whole point is choosing a time). */
+  startExpanded?: boolean;
+  /** Replaces the default "starting the shift…" helper line when the picker is
+   *  reused outside the clock-in context (e.g. picking a clock-OUT time). */
+  caption?: string;
 }) {
-  const [custom, setCustom] = useState(false);
+  const [custom, setCustom] = useState(startExpanded);
   const [rounded, setRounded] = useState(false);
   const init = nowParts();
   const [date, setDate] = useState(init.date);
@@ -109,19 +117,24 @@ export function ClockStartPicker({
           className="h-9 w-28"
           aria-label="Start time"
         />
-        <button
-          type="button"
-          onClick={() => {
-            setCustom(false);
-            onChange(null);
-          }}
-          className="text-xs font-medium text-slate-400 hover:text-slate-700"
-        >
-          Use now
-        </button>
+        {/* In startExpanded mode the HOST owns escape/"now" (its buttons), and
+            collapsing here would show the clock-IN "Starting now" label in the
+            wrong context. */}
+        {!startExpanded && (
+          <button
+            type="button"
+            onClick={() => {
+              setCustom(false);
+              onChange(null);
+            }}
+            className="text-xs font-medium text-slate-400 hover:text-slate-700"
+          >
+            Use now
+          </button>
+        )}
       </div>
       <p className="mt-1 text-xs text-amber-600">
-        Starting the shift at the time above — use this if you forgot to clock in.
+        {caption ?? "Starting the shift at the time above — use this if you forgot to clock in."}
       </p>
     </div>
   );

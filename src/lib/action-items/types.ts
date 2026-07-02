@@ -19,7 +19,8 @@ export type ActionKind =
   // ── The end-of-day money-leak sweep (the "Apache Ct" detectors) ──
   | "time_stray" // a time entry left running past its day, or closed with no job — hours nobody can bill
   | "job_unbilled_work" // a job worked recently with ZERO costs/materials recorded (the 30'-of-Romex leak)
-  | "job_needs_return"; // a job worked recently with nothing scheduled next (the forgotten return visit)
+  | "job_needs_return" // a job worked recently with nothing scheduled next (the forgotten return visit)
+  | "materials_needed"; // unpurchased take-off items on a job the crew is about to stand on (buy before the truck rolls)
 
 /** The four urgency streams the inbox renders under. Order is the render order:
  *  money first (chase the dollars), then fresh leads, then today's work, then
@@ -53,6 +54,7 @@ export const KIND_STREAM: Record<ActionKind, Stream> = {
   time_stray: "today", // a running/orphaned clock is today's cleanup, not tomorrow's
   job_unbilled_work: "money", // uncosted work = dollars leaking off the invoice
   job_needs_return: "today", // the return visit gets scheduled today or it gets forgotten
+  materials_needed: "today", // the shopping run happens before the truck rolls — today's prep
 };
 
 /** The canonical verbs. Each maps to an existing server action in dispatch.ts. */
@@ -95,6 +97,9 @@ export const KIND_META: Record<ActionKind, { label: string; tone: "slate" | "blu
   time_stray: { label: "Stray time", tone: "amber" },
   job_unbilled_work: { label: "No costs recorded", tone: "amber" },
   job_needs_return: { label: "Nothing scheduled", tone: "blue" },
+  // Deliberately NOT "No costs recorded" (job_unbilled_work = nothing captured yet);
+  // this one means items ARE on the take-off and still need buying.
+  materials_needed: { label: "Materials needed", tone: "blue" },
 };
 
 // The affordance matrix — which verbs each kind exposes. THE contract, consumed
@@ -124,6 +129,9 @@ export const AFFORDANCES: Record<ActionKind, Affordance[]> = {
   time_stray: ["open"],
   job_unbilled_work: ["open"],
   job_needs_return: ["open"],
+  // The buy/check-off lives on the job's materials list (purchased toggles per item) —
+  // a row-level "do" here couldn't say WHICH items got bought.
+  materials_needed: ["open"],
 };
 
 /**

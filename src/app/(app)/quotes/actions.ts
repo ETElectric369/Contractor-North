@@ -344,27 +344,18 @@ export async function saveQuote(input: SaveQuoteInput) {
     if (itemsErr) return { ok: false as const, error: itemsErr.message };
   }
 
-  // A new estimate/quote spawns a sales follow-up task (best-effort).
-  await supabase.from("tasks").insert({
-    title: `Follow up on quote${input.title ? ` — ${input.title}` : ""}`,
-    category: "sales",
-    status: "open",
-    priority: 0,
-    job_id: input.job_id || null,
-    due_date: new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10),
-    created_by: ctx.userId,
-  });
+  // No auto follow-up task here: the "awaiting reply" inbox item on My Day IS
+  // the follow-up, and it self-clears when the quote is answered — one intent,
+  // one surface (the old per-quote task factory just piled up orphans).
 
   revalidatePath("/quotes");
-  revalidatePath("/tasks");
-  revalidatePath("/tasks/sales");
   return { ok: true as const, id: quote.id };
 }
 
 /**
  * Clone a quote (header fields + all line items) into a fresh draft titled
- * "… (copy)". Reuses the existing saveQuote insert path so totals, the
- * follow-up task, and revalidation all behave exactly like a new estimate.
+ * "… (copy)". Reuses the existing saveQuote insert path so totals and
+ * revalidation all behave exactly like a new estimate.
  * RLS-scoped reads mean a foreign-org quote resolves to nothing here.
  */
 export async function duplicateQuote(

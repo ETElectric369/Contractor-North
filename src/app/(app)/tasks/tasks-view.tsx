@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import Link from "next/link";
 import { Plus, Trash2, Flag, Briefcase, Pencil, User } from "lucide-react";
@@ -38,11 +38,20 @@ interface Person {
   full_name: string | null;
 }
 
-const CATEGORIES: { id: TaskCategory; label: string; tone: string }[] = [
-  { id: "sales", label: "Sales", tone: "border-indigo-200 bg-indigo-50/60" },
-  { id: "operations", label: "Operations", tone: "border-green-200 bg-green-50/60" },
-  { id: "office", label: "Office", tone: "border-amber-200 bg-amber-50/60" },
+const CATEGORIES: { id: TaskCategory; label: string }[] = [
+  { id: "sales", label: "Sales" },
+  { id: "operations", label: "Operations" },
+  { id: "office", label: "Office" },
 ];
+
+// Category is a glance-chip on the row now, not the organizing principle —
+// the sections answer "what's next", the chip answers "what kind".
+const CATEGORY_CHIP: Record<string, string> = {
+  sales: "bg-indigo-50 text-indigo-700",
+  operations: "bg-green-50 text-green-700",
+  office: "bg-amber-50 text-amber-700",
+};
+const categoryLabel = (id: string) => CATEGORIES.find((c) => c.id === id)?.label ?? id;
 
 const PRIORITIES: { value: number; label: string }[] = [
   { value: 0, label: "Normal" },
@@ -283,12 +292,16 @@ export function TaskRow({
   people,
   category,
   subtasks = [],
+  showCategory = false,
+  overdue = false,
 }: {
   t: ViewTask;
   jobs: JobOption[];
   people: Person[];
   category: TaskCategory;
   subtasks?: ViewTask[];
+  showCategory?: boolean;
+  overdue?: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -325,7 +338,11 @@ export function TaskRow({
             {t.title}
           </div>
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
-            {t.due_date && <span>Due {formatDate(t.due_date)}</span>}
+            {t.due_date && (
+              <span className={overdue && t.status !== "done" ? "font-medium text-red-600" : undefined}>
+                Due {formatDate(t.due_date)}
+              </span>
+            )}
             {t.priority > 0 && <span className={t.priority >= 2 ? "text-red-600" : "text-amber-600"}>{priorityLabel(t.priority)}</span>}
             {t.assignee?.full_name && (
               <span className="flex items-center gap-1"><User className="h-3 w-3" /> {t.assignee.full_name}</span>
@@ -334,6 +351,11 @@ export function TaskRow({
               <Link href={`/jobs/${t.job_id}`} className="flex items-center gap-1 hover:text-brand">
                 <Briefcase className="h-3 w-3" /> {t.jobs.name}
               </Link>
+            )}
+            {showCategory && (
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${CATEGORY_CHIP[t.category] ?? "bg-slate-100 text-slate-500"}`}>
+                {categoryLabel(t.category)}
+              </span>
             )}
             {(t.tags ?? []).map((tag) => (
               <span key={tag} className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-500">#{tag}</span>
@@ -400,83 +422,137 @@ export function TaskRow({
   );
 }
 
-function TaskColumn({
-  category,
+/** Saturday closing the Sunday-start week that contains `todayStr` (matches the planner/payroll week). */
+function weekEndStr(todayStr: string): string {
+  const d = new Date(`${todayStr}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + (6 - d.getUTCDay()));
+  return d.toISOString().slice(0, 10);
+}
+
+function TimeSection({
   label,
   tone,
-  tasks,
-  jobs,
-  people,
+  count,
+  countClass = "text-slate-500",
+  children,
+  footer,
 }: {
-  category: TaskCategory;
   label: string;
   tone: string;
-  tasks: ViewTask[];
-  jobs: JobOption[];
-  people: Person[];
+  count: number;
+  countClass?: string;
+  children: ReactNode;
+  footer?: ReactNode;
 }) {
-  // Nest subtasks under their parent; only top-level tasks are columns rows.
-  const childrenByParent = new Map<string, ViewTask[]>();
-  for (const t of tasks) {
-    if (t.parent_id) {
-      if (!childrenByParent.has(t.parent_id)) childrenByParent.set(t.parent_id, []);
-      childrenByParent.get(t.parent_id)!.push(t);
-    }
-  }
-  const top = tasks.filter((t) => !t.parent_id);
-  const open = top.filter((t) => t.status !== "done");
-  const done = top.filter((t) => t.status === "done");
-  const row = (t: ViewTask) => (
-    <TaskRow key={t.id} t={t} jobs={jobs} people={people} category={category} subtasks={childrenByParent.get(t.id) ?? []} />
-  );
-
   return (
     <Card className={`overflow-hidden border ${tone}`}>
       <div className="flex items-center justify-between border-b border-slate-200/70 px-4 py-3">
         <h3 className="text-sm font-semibold text-slate-900">{label}</h3>
-        <span className="text-xs text-slate-500">{open.length} open</span>
+        <span className={`text-xs ${countClass}`}>{count}</span>
       </div>
-      <ul className="divide-y divide-slate-100 bg-white">
-        {top.length === 0 ? (
-          <li className="px-4 py-6 text-center text-sm text-slate-400">No {label.toLowerCase()} tasks yet.</li>
-        ) : (
-          <>
-            {open.map(row)}
-            {done.map(row)}
-          </>
-        )}
-      </ul>
+      <ul className="divide-y divide-slate-100 bg-white">{children}</ul>
+      {footer}
     </Card>
   );
 }
 
+/**
+ * Tasks grouped by WHEN, not what kind — Overdue / Today / This week / Later /
+ * Someday, in that order, so "what's next" is a 3-second read. Empty sections
+ * stay hidden; completed sinks to the bottom behind a bounded fetch.
+ */
 export function TasksView({
   tasks,
   jobs,
   people = [],
   category,
+  todayStr,
+  doneTotal = 0,
+  showingAllDone = false,
 }: {
   tasks: ViewTask[];
   jobs: JobOption[];
   people?: Person[];
   category?: TaskCategory;
+  todayStr: string;
+  doneTotal?: number;
+  showingAllDone?: boolean;
 }) {
-  const cols = category ? CATEGORIES.filter((c) => c.id === category) : CATEGORIES;
+  const pathname = usePathname();
+
+  // Nest subtasks under their parent; a subtask whose parent wasn't fetched
+  // (e.g. an old completed parent past the done limit) surfaces as its own row.
+  const ids = new Set(tasks.map((t) => t.id));
+  const childrenByParent = new Map<string, ViewTask[]>();
+  const top: ViewTask[] = [];
+  for (const t of tasks) {
+    if (t.parent_id && ids.has(t.parent_id)) {
+      if (!childrenByParent.has(t.parent_id)) childrenByParent.set(t.parent_id, []);
+      childrenByParent.get(t.parent_id)!.push(t);
+    } else {
+      top.push(t);
+    }
+  }
+
+  const weekEnd = weekEndStr(todayStr);
+  const openTop = top.filter((t) => t.status !== "done");
+  const doneTop = top.filter((t) => t.status === "done");
+  const doneFetched = tasks.filter((t) => t.status === "done").length;
+
+  const row = (t: ViewTask, overdue = false) => (
+    <TaskRow
+      key={t.id}
+      t={t}
+      jobs={jobs}
+      people={people}
+      category={(t.category as TaskCategory) ?? "office"}
+      subtasks={childrenByParent.get(t.id) ?? []}
+      showCategory={!category}
+      overdue={overdue}
+    />
+  );
+
+  const sections: { key: string; label: string; tone: string; countClass?: string; tasks: ViewTask[]; overdue?: boolean }[] = [
+    { key: "overdue", label: "Overdue", tone: "border-red-200 bg-red-50/60", countClass: "font-semibold text-red-600", overdue: true, tasks: openTop.filter((t) => !!t.due_date && t.due_date! < todayStr) },
+    { key: "today", label: "Today", tone: "border-sky-200 bg-sky-50/60", tasks: openTop.filter((t) => t.due_date === todayStr) },
+    { key: "week", label: "This week", tone: "border-slate-200 bg-slate-50/60", tasks: openTop.filter((t) => !!t.due_date && t.due_date! > todayStr && t.due_date! <= weekEnd) },
+    { key: "later", label: "Later", tone: "border-slate-200 bg-slate-50/40", tasks: openTop.filter((t) => !!t.due_date && t.due_date! > weekEnd) },
+    { key: "someday", label: "Someday", tone: "border-slate-200 bg-white", tasks: openTop.filter((t) => !t.due_date) },
+  ].filter((s) => s.tasks.length > 0);
+
   return (
     <div>
       <NewTaskBox jobs={jobs} people={people} defaultCategory={category} />
-      <div className={category ? "" : "grid gap-4 lg:grid-cols-3"}>
-        {cols.map((c) => (
-          <TaskColumn
-            key={c.id}
-            category={c.id}
-            label={c.label}
-            tone={c.tone}
-            tasks={tasks.filter((t) => t.category === c.id)}
-            jobs={jobs}
-            people={people}
-          />
+      <div className="space-y-4">
+        {sections.length === 0 && (
+          <Card>
+            <div className="px-4 py-8 text-center text-sm text-slate-400">Nothing open — add a task above.</div>
+          </Card>
+        )}
+        {sections.map((s) => (
+          <TimeSection key={s.key} label={s.label} tone={s.tone} count={s.tasks.length} countClass={s.countClass}>
+            {s.tasks.map((t) => row(t, s.overdue))}
+          </TimeSection>
         ))}
+        {doneTop.length > 0 && (
+          <TimeSection
+            label="Completed"
+            tone="border-slate-200 bg-slate-50/40"
+            count={doneTotal || doneTop.length}
+            countClass="text-slate-400"
+            footer={
+              !showingAllDone && doneTotal > doneFetched ? (
+                <div className="border-t border-slate-200/70 bg-white px-4 py-2.5 text-center">
+                  <Link href={`${pathname}?done=all`} className="text-xs font-medium text-brand hover:underline">
+                    Show all completed ({doneTotal})
+                  </Link>
+                </div>
+              ) : undefined
+            }
+          >
+            {doneTop.map((t) => row(t))}
+          </TimeSection>
+        )}
       </div>
     </div>
   );

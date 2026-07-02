@@ -13,6 +13,7 @@ import { NavLink } from "@/components/nav-link";
 import { toJobOptions, toCustomerOptions, toStaffOptions } from "@/lib/schedule-options";
 import { todayBoundsInTz, prettyDay, tzDayStartUtc } from "@/lib/tz";
 import { DayClock } from "./day-clock";
+import { YourList } from "./your-list";
 import { getActionItems } from "@/lib/action-items/query";
 import { ActionList } from "@/components/action-items/action-list";
 import { AppointmentButton } from "../appointments/appointment-button";
@@ -51,7 +52,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   // ONE parallel batch for everything that only needs the tz + the user id — was three sequential
   // rounds (day data → current job + week total → form/snapshot options). Latency audit 2026-06-27.
   const [
-    { data: jobs }, { data: segJobs }, { data: appts }, { data: tasks }, { data: entries }, { data: openRows },
+    { data: jobs }, { data: segJobs }, { data: appts }, { data: entries }, { data: openRows },
     { data: weekEntries },
     { data: customers }, { data: staff }, { data: jobOptRows }, { data: me }, leadsCount,
   ] = await Promise.all([
@@ -59,7 +60,6 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     // Multi-range jobs whose segment covers today.
     supabase.from("job_schedule_segments").select("job_id, jobs(id, job_number, name, status, address, customers(name))").lte("start_date", todayStr).gte("end_date", todayStr),
     supabase.from("appointments").select("id, type, title, starts_at, ends_at, location, notes, status, job_id, customer_id, assigned_to").gte("starts_at", dayStart.toISOString()).lt("starts_at", dayEnd.toISOString()).neq("status", "cancelled").order("starts_at"),
-    supabase.from("tasks").select("id, title, category, status, priority, due_date, job_id, assigned_to, jobs(job_number, name), assignee:assigned_to(full_name)").eq("status", "open").lte("due_date", todayStr).order("priority", { ascending: false }),
     supabase.from("time_entries").select("id, job_id, clock_in, clock_out, lunch_minutes, status").eq("profile_id", user?.id ?? "").gte("clock_in", dayStart.toISOString()).lt("clock_in", dayEnd.toISOString()),
     // The open entry, regardless of when it started (overnight shift, etc.). The job
     // on THIS entry is the "Now" hero — scoped to the caller, not the org's latest
@@ -80,15 +80,47 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
 
   // The reads that depend on a result above — the caller's current job (the job on
   // their OWN open time entry, so the "Now" hero is their site, not a coworker's),
-  // and the staff-only money pipeline — run together in one final round.
-  const [curJobRes, pipeline] = await Promise.all([
+  // the staff-only money pipeline, and the two role-aware task reads — run together
+  // in one final round.
+  const [curJobRes, pipeline, myTasksR, dueTasksR] = await Promise.all([
     openEntry?.job_id
       ? supabase.from("jobs").select("id, job_number, name, status, address, customers(name)").eq("id", openEntry.job_id).maybeSingle()
       : Promise.resolve({ data: null }),
     // Money pipeline (staff only) — the daily "nothing got missed" nudge.
     isStaff ? getMoneyPipeline(supabase) : Promise.resolve(null),
+    // YOUR LIST — my open tasks, every due state (the card sorts overdue → today →
+    // dated → undated and groups by job). Techs see what's assigned to THEM; staff
+    // additionally see their own unassigned captures (the boss's loose ends). The
+    // DB order just makes the 60-row cap keep the nearest-due first.
+    (isStaff
+      ? supabase
+          .from("tasks")
+          .select("id, title, category, priority, due_date, job_id, jobs(job_number, name)")
+          .eq("status", "open")
+          .or(`assigned_to.eq.${user?.id ?? ""},and(created_by.eq.${user?.id ?? ""},assigned_to.is.null)`)
+      : supabase
+          .from("tasks")
+          .select("id, title, category, priority, due_date, job_id, jobs(job_number, name)")
+          .eq("status", "open")
+          .eq("assigned_to", user?.id ?? "")
+    )
+      .order("due_date", { ascending: true, nullsFirst: false })
+      .limit(60),
+    // STAFF AGENDA — tasks due TODAY across the whole crew (small "who" tag), so a
+    // dated task finally shows on a time surface. Techs' own tasks live in Your list.
+    isStaff
+      ? supabase
+          .from("tasks")
+          .select("id, title, category, due_date, job_id, jobs(job_number, name), assignee:assigned_to(full_name)")
+          .eq("status", "open")
+          .eq("due_date", todayStr)
+          .order("priority", { ascending: false })
+          .limit(50)
+      : Promise.resolve({ data: [] }),
   ]);
   const currentJob = ((curJobRes as any)?.data as any) ?? undefined;
+  const myTasks = ((myTasksR as any)?.data ?? []) as any[];
+  const dueTasks = ((dueTasksR as any)?.data ?? []) as any[];
 
   // The current job's materials (needs its id) and the "Needs action" inbox (needs
   // the role) — one final round instead of two more awaits.
@@ -154,12 +186,13 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   const visibleActions = showAllActions ? actionItems : actionItems.slice(0, 5);
 
   // ── Agenda (Now / Next / Later) ─────────────────────────────────────────────
-  // One chronological stream of the day — timed jobs + appointments. (Tasks live in
-  // the "Needs action" inbox above, so they're not duplicated here.) The job you're
-  // ON is the "Now" hero card; the rest groups into Next (soonest) and Later.
+  // One chronological stream of the day — timed jobs + appointments, plus (staff
+  // only) the crew's tasks DUE today with a small "who" tag, so a dated task shows
+  // on a time surface. Untimed tasks land in "Later". The job you're ON is the
+  // "Now" hero card; the rest groups into Next (soonest) and Later.
   type Agenda = {
     key: string;
-    kind: "job" | "appt";
+    kind: "job" | "appt" | "task";
     time: string | null;
     title: string;
     sub: string | null;
@@ -190,6 +223,18 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       address: a.location ?? null,
       href: a.job_id ? `/jobs/${a.job_id}` : "/schedule?view=appointments",
       apptType: a.type,
+    })),
+    ...dueTasks.map((t: any) => ({
+      key: `t-${t.id}`,
+      kind: "task" as const,
+      time: null, // due_date has no time — tasks slot into "Later" alongside untimed jobs
+      title: t.title,
+      sub:
+        [t.assignee?.full_name ?? "Unassigned", t.jobs ? `${t.jobs.job_number} · ${t.jobs.name}` : null]
+          .filter(Boolean)
+          .join(" · ") || null,
+      address: null,
+      href: t.job_id ? `/jobs/${t.job_id}?tab=tasks` : `/tasks/${t.category}`,
     })),
   ];
   const nowMs = Date.now();
@@ -297,6 +342,8 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           <div className="flex items-center gap-2">
             {i.kind === "appt" ? (
               <Badge tone={i.apptType === "inspection" ? "amber" : "blue"}>{i.apptType}</Badge>
+            ) : i.kind === "task" ? (
+              <Badge tone="slate">task</Badge>
             ) : i.status ? (
               <Badge tone={statusTone(i.status)}>{i.status.replace("_", " ")}</Badge>
             ) : null}
@@ -400,6 +447,10 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           )}
         </Card>
       )}
+
+      {/* YOUR LIST — the crew checklist: MY open tasks, due-ordered, grouped by
+          job, one-tap check-offs. For a tech this is the day's work list. */}
+      <YourList tasks={myTasks} todayStr={todayStr} />
 
       {/* Quick add-a-task box — lives next to the inbox it feeds. */}
       <NewTaskBox jobs={(jobOptRows ?? []) as any} people={people} />

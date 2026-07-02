@@ -379,10 +379,70 @@ export async function clockOutCurrent(input: {
   });
 }
 
-/** Geofence auto clock-out — the GeofenceMonitor calls this when the employee has left
- *  the spot they clocked in at. Clocks out the caller's OPEN entry at `atIso` (the time
- *  they were last at the site), stamps the GPS, and marks the source 'auto_gps'. The
- *  entry's note is preserved. */
+/**
+ * Backfill the geofence anchor for the caller's OPEN entry when clock-in couldn't
+ * capture GPS — My Day and the job-page clock button punch with gps:null, and the
+ * timeclock punch races a short GPS cap that loses to the iOS permission dialog on
+ * first use. Without an anchor the geofence was silently dead for those shifts.
+ * Tightly guarded: self-scoped to the caller's own OPEN entry, only while gps_in is
+ * still empty, only within 15 minutes of clock-in (a reopen-from-home hours later can
+ * never become "where the job is"), and only with a usable fix. The capture time is
+ * stored alongside the coords so a backfilled anchor is distinguishable from a true
+ * clock-in stamp when someone audits the entry.
+ */
+export async function adoptGeofenceAnchor(entryId: string, gps: GeoPoint): Promise<ClockResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+  if (
+    typeof gps?.lat !== "number" || typeof gps?.lng !== "number" ||
+    !Number.isFinite(gps.lat) || !Number.isFinite(gps.lng)
+  ) {
+    return { ok: false, error: "Bad coordinates." };
+  }
+  // A fix fuzzier than this proves nothing about where the job is — refuse it.
+  if (gps.accuracy != null && gps.accuracy > 200) return { ok: false, error: "Fix too fuzzy to anchor on." };
+
+  const { data: open } = await supabase
+    .from("time_entries")
+    .select("id, clock_in, gps_in")
+    .eq("id", entryId)
+    .eq("profile_id", user.id)
+    .eq("status", "open")
+    .maybeSingle();
+  if (!open) return { ok: false, error: "Not clocked in." };
+  if ((open as { gps_in: GeoPoint | null }).gps_in) return { ok: false, error: "Anchor already set." };
+  const ciMs = Date.parse((open as { clock_in: string }).clock_in);
+  if (isNaN(ciMs) || Date.now() - ciMs > 15 * 60_000) {
+    return { ok: false, error: "Too long since clock-in to backfill a location." };
+  }
+
+  const { error } = await supabase
+    .from("time_entries")
+    .update({
+      gps_in: {
+        lat: gps.lat,
+        lng: gps.lng,
+        accuracy: gps.accuracy ?? null,
+        // Honesty marker: this was captured AFTER the punch, not at it.
+        captured_at: new Date().toISOString(),
+      },
+    })
+    .eq("id", entryId)
+    .eq("profile_id", user.id)
+    .eq("status", "open");
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
+/** Geofence clock-out — the GeofenceMonitor calls this when the employee has left the
+ *  job site. `atIso` is never a guess: it's either NOW (the "Clock out now" tap), a time
+ *  the USER picked in the prompt sheet, or — for the live-watch auto close — the time
+ *  GPS last observed them at the site. Clocks out the caller's OPEN entry, stamps the
+ *  GPS, and marks the source 'auto_gps' so /timeclock asks the codes+lunch questions
+ *  after the fact. The entry's note is preserved. */
 export async function geoClockOut(gps: GeoPoint | null, atIso: string): Promise<ClockResult> {
   const supabase = await createClient();
   const {

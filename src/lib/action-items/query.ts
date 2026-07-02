@@ -61,6 +61,10 @@ export async function getActionItems(ctx: {
   const supabase = await createClient();
   const endOfToday = `${todayStr}T23:59:59`;
   const clamp = (p: number): 0 | 1 | 2 => (p >= 2 ? 2 : p >= 1 ? 1 : 0);
+  // Forward day cuts for the materials-needed window (yyyy-mm-dd; daysAgoStr with a
+  // negative offset walks forward). Same ≤1-day tz fuzz as the other feeders.
+  const tomorrowStr = daysAgoStr(todayStr, -1);
+  const dayAfterTomorrowStr = daysAgoStr(todayStr, -2);
 
   // Open to-dos due today/overdue — PLUS undated ones, treated as due-now. Every
   // fast capture path (voice, quick-add) creates tasks without a due_date; a plain
@@ -76,7 +80,7 @@ export async function getActionItems(ctx: {
 
   const empty = Promise.resolve({ data: [] as any[] });
 
-  const [tasksR, jobsR, inqR, apptR, orgR, invR, quoteR, draftR, conR, lienR, bugR, openTimeR, recentTimeR] = await Promise.all([
+  const [tasksR, jobsR, inqR, apptR, orgR, invR, quoteR, draftR, conR, lienR, bugR, openTimeR, recentTimeR, matJobsR, matSegR] = await Promise.all([
     taskQ,
     // Unscheduled jobs — staff only (the "resting place" for things needing a date).
     isStaff
@@ -199,6 +203,25 @@ export async function getActionItems(ctx: {
           .gte("clock_in", daysAgoStr(todayStr, NEEDS_RETURN_DAYS))
           .order("clock_in", { ascending: false })
           .limit(200)
+      : empty,
+    // ── Materials-routing candidates (staff only) — jobs the crew is about to
+    // stand on: scheduled today/tomorrow, plus multi-day segments covering the
+    // same window. (Worked-in-the-last-2-days jobs join via the rollup below.)
+    isStaff
+      ? supabase
+          .from("jobs")
+          .select("id, job_number, name, status, scheduled_start")
+          .gte("scheduled_start", todayStr)
+          .lt("scheduled_start", dayAfterTomorrowStr)
+          .limit(50)
+      : empty,
+    isStaff
+      ? supabase
+          .from("job_schedule_segments")
+          .select("start_date, jobs(id, job_number, name, status)")
+          .lte("start_date", tomorrowStr)
+          .gte("end_date", todayStr)
+          .limit(50)
       : empty,
   ]);
 
@@ -463,6 +486,24 @@ export async function getActionItems(ctx: {
     });
   }
 
+  // ── MATERIALS ROUTING (staff only) — the "who's buying?" feeder. Unpurchased
+  // take-off items on a job about to be worked route back to whoever is coming
+  // through next. Distinct from job_unbilled_work BY CONSTRUCTION: that one fires
+  // on ZERO recorded materials/costs ("nothing recorded"); this one fires on
+  // recorded-but-unpurchased items ("needed to buy") — having items makes a job
+  // costed, so the same job can never show both.
+  const matCandidates = new Map<string, { job: { id: string; job_number?: string | null; name?: string | null }; when: string | null }>();
+  const matStatusOk = (s: string | null | undefined) => s !== "cancelled" && s !== "complete" && s !== "invoiced";
+  for (const j of (matJobsR.data ?? []) as any[]) {
+    if (matStatusOk(j.status)) matCandidates.set(j.id, { job: j, when: j.scheduled_start ?? null });
+  }
+  for (const s of (matSegR.data ?? []) as any[]) {
+    const j = s.jobs;
+    if (!j || !matStatusOk(j.status) || matCandidates.has(j.id)) continue;
+    // The day the crew is next on it: the segment's start if still ahead, else today.
+    matCandidates.set(j.id, { job: j, when: s.start_date && s.start_date > todayStr ? s.start_date : todayStr });
+  }
+
   // 2 & 3) Job-level detectors need the worked jobs' costs/schedule — one small
   // dependent round, bounded by the recent-entries rollup (a couple dozen ids max).
   const worked = rollupWorkedJobs((recentTimeR.data ?? []) as any[], todayStr);
@@ -498,6 +539,14 @@ export async function getActionItems(ctx: {
     const futureSegmentJobIds = new Set<string>(((wSegR.data ?? []) as any[]).map((s) => s.job_id as string));
     const workedJobs = (wJobsR.data ?? []) as any[];
 
+    // Jobs worked in the last UNBILLED_WORK_DAYS (2) join the materials-needed
+    // candidates — the crew was JUST there, so leftover unpurchased items are live.
+    for (const j of workedJobs) {
+      if (worked.get(j.id)?.workedInUnbilledWindow && matStatusOk(j.status) && !matCandidates.has(j.id)) {
+        matCandidates.set(j.id, { job: j, when: null });
+      }
+    }
+
     // 2) UNBILLED WORK — time on the job, zero costs/POs/materials. The Romex leak.
     for (const f of detectUnbilledWork({ jobs: workedJobs, worked, costedJobIds, invoicedJobIds })) {
       items.push({
@@ -527,6 +576,46 @@ export async function getActionItems(ctx: {
         done: false,
         href: `/jobs/${f.job.id}`,
         affordances: AFFORDANCES.job_needs_return,
+      });
+    }
+  }
+
+  // MATERIALS NEEDED — one dependent round for the candidates' take-off lists,
+  // then ONE item per job with unpurchased (non-tool) items: "Materials needed at
+  // {job}" + the first few item names, deep-linked to the job's materials tab.
+  if (isStaff && matCandidates.size > 0) {
+    const matJobIds = [...matCandidates.keys()].slice(0, 30);
+    const { data: matLists } = await supabase
+      .from("material_lists")
+      .select("job_id, material_list_items(description, quantity, purchased, is_tool)")
+      .in("job_id", matJobIds)
+      .limit(100);
+    const needByJob = new Map<string, { description: string; quantity: number }[]>();
+    for (const ml of (matLists ?? []) as any[]) {
+      for (const it of (ml.material_list_items ?? []) as any[]) {
+        // Tools are brought from the shop, not bought — an owned tool would sit
+        // "unpurchased" forever and nag the shopping run daily.
+        if (it.purchased || it.is_tool) continue;
+        if (!needByJob.has(ml.job_id)) needByJob.set(ml.job_id, []);
+        needByJob.get(ml.job_id)!.push({ description: it.description, quantity: Number(it.quantity ?? 1) });
+      }
+    }
+    for (const [jobId, need] of needByJob) {
+      const cand = matCandidates.get(jobId);
+      if (!cand || need.length === 0) continue;
+      const preview = need.slice(0, 3).map((it) => `${it.quantity}× ${it.description}`).join(", ");
+      const more = need.length - 3;
+      items.push({
+        id: `materials-${jobId}`, // synthetic (kind-prefixed) — open-only, no per-row dispatch
+        kind: "materials_needed",
+        title: `Materials needed at ${jobLabel(cand.job)}`,
+        subtitle: preview + (more > 0 ? ` +${more} more` : ""),
+        who: null,
+        when: cand.when,
+        urgency: 1,
+        done: false,
+        href: `/jobs/${jobId}?tab=materials`,
+        affordances: AFFORDANCES.materials_needed,
       });
     }
   }

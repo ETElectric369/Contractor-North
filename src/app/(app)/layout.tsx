@@ -61,17 +61,23 @@ export default async function AppLayout({
 
   const settings = getOrgSettings((org as any)?.settings);
 
-  // Geofence auto clock-out: if the user is on the clock, load the open entry's
-  // clock-in GPS so the global monitor can watch whether they leave the job site.
-  let openEntry: { id: string; gps_in: GeoPoint; clock_in: string } | null = null;
+  // Geofence: if the user is on the clock, mount the exit monitor. The clock-in GPS
+  // is the fence anchor when it exists; entries WITHOUT one mount too (My Day and the
+  // job-page clock buttons punch with gps:null, and the timeclock punch can outrun the
+  // iOS permission dialog) — the monitor adopts an anchor from its first good fix near
+  // clock-in. Requiring gps_in here is what silently disabled the geofence for most
+  // punches (the 30-hour open shift).
+  let openEntry:
+    | { id: string; gps_in: GeoPoint | null; clock_in: string; job: { job_number: string; name: string } | null }
+    | null = null;
   if (settings.geofence_logout) {
     const { data: oe } = await supabase
       .from("time_entries")
-      .select("id, gps_in, clock_in")
+      .select("id, gps_in, clock_in, job:job_id(job_number, name)")
       .eq("profile_id", user.id)
       .eq("status", "open")
       .maybeSingle();
-    if (oe && (oe as any).gps_in) openEntry = oe as any;
+    if (oe) openEntry = oe as any;
   }
 
   // Billing gate (only when Stripe is configured): trial expired & not subscribed.
@@ -128,6 +134,7 @@ export default async function AppLayout({
           gpsIn={openEntry.gps_in}
           clockInIso={openEntry.clock_in}
           radiusM={settings.geofence_radius_m}
+          jobLabel={openEntry.job ? `${openEntry.job.job_number} · ${openEntry.job.name}` : "the job site"}
         />
       )}
     </div>

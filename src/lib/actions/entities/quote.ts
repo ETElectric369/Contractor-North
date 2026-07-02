@@ -155,7 +155,8 @@ export const quoteActions: Record<string, ActionDef> = {
     auth: "staff", // quotes/financials are staff-only (migration 0056)
     effect: "write",
     // Reuse the canonical saveQuote (subtotal/tax/total math, per-org Q- number via the
-    // DB trigger, the follow-up task). Map its {ok,id} into the ActionResult shape.
+    // DB trigger). No auto follow-up task — the "awaiting reply" inbox item on My Day is
+    // the follow-up and self-clears. Map its {ok,id} into the ActionResult shape.
     handler: async (i) => {
       const r = await saveQuote({
         customer_id: i.customer_id ?? null,
