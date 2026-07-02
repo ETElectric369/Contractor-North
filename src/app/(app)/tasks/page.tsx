@@ -7,15 +7,21 @@ export const dynamic = "force-dynamic";
 export default async function TasksPage({
   searchParams,
 }: {
-  searchParams: Promise<{ done?: string }>;
+  searchParams: Promise<{ done?: string; mine?: string }>;
 }) {
   const sp = await searchParams;
   const showAllDone = sp?.done === "all";
-  const { todayStr, tasks, doneTotal, jobs, people } = await getTasksPageData(null, showAllDone);
+  // ?mine=1 — the tech door from My Day: only what's assigned to the caller,
+  // so the door's count matches the page it opens.
+  const mine = sp?.mine === "1";
+  const { todayStr, tasks, doneTotal, jobs, people } = await getTasksPageData(null, showAllDone, { mine });
 
   return (
     <div>
-      <PageHeader title="Tasks" description="What's next, by when — overdue first." />
+      <PageHeader
+        title={mine ? "Your tasks" : "Tasks"}
+        description={mine ? "Everything assigned to you, by when — overdue first." : "What's next, by when — overdue first."}
+      />
       <TasksView
         tasks={tasks as any}
         jobs={jobs}

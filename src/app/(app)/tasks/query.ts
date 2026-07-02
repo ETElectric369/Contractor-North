@@ -3,7 +3,7 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz } from "@/lib/tz";
 
 const TASK_SELECT =
-  "id, title, category, status, priority, due_date, job_id, assigned_to, parent_id, tags, jobs(job_number, name), assignee:assigned_to(full_name)";
+  "id, title, category, status, priority, due_date, focus_date, job_id, assigned_to, parent_id, tags, jobs(job_number, name), assignee:assigned_to(full_name)";
 
 /** Done tasks stay bounded by default — history is a tap away, not a page weight. */
 export const DONE_LIMIT = 30;
@@ -16,8 +16,19 @@ export const DONE_LIMIT = 30;
 export async function getTasksPageData(
   category: string | null,
   showAllDone: boolean,
+  opts?: { mine?: boolean },
 ) {
   const supabase = await createClient();
+
+  // ?mine=1 — My Day's tech door ("Everything else · N →") filters to the
+  // caller's own assigned tasks so the door's number matches the page it opens.
+  let mineId: string | null = null;
+  if (opts?.mine) {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    mineId = user?.id ?? null;
+  }
 
   let openQ = supabase
     .from("tasks")
@@ -26,6 +37,7 @@ export async function getTasksPageData(
     .order("due_date", { ascending: true, nullsFirst: false })
     .order("priority", { ascending: false });
   if (category) openQ = openQ.eq("category", category);
+  if (mineId) openQ = openQ.eq("assigned_to", mineId);
 
   let doneQ = supabase
     .from("tasks")
@@ -33,6 +45,7 @@ export async function getTasksPageData(
     .eq("status", "done")
     .order("completed_at", { ascending: false, nullsFirst: false });
   if (category) doneQ = doneQ.eq("category", category);
+  if (mineId) doneQ = doneQ.eq("assigned_to", mineId);
   if (!showAllDone) doneQ = doneQ.limit(DONE_LIMIT);
 
   const [{ data: orgRow }, openR, doneR, { data: jobs }, { data: people }] =

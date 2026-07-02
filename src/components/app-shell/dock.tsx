@@ -80,7 +80,9 @@ function DockInner({ branding, role, badges }: DockProps) {
                 <span className={`text-[10px] font-medium leading-none ${on ? "text-slate-900" : "text-slate-600"}`}>{s.short ?? s.label}</span>
                 {badge > 0 && (
                   <span className="absolute right-1 top-1 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-amber-400 px-1 text-[9px] font-bold text-amber-900">
-                    {badge}
+                    {/* Display-capped per the badge invariant (action-items/types.ts):
+                        past 9 the exact figure is noise — the list is the source of truth. */}
+                    {badge > 9 ? "9+" : badge}
                   </span>
                 )}
               </Link>

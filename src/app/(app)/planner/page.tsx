@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { CalendarCheck, ChevronLeft, ChevronRight, UserPlus, Receipt, Navigation } from "lucide-react";
+import { CalendarCheck, ChevronLeft, ChevronRight, UserPlus, Receipt, Navigation, FolderClosed, ListTodo } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { RefreshOnVisible } from "@/components/refresh-on-visible";
@@ -15,10 +15,11 @@ import { toJobOptions, toCustomerOptions, toStaffOptions } from "@/lib/schedule-
 import { todayBoundsInTz, prettyDay, tzDayStartUtc } from "@/lib/tz";
 import { DayClock } from "./day-clock";
 import { YourList } from "./your-list";
+import { rankSix, SIX_SLOTS } from "@/lib/six-rank";
 import { getActionItems } from "@/lib/action-items/query";
 import { ActionList } from "@/components/action-items/action-list";
 import { AppointmentButton, type ApptValue } from "../appointments/appointment-button";
-import { JobMoveButton, ApptMoveButton, TaskAgendaControls } from "./agenda-move";
+import { JobMoveButton, ApptMoveButton } from "./agenda-move";
 import { NewTaskBox } from "../tasks/tasks-view";
 import { QuickCostButton } from "@/components/quick-cost-button";
 
@@ -89,62 +90,8 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   // who can't see /schedule (office-only). A role-gated single map ≠ duplication.
   if (view === "week" && isStaff) redirect("/schedule?view=week");
 
-  // The reads that depend on a result above — the caller's current job (the job on
-  // their OWN open time entry, so the "Now" hero is their site, not a coworker's),
-  // the staff-only money pipeline, and the two role-aware task reads — run together
-  // in one final round.
-  const [curJobRes, pipeline, myTasksR, dueTasksR] = await Promise.all([
-    openEntry?.job_id
-      ? supabase.from("jobs").select("id, job_number, name, status, address, customers(name)").eq("id", openEntry.job_id).maybeSingle()
-      : Promise.resolve({ data: null }),
-    // Money pipeline (staff only) — the daily "nothing got missed" nudge.
-    isStaff ? getMoneyPipeline(supabase) : Promise.resolve(null),
-    // YOUR LIST — my open tasks, every due state (the card sorts overdue → today →
-    // dated → undated and groups by job). Techs see what's assigned to THEM; staff
-    // additionally see their own unassigned captures (the boss's loose ends). The
-    // DB order just makes the 60-row cap keep the nearest-due first.
-    (isStaff
-      ? supabase
-          .from("tasks")
-          .select("id, title, category, priority, due_date, job_id, jobs(job_number, name)")
-          .eq("status", "open")
-          .or(`assigned_to.eq.${user?.id ?? ""},and(created_by.eq.${user?.id ?? ""},assigned_to.is.null)`)
-      : supabase
-          .from("tasks")
-          .select("id, title, category, priority, due_date, job_id, jobs(job_number, name)")
-          .eq("status", "open")
-          .eq("assigned_to", user?.id ?? "")
-    )
-      .order("due_date", { ascending: true, nullsFirst: false })
-      .limit(60),
-    // STAFF AGENDA — tasks due TODAY across the whole crew (small "who" tag), so a
-    // dated task finally shows on a time surface. Techs' own tasks live in Your list.
-    isStaff
-      ? supabase
-          .from("tasks")
-          .select("id, title, category, due_date, job_id, jobs(job_number, name), assignee:assigned_to(full_name)")
-          .eq("status", "open")
-          .eq("due_date", todayStr)
-          .order("priority", { ascending: false })
-          .limit(50)
-      : Promise.resolve({ data: [] }),
-  ]);
-  const currentJob = ((curJobRes as any)?.data as any) ?? undefined;
-  const myTasks = ((myTasksR as any)?.data ?? []) as any[];
-  const dueTasks = ((dueTasksR as any)?.data ?? []) as any[];
-
-  // The current job's materials (needs its id) and the "Needs action" inbox (needs
-  // the role) — one final round instead of two more awaits.
-  const [mlRes, actionItems] = await Promise.all([
-    currentJob
-      ? supabase.from("material_lists").select("id, name").eq("job_id", currentJob.id).order("id", { ascending: false }).limit(1).maybeSingle()
-      : Promise.resolve({ data: null }),
-    getActionItems({ todayStr, isStaff, userId: user?.id ?? "" }),
-  ]);
-  const currentMaterials: { id: string; name: string } | null = ((mlRes as any)?.data as any) ?? null;
-
-  // ── derived (no awaits) ──
-  // Merge scheduled-today jobs + segment-today jobs (dedup).
+  // Merge scheduled-today jobs + segment-today jobs (dedup) — derived BEFORE the
+  // next round because the six-slot pool cut reuses today's job ids (rank 4).
   const jobMap = new Map<string, any>();
   for (const j of jobs ?? []) jobMap.set(j.id, { ...j, time: j.scheduled_start });
   for (const s of (segJobs ?? []) as any[]) {
@@ -152,6 +99,114 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     if (j && !jobMap.has(j.id)) jobMap.set(j.id, { ...j, time: null });
   }
   const todayJobs = [...jobMap.values()];
+  const todayJobIds = todayJobs.map((j: any) => j.id as string);
+
+  const uid = user?.id ?? "";
+  // The ownership cut for MY tasks: techs see what's assigned to THEM; staff
+  // additionally see their own unassigned captures (the boss's loose ends).
+  const mineCut = <T,>(q: T): T =>
+    (isStaff
+      ? (q as any).or(`assigned_to.eq.${uid},and(created_by.eq.${uid},assigned_to.is.null)`)
+      : (q as any).eq("assigned_to", uid)) as T;
+  // TODAY'S 6 pool cut — only rows a rank can claim (pinned / overdue / due today /
+  // riding today's jobs / flagged undated), so a deep dated backlog can't starve
+  // the pool out of the 60-row cap. Plain undated tasks never fetch, never promote.
+  const poolCut = [
+    `focus_date.eq.${todayStr}`,
+    `due_date.lte.${todayStr}`,
+    "and(due_date.is.null,priority.gte.1)",
+    ...(todayJobIds.length ? [`job_id.in.(${todayJobIds.join(",")})`] : []),
+  ].join(",");
+  const headCount = () => supabase.from("tasks").select("id", { count: "exact", head: true });
+
+  // The reads that depend on a result above — the caller's current job (the job on
+  // their OWN open time entry, so the "Now" hero is their site, not a coworker's),
+  // the staff-only money pipeline, the six-slot pool, and the door/progress
+  // head-counts — run together in one final round.
+  const [curJobRes, pipeline, poolR, elseCountR, officeCountR, officeDueR, doneTodayR] = await Promise.all([
+    openEntry?.job_id
+      ? supabase.from("jobs").select("id, job_number, name, status, address, customers(name)").eq("id", openEntry.job_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+    // Money pipeline (staff only) — the daily "nothing got missed" nudge.
+    isStaff ? getMoneyPipeline(supabase) : Promise.resolve(null),
+    // TODAY'S 6 pool — my open TOP-LEVEL tasks a rank can claim (subtasks nest
+    // under their parent and never count; children fetch below).
+    mineCut(
+      supabase
+        .from("tasks")
+        .select("id, title, category, priority, due_date, focus_date, job_id, jobs(job_number, name)")
+        .eq("status", "open")
+        .is("parent_id", null),
+    )
+      .or(poolCut)
+      .order("due_date", { ascending: true, nullsFirst: false })
+      .order("priority", { ascending: false })
+      .limit(60),
+    // "EVERYTHING ELSE" door count — the open top-level backlog. Staff: org-wide
+    // minus office (the Office door counts that inventory). Techs: THEIR tasks,
+    // because their door carries ?mine=1 so the number matches the page it opens.
+    isStaff
+      ? headCount().eq("status", "open").is("parent_id", null).neq("category", "office")
+      : headCount().eq("status", "open").is("parent_id", null).eq("assigned_to", uid),
+    // "OFFICE" door counts (staff only) — batch inventory + its due-now slice.
+    isStaff
+      ? headCount().eq("status", "open").is("parent_id", null).eq("category", "office")
+      : Promise.resolve({ count: 0 } as { count: number | null }),
+    isStaff
+      ? headCount().eq("status", "open").is("parent_id", null).eq("category", "office").lte("due_date", todayStr)
+      : Promise.resolve({ count: 0 } as { count: number | null }),
+    // My tasks completed today — the durable half of the card's "2/6".
+    mineCut(
+      headCount()
+        .eq("status", "done")
+        .is("parent_id", null)
+        .gte("completed_at", dayStart.toISOString())
+        .lt("completed_at", dayEnd.toISOString()),
+    ),
+  ]);
+  const currentJob = ((curJobRes as any)?.data as any) ?? undefined;
+  const sixPool = ((poolR as any)?.data ?? []) as any[];
+  // THE shared rank (lib/six-rank — the same function behind the morning digest,
+  // pinned by tests/badge-economy.test.ts, so the phone and the card can never
+  // disagree). The card's pin/on-site glyphs are derived HERE, keeping the pure
+  // rank presentation-free.
+  const scheduledJobSet = new Set(todayJobIds);
+  const six = rankSix(sixPool, { todayStr, scheduledJobIds: scheduledJobSet }).map((t: any) => ({
+    ...t,
+    pinned: t.focus_date === todayStr,
+    onSite: !!t.job_id && scheduledJobSet.has(t.job_id),
+  }));
+  // Pins beyond six wait behind the door — its label says so ("+N pinned").
+  const pinnedOverflow = Math.max(0, sixPool.filter((t: any) => t.focus_date === todayStr).length - SIX_SLOTS);
+
+  // The current job's materials (needs its id), the "Needs action" inbox (needs
+  // the role), and the six's subtasks (need the chosen six) — one final round.
+  const [mlRes, actionItems, kidsRes] = await Promise.all([
+    currentJob
+      ? supabase.from("material_lists").select("id, name").eq("job_id", currentJob.id).order("id", { ascending: false }).limit(1).maybeSingle()
+      : Promise.resolve({ data: null }),
+    getActionItems({ todayStr, isStaff, userId: user?.id ?? "" }),
+    six.length
+      ? supabase
+          .from("tasks")
+          .select("id, title, status, parent_id")
+          .in("parent_id", six.map((t) => t.id))
+          .order("created_at", { ascending: true })
+      : Promise.resolve({ data: [] as any[] }),
+  ]);
+  const currentMaterials: { id: string; name: string } | null = ((mlRes as any)?.data as any) ?? null;
+  const sixKids = ((kidsRes as any)?.data ?? []) as any[];
+
+  // ── derived (no awaits) ──
+  // DOOR NUMBERS — honest by subtraction: whatever the six show doesn't count as
+  // "everything else"; office tasks IN the six stay in the office inventory count
+  // (that door mirrors /tasks/office, which still lists them).
+  const sixNonOffice = six.filter((t) => t.category !== "office").length;
+  const elseCount = Math.max(0, (((elseCountR as any)?.count as number | null) ?? 0) - (isStaff ? sixNonOffice : six.length));
+  const officeCount = (((officeCountR as any)?.count as number | null) ?? 0);
+  const officeDue = (((officeDueR as any)?.count as number | null) ?? 0);
+  const doneToday = (((doneTodayR as any)?.count as number | null) ?? 0);
+  const elseHref = isStaff ? "/tasks" : "/tasks?mine=1";
 
   const hoursToday = (entries ?? []).reduce(
     (sum: number, e: any) =>
@@ -197,13 +252,13 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   const visibleActions = showAllActions ? actionItems : actionItems.slice(0, 5);
 
   // ── Agenda (Now / Next / Later) ─────────────────────────────────────────────
-  // One chronological stream of the day — timed jobs + appointments, plus (staff
-  // only) the crew's tasks DUE today with a small "who" tag, so a dated task shows
-  // on a time surface. Untimed tasks land in "Later". The job you're ON is the
-  // "Now" hero block; the rest groups into Next (soonest) and Later.
+  // One chronological stream of WHERE YOU'LL BE — timed jobs + appointments,
+  // nothing else. Tasks live in Today's 6 above (doctrine law 2: a due-today task
+  // rendering as slot AND agenda row would be a double map). The job you're ON is
+  // the "Now" hero block; the rest groups into Next (soonest) and Later.
   type Agenda = {
     key: string;
-    kind: "job" | "appt" | "task";
+    kind: "job" | "appt";
     time: string | null;
     title: string;
     sub: string | null;
@@ -212,10 +267,9 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     status?: string;
     apptType?: string;
     // Row verbs (staff, day view only): the appt record powers the edit pencil +
-    // move; jobs/tasks carry just what their move contract needs.
+    // move; jobs carry just what their move contract needs.
     appt?: ApptValue;
     jobId?: string;
-    task?: { id: string; category: string; job_id: string | null };
   };
   const agenda: Agenda[] = [
     ...todayJobs
@@ -252,19 +306,6 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         notes: a.notes ?? null,
         assigned_to: a.assigned_to ?? null,
       } satisfies ApptValue,
-    })),
-    ...dueTasks.map((t: any) => ({
-      key: `t-${t.id}`,
-      kind: "task" as const,
-      time: null, // due_date has no time — tasks slot into "Later" alongside untimed jobs
-      title: t.title,
-      sub:
-        [t.assignee?.full_name ?? "Unassigned", t.jobs ? `${t.jobs.job_number} · ${t.jobs.name}` : null]
-          .filter(Boolean)
-          .join(" · ") || null,
-      address: null,
-      href: t.job_id ? `/jobs/${t.job_id}?tab=tasks` : `/tasks/${t.category}`,
-      task: { id: t.id as string, category: (t.category as string) ?? "office", job_id: (t.job_id as string | null) ?? null },
     })),
   ];
   const nowMs = Date.now();
@@ -380,8 +421,6 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           <div className="flex items-center gap-2">
             {i.kind === "appt" ? (
               <Badge tone={i.apptType === "inspection" ? "amber" : "blue"}>{i.apptType}</Badge>
-            ) : i.kind === "task" ? (
-              <Badge tone="slate">task</Badge>
             ) : i.status ? (
               <Badge tone={statusTone(i.status)}>{i.status.replace("_", " ")}</Badge>
             ) : null}
@@ -404,7 +443,6 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           )}
           {isStaff && i.appt && <ApptMoveButton id={i.appt.id} startsAt={i.appt.starts_at} endsAt={i.appt.ends_at} />}
           {isStaff && i.jobId && <JobMoveButton jobId={i.jobId} fromDate={todayStr} />}
-          {isStaff && i.task && <TaskAgendaControls taskId={i.task.id} category={i.task.category} jobId={i.task.job_id} />}
         </div>
       </li>
     ));
@@ -574,9 +612,57 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         </Card>
       )}
 
-      {/* Needs action — the one unified inbox (tasks, jobs to schedule,
-          inquiries, appointments to finish, captures to file), right under the
-          agenda so pull-work follows the day's plan. */}
+      {/* TODAY'S 6 — what must get done (the agenda above is where you'll be).
+          Pins + the ranked pool fill six check rows; subtasks nest under their
+          parent and never count anywhere. */}
+      <YourList
+        six={six as any}
+        subtasks={sixKids as any}
+        todayStr={todayStr}
+        doneToday={doneToday}
+        grabHref={elseCount + officeCount > 0 ? elseHref : null}
+      />
+
+      {/* DOOR LINES — #7+ never vanishes, it just doesn't scream. Grey inventory
+          numbers are allowed on a door (a browse affordance), never on chrome. */}
+      {(officeCount > 0 || elseCount > 0 || pinnedOverflow > 0) && (
+        <div className="mb-4 space-y-2">
+          {isStaff && officeCount > 0 && (
+            <Link
+              href="/tasks/office"
+              className="flex min-h-[44px] items-center gap-x-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm hover:bg-slate-50"
+            >
+              <span className="flex items-center gap-1.5 font-semibold text-slate-900">
+                <FolderClosed className="h-4 w-4 text-slate-400" /> Office
+              </span>
+              <span className="text-slate-600">
+                <strong>{officeCount}</strong>
+                {officeDue > 0 ? ` (${officeDue} due)` : ""}
+              </span>
+              <span className="ml-auto text-xs font-medium text-brand">→</span>
+            </Link>
+          )}
+          {(elseCount > 0 || pinnedOverflow > 0) && (
+            <Link
+              href={elseHref}
+              className="flex min-h-[44px] items-center gap-x-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm hover:bg-slate-50"
+            >
+              <span className="flex items-center gap-1.5 font-semibold text-slate-900">
+                <ListTodo className="h-4 w-4 text-slate-400" /> Everything else
+              </span>
+              <span className="text-slate-600">
+                <strong>{elseCount}</strong>
+                {pinnedOverflow > 0 ? ` · +${pinnedOverflow} pinned` : ""}
+              </span>
+              <span className="ml-auto text-xs font-medium text-brand">→</span>
+            </Link>
+          )}
+        </div>
+      )}
+
+      {/* Needs action — the pure DECISION inbox (money, leads, waiting, leak
+          detectors), right under the day so pull-work follows the plan. Tasks
+          live in Today's 6 + the doors above, never here. */}
       {actionItems.length > 0 && (
         <Card className="mb-4 overflow-hidden">
           <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
@@ -599,12 +685,9 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         </Card>
       )}
 
-      {/* YOUR LIST — the crew checklist: MY open tasks, due-ordered, grouped by
-          job, one-tap check-offs. For a tech this is the day's work list. */}
-      <YourList tasks={myTasks} todayStr={todayStr} />
-
-      {/* Quick add-a-task box — lives next to the inbox it feeds. */}
-      <NewTaskBox jobs={(jobOptRows ?? []) as any} people={people} />
+      {/* Quick add-a-task box — the mint door. Its toast says where the task
+          landed (today's six / Office / Everything else) so capture stays honest. */}
+      <NewTaskBox jobs={(jobOptRows ?? []) as any} people={people} todayStr={todayStr} />
 
       {/* MONEY LINE — the daily "nothing slipped" nudge. ONE money map on My Day:
           this line carries the pipeline totals (to invoice + unpaid/outstanding);

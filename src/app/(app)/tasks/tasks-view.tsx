@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import Link from "next/link";
-import { Plus, Trash2, Flag, Briefcase, Pencil, User } from "lucide-react";
+import { Plus, Trash2, Flag, Briefcase, Pencil, Pin, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Modal, ModalActions } from "@/components/ui/modal";
@@ -11,7 +11,7 @@ import { Card } from "@/components/ui/card";
 import { MoveToDay } from "@/components/move-to-day";
 import { useToast } from "@/components/toast";
 import { formatDate } from "@/lib/utils";
-import { createTask, toggleTask, deleteTask, updateTask, type TaskCategory } from "./actions";
+import { createTask, toggleTask, deleteTask, updateTask, type TaskCategory, type ToggleTaskResult } from "./actions";
 
 export interface ViewTask {
   id: string;
@@ -20,6 +20,8 @@ export interface ViewTask {
   status: string;
   priority: number;
   due_date: string | null;
+  /** = today means pinned into My Day's six (self-expires at midnight). */
+  focus_date?: string | null;
   job_id: string | null;
   assigned_to: string | null;
   notes?: string | null;
@@ -66,12 +68,16 @@ export function NewTaskBox({
   jobs,
   people,
   defaultCategory,
+  todayStr,
 }: {
   jobs: JobOption[];
   people: Person[];
   defaultCategory?: TaskCategory;
+  /** Org-local today — enables the destination toast ("Added to today's six"). */
+  todayStr?: string;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const [pending, start] = useTransition();
@@ -111,6 +117,20 @@ export function NewTaskBox({
         assigned_to: assignedTo || null,
       });
       if (!res.ok) return setError(res.error ?? "Could not save.");
+      // Say where it landed — capture must stay honest now that undated tasks
+      // wait behind My Day's "Everything else" door instead of screaming. A
+      // dup-collapse (createTask handed back the existing task) is never silent.
+      if (res.duplicate) {
+        toast(res.speak ?? "Already on the list.", "info");
+      } else {
+        const landed =
+          todayStr && dueDate && dueDate <= todayStr
+            ? "Added to today's six"
+            : category === "office"
+              ? "Added to Office"
+              : "Added to Everything else";
+        toast(todayStr ? landed : "Task added", "success");
+      }
       setTitle("");
       setJobId("");
       setDueDate("");
@@ -308,6 +328,7 @@ export function TaskRow({
   subtasks = [],
   showCategory = false,
   overdue = false,
+  todayStr,
 }: {
   t: ViewTask;
   jobs: JobOption[];
@@ -316,6 +337,8 @@ export function TaskRow({
   subtasks?: ViewTask[];
   showCategory?: boolean;
   overdue?: boolean;
+  /** Org-local today — enables the "Do today" pin (focus_date) affordance. */
+  todayStr?: string;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -323,14 +346,42 @@ export function TaskRow({
   const [editing, setEditing] = useState(false);
   const [adding, setAdding] = useState(false);
   const [subTitle, setSubTitle] = useState("");
+  const pinnedToday = !!todayStr && t.focus_date === todayStr;
 
   function addSub() {
     if (!subTitle.trim()) return;
     start(async () => {
       const res = await createTask({ title: subTitle, category, parent_id: t.id });
       if (!res?.ok) { toast(res?.error ?? "Couldn't add subtask — try again.", "error"); return; }
+      if (res.duplicate) toast(res.speak ?? "Already on the list.", "info");
       setSubTitle("");
       setAdding(false);
+      router.refresh();
+    });
+  }
+
+  // Parent check-off honors the toggleTask cascade contract: open subtasks are
+  // never silently stranded under a done parent — confirm, then cascade.
+  function toggleParent(done: boolean) {
+    start(async () => {
+      let res: ToggleTaskResult = await toggleTask(t.id, done, { category });
+      if (!res?.ok && res?.needsCascade && done) {
+        const n = res.openChildren ?? subtasks.filter((s) => s.status !== "done").length;
+        if (!confirm(`"${t.title}" has ${n} open subtask${n === 1 ? "" : "s"} — mark ${n === 1 ? "it" : "them"} done too?`)) return;
+        res = await toggleTask(t.id, done, { category, cascade: true });
+      }
+      if (!res?.ok) { toast(res?.error ?? "Couldn't update task — try again.", "error"); return; }
+      router.refresh();
+    });
+  }
+
+  function togglePin() {
+    if (!todayStr) return;
+    start(async () => {
+      // focus_date = the "do today" pin — a date, so it self-expires at midnight.
+      const res = await updateTask(t.id, { focus_date: pinnedToday ? null : todayStr }, { category, jobId: t.job_id });
+      if (!res?.ok) { toast(res?.error ?? "Couldn't update task — try again.", "error"); return; }
+      toast(pinnedToday ? "Unpinned from today" : "Pinned to today's six", "success");
       router.refresh();
     });
   }
@@ -341,7 +392,7 @@ export function TaskRow({
         <input
           type="checkbox"
           checked={t.status === "done"}
-          onChange={(e) => start(async () => { const res = await toggleTask(t.id, e.target.checked, { category }); if (!res?.ok) { toast(res?.error ?? "Couldn't update task — try again.", "error"); return; } router.refresh(); })}
+          onChange={(e) => toggleParent(e.target.checked)}
           className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-brand focus:ring-brand"
         />
         <div className="min-w-0 flex-1">
@@ -376,6 +427,18 @@ export function TaskRow({
             ))}
           </div>
         </div>
+        {/* "Do today" — pin into My Day's six (a date, so it self-expires at
+            midnight). Top-level open tasks only; subtasks are never slots. */}
+        {todayStr && t.status !== "done" && !t.parent_id && (
+          <button
+            onClick={togglePin}
+            disabled={pending}
+            className={pinnedToday ? "text-brand" : "text-slate-300 hover:text-brand"}
+            title={pinnedToday ? "Unpin from today" : "Do today"}
+          >
+            <Pin className="h-4 w-4" fill={pinnedToday ? "currentColor" : "none"} />
+          </button>
+        )}
         <button onClick={() => setAdding((v) => !v)} className="text-slate-300 hover:text-brand" title="Add subtask">
           <Plus className="h-4 w-4" />
         </button>
@@ -493,6 +556,9 @@ export function TasksView({
   showingAllDone?: boolean;
 }) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  // Keep the tech door's ?mine=1 filter when expanding completed history.
+  const mineQ = searchParams.get("mine") === "1" ? "mine=1&" : "";
 
   // Nest subtasks under their parent; a subtask whose parent wasn't fetched
   // (e.g. an old completed parent past the done limit) surfaces as its own row.
@@ -523,6 +589,7 @@ export function TasksView({
       subtasks={childrenByParent.get(t.id) ?? []}
       showCategory={!category}
       overdue={overdue}
+      todayStr={todayStr}
     />
   );
 
@@ -536,7 +603,7 @@ export function TasksView({
 
   return (
     <div>
-      <NewTaskBox jobs={jobs} people={people} defaultCategory={category} />
+      <NewTaskBox jobs={jobs} people={people} defaultCategory={category} todayStr={todayStr} />
       <div className="space-y-4">
         {sections.length === 0 && (
           <Card>
@@ -557,7 +624,7 @@ export function TasksView({
             footer={
               !showingAllDone && doneTotal > doneFetched ? (
                 <div className="border-t border-slate-200/70 bg-white px-4 py-2.5 text-center">
-                  <Link href={`${pathname}?done=all`} className="text-xs font-medium text-brand hover:underline">
+                  <Link href={`${pathname}?${mineQ}done=all`} className="text-xs font-medium text-brand hover:underline">
                     Show all completed ({doneTotal})
                   </Link>
                 </div>

@@ -1,9 +1,25 @@
 // The unified "actionable item" model — the action-layer twin of <ModalActions>.
-// Every surface (tasks, jobs to schedule, inquiries, appointments, captures to
-// file) projects onto ONE shape with ONE set of canonical verbs, so a single
-// list component and a single voice registry can act on all of them.
+// Every surface (jobs to schedule, inquiries, appointments, captures to file,
+// money/legal clocks, leak detectors) projects onto ONE shape with ONE set of
+// canonical verbs, so a single list component and a single voice registry can
+// act on all of them.
+//
+// ── THE BADGE INVARIANT (the law; enforced by tests/badge-economy.test.ts) ──
+// A NUMBER on chrome = distinct items needing a HUMAN DECISION TODAY that the
+// app cannot defer, shown where the deciding happens, display-capped at 9+.
+// No count may be the length of an unbounded or undated set — every counted
+// item carries an expiry: a date, a bounded window, or a rollup.
+//
+// Chores never badge; decisions badge. Overdue tasks scream through Today's 6's
+// red due-chips, not through chrome. Door labels ("Everything else · N",
+// "Office · N") are browse affordances, not badges — grey inventory only.
 
 export type ActionKind =
+  // task/work_order are BADGE-EXEMPT and NO LONGER FED by getActionItems (the
+  // task feeder was deleted — an undated task counted as "due now" forever,
+  // violating the invariant above). The kinds stay in the union because the
+  // dispatch grammar (dispatch.ts resolve()) and the six-slot card's "…" sheet
+  // reuse the (kind, verb) → registry mapping. Do not re-feed them.
   | "task" // an open to-do
   | "work_order" // an open to-do tied to a job
   | "job_to_schedule" // a job with no date yet
@@ -39,6 +55,8 @@ export const STREAM_LABEL: Record<Stream, string> = {
 /** Which stream each kind belongs to — assigned per-kind in ONE place so the
  *  grouped inbox and any digest/summary surface can never disagree. */
 export const KIND_STREAM: Record<ActionKind, Stream> = {
+  // task/work_order entries exist for type completeness + the dispatch grammar —
+  // the inbox never emits them (badge-exempt; see the invariant above).
   task: "today",
   work_order: "today",
   job_to_schedule: "today",

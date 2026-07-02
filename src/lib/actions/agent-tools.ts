@@ -12,6 +12,7 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   "task.create",
   "task.complete",
   "task.setDue",
+  "task.setFocus", // pin/unpin into a day's six ("do this today", the debrief's tomorrow picks) — reversible tier-1
   "task.assign",
   // Bulk triage (T2): sweep MANY open tasks in one confirmed verb ("push all follow-ups to
   // Monday", "clear everything about ZZ TEST"). Staff-only + confirm-gated (the describe

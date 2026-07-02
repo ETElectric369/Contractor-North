@@ -50,9 +50,17 @@ const QUOTE_QUIET_DAYS = 7;
 const QUOTE_EXPIRY_SOON_DAYS = 5;
 
 /**
- * THE single union behind the "Needs action" inbox. Projects rows from the
- * existing tables onto one ActionItem[] — no new tables. RLS already scopes to
- * the org; we additionally scope tech (non-staff) views to their own items.
+ * THE single union behind the "Needs action" inbox — DECISIONS ONLY: money
+ * (overdue/quiet/draft), leads, waiting (contracts/liens/captures/bug rollup),
+ * the leak detectors, appointments, and jobs needing a date. Projects rows from
+ * the existing tables onto one ActionItem[] — no new tables. RLS already scopes
+ * to the org; we additionally scope tech (non-staff) views to their own items.
+ *
+ * TASKS ARE DELIBERATELY NOT FED HERE. To-dos live in exactly three places —
+ * Today's 6 on My Day, /tasks (grouped by due), and the schedule's per-day due
+ * lines. The old task feeder counted every undated task as "due now" forever,
+ * which is exactly what the badge invariant (types.ts) forbids: no count may be
+ * the length of an unbounded or undated set. Do not re-add a task feeder.
  */
 export async function getActionItems(ctx: {
   todayStr: string;
@@ -62,28 +70,14 @@ export async function getActionItems(ctx: {
   const { todayStr, isStaff, userId } = ctx;
   const supabase = await createClient();
   const endOfToday = `${todayStr}T23:59:59`;
-  const clamp = (p: number): 0 | 1 | 2 => (p >= 2 ? 2 : p >= 1 ? 1 : 0);
   // Forward day cuts for the materials-needed window (yyyy-mm-dd; daysAgoStr with a
   // negative offset walks forward). Same ≤1-day tz fuzz as the other feeders.
   const tomorrowStr = daysAgoStr(todayStr, -1);
   const dayAfterTomorrowStr = daysAgoStr(todayStr, -2);
 
-  // Open to-dos due today/overdue — PLUS undated ones, treated as due-now. Every
-  // fast capture path (voice, quick-add) creates tasks without a due_date; a plain
-  // lte() filter silently dropped them, so captured work never reached the inbox.
-  // Undated items sort last (when: null) via the universal ordering rule.
-  let taskQ = supabase
-    .from("tasks")
-    .select("id, title, category, status, priority, due_date, job_id, assignee:assigned_to(full_name), jobs(job_number, name)")
-    .eq("status", "open")
-    .or(`due_date.is.null,due_date.lte.${todayStr}`)
-    .order("priority", { ascending: false });
-  if (!isStaff) taskQ = taskQ.eq("assigned_to", userId);
-
   const empty = Promise.resolve({ data: [] as any[] });
 
-  const [tasksR, jobsR, inqR, apptR, orgR, invR, quoteR, draftR, conR, lienR, bugR, openTimeR, recentTimeR, matJobsR, matSegR] = await Promise.all([
-    taskQ,
+  const [jobsR, inqR, apptR, orgR, invR, quoteR, draftR, conR, lienR, bugR, openTimeR, recentTimeR, matJobsR, matSegR] = await Promise.all([
     // Unscheduled jobs — staff only (the "resting place" for things needing a date).
     // EVERY still-in-flight dateless job, not just estimate/scheduled: an in_progress
     // or on_hold job whose date was cleared must not vanish from every scheduling
@@ -233,26 +227,6 @@ export async function getActionItems(ctx: {
   // Built without `stream`, stamped once at the return from KIND_STREAM — one
   // assignment site means a new kind can't ship with a forgotten/mismatched stream.
   const items: Omit<ActionItem, "stream">[] = [];
-
-  for (const t of (tasksR.data ?? []) as any[]) {
-    // A task is a task — even when it belongs to a job. (Previously a job_id
-    // mislabeled it as a "work order" and stripped its snooze affordance.)
-    const job = t.jobs;
-    items.push({
-      id: t.id,
-      kind: "task",
-      title: t.title,
-      subtitle: job ? `${job.job_number} · ${job.name}` : t.category,
-      who: t.assignee?.full_name ?? null,
-      when: t.due_date,
-      urgency: clamp(Number(t.priority) || 0),
-      done: false,
-      // Land ON the task, not the job's front page: deep-link to the job's Tasks
-      // tab (or the category list for a standalone task) so a tap opens the item.
-      href: t.job_id ? `/jobs/${t.job_id}?tab=tasks` : `/tasks/${t.category}`,
-      affordances: AFFORDANCES.task,
-    });
-  }
 
   for (const j of (jobsR.data ?? []) as any[]) {
     items.push({
