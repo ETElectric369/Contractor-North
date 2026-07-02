@@ -82,12 +82,48 @@ function browserSpeak(text: string, fire: () => void) {
   }
 }
 
+
+/**
+ * SPEAKABLE TEXT — the voice was reading contractor shorthand raw ("E-009" as
+ * "E dash zero zero nine", "10/3" as "ten slash three", "$5,550.00" digit by
+ * digit). Translate app/trade notation into spoken English JUST for the voice —
+ * the screen keeps the compact text. Applied at the speakSmart choke point so
+ * every speak path (assistant, geofence, alerts) inherits it.
+ */
+export function speakable(input: string): string {
+  let t = String(input ?? "");
+  // Wire gauge FIRST — "#10 AWG" → "number 10" (the markdown strip below would eat the #).
+  t = t.replace(/#(\d+)\s*(AWG\b)?/gi, "number $1 ");
+  // Markdown + symbols that read as noise.
+  t = t.replace(/[*_`#]+/g, "").replace(/\u2026|\.{3}/g, ",").replace(/[–—]/g, ", ");
+  // Doc numbers: E-009 → "estimate 9", INV-00012 → "invoice 12", J-018 → "job 18".
+  const DOC: Record<string, string> = { E: "estimate", Q: "quote", J: "job", INV: "invoice", WO: "work order", CO: "change order", PO: "purchase order" };
+  t = t.replace(/\b(E|Q|J|INV|WO|CO|PO)-0*(\d+)\b/g, (_, l: string, n: string) => `${DOC[l]} ${n}`);
+  // Wire sizes — the trade reads these as words: 4/0 → "four aught"; 10/3 → "ten three".
+  const AUGHT: Record<string, string> = { "1": "one aught", "2": "two aught", "3": "three aught", "4": "four aught" };
+  t = t.replace(/\b([1-4])\/0\b/g, (_, n: string) => AUGHT[n]);
+  t = t.replace(/\b(\d{1,2})\/(\d)\b/g, "$1 $2"); // 10/3, 12/2, 14/2 → "ten three" …
+  // Units & electrical notation.
+  t = t.replace(/\b(\d[\d,\.]*)\s*A\b/g, "$1 amp").replace(/\b(\d[\d,\.]*)\s*V\b/g, "$1 volt");
+  t = t.replace(/\b(\d[\d,\.]*)\s*kWh\b/gi, "$1 kilowatt hours").replace(/\b(\d[\d,\.]*)\s*kW\b/gi, "$1 kilowatts");
+  t = t.replace(/(\d)\s*'\s*/g, "$1 feet ").replace(/(\d)\s*"\s*/g, "$1 inches ");
+  t = t.replace(/\b(\d[\d,\.]*)\s*ft\b/gi, "$1 feet").replace(/\b(\d[\d,\.]*)\s*(hrs?|hours?)\b/gi, "$1 hours");
+  t = t.replace(/\b(\d+)\s*ea\b/gi, "$1 each").replace(/\bsq\s*ft\b/gi, "square feet");
+  t = t.replace(/\b4S\b/g, "four S").replace(/\bT&M\b/gi, "time and materials");
+  t = t.replace(/\s*×\s*/g, " by ").replace(/(\d)\s*x\s*(\d)/gi, "$1 by $2");
+  // Money: strip trailing .00; "$5,550" → "5,550 dollars"; cents spoken plainly.
+  t = t.replace(/\$(\d[\d,]*)\.(\d{2})\b/g, (_, d: string, c: string) => (c === "00" ? `${d} dollars` : `${d} dollars and ${c} cents`));
+  t = t.replace(/\$(\d[\d,]*)\b/g, "$1 dollars");
+  t = t.replace(/%/g, " percent").replace(/&/g, " and ");
+  return t.replace(/\s{2,}/g, " ").trim();
+}
+
 /** Speak `text` with the neural voice; fall back to the browser voice only if there's no
  *  provider or playback is blocked. onEnd always fires exactly once. */
 export function speakSmart(text: string, onEnd?: () => void) {
   let fired = false;
   const fire = () => { if (fired) return; fired = true; onEnd?.(); };
-  const t = (text || "").trim();
+  const t = speakable((text || "").trim());
   if (!t) { fire(); return; }
   if (neuralDisabled) { browserSpeak(t, fire); return; }
 
