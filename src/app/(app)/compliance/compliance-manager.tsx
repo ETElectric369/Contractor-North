@@ -113,7 +113,9 @@ export function ComplianceManager({ items, orgId }: { items: ComplianceItem[]; o
 
   return (
     <div className="space-y-4">
-      <div className="flex items-start justify-end gap-2">
+      {/* flex-wrap + items-center so the 3 action buttons wrap as a neat group on
+          a narrow phone instead of cramping/overflowing (bug: button alignment). */}
+      <div className="flex flex-wrap items-center justify-end gap-2">
         <ImportDocsButton orgId={orgId} page="Compliance" />
         <Button size="sm" onClick={() => setAdding((a) => !a)}><Plus className="h-3.5 w-3.5" /> Add item</Button>
       </div>

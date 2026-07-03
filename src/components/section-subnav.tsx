@@ -60,8 +60,12 @@ export function SectionSubnav({ isStaff }: { isStaff?: boolean }) {
   // 2–4 pages: a flex-1 row that fills the phone width evenly — no horizontal scroll (Erik:
   // "shrink to width of page so all of them fit, not have horizontal scroll"). Each pill grows
   // to an equal share; the label truncates while the icon stays put so nothing overflows.
+  // The strip is now ONE sea-glass bar — the same glass/tint/gloss recipe as the
+  // left-edge dock handle — so the responsive top nav matches the side nav (Erik).
+  // Ink-teal text for the resting pills (visible + inviting on the tint); the active
+  // page is a solid brand chip. `relative z-10` keeps the pills above the gloss sheen.
   return (
-    <div className="mb-4 flex w-full gap-1.5 pb-1 lg:hidden">
+    <div className="glass glass-tint glass-gloss mb-4 flex w-full gap-1 rounded-2xl p-1 text-[color:rgb(var(--glass-ink))] lg:hidden">
       {tabs.map((c) => {
         const active = c.href === activeHref;
         const Icon = c.icon;
@@ -69,10 +73,10 @@ export function SectionSubnav({ isStaff }: { isStaff?: boolean }) {
           <Link
             key={c.id}
             href={c.href!}
-            className={`inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors ${
+            className={`relative z-10 inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium transition-colors ${
               active
                 ? "bg-brand text-white shadow-sm"
-                : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                : "hover:bg-white/60"
             }`}
           >
             <Icon className="h-4 w-4 shrink-0" />
