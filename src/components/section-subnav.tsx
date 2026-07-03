@@ -9,10 +9,10 @@ import { SectionSheet } from "./section-sheet";
  *  current page belongs to (via the ONE shared matcher in src/lib/dock.ts) and renders its
  *  siblings — in one of TWO shapes, by how many there are:
  *
- *  ≤6 pages (Today, Clock, Sales…): the horizontal pill strip, pinned in place — a few pills
- *  fit a phone width, so they stay on top where they're glanceable.
+ *  ≤4 pages (Today, Clock, Sales…): the horizontal pill strip, flex-1 filling the full phone
+ *  width — 2–4 pills share it evenly with no horizontal scroll, so they stay glanceable.
  *
- *  >6 pages (Jobs' 13, Office's 12, Money's 9): the strip died as a blind sideways scroll,
+ *  >4 pages (Jobs' 13, Office's 12, Money's 9): the strip died as a blind sideways scroll,
  *  so it's replaced 1:1 by <SectionSheet> — a slim left-edge handle (the one lit "where am
  *  I" chip) opening a vertical slide-over of the same pages, headers as dividers. Never
  *  both: when the handle renders, no strip does (zero duplication).
@@ -43,11 +43,11 @@ export function SectionSubnav({ isStaff }: { isStaff?: boolean }) {
   const activeHref =
     exact?.href ?? tabs.find((c) => c.href && basePath(c.href) === pathname && !c.href.includes("?"))?.href;
 
-  // The ADHD principle, doubled down responsively: past 6 pages the strip stops being
-  // scannable and becomes an endless horizontal scroll, so the long sections swap it for
-  // the left-edge handle + vertical sheet. Headers ride along here (the sheet renders
-  // them as dividers, like the desktop rail) — the strip below still flattens them away.
-  if (tabs.length > 6) {
+  // The ADHD principle, doubled down responsively: past 4 pages the strip stops fitting a
+  // phone width, so the long sections swap it for the left-edge handle + vertical sheet
+  // (Erik: "if more than 4 side tab nav, looks great btw"). Headers ride along here (the
+  // sheet renders them as dividers, like the desktop rail) — the strip below flattens them.
+  if (tabs.length > 4) {
     return (
       <SectionSheet
         group={group}
@@ -57,8 +57,11 @@ export function SectionSubnav({ isStaff }: { isStaff?: boolean }) {
     );
   }
 
+  // 2–4 pages: a flex-1 row that fills the phone width evenly — no horizontal scroll (Erik:
+  // "shrink to width of page so all of them fit, not have horizontal scroll"). Each pill grows
+  // to an equal share; the label truncates while the icon stays put so nothing overflows.
   return (
-    <div className="mb-4 -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 lg:hidden">
+    <div className="mb-4 flex w-full gap-1.5 pb-1 lg:hidden">
       {tabs.map((c) => {
         const active = c.href === activeHref;
         const Icon = c.icon;
@@ -66,14 +69,14 @@ export function SectionSubnav({ isStaff }: { isStaff?: boolean }) {
           <Link
             key={c.id}
             href={c.href!}
-            className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors ${
+            className={`inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors ${
               active
                 ? "bg-brand text-white shadow-sm"
                 : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
             }`}
           >
-            <Icon className="h-4 w-4" />
-            {c.label}
+            <Icon className="h-4 w-4 shrink-0" />
+            <span className="truncate">{c.label}</span>
           </Link>
         );
       })}

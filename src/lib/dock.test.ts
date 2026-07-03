@@ -72,9 +72,11 @@ describe("DOCK time doors — Schedule under Today, Clock keeps the when-did pai
 
 /** Drift guard #2b: the settings-restructure truth. Team is its own Office page now (its
  *  lifecycle verbs lifted out of Settings), and Settings is GONE from the Office list —
- *  it lives behind the avatar (the one predictable door, zero-duplication law). Office
- *  still owns /settings via an owns-alias so the tile lights, but no redundant link. This
- *  pins that a future wave can't re-add a Settings link to Office or drop Team's home. */
+ *  it lives behind the avatar (the one predictable door, zero-duplication law). Settings
+ *  is now its OWN territory, owned by NO dock section: its own side-tab (settings-subnav)
+ *  drives its clusters, so the Office list no longer clutters the settings page (cn-v331).
+ *  This pins that a future wave can't re-add a Settings link to Office, re-own /settings
+ *  through Office, or drop Team's home. */
 describe("DOCK office — Team present, Settings link absent (settings doctrine)", () => {
   const office = DOCK.find((s) => s.key === "office");
   const children = office?.children ?? [];
@@ -88,9 +90,9 @@ describe("DOCK office — Team present, Settings link absent (settings doctrine)
     expect(children.some((c) => c.href && basePath(c.href) === "/settings")).toBe(false);
   });
 
-  it("Office still OWNS /settings (the tile lights on the settings page) via an owns-alias", () => {
-    expect(children.some((c) => c.owns?.some((p) => basePath(p) === "/settings"))).toBe(true);
-    expect(activeSection("/settings")?.key).toBe("office");
+  it("Office does NOT own /settings — Settings is its own territory (its own side-tab drives it)", () => {
+    expect(children.some((c) => c.owns?.some((p) => basePath(p) === "/settings"))).toBe(false);
+    expect(activeSection("/settings")).toBeUndefined();
   });
 
   it("zero duplication: /team has exactly one dock home", () => {
@@ -144,9 +146,9 @@ describe("activeSection — child detail routes light the right section", () => 
     expect(key("/tasks/site-prep")).toBe("today");
   });
 
-  it("the team roster and settings both light Office", () => {
+  it("the team roster lights Office; settings lights NOTHING (its own territory)", () => {
     expect(key("/team")).toBe("office");
-    expect(key("/settings")).toBe("office"); // via the owns-alias, no visible link
+    expect(key("/settings")).toBeUndefined(); // owned by no dock section — its own side-tab drives it
   });
 
   it("unmapped routes match NOTHING — light nothing, never lie", () => {

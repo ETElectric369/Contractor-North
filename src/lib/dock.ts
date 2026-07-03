@@ -216,12 +216,12 @@ export const DOCK: DockSection[] = [
       { id: "o-stock-h", label: "Stock", icon: Boxes, header: true, staffOnly: true },
       { id: "ma-stock", label: "Inventory", icon: Boxes, href: "/inventory", staffOnly: true },
       // Diagnostics. Settings is NO LONGER a link here (zero-duplication law): it lives
-      // behind the avatar (the predictable phone-app door, cn-v326), so a second Office
-      // entry would be a duplicate door. Office still OWNS /settings for the where-am-I
-      // glance — the `owns` alias below lights the Office tile when you're in Settings
-      // without rendering a redundant link.
+      // behind the avatar (the predictable phone-app door, cn-v326). Office no longer OWNS
+      // /settings either — Settings is its own territory now, owned by no dock section, so
+      // its OWN side-tab (settings-subnav) drives its clusters instead of Office's list
+      // cluttering the settings page (cn-v331).
       { id: "o-diag-h", label: "Diagnostics", icon: ScrollText, header: true, staffOnly: true },
-      { id: "o-activity", label: "Activity", icon: Activity, href: "/activity", staffOnly: true, owns: ["/settings"] },
+      { id: "o-activity", label: "Activity", icon: Activity, href: "/activity", staffOnly: true },
       { id: "o-bugs", label: "Bug watch", icon: Bug, href: "/bugs", staffOnly: true },
       { id: "o-audit", label: "Activity audit", icon: ScrollText, href: "/audit", staffOnly: true },
     ],

@@ -3,7 +3,8 @@ import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Tabs } from "@/components/tabs";
+import { User, Building2, Wallet, CalendarDays, Plug } from "lucide-react";
+import { SettingsSubnav } from "./settings-subnav";
 import { getOrgSettings } from "@/lib/org-settings";
 import { OrgSettingsForm } from "./org-settings-form";
 import { DocumentDesigner } from "./document-designer";
@@ -68,7 +69,7 @@ export default async function SettingsPage({
 }: {
   searchParams: Promise<{ billing?: string; billing_error?: string; qbo?: string; gcal?: string; tab?: string }>;
 }) {
-  const { billing, billing_error, qbo, gcal } = await searchParams;
+  const { billing, billing_error, qbo, gcal, tab } = await searchParams;
   const supabase = await createClient();
   const {
     data: { user },
@@ -122,6 +123,7 @@ export default async function SettingsPage({
   const youTab = {
     id: "you",
     label: "You",
+    icon: User,
     content: (
       <div className="space-y-6">
         <Section title="Your profile">
@@ -166,6 +168,7 @@ export default async function SettingsPage({
         {
           id: "company",
           label: "Company",
+          icon: Building2,
           content: (
             <div className="space-y-6">
               <Section title="Company details"><OrgSettingsForm org={org as Organization} /></Section>
@@ -217,6 +220,7 @@ export default async function SettingsPage({
         {
           id: "money",
           label: "Money & docs",
+          icon: Wallet,
           content: (
             <div className="space-y-6">
               <Section title="Tax, pricing & financial defaults"><TaxRatesManager taxRates={(taxRates ?? []) as any} pricingLevels={(pricingLevels ?? []) as any} settings={settings} /></Section>
@@ -292,6 +296,7 @@ export default async function SettingsPage({
         {
           id: "scheduling",
           label: "Scheduling",
+          icon: CalendarDays,
           content: (
             <div className="space-y-6">
               <Section title="Scheduler & timesheets">
@@ -320,6 +325,7 @@ export default async function SettingsPage({
         {
           id: "integrations",
           label: "Integrations",
+          icon: Plug,
           content: (
             <div className="space-y-6">
               <Section title="AI assistant">
@@ -337,14 +343,25 @@ export default async function SettingsPage({
       ]
     : [];
 
-  // "You" leads for techs (their only tab); for staff it follows the admin clusters — the
-  // set-once org config leads, personal settings sit at the end (frequency law).
-  const tabs = isStaff ? [...adminTabs, youTab] : [youTab];
+  // "You" leads for techs (their only cluster); for staff it follows the admin clusters —
+  // the set-once org config leads, personal settings sit at the end (frequency law). This
+  // order also fixes the default cluster: the first entry is what ?tab= falls back to.
+  const clusters = isStaff ? [...adminTabs, youTab] : [youTab];
+
+  // ROUTE-DRIVEN (not client <Tabs>): the left side-tab (settings-subnav) drives which
+  // cluster shows via ?tab=<id>, so its own side-tab can replace the Office list that was
+  // cluttering /settings (cn-v331). Resolve the active cluster from the ?tab= param, default
+  // to the first role-appropriate cluster (staff → "company", tech → "you"), exactly the old
+  // <Tabs urlSync> default (tabs[0]). An unknown/gated tab falls back to that default too.
+  const active = clusters.find((c) => c.id === tab) ?? clusters[0];
+  // The nav needs only id/label/icon per cluster — the panels render server-side below.
+  const navClusters = clusters.map((c) => ({ id: c.id, label: c.label, icon: c.icon }));
 
   return (
     <div className="mx-auto max-w-3xl">
       <PageHeader title="Settings" description="Configure every part of your business." />
-      <Tabs tabs={tabs} urlSync />
+      <SettingsSubnav clusters={navClusters} activeTab={active.id} />
+      <div>{active.content}</div>
     </div>
   );
 }
