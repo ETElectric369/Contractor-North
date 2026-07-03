@@ -328,27 +328,32 @@ export class SpeakQueue {
 // ABOVE the echo-cancelled TTS bleed, we treat it as the user interrupting: stop playback and let the
 // caller re-arm the mic to capture what they're saying.
 //
-// TUNING: BARGE_IN_RMS is the loudness gate; BARGE_IN_SUSTAIN_MS is how long it must stay above the
-// gate. Both are deliberately conservative — with echoCancellation on, Nort's own voice bleeds through
-// at a LOW RMS, so the gate sits well above that so Nort can't self-trigger. If Erik reports Nort
-// cutting ITSELF off, raise BARGE_IN_RMS (e.g. 0.14 → 0.18) and/or lengthen BARGE_IN_SUSTAIN_MS. If it
-// won't interrupt when he talks over it, lower BARGE_IN_RMS (e.g. → 0.10) first. Better to miss an
-// interruption than to have Nort constantly cut itself off, so bias HIGH when unsure.
-export const BARGE_IN_RMS = 0.14; // input RMS (0..1) that counts as "the user is talking over Nort"
-export const BARGE_IN_SUSTAIN_MS = 250; // must stay above the gate this long, continuously, to fire
-const BARGE_IN_POLL_MS = 60; // how often we sample the analyser during playback
+// TUNING — the gate is now ADAPTIVE so it works parked AND at 60mph. Erik reported (cn-v338 field
+// test) that a fixed 0.14 gate never fired — his voice over the truck speaker didn't clear it. So
+// instead of one absolute number: sample the ambient (engine + road + Nort's echo bleed) for the first
+// moment of playback, then set the gate to ambient + BARGE_IN_MARGIN, never below BARGE_IN_FLOOR. A
+// deliberate talk-over always sits clearly above the road noise; the road noise itself never trips it.
+// If it STILL won't interrupt, lower BARGE_IN_FLOOR/MARGIN; if Nort cuts ITSELF off, raise them.
+export const BARGE_IN_FLOOR = 0.085; // the gate never drops below this (quiet cab → still needs real voice)
+export const BARGE_IN_MARGIN = 0.06; // how far ABOVE the measured ambient a talk-over must be
+export const BARGE_IN_BASELINE_MS = 320; // sample ambient this long at the start of playback
+const BARGE_IN_BASELINE_CAP = 0.13; // never let the learned ambient push the gate absurdly high
+export const BARGE_IN_SUSTAIN_MS = 220; // must stay above the gate this long, continuously, to fire
+const BARGE_IN_POLL_MS = 55; // how often we sample the analyser during playback
 
 /**
  * Watch the live analyser for a sustained talk-over during playback. `rmsFn` returns the current input
- * RMS (0..1) or null when there's no live analyser (then we CANNOT judge → never interrupt). `onBargeIn`
- * fires at most once, when energy has stayed above BARGE_IN_RMS for BARGE_IN_SUSTAIN_MS continuously.
- * Returns a stop() to tear the watcher down (call it from the speak onDone and on stop). Never throws;
- * any uncertainty defaults to NOT interrupting.
+ * RMS (0..1) or null when there's no live analyser (then we CANNOT judge → never interrupt). The gate
+ * self-calibrates: for the first BASELINE_MS it learns the ambient floor, then fires when energy stays
+ * MARGIN above that (but never below FLOOR) for SUSTAIN_MS continuously. onBargeIn fires at most once.
+ * Returns a stop() to tear the watcher down. Never throws; any uncertainty defaults to NOT interrupting.
  */
 export function startBargeInMonitor(rmsFn: () => number | null, onBargeIn: () => void): () => void {
   let timer: ReturnType<typeof setInterval> | null = null;
   let aboveSince = 0;
   let done = false;
+  const startedAt = Date.now();
+  let ambient = 0; // running max of the quiet baseline seen in the first window
   const teardown = () => {
     if (timer) { clearInterval(timer); timer = null; }
   };
@@ -358,7 +363,14 @@ export function startBargeInMonitor(rmsFn: () => number | null, onBargeIn: () =>
     try { rms = rmsFn(); } catch { rms = null; }
     // No analyser / read failed → we can't tell, so never interrupt (fall back to today's behavior).
     if (rms == null) { aboveSince = 0; return; }
-    if (rms >= BARGE_IN_RMS) {
+    // Learn the ambient (engine/road/echo) during the opening window, then hold it.
+    if (Date.now() - startedAt < BARGE_IN_BASELINE_MS) {
+      if (rms > ambient) ambient = Math.min(rms, BARGE_IN_BASELINE_CAP);
+      aboveSince = 0; // don't fire while still calibrating
+      return;
+    }
+    const gate = Math.max(BARGE_IN_FLOOR, ambient + BARGE_IN_MARGIN);
+    if (rms >= gate) {
       if (!aboveSince) aboveSince = Date.now();
       else if (Date.now() - aboveSince >= BARGE_IN_SUSTAIN_MS) {
         done = true;
