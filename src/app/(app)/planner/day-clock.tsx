@@ -134,13 +134,13 @@ export function DayClock({
               disabled={busy}
               className="shrink-0 text-red-600"
             >
-              <Square className="h-4 w-4" /> Clock out
+              <Square className="h-4 w-4" /> Clock Out
             </Button>
           ) : (
             // Field crew clock out on the full timeclock so they answer the codes+hours
             // question (this quick widget can't capture the breakdown).
             <Button variant="outline" onClick={() => router.push("/timeclock")} className="shrink-0 text-red-600">
-              <Square className="h-4 w-4" /> Clock out
+              <Square className="h-4 w-4" /> Clock Out
             </Button>
           )
         ) : (
@@ -149,7 +149,7 @@ export function DayClock({
             disabled={busy}
             className="shrink-0"
           >
-            <Play className="h-4 w-4" /> Clock in
+            <Play className="h-4 w-4" /> Clock In
           </Button>
         )}
       </div>

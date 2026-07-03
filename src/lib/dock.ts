@@ -102,7 +102,7 @@ export const DOCK: DockSection[] = [
     icon: Sun,
     href: "/planner",
     children: [
-      { id: "t-day", label: "My day", icon: Sun, href: "/planner" },
+      { id: "t-day", label: "My Day", icon: Sun, href: "/planner" },
       // Schedule = planning the WHEN-WILL, so it lives with Today (plan/do), not behind the
       // timeclock's impulse door — it sat as Clock's 3rd pill and nothing in the dock said
       // "calendar". Office-only (/schedule redirects techs to /planner). /calendar,
@@ -118,7 +118,7 @@ export const DOCK: DockSection[] = [
     icon: Briefcase,
     href: "/jobs",
     children: [
-      { id: "j-all", label: "All jobs", icon: Briefcase, href: "/jobs" },
+      { id: "j-all", label: "All Jobs", icon: Briefcase, href: "/jobs" },
       // The job lifecycle, GENERATED from the canonical JOB_STATUSES spine (its order IS the
       // lifecycle) so this list can't drift from the enum again — it had: missing invoiced +
       // cancelled, and a hand-written "Completed" vs canonical "complete". Guarded by dock.test.ts.
@@ -132,9 +132,9 @@ export const DOCK: DockSection[] = [
       // Permits live under active jobs now (moved out of Office per Alexa).
       { id: "j-across-h", label: "Across all jobs", icon: Layers, header: true, staffOnly: true },
       { id: "j-permits", label: "Permits", icon: Stamp, href: "/permits", staffOnly: true },
-      { id: "j-wo", label: "Work orders", icon: Wrench, href: "/work-orders", staffOnly: true },
+      { id: "j-wo", label: "Work Orders", icon: Wrench, href: "/work-orders", staffOnly: true },
       { id: "j-mat", label: "Materials", icon: Boxes, href: "/materials", staffOnly: true },
-      { id: "j-co", label: "Change orders", icon: FileText, href: "/change-orders", staffOnly: true },
+      { id: "j-co", label: "Change Orders", icon: FileText, href: "/change-orders", staffOnly: true },
       // Plans & LiDAR (plan markup / scans → take-off → work order) — was an orphan route with
       // zero inbound links; given a home under Jobs where take-offs feed the rest of the lifecycle.
       { id: "j-plans", label: "Plans & LiDAR", icon: ScanLine, href: "/plans", staffOnly: true },
@@ -179,14 +179,14 @@ export const DOCK: DockSection[] = [
       { id: "m-inv", label: "Invoices", icon: Receipt, href: "/billing" },
       { id: "m-pay", label: "Payments", icon: CreditCard, href: "/payments" },
       { id: "m-bills", label: "Bills & POs", icon: Wallet, href: "/bills", owns: ["/purchasing"] },
-      { id: "m-price", label: "Price list", icon: Tags, href: "/price-list" },
+      { id: "m-price", label: "Price List", icon: Tags, href: "/price-list" },
       // Money admin — promoted out of Office (Alexa's open "under billing?" call, now answered).
       { id: "m-ma-h", label: "Money admin", icon: Calculator, header: true },
       { id: "ma-payroll", label: "Payroll", icon: Banknote, href: "/payroll" },
-      { id: "ma-tax", label: "Tax report", icon: Calculator, href: "/tax-report" },
+      { id: "ma-tax", label: "Tax Report", icon: Calculator, href: "/tax-report" },
       { id: "ma-analytics", label: "Analytics", icon: TrendingUp, href: "/analytics" },
       { id: "ma-recur", label: "Recurring", icon: Repeat, href: "/recurring" },
-      { id: "ma-petty", label: "Petty cash", icon: Coins, href: "/petty-cash" },
+      { id: "ma-petty", label: "Petty Cash", icon: Coins, href: "/petty-cash" },
     ],
   },
   {
@@ -207,7 +207,7 @@ export const DOCK: DockSection[] = [
       // own page (settings doctrine: Settings keeps zero team UI). Office-only.
       { id: "o-hr-h", label: "HR", icon: UserCog, header: true },
       { id: "o-team", label: "Team", icon: Users, href: "/team", staffOnly: true },
-      { id: "o-docs", label: "Employee docs", icon: IdCard, href: "/employee-docs", staffOnly: true },
+      { id: "o-docs", label: "Employee Docs", icon: IdCard, href: "/employee-docs", staffOnly: true },
       { id: "o-forms", label: "Forms", icon: ClipboardList, href: "/forms" },
       { id: "o-resources", label: "Resources", icon: BookUser, href: "/resources" },
       { id: "o-handbook", label: "Handbook", icon: BookOpen, href: "/handbook" },
@@ -222,8 +222,8 @@ export const DOCK: DockSection[] = [
       // cluttering the settings page (cn-v331).
       { id: "o-diag-h", label: "Diagnostics", icon: ScrollText, header: true, staffOnly: true },
       { id: "o-activity", label: "Activity", icon: Activity, href: "/activity", staffOnly: true },
-      { id: "o-bugs", label: "Bug watch", icon: Bug, href: "/bugs", staffOnly: true },
-      { id: "o-audit", label: "Activity audit", icon: ScrollText, href: "/audit", staffOnly: true },
+      { id: "o-bugs", label: "Bug Watch", icon: Bug, href: "/bugs", staffOnly: true },
+      { id: "o-audit", label: "Activity Audit", icon: ScrollText, href: "/audit", staffOnly: true },
     ],
   },
   {
@@ -236,7 +236,7 @@ export const DOCK: DockSection[] = [
     href: "/crm",
     staffOnly: true,
     // Just the one destination — Leads lives under Sales (the pipeline), not duplicated here.
-    children: [{ id: "c-all", label: "All contacts", icon: Users, href: "/crm" }],
+    children: [{ id: "c-all", label: "All Contacts", icon: Users, href: "/crm" }],
   },
   {
     // Pulled out of Office to its own dock section — the calculators/utilities are a daily
@@ -245,7 +245,7 @@ export const DOCK: DockSection[] = [
     label: "Tools",
     icon: Wrench,
     href: "/tools",
-    children: [{ id: "tl-all", label: "Calculators & tools", icon: Wrench, href: "/tools" }],
+    children: [{ id: "tl-all", label: "Calculators & Tools", icon: Wrench, href: "/tools" }],
   },
 ];
 

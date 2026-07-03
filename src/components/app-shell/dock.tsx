@@ -139,7 +139,10 @@ function DockInner({ branding, role, badges }: DockProps) {
         style={{ transform: "translateZ(0)", WebkitBackfaceVisibility: "hidden" }}
         // Cap the home-indicator inset so a big safe-area on some iPhones doesn't
         // make the dock tower over its 9px labels (bug: "dock bigger than other screens").
-        className="app-bottom-nav glass fixed inset-x-2 bottom-2 z-[70] flex items-center rounded-2xl border-white/40 px-0.5 pb-[min(env(safe-area-inset-bottom),0.5rem)] lg:hidden"
+        // gap-1 SEPARATES the tiles so the lit pill no longer touches its neighbor; the
+        // balanced pt-1 / safe-area-floored pb keeps the content vertically centered above
+        // the home indicator instead of riding high with dead space below it.
+        className="app-bottom-nav glass fixed inset-x-2 bottom-2 z-[70] flex items-center gap-1 rounded-2xl border-white/40 px-1 pt-1 pb-[max(0.25rem,min(env(safe-area-inset-bottom),0.5rem))] lg:hidden"
       >
         {sections.map((s) => {
           const Icon = s.icon;
@@ -148,14 +151,16 @@ function DockInner({ branding, role, badges }: DockProps) {
             <Link
               key={s.key}
               href={s.href}
-              className={`relative flex flex-1 flex-col items-center gap-0.5 rounded-xl py-2 text-[9px] font-medium ${
+              // gap-1 (not 0.5) between icon and label for readability; 10px label (not 9px)
+              // reads better in the field and still fits all tiles at 375px.
+              className={`relative flex flex-1 flex-col items-center gap-1 rounded-xl px-1 py-1.5 text-[10px] font-medium ${
                 // Same `.seaglass-active` fill (tint + gloss + ink) as the desktop rail tile.
                 // Icon+label carry `relative z-10` to sit above the gloss sheen.
                 onRoute ? "seaglass-active" : "text-slate-600"
               }`}
               aria-label={s.label}
             >
-              <Icon className="relative z-10 h-5 w-5 shrink-0" />
+              <Icon className="relative z-10 h-[18px] w-[18px] shrink-0" />
               <span className="relative z-10 whitespace-nowrap leading-none">{s.short ?? s.label}</span>
             </Link>
           );
