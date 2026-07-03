@@ -14,6 +14,17 @@ function toLocalDate(iso: string | null): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
+/** ISO → "HH:MM" in local time for a time input. The 8 AM all-day default reads
+ *  as blank (no explicit time) — the same convention the calendar uses to decide
+ *  whether to show a time at all. */
+function toLocalTime(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const p = (n: number) => String(n).padStart(2, "0");
+  const hm = `${p(d.getHours())}:${p(d.getMinutes())}`;
+  return hm === "08:00" ? "" : hm;
+}
+
 export interface ScheduleSegment {
   start_date: string; // yyyy-mm-dd
   end_date: string;
@@ -42,11 +53,14 @@ export function JobScheduleControl({
         : [{ start: "", end: "" }];
 
   const [ranges, setRanges] = useState<DateRange[]>(initial);
+  // Optional time-of-day for the job's PRIMARY start (the first range). Blank =
+  // all-day; a time refines only jobs.scheduled_start, not per-segment.
+  const [startTime, setStartTime] = useState<string>(toLocalTime(start));
   const [pending, startT] = useTransition();
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  function persist(next: DateRange[]) {
+  function persist(next: DateRange[], time = startTime) {
     setError(null);
     const filled = next.filter((r) => r.start);
     if (filled.some((r) => r.end && r.end < r.start)) {
@@ -54,7 +68,8 @@ export function JobScheduleControl({
       return;
     }
     startT(async () => {
-      const res = await setJobScheduleRanges(id, filled);
+      // Only send a time when there's a primary start to attach it to.
+      const res = await setJobScheduleRanges(id, filled, filled.length ? time || null : null);
       if (!res.ok) {
         setError(res.error ?? "Could not save.");
         return;
@@ -69,6 +84,11 @@ export function JobScheduleControl({
     const next = ranges.map((r, idx) => (idx === i ? { ...r, ...patch } : r));
     setRanges(next);
     persist(next);
+  }
+
+  function updateTime(time: string) {
+    setStartTime(time);
+    persist(ranges, time);
   }
 
   function addRange() {
@@ -103,6 +123,22 @@ export function JobScheduleControl({
             className="h-9 w-[150px]"
             aria-label={`End date ${i + 1}`}
           />
+          {i === 0 && (
+            // Optional start time on the PRIMARY range only — refines
+            // scheduled_start's time-of-day; blank keeps the job all-day.
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-slate-400">at</span>
+              <Input
+                type="time"
+                value={startTime}
+                onChange={(ev) => updateTime(ev.target.value)}
+                disabled={pending}
+                className="h-9 w-[120px]"
+                aria-label="Start time (optional)"
+                title="Optional start time — leave blank for all-day"
+              />
+            </div>
+          )}
           {ranges.length > 1 && (
             <button
               type="button"

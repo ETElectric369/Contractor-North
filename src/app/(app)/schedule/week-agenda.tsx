@@ -54,8 +54,18 @@ export function WeekAgenda({
     return found.length > 2 ? `${shown} +${found.length - 2}` : shown;
   };
 
+  // A job's start time, unless it's the all-day sentinel (8 AM local = "no explicit
+  // time" — see setJobScheduleRanges). Lets a job with a real start time show it,
+  // like appointments do, while all-day jobs stay time-less.
+  const jobStartLabel = (iso: string | null): string | null => {
+    if (!iso) return null;
+    const d = new Date(iso);
+    if (d.getHours() === 8 && d.getMinutes() === 0) return null;
+    return fmtTime(iso);
+  };
   const jobChip = (k: string, { job, pos }: JobOnDay) => {
     const ini = initials(job.assigned_to);
+    const t = jobStartLabel(job.scheduled_start);
     return (
       <button
         key={`j-${job.id}`}
@@ -71,6 +81,7 @@ export function WeekAgenda({
             : "border-blue-200 bg-blue-50 text-blue-900 hover:border-blue-400"
         }`}
       >
+        {t && <span className="shrink-0 text-[10px] font-semibold text-blue-700">{t}</span>}
         <span className="min-w-0 flex-1 truncate font-medium">{job.name}</span>
         {pos && (
           // "d2/3" decoded for hover + screen readers: "Day 2 of 3".

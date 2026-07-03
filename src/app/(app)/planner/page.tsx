@@ -372,6 +372,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       ...((wJobs ?? []) as any[]).map((j) => ({
         key: `wj-${j.id}`,
         kind: "job" as const,
+        jobId: j.id,
         time: j.scheduled_start,
         title: `${j.job_number} — ${j.name}`,
         sub: [j.customers?.name, j.address].filter(Boolean).join(" · ") || null,
@@ -393,16 +394,30 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       .filter((i) => i.time)
       .sort((a, b) => (a.time as string).localeCompare(b.time as string));
     const tzDayOf = (iso: string) => new Date(iso).toLocaleDateString("en-CA", { timeZone: tz });
+    // Segment-first dedup (mirrors calendar-view.byDay + the day view): a job that
+    // has ANY segment rows is placed ONLY on its segment days for this week — its
+    // scheduled_start-derived (timed) row is dropped so it can't double-list on a
+    // different day, and can't collide with itself on the same day. Jobs with no
+    // segments still place by scheduled_start as before. Keyed by JOB ID, not href.
+    const segJobIds = new Set(((wSegs ?? []) as any[]).map((s) => s.jobs?.id).filter(Boolean));
     for (const dayStr of weekDayStrs) {
-      const items: Agenda[] = timedWeek.filter((it) => tzDayOf(it.time as string) === dayStr);
+      const items: Agenda[] = timedWeek.filter(
+        (it) => tzDayOf(it.time as string) === dayStr && !(it.kind === "job" && it.jobId && segJobIds.has(it.jobId)),
+      );
+      // Per-day set of job IDs already placed, so a job covered by two overlapping
+      // segments (or a lingering timed row) appears exactly once per covered day.
+      const placedJobIds = new Set<string>(
+        items.filter((it) => it.kind === "job" && it.jobId).map((it) => it.jobId as string),
+      );
       for (const s of (wSegs ?? []) as any[]) {
         const j = s.jobs;
         if (!j || s.start_date > dayStr || s.end_date < dayStr) continue;
-        // Dedup: skip if this job already shows on this day via a timed row.
-        if (items.some((it) => it.kind === "job" && it.href === `/jobs/${j.id}`)) continue;
+        if (placedJobIds.has(j.id)) continue;
+        placedJobIds.add(j.id);
         items.push({
           key: `ws-${j.id}-${dayStr}`,
           kind: "job",
+          jobId: j.id,
           time: null,
           title: `${j.job_number} — ${j.name}`,
           sub: [j.customers?.name, j.address].filter(Boolean).join(" · ") || null,

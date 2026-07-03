@@ -5,7 +5,7 @@ import { emptyToNull } from "@/lib/forms";
 import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
 import { getOrgSettings } from "@/lib/org-settings";
-import { todayStrInTz, tzLocalHourUtc } from "@/lib/tz";
+import { todayStrInTz, tzLocalHourUtc, tzDateTimeUtc } from "@/lib/tz";
 import { addDaySegment, shiftSegmentCovering } from "@/lib/schedule-math";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -21,6 +21,22 @@ const DAY_END_HOUR = 16; // 4 PM local
 async function orgTimezone(supabase: SupabaseClient): Promise<string> {
   const { data } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
   return getOrgSettings((data as any)?.settings).timezone;
+}
+
+/** The stored scheduled_start's wall-clock "HH:MM" in the org timezone, or null.
+ *  Lets a day-move preserve an explicit start time instead of snapping back to
+ *  the 8 AM default. A time that reads exactly as the all-day default window
+ *  start (08:00) is treated as "no explicit time" — the same convention the
+ *  calendar uses to decide whether to render a time at all. */
+function localHmInTz(iso: string | null, tz: string): string | null {
+  if (!iso) return null;
+  const hm = new Intl.DateTimeFormat("en-GB", {
+    timeZone: tz,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(new Date(iso));
+  return hm === `${String(DAY_START_HOUR).padStart(2, "0")}:00` ? null : hm;
 }
 
 /** Advance an early-stage job to "scheduled" once it has a date — without ever
@@ -174,10 +190,17 @@ export type DateRange = { start: string; end: string }; // yyyy-mm-dd each
 
 /** Canonical writer for a job's schedule as one or more date ranges. Replaces
  *  all segments, and mirrors the overall min start / max end onto
- *  jobs.scheduled_start/end (8am–4pm local) so every legacy reader still works. */
+ *  jobs.scheduled_start/end (8am–4pm local) so every legacy reader still works.
+ *
+ *  `startTime` ("HH:MM", optional) refines ONLY the single primary
+ *  scheduled_start mirror — a real time-of-day the calendar renders instead of
+ *  the all-day window. Segments stay date-only (a time refines the primary start,
+ *  not each span). When omitted, any explicit time already on the job is
+ *  preserved (so a day-move keeps it) and otherwise the 8 AM default is used. */
 export async function setJobScheduleRanges(
   jobId: string,
   ranges: DateRange[],
+  startTime?: string | null,
 ): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -198,8 +221,29 @@ export async function setJobScheduleRanges(
   const tz = await orgTimezone(supabase);
   const minStart = clean.length ? clean[0].start : null;
   const maxEnd = clean.length ? clean.reduce((m, r) => (r.end > m ? r.end : m), clean[0].end) : null;
+
+  // Decide the primary start's time-of-day, with THREE distinct intents:
+  //  • startTime === undefined (movers, undo, registry verb): PRESERVE whatever
+  //    real time the job already carries so a day-move doesn't snap it to 8 AM.
+  //  • startTime "HH:MM": use it (an explicit time-of-day the editor set).
+  //  • startTime null/"" (the editor cleared the time input): back to all-day.
+  let clock: string | null;
+  if (/^\d{2}:\d{2}/.test(startTime ?? "")) {
+    clock = (startTime as string).slice(0, 5);
+  } else if (startTime === undefined && minStart) {
+    const { data: prior } = await supabase.from("jobs").select("scheduled_start").eq("id", jobId).maybeSingle();
+    clock = localHmInTz((prior as any)?.scheduled_start ?? null, tz);
+  } else {
+    clock = null; // explicit clear (null/"") or no start → 8 AM default window
+  }
+  const startIso = minStart
+    ? clock
+      ? tzDateTimeUtc(minStart, clock, tz) ?? tzLocalHourUtc(minStart, DAY_START_HOUR, tz).toISOString()
+      : tzLocalHourUtc(minStart, DAY_START_HOUR, tz).toISOString()
+    : null;
+
   const patch: Record<string, unknown> = {
-    scheduled_start: minStart ? tzLocalHourUtc(minStart, DAY_START_HOUR, tz).toISOString() : null,
+    scheduled_start: startIso,
     scheduled_end: maxEnd ? tzLocalHourUtc(maxEnd, DAY_END_HOUR, tz).toISOString() : null,
     updated_at: new Date().toISOString(),
   };

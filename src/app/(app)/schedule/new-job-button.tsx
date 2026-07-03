@@ -28,6 +28,7 @@ interface JobForm {
   billing_type: string;
   address: string;
   scheduled_date: string;
+  scheduled_time: string; // optional "HH:MM"; blank = all-day (default 8–4 window)
   description: string;
 }
 
@@ -62,6 +63,7 @@ export function NewJobButton({
     billing_type: "tm",
     address: "",
     scheduled_date: today,
+    scheduled_time: "",
     description: "",
   });
   const [form, setForm] = useState<JobForm>(emptyForm);
@@ -124,9 +126,12 @@ export function NewJobButton({
   function onSubmit(formData: FormData) {
     setError(null);
     // Convert the local date to ISO here so the server never guesses the timezone.
+    // A time is OPTIONAL (fragment-first): blank keeps the all-day 8 AM default;
+    // an explicit "HH:MM" rides through as the job's real start time-of-day.
+    const clock = /^\d{2}:\d{2}/.test(form.scheduled_time) ? form.scheduled_time.slice(0, 5) : "08:00";
     formData.set(
       "scheduled_start",
-      form.scheduled_date ? new Date(`${form.scheduled_date}T08:00:00`).toISOString() : "",
+      form.scheduled_date ? new Date(`${form.scheduled_date}T${clock}:00`).toISOString() : "",
     );
     start(async () => {
       const res = await createJob(formData);
@@ -286,14 +291,26 @@ export function NewJobButton({
               }}
             />
           </div>
-          <div>
-            <Label htmlFor="scheduled_start">Scheduled date</Label>
-            <Input
-              id="scheduled_start"
-              type="date"
-              value={form.scheduled_date}
-              onChange={(e) => patch({ scheduled_date: e.target.value })}
-            />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label htmlFor="scheduled_start">Scheduled date</Label>
+              <Input
+                id="scheduled_start"
+                type="date"
+                value={form.scheduled_date}
+                onChange={(e) => patch({ scheduled_date: e.target.value })}
+              />
+            </div>
+            <div>
+              <Label htmlFor="scheduled_time">Start time</Label>
+              <Input
+                id="scheduled_time"
+                type="time"
+                value={form.scheduled_time}
+                onChange={(e) => patch({ scheduled_time: e.target.value })}
+              />
+              <p className="mt-1 text-xs text-slate-400">Optional — leave blank for all-day.</p>
+            </div>
           </div>
           <div>
             <Label htmlFor="description">Description</Label>

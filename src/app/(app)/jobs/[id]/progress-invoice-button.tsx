@@ -9,6 +9,7 @@ import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { SegmentedControl } from "@/components/ui/segmented";
 import { formatCurrency } from "@/lib/utils";
+import { useToast } from "@/components/toast";
 import { createProgressInvoice } from "../../recurring/actions";
 import { recordPayment, createProgressReportInvoice } from "../../billing/actions";
 
@@ -42,6 +43,7 @@ export function ProgressInvoiceButton({
   scheduleActive?: boolean;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const isTM = billingType === "tm";
 
@@ -110,6 +112,7 @@ export function ProgressInvoiceButton({
         if (!payInvoice) return setError("No open invoice to apply a payment to.");
         const res = await recordPayment({ invoice_id: payInvoice, amount: payAmount, method, note: "Progress payment", paid_at: payDate || null });
         if (!res.ok) return setError(res.error ?? "Could not record the payment.");
+        toast("Payment recorded", "success");
         setOpen(false);
         router.refresh();
       } else {
@@ -118,6 +121,7 @@ export function ProgressInvoiceButton({
             ? await createProgressReportInvoice(jobId, kind === "deposit" ? "progress" : kind)
             : await createProgressInvoice(jobId, { kind, mode: billMode, value: billMode === "percent" ? pct : fixed });
         if (!res.ok || !res.id) return setError(res.error ?? "Could not create the invoice.");
+        toast("Invoice created", "success");
         router.push(`/billing/${res.id}`);
       }
     });

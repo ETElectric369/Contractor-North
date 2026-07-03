@@ -357,6 +357,52 @@ export async function deleteQuote(id: string): Promise<{ ok: boolean; error?: st
   return { ok: true };
 }
 
+/**
+ * Duplicate-draft cleanup: keep one draft, delete the losers in one tap.
+ * Erik: "made many copies then not being able to correct them, merge them or
+ * delete them." A draft carries no children (no job/invoice/WO re-point needed),
+ * so "merge" here IS keep-one-delete-the-rest. Guards hard before deleting:
+ * every id (keep + losers) must resolve — under RLS scoping — to a DRAFT of the
+ * SAME customer, so a stray non-draft or foreign-org row can never be swept up.
+ */
+export async function resolveDuplicateDrafts(
+  keepId: string,
+  deleteIds: string[],
+): Promise<{ ok: boolean; error?: string; deleted?: number }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+
+  const losers = deleteIds.filter((id) => id && id !== keepId);
+  if (losers.length === 0) return { ok: false, error: "Nothing to delete." };
+
+  // Fetch the whole cluster (keep + losers) under RLS — foreign rows drop out.
+  const ids = [keepId, ...losers];
+  const { data: rows, error: readErr } = await supabase
+    .from("quotes")
+    .select("id, status, customer_id")
+    .in("id", ids);
+  if (readErr) return { ok: false, error: readErr.message };
+
+  const found = rows ?? [];
+  // Every id must have resolved (RLS didn't hide any) — else refuse the batch.
+  if (found.length !== ids.length)
+    return { ok: false, error: "One of these drafts isn't available." };
+  // All must be drafts — never delete a sent/accepted quote through this path.
+  if (found.some((r) => r.status !== "draft"))
+    return { ok: false, error: "Only draft estimates can be cleaned up here." };
+  // All must share the keep's customer — the dedupe signal we grouped on.
+  const keepRow = found.find((r) => r.id === keepId);
+  if (!keepRow) return { ok: false, error: "That draft isn't available." };
+  if (found.some((r) => (r.customer_id ?? null) !== (keepRow.customer_id ?? null)))
+    return { ok: false, error: "These drafts belong to different customers." };
+
+  const { error } = await supabase.from("quotes").delete().in("id", losers);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/quotes");
+  return { ok: true, deleted: losers.length };
+}
+
 export async function saveQuote(input: SaveQuoteInput) {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false as const, error: ctx.error };
