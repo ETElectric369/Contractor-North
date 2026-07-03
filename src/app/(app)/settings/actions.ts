@@ -181,6 +181,7 @@ export async function createInvitation(formData: FormData): Promise<Result> {
     invited_by: user.id,
   });
   if (error) return { ok: false, error: error.message };
+  revalidatePath("/team");
   revalidatePath("/settings");
   return { ok: true };
 }
@@ -189,6 +190,7 @@ export async function deleteInvitation(id: string): Promise<Result> {
   const supabase = await createClient();
   const { error } = await supabase.from("invitations").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
+  revalidatePath("/team");
   revalidatePath("/settings");
   return { ok: true };
 }
@@ -257,6 +259,7 @@ export async function createEmployee(input: {
     .eq("id", created.user.id);
   if (profErr) return { ok: false, error: profErr.message };
 
+  revalidatePath("/team");
   revalidatePath("/settings");
   return { ok: true };
 }
@@ -322,6 +325,7 @@ export async function importCrew(rows: CrewImportRow[], requireReset = true): Pr
     }
     results.push({ name, email, password, status: "created" });
   }
+  revalidatePath("/team");
   revalidatePath("/settings");
   return { ok: true, results };
 }
@@ -419,7 +423,9 @@ export async function updateMember(
 
   const { error } = await supabase.from("profiles").update(clean).eq("id", id);
   if (error) return { ok: false, error: error.message };
+  revalidatePath("/team");
   revalidatePath("/settings");
+  revalidatePath("/planner"); // role/active/rate feed the planner's assignee pickers
   return { ok: true };
 }
 
@@ -457,7 +463,103 @@ export async function updateMemberAuth(
   const { error } = await admin.auth.admin.updateUserById(id, attrs);
   if (error) return { ok: false, error: error.message };
   if (attrs.email) await admin.from("profiles").update({ email: attrs.email }).eq("id", id);
+  revalidatePath("/team");
   revalidatePath("/settings");
+  return { ok: true };
+}
+
+/** Deactivate (lock out) or reactivate a team member. `active=false` now actually
+ *  bars sign-in — the app layout redirects a signed-in profile with active===false to
+ *  the deactivated screen (before it only hid them from assignee pickers). Reversible:
+ *  flip active back and they're in again. Owner/admin only; you can't deactivate
+ *  yourself (mirrors the updateMember self-guard so the owner can't lock themselves out).
+ *  Revalidates /planner too — the assignee pickers there filter on active. */
+export async function setMemberActive(id: string, active: boolean): Promise<Result> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+  const { data: me } = await supabase.from("profiles").select("role, org_id").eq("id", user.id).maybeSingle();
+  if (!me || !["owner", "admin"].includes(me.role)) return { ok: false, error: "Not allowed." };
+  if (id === user.id && !active) return { ok: false, error: "You can't deactivate your own account." };
+
+  // Same-org guard (defense-in-depth over RLS) + never deactivate the owner.
+  const { data: target } = await supabase.from("profiles").select("org_id, role").eq("id", id).maybeSingle();
+  if (!target || target.org_id !== me.org_id) return { ok: false, error: "Member not found." };
+  if (target.role === "owner" && !active) return { ok: false, error: "The owner can't be deactivated." };
+
+  const { error } = await supabase.from("profiles").update({ active }).eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/team");
+  revalidatePath("/settings");
+  revalidatePath("/planner"); // assignee pickers filter on active
+  return { ok: true };
+}
+
+/** How much history a member carries — the remove-vs-deactivate signal. A member with
+ *  time entries has a payroll/hours footprint (like Ryan/Danny) → DEACTIVATE keeps that
+ *  history; a clean, never-used account (zero time entries) may be safely removed.
+ *  Owner/admin only. Returns the time-entry count so the /team UI can pick the right verb. */
+export async function memberFootprint(id: string): Promise<{ ok: boolean; error?: string; timeEntries?: number }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+  const { data: me } = await supabase.from("profiles").select("role, org_id").eq("id", user.id).maybeSingle();
+  if (!me || !["owner", "admin"].includes(me.role)) return { ok: false, error: "Not allowed." };
+  const { count, error } = await supabase
+    .from("time_entries")
+    .select("id", { count: "exact", head: true })
+    .eq("profile_id", id);
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, timeEntries: count ?? 0 };
+}
+
+/** Remove a never-used team member — hard-delete the login + profile. ONLY safe for a
+ *  clean account with zero footprint (mirrors how the operator removed Ryan/Danny: a
+ *  member who ever clocked in is DEACTIVATED to keep history, only a never-used account
+ *  is removed). Re-checks the footprint server-side so a stale client can't delete a
+ *  member who logged time between load and click. Needs the service-role key to drop the
+ *  auth user. Owner/admin only; never yourself/the owner. */
+export async function removeMember(id: string): Promise<Result> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+  const { data: me } = await supabase.from("profiles").select("role, org_id").eq("id", user.id).maybeSingle();
+  if (!me || !["owner", "admin"].includes(me.role)) return { ok: false, error: "Not allowed." };
+  if (id === user.id) return { ok: false, error: "You can't remove your own account." };
+
+  const { data: target } = await supabase.from("profiles").select("org_id, role").eq("id", id).maybeSingle();
+  if (!target || target.org_id !== me.org_id) return { ok: false, error: "Member not found." };
+  if (target.role === "owner") return { ok: false, error: "The owner can't be removed." };
+
+  // Footprint re-check — a member with logged time keeps their history (deactivate, don't delete).
+  const { count } = await supabase.from("time_entries").select("id", { count: "exact", head: true }).eq("profile_id", id);
+  if ((count ?? 0) > 0) {
+    return { ok: false, error: "This person has logged time — deactivate them to keep their history instead of removing them." };
+  }
+
+  const { adminConfigured, createAdminClient } = await import("@/lib/supabase/admin");
+  if (!adminConfigured()) {
+    return { ok: false, error: "Removing an account needs SUPABASE_SERVICE_ROLE_KEY on the server. Deactivate them instead." };
+  }
+  const admin = createAdminClient();
+  // Delete the profile first (org-scoped), then the auth user. If the auth delete fails,
+  // the profile is already gone (they can't get back in); surface the error to clean up.
+  const { error: profErr } = await admin.from("profiles").delete().eq("id", id).eq("org_id", me.org_id);
+  if (profErr) return { ok: false, error: profErr.message };
+  const { error: authErr } = await admin.auth.admin.deleteUser(id);
+  if (authErr) {
+    reportError("removeMember.deleteUser", authErr, { id });
+    return { ok: false, error: "Profile removed, but clearing their login failed — contact support to finish." };
+  }
+  revalidatePath("/team");
+  revalidatePath("/settings");
+  revalidatePath("/planner");
   return { ok: true };
 }
 
@@ -479,6 +581,7 @@ export async function updateMemberRate(
   if (billRate !== undefined) patch.bill_rate = billRate;
   const { error } = await supabase.from("profiles").update(patch).eq("id", id);
   if (error) return { ok: false, error: error.message };
+  revalidatePath("/team");
   revalidatePath("/settings");
   return { ok: true };
 }

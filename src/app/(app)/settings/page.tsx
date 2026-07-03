@@ -4,10 +4,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs } from "@/components/tabs";
-import { initials } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
 import { OrgSettingsForm } from "./org-settings-form";
-import { InviteManager } from "./invite-manager";
 import { DocumentDesigner } from "./document-designer";
 import { LogoUpload } from "./logo-upload";
 import { LanguageToggle } from "./language-toggle";
@@ -23,16 +21,10 @@ import { JobCodesManager } from "./job-codes-manager";
 import { SplashSettings } from "./splash-settings";
 import { AiStatus } from "./ai-status";
 import { QuotePlaybookForm } from "./quote-playbook-form";
-import { MemberRate } from "./member-rate";
-import { EditMemberButton } from "./edit-member-button";
-import { ImportCustomersButton } from "../crm/import-customers-button";
 import { AvatarUpload } from "./avatar-upload";
-import { AddEmployeeButton } from "./add-employee-button";
-import { CrewImportButton } from "./crew-import-button";
 import { CodeTemplatesManager } from "./code-templates-manager";
 import { PasskeyManager } from "./passkey-manager";
 import { listPasskeys } from "./passkey-actions";
-import { adminConfigured } from "@/lib/supabase/admin";
 import { gcalConfigured } from "@/lib/google-calendar";
 import { GcalCard } from "./gcal-card";
 import QRCode from "qrcode";
@@ -64,10 +56,17 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
+/**
+ * SETTINGS — collapsed to four MINDSET clusters after Team left for its own /team page
+ * (settings doctrine): "You" (everything personal), "Company" (who we are + how leads
+ * reach us), "Money & docs" (dollars, tax/pricing, document numbering & design, QBO/
+ * Stripe), and "Integrations" (the AI + calendar connectors). Techs get only "You".
+ * urlSync (?tab=) stays live; role-gating intact — the admin clusters are staff-only.
+ */
 export default async function SettingsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ billing?: string; billing_error?: string; qbo?: string; gcal?: string }>;
+  searchParams: Promise<{ billing?: string; billing_error?: string; qbo?: string; gcal?: string; tab?: string }>;
 }) {
   const { billing, billing_error, qbo, gcal } = await searchParams;
   const supabase = await createClient();
@@ -83,24 +82,24 @@ export default async function SettingsPage({
   const isStaff = isAdmin || profile?.role === "office";
   const t = translator(profile?.language);
 
-  const [{ data: org }, { data: team }, { data: invites }, { data: taxRates }, { data: pricingLevels }, { data: codeTemplates }, { data: jobCodes }] = await Promise.all([
+  const [{ data: org }, { data: taxRates }, { data: pricingLevels }, { data: codeTemplates }, { data: jobCodes }] = await Promise.all([
     profile?.org_id
       ? supabase.from("organizations").select("*").eq("id", profile.org_id).maybeSingle()
       : Promise.resolve({ data: null }),
-    supabase.from("profiles").select("*").order("full_name"),
-    isAdmin
-      ? supabase.from("invitations").select("*").order("created_at", { ascending: false })
-      : Promise.resolve({ data: [] }),
     supabase.from("tax_rates").select("id, name, rate, is_default").order("created_at"),
     supabase.from("pricing_levels").select("id, name, markup_pct, is_default").order("created_at"),
     supabase.from("job_code_templates").select("id, name, codes").order("name"),
     supabase.from("job_codes").select("id, code, description, billable, active").order("code"),
   ]);
 
-  const members = (team ?? []) as Profile[];
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "";
   const settings = getOrgSettings((org as any)?.settings);
   const docCounters = await getDocCounters(); // null until migration 0088 is applied
+
+  // The scheduler's crew picker still needs the team names (read-only here — editing
+  // the roster itself lives on /team now).
+  const { data: crew } = await supabase.from("profiles").select("id, full_name, role").order("full_name");
+  const members = (crew ?? []) as Pick<Profile, "id" | "full_name" | "role">[];
 
   const { data: qboConn } = isAdmin
     ? await supabase.from("accounting_connections").select("realm_id, connected_at").maybeSingle()
@@ -119,119 +118,59 @@ export default async function SettingsPage({
 
   const passkeys = await listPasskeys();
 
-  const profileTab = {
-    id: "profile",
-    label: "Profile",
-    content: (
-      <Section title="Your profile">
-        <div className="flex flex-wrap items-center gap-5">
-          <AvatarUpload
-            userId={profile?.id ?? ""}
-            orgId={profile?.org_id ?? ""}
-            name={profile?.full_name ?? null}
-            current={profile?.avatar_url ?? null}
-          />
-          <div>
-            <div className="text-base font-medium text-slate-900">{profile?.full_name ?? "—"}</div>
-            <div className="text-sm text-slate-500">{profile?.email}</div>
-            <Badge tone={roleTone[profile?.role ?? "tech"]} className="mt-1">{profile?.role}</Badge>
-          </div>
-        </div>
-        <div className="mt-5 border-t border-slate-100 pt-4">
-          <div className="text-sm font-medium text-slate-700">{t("s_language")}</div>
-          <div className="mb-2 text-xs text-slate-400">{t("s_languageDesc")}</div>
-          <LanguageToggle current={profile?.language ?? "en"} />
-        </div>
-        <div className="mt-5 border-t border-slate-100 pt-4">
-          <div className="mb-1 text-sm font-medium text-slate-700">Navigation app</div>
-          <MapsProviderToggle />
-        </div>
-        <div className="mt-5 border-t border-slate-100 pt-4">
-          <div className="mb-2 text-sm font-medium text-slate-700">Sign-in &amp; security</div>
-          <PasskeyManager passkeys={passkeys} />
-        </div>
-      </Section>
-    ),
-  };
-
-  const notificationsTab = {
-    id: "notifications",
-    label: "Notifications",
-    content: (
-      <Section title="Push notifications">
-        <PushSettings initialPrefs={((profile as any)?.push_prefs ?? {}) as Record<string, boolean>} />
-      </Section>
-    ),
-  };
-
-  const teamTab = {
-    id: "team",
-    label: "Team",
+  // ── "You" — everything personal (profile, notifications, language, security). ─────────
+  const youTab = {
+    id: "you",
+    label: "You",
     content: (
       <div className="space-y-6">
-        {isAdmin && (
-          <Section title="Invite team members">
-            <InviteManager invites={(invites as any) ?? []} siteUrl={siteUrl} />
-            <div className="mt-4 border-t border-slate-100 pt-4">
-              <div className="mb-2 text-xs text-slate-500">
-                Or create their login yourself and hand them the password — no email needed:
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <AddEmployeeButton configured={adminConfigured()} />
-                {adminConfigured() && <CrewImportButton />}
-              </div>
+        <Section title="Your profile">
+          <div className="flex flex-wrap items-center gap-5">
+            <AvatarUpload
+              userId={profile?.id ?? ""}
+              orgId={profile?.org_id ?? ""}
+              name={profile?.full_name ?? null}
+              current={profile?.avatar_url ?? null}
+            />
+            <div>
+              <div className="text-base font-medium text-slate-900">{profile?.full_name ?? "—"}</div>
+              <div className="text-sm text-slate-500">{profile?.email}</div>
+              <Badge tone={roleTone[profile?.role ?? "tech"]} className="mt-1">{profile?.role}</Badge>
             </div>
-          </Section>
-        )}
-        <Card>
-          <div className="border-b border-slate-100 px-5 py-3">
-            <h3 className="text-sm font-semibold text-slate-900">Team ({members.length})</h3>
           </div>
-          <ul className="divide-y divide-slate-100">
-            {members.map((m) => (
-              <li key={m.id} className="flex items-center gap-3 px-5 py-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-sm font-semibold text-slate-600">
-                  {initials(m.full_name)}
-                </div>
-                <div className="flex-1">
-                  <div className="text-sm font-medium text-slate-900">{m.full_name ?? "—"}</div>
-                  <div className="text-xs text-slate-400">{m.email}</div>
-                </div>
-                {isAdmin && <MemberRate id={m.id} rate={m.hourly_rate} billRate={(m as any).bill_rate ?? null} />}
-                {!m.active && <Badge tone="red">inactive</Badge>}
-                <Badge tone={roleTone[m.role]}>{m.role}</Badge>
-                {isAdmin && (
-                  <EditMemberButton
-                    member={{ id: m.id, full_name: m.full_name, email: m.email, phone: (m as any).phone ?? null, role: m.role, active: m.active, home_address: m.home_address, commute_baseline_miles: (m as any).commute_baseline_miles ?? 0 }}
-                    isSelf={m.id === profile?.id}
-                    authConfigured={adminConfigured()}
-                  />
-                )}
-              </li>
-            ))}
-          </ul>
-        </Card>
+          <div className="mt-5 border-t border-slate-100 pt-4">
+            <div className="text-sm font-medium text-slate-700">{t("s_language")}</div>
+            <div className="mb-2 text-xs text-slate-400">{t("s_languageDesc")}</div>
+            <LanguageToggle current={profile?.language ?? "en"} />
+          </div>
+          <div className="mt-5 border-t border-slate-100 pt-4">
+            <div className="mb-1 text-sm font-medium text-slate-700">Navigation app</div>
+            <MapsProviderToggle />
+          </div>
+          <div className="mt-5 border-t border-slate-100 pt-4">
+            <div className="mb-2 text-sm font-medium text-slate-700">Sign-in &amp; security</div>
+            <PasskeyManager passkeys={passkeys} />
+          </div>
+        </Section>
+        <Section title="Push notifications">
+          <PushSettings initialPrefs={((profile as any)?.push_prefs ?? {}) as Record<string, boolean>} />
+        </Section>
       </div>
     ),
   };
 
+  // ── The admin clusters (staff only). ─────────────────────────────────────────────────
   const adminTabs = org && isStaff
     ? [
+        // "Company" — who we are + how leads reach us.
         {
           id: "company",
           label: "Company",
-          // Set-once tabs live in the labeled "More" group so the visible strip
-          // leads with the tabs touched weekly/daily (frequency law).
-          tier: "overflow" as const,
-          group: "Set once",
           content: (
             <div className="space-y-6">
               <Section title="Company details"><OrgSettingsForm org={org as Organization} /></Section>
-              <Section title="Import customers">
-                <p className="mb-3 text-sm text-slate-500">
-                  Bring your whole customer book over from a spreadsheet (CSV export from Contacts, Tradify, QuickBooks…) or a vCard — map the columns and import in one shot. Adding people one at a time? Do that from the <strong>Customers</strong> page.
-                </p>
-                <ImportCustomersButton />
+              <Section title="Company logo">
+                <LogoUpload orgId={(org as Organization).id} current={(org as Organization).logo_url} />
               </Section>
               <Section title="Public lead link">
                 <p className="mb-2 text-sm text-slate-500">
@@ -274,27 +213,18 @@ export default async function SettingsPage({
             </div>
           ),
         },
+        // "Money & docs" — dollars, tax/pricing, document numbering & design, QBO/Stripe.
         {
-          id: "financial",
-          label: "Financial",
+          id: "money",
+          label: "Money & docs",
           content: (
             <div className="space-y-6">
               <Section title="Tax, pricing & financial defaults"><TaxRatesManager taxRates={(taxRates ?? []) as any} pricingLevels={(pricingLevels ?? []) as any} settings={settings} /></Section>
               <Section title="How we quote (AI playbook)"><QuotePlaybookForm settings={settings} /></Section>
-            </div>
-          ),
-        },
-        {
-          id: "documents",
-          label: "Documents",
-          content: (
-            <div className="space-y-6">
+              <Section title="Payment methods"><PaymentMethods settings={settings} /></Section>
               <Section title="Estimate & invoice defaults"><DocumentSettings settings={settings} /></Section>
               <Section title="Numbering">
                 <NumberingSettings prefixes={settings.doc_prefixes} counters={docCounters} />
-              </Section>
-              <Section title="Company logo">
-                <LogoUpload orgId={(org as Organization).id} current={(org as Organization).logo_url} />
               </Section>
               <Section title="Document designer">
                 <DocumentDesigner
@@ -303,14 +233,67 @@ export default async function SettingsPage({
                   brand={(org as Organization).brand_color || "#0b57c4"}
                 />
               </Section>
+              <Section title="QuickBooks">
+                {qbo === "connected" && (
+                  <div className="mb-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">Connected to QuickBooks Online.</div>
+                )}
+                {(qbo === "error" || qbo === "denied") && (
+                  <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">Could not connect to QuickBooks. Please try again.</div>
+                )}
+                {!qboConfigured() ? (
+                  <p className="text-sm text-slate-400">Not configured yet. Add QBO_CLIENT_ID, QBO_CLIENT_SECRET, and QBO_ENVIRONMENT to enable syncing.</p>
+                ) : qboConn?.realm_id ? (
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Badge tone="green">Connected</Badge>
+                    <span className="text-sm text-slate-500">Send invoices to QuickBooks from any invoice page.</span>
+                    <form action={async () => { "use server"; await disconnectQuickbooks(); }}>
+                      <Button variant="outline">Disconnect</Button>
+                    </form>
+                  </div>
+                ) : (
+                  <div>
+                    <a href="/api/quickbooks/connect" className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark">Connect QuickBooks</a>
+                    <p className="mt-2 text-xs text-slate-400">Sync customers and invoices to QuickBooks Online.</p>
+                  </div>
+                )}
+              </Section>
+              <Section title="Plan & subscription">
+                {billing === "success" && (
+                  <div className="mb-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">Subscription active — thank you!</div>
+                )}
+                {billing_error && (
+                  <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{billing_error}</div>
+                )}
+                <div className="flex flex-wrap items-center gap-3">
+                  <Badge tone={(org as Organization).subscription_status === "active" ? "green" : "amber"}>
+                    {(org as Organization).subscription_status}
+                  </Badge>
+                  <span className="text-sm text-slate-600">Plan: {(org as Organization).plan}</span>
+                  {(org as Organization).subscription_status === "trialing" && (
+                    <span className="text-sm text-slate-500">· {trialDaysLeft(org as Organization)} days left in trial</span>
+                  )}
+                </div>
+                {billingEnabled ? (
+                  <div className="mt-4 flex gap-2">
+                    {(org as Organization).subscription_status === "active" ? (
+                      <form action={openPortal}><Button variant="outline">Manage billing</Button></form>
+                    ) : (
+                      <form action={startCheckout}><Button>Subscribe</Button></form>
+                    )}
+                  </div>
+                ) : (
+                  <p className="mt-3 text-sm text-slate-400">Billing isn&apos;t configured yet. Add your Stripe keys (STRIPE_SECRET_KEY, STRIPE_PRICE_ID, STRIPE_WEBHOOK_SECRET) to enable subscriptions.</p>
+                )}
+              </Section>
             </div>
           ),
         },
+        // "Scheduling" — Alexa's control plane (scheduler + timesheets + job codes).
         {
           id: "scheduling",
           label: "Scheduling",
           content: (
-            <>
+            <div className="space-y-6">
               <Section title="Scheduler & timesheets">
                 <SchedulingSettings
                   settings={settings}
@@ -329,106 +312,34 @@ export default async function SettingsPage({
                   codes={((jobCodes ?? []) as { code: string; description: string; active: boolean }[]).filter((c) => c.active).map((c) => ({ code: c.code, description: c.description }))}
                 />
               </Section>
-            </>
-          ),
-        },
-        {
-          id: "payments",
-          label: "Payment methods",
-          content: <Section title="Payment methods"><PaymentMethods settings={settings} /></Section>,
-        },
-        {
-          id: "automation",
-          label: "Automation",
-          content: <Section title="Reminders & follow-ups"><AutomationSettings settings={settings} /></Section>,
-        },
-        {
-          id: "integrations",
-          label: "Integrations",
-          tier: "overflow" as const,
-          group: "Set once",
-          content: (
-            <div className="space-y-6">
-            <Section title="AI assistant">
-              <AiStatus
-                configured={!!process.env.ANTHROPIC_API_KEY}
-                model={process.env.ANTHROPIC_MODEL || "claude-opus-4-8"}
-              />
-            </Section>
-            <Section title="Google Calendar">
-              <GcalCard configured={gcalConfigured()} connected={!!gcalConn} flash={gcal} />
-            </Section>
-            <Section title="QuickBooks">
-              {qbo === "connected" && (
-                <div className="mb-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">Connected to QuickBooks Online.</div>
-              )}
-              {(qbo === "error" || qbo === "denied") && (
-                <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">Could not connect to QuickBooks. Please try again.</div>
-              )}
-              {!qboConfigured() ? (
-                <p className="text-sm text-slate-400">Not configured yet. Add QBO_CLIENT_ID, QBO_CLIENT_SECRET, and QBO_ENVIRONMENT to enable syncing.</p>
-              ) : qboConn?.realm_id ? (
-                <div className="flex flex-wrap items-center gap-3">
-                  <Badge tone="green">Connected</Badge>
-                  <span className="text-sm text-slate-500">Send invoices to QuickBooks from any invoice page.</span>
-                  <form action={async () => { "use server"; await disconnectQuickbooks(); }}>
-                    <Button variant="outline">Disconnect</Button>
-                  </form>
-                </div>
-              ) : (
-                <div>
-                  <a href="/api/quickbooks/connect" className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark">Connect QuickBooks</a>
-                  <p className="mt-2 text-xs text-slate-400">Sync customers and invoices to QuickBooks Online.</p>
-                </div>
-              )}
-            </Section>
+              <Section title="Reminders & follow-ups"><AutomationSettings settings={settings} /></Section>
             </div>
           ),
         },
+        // "Integrations" — the AI + calendar connectors.
         {
-          id: "plan",
-          label: "Plan & Billing",
-          tier: "overflow" as const,
-          group: "Set once",
+          id: "integrations",
+          label: "Integrations",
           content: (
-            <Section title="Subscription">
-              {billing === "success" && (
-                <div className="mb-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">Subscription active — thank you!</div>
-              )}
-              {billing_error && (
-                <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{billing_error}</div>
-              )}
-              <div className="flex flex-wrap items-center gap-3">
-                <Badge tone={(org as Organization).subscription_status === "active" ? "green" : "amber"}>
-                  {(org as Organization).subscription_status}
-                </Badge>
-                <span className="text-sm text-slate-600">Plan: {(org as Organization).plan}</span>
-                {(org as Organization).subscription_status === "trialing" && (
-                  <span className="text-sm text-slate-500">· {trialDaysLeft(org as Organization)} days left in trial</span>
-                )}
-              </div>
-              {billingEnabled ? (
-                <div className="mt-4 flex gap-2">
-                  {(org as Organization).subscription_status === "active" ? (
-                    <form action={openPortal}><Button variant="outline">Manage billing</Button></form>
-                  ) : (
-                    <form action={startCheckout}><Button>Subscribe</Button></form>
-                  )}
-                </div>
-              ) : (
-                <p className="mt-3 text-sm text-slate-400">Billing isn't configured yet. Add your Stripe keys (STRIPE_SECRET_KEY, STRIPE_PRICE_ID, STRIPE_WEBHOOK_SECRET) to enable subscriptions.</p>
-              )}
-            </Section>
+            <div className="space-y-6">
+              <Section title="AI assistant">
+                <AiStatus
+                  configured={!!process.env.ANTHROPIC_API_KEY}
+                  model={process.env.ANTHROPIC_MODEL || "claude-opus-4-8"}
+                />
+              </Section>
+              <Section title="Google Calendar">
+                <GcalCard configured={gcalConfigured()} connected={!!gcalConn} flash={gcal} />
+              </Section>
+            </div>
           ),
         },
       ]
     : [];
 
-  // Frequency-sorted: the tabs touched weekly/daily lead; the set-once admin
-  // cluster follows (staff only — techs get just their three personal tabs).
-  const tabs = isStaff
-    ? [teamTab, ...adminTabs, notificationsTab, profileTab]
-    : [profileTab, notificationsTab, teamTab];
+  // "You" leads for techs (their only tab); for staff it follows the admin clusters — the
+  // set-once org config leads, personal settings sit at the end (frequency law).
+  const tabs = isStaff ? [...adminTabs, youTab] : [youTab];
 
   return (
     <div className="mx-auto max-w-3xl">

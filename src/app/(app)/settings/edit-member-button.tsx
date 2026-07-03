@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Pencil, Eye, EyeOff } from "lucide-react";
+import { Pencil, Eye, EyeOff, UserCog } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select } from "@/components/ui/input";
@@ -19,15 +19,22 @@ interface Member {
   commute_baseline_miles?: number | null;
 }
 
-/** Owner/admin edit for a team member: name/role/active + login email/password. */
+/** Owner/admin edit for a team member: name/role/active + login email/password.
+ *  `menuItem` renders the trigger as a full-width menu row (for the /team ⋯ menu)
+ *  instead of the pencil icon; the modal renders IN-PLACE, so the menu that owns
+ *  this must stay mounted while it's open (see TeamMemberMenu's modal-rule handler). */
 export function EditMemberButton({
   member,
   isSelf,
   authConfigured,
+  menuItem = false,
+  rowClassName,
 }: {
   member: Member;
   isSelf: boolean;
   authConfigured: boolean;
+  menuItem?: boolean;
+  rowClassName?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -75,9 +82,15 @@ export function EditMemberButton({
 
   return (
     <>
-      <button onClick={() => setOpen(true)} className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Edit member">
-        <Pencil className="h-4 w-4" />
-      </button>
+      {menuItem ? (
+        <button onClick={() => setOpen(true)} className={rowClassName}>
+          <UserCog className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Edit &amp; role
+        </button>
+      ) : (
+        <button onClick={() => setOpen(true)} className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Edit member">
+          <Pencil className="h-4 w-4" />
+        </button>
+      )}
 
       <Modal
         open={open}

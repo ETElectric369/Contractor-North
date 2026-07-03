@@ -53,6 +53,12 @@ export default async function AppLayout({
   // pick their own before they can use the app, so the temp can't be reused indefinitely.
   if (profile.must_reset_password) redirect("/set-password");
 
+  // Deactivated → locked out. `active=false` used to only hide a member from assignee
+  // pickers while they could still sign in and use the app; this is the choke point that
+  // makes deactivation actually bar access. The deactivated screen ends their session.
+  // Reversible: an owner/admin flipping active back lets them in again.
+  if (profile.active === false) redirect("/account-deactivated");
+
   const { data: org } = await supabase
     .from("organizations")
     .select("name, logo_url, brand_color, subscription_status, trial_ends_at, settings")

@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { saveQuote, addQuoteItem, updateQuoteItem, deleteQuoteItem, createJobFromQuote, updateQuoteStatus, setQuoteType, updateQuoteMeta, setQuoteCustomer, setQuoteJob, findRecentDraftQuote, duplicateQuote } from "@/app/(app)/quotes/actions";
+import { createClient } from "@/lib/supabase/server";
+import { resolveCustomerId, resolveJobId } from "../resolve-id";
 import type { ActionDef } from "../types";
 
 export const quoteActions: Record<string, ActionDef> = {
@@ -111,7 +113,14 @@ export const quoteActions: Record<string, ActionDef> = {
     input: z.object({ id: z.string(), customer_id: z.string().nullable() }),
     auth: "staff",
     effect: "write",
-    handler: (i) => setQuoteCustomer(i.id, i.customer_id),
+    handler: async (i) => {
+      // Forgive a name where a customer_id belongs (fragment-first) — but never guess among
+      // several; the wrong customer on a saved quote is a real, money-adjacent error.
+      const supabase = await createClient();
+      const cust = await resolveCustomerId(supabase, i.customer_id);
+      if ("error" in cust) return { ok: false, error: cust.error };
+      return setQuoteCustomer(i.id, cust.id);
+    },
   },
   "quote.duplicate": {
     name: "quote.duplicate",
@@ -137,7 +146,14 @@ export const quoteActions: Record<string, ActionDef> = {
     input: z.object({ id: z.string().uuid(), job_id: z.string().uuid().nullable() }),
     auth: "staff",
     effect: "write",
-    handler: (i) => setQuoteJob(i.id, i.job_id),
+    handler: async (i) => {
+      // job_id is schema-constrained to a uuid|null here, so this only ever fast-paths — but
+      // routing through the resolver keeps the pattern uniform (and future-proofs a loosened schema).
+      const supabase = await createClient();
+      const job = await resolveJobId(supabase, i.job_id);
+      if ("error" in job) return { ok: false, error: job.error };
+      return setQuoteJob(i.id, job.id);
+    },
   },
   "quote.create": {
     name: "quote.create",
@@ -169,10 +185,21 @@ export const quoteActions: Record<string, ActionDef> = {
     // DB trigger). No auto follow-up task — the "awaiting reply" inbox item on My Day is
     // the follow-up and self-clears. Map its {ok,id} into the ActionResult shape.
     handler: async (i) => {
+      // Fragment-first safety net: Nort sometimes passes a NAME ("John Chmura") where the
+      // customer_id belongs. Resolve it (and any job name) to a real id BEFORE the dup check
+      // and save — a single match resolves; zero/several ASK rather than attach the wrong one.
+      const supabase = await createClient();
+      const cust = await resolveCustomerId(supabase, i.customer_id ?? null);
+      if ("error" in cust) return { ok: false, error: cust.error };
+      const job = await resolveJobId(supabase, i.job_id ?? null);
+      if ("error" in job) return { ok: false, error: job.error };
+      const customerId = cust.id;
+      const jobId = job.id;
+
       // One conversation saved the same estimate three times (E-009/E-010/E-011) because
       // "save it" late in a chat re-fired create. A same-title recent draft IS that document:
       // refuse and steer to the edit verbs so the number the user already heard stays true.
-      const dup = await findRecentDraftQuote(i.customer_id ?? null, i.title ?? "");
+      const dup = await findRecentDraftQuote(customerId, i.title ?? "");
       if (dup) {
         return {
           ok: false,
@@ -180,8 +207,8 @@ export const quoteActions: Record<string, ActionDef> = {
         };
       }
       const r = await saveQuote({
-        customer_id: i.customer_id ?? null,
-        job_id: i.job_id ?? null,
+        customer_id: customerId,
+        job_id: jobId,
         title: i.title ?? "",
         notes: i.notes ?? "",
         tax_rate: i.tax_rate ?? 0,

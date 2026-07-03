@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { createAppointment, setAppointmentStatus, rescheduleAppointment } from "@/app/(app)/appointments/actions";
+import { createClient } from "@/lib/supabase/server";
+import { resolveCustomerId, resolveJobId } from "../resolve-id";
 import type { ActionDef } from "../types";
 
 export const appointmentActions: Record<string, ActionDef> = {
@@ -37,14 +39,20 @@ export const appointmentActions: Record<string, ActionDef> = {
     effect: "write",
     // Wrap the canonical createAppointment (trim+validate, org-tz ISO, revalidate, the
     // nullable fields) via a FormData — no duplicated write-path.
-    handler: (i) => {
+    handler: async (i) => {
+      // Forgive a job/customer NAME where an id belongs — resolve each to a single match first.
+      const supabase = await createClient();
+      const job = await resolveJobId(supabase, i.job_id ?? null);
+      if ("error" in job) return { ok: false, error: job.error };
+      const cust = await resolveCustomerId(supabase, i.customer_id ?? null);
+      if ("error" in cust) return { ok: false, error: cust.error };
       const fd = new FormData();
       fd.set("title", i.title);
       fd.set("type", i.type);
       fd.set("starts_at_iso", i.starts_at);
       if (i.ends_at) fd.set("ends_at_iso", i.ends_at);
-      if (i.job_id) fd.set("job_id", i.job_id);
-      if (i.customer_id) fd.set("customer_id", i.customer_id);
+      if (job.id) fd.set("job_id", job.id);
+      if (cust.id) fd.set("customer_id", cust.id);
       if (i.location) fd.set("location", i.location);
       if (i.notes) fd.set("notes", i.notes);
       return createAppointment(fd);

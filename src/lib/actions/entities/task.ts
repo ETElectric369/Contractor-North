@@ -2,6 +2,7 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { createTask, toggleTask, updateTask, deleteTask } from "@/app/(app)/tasks/actions";
 import { createClient } from "@/lib/supabase/server";
+import { resolveJobId, resolveProfileId } from "../resolve-id";
 import type { ActionDef, ActionResult } from "../types";
 
 /** Subtasks ride with their parent's assignee (amendment 5c): a child assigned to
@@ -118,16 +119,23 @@ export const taskActions: Record<string, ActionDef> = {
     auth: "any",
     effect: "write",
     handler: async (i) => {
+      // Forgive a job/person NAME where an id belongs — resolve both to a single match BEFORE
+      // the cross-assignee check (which compares the resolved assignee to the parent's).
+      const supabase = await createClient();
+      const job = await resolveJobId(supabase, i.job_id ?? null);
+      if ("error" in job) return { ok: false, error: job.error };
+      const person = await resolveProfileId(supabase, i.assigned_to ?? null);
+      if ("error" in person) return { ok: false, error: person.error };
       if (i.parent_id) {
-        const refusal = await refuseCrossAssigneeChild(i.parent_id, i.assigned_to);
+        const refusal = await refuseCrossAssigneeChild(i.parent_id, person.id);
         if (refusal) return refusal;
       }
       return createTask({
         title: i.title,
         category: i.category,
         due_date: i.due_date ?? null,
-        job_id: i.job_id ?? null,
-        assigned_to: i.assigned_to ?? null,
+        job_id: job.id,
+        assigned_to: person.id,
         notes: i.notes ?? null,
         priority: i.priority ?? 0,
         parent_id: i.parent_id ?? null,

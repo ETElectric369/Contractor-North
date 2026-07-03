@@ -2,6 +2,8 @@ import { z } from "zod";
 import { setJobScheduleRanges, setJobAssignee, createJob, moveJobDay, createScheduleProposal } from "@/app/(app)/schedule/actions";
 import { setJobStatus, finishJob, updateJobDescription } from "@/app/(app)/jobs/actions";
 import { linkJobContact, unlinkJobContact } from "@/app/(app)/jobs/[id]/job-contacts-actions";
+import { createClient } from "@/lib/supabase/server";
+import { resolveCustomerId, resolveContactId, resolveJobId, resolveProfileId } from "../resolve-id";
 import type { ActionDef } from "../types";
 
 export const jobActions: Record<string, ActionDef> = {
@@ -14,7 +16,17 @@ export const jobActions: Record<string, ActionDef> = {
     input: z.object({ job_id: z.string(), customer_id: z.string(), role: z.string().default("Subcontractor") }),
     auth: "staff",
     effect: "write",
-    handler: (i) => linkJobContact(i.job_id, i.customer_id, i.role || "Subcontractor"),
+    handler: async (i) => {
+      // Forgive a job/contact NAME where an id belongs — resolve both to a single match first.
+      const supabase = await createClient();
+      const job = await resolveJobId(supabase, i.job_id);
+      if ("error" in job) return { ok: false, error: job.error };
+      if (!job.id) return { ok: false, error: "Which job? I need the job to link the contact to." };
+      const contact = await resolveContactId(supabase, i.customer_id);
+      if ("error" in contact) return { ok: false, error: contact.error };
+      if (!contact.id) return { ok: false, error: "Which contact? I need the contact to link." };
+      return linkJobContact(job.id, contact.id, i.role || "Subcontractor");
+    },
   },
   "job.unlinkContact": {
     name: "job.unlinkContact",
@@ -54,10 +66,17 @@ export const jobActions: Record<string, ActionDef> = {
     }),
     auth: "staff",
     effect: "write",
-    handler: (i) => {
+    handler: async (i) => {
+      // Forgive a customer NAME passed as customer_id (the "c1a-first-rob" / "John Chmura"
+      // class). Resolve it to a real id; a bad name ASKS rather than silently opening a job on
+      // the wrong (or no) customer. The new_customer_name path is untouched — that's the
+      // explicit "create one" branch and is handled by createJob itself.
+      const supabase = await createClient();
+      const cust = await resolveCustomerId(supabase, i.customer_id ?? null);
+      if ("error" in cust) return { ok: false, error: cust.error };
       const fd = new FormData();
       fd.set("name", i.name);
-      if (i.customer_id) fd.set("customer_id", i.customer_id);
+      if (cust.id) fd.set("customer_id", cust.id);
       if (i.new_customer_name) fd.set("new_customer_name", i.new_customer_name);
       if (i.description) fd.set("description", i.description);
       if (i.address) fd.set("address", i.address);
@@ -99,7 +118,14 @@ export const jobActions: Record<string, ActionDef> = {
     input: z.object({ id: z.string(), date: z.string(), end: z.string().optional() }),
     auth: "staff", // jobs are staff-only in RLS — the registry gate now matches (Phase C)
     effect: "write",
-    handler: (i) => setJobScheduleRanges(i.id, [{ start: i.date, end: i.end || i.date }]),
+    handler: async (i) => {
+      // Forgive a job NAME passed as the id — resolve to a single match before scheduling.
+      const supabase = await createClient();
+      const job = await resolveJobId(supabase, i.id);
+      if ("error" in job) return { ok: false, error: job.error };
+      if (!job.id) return { ok: false, error: "Which job should I schedule?" };
+      return setJobScheduleRanges(job.id, [{ start: i.date, end: i.end || i.date }]);
+    },
   },
   "job.move": {
     name: "job.move",
@@ -161,6 +187,16 @@ export const jobActions: Record<string, ActionDef> = {
     input: z.object({ id: z.string(), assignee: z.string().nullable() }),
     auth: "staff", // jobs are staff-only in RLS — the registry gate now matches (Phase C)
     effect: "write",
-    handler: (i) => setJobAssignee(i.id, i.assignee ?? ""),
+    handler: async (i) => {
+      // Forgive names on BOTH sides: a job name as the id, and a crew member's name as the
+      // assignee. A single match resolves; zero/several ASK. An explicit null still unassigns.
+      const supabase = await createClient();
+      const job = await resolveJobId(supabase, i.id);
+      if ("error" in job) return { ok: false, error: job.error };
+      if (!job.id) return { ok: false, error: "Which job should I assign?" };
+      const person = await resolveProfileId(supabase, i.assignee);
+      if ("error" in person) return { ok: false, error: person.error };
+      return setJobAssignee(job.id, person.id ?? "");
+    },
   },
 };

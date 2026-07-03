@@ -13,6 +13,8 @@ import {
   setInvoiceStatus,
 } from "@/app/(app)/billing/actions";
 import { createInvoiceForJob } from "@/app/(app)/jobs/actions";
+import { createClient } from "@/lib/supabase/server";
+import { resolveJobId } from "../resolve-id";
 import type { ActionDef } from "../types";
 
 // The "money loop by voice" (CIB audit Phase 2): the assistant readies a DRAFT invoice
@@ -33,7 +35,12 @@ export const invoiceActions: Record<string, ActionDef> = {
     auth: "staff",
     effect: "write",
     handler: async (i) => {
-      const r = await createInvoiceForJob(i.job_id);
+      // Forgive a job NAME passed as job_id — resolve to a single match before drafting.
+      const supabase = await createClient();
+      const job = await resolveJobId(supabase, i.job_id);
+      if ("error" in job) return { ok: false, error: job.error };
+      if (!job.id) return { ok: false, error: "Which job should I invoice?" };
+      const r = await createInvoiceForJob(job.id);
       if (!r.ok) return { ok: false, error: r.error };
       return {
         ok: true,

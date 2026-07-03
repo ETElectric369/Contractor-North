@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { addPettyCash } from "@/app/(app)/petty-cash/actions";
+import { createClient } from "@/lib/supabase/server";
+import { resolveJobId } from "../resolve-id";
 import type { ActionDef } from "../types";
 
 export const pettyCashActions: Record<string, ActionDef> = {
@@ -21,14 +23,20 @@ export const pettyCashActions: Record<string, ActionDef> = {
     effect: "write",
     confirm: "financial",
     describe: (i) => `Log a $${i.amount} petty-cash ${i.kind}${i.description ? ` (${i.description})` : ""} — say yes to confirm.`,
-    handler: (i) =>
-      addPettyCash({
+    handler: async (i) => {
+      // Forgive a job NAME passed as job_id — and catch the '{{APACHE_JOB_ID}}' placeholder
+      // class with a "look it up first" nudge instead of a raw uuid-syntax error.
+      const supabase = await createClient();
+      const job = await resolveJobId(supabase, i.job_id ?? null);
+      if ("error" in job) return { ok: false, error: job.error };
+      return addPettyCash({
         kind: i.kind,
         amount: i.amount,
         category: i.category ?? null,
         description: i.description ?? null,
         tx_date: i.tx_date ?? null,
-        job_id: i.job_id ?? null,
-      }),
+        job_id: job.id,
+      });
+    },
   },
 };

@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { createPermit } from "@/app/(app)/permits/actions";
+import { createClient } from "@/lib/supabase/server";
+import { resolveJobId } from "../resolve-id";
 import type { ActionDef } from "../types";
 
 // Permits are prime assistant/field territory (deadlines + inspections). Wraps the existing
@@ -23,9 +25,14 @@ export const permitActions: Record<string, ActionDef> = {
     }),
     auth: "staff",
     effect: "write",
-    handler: (i) =>
-      createPermit({
-        job_id: i.job_id ?? null,
+    handler: async (i) => {
+      // Forgive a job NAME passed as job_id — a permit can stand alone (null is fine), but a
+      // NAME that matches nothing / several ASKS rather than logging it against the wrong job.
+      const supabase = await createClient();
+      const job = await resolveJobId(supabase, i.job_id ?? null);
+      if ("error" in job) return { ok: false, error: job.error };
+      return createPermit({
+        job_id: job.id,
         permit_number: i.permit_number ?? null,
         type: i.type,
         authority: i.authority ?? null,
@@ -33,6 +40,7 @@ export const permitActions: Record<string, ActionDef> = {
         applied_date: i.applied_date ?? null,
         inspection_date: i.inspection_date ?? null,
         notes: i.notes ?? null,
-      }),
+      });
+    },
   },
 };

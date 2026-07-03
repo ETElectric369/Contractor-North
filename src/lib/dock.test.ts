@@ -70,6 +70,37 @@ describe("DOCK time doors — Schedule under Today, Clock keeps the when-did pai
   });
 });
 
+/** Drift guard #2b: the settings-restructure truth. Team is its own Office page now (its
+ *  lifecycle verbs lifted out of Settings), and Settings is GONE from the Office list —
+ *  it lives behind the avatar (the one predictable door, zero-duplication law). Office
+ *  still owns /settings via an owns-alias so the tile lights, but no redundant link. This
+ *  pins that a future wave can't re-add a Settings link to Office or drop Team's home. */
+describe("DOCK office — Team present, Settings link absent (settings doctrine)", () => {
+  const office = DOCK.find((s) => s.key === "office");
+  const children = office?.children ?? [];
+
+  it("Team is an Office child, office-only, pointing at /team", () => {
+    const team = children.find((c) => c.id === "o-team");
+    expect(team).toMatchObject({ label: "Team", href: "/team", staffOnly: true });
+  });
+
+  it("no Settings LINK in the Office list (it lives behind the avatar)", () => {
+    expect(children.some((c) => c.href && basePath(c.href) === "/settings")).toBe(false);
+  });
+
+  it("Office still OWNS /settings (the tile lights on the settings page) via an owns-alias", () => {
+    expect(children.some((c) => c.owns?.some((p) => basePath(p) === "/settings"))).toBe(true);
+    expect(activeSection("/settings")?.key).toBe("office");
+  });
+
+  it("zero duplication: /team has exactly one dock home", () => {
+    const homes = DOCK.flatMap((s) => s.children).filter(
+      (c) => c.href && basePath(c.href) === "/team",
+    );
+    expect(homes.map((c) => c.id)).toEqual(["o-team"]);
+  });
+});
+
 /** Drift guard #3: activeSection is THE one matcher behind the desktop rail, the phone
  *  bottom tiles and the SectionSubnav strip. The original disease was three drifting
  *  copies, none of which prefix-matched child routes — /quotes/abc lit "Today" on desktop
@@ -111,6 +142,11 @@ describe("activeSection — child detail routes light the right section", () => 
     expect(key("/billing/abc123")).toBe("invoices");
     expect(key("/forms/abc123")).toBe("office");
     expect(key("/tasks/site-prep")).toBe("today");
+  });
+
+  it("the team roster and settings both light Office", () => {
+    expect(key("/team")).toBe("office");
+    expect(key("/settings")).toBe("office"); // via the owns-alias, no visible link
   });
 
   it("unmapped routes match NOTHING — light nothing, never lie", () => {

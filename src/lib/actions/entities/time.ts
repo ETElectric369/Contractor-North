@@ -2,6 +2,7 @@ import { z } from "zod";
 import { clockIn, clockOutCurrent, createManualEntry, updateTimeEntry } from "@/app/(app)/timeclock/actions";
 import { createClient } from "@/lib/supabase/server";
 import { visibleJobIdOrNull } from "@/lib/job-visibility";
+import { resolveJobId, resolveProfileId } from "../resolve-id";
 import type { ActionDef } from "../types";
 
 // Time-logging, finally in the registry — so voice ("clock me in / out / add 2 hours
@@ -91,19 +92,29 @@ export const timeActions: Record<string, ActionDef> = {
       }),
     auth: "staff", // manual/back-dated entries are office corrections, not tech self-service
     effect: "write",
-    handler: (i) =>
-      createManualEntry({
-        profile_id: i.profile_id ?? "",
+    handler: async (i) => {
+      // Forgive a crew-member NAME ("Brian") passed as profile_id, and a job name as job_id.
+      // Resolving WHO the hours belong to is a lookup, never a money inference — the hours
+      // themselves still come only from the user's stated number. A single match resolves;
+      // zero/several ASK (attributing hours to the wrong person is a real payroll error).
+      const supabase = await createClient();
+      const person = await resolveProfileId(supabase, i.profile_id ?? null);
+      if ("error" in person) return { ok: false, error: person.error };
+      const job = await resolveJobId(supabase, i.job_id ?? null);
+      if ("error" in job) return { ok: false, error: job.error };
+      return createManualEntry({
+        profile_id: person.id ?? "",
         clock_in: i.clock_in,
         clock_out: i.clock_out,
         work_date: i.work_date,
         hours: i.hours,
-        job_id: i.job_id ?? null,
+        job_id: job.id,
         job_code: i.job_code ?? null,
         lunch_minutes: i.lunch_minutes ?? 0,
         notes: i.notes ?? "",
         miles: i.miles,
-      }),
+      });
+    },
   },
   "time.fixEntry": {
     name: "time.fixEntry",

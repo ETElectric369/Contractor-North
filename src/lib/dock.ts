@@ -31,7 +31,6 @@ import {
   ClipboardList,
   Wrench,
   IdCard,
-  Settings,
   ScrollText,
   Activity,
   Bug,
@@ -203,8 +202,11 @@ export const DOCK: DockSection[] = [
       { id: "o-insurance", label: "Insurance", icon: Umbrella, href: "/insurance" },
       { id: "o-safety", label: "Safety", icon: HardHat, href: "/safety" },
       { id: "o-audits", label: "Audits", icon: ClipboardCheck, href: "/audits" },
-      // HR
+      // HR — Team leads: the crew roster with real lifecycle verbs (change role,
+      // reset login, deactivate/reactivate, remove) lifted out of Settings into its
+      // own page (settings doctrine: Settings keeps zero team UI). Office-only.
       { id: "o-hr-h", label: "HR", icon: UserCog, header: true },
+      { id: "o-team", label: "Team", icon: Users, href: "/team", staffOnly: true },
       { id: "o-docs", label: "Employee docs", icon: IdCard, href: "/employee-docs", staffOnly: true },
       { id: "o-forms", label: "Forms", icon: ClipboardList, href: "/forms" },
       { id: "o-resources", label: "Resources", icon: BookUser, href: "/resources" },
@@ -213,14 +215,15 @@ export const DOCK: DockSection[] = [
       // up to the Money section; only Inventory (warehouse stock, not a dollar ledger) stays here.
       { id: "o-stock-h", label: "Stock", icon: Boxes, header: true, staffOnly: true },
       { id: "ma-stock", label: "Inventory", icon: Boxes, href: "/inventory", staffOnly: true },
-      // Diagnostics
+      // Diagnostics. Settings is NO LONGER a link here (zero-duplication law): it lives
+      // behind the avatar (the predictable phone-app door, cn-v326), so a second Office
+      // entry would be a duplicate door. Office still OWNS /settings for the where-am-I
+      // glance — the `owns` alias below lights the Office tile when you're in Settings
+      // without rendering a redundant link.
       { id: "o-diag-h", label: "Diagnostics", icon: ScrollText, header: true, staffOnly: true },
-      { id: "o-activity", label: "Activity", icon: Activity, href: "/activity", staffOnly: true },
+      { id: "o-activity", label: "Activity", icon: Activity, href: "/activity", staffOnly: true, owns: ["/settings"] },
       { id: "o-bugs", label: "Bug watch", icon: Bug, href: "/bugs", staffOnly: true },
       { id: "o-audit", label: "Activity audit", icon: ScrollText, href: "/audit", staffOnly: true },
-      // General — Settings sits at the very bottom of the Office list (admin config, last reach).
-      { id: "o-gen-h", label: "General", icon: Building2, header: true },
-      { id: "o-settings", label: "Settings", icon: Settings, href: "/settings" },
     ],
   },
   {

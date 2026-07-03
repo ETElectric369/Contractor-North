@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { patchLienRecord } from "@/app/(app)/jobs/lien-actions";
+import { createClient } from "@/lib/supabase/server";
+import { resolveJobId } from "../resolve-id";
 import type { ActionDef } from "../types";
 
 export const lienActions: Record<string, ActionDef> = {
@@ -19,13 +21,20 @@ export const lienActions: Record<string, ActionDef> = {
     }),
     auth: "staff",
     effect: "write",
-    handler: (i) =>
-      patchLienRecord(i.job_id, {
+    handler: async (i) => {
+      // Forgive a job NAME passed as job_id — lien dates are the costliest thing to forget, so
+      // never patch the wrong job: a name matching nothing/several ASKS instead of guessing.
+      const supabase = await createClient();
+      const job = await resolveJobId(supabase, i.job_id);
+      if ("error" in job) return { ok: false, error: job.error };
+      if (!job.id) return { ok: false, error: "Which job's lien record should I update?" };
+      return patchLienRecord(job.id, {
         prelim_sent_at: i.prelim_sent_at ?? undefined,
         lien_recorded_at: i.lien_recorded_at ?? undefined,
         completion_date: i.completion_date ?? undefined,
         first_furnished_date: i.first_furnished_date ?? undefined,
         notes: i.notes ?? undefined,
-      }),
+      });
+    },
   },
 };

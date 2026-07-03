@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { createBill, updateBill, deleteBill, setBillStatus } from "@/app/(app)/jobs/actions";
+import { createClient } from "@/lib/supabase/server";
+import { resolveJobId } from "../resolve-id";
 import type { ActionDef } from "../types";
 
 // Each entry just WRAPS the existing server action — no new business logic.
@@ -26,9 +28,14 @@ export const billActions: Record<string, ActionDef> = {
       `Add a $${Number(i.amount ?? 0).toFixed(2)} cost${i.supplier ? ` from ${i.supplier}` : ""}` +
       `${i.category ? ` as ${i.category}` : ""}${i.job_id ? " on a job" : ""}${i.notes ? " with a note" : ""}` +
       ` — say yes to confirm. Check the details below.`,
-    handler: (i) =>
-      createBill({
-        job_id: i.job_id ?? null,
+    handler: async (i) => {
+      // Forgive a job NAME passed as job_id — resolve to a single match so a cost never lands
+      // on the wrong (or a fabricated) job. The amount itself is still user-stated + confirmed.
+      const supabase = await createClient();
+      const job = await resolveJobId(supabase, i.job_id ?? null);
+      if ("error" in job) return { ok: false, error: job.error };
+      return createBill({
+        job_id: job.id,
         supplier: i.supplier,
         bill_number: i.bill_number ?? "",
         amount: i.amount ?? 0,
@@ -36,7 +43,8 @@ export const billActions: Record<string, ActionDef> = {
         bill_date: i.bill_date ?? null,
         notes: i.notes ?? "",
         category: i.category ?? null,
-      }),
+      });
+    },
   },
   "bill.update": {
     name: "bill.update",
