@@ -11,9 +11,9 @@ describe("DOCK jobs section ← JOB_STATUSES", () => {
   const children = jobs?.children ?? [];
   const statusChildren = children.filter((c) => c.href?.startsWith("/jobs?status="));
 
-  it("exists, with 'All jobs' first", () => {
+  it("exists, with 'All Jobs' first", () => {
     expect(jobs).toBeDefined();
-    expect(children[0]).toMatchObject({ label: "All jobs", href: "/jobs" });
+    expect(children[0]).toMatchObject({ label: "All Jobs", href: "/jobs" });
   });
 
   it("hrefs cover every job status, in lifecycle order (cancelled last)", () => {
