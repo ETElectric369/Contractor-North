@@ -26,6 +26,10 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
+  // Resize the layout when the on-screen keyboard opens so 100dvh + sticky footers
+  // stay above it (complements the visualViewport cap in Modal). Chrome/Android +
+  // newer iOS; harmless where unsupported.
+  interactiveWidget: "resizes-content",
 };
 
 export default function RootLayout({

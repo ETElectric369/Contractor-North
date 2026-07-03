@@ -35,6 +35,11 @@ export function Modal({
   // tap doesn't leave the modal permanently one tap away from discarding.
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const disarmTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // KEYBOARD FIX: on an installed iOS PWA, 100dvh does NOT shrink when the keyboard
+  // opens, so the pinned footer (Save) ends up UNDER the keyboard. The visualViewport
+  // API DOES track the keyboard — cap the panel to it so the footer always stays above
+  // it. Undefined (no visualViewport) → fall back to the max-h-[100dvh] class.
+  const [kbMaxH, setKbMaxH] = useState<string | undefined>(undefined);
   const requestClose = () => {
     if (dirty && !confirmDiscard) {
       setConfirmDiscard(true);
@@ -73,6 +78,22 @@ export function Modal({
     };
   }, [open]);
 
+  // Track the visual viewport (which shrinks under the keyboard) and cap the panel
+  // to it, so the pinned footer sits ABOVE the keyboard instead of under it.
+  useEffect(() => {
+    if (!open || typeof window === "undefined" || !window.visualViewport) return;
+    const vv = window.visualViewport;
+    const update = () => setKbMaxH(`${Math.max(200, Math.round(vv.height - 24))}px`);
+    update();
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+      setKbMaxH(undefined);
+    };
+  }, [open]);
+
   if (!open) return null;
 
   const maxW =
@@ -84,7 +105,10 @@ export function Modal({
       {/* Cap the panel to the viewport: the HEADER and FOOTER are fixed (shrink-0)
           and only the middle BODY scrolls, so the action row is always reachable
           on a short phone (esp. with the keyboard up). */}
-      <div className={`relative z-10 flex max-h-[calc(100dvh-1.5rem)] w-full ${maxW} flex-col rounded-2xl bg-white shadow-xl`}>
+      <div
+        style={kbMaxH ? { maxHeight: kbMaxH } : undefined}
+        className={`relative z-10 flex max-h-[calc(100dvh-1.5rem)] w-full ${maxW} flex-col rounded-2xl bg-white shadow-xl`}
+      >
         <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-6 py-4">
           <h2 className="text-base font-semibold text-slate-900">{title}</h2>
           <button

@@ -161,11 +161,15 @@ export function QuickCostButton({
       });
       return;
     }
-    if (!supplier.trim()) return setError("Who was it paid to? (supplier)");
+    // Fragment-first: snapping a receipt must NEVER be blocked by a missing supplier —
+    // the photo IS the capture, and the supplier can be read off it / filled in later.
+    // Require the supplier only when there's no receipt to carry the detail.
+    if (!supplier.trim() && !receipt) return setError("Who was it paid to? (supplier)");
+    const finalSupplier = supplier.trim() || "From receipt — add supplier";
     start(async () => {
       const res = await createBill({
         job_id: targetJob || null,
-        supplier: supplier.trim(),
+        supplier: finalSupplier,
         bill_number: "",
         amount,
         status: paid ? "paid" : "unpaid",
