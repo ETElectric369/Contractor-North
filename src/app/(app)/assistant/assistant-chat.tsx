@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Send, Sparkles, Loader2, Mic, Check, Square, FileText } from "lucide-react";
+import { Send, Sparkles, Loader2, Mic, Check, Square, FileText, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
 import { speakSmart, unlockAudio, stopSpeaking } from "@/lib/tts";
@@ -49,7 +49,7 @@ function parseStream(full: string): { text: string; draft: AgentDraft | null; st
 }
 
 /** The Estimator — the live estimate building in front of you (the assistant's preview box). */
-function LiveQuote({ draft, onSave, saving }: { draft: AgentDraft; onSave: () => void; saving: boolean }) {
+function LiveQuote({ draft, onSave, onDismiss, saving }: { draft: AgentDraft; onSave: () => void; onDismiss: () => void; saving: boolean }) {
   // Defensive: a streaming/partial draft can briefly arrive with items as a non-array or with
   // a null entry — never let that crash the Estimator render (it would blank the whole page).
   const items = (Array.isArray(draft.items) ? draft.items : []).filter((i) => i && typeof i === "object");
@@ -64,6 +64,17 @@ function LiveQuote({ draft, onSave, saving }: { draft: AgentDraft; onSave: () =>
         <span className="text-[10px] font-bold uppercase tracking-wide text-brand">Estimator</span>
         <span className="min-w-0 truncate font-normal text-slate-500">· {draft.title || "New estimate"}</span>
         {draft.customer_name ? <span className="truncate font-normal text-slate-400">· {draft.customer_name}</span> : null}
+        {/* Always give the user a way to clear the preview off the screen — an
+            already-saved or abandoned estimate should never be stuck here. */}
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label="Clear the estimate preview"
+          title="Clear this estimate off the screen"
+          className="ml-auto shrink-0 rounded-full p-1 text-slate-400 hover:bg-slate-200/60 hover:text-slate-700"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
       </div>
       <ul className="max-h-40 divide-y divide-slate-100 overflow-y-auto px-3 text-xs">
         {items.length === 0 ? (
@@ -405,7 +416,9 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         if (done) break;
         full += decoder.decode(value, { stream: true });
         const { text: visible, draft: liveDraft, status: liveStatus } = parseStream(full);
-        if (liveDraft) setDraft(liveDraft); // the quote fills in live as blocks arrive
+        // `cleared` = the agent just saved the estimate → wipe the preview so it stops
+        // anchoring the conversation. Otherwise the quote fills in live as blocks arrive.
+        if (liveDraft) setDraft((liveDraft as { cleared?: boolean }).cleared ? null : liveDraft);
         setStatus(liveStatus); // transient "Searching…" pill while a tool runs
         setTokens(Math.max(1, Math.round(visible.length / 4))); // rough live token count for the status line
         setMessages((m) => {
@@ -708,7 +721,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
       ) : null}
 
       {/* The full estimate card — non-glass only; the glass drawer shows the ESTIMATOR line + items. */}
-      {draft && !glass ? <LiveQuote draft={draft} onSave={saveDraft} saving={savingDraft} /> : null}
+      {draft && !glass ? <LiveQuote draft={draft} onSave={saveDraft} onDismiss={() => setDraft(null)} saving={savingDraft} /> : null}
 
       {/* Saved-this-session estimates: the live numbers collapse to ONE clickable line each, linking to
           the quote in /quotes (the permanent log). Newest first. */}

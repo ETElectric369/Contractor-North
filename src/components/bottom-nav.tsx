@@ -22,7 +22,9 @@ export function BottomNav({ role }: { role?: string }) {
     <nav
       // transform:translateZ(0) keeps the bar from drifting during iOS momentum scroll.
       style={{ transform: "translateZ(0)", WebkitBackfaceVisibility: "hidden" }}
-      className="app-bottom-nav glass fixed inset-x-2 bottom-2 z-[70] flex items-center rounded-2xl border-white/40 px-0.5 pb-[env(safe-area-inset-bottom)] lg:hidden"
+      // Cap the home-indicator inset so a big safe-area on some iPhones doesn't
+      // make the dock tower over its 9px labels (bug: "dock bigger than other screens").
+      className="app-bottom-nav glass fixed inset-x-2 bottom-2 z-[70] flex items-center rounded-2xl border-white/40 px-0.5 pb-[min(env(safe-area-inset-bottom),0.5rem)] lg:hidden"
     >
       {sections.map((s) => {
         const Icon = s.icon;

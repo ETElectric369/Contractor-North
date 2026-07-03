@@ -4,7 +4,7 @@
 // so a SW bug can't trap users on old code. We only cache hashed/immutable
 // static assets and an offline fallback page. API and auth requests are never
 // touched. Bump VERSION to invalidate the static cache.
-const VERSION = "cn-v331";
+const VERSION = "cn-v332";
 const STATIC_CACHE = `static-${VERSION}`;
 const PRECACHE = ["/offline", "/icon-192.png", "/icon-512.png", "/apple-touch-icon.png"];
 

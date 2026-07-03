@@ -67,7 +67,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     supabase.from("jobs").select("id, job_number, name, status, address, scheduled_start, customers(name)").gte("scheduled_start", dayStart.toISOString()).lt("scheduled_start", dayEnd.toISOString()).order("scheduled_start"),
     // Multi-range jobs whose segment covers today.
     supabase.from("job_schedule_segments").select("job_id, jobs(id, job_number, name, status, address, customers(name))").lte("start_date", todayStr).gte("end_date", todayStr),
-    supabase.from("appointments").select("id, type, title, starts_at, ends_at, location, notes, status, job_id, customer_id, assigned_to").gte("starts_at", dayStart.toISOString()).lt("starts_at", dayEnd.toISOString()).neq("status", "cancelled").order("starts_at"),
+    supabase.from("appointments").select("id, type, title, starts_at, ends_at, location, notes, status, job_id, customer_id, assigned_to, jobs(address)").gte("starts_at", dayStart.toISOString()).lt("starts_at", dayEnd.toISOString()).neq("status", "cancelled").order("starts_at"),
     supabase.from("time_entries").select("id, job_id, clock_in, clock_out, lunch_minutes, status").eq("profile_id", user?.id ?? "").gte("clock_in", dayStart.toISOString()).lt("clock_in", dayEnd.toISOString()),
     // The open entry, regardless of when it started (overnight shift, etc.). The job
     // on THIS entry is the "Now" hero — scoped to the caller, not the org's latest
@@ -296,7 +296,9 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       time: a.starts_at,
       title: a.title,
       sub: a.location ?? null,
-      address: a.location ?? null,
+      // Fall back to the linked job's address so the Navigate button appears on a
+      // job appointment that has no explicit location (bug: NAV missing on appts).
+      address: a.location ?? a.jobs?.address ?? null,
       href: a.job_id ? `/jobs/${a.job_id}` : `/schedule?view=day&date=${todayStr}`,
       apptType: a.type,
       appt: {

@@ -312,7 +312,12 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
       json = JSON.stringify({ ...d, items, items_truncated: true });
     }
     if (json.length <= 2048) {
-      tailContext.push(`CANONICAL DRAFT currently on screen (treat as the quote so far — continue from it, do not restart): ${json}`);
+      // ADVISORY, not a command: the estimate preview the user is building. If they've
+      // moved on to something else, you do NOT have to keep working on it, and you must
+      // NEVER re-save a quote that's already saved (the app used to phrase this as
+      // "continue from it, do not restart", which anchored the whole conversation on a
+      // saved estimate and spawned duplicate saves).
+      tailContext.push(`ESTIMATE PREVIEW on screen (context only — the quote being built; ignore it if the user has moved on, and never re-save an already-saved quote): ${json}`);
     }
   }
   if (typeof body.path === "string" && body.path.startsWith("/") && body.path.length <= 200) {
@@ -517,6 +522,14 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
                     ...(res.missingFields?.length ? { missingFields: res.missingFields } : {}),
                     ...(res.data ? { data: res.data } : {}),
                   });
+                  // The estimate is now SAVED (or became a job) — tell the client to WIPE the
+                  // on-screen Estimator preview. Without this the preview lingered, the app
+                  // re-injected it as "the quote so far" every turn, and the conversation stayed
+                  // anchored on a saved estimate (the 400A-panel loop) — often spawning a
+                  // duplicate save. The client clears the draft on `cleared: true`.
+                  if (res.ok && (actionName === "quote.create" || actionName === "quote.convertToJob")) {
+                    emit(DRAFT_OPEN + JSON.stringify({ kind: "quote", cleared: true }) + DRAFT_CLOSE);
+                  }
                 }
               }
             } else {
