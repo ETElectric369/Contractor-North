@@ -44,11 +44,13 @@ export function BugList({ initial }: { initial: BugReport[] }) {
             key={t.key}
             onClick={() => setTab(t.key)}
             className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
-              tab === t.key ? "bg-brand text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+              tab === t.key ? "seaglass-active" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
             }`}
           >
-            {t.label}
-            {t.key === "open" && openCount > 0 ? ` (${openCount})` : ""}
+            <span className="relative z-10">
+              {t.label}
+              {t.key === "open" && openCount > 0 ? ` (${openCount})` : ""}
+            </span>
           </button>
         ))}
       </div>

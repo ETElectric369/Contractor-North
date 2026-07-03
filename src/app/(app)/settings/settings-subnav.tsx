@@ -77,12 +77,12 @@ export function SettingsSubnav({
               scroll={false}
               className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors ${
                 active
-                  ? "bg-brand text-white shadow-sm"
-                  : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                  ? "seaglass-active"
+                  : "border border-slate-200 bg-white text-slate-600 hover:text-[color:rgb(var(--glass-ink))]"
               }`}
             >
-              <Icon className="h-4 w-4" />
-              {c.label}
+              <Icon className="relative z-10 h-4 w-4" />
+              <span className="relative z-10">{c.label}</span>
             </Link>
           );
         })}

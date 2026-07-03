@@ -58,7 +58,7 @@ export function FinishJobButton({
         // with the truth and a link to review/send it manually.
         setDoneId(res.id);
         setWarn(
-          "The job is finished, but the invoice wasn’t emailed — the customer may have no email on file, or there was nothing billable to send. It’s saved as a draft in “To be invoiced” for you to review and send.",
+          "The job is finished, but the invoice wasn't emailed — the customer may have no email on file, or there was nothing billable to send. It's saved as a draft in \"To be invoiced\" for you to review and send.",
         );
         return;
       }
@@ -148,7 +148,7 @@ export function FinishJobButton({
                       <span className="block text-xs text-slate-500">
                         {sendInvoice
                           ? "Sends as soon as you finish — double-check the amounts first."
-                          : "Leave unchecked to hold it in “To be invoiced” for review."}
+                          : 'Leave unchecked to hold it in "To be invoiced" for review.'}
                       </span>
                     </span>
                   </label>

@@ -30,7 +30,7 @@ export default async function PermitsPage() {
 
   return (
     <div>
-      <PageHeader title="Permits & Inspections" description="Every permit and inspection across your jobs.">
+      <PageHeader title="Permits & inspections" description="Every permit and inspection across your jobs.">
         <AddPermitButton jobs={jobOpts} />
       </PageHeader>
 

@@ -113,11 +113,16 @@ function DockInner({ branding, role, badges }: DockProps) {
                 key={c.id}
                 href={c.href}
                 className={`flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors ${
-                  cur ? "bg-brand text-white shadow-sm" : "text-slate-600 hover:bg-white/70"
+                  // Active row IS the dock section tile's look (sea-glass, never brand blue):
+                  // the shared `.seaglass-active` recipe. Resting rows warm to ink-teal on the
+                  // dock's canonical hover brighten (hover:bg-white/70).
+                  cur
+                    ? "seaglass-active"
+                    : "text-slate-600 hover:bg-white/70 hover:text-[color:rgb(var(--glass-ink))]"
                 }`}
               >
-                <CIcon className="h-4 w-4 shrink-0" />
-                <span className="truncate">{c.label}</span>
+                <CIcon className="relative z-10 h-4 w-4 shrink-0" />
+                <span className="relative z-10 truncate">{c.label}</span>
               </Link>
             );
           })}

@@ -780,9 +780,10 @@ export function ToolsView() {
             <button
               key={p}
               onClick={() => setPkg(p)}
-              className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${active ? "bg-brand text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+              className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${active ? "seaglass-active" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
             >
-              {p} <span className={active ? "text-white/70" : "text-slate-400"}>{count}</span>
+              <span className="relative z-10">{p}</span>{" "}
+              <span className={`relative z-10 ${active ? "text-[color:rgb(var(--glass-ink))]/70" : "text-slate-400"}`}>{count}</span>
             </button>
           );
         })}

@@ -27,11 +27,11 @@ export function LanguageToggle({ current }: { current: string }) {
           disabled={pending}
           className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
             lang === l.code
-              ? "bg-brand text-white"
+              ? "seaglass-active"
               : "text-slate-600 hover:bg-slate-100"
           }`}
         >
-          {l.label}
+          <span className="relative z-10">{l.label}</span>
         </button>
       ))}
     </div>

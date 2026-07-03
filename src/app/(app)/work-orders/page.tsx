@@ -35,7 +35,7 @@ export default async function WorkOrdersPage({
   return (
     <div>
       <PageHeader
-        title="Work Orders"
+        title="Work orders"
         description="Field work orders, scopes, and assignments."
       >
         <NewWorkOrderButton

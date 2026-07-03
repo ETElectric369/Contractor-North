@@ -401,7 +401,7 @@ export function AppointmentButton({
               <Label htmlFor="ap-type">Type</Label>
               <Select id="ap-type" name="type" value={form.type} onChange={(e) => patch({ type: e.target.value })}>
                 <option value="quote">Quote / estimate a job</option>
-                <option value="meeting">Meet with client</option>
+                <option value="meeting">Meet with customer</option>
                 <option value="inspection">Inspection</option>
                 <option value="appointment">Appointment</option>
                 <option value="other">Other</option>

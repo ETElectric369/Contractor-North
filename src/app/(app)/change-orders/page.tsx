@@ -36,7 +36,7 @@ export default async function ChangeOrdersPage() {
   return (
     <div>
       <PageHeader
-        title="Change Orders"
+        title="Change orders"
         description="Track and approve scope changes."
       >
         <NewChangeOrderButton jobs={jobs ?? []} />

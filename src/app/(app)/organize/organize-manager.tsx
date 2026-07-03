@@ -450,7 +450,7 @@ export function OrganizeManager({
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <Label htmlFor="oi-vendor">Vendor</Label>
-              <Input id="oi-vendor" value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder="Store / supplier" />
+              <Input id="oi-vendor" value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder="Store" />
             </div>
             <div>
               <Label htmlFor="oi-amount">Amount</Label>

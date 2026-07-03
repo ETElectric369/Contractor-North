@@ -156,6 +156,35 @@ body.modal-open .app-bottom-nav {
   );
   pointer-events: none;
 }
+/* THE sea-glass active/selected state — one definition shared by every nav surface
+   (section subnav pills, the dock's inside-left rail rows, in-page tabs). It IS the
+   dock's active look: tinted glass + specular gloss + dark-teal ink, NEVER brand blue.
+   Bundles .glass-tint + .glass-gloss so a selected chip matches the mouse-over/full-
+   screen dock feel. Content inside must carry `relative z-10` to clear the gloss sheen. */
+.seaglass-active {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.12)),
+    rgb(var(--glass-tint) / 0.24);
+  color: rgb(var(--glass-ink));
+  position: relative;
+  overflow: hidden;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    0 6px 18px -12px rgba(15, 23, 42, 0.35);
+}
+.seaglass-active::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.78) 0%,
+    rgba(255, 255, 255, 0.2) 36%,
+    rgba(255, 255, 255, 0) 58%
+  );
+  pointer-events: none;
+}
 /* The bloom: a branch grows in from the dock icon, then the node pops. */
 @keyframes cn-pop {
   from { opacity: 0; transform: translateY(-50%) scale(0.86); }

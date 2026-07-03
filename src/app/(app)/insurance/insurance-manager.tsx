@@ -135,7 +135,7 @@ export function InsuranceManager({ items, orgId }: { items: InsuranceItem[]; org
 
   return (
     <div className="space-y-4">
-      <div className="flex items-start justify-end gap-2">
+      <div className="flex flex-wrap items-center justify-end gap-2">
         <ImportDocsButton orgId={orgId} page="Insurance" />
         <Button size="sm" onClick={() => setAdding((a) => !a)}><Plus className="h-3.5 w-3.5" /> Add policy</Button>
       </div>

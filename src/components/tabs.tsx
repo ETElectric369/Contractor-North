@@ -221,7 +221,8 @@ function CountBadge({ count, active }: { count?: number; active: boolean }) {
     <span
       className={cn(
         "rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
-        active ? "bg-brand-light text-brand-dark" : "bg-slate-100 text-slate-500",
+        // Active badge picks up the sea-glass tint + ink (matches the active tab), not brand blue.
+        active ? "bg-[rgb(var(--glass-tint))]/15 text-[rgb(var(--glass-ink))]" : "bg-slate-100 text-slate-500",
       )}
     >
       {count}
@@ -269,7 +270,15 @@ function ScrollStrip({ items, activeId, onSelect }: { items: TabBarItem[]; activ
               <CountBadge count={t.count} active={active} />
             </>
           );
-          const cls = cn(TAB_CLS, active ? "border-brand text-brand" : "border-transparent text-slate-500 hover:text-slate-800");
+          // Active tab is sea-glass, not brand blue: dark-teal ink text + a matching
+          // ink underline (the tab grammar keeps the underline strip). Resting tabs warm
+          // to ink-teal on hover so mouse-over is consistent with the dock/nav.
+          const cls = cn(
+            TAB_CLS,
+            active
+              ? "border-[rgb(var(--glass-ink))] text-[rgb(var(--glass-ink))]"
+              : "border-transparent text-slate-500 hover:text-[rgb(var(--glass-ink))]",
+          );
           return t.href ? (
             <Link key={t.id} href={t.href} scroll={false} className={cls}>
               {inner}
@@ -329,7 +338,10 @@ function MoreMenu({ items, activeId, onSelect }: { items: TabBarItem[]; activeId
   const itemCls = (active: boolean) =>
     cn(
       "relative z-10 flex w-full items-center gap-2 px-3 py-2 text-left text-sm",
-      active ? "bg-brand-light/40 font-medium text-brand-dark" : "text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15",
+      // Active row is sea-glass tint + ink (the app-wide active look), not brand blue.
+      active
+        ? "bg-[rgb(var(--glass-tint))]/20 font-medium text-[rgb(var(--glass-ink))]"
+        : "text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15",
     );
 
   return (
@@ -338,7 +350,11 @@ function MoreMenu({ items, activeId, onSelect }: { items: TabBarItem[]; activeId
         onClick={() => setOpen((v) => !v)}
         className={cn(
           "flex items-center gap-1 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium transition-colors",
-          activeHere ? "border-brand text-brand" : "border-transparent text-slate-500 hover:text-slate-800",
+          // "More" mirrors the active tab: sea-glass ink underline + text when an overflow
+          // tab is active; ink-teal on hover otherwise. Never brand blue.
+          activeHere
+            ? "border-[rgb(var(--glass-ink))] text-[rgb(var(--glass-ink))]"
+            : "border-transparent text-slate-500 hover:text-[rgb(var(--glass-ink))]",
         )}
         aria-haspopup="menu"
         aria-expanded={open}

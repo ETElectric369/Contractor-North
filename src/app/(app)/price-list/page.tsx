@@ -26,7 +26,7 @@ export default async function PriceListPage() {
   return (
     <div>
       <PageHeader
-        title="Price List & Kits"
+        title="Price list & kits"
         description="Your priced catalog and reusable bundles — drop them onto quotes. Import a supplier list (e.g. CED) via CSV."
       />
       <Tabs

@@ -28,7 +28,7 @@ export default async function MaterialsPage() {
   return (
     <div>
       <PageHeader
-        title="Material Lists"
+        title="Material lists"
         description="Take-offs for jobs — build by hand or generate with AI."
       >
         <NewListButton jobs={jobs ?? []} />

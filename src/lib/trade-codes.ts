@@ -116,7 +116,20 @@ export const TRADE_PRESETS: Record<string, { label: string; codes: JobCodeSeed[]
       TRAVEL, SHOP, PTO,
     ],
   },
+  tile: {
+    label: "Tile / flooring",
+    codes: [
+      { code: "DEMO", description: "Demo / tear-out", billable: true },
+      { code: "PREP", description: "Substrate prep / leveling", billable: true },
+      { code: "WPROOF", description: "Waterproofing / membrane", billable: true },
+      { code: "BACKER", description: "Backer board / underlayment", billable: true },
+      { code: "SET", description: "Tile setting / install", billable: true },
+      { code: "GROUT", description: "Grout / seal", billable: true },
+      { code: "REPAIR", description: "Repair / regrout", billable: true },
+      SVC, TRAVEL, SHOP, PTO,
+    ],
+  },
 };
 
 /** Ordered for the onboarding dropdown — General first, then alphabetical-ish by trade. */
-export const TRADE_ORDER = ["general", "deck", "electrical", "plumbing", "hvac", "landscaping", "roofing", "concrete", "painting"] as const;
+export const TRADE_ORDER = ["general", "deck", "electrical", "plumbing", "hvac", "landscaping", "roofing", "concrete", "tile", "painting"] as const;

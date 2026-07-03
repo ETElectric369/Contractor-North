@@ -67,7 +67,7 @@ export function CustomerSelect({
           <button
             onClick={save}
             disabled={pending}
-            className="shrink-0 rounded-md bg-brand p-1.5 text-white hover:bg-brand-dark disabled:opacity-50"
+            className="shrink-0 rounded-md bg-[rgb(var(--glass-ink))] p-1.5 text-white hover:bg-[rgb(var(--glass-ink))]/90 disabled:opacity-50"
             aria-label="Save customer"
           >
             <Check className="h-4 w-4" />

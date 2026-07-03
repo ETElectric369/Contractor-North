@@ -35,7 +35,7 @@ export default async function EmployeeDocsPage() {
   return (
     <div>
       <PageHeader
-        title="Employee Documents"
+        title="Employee documents"
         description="Driver's licenses, I-9, W-2, and certifications — stored securely (staff only)."
       />
       <EmployeeDocsManager orgId={me.org_id} employees={employees ?? []} docs={docs as any} />

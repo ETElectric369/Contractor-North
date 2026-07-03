@@ -59,9 +59,10 @@ export function SectionSubnav({ isStaff }: { isStaff?: boolean }) {
 
   // 2–4 pages: each is its OWN sea-glass chip (Erik: "individual buttons like the dock")
   // — the same glass/tint/gloss recipe as the left-edge dock handle — sharing the width
-  // evenly (flex-1). The active page is a solid brand chip (the dock's active highlight);
-  // resting chips are frosted ink-teal glass. Labels show WHOLE WORDS (no truncation) —
-  // short section names fit at this width. `relative z-10` keeps content above the gloss.
+  // evenly (flex-1). The active page IS the dock's active highlight (sea-glass, never
+  // brand blue): the shared `.seaglass-active` recipe = tint + gloss + dark-teal ink.
+  // Resting chips are frosted white glass (no tint) that warm to ink-teal on hover.
+  // Labels show WHOLE WORDS (no truncation). `relative z-10` keeps content above the gloss.
   return (
     <div className="mb-4 flex w-full gap-1.5 pb-1 lg:hidden">
       {tabs.map((c) => {
@@ -73,8 +74,8 @@ export function SectionSubnav({ isStaff }: { isStaff?: boolean }) {
             href={c.href!}
             className={`relative flex flex-1 items-center justify-center gap-1.5 rounded-xl px-2.5 py-2 text-sm font-medium transition-colors ${
               active
-                ? "bg-brand text-white shadow-sm"
-                : "glass glass-tint glass-gloss text-[color:rgb(var(--glass-ink))]"
+                ? "seaglass-active"
+                : "glass glass-gloss text-slate-600 hover:text-[color:rgb(var(--glass-ink))]"
             }`}
           >
             <Icon className="relative z-10 h-4 w-4 shrink-0" />

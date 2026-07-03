@@ -158,11 +158,11 @@ export function SectionSheet({
                 href={c.href}
                 onClick={() => setOpen(false)}
                 className={`flex min-h-[44px] items-center gap-2.5 rounded-lg px-3 text-sm font-medium transition-colors ${
-                  cur ? "bg-brand text-white shadow-sm" : "text-slate-700 hover:bg-white/70"
+                  cur ? "seaglass-active" : "text-slate-700 hover:bg-white/70"
                 }`}
               >
-                <CIcon className={`h-4 w-4 shrink-0 ${cur ? "" : "text-[rgb(var(--glass-ink))]"}`} />
-                <span className="truncate">{c.label}</span>
+                <CIcon className="relative z-10 h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" />
+                <span className="relative z-10 truncate">{c.label}</span>
               </Link>
             );
           })}

@@ -545,7 +545,7 @@ export default async function JobDetailPage({
               const h = e.status === "closed" && e.clock_out
                 ? hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes) : null;
               return (
-                <li key={e.id} className="flex items-center justify-between px-5 py-2.5 text-sm">
+                <li key={e.id} className="flex items-center justify-between px-5 py-3 text-sm">
                   <div>
                     <span className="text-slate-700">{formatDateTz(e.clock_in, tz)}</span>
                     <span className="ml-2 text-slate-500">{e.profiles?.full_name ?? "—"}</span>
@@ -639,7 +639,7 @@ export default async function JobDetailPage({
             <ul className="divide-y divide-slate-100">
               {(pos ?? []).map((p: any) => (
                 <li key={p.id}>
-                  <Link href={`/purchasing/${p.id}`} className="flex items-center justify-between px-5 py-2.5 text-sm hover:bg-slate-50">
+                  <Link href={`/purchasing/${p.id}`} className="flex items-center justify-between px-5 py-3 text-sm hover:bg-slate-50">
                     <span>{p.po_number} · {p.vendor}</span>
                     <span className="text-slate-700">{formatCurrency(p.total)}</span>
                   </Link>
@@ -717,9 +717,9 @@ export default async function JobDetailPage({
           <div className="flex justify-end">
             <Link
               href={`/quotes/new?customer=${j.customer_id ?? ""}&job=${j.id}`}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
+              className="btn-gloss inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-[rgb(var(--glass-ink))] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[rgb(var(--glass-ink))]/90"
             >
-              <Plus className="h-3.5 w-3.5" /> New estimate
+              <Plus className="h-4 w-4" /> New estimate
             </Link>
           </div>
           <Card className="overflow-hidden">

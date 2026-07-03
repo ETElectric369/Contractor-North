@@ -51,7 +51,7 @@ export default async function BillsPage() {
   return (
     <div>
       <PageHeader
-        title="Bills & Purchasing"
+        title="Bills & purchasing"
         description="Purchase orders, supplier bills, and receipts across every job."
       />
 

@@ -36,10 +36,10 @@ export function MapsProviderToggle() {
               type="button"
               onClick={() => choose(o.value)}
               className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium ${
-                active ? "border-brand bg-brand/10 text-brand" : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                active ? "seaglass-active border-transparent" : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
               }`}
             >
-              {active && <Check className="h-4 w-4" />} {o.label}
+              {active && <Check className="relative z-10 h-4 w-4" />} <span className="relative z-10">{o.label}</span>
             </button>
           );
         })}

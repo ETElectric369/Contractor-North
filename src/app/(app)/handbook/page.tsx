@@ -21,7 +21,7 @@ export default async function HandbookPage() {
   return (
     <div className="mx-auto max-w-3xl">
       <PageHeader
-        title="Employee Handbook"
+        title="Employee handbook"
         description={`Policies and expectations at ${(org as any)?.name ?? "the company"}.`}
       />
       <PhoneSetupChecklist />

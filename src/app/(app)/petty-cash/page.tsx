@@ -21,7 +21,7 @@ export default async function PettyCashPage() {
 
   return (
     <div>
-      <PageHeader title="Petty Cash" description="Track your cash box — add cash, log expenses, see the running balance." />
+      <PageHeader title="Petty cash" description="Track your cash box — add cash, log expenses, see the running balance." />
       <PettyCashManager items={rows as any} balance={balance} />
     </div>
   );

@@ -117,7 +117,7 @@ export default async function TaxReportPage({
 
   return (
     <div>
-      <PageHeader title="Tax Report" description="Sales tax collected by rate / jurisdiction — for filing & remittance." />
+      <PageHeader title="Tax report" description="Sales tax collected by rate / jurisdiction — for filing & remittance." />
 
       <div className="mb-4 flex flex-wrap gap-2">
         {(Object.keys(LABELS) as Period[]).map((p) => (
@@ -125,10 +125,10 @@ export default async function TaxReportPage({
             key={p}
             href={`/tax-report?period=${p}`}
             className={`rounded-lg border px-3 py-1.5 text-sm font-medium ${
-              period === p ? "border-brand bg-brand text-white" : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+              period === p ? "seaglass-active border-transparent" : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
             }`}
           >
-            {LABELS[p]}
+            <span className="relative z-10">{LABELS[p]}</span>
           </Link>
         ))}
       </div>

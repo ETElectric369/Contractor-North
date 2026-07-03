@@ -557,7 +557,7 @@ function MonthGrid({
               <div
                 className={`text-xs ${
                   k === todayK
-                    ? "inline-flex h-5 w-5 items-center justify-center rounded-full bg-brand font-semibold text-white"
+                    ? "inline-flex h-5 w-5 items-center justify-center rounded-full bg-[rgb(var(--glass-ink))] font-semibold text-white"
                     : inMonth ? "text-slate-500" : "text-slate-300"
                 }`}
               >

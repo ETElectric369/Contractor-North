@@ -453,7 +453,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         <div className="flex shrink-0 items-center gap-1">
           {i.address && (
             <NavLink address={i.address} className={navBtnCls}>
-              <Navigation className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Navigate</span>
+              <Navigation className="h-4 w-4" /> <span className="hidden sm:inline">Navigate</span>
             </NavLink>
           )}
           {/* Row verbs (staff): the edit pencil kills the old dead-end (appt row →
@@ -590,7 +590,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
                 {currentJob.address && (
                   <NavLink
                     address={currentJob.address}
-                    className="flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-brand text-white shadow-sm hover:bg-brand-dark"
+                    className="flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-[rgb(var(--glass-ink))] text-white shadow-sm hover:bg-[rgb(var(--glass-ink))]/90"
                   >
                     <Navigation className="h-4 w-4" /> Navigate
                   </NavLink>

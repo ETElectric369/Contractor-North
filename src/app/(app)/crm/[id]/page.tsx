@@ -265,7 +265,7 @@ export default async function CustomerDetailPage({
           {c.phone && (
             <a
               href={`tel:${c.phone}`}
-              className="btn-gloss inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-brand-dark"
+              className="btn-gloss inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-[rgb(var(--glass-ink))] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[rgb(var(--glass-ink))]/90"
             >
               <Phone className="h-4 w-4" /> Call
             </a>

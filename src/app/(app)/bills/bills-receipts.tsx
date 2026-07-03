@@ -288,10 +288,10 @@ export function BillsReceipts({
                 key={id}
                 onClick={() => setBillFilter(id)}
                 className={`rounded-full px-3 py-1 text-xs font-medium ${
-                  billFilter === id ? "bg-brand text-white" : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"
+                  billFilter === id ? "seaglass-active" : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"
                 }`}
               >
-                {label}
+                <span className="relative z-10">{label}</span>
               </button>
             ))}
           </div>

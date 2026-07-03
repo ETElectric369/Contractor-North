@@ -152,7 +152,7 @@ export function JobTimeButton({
   const triggerCls =
     "btn-gloss inline-flex h-11 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 text-sm font-semibold transition-colors sm:px-3.5 " +
     (state === "in"
-      ? "bg-brand text-white shadow-sm hover:bg-brand-dark"
+      ? "bg-[rgb(var(--glass-ink))] text-white shadow-sm hover:bg-[rgb(var(--glass-ink))]/90"
       : state === "switch"
         ? "border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
         : "border border-green-300 bg-green-50 text-green-700 hover:bg-green-100");

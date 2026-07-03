@@ -109,7 +109,7 @@ export default async function CustomerPortalPage({ params }: { params: Promise<{
 
         {/* Jobs (read-only status) */}
         {jobs.length > 0 && (
-          <Section icon={<Briefcase className="h-4 w-4" />} title="Your projects" brand={brand}>
+          <Section icon={<Briefcase className="h-4 w-4" />} title="Your jobs" brand={brand}>
             {jobs.map((j: any, idx: number) => (
               <div key={idx} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
                 <span className="min-w-0 truncate text-slate-800">{j.name}</span>
