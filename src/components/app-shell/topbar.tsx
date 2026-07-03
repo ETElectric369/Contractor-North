@@ -27,7 +27,7 @@ export function Topbar({
   const isStaff = ["owner", "admin", "office"].includes(profile?.role ?? "");
 
   return (
-    <header className="flex h-16 items-center justify-between gap-2 border-b border-slate-200 bg-white px-4 lg:px-6">
+    <header className="flex h-16 items-center justify-between gap-2 border-b border-white/50 bg-[rgba(255,255,255,0.55)] px-4 backdrop-blur-[14px] backdrop-saturate-150 lg:px-6">
       <button
         className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100"
         onClick={() => {

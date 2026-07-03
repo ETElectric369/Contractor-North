@@ -3,7 +3,6 @@ import { createClient } from "@/lib/supabase/server";
 import { Dock } from "@/components/app-shell/dock";
 import { Topbar } from "@/components/app-shell/topbar";
 import { CommandBar } from "@/components/command-bar";
-import { BottomNav } from "@/components/bottom-nav";
 import { billingEnabled } from "@/lib/stripe";
 import { hasActiveAccess, isCompedOrg } from "@/lib/subscription";
 import { getOrgSettings } from "@/lib/org-settings";
@@ -132,7 +131,6 @@ export default async function AppLayout({
         </main>
       </div>
       <CommandBar isStaff={isStaff} />
-      <BottomNav role={profile.role} />
       {isStaff && <BugReporter orgId={profile.org_id} />}
       {openEntry && (
         <GeofenceMonitor
