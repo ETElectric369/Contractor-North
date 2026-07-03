@@ -69,6 +69,7 @@ export default async function PublicQuotePage({
             accepted={q.status === "accepted"}
             declined={q.status === "declined"}
             brand={co.brand}
+            docLabel={docLabel}
           />
         }
       />

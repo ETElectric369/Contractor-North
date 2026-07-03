@@ -12,12 +12,16 @@ export function PublicQuoteAccept({
   accepted,
   declined,
   brand,
+  docLabel = "Quote",
 }: {
   token: string;
   accepted: boolean;
   declined?: boolean;
   brand: string;
+  /** "Estimate" or "Quote" — so the button/outcome copy matches the doc type. */
+  docLabel?: string;
 }) {
+  const lower = docLabel.toLowerCase();
   const [outcome, setOutcome] = useState<Outcome>(accepted ? "accepted" : declined ? "declined" : "open");
   const [busy, setBusy] = useState<null | "accept" | "decline">(null);
   const [err, setErr] = useState<string | null>(null);
@@ -54,7 +58,7 @@ export function PublicQuoteAccept({
   if (outcome === "accepted") {
     return (
       <div className="no-print flex items-center justify-center gap-2 rounded-xl bg-green-50 px-4 py-3 text-sm font-medium text-green-700">
-        <Check className="h-5 w-5" /> Quote accepted — thank you! We'll be in touch to schedule.
+        <Check className="h-5 w-5" /> {docLabel} accepted — thank you! We'll be in touch to schedule.
       </div>
     );
   }
@@ -62,7 +66,7 @@ export function PublicQuoteAccept({
   if (outcome === "declined") {
     return (
       <div className="no-print flex items-center justify-center gap-2 rounded-xl bg-slate-100 px-4 py-3 text-sm font-medium text-slate-600">
-        <X className="h-5 w-5" /> Quote declined. Thanks for letting us know — reach out if anything changes.
+        <X className="h-5 w-5" /> {docLabel} declined. Thanks for letting us know — reach out if anything changes.
       </div>
     );
   }
@@ -77,7 +81,7 @@ export function PublicQuoteAccept({
         style={{ backgroundColor: brand }}
       >
         {busy === "accept" ? <Loader2 className="h-5 w-5 animate-spin" /> : <Check className="h-5 w-5" />}
-        Accept this quote
+        Accept this {lower}
       </button>
       <p className="mt-1.5 text-xs text-slate-400">Accepting lets us schedule your work.</p>
       <button
@@ -86,7 +90,7 @@ export function PublicQuoteAccept({
         className="mt-3 inline-flex items-center gap-1.5 text-sm text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline disabled:opacity-60"
       >
         {busy === "decline" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-        No thanks, decline this quote
+        No thanks, decline this {lower}
       </button>
     </div>
   );
