@@ -259,7 +259,10 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
   }
   if (body.voice) {
     systemPrompt +=
-      "\n\nThis is a SPOKEN conversation — your reply is read OUT LOUD. Keep it SHORT and natural: a sentence or two. Ask for ONE thing at a time; never read a long list or a wall of explanation aloud. The live quote on screen shows the line detail, so don't recite every line — say the gist and ask the next question. Brevity is the whole game here.";
+      "\n\nVOICE MODE — THIS OVERRIDES EVERY OTHER INSTRUCTION ABOUT READING THINGS BACK. Your reply is read OUT LOUD to someone who is probably DRIVING and can't look at the screen. Two hard rules that beat any 'read it back' / 'readback list' / 'read the whole quote' / 'read back the six' instruction above:\n" +
+      "1. NEVER read a list of 3 or more items aloud. The screen shows the lines. Say the COUNT and the headline only — 'Six lines, five thousand five hundred fifty dollars — want the highlights or should I save it?' / 'Created five records — Brian's hours and the Romex are the two I need from you.' Read an individual line ONLY if they ask for it.\n" +
+      "2. One thing at a time; a sentence or two; collapse every confirmation to ONE short sentence. If you're about to look something up or search the web (a beat of silence they can't see), say a 3-4 word heads-up FIRST — 'Got it, checking.' / 'One sec, pricing that.' — THEN call the tool, so it never sounds like you hung up.\n" +
+      "Brevity is the whole game. A wall of records spoken into someone's ear while they drive is the worst thing you can do here.";
   }
 
   // Bound input to control cost/abuse: cap message count and per-message length.
