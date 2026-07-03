@@ -84,6 +84,35 @@ function browserSpeak(text: string, fire: () => void) {
 
 
 /**
+ * Is this line an itemized COST line — a bullet with a dollar amount that reads as
+ * process, not a highlight? ("- Labor — Owner: 24 hr × $150 = $3,600".) Totals /
+ * balances / deposits are highlights and are deliberately NOT matched (they get spoken).
+ */
+function isCostBreakdownLine(line: string): boolean {
+  const s = line.trim();
+  if (!/^[-*•–]\s+/.test(s)) return false; // must be a bullet
+  if (!/\$\s?\d/.test(s)) return false; // must carry a dollar amount
+  if (/\b(total|balance|due|deposit|owes?|owed|subtotal|remaining)\b/i.test(s)) return false; // keep money highlights
+  // Looks like an itemization: has math (× x =), a "label: $amount" shape, or a qty unit.
+  return /[×x=]/.test(s) || /:\s*\$?\d/.test(s) || /\d\s*(hrs?|hours?|ea|each)\b/i.test(s);
+}
+
+/**
+ * VOICE-ONLY: collapse a cost breakdown so speech gives HIGHLIGHTS + TOTAL, not the
+ * per-line arithmetic Erik kept hearing ("24 hours by 150 dollars equals 3,600 dollars",
+ * twice, then the total). When there are 2+ itemized cost bullets AND a Total is present,
+ * drop the itemized bullets from the SPOKEN string — the screen still shows every line;
+ * the driver hears the lead-in prose and the total. No Total to anchor on → leave the lines
+ * alone (never silently swallow the only numbers).
+ */
+function collapseCostBreakdown(text: string): string {
+  if (!/\btotal\b/i.test(text)) return text;
+  const lines = text.split(/\r?\n/);
+  if (lines.filter(isCostBreakdownLine).length < 2) return text;
+  return lines.filter((ln) => !isCostBreakdownLine(ln)).join("\n");
+}
+
+/**
  * SPEAKABLE TEXT — the voice was reading contractor shorthand raw ("E-009" as
  * "E dash zero zero nine", "10/3" as "ten slash three", "$5,550.00" digit by
  * digit). Translate app/trade notation into spoken English JUST for the voice —
@@ -92,11 +121,15 @@ function browserSpeak(text: string, fire: () => void) {
  */
 export function speakable(input: string): string {
   let t = String(input ?? "");
+  // Voice-only: drop itemized cost lines so speech jumps to highlights + total, not the math.
+  t = collapseCostBreakdown(t);
   // Wire gauge FIRST — "#10 AWG" → "number 10" (the markdown strip below would eat the #).
   t = t.replace(/#(\d+)\s*(AWG\b)?/gi, "number $1 ");
   // Markdown + symbols that read as noise.
   t = t.replace(/[*_`#]+/g, "").replace(/\u2026|\.{3}/g, ",").replace(/[–—]/g, ", ");
   // Doc numbers: E-009 → "estimate 9", INV-00012 → "invoice 12", J-018 → "job 18".
+  // Strip leading list bullets so a kept line never reads as "dash …" / "star …".
+  t = t.replace(/^[ \t]*[-•]\s+/gm, "");
   const DOC: Record<string, string> = { E: "estimate", Q: "quote", J: "job", INV: "invoice", WO: "work order", CO: "change order", PO: "purchase order" };
   t = t.replace(/\b(E|Q|J|INV|WO|CO|PO)-0*(\d+)\b/g, (_, l: string, n: string) => `${DOC[l]} ${n}`);
   // Wire sizes — the trade reads these as words: 4/0 → "four aught"; 10/3 → "ten three".
@@ -110,6 +143,10 @@ export function speakable(input: string): string {
   t = t.replace(/\b(\d[\d,\.]*)\s*ft\b/gi, "$1 feet").replace(/\b(\d[\d,\.]*)\s*(hrs?|hours?)\b/gi, "$1 hours");
   t = t.replace(/\b(\d+)\s*ea\b/gi, "$1 each").replace(/\bsq\s*ft\b/gi, "square feet");
   t = t.replace(/\b4S\b/g, "four S").replace(/\bT&M\b/gi, "time and materials");
+  // Street-suffix abbreviations (addresses) — capitalized only, so "3rd"/"have" can't trip.
+  const SUFFIX: Record<string, string> = { Ct: "Court", Ave: "Avenue", Blvd: "Boulevard", Rd: "Road", Ln: "Lane", Hwy: "Highway", Ste: "Suite" };
+  t = t.replace(/\b(Ct|Ave|Blvd|Rd|Ln|Hwy|Ste)\b\.?/g, (_, w: string) => SUFFIX[w]);
+  t = t.replace(/\s*=\s*/g, " equals "); // any math that survives the breakdown collapse
   t = t.replace(/\s*×\s*/g, " by ").replace(/(\d)\s*x\s*(\d)/gi, "$1 by $2");
   // Money: strip trailing .00; "$5,550" → "5,550 dollars"; cents spoken plainly.
   t = t.replace(/\$(\d[\d,]*)\.(\d{2})\b/g, (_, d: string, c: string) => (c === "00" ? `${d} dollars` : `${d} dollars and ${c} cents`));

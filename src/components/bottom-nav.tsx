@@ -33,13 +33,17 @@ export function BottomNav({ role }: { role?: string }) {
           <Link
             key={s.key}
             href={s.href}
-            className={`flex flex-1 flex-col items-center gap-0.5 rounded-xl py-2 text-[9px] font-medium ${
-              onRoute ? "text-[color:rgb(var(--glass-ink))]" : "text-slate-600"
+            className={`relative flex flex-1 flex-col items-center gap-0.5 rounded-xl py-2 text-[9px] font-medium ${
+              // The active tile IS the dock's active look now — the shared `.seaglass-active`
+              // fill (tint + gloss + ink), same as the desktop dock section tiles and every
+              // pill/tab elsewhere. No more teal-text-only outlier. Icon+label carry
+              // `relative z-10` to sit above the gloss sheen.
+              onRoute ? "seaglass-active" : "text-slate-600"
             }`}
             aria-label={s.label}
           >
-            <Icon className="h-5 w-5 shrink-0" />
-            <span className="whitespace-nowrap leading-none">{s.short ?? s.label}</span>
+            <Icon className="relative z-10 h-5 w-5 shrink-0" />
+            <span className="relative z-10 whitespace-nowrap leading-none">{s.short ?? s.label}</span>
           </Link>
         );
       })}
