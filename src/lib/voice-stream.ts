@@ -32,6 +32,29 @@ let statusCb: ((s: string) => void) | null = null;
 export function currentLevel(): number {
   return level;
 }
+
+/**
+ * BARGE-IN support. The mic MediaStream + AudioContext + AnalyserNode are held alive across turns
+ * (they're only torn down in stopListening). During TTS playback the MediaRecorder is stopped and the
+ * turn is muted, but the analyser is still wired to the live stream — so we can read a coarse input RMS
+ * off it WITHOUT a fresh getUserMedia (which iOS would reject off-gesture). Returns null when there's
+ * no live analyser to read (the caller must then default to NOT interrupting). Never throws.
+ */
+export function analyserRms(): number | null {
+  if (!analyser) return null;
+  try {
+    const buf = new Uint8Array(analyser.frequencyBinCount);
+    analyser.getByteTimeDomainData(buf);
+    let sum = 0;
+    for (let i = 0; i < buf.length; i++) {
+      const v = (buf[i] - 128) / 128;
+      sum += v * v;
+    }
+    return Math.sqrt(sum / buf.length);
+  } catch {
+    return null;
+  }
+}
 export function onStatus(cb: ((s: string) => void) | null) {
   statusCb = cb;
 }

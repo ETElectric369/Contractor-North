@@ -142,3 +142,233 @@ export function speakSmart(text: string, onEnd?: () => void) {
     })
     .catch(() => browserSpeak(t, fire));
 }
+
+// ── Streaming speech: sentence-chunking + an in-order FIFO speak queue ────────────────
+// CHANGE 1: kill the dead air where Nort synthesizes the WHOLE reply before making a sound.
+// A SpeakQueue plays sentence 1 the instant it's synthesized while later sentences are still
+// arriving from the LLM. Each queued clip awaits the previous clip's audio-end before it plays,
+// so speech stays in order and never overlaps. The queue's onDone fires only after the LAST clip.
+
+/** Abbreviations whose trailing "." must NOT be treated as a sentence boundary. Lowercased, no dot. */
+const ABBREV = new Set([
+  "mr", "mrs", "ms", "dr", "st", "ave", "rd", "blvd", "apt", "no", "vs", "etc", "inc", "ltd", "co",
+  "jr", "sr", "fig", "approx", "dept", "min", "max", "qty", "ea", "amp", "amps", "ft", "in", "hr",
+  "hrs", "gal", "e.g", "i.e", "a.m", "p.m", "u.s",
+]);
+
+/**
+ * Split streamed text into COMPLETED sentences plus a trailing remainder that isn't a full sentence
+ * yet. A boundary is `. ! ?` (optionally followed by a closing quote/paren) that is NOT: part of a
+ * decimal number (3.5), part of a known abbreviation (Mr., e.g.), or a mid-word dot. The remainder is
+ * whatever comes after the last boundary — held back until more text arrives (or flushed at stream end).
+ * Never throws; on any doubt it keeps text in the remainder (spoken later) rather than mis-splitting.
+ */
+export function splitSentences(text: string): { sentences: string[]; rest: string } {
+  const s = String(text ?? "");
+  const sentences: string[] = [];
+  let start = 0;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch !== "." && ch !== "!" && ch !== "?") continue;
+    // Consume a run of terminators + any trailing closing quotes/brackets: `?"`, `!)`, `...`
+    let j = i;
+    while (j + 1 < s.length && (s[j + 1] === "." || s[j + 1] === "!" || s[j + 1] === "?")) j++;
+    let end = j;
+    while (end + 1 < s.length && /["'”’)\]]/.test(s[end + 1])) end++;
+    // Must be followed by whitespace or end-of-string to be a real boundary (not mid-token like "3.5").
+    const after = s[end + 1];
+    if (after !== undefined && !/\s/.test(after)) { i = j; continue; }
+    // Decimal guard: a lone "." between two digits is not a boundary (3.5, $4.00 handled elsewhere).
+    if (ch === "." && i === j) {
+      const prev = s[i - 1];
+      const nxt = s[i + 1];
+      if (prev && /\d/.test(prev) && nxt && /\d/.test(nxt)) continue;
+    }
+    // Abbreviation guard: the word immediately before a single "." — if it's a known abbrev, skip.
+    if (ch === "." && i === j) {
+      const m = s.slice(start, i).match(/([A-Za-z.]+)$/);
+      const word = (m ? m[1] : "").toLowerCase().replace(/\.+$/, "");
+      if (word && ABBREV.has(word)) continue;
+    }
+    const piece = s.slice(start, end + 1).trim();
+    if (piece) sentences.push(piece);
+    start = end + 1;
+    i = end;
+  }
+  return { sentences, rest: s.slice(start) };
+}
+
+/** Synthesize ONE already-speakable clip → an <audio>-playable object URL. Resolves to null when the
+ *  neural provider is unavailable/errored (caller then browser-speaks the text). Never rejects. */
+function synthClip(speakableText: string): Promise<string | null> {
+  if (neuralDisabled) return Promise.resolve(null);
+  return fetch("/api/tts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: speakableText }) })
+    .then(async (r) => {
+      if (r.status === 503) { neuralDisabled = true; return null; }
+      if (!r.ok) return null;
+      const buf = await r.arrayBuffer();
+      return URL.createObjectURL(new Blob([buf], { type: "audio/mpeg" }));
+    })
+    .catch(() => null);
+}
+
+/** Play one object-URL clip on the shared audio element; resolves when it ends, fails, OR is paused
+ *  (a stopSpeaking() during a barge-in/Stop pauses the element — resolving on pause keeps the speak
+ *  queue's pump from hanging on a clip that will never fire `ended`). Idempotent: resolves once. */
+function playClipUrl(url: string): Promise<void> {
+  return new Promise((resolve) => {
+    const a = getAudio();
+    if (!a) { URL.revokeObjectURL(url); resolve(); return; }
+    let done = false;
+    const onPause = () => finish();
+    const finish = () => {
+      if (done) return;
+      done = true;
+      a.onended = null;
+      a.onerror = null;
+      try { a.removeEventListener("pause", onPause); } catch {}
+      try { URL.revokeObjectURL(url); } catch {}
+      resolve();
+    };
+    try { window.speechSynthesis?.cancel(); } catch {}
+    a.onended = finish;
+    a.onerror = finish;
+    a.src = url;
+    // Attach the pause listener only AFTER playback actually starts, so setting src on an
+    // already-stopped element can't spuriously resolve us before this clip has played.
+    a.play().then(() => { if (!done) a.addEventListener("pause", onPause); }).catch(() => finish());
+  });
+}
+
+/**
+ * An in-order speak queue for a SINGLE streaming reply. Push raw text chunks as sentences complete;
+ * each is run through speakable() (the choke point) then synthesized. Clips PLAY in push order —
+ * a clip waits for the previous clip's audio to END before it starts, so speech never overlaps and
+ * stays ordered. Synthesis of clip N+1 overlaps playback of clip N (fetch is fired as soon as it's
+ * pushed), so there's minimal gap between sentences. onDone fires exactly once after the last clip
+ * finishes AND the producer has signalled done().
+ *
+ * GRACEFUL FALLBACK: if a clip's neural synth fails, that clip is spoken with the browser voice
+ * (still in order). If neural is disabled entirely, everything browser-speaks. A stop() aborts the
+ * whole queue immediately and fires onDone so the caller's re-arm path always runs.
+ */
+export class SpeakQueue {
+  private items: { speakable: string; clip: Promise<string | null> }[] = [];
+  private playing = false;
+  private producerDone = false;
+  private stopped = false;
+  private fired = false;
+  private onDone?: () => void;
+  // Resolved by stop() so an in-flight clip's await can't outlive a teardown (no hung pump).
+  private stopResolve!: () => void;
+  private stopped$: Promise<void> = new Promise((r) => { this.stopResolve = r; });
+
+  constructor(onDone?: () => void) { this.onDone = onDone; }
+
+  /** Queue a chunk of text to speak. It's synthesized immediately (fetch fires now) but played in order. */
+  push(text: string) {
+    if (this.stopped) return;
+    const t = speakable((text || "").trim());
+    if (!t) return;
+    this.items.push({ speakable: t, clip: synthClip(t) });
+    if (!this.playing) void this.pump();
+  }
+
+  /** No more chunks are coming. onDone fires once the queue drains. */
+  done() {
+    this.producerDone = true;
+    if (!this.playing) this.maybeFinish();
+  }
+
+  /** Hard stop: drop everything and fire onDone so the caller re-arms the mic. */
+  stop() {
+    this.stopped = true;
+    this.items = [];
+    stopSpeaking();
+    try { this.stopResolve(); } catch {} // unblock any in-flight clip await
+    this.fire();
+  }
+
+  private fire() {
+    if (this.fired) return;
+    this.fired = true;
+    try { this.onDone?.(); } catch {}
+  }
+
+  private maybeFinish() {
+    if (this.stopped) { this.fire(); return; }
+    if (this.producerDone && this.items.length === 0) this.fire();
+  }
+
+  private async pump() {
+    if (this.playing) return;
+    this.playing = true;
+    while (!this.stopped && this.items.length) {
+      const item = this.items.shift()!;
+      let url: string | null = null;
+      // Race synth (and playback below) against stop() so a teardown never leaves the pump hung.
+      try { url = await Promise.race([item.clip, this.stopped$.then(() => null)]); } catch { url = null; }
+      if (this.stopped) break;
+      if (url) {
+        await Promise.race([playClipUrl(url), this.stopped$]);
+      } else {
+        // Neural failed for this clip — speak it with the browser voice, still in order.
+        await Promise.race([new Promise<void>((res) => browserSpeak(item.speakable, res)), this.stopped$]);
+      }
+    }
+    this.playing = false;
+    this.maybeFinish();
+  }
+}
+
+// ── CHANGE 2: barge-in — let the user cut Nort off by TALKING ────────────────────────
+// While Nort speaks, the mic MediaStream + AnalyserNode stay alive (voice-stream holds them across
+// turns) even though the MediaRecorder is stopped. We poll a coarse RMS off that already-live analyser
+// (never a fresh getUserMedia) and, when input energy stays sustained above a threshold set clearly
+// ABOVE the echo-cancelled TTS bleed, we treat it as the user interrupting: stop playback and let the
+// caller re-arm the mic to capture what they're saying.
+//
+// TUNING: BARGE_IN_RMS is the loudness gate; BARGE_IN_SUSTAIN_MS is how long it must stay above the
+// gate. Both are deliberately conservative — with echoCancellation on, Nort's own voice bleeds through
+// at a LOW RMS, so the gate sits well above that so Nort can't self-trigger. If Erik reports Nort
+// cutting ITSELF off, raise BARGE_IN_RMS (e.g. 0.14 → 0.18) and/or lengthen BARGE_IN_SUSTAIN_MS. If it
+// won't interrupt when he talks over it, lower BARGE_IN_RMS (e.g. → 0.10) first. Better to miss an
+// interruption than to have Nort constantly cut itself off, so bias HIGH when unsure.
+export const BARGE_IN_RMS = 0.14; // input RMS (0..1) that counts as "the user is talking over Nort"
+export const BARGE_IN_SUSTAIN_MS = 250; // must stay above the gate this long, continuously, to fire
+const BARGE_IN_POLL_MS = 60; // how often we sample the analyser during playback
+
+/**
+ * Watch the live analyser for a sustained talk-over during playback. `rmsFn` returns the current input
+ * RMS (0..1) or null when there's no live analyser (then we CANNOT judge → never interrupt). `onBargeIn`
+ * fires at most once, when energy has stayed above BARGE_IN_RMS for BARGE_IN_SUSTAIN_MS continuously.
+ * Returns a stop() to tear the watcher down (call it from the speak onDone and on stop). Never throws;
+ * any uncertainty defaults to NOT interrupting.
+ */
+export function startBargeInMonitor(rmsFn: () => number | null, onBargeIn: () => void): () => void {
+  let timer: ReturnType<typeof setInterval> | null = null;
+  let aboveSince = 0;
+  let done = false;
+  const teardown = () => {
+    if (timer) { clearInterval(timer); timer = null; }
+  };
+  const tick = () => {
+    if (done) return;
+    let rms: number | null = null;
+    try { rms = rmsFn(); } catch { rms = null; }
+    // No analyser / read failed → we can't tell, so never interrupt (fall back to today's behavior).
+    if (rms == null) { aboveSince = 0; return; }
+    if (rms >= BARGE_IN_RMS) {
+      if (!aboveSince) aboveSince = Date.now();
+      else if (Date.now() - aboveSince >= BARGE_IN_SUSTAIN_MS) {
+        done = true;
+        teardown();
+        try { onBargeIn(); } catch {}
+      }
+    } else {
+      aboveSince = 0; // dropped below the gate → the run must be continuous, so reset
+    }
+  };
+  try { timer = setInterval(tick, BARGE_IN_POLL_MS); } catch { /* if timers are unavailable, simply never fire */ }
+  return teardown;
+}

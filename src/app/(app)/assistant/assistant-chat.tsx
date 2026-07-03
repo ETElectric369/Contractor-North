@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { Send, Sparkles, Loader2, Mic, Check, Square, FileText, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
-import { speakSmart, unlockAudio, stopSpeaking } from "@/lib/tts";
+import { speakSmart, unlockAudio, stopSpeaking, splitSentences, SpeakQueue, startBargeInMonitor } from "@/lib/tts";
+import { classifyConfirmReply } from "@/lib/confirm-parse";
 import * as speech from "@/lib/voice";
 import {
   CONFIRM_MARKER, OPEN_MARKER, PICK_MARKER, STATUS_OPEN, STATUS_CLOSE, DRAFT_OPEN, DRAFT_CLOSE,
@@ -145,8 +146,9 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
   const [listening, setListening] = useState(false);
   const [voiceOn, setVoiceOn] = useState(false); // is the mic available
   const scrollRef = useRef<HTMLDivElement>(null);
-  // The speech service holds the recognizer; we just give it the latest `send` via a ref (so the
-  // module-level result handler never goes stale on `messages`).
+  // The voice backend (voice-stream: record-a-turn → POST /api/transcribe → transcript) holds the live
+  // MediaStream at module level; we just hand it the latest `send` via a ref, so the module-level
+  // result handler never goes stale on `messages`.
   const sendRef = useRef<((t: string, viaVoice?: boolean) => void) | null>(null);
   // True while we're in a spoken back-and-forth: each reply is read aloud and the mic
   // re-opens for the next turn. Tapping the mic off, or typing, leaves voice mode.
@@ -171,10 +173,14 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
   // Publish listening too, so the topbar button can show a real red STOP whenever the mic is hot
   // (not just while thinking/talking) — it's the only voice control now.
   useEffect(() => { estimatorStore.setListening(listening); }, [listening]);
-  // Tear the voice session down on unmount (close), so a live recognizer never outlives the panel.
+  // Tear the voice session down on unmount (close), so a live recognizer + any in-flight speech
+  // (streaming queue / barge-in monitor) never outlive the panel.
   useEffect(() => () => {
     speech.stopListening();
     speech.setResultHandler(null);
+    try { bargeStopRef.current?.(); } catch {}
+    try { speakQueueRef.current?.stop(); } catch {}
+    stopSpeaking();
     estimatorStore.setListening(false);
     estimatorStore.setSpeaking(false);
     estimatorStore.setStreaming(false);
@@ -187,7 +193,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     const stop = () => {
       try { abortRef.current?.abort(); } catch {}
       speech.stopListening();
-      stopSpeaking();
+      killSpeech(); // tears down the streaming speak queue + barge-in monitor, then cuts TTS
       setStreaming(false);
       setSpeaking(false);
       setStatus(null);
@@ -254,10 +260,27 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     setVoiceModeState(on);
   }
 
-  // Speak a reply, tracking the speaking state, then run `after` (usually re-open the mic).
-  // MUTE the live mic session while speaking so the assistant's own TTS isn't transcribed back —
-  // the recognizer keeps running, so `after` (startMic) just unmutes the SAME session instead of
-  // doing a fresh .start() that iOS rejects off-gesture. THIS is what lost the user's answer.
+  // The active streaming speak queue for the current reply, and the barge-in monitor teardown.
+  // Held in refs so the topbar Stop / stopVoice paths can tear them down deterministically.
+  const speakQueueRef = useRef<SpeakQueue | null>(null);
+  const bargeStopRef = useRef<(() => void) | null>(null);
+
+  // Tear down any in-flight speech (streaming queue + barge-in monitor) and cut audio. Idempotent —
+  // safe to call from Stop, barge-in, a new turn, or teardown. Does NOT re-arm; callers decide that.
+  function killSpeech() {
+    try { bargeStopRef.current?.(); } catch {}
+    bargeStopRef.current = null;
+    const q = speakQueueRef.current;
+    speakQueueRef.current = null;
+    // stop() fires the queue's onDone, but its re-arm is guarded on this ref being current — since we
+    // already cleared it, that path no-ops and we avoid a double re-arm.
+    try { q?.stop(); } catch {}
+    stopSpeaking();
+  }
+
+  // Speak a SHORT phrase (directive lead-ins: "opening maps…", the confirm prompt, "say yes or no").
+  // Tracks speaking state, mutes the live mic so Nort's own TTS isn't transcribed back, then runs
+  // `after` (usually re-open the mic). Unchanged conversational contract; used for the non-streamed bits.
   function say(text: string, after?: () => void) {
     setSpeaking(true);
     speech.setMuted(true);
@@ -268,13 +291,45 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     });
   }
 
+  // Speak a reply as it STREAMS: `feed` pushes completed-sentence chunks (played in order, first one
+  // starts the instant it's synthesized — killing the old 3-6s dead air), `finish()` signals no more
+  // are coming. `after` runs once the LAST chunk finishes (or a barge-in cuts in). While playing, a
+  // barge-in monitor watches the live analyser; a sustained talk-over stops playback and runs `after`
+  // EARLY (which re-arms the mic to capture what the user is saying). onEnd fires exactly once.
+  function makeSpeakStream(after?: () => void): { feed: (chunk: string) => void; finish: () => void } {
+    setSpeaking(true);
+    speech.setMuted(true);
+    const q = new SpeakQueue(() => {
+      // Runs once: natural end (last clip done) OR a stop() (barge-in / Stop). Re-arm only if this is
+      // still the current queue (killSpeech clears the ref first to suppress a double re-arm).
+      try { bargeStopRef.current?.(); } catch {}
+      bargeStopRef.current = null;
+      const wasCurrent = speakQueueRef.current === q;
+      if (wasCurrent) speakQueueRef.current = null;
+      setSpeaking(false);
+      speech.setMuted(false);
+      if (wasCurrent) after?.();
+    });
+    speakQueueRef.current = q;
+    // Barge-in: reuse the always-on analyser (never a fresh getUserMedia). On a sustained talk-over,
+    // stop the queue → its onDone re-arms the mic so we capture the interruption.
+    bargeStopRef.current = startBargeInMonitor(
+      () => speech.analyserRms(),
+      () => { q.stop(); },
+    );
+    return { feed: (chunk) => q.push(chunk), finish: () => q.done() };
+  }
+
   // The big mic button in voice mode: cut off any speech, end a listening turn, or start one.
   function voiceTap() {
     if (listening) {
       speech.stopListening();
       return;
     }
-    stopSpeaking();
+    // Cut any in-flight speech — the streaming queue + barge-in monitor too — before we manually
+    // re-open the mic, so the queue's own onDone can't ALSO fire a second startMic.
+    killSpeech();
+    speech.setMuted(false);
     setSpeaking(false);
     startMic();
   }
@@ -354,11 +409,12 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
   }
 
   // Stop the whole voice conversation at any time (like chat): stop listening, cut off any
-  // speech mid-sentence, and leave voice mode.
+  // speech mid-sentence (streaming queue + barge-in monitor included), and leave voice mode.
   function stopVoice() {
     setVoiceMode(false);
     speech.stopListening();
-    stopSpeaking();
+    killSpeech();
+    setSpeaking(false);
     setListening(false);
   }
 
@@ -372,9 +428,11 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     const content = text.trim();
     if (!content || streaming) return;
     if (!viaVoice) setVoiceMode(false); // typing leaves voice mode
-    // Mute the (still-live) mic while we process this turn so background noise / the user thinking
-    // out loud during the reply isn't captured as a second turn. The re-listen after the reply
-    // unmutes it — we never stop/restart the session (iOS rejects an off-gesture restart).
+    // Mute the (still-live) MediaStream while we process this turn so background noise / the user
+    // thinking out loud during the reply isn't captured as the next turn. The active backend RECORDS
+    // ONE TURN AT A TIME off a stream that's held open across turns (it is NOT a continuously-running
+    // recognizer); the re-arm after the reply (startMic → beginTurn) records the next turn from the
+    // SAME stream — we never call a fresh getUserMedia mid-conversation (iOS rejects it off-gesture).
     if (viaVoice) speech.setMuted(true);
 
     const next: Msg[] = [...messages, { role: "user", content }];
@@ -410,6 +468,42 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
 
+      // CHANGE 1 — streaming voice. In voice mode, speak each COMPLETED sentence the moment it's ready
+      // instead of waiting for the whole reply. `stream` is created lazily on the first finished
+      // sentence (so a directive-only / empty reply never opens a speaker). `spokenLen` tracks how much
+      // of the visible text we've already handed to the queue. `noStream` disables streamed speech for
+      // this turn if anything goes wrong, so we fall back to speaking the whole reply once at the end.
+      let stream: { feed: (c: string) => void; finish: () => void } | null = null;
+      let spokenLen = 0;
+      let noStream = false;
+      const stripTrailingTag = (s: string) => s.replace(/\s*\[[^\]]*\]\s*$/, "");
+      const feedSentences = (visible: string, final: boolean) => {
+        if (!viaVoice || noStream) return;
+        try {
+          const pending = visible.slice(spokenLen);
+          const { sentences, rest } = splitSentences(pending);
+          for (const s of sentences) {
+            const clean = s.trim();
+            if (clean) {
+              if (!stream) stream = makeSpeakStream(() => { if (voiceModeRef.current) startMic(); });
+              stream.feed(clean);
+            }
+          }
+          // Consume everything up to the trailing remainder (kept for the next tick / the flush).
+          spokenLen += pending.length - rest.length;
+          if (final) {
+            const tail = stripTrailingTag(visible.slice(spokenLen)).trim();
+            if (tail) {
+              if (!stream) stream = makeSpeakStream(() => { if (voiceModeRef.current) startMic(); });
+              stream.feed(tail);
+            }
+          }
+        } catch {
+          // Any parse/queue trouble → abandon streamed speech; the end-of-turn path speaks it all once.
+          noStream = true;
+        }
+      };
+
       let full = ""; // the whole reply, which may END with a CONFIRM proposal
       while (true) {
         const { done, value } = await reader.read();
@@ -426,6 +520,11 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
           copy[copy.length - 1] = { role: "assistant", content: visible };
           return copy;
         });
+        // Speak completed sentences as they land (voice mode only). Only starts a speaker once a
+        // directive marker CAN'T retroactively appear inside already-spoken text: parseStream strips
+        // the markers, so `visible` is exactly the spoken body. If a directive turns up at the tail,
+        // the end-of-turn handler cuts the streamed speech and speaks the directive phrase instead.
+        feedSentences(visible, false);
         scrollToBottom();
       }
       setStatus(null);
@@ -444,6 +543,12 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
       if (full.includes(PICK_MARKER)) {
         try { pickDir = JSON.parse(full.split(PICK_MARKER)[1]); } catch {}
       }
+
+      // A directive at the tail changes what we SAY (a specific phrase, not the streamed body). If we
+      // opened a streamed speaker for the body, cut it now so we don't double-speak, then say the
+      // directive phrase. A plain reply instead flushes its remainder and finishes the stream in order.
+      const hasDirective = !!(pickDir || openDir?.url || proposal);
+      if (viaVoice && hasDirective) killSpeech();
 
       if (pickDir) {
         // The assistant asked the user to pick a contact on screen — pop the picker; their choice
@@ -472,9 +577,16 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         // Voice: read the proposal and listen for yes/no. Card shows either way.
         if (viaVoice) say(proposal.prompt, () => { if (voiceModeRef.current) confirmListen(); });
       } else if (viaVoice) {
-        // No directive — read the whole reply aloud, then re-open the mic for the next turn.
-        const clean = visibleText.replace(/\s*\[[^\]]*\]\s*$/, "").trim();
-        if (clean) say(clean, () => { if (voiceModeRef.current) startMic(); });
+        // No directive — finish the streamed read, then re-open the mic (the queue's onDone re-arms
+        // after the LAST sentence). If streaming was disabled or nothing streamed, fall back to
+        // speaking the whole reply once (today's behavior) so the reply is never dropped.
+        const clean = stripTrailingTag(visibleText).trim();
+        if (stream && !noStream) {
+          feedSentences(visibleText, true); // flush the trailing fragment as a final chunk
+          (stream as { finish: () => void }).finish(); // re-arms on the last clip's end
+        } else if (clean) {
+          say(clean, () => { if (voiceModeRef.current) startMic(); });
+        }
         // A reply with nothing to read (action-only) still has to unmute + re-listen, or the
         // session sits muted and the next answer is silently dropped.
         else if (voiceModeRef.current) startMic();
@@ -482,8 +594,12 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     } catch (e: any) {
       // A user-initiated stop (abort) is not an error — leave the partial reply as-is.
       if (e?.name !== "AbortError") {
+        // Cut any streamed speech first so its queue can't also re-arm (double startMic), then
+        // re-open the mic so a voice turn is never left muted/stuck.
+        killSpeech();
+        speech.setMuted(false);
+        setSpeaking(false);
         setMessages((m) => [...m, { role: "assistant", content: `Error: ${e?.message ?? "unknown"}` }]);
-        // Re-open the mic after an error so a voice turn isn't left muted/stuck.
         if (viaVoice && voiceModeRef.current) startMic();
       }
     } finally {
@@ -493,9 +609,11 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     }
   }
 
-  // Open the mic for a normal spoken turn (transcript → send). Routes through the shared service; if
-  // start() is rejected (off-gesture on iOS — e.g. the auto re-listen after a reply fires from a TTS
-  // callback, outside the gesture), fall back to a "tap Talk" nudge instead of dying silently.
+  // Open the mic for a normal spoken turn (transcript → send). On the active stream backend this just
+  // records the next turn off the already-live MediaStream (no gesture needed), so mid-conversation
+  // re-arms from a speak-queue/TTS-end callback succeed. If start() returns false — the webkit fallback
+  // backend rejecting an off-gesture restart, or no mic — fall back to a "tap Talk" nudge, never dying
+  // silently.
   function startMic() {
     speech.setResultHandler((t) => sendRef.current?.(t, true)); // normal mode (confirmListen may have changed it)
     if (!speech.startListening()) setStatus("Tap the mic to answer");
@@ -516,14 +634,28 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     else startMic();
   }
 
-  // Listen for a spoken yes/no on a pending confirm proposal (the service routes the transcript here).
+  // Listen for a spoken reply to a pending confirm proposal (the service routes the transcript here).
+  // Handles corrections, not just yes/no — see classifyConfirmReply.
   function confirmListen() {
     speech.setResultHandler((t) => {
-      const low = t.trim().toLowerCase();
-      // Fail safe: an explicit no/cancel wins (checked first).
-      if (/\b(no|nope|cancel|stop|never ?mind|don'?t|do not|wrong|negative)\b/.test(low)) resolveConfirm(false);
-      else if (/\b(yes|yeah|yep|yup|confirm|do it|go ahead|sure|okay|ok|save it|sounds good)\b/.test(low)) resolveConfirm(true);
-      else say("Say yes or no.", () => { if (voiceModeRef.current && confirmRef.current) confirmListen(); });
+      const intent = classifyConfirmReply(t);
+      if (intent === "yes") resolveConfirm(true);
+      else if (intent === "no") resolveConfirm(false);
+      else if (intent === "correction") {
+        // The user is amending the proposal by voice ("actually make it the second one", "change it to
+        // 3", a name…). Drop the stale confirm card and re-send the whole utterance as a normal voice
+        // turn — the proposal is still in the conversation history, so Nort amends and re-proposes. The
+        // confirm-gate is intact: nothing writes until a fresh explicit yes.
+        // NOTE: do NOT stopListening() here — that tears down the live iOS stream; a re-arm from this
+        // (off-gesture) transcription callback would need a fresh getUserMedia that iOS rejects. send()
+        // mutes the live session and re-arms it at the end of the turn, exactly like a normal voice turn.
+        confirmRef.current = null;
+        setPendingConfirm(null);
+        void send(t, true);
+      } else {
+        // Unclear — re-prompt, then listen again (only while a proposal is still pending).
+        say("Say yes or no.", () => { if (voiceModeRef.current && confirmRef.current) confirmListen(); });
+      }
     });
     if (!speech.startListening()) setStatus("Tap the mic to answer");
   }

@@ -42,6 +42,12 @@ export function onStatus(cb: ((s: string) => void) | null) {
 export function currentLevel(): number {
   return (streamBackend as any).currentLevel?.() ?? 0;
 }
+/** Coarse live input RMS off the always-on analyser (for barge-in during playback). Only the
+ *  getUserMedia backend has an analyser; returns null otherwise so the caller defaults to NOT
+ *  interrupting. */
+export function analyserRms(): number | null {
+  return (streamBackend as any).analyserRms?.() ?? null;
+}
 export function usingStreamBackend(): boolean {
   return streamBackend.speechSupported();
 }
