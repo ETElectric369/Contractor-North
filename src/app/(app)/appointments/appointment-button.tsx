@@ -17,17 +17,40 @@ import {
   createAppointmentProposal,
 } from "./actions";
 
+const p2 = (n: number) => String(n).padStart(2, "0");
+const ymd = (d: Date) => `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
+
 /** Next three weekdays at 8 AM — sensible default slots to propose. */
 function defaultSlots(): { date: string; time: string }[] {
   const out: { date: string; time: string }[] = [];
   const d = new Date();
-  const p = (n: number) => String(n).padStart(2, "0");
   while (out.length < 3) {
     d.setDate(d.getDate() + 1);
-    if (d.getDay() !== 0 && d.getDay() !== 6)
-      out.push({ date: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`, time: "08:00" });
+    if (d.getDay() !== 0 && d.getDay() !== 6) out.push({ date: ymd(d), time: "08:00" });
   }
   return out;
+}
+
+/** The day we should open the create form on: the viewed day if the caller passed one, else
+ *  today if it's a weekday, else roll forward to the next weekday. Never a blind empty date. */
+function suggestedDate(defaultDate?: string): string {
+  if (defaultDate) return defaultDate;
+  const d = new Date();
+  while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
+  return ymd(d);
+}
+
+/** A sensible START time for a new appointment on `date`: if that day already has appointments
+ *  (dayStarts = their ISO starts), suggest the next hour AFTER the last one so a fresh entry
+ *  doesn't blindly collide at 08:00; otherwise the honest 08:00 default. Caps at 17:00. */
+function suggestedTime(date: string, dayStarts: string[]): string {
+  const sameDay = dayStarts
+    .map((iso) => new Date(iso))
+    .filter((d) => !isNaN(d.getTime()) && ymd(d) === date);
+  if (!sameDay.length) return "08:00";
+  const last = sameDay.reduce((a, b) => (b > a ? b : a));
+  const h = Math.min(last.getHours() + 1, 17);
+  return `${p2(h)}:00`;
 }
 
 interface Opt { id: string; label: string; address?: string | null }
@@ -85,6 +108,9 @@ export function AppointmentButton({
   appointment,
   defaultDate,
   defaultCustomerId,
+  defaultJobId,
+  fromLead = false,
+  dayStarts,
   compact = false,
 }: {
   jobs: Opt[];
@@ -94,6 +120,14 @@ export function AppointmentButton({
   defaultDate?: string;
   /** Preselect a customer in create mode (e.g. mounted on that customer's page). */
   defaultCustomerId?: string;
+  /** Preselect a job in create mode (e.g. mounted on that job's page) — prefills the
+   *  location from the job address and suggests an "Inspection — <job#>" title. */
+  defaultJobId?: string;
+  /** Mounted from a lead → default the TYPE to a quote/estimate instead of a plain appointment. */
+  fromLead?: boolean;
+  /** ISO starts of appointments already on the viewed day — lets the create form suggest a
+   *  time AFTER the last one instead of a blind 08:00. Optional; empty → 08:00. */
+  dayStarts?: string[];
   /** Tight card-header variant: small button that stays on one line. */
   compact?: boolean;
 }) {
@@ -112,20 +146,37 @@ export function AppointmentButton({
   const [copied, setCopied] = useState(false);
 
   const emptyForm = (): ApptForm => {
-    const st = appointment ? toLocal(appointment.starts_at) : { date: defaultDate ?? "", time: "08:00" };
+    // CREATE-with-logic (an entry that "could go anywhere" gets a starting point, never a blank):
+    // when mounted from a job or customer, prefill the location + a title from that context, and
+    // suggest a real day/time rather than a blind empty date or a blind 08:00. Editing an existing
+    // appointment always shows its OWN stored values untouched — none of this fires.
+    const ctxJob = !appointment && defaultJobId ? jobs.find((j) => j.id === defaultJobId) : undefined;
+    const ctxCust = !appointment && defaultCustomerId ? customers.find((c) => c.id === defaultCustomerId) : undefined;
+    // Title: job context reads back the job (its label starts with the job number), else the
+    // customer name; a lead is a quote walk-through, a job/customer is an on-site inspection.
+    const suggestedTitle = ctxJob
+      ? `Inspection — ${ctxJob.label}`
+      : ctxCust
+      ? `${fromLead ? "Estimate" : "Appointment"} — ${ctxCust.label}`
+      : "";
+    const date = appointment ? toLocal(appointment.starts_at).date : suggestedDate(defaultDate);
+    const st = appointment ? toLocal(appointment.starts_at) : { date, time: suggestedTime(date, dayStarts ?? []) };
     const en = appointment ? toLocal(appointment.ends_at) : { date: "", time: "" };
     return {
-      type: appointment?.type ?? "quote",
+      // Default TYPE: a lead → quote/estimate; anywhere else → a plain appointment (NOT the old
+      // blind "quote" default that mislabeled every hand-added entry as an estimate).
+      type: appointment?.type ?? (fromLead ? "quote" : "appointment"),
       assigned_to: appointment?.assigned_to ?? "",
-      title: appointment?.title ?? "",
-      date: st.date,
+      title: appointment?.title ?? suggestedTitle,
+      date,
       start_time: st.time || "08:00",
       end_time: en.time,
       customer_id: appointment?.customer_id ?? defaultCustomerId ?? "",
-      job_id: appointment?.job_id ?? "",
+      job_id: appointment?.job_id ?? defaultJobId ?? "",
       new_customer_name: "",
       new_customer_phone: "",
-      location: appointment?.location ?? "",
+      // Location from the job address when we have a job context (customer Opt carries no address).
+      location: appointment?.location ?? ctxJob?.address ?? "",
       notes: appointment?.notes ?? "",
     };
   };

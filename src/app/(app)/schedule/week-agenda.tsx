@@ -1,18 +1,32 @@
 "use client";
 
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { CalendarSync } from "lucide-react";
+import { MoveToDay } from "@/components/move-to-day";
 import { initialsOf } from "@/lib/employee-color";
-import type { ArmedTarget, CalAppt, CalMember, DayData, JobOnDay } from "../calendar/calendar-view";
+import { shiftApptToDay } from "@/lib/appt-time";
+import { moveJobDay } from "./actions";
+import { rescheduleAppointment } from "../appointments/actions";
+import type { CalAppt, CalMember, DayData, JobOnDay } from "../calendar/calendar-view";
 
 // THE default /schedule view: a vertical 7-day agenda (lifted from My Day's
 // week renderer) — one full-width row per day, Sun–Sat, chips inside. No
 // horizontal scroll anywhere; "what's next week" is Schedule → next chevron,
 // read top to bottom. Chip color = RECORD TYPE (job blue, appointment violet,
-// inspection teal, task slate — amber is reserved for move-mode/needs-
-// scheduling); WHO rides as initials text, not chip color — person-color lied
-// (a two-man job showed one man). The color code is stated in the legend line
-// the calendar shell renders under its zoom control.
+// inspection teal, task slate — amber is reserved for needs-scheduling); WHO
+// rides as initials text, not chip color — person-color lied (a two-man job
+// showed one man). The color code is stated in the legend line the calendar
+// shell renders under its zoom control.
+//
+// SAFETY: a chip's MAIN tap is non-mutating — it OPENS the record (a job chip
+// navigates to /jobs/[id]; an appointment chip opens its day drill where the
+// edit pencil lives). Rescheduling takes deliberate intent through the small
+// move handle (the CalendarSync glyph) → the MoveToDay sheet. A stray tap can
+// never silently reschedule a real appointment; there is no armed mode to leave
+// dangling.
 
-// Local copies of the day-key/time helpers: this file only takes TYPES from
+// Local copy of the day-key helper: this file only takes TYPES from
 // calendar-view (import type), so there is no runtime import cycle between
 // the shell and its default view.
 const dayKey = (d: Date) => {
@@ -22,28 +36,31 @@ const dayKey = (d: Date) => {
 const fmtTime = (iso: string) =>
   new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 
+const PROPOSED_CONFIRM =
+  "A pick-a-time link is out to the customer for this — moving it withdraws that link. Move it anyway?";
+
+// The move handle: a >=44px touch target holding a ~26px CalendarSync glyph,
+// stopPropagation so it can't double as the chip's open-the-record tap.
+const moveHandle =
+  "flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-white/70 hover:text-slate-700";
+
 export function WeekAgenda({
   days,
   byDay,
   todayK,
   members,
-  armedId,
-  armedActive,
   onDayTap,
-  onArm,
 }: {
   /** The 7 dates of the visible week (Sun–Sat). */
   days: Date[];
   byDay: Map<string, DayData>;
   todayK: string;
   members: CalMember[];
-  /** Id of the armed job/appointment chip (ring it); tray arms don't ring here. */
-  armedId: string | null;
-  /** Anything armed → every day row is a move target. */
-  armedActive: boolean;
+  /** Open the day drill for a day (the row's main tap — never a move). */
   onDayTap: (d: Date) => void;
-  onArm: (t: ArmedTarget) => void;
 }) {
+  const router = useRouter();
+
   const initials = (ids: string[] | null | undefined) => {
     const found = (ids ?? []).map((id) => members.find((m) => m.id === id)).filter(Boolean);
     const shown = found
@@ -63,38 +80,56 @@ export function WeekAgenda({
     if (d.getHours() === 8 && d.getMinutes() === 0) return null;
     return fmtTime(iso);
   };
+
   const jobChip = (k: string, { job, pos }: JobOnDay) => {
     const ini = initials(job.assigned_to);
     const t = jobStartLabel(job.scheduled_start);
     return (
-      <button
+      <div
         key={`j-${job.id}`}
-        onClick={(e) => {
-          // Chips arm; the surrounding day row is the move target — don't let
-          // an arming tap double as a day tap.
-          e.stopPropagation();
-          onArm({ kind: "job", id: job.id, label: job.name, fromDate: k, href: `/jobs/${job.id}` });
-        }}
-        className={`flex min-h-[32px] w-full items-center gap-1.5 rounded-lg border px-2 py-1 text-left text-xs transition-colors ${
-          armedId === job.id
-            ? "border-amber-400 bg-amber-50 ring-1 ring-amber-400"
-            : "border-blue-200 bg-blue-50 text-blue-900 hover:border-blue-400"
-        }`}
+        className="flex min-h-[44px] w-full items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 pl-2 text-blue-900 transition-colors hover:border-blue-400"
       >
-        {t && <span className="shrink-0 text-[10px] font-semibold text-blue-700">{t}</span>}
-        <span className="min-w-0 flex-1 truncate font-medium">{job.name}</span>
-        {pos && (
-          // "d2/3" decoded for hover + screen readers: "Day 2 of 3".
-          <span
-            className="shrink-0 text-[10px] opacity-60"
-            title={`Day ${pos.slice(1).replace("/", " of ")}`}
-            aria-label={`Day ${pos.slice(1).replace("/", " of ")}`}
+        {/* Main tap OPENS the job — a chip is a link to its record, never a
+            move. onClick stops here so the day row's drill tap doesn't fire. */}
+        <Link
+          href={`/jobs/${job.id}`}
+          onClick={(e) => e.stopPropagation()}
+          className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left text-xs"
+        >
+          {t && <span className="shrink-0 text-[10px] font-semibold text-blue-700">{t}</span>}
+          <span className="min-w-0 flex-1 truncate font-medium">{job.name}</span>
+          {pos && (
+            // "d2/3" decoded for hover + screen readers: "Day 2 of 3".
+            <span
+              className="shrink-0 text-[10px] opacity-60"
+              title={`Day ${pos.slice(1).replace("/", " of ")}`}
+              aria-label={`Day ${pos.slice(1).replace("/", " of ")}`}
+            >
+              {pos}
+            </span>
+          )}
+          {ini && <span className="shrink-0 rounded bg-white/80 px-1 text-[10px] font-semibold opacity-80">{ini}</span>}
+        </Link>
+        {/* Deliberate-move handle → the shared MoveToDay sheet. */}
+        <div onClick={(e) => e.stopPropagation()}>
+          <MoveToDay
+            label={`Move ${job.name} to a day`}
+            triggerClassName={moveHandle}
+            onPick={async (dateISO) => {
+              if (!dateISO) return { ok: false, error: "Pick a day." };
+              let res = await moveJobDay(job.id, k, dateISO);
+              if (!res.ok && res.needsProposalConfirm) {
+                if (!confirm(PROPOSED_CONFIRM)) return { ok: true, note: "Left it alone — the link is still live." };
+                res = await moveJobDay(job.id, k, dateISO, { cancelProposals: true });
+              }
+              if (res.ok) router.refresh();
+              return res;
+            }}
           >
-            {pos}
-          </span>
-        )}
-        {ini && <span className="shrink-0 rounded bg-white/80 px-1 text-[10px] font-semibold opacity-80">{ini}</span>}
-      </button>
+            <CalendarSync className="h-4 w-4" />
+          </MoveToDay>
+        </div>
+      </div>
     );
   };
 
@@ -102,38 +137,49 @@ export function WeekAgenda({
     const insp = a.type === "inspection";
     const ini = initials(a.assigned_to ? [a.assigned_to] : null);
     return (
-      <button
+      <div
         key={`a-${a.id}`}
-        onClick={(e) => {
-          e.stopPropagation();
-          onArm({
-            kind: "appt",
-            id: a.id,
-            label: a.title,
-            starts_at: a.starts_at,
-            ends_at: a.ends_at,
-            status: a.status,
-            // No appointment page exists — "Open" lands on its day drill,
-            // where the edit pencil and quick actions live.
-            href: `/schedule?view=day&date=${k}`,
-          });
-        }}
-        className={`flex min-h-[32px] w-full items-center gap-1.5 rounded-lg border px-2 py-1 text-left text-xs transition-colors ${
-          armedId === a.id
-            ? "border-amber-400 bg-amber-50 ring-1 ring-amber-400"
-            : insp
-              ? "border-teal-200 bg-teal-50 text-teal-900 hover:border-teal-400"
-              : "border-violet-200 bg-violet-50 text-violet-900 hover:border-violet-400"
+        className={`flex min-h-[44px] w-full items-center gap-1 rounded-lg border pl-2 transition-colors ${
+          insp
+            ? "border-teal-200 bg-teal-50 text-teal-900 hover:border-teal-400"
+            : "border-violet-200 bg-violet-50 text-violet-900 hover:border-violet-400"
         } ${a.status === "proposed" ? "border-dashed opacity-80" : ""} ${a.status === "completed" ? "opacity-60" : ""}`}
       >
-        {/* ◌ = awaiting the customer's pick — the ONE hollow-ring symbol, same
-            as the month view's ring dot and the legend's ◌ entry. */}
-        <span className="shrink-0 font-semibold" title={a.status === "proposed" ? "Awaiting customer pick" : undefined}>
-          {a.status === "proposed" ? "◌" : fmtTime(a.starts_at)}
-        </span>
-        <span className="min-w-0 flex-1 truncate">{a.title}</span>
-        {ini && <span className="shrink-0 rounded bg-white/80 px-1 text-[10px] font-semibold opacity-80">{ini}</span>}
-      </button>
+        {/* Main tap OPENS the appointment's day drill (no appointment page
+            exists — the edit pencil + quick actions live there). */}
+        <Link
+          href={`/schedule?view=day&date=${k}`}
+          onClick={(e) => e.stopPropagation()}
+          className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left text-xs"
+        >
+          {/* ◌ = awaiting the customer's pick — the ONE hollow-ring symbol, same
+              as the month view's ring dot and the legend's ◌ entry. */}
+          <span className="shrink-0 font-semibold" title={a.status === "proposed" ? "Awaiting customer pick" : undefined}>
+            {a.status === "proposed" ? "◌" : fmtTime(a.starts_at)}
+          </span>
+          <span className="min-w-0 flex-1 truncate">{a.title}</span>
+          {ini && <span className="shrink-0 rounded bg-white/80 px-1 text-[10px] font-semibold opacity-80">{ini}</span>}
+        </Link>
+        {/* Deliberate-move handle → the shared MoveToDay sheet (DST-safe via
+            shiftApptToDay; a live pick-a-time link is confirmed away first). */}
+        <div onClick={(e) => e.stopPropagation()}>
+          <MoveToDay
+            label={`Move ${a.title} to a day`}
+            triggerClassName={moveHandle}
+            onPick={async (dateISO) => {
+              if (!dateISO) return { ok: false, error: "Pick a day." };
+              if (a.status === "proposed" && !confirm(PROPOSED_CONFIRM))
+                return { ok: true, note: "Left it alone — the link is still live." };
+              const t = shiftApptToDay(a.starts_at, a.ends_at, dateISO);
+              const res = await rescheduleAppointment(a.id, t.start, t.end);
+              if (res.ok) router.refresh();
+              return res; // a withdrawn pick-a-time link surfaces via `note`
+            }}
+          >
+            <CalendarSync className="h-4 w-4" />
+          </MoveToDay>
+        </div>
+      </div>
     );
   };
 
@@ -149,8 +195,8 @@ export function WeekAgenda({
             key={k}
             onClick={() => onDayTap(d)}
             className={`min-h-[44px] cursor-pointer rounded-xl border p-2 transition-colors ${
-              isToday ? "border-brand/40 bg-brand-light/20" : "border-slate-200 bg-white"
-            } ${armedActive ? "border-amber-300" : "hover:border-brand/40"}`}
+              isToday ? "border-brand/40 bg-brand-light/20" : "border-slate-200 bg-white hover:border-brand/40"
+            }`}
           >
             <div className="mb-1 flex items-baseline gap-2 px-1">
               <span className={`text-xs font-semibold ${isToday ? "text-brand" : "text-slate-500"}`}>

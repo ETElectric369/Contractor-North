@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Check } from "lucide-react";
 import { MoveToDay } from "@/components/move-to-day";
 import { useToast } from "@/components/toast";
+import { shiftApptToDay } from "@/lib/appt-time";
 import { moveJobDay } from "../schedule/actions";
 import { rescheduleAppointment } from "../appointments/actions";
 import { toggleTask, updateTask } from "../tasks/actions";
@@ -45,8 +46,9 @@ export function JobMoveButton({ jobId, fromDate }: { jobId: string; fromDate: st
 }
 
 /** Move an appointment to another day, keeping its time-of-day and duration.
- *  The new instant is computed in the browser so the user's own timezone is
- *  honored (same rule as the appointment form's ISO resolution). */
+ *  The new instant is computed in the browser (via the shared shiftApptToDay
+ *  helper) so the user's own timezone is honored and the calendar/agenda paths
+ *  can't drift across a DST boundary. */
 export function ApptMoveButton({ id, startsAt, endsAt }: { id: string; startsAt: string; endsAt: string | null }) {
   const router = useRouter();
   return (
@@ -55,12 +57,8 @@ export function ApptMoveButton({ id, startsAt, endsAt }: { id: string; startsAt:
       triggerClassName={rowTrigger}
       onPick={async (dateISO) => {
         if (!dateISO) return { ok: false, error: "Pick a day." };
-        const [y, m, d] = dateISO.split("-").map(Number);
-        const start = new Date(startsAt);
-        const next = new Date(start);
-        next.setFullYear(y, m - 1, d); // same wall-clock time, new day
-        const end = endsAt ? new Date(new Date(endsAt).getTime() + (next.getTime() - start.getTime())) : null;
-        const res = await rescheduleAppointment(id, next.toISOString(), end ? end.toISOString() : null);
+        const t = shiftApptToDay(startsAt, endsAt, dateISO);
+        const res = await rescheduleAppointment(id, t.start, t.end);
         if (res.ok) router.refresh();
         return res; // a withdrawn pick-a-time link surfaces via `note` as a toast
       }}

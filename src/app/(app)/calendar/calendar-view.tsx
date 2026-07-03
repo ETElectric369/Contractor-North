@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CalendarClock, Briefcase, ListTodo, MapPin, Users, X } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CalendarClock, CalendarDays, CalendarSync, Briefcase, ListTodo, SquareCheck, MapPin, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented";
 import { Card } from "@/components/ui/card";
@@ -12,7 +12,8 @@ import { useToast } from "@/components/toast";
 import { MoveToDay } from "@/components/move-to-day";
 import { NavLink } from "@/components/nav-link";
 import { firstNameOf } from "@/lib/employee-color";
-import { moveJobDay, placeJobOnDay, setJobScheduleRanges } from "../schedule/actions";
+import { shiftApptToDay } from "@/lib/appt-time";
+import { placeJobOnDay, setJobScheduleRanges } from "../schedule/actions";
 import { rescheduleAppointment } from "../appointments/actions";
 import { updateTask, type TaskCategory } from "../tasks/actions";
 import { AppointmentButton, type ApptValue } from "../appointments/appointment-button";
@@ -26,6 +27,13 @@ import { WeekAgenda } from "../schedule/week-agenda";
 // that territory and are gone. Views are url-synced (?view=day|week|month +
 // ?date=) via SHALLOW history writes: the server preloads a wide ±window once
 // and every chevron/day tap slices it client-side — no RSC round-trip per tap.
+//
+// SAFETY (the deliberate-move law): a chip's MAIN tap OPENS its record — it is
+// never a move. There is NO armed "tap a chip, then tap a day" mode: one stray
+// tap while driving can't silently reschedule a real appointment. Every
+// reschedule goes through the MoveToDay sheet (a day-strip + Cancel) hung off a
+// small per-chip move handle, so it takes a deliberate two-step gesture inside
+// a modal. A day tap only ever drills into that day.
 
 export interface CalJob {
   id: string;
@@ -99,13 +107,6 @@ export interface DayData {
   tasks: CalTask[];
 }
 
-/** The armed "moving/placing X — tap a day" state. ONE grammar for every
- *  record type; each kind carries just enough to call its server contract. */
-export type ArmedTarget =
-  | { kind: "place"; id: string; label: string; href: string }
-  | { kind: "job"; id: string; label: string; fromDate: string; href: string }
-  | { kind: "appt"; id: string; label: string; starts_at: string; ends_at: string | null; status: string; href: string };
-
 interface PickerOpt {
   id: string;
   label: string;
@@ -134,16 +135,6 @@ function startOfWeek(d: Date) {
   r.setDate(r.getDate() - r.getDay()); // Sunday start
   r.setHours(0, 0, 0, 0);
   return r;
-}
-
-/** Same day-of-week time on a new day (duration preserved) — a calendar move
- *  changes the DAY; the time-of-day the appointment was booked for stays. */
-function shiftApptTimes(startsAt: string, endsAt: string | null, toYmd: string) {
-  const s = new Date(startsAt);
-  const ns = new Date(`${toYmd}T00:00:00`);
-  ns.setHours(s.getHours(), s.getMinutes(), 0, 0);
-  const ne = endsAt ? new Date(ns.getTime() + (new Date(endsAt).getTime() - s.getTime())) : null;
-  return { start: ns.toISOString(), end: ne ? ne.toISOString() : null };
 }
 
 const PROPOSED_CONFIRM =
@@ -208,14 +199,6 @@ export function CalendarView({
     nav(view, dayKey(d));
   }
 
-  // The armed record — tap a chip to arm, tap a day to move/place it. Paging
-  // and zoom deliberately do NOT disarm (the target day may be next week);
-  // the banner's × and re-tapping the armed chip do.
-  const [armed, setArmed] = useState<ArmedTarget | null>(null);
-  function arm(t: ArmedTarget) {
-    setArmed((cur) => (cur && cur.kind === t.kind && cur.id === t.id ? null : t));
-  }
-
   // "To schedule" tray: a collapsed one-line chip by default — the calendar
   // grid is the point of the page, not the backlog rail.
   const [trayOpen, setTrayOpen] = useState(false);
@@ -237,7 +220,9 @@ export function CalendarView({
     );
   }, [personFilter, jobs, segments, appointments, tasks]);
 
-  // Undo for the tap-tap move — snapshot taken client-side BEFORE the write.
+  // Undo for a tray placement — snapshot taken client-side BEFORE the write, so
+  // "Schedule" a backlog job is one deliberate pick with a safety net. (Chip
+  // moves run through the MoveToDay sheet's own confirm/error affordances.)
   const [undo, setUndo] = useState<{ label: string; run: () => Promise<{ ok: boolean; error?: string } | void> } | null>(null);
   useEffect(() => {
     if (!undo) return;
@@ -298,8 +283,9 @@ export function CalendarView({
     return m;
   }, [jobs, segments, appointments, tasks, personFilter]);
 
-  /** The job's current ranges as seen by this render — the undo snapshot. An
-   *  empty result means "was unscheduled", which undo restores by writing []. */
+  /** The job's current ranges as seen by this render — the tray-place undo
+   *  snapshot. An empty result means "was unscheduled", which undo restores by
+   *  writing []. */
   function snapshotJobRanges(jobId: string): { start: string; end: string }[] {
     const segs = segments.filter((s) => s.job_id === jobId).map((s) => ({ start: s.start_date, end: s.end_date }));
     if (segs.length) return segs;
@@ -312,47 +298,18 @@ export function CalendarView({
     return [];
   }
 
-  /** The move itself — armed record onto the tapped day. Every job write goes
-   *  through moveJobDay/placeJobOnDay (read-modify-write server contracts);
-   *  NEVER a raw single-day ranges write, which would erase multi-range
-   *  schedules. Undo restores the exact pre-move snapshot. */
-  function executeMove(targetYmd: string) {
-    if (!armed || pending) return;
-    const a = armed;
-    // Moving a job onto the day it's already on is a no-op: just disarm —
-    // no write, no undo pill celebrating nothing.
-    if (a.kind === "job" && a.fromDate === targetYmd) {
-      setArmed(null);
-      return;
-    }
-    start(async () => {
-      if (a.kind === "place") {
-        const prior = snapshotJobRanges(a.id);
-        const res = await placeJobOnDay(a.id, targetYmd);
-        if (!res.ok) return toast(res.error ?? "Couldn't place it — try again.", "error");
-        setUndo({ label: `${a.label} → ${prettyYmd(targetYmd)}`, run: () => setJobScheduleRanges(a.id, prior) });
-      } else if (a.kind === "job") {
-        const prior = snapshotJobRanges(a.id);
-        let res = await moveJobDay(a.id, a.fromDate, targetYmd);
-        if (!res.ok && res.needsProposalConfirm) {
-          if (!confirm(`${res.error} Move it anyway?`)) return;
-          res = await moveJobDay(a.id, a.fromDate, targetYmd, { cancelProposals: true });
-        }
-        if (!res.ok) return toast(res.error ?? "Couldn't move it — try again.", "error");
-        setUndo({ label: `${a.label} → ${prettyYmd(targetYmd)}`, run: () => setJobScheduleRanges(a.id, prior) });
-      } else {
-        // A live pick-a-time link would let the customer's later tap silently
-        // overwrite this move — confirm the withdrawal first.
-        if (a.status === "proposed" && !confirm(PROPOSED_CONFIRM)) return;
-        const t = shiftApptTimes(a.starts_at, a.ends_at, targetYmd);
-        const res = await rescheduleAppointment(a.id, t.start, t.end);
-        if (!res.ok) return toast(res.error ?? "Couldn't move it — try again.", "error");
-        if (res.note) toast(res.note, "info");
-        setUndo({ label: `${a.label} → ${prettyYmd(targetYmd)}`, run: () => rescheduleAppointment(a.id, a.starts_at, a.ends_at) });
-      }
-      setArmed(null);
-      router.refresh();
-    });
+  /** Place a backlog (dateless) job on a day — the tray's "Schedule" gesture,
+   *  routed to placeJobOnDay (a UNION write: a needs-return job keeps its
+   *  worked-history segments). Runs inside the MoveToDay sheet, so it's already
+   *  a deliberate two-step pick; undo restores the exact pre-place snapshot.
+   *  Returns the MoveToDay result shape so the sheet reports errors inline. */
+  async function placeOnDay(job: CalUnscheduled, targetYmd: string) {
+    const prior = snapshotJobRanges(job.id);
+    const res = await placeJobOnDay(job.id, targetYmd);
+    if (!res.ok) return res;
+    setUndo({ label: `${job.name} → ${prettyYmd(targetYmd)}`, run: () => setJobScheduleRanges(job.id, prior) });
+    router.refresh();
+    return res;
   }
 
   function runUndo() {
@@ -367,9 +324,8 @@ export function CalendarView({
     });
   }
 
-  /** Day tap anywhere: move target while armed, otherwise the day drill. */
+  /** A day tap only ever drills into that day — never a move. */
   function handleDayTap(d: Date) {
-    if (armed) return executeMove(dayKey(d));
     nav("day", dayKey(d), { push: true });
   }
 
@@ -390,7 +346,6 @@ export function CalendarView({
         : anchor.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
 
   const iconBtn = "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg";
-  const armedInTray = armed?.kind === "place" ? armed.id : null;
 
   return (
     <div className="space-y-3">
@@ -442,20 +397,11 @@ export function CalendarView({
         ]}
       />
 
-      {/* THE legend — the type-color code, stated once, visible in every zoom.
-          Dot classes mirror the exact chip/dot colors the views render; the
-          hollow ring = a proposed appointment awaiting the customer's pick. */}
-      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 px-1 text-[10px] text-slate-400">
-        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 shrink-0 rounded-full bg-blue-500" />Job</span>
-        <span>·</span>
-        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 shrink-0 rounded-full bg-violet-500" />Appt</span>
-        <span>·</span>
-        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 shrink-0 rounded-full bg-teal-500" />Inspection</span>
-        <span>·</span>
-        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 shrink-0 rounded-full bg-slate-400" />Task</span>
-        <span>·</span>
-        <span className="inline-flex items-center gap-1"><span className="h-2 w-2 shrink-0 rounded-full border-[1.5px] border-violet-500" />awaiting pick</span>
-      </div>
+      {/* The type-color legend is GONE: month cells now carry a labeled
+          icon+count per type (briefcase/calendar/checkbox), and week/day chips
+          are already color + text — so nothing needs a dot key to decode. The
+          one glyph that still means something on its own, ◌ = awaiting the
+          customer's pick, is titled on the chip/dot itself. */}
 
       {/* Person filter chips — only when summoned (or active), so the header
           stays three rows. Filtering answers "who works where"; nothing on the
@@ -488,35 +434,40 @@ export function CalendarView({
       )}
 
       {/* ROW 3 — the "To schedule" tray: a collapsed amber chip (hidden at 0),
-          expanding to the armable backlog. Tray placement is the UNION write
-          (placeJobOnDay) — a needs-return job keeps its history segments. */}
+          expanding to the backlog. Each job carries its OWN Schedule handle →
+          the MoveToDay sheet → placeJobOnDay (a UNION write, so a needs-return
+          job keeps its history segments). No arming: pick the day right there. */}
       {unscheduled.length > 0 &&
         (trayOpen ? (
           <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-2">
             <div className="mb-1.5 flex items-center justify-between px-1 text-xs">
               <span className="font-semibold text-amber-700">To schedule · {unscheduled.length}</span>
-              <span className="flex items-center gap-2">
-                <span className="text-slate-400">Tap a job, then tap a day</span>
-                <button onClick={() => setTrayOpen(false)} className="rounded p-0.5 text-amber-700 hover:bg-amber-100" aria-label="Collapse">
-                  <ChevronUp className="h-3.5 w-3.5" />
-                </button>
-              </span>
+              <button onClick={() => setTrayOpen(false)} className="rounded p-0.5 text-amber-700 hover:bg-amber-100" aria-label="Collapse">
+                <ChevronUp className="h-3.5 w-3.5" />
+              </button>
             </div>
             <div className="flex gap-1.5 overflow-x-auto pb-1">
               {unscheduled.map((j) => (
-                <button
+                <div
                   key={j.id}
-                  onClick={() => arm({ kind: "place", id: j.id, label: j.name, href: `/jobs/${j.id}` })}
-                  disabled={pending}
-                  className={`shrink-0 rounded-lg border px-2.5 py-1.5 text-left text-xs transition-colors ${
-                    armedInTray === j.id
-                      ? "border-amber-500 bg-amber-100 ring-1 ring-amber-400"
-                      : "border-slate-200 bg-white hover:border-amber-300"
-                  }`}
+                  className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white pl-2.5 text-xs"
                 >
-                  <div className="max-w-[160px] truncate font-medium text-slate-800">{j.name}</div>
-                  <div className="truncate text-[11px] text-slate-400">{j.customer ?? j.job_number}</div>
-                </button>
+                  <Link href={`/jobs/${j.id}`} className="min-w-0 py-1.5 text-left">
+                    <div className="max-w-[160px] truncate font-medium text-slate-800">{j.name}</div>
+                    <div className="truncate text-[11px] text-slate-400">{j.customer ?? j.job_number}</div>
+                  </Link>
+                  {/* The Schedule handle — a deliberate day pick, undo-safe. */}
+                  <MoveToDay
+                    label={`Schedule ${j.name}`}
+                    triggerClassName="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-amber-600 hover:bg-amber-100"
+                    onPick={async (iso) => {
+                      if (!iso) return { ok: false, error: "Pick a day." };
+                      return placeOnDay(j, iso);
+                    }}
+                  >
+                    <CalendarSync className="h-4 w-4" />
+                  </MoveToDay>
+                </div>
               ))}
             </div>
           </div>
@@ -529,58 +480,13 @@ export function CalendarView({
           </button>
         ))}
 
-      {/* The armed banner — the move gesture's status line, sticky so the mode
-          stays narrated however far the grid scrolls. Open/View day replaces
-          the old navigate-on-tap; × disarms. Load-bearing, not polish. */}
-      {armed && (
-        <div className="sticky top-2 z-30 flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 shadow-sm">
-          <span className="min-w-0 flex-1 truncate">
-            {pending ? "Moving" : armed.kind === "place" ? "Placing" : "Moving"} <span className="font-semibold">{armed.label}</span>
-            {pending ? "…" : " — tap a day"}
-          </span>
-          {/* An appointment has no page of its own — its link lands on the day
-              drill, so the button says what it does. */}
-          <Link
-            href={armed.href}
-            className="shrink-0 rounded-full bg-amber-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-amber-700"
-          >
-            {armed.kind === "appt" ? "View day" : "Open ↗"}
-          </Link>
-          <button onClick={() => setArmed(null)} className="rounded p-1 hover:bg-amber-100" aria-label="Cancel move">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-      )}
-
-      {view === "month" && (
-        <MonthGrid anchor={anchor} byDay={byDay} todayK={todayK} arming={!!armed} onPick={handleDayTap} />
-      )}
+      {view === "month" && <MonthGrid anchor={anchor} byDay={byDay} todayK={todayK} onPick={handleDayTap} />}
       {view === "week" && (
-        <WeekAgenda
-          days={weekDays}
-          byDay={byDay}
-          todayK={todayK}
-          members={members}
-          armedId={armed?.kind === "place" ? null : (armed?.id ?? null)}
-          armedActive={!!armed}
-          onDayTap={handleDayTap}
-          onArm={arm}
-        />
+        <WeekAgenda days={weekDays} byDay={byDay} todayK={todayK} members={members} onDayTap={handleDayTap} />
       )}
-      {view === "day" && (
-        <DayDetail
-          date={anchor}
-          dayK={anchorK}
-          data={byDay.get(anchorK)}
-          members={members}
-          picker={picker}
-          armed={armed}
-          pending={pending}
-          onPlaceHere={() => executeMove(anchorK)}
-        />
-      )}
+      {view === "day" && <DayDetail dayK={anchorK} data={byDay.get(anchorK)} members={members} picker={picker} />}
 
-      {/* Undo — the safety net under the 2-tap gesture. */}
+      {/* Undo — the safety net under a tray placement. */}
       {undo && (
         <div className="fixed inset-x-0 bottom-[calc(9rem+env(safe-area-inset-bottom))] z-[120] flex justify-center px-4">
           <div className="flex max-w-sm items-center gap-3 rounded-full bg-slate-900 px-4 py-2 text-sm text-white shadow-lg">
@@ -595,19 +501,21 @@ export function CalendarView({
   );
 }
 
-/** Month = density map: date numeral + up to 4 type-colored dots + "+N".
+/** Month = density map: date numeral + compact icon+count chips per record
+ *  TYPE (briefcase=jobs blue, calendar=appts violet, checkbox=tasks slate) —
+ *  the glyph carries the type, so a cell reads without a legend. A count shows
+ *  ONLY when it's > 0; if the three together would crowd the cell (total > 6),
+ *  it collapses to a single neutral total badge so 375px never overflows.
  *  Names live one tap down in the day drill — 10px truncated chips were noise. */
 function MonthGrid({
   anchor,
   byDay,
   todayK,
-  arming,
   onPick,
 }: {
   anchor: Date;
   byDay: Map<string, DayData>;
   todayK: string;
-  arming: boolean;
   onPick: (d: Date) => void;
 }) {
   const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
@@ -631,26 +539,20 @@ function MonthGrid({
           const k = dayKey(d);
           const data = byDay.get(k);
           const inMonth = d.getMonth() === anchor.getMonth();
-          // One dot per item, colored by RECORD TYPE (the layer-dot palette);
-          // a proposed appointment is a hollow ring — pending, not booked.
-          const dots = [
-            ...(data?.jobs ?? []).map(() => ({ ring: false, cls: "bg-blue-500" })),
-            ...(data?.appts ?? []).map((a) => ({
-              ring: a.status === "proposed",
-              cls:
-                a.status === "proposed"
-                  ? a.type === "inspection" ? "border-teal-500" : "border-violet-500"
-                  : a.type === "inspection" ? "bg-teal-500" : "bg-violet-500",
-            })),
-            ...(data?.tasks ?? []).map(() => ({ ring: false, cls: "bg-slate-400" })),
-          ];
+          const jobN = data?.jobs.length ?? 0;
+          const apptN = data?.appts.length ?? 0;
+          const taskN = data?.tasks.length ?? 0;
+          // A hollow calendar ring means at least one appointment is still
+          // awaiting the customer's pick (○, matching the chip/legend symbol).
+          const anyProposed = (data?.appts ?? []).some((a) => a.status === "proposed");
+          const total = jobN + apptN + taskN;
           return (
             <button
               key={i}
               onClick={() => onPick(d)}
               className={`flex min-h-[84px] flex-col items-start justify-start border-b border-r border-slate-100 p-1 text-left hover:bg-slate-50 ${
                 inMonth ? "" : "bg-slate-50/60"
-              } ${arming && inMonth ? "bg-amber-50/50" : ""}`}
+              }`}
             >
               <div
                 className={`text-xs ${
@@ -661,15 +563,46 @@ function MonthGrid({
               >
                 {d.getDate()}
               </div>
-              {dots.length > 0 && (
-                <div className="mt-1.5 flex flex-wrap items-center gap-1 px-0.5">
-                  {dots.slice(0, 4).map((dot, di) => (
-                    <span
-                      key={di}
-                      className={`h-2 w-2 shrink-0 rounded-full ${dot.ring ? `border-[1.5px] ${dot.cls}` : dot.cls}`}
-                    />
-                  ))}
-                  {dots.length > 4 && <span className="text-[10px] font-medium text-slate-400">+{dots.length - 4}</span>}
+              {total > 0 && (
+                <div className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 px-0.5">
+                  {total > 6 ? (
+                    // Too much to itemize without overflowing a 375px cell —
+                    // one neutral total; the day drill breaks it down.
+                    <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-slate-500">
+                      <CalendarDays className="h-3 w-3 shrink-0" />
+                      {total}
+                    </span>
+                  ) : (
+                    <>
+                      {jobN > 0 && (
+                        <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-blue-600" title={`${jobN} job${jobN > 1 ? "s" : ""}`}>
+                          <Briefcase className="h-3 w-3 shrink-0" />
+                          {jobN}
+                        </span>
+                      )}
+                      {apptN > 0 && (
+                        <span
+                          className={`inline-flex items-center gap-0.5 text-[10px] font-semibold ${anyProposed ? "text-violet-400" : "text-violet-600"}`}
+                          title={
+                            anyProposed
+                              ? `${apptN} appointment${apptN > 1 ? "s" : ""} — some awaiting pick`
+                              : `${apptN} appointment${apptN > 1 ? "s" : ""}`
+                          }
+                        >
+                          {/* Hollow calendar = something's still awaiting the
+                              customer's pick; filled = all booked. */}
+                          <CalendarDays className={`h-3 w-3 shrink-0 ${anyProposed ? "opacity-70" : ""}`} strokeWidth={anyProposed ? 1.5 : 2} />
+                          {apptN}
+                        </span>
+                      )}
+                      {taskN > 0 && (
+                        <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-slate-500" title={`${taskN} task${taskN > 1 ? "s" : ""}`}>
+                          <SquareCheck className="h-3 w-3 shrink-0" />
+                          {taskN}
+                        </span>
+                      )}
+                    </>
+                  )}
                 </div>
               )}
             </button>
@@ -683,23 +616,15 @@ function MonthGrid({
 /** Day drill: timed appointments (edit pencil + quick done/cancel live HERE
  *  now — the appointments tab is gone), all-day job cards, then tasks due. */
 function DayDetail({
-  date,
   dayK,
   data,
   members = [],
   picker,
-  armed,
-  pending,
-  onPlaceHere,
 }: {
-  date: Date;
   dayK: string;
   data?: DayData;
   members?: CalMember[];
   picker: SchedulePicker;
-  armed: ArmedTarget | null;
-  pending: boolean;
-  onPlaceHere: () => void;
 }) {
   const appts = data?.appts ?? [];
   const jobsOn = data?.jobs ?? [];
@@ -707,17 +632,6 @@ function DayDetail({
 
   return (
     <div className="space-y-4">
-      {armed && (
-        <button
-          onClick={onPlaceHere}
-          disabled={pending}
-          className="w-full rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm font-medium text-amber-700 hover:bg-amber-100"
-        >
-          {armed.kind === "place" ? "Place" : "Move"} {armed.label} onto{" "}
-          {date.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}
-        </button>
-      )}
-
       <Card>
         <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
           <div className="flex items-center gap-2">
@@ -837,8 +751,8 @@ function ApptRow({ a, picker }: { a: CalAppt; picker: SchedulePicker }) {
           triggerClassName="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
           onPick={async (iso) => {
             if (!iso) return { ok: false, error: "Pick a day." };
-            if (a.status === "proposed" && !confirm(PROPOSED_CONFIRM)) return { ok: false, error: "Left it alone — the link is still live." };
-            const t = shiftApptTimes(a.starts_at, a.ends_at, iso);
+            if (a.status === "proposed" && !confirm(PROPOSED_CONFIRM)) return { ok: true, note: "Left it alone — the link is still live." };
+            const t = shiftApptToDay(a.starts_at, a.ends_at, iso);
             const res = await rescheduleAppointment(a.id, t.start, t.end);
             if (res.ok) router.refresh();
             return res; // a returned `note` (withdrawn link) surfaces as a toast

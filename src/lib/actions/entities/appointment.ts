@@ -14,6 +14,15 @@ export const appointmentActions: Record<string, ActionDef> = {
     input: z.object({ id: z.string(), starts_at: z.string().min(1), ends_at: z.string().nullable().optional() }),
     auth: "staff",
     effect: "write",
+    // Moving a real appointment by VOICE is Erik's "swap days while driving" hazard: a stray
+    // spoken word must not silently reschedule. Gate the AGENT route so Nort PROPOSES the new
+    // day/time and waits for the spoken yes (the UI drag/edit path is exempt — a human tap IS
+    // the consent). "destructive", not "financial" — no money, but it clobbers a scheduled time.
+    confirm: "destructive",
+    // Read the day/time straight off the ISO the model passed (the user's stated local time) —
+    // no server-tz conversion that could read back a shifted hour. Title isn't in the input
+    // (only the id is), so name the change by its new slot — the card below shows which one.
+    describe: (i) => `Move this appointment to ${readbackWhen(i.starts_at)}? Check the details below before you confirm.`,
     handler: (i) => rescheduleAppointment(i.id, i.starts_at, i.ends_at ?? null),
   },
   "appointment.create": {
@@ -66,6 +75,38 @@ export const appointmentActions: Record<string, ActionDef> = {
     input: z.object({ id: z.string(), status: z.string() }),
     auth: "staff", // appointments are staff-only in RLS — the registry gate now matches (Phase C)
     effect: "write",
+    // Cancelling/completing a real appointment by voice is the same "one stray word" hazard as a
+    // move — gate the AGENT route so Nort reads the change back and waits for the yes. Cancelling
+    // also withdraws the live pick-a-time link, so this is not a cheap undo. UI is exempt.
+    confirm: "destructive",
+    describe: (i) => `${statusVerb(i.status)} this appointment? Check the details below before you confirm.`,
     handler: (i) => setAppointmentStatus(i.id, i.status),
   },
 };
+
+/** Read an ISO datetime back as a spoken day + time WITHOUT a tz conversion — pull the fields
+ *  straight off the string the model passed (the user's stated local wall-clock), the same way
+ *  time.fixEntry's describe avoids a shifted hour. Falls back to the raw string if it's not ISO. */
+function readbackWhen(iso: string): string {
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  if (!m) return iso;
+  const [, y, mo, d, hh, mm] = m;
+  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  // Date-only math for the weekday name (noon UTC dodges any DST edge); the CLOCK comes from the
+  // raw hh:mm above, never from this Date, so no tz shift reaches the read-back time.
+  const dow = days[new Date(Date.UTC(+y, +mo - 1, +d, 12)).getUTCDay()];
+  let h = +hh;
+  const ampm = h < 12 ? "am" : "pm";
+  h = h % 12 || 12;
+  const time = +mm === 0 ? `${h}${ampm}` : `${h}:${mm}${ampm}`;
+  return `${dow} ${+mo}/${+d} at ${time}`;
+}
+
+/** The verb for a setStatus read-back — "Cancel" / "Mark complete" / a generic "Set … to <status>". */
+function statusVerb(status: string): string {
+  const s = status.toLowerCase();
+  if (s === "cancelled" || s === "canceled") return "Cancel";
+  if (s === "completed") return "Mark complete";
+  if (s === "scheduled") return "Re-open (mark scheduled)";
+  return `Set the status to "${status}" on`;
+}
