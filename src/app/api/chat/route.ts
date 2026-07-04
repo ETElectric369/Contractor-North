@@ -287,7 +287,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
     // calling ANY tool — nothing was saved anywhere. These two rules close both halves of that hole.
     systemPrompt +=
       "\n\nCAPTURE ANYTHING: when the user gives you an idea, a feature request, an app suggestion, a note, or any thought to keep ('capture this', 'write this down', 'remember this idea') — call capture.quick with the FULL text; it saves instantly to their Needs-action inbox for later filing. Use it too whenever they describe something you have no other tool for but that clearly shouldn't be lost." +
-      "\n\nTHE HONESTY RULE (absolute): NEVER say 'captured', 'saved', 'added', 'done', or read back a record as if it exists unless a tool call actually SUCCEEDED in this conversation. If you have no tool for what they asked, say so plainly in one sentence and offer capture.quick so the thought still lands somewhere real. A confident claim with no write behind it is the worst thing you can do — it silently loses their work. Corollary: never claim a LINK you didn't write — 'attached to John' / 'pinned to the job' is true only if that exact id was an argument of a call that succeeded; a missing link gets ADDED (quote.setCustomer, quote.attachJob), the document never re-created." +
+      "\n\nTHE HONESTY RULE (absolute): NEVER say 'captured', 'saved', 'added', 'done', or read back a record as if it exists unless a tool call actually SUCCEEDED in this conversation. If you have no tool for what they asked, say so plainly in one sentence and offer capture.quick so the thought still lands somewhere real. A confident claim with no write behind it is the worst thing you can do — it silently loses their work. Corollary: never claim a LINK you didn't write — 'attached to John' / 'pinned to the job' is true only if that exact id was an argument of a call that succeeded; a missing link gets ADDED (quote.setCustomer, quote.attachJob), the document never re-created. Corollary 2 (edits): after you change line items, the NEW TOTAL is real ONLY if you RE-READ the record (get_quote) after the write tools returned ok — do NOT do the arithmetic in your head and report that figure as saved. Write → get the ok → re-read → THEN read back the real total (and show_card it). If you run low on tool rounds, prioritize the write over the readback: it's better to say 'saved — pull it up to see the new total' than to recite a total you never confirmed." +
       // The Chmura night (2026-07-01): one estimate saved three times (E-009/010/011) + three
       // calls failed on names/placeholders passed as ids. These two rules close both holes.
       "\n\nSAVE ONCE: a document already saved this conversation is NEVER created again — a later 'save it' about the same doc means confirm its number and EDIT it (quote.addItem/updateItem/deleteItem, quote.setType, quote.setCustomer, quote.attachJob). Duplicate drafts cost the user cleanup and trust." +
@@ -356,7 +356,11 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
   // Agentic loop: the model may call read-only data tools (scoped to this user's
   // org by RLS) before answering. We stream its text out in every round and run
   // tool calls in between, until it stops asking for tools.
-  const MAX_ROUNDS = 6;
+  // A real multi-edit task legitimately chains rounds: read the quote for its line ids →
+  // edit line 1 → edit line 2 → delete line 3 → re-read → show_card. Six ran out mid-task
+  // (edits saved but the card never rendered — 'Reached the tool-call limit'). Twelve gives
+  // the whole loop room to finish AND still project the result on the glass.
+  const MAX_ROUNDS = 12;
   const convo: Anthropic.MessageParam[] = messages.map((m) => ({
     role: m.role,
     content: m.content,
