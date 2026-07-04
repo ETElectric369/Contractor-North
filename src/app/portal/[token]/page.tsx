@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { invoiceBalance } from "@/lib/invoice-math";
 import { accentHex } from "@/lib/org-settings";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { statusTone, toneClasses } from "@/components/ui/badge";
 
 export const dynamic = "force-dynamic";
 
@@ -14,12 +15,10 @@ export async function generateMetadata({ params }: { params: Promise<{ token: st
   return { title: data?.org?.name ? `${data.org.name} — Your account` : "Your account" };
 }
 
-function statusColor(s: string): string {
-  if (["paid", "signed", "accepted"].includes(s)) return "bg-emerald-50 text-emerald-700";
-  if (["overdue"].includes(s)) return "bg-red-50 text-red-700";
-  if (["partial", "sent"].includes(s)) return "bg-amber-50 text-amber-700";
-  return "bg-slate-100 text-slate-600";
-}
+// Colors come from the ONE palette (statusTone → toneClasses); the portal no longer
+// hand-rolls its own status→color map. NB this now follows the app: 'sent' reads blue
+// (was amber here), paid/signed/accepted green, overdue red, partial amber.
+const statusColor = (s: string): string => toneClasses(statusTone(s));
 
 export default async function CustomerPortalPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;

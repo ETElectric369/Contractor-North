@@ -1,7 +1,7 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
-type Tone =
+export type Tone =
   | "slate"
   | "blue"
   | "green"
@@ -19,6 +19,12 @@ const tones: Record<Tone, string> = {
   purple: "bg-purple-100 text-purple-700",
   indigo: "bg-indigo-100 text-indigo-700",
 };
+
+/** THE tone→classes map, for surfaces that can't use <Badge> (e.g. a bare portal span)
+ *  but must still pull their colors from the ONE palette — never a hand-rolled color pair. */
+export function toneClasses(tone: Tone): string {
+  return tones[tone];
+}
 
 export function Badge({
   tone = "slate",
@@ -45,12 +51,16 @@ export function statusTone(status: string): Tone {
     case "complete":
     case "approved":
     case "in_progress":
+    case "paid":
+    case "signed":
       return "green";
     case "lead":
     case "draft":
     case "estimate":
     case "pending":
     case "open":
+    case "unpaid":
+    case "partial":
       return "amber";
     case "scheduled":
     case "sent":
@@ -61,6 +71,7 @@ export function statusTone(status: string): Tone {
     case "cancelled":
     case "expired":
     case "inactive":
+    case "overdue":
       return "red";
     case "invoiced":
       return "purple";

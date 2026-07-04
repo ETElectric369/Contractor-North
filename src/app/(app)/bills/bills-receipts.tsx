@@ -325,7 +325,7 @@ export function BillsReceipts({
                       }}
                       title="Toggle paid/unpaid"
                     >
-                      <Badge tone={b.status === "paid" ? "green" : "amber"}>{b.status}</Badge>
+                      <Badge tone={statusTone(b.status)}>{b.status}</Badge>
                     </button>
                     <button onClick={() => setEditBill(b)} className="text-slate-400 hover:text-brand" title="Edit">
                       <Pencil className="h-4 w-4" />

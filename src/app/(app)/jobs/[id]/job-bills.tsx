@@ -6,7 +6,7 @@ import { Plus, Trash2, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
-import { Badge } from "@/components/ui/badge";
+import { Badge, statusTone } from "@/components/ui/badge";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { useToast } from "@/components/toast";
 import { formatCurrency, formatDate } from "@/lib/utils";
@@ -140,7 +140,7 @@ export function JobBills({ jobId, bills }: { jobId: string; bills: Bill[] }) {
                 }
                 title="Toggle paid/unpaid"
               >
-                <Badge tone={b.status === "paid" ? "green" : "amber"}>{b.status}</Badge>
+                <Badge tone={statusTone(b.status)}>{b.status}</Badge>
               </button>
               <button onClick={() => setEditBill(b)} className="text-slate-400 hover:text-brand" title="Edit">
                 <Pencil className="h-4 w-4" />
