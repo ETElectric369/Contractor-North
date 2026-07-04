@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { JOB_STATUSES } from "@/lib/job-status";
+import { DRAW_KINDS } from "@/lib/invoice-math";
 import { emptyToNull } from "@/lib/forms";
 import { visibleJobIdOrNull, visibleTemplateIdOrNull } from "@/lib/job-visibility";
 import { requireStaff } from "@/lib/staff-guard";
@@ -146,7 +147,7 @@ export async function finishJob(
     .select("id")
     .eq("job_id", jobId)
     .neq("status", "void")
-    .in("invoice_kind", ["deposit", "progress", "final"])
+    .in("invoice_kind", [...DRAW_KINDS])
     .order("created_at", { ascending: false })
     .limit(1);
   if (draws && draws.length) {

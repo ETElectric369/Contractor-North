@@ -15,7 +15,7 @@ import { invoiceSectionTree } from "@/lib/nav-tree";
 import { deleteInvoice } from "../actions";
 import { getOrgSettings } from "@/lib/org-settings";
 import { jobProgressFinancials, receivedBeforeThisInvoice } from "@/lib/job-financials";
-import { invoiceBalance } from "@/lib/invoice-math";
+import { invoiceBalance, isDrawKind } from "@/lib/invoice-math";
 import { listCustomerOptions } from "@/lib/schedule-options";
 import { ProgressReportCard } from "@/components/progress-report-card";
 import type { Invoice, InvoiceItem, Payment } from "@/lib/types";
@@ -73,7 +73,7 @@ export default async function InvoicePage({
   // A deposit/progress/final invoice on a job carries a progress-report summary
   // so the payment request doubles as a running-balance statement.
   const drawKind = (inv as any).invoice_kind as string | undefined;
-  const isDraw = !!(inv as any).job_id && ["deposit", "progress", "final"].includes(drawKind ?? "");
+  const isDraw = !!(inv as any).job_id && isDrawKind(drawKind);
   const fin = isDraw ? await jobProgressFinancials(supabase, (inv as any).job_id) : null;
 
   return (

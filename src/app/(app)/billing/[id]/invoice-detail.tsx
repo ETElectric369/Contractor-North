@@ -10,7 +10,7 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/components/toast";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
-import { invoiceBalance } from "@/lib/invoice-math";
+import { invoiceBalance, isDrawKind } from "@/lib/invoice-math";
 import { LineItemText } from "@/components/line-item-text";
 import { CostBreakdown } from "@/components/cost-breakdown";
 import type { Invoice, InvoiceItem, Payment } from "@/lib/types";
@@ -455,7 +455,7 @@ export function InvoiceDetail({
         </div>
 
         {(invoice.job_id || (invoice as any).quote_id) &&
-          !["deposit", "progress", "final"].includes((invoice as any).invoice_kind ?? "") && (
+          !isDrawKind((invoice as any).invoice_kind) && (
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50/60 px-3 py-2.5">
             <span className="text-xs font-medium text-slate-500">Import:</span>
             <Button size="sm" variant="outline" onClick={() => runImport(importQuoteItemsIntoInvoice, "Estimate items")} disabled={pending}>

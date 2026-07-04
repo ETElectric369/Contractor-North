@@ -10,7 +10,7 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { tzLocalHourUtc, todayStrInTz } from "@/lib/tz";
 import { requireStaff } from "@/lib/staff-guard";
 import { computeJobLaborBilling, fetchJobLaborRows } from "@/lib/labor-billing";
-import { recalcTotals, resolveDrawCredit, shouldBlockStandardImport, invoiceBalance } from "@/lib/invoice-math";
+import { recalcTotals, resolveDrawCredit, shouldBlockStandardImport, invoiceBalance, DRAW_KINDS } from "@/lib/invoice-math";
 import { standardBillingBlockerOnJob, standardBillingConflictError } from "@/lib/billing-guards";
 import { scheduleStatus, contractTotalFromQuotes, type Milestone } from "@/lib/payment-schedule-math";
 import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
@@ -402,7 +402,7 @@ async function activeDrawOnJob(supabase: any, jobId: string, excludeInvoiceId?: 
     .select("id, status, invoice_number")
     .eq("job_id", jobId)
     .neq("status", "void")
-    .in("invoice_kind", ["deposit", "progress", "final"])
+    .in("invoice_kind", [...DRAW_KINDS])
     .limit(1);
   if (excludeInvoiceId) q = q.neq("id", excludeInvoiceId);
   const { data } = await q;
@@ -549,7 +549,7 @@ export async function createProgressReportInvoice(
     supabase.from("jobs").select("customer_id, name").eq("id", jobId).maybeSingle(),
     supabase.from("organizations").select("settings").maybeSingle(),
     supabase.from("invoices").select("invoice_number").eq("job_id", jobId).eq("status", "draft")
-      .in("invoice_kind", ["deposit", "progress", "final"]).limit(1).maybeSingle(),
+      .in("invoice_kind", [...DRAW_KINDS]).limit(1).maybeSingle(),
     supabase.from("payment_milestones").select("id").eq("job_id", jobId).limit(1).maybeSingle(),
   ]);
   if (!job) return { ok: false, error: "Job not found." };
@@ -677,7 +677,7 @@ export async function setPaymentSchedule(
     .select("invoice_number")
     .eq("job_id", jobId)
     .neq("status", "void")
-    .in("invoice_kind", ["deposit", "progress", "final"])
+    .in("invoice_kind", [...DRAW_KINDS])
     .limit(1)
     .maybeSingle();
   if (draw)
@@ -784,7 +784,7 @@ async function createMilestoneDraw(
     .select("invoice_number")
     .eq("job_id", jobId)
     .eq("status", "draft")
-    .in("invoice_kind", ["deposit", "progress", "final"])
+    .in("invoice_kind", [...DRAW_KINDS])
     .limit(1)
     .maybeSingle();
   if (existingDraft)

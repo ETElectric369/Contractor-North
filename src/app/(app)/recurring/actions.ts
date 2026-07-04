@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
 import { requireStaff } from "@/lib/staff-guard";
-import { drawAmount } from "@/lib/invoice-math";
+import { drawAmount, DRAW_KINDS } from "@/lib/invoice-math";
 import { getOrgSettings } from "@/lib/org-settings";
 import { tzLocalHourUtc, todayStrInTz } from "@/lib/tz";
 import { standardBillingBlockerOnJob, standardBillingConflictError } from "@/lib/billing-guards";
@@ -177,7 +177,7 @@ export async function createProgressInvoice(
 
   // H3/M6: at most one draft draw per job at a time — a second would over-bill.
   const { data: existingDraft } = await supabase.from("invoices").select("invoice_number")
-    .eq("job_id", jobId).eq("status", "draft").in("invoice_kind", ["deposit", "progress", "final"]).limit(1).maybeSingle();
+    .eq("job_id", jobId).eq("status", "draft").in("invoice_kind", [...DRAW_KINDS]).limit(1).maybeSingle();
   if (existingDraft) {
     return { ok: false, error: `Draft ${(existingDraft as any).invoice_number} is still open on this job — send or delete it before creating another draw.` };
   }

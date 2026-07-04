@@ -36,6 +36,20 @@ export function invoiceBalance(total: number | null | undefined, amountPaid: num
   return cents(Math.max(0, fin(total) - fin(amountPaid)));
 }
 
+/** The progress-DRAW invoice kinds — a job billed in stages (mirrors the 0063 invoice_kind
+ *  CHECK, minus 'standard'). One definition so the H4 double-billing guard and the "is this
+ *  a draw?" checks scattered across billing can't drift. */
+export const DRAW_KINDS = ["deposit", "progress", "final"] as const;
+export type DrawKind = (typeof DRAW_KINDS)[number];
+export type InvoiceKind = "standard" | DrawKind;
+
+/** Is this invoice a progress DRAW (deposit/progress/final) rather than a plain standard
+ *  invoice? A null/absent kind is 'standard' by the DB default, so it is NOT a draw — which
+ *  is exactly what the negation sites (`!isDrawKind`) rely on to catch standard-and-null. */
+export function isDrawKind(kind: string | null | undefined): boolean {
+  return !!kind && (DRAW_KINDS as readonly string[]).includes(kind);
+}
+
 /** Subtotal / tax / total from a set of line totals + a tax rate — the money rollup
  *  shared by invoices, quotes, and POs. Each figure is rounded to cents so float dust
  *  (0.01 + 2.01 = 2.0199…) can't accumulate, and — critically — a quote and the invoice

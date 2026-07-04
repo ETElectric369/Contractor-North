@@ -7,7 +7,7 @@ import { companyFromOrg } from "@/components/doc-letterhead";
 import { templateFor } from "@/components/doc-templates";
 import { getOrgSettings } from "@/lib/org-settings";
 import { jobProgressFinancials, receivedBeforeThisInvoice } from "@/lib/job-financials";
-import { invoiceTypeLabel } from "@/lib/invoice-math";
+import { invoiceTypeLabel, isDrawKind } from "@/lib/invoice-math";
 import { InvoiceDocument } from "@/components/invoice-document";
 import { docTitle } from "@/lib/doc-title";
 import type { Metadata } from "next";
@@ -49,7 +49,7 @@ export default async function InvoicePrintPage({ params }: { params: Promise<{ i
 
   // A deposit/progress/final invoice on a job shows a progress-report summary.
   const drawKind = (inv as any).invoice_kind as string | undefined;
-  const isDraw = !!(inv as any).job_id && ["deposit", "progress", "final"].includes(drawKind ?? "");
+  const isDraw = !!(inv as any).job_id && isDrawKind(drawKind);
   const fin = isDraw ? await jobProgressFinancials(supabase, (inv as any).job_id) : null;
 
   // A clear "Time & Material vs Fixed-Price" statement from the job's billing model.

@@ -1,5 +1,17 @@
 import { describe, it, expect } from "vitest";
-import { recalcTotals, resolveDrawCredit, drawAmount, progressSummary, shouldBlockStandardImport, isStandardBillingBlocker, groupInvoiceLines, paidStatus, invoiceTypeLabel, invoiceBalance, subtotalTaxTotal } from "@/lib/invoice-math";
+import { recalcTotals, resolveDrawCredit, drawAmount, progressSummary, shouldBlockStandardImport, isStandardBillingBlocker, groupInvoiceLines, paidStatus, invoiceTypeLabel, invoiceBalance, subtotalTaxTotal, isDrawKind, DRAW_KINDS } from "@/lib/invoice-math";
+
+describe("isDrawKind — one draw-vs-standard predicate", () => {
+  it("the three draw kinds are draws", () => {
+    for (const k of DRAW_KINDS) expect(isDrawKind(k)).toBe(true);
+  });
+  it("standard / null / undefined are NOT draws (the standard-as-default the !isDrawKind sites rely on)", () => {
+    expect(isDrawKind("standard")).toBe(false);
+    expect(isDrawKind(null)).toBe(false);
+    expect(isDrawKind(undefined)).toBe(false);
+    expect(isDrawKind("")).toBe(false);
+  });
+});
 
 describe("subtotalTaxTotal — one rollup for invoices, quotes, POs", () => {
   it("cents-rounds subtotal, tax, total", () => {

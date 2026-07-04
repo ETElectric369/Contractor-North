@@ -9,7 +9,7 @@ import {
   ClipboardCheck, FileText, Wallet, Receipt as ReceiptTab, StickyNote, Stamp, FileDiff,
 } from "./job-tab-icons";
 import { createClient } from "@/lib/supabase/server";
-import { invoiceBalance } from "@/lib/invoice-math";
+import { invoiceBalance, isDrawKind } from "@/lib/invoice-math";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { Tabs, type TabDef } from "@/components/tabs";
@@ -896,7 +896,7 @@ export default async function JobDetailPage({
         hasQuote={(quotes ?? []).length > 0}
         defaultSendInvoice={getOrgSettings((org as any)?.settings).auto_send_invoice_on_complete}
         isDrawBilled={(invoices ?? []).some(
-          (i: any) => ["deposit", "progress", "final"].includes(i.invoice_kind) && i.status !== "void",
+          (i: any) => isDrawKind(i.invoice_kind) && i.status !== "void",
         )}
         customers={allCustomers ?? []}
         templates={(codeTemplates ?? []) as { id: string; name: string }[]}
