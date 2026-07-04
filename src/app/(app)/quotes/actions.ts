@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
+import { subtotalTaxTotal } from "@/lib/invoice-math";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { getOrgSettings, accentHex } from "@/lib/org-settings";
 import { sendEmail, renderQuoteNoticeEmail, ownerBcc } from "@/lib/email";
@@ -144,11 +145,13 @@ async function recalcQuote(supabase: any, quoteId: string) {
     .from("quote_line_items")
     .select("line_total")
     .eq("quote_id", quoteId);
-  const subtotal = round2((items ?? []).reduce((s: number, i: any) => s + Number(i.line_total ?? 0), 0));
-  const tax = round2(subtotal * Number(quote?.tax_rate ?? 0));
+  const { subtotal, tax, total } = subtotalTaxTotal(
+    (items ?? []).map((i: any) => Number(i.line_total ?? 0)),
+    Number(quote?.tax_rate ?? 0),
+  );
   await supabase
     .from("quotes")
-    .update({ subtotal, tax, total: round2(subtotal + tax) })
+    .update({ subtotal, tax, total })
     .eq("id", quoteId);
 }
 
@@ -408,11 +411,10 @@ export async function saveQuote(input: SaveQuoteInput) {
   if ("error" in ctx) return { ok: false as const, error: ctx.error };
   const supabase = ctx.supabase;
 
-  const subtotal = round2(
-    input.items.reduce((s, i) => s + i.quantity * i.unit_price, 0),
+  const { subtotal, tax, total } = subtotalTaxTotal(
+    input.items.map((i) => i.quantity * i.unit_price),
+    input.tax_rate || 0,
   );
-  const tax = round2(subtotal * (input.tax_rate || 0));
-  const total = round2(subtotal + tax);
 
   const { data: quote, error } = await supabase
     .from("quotes")
@@ -621,8 +623,4 @@ function extractJsonArray(text: string) {
   const end = text.lastIndexOf("]");
   if (start === -1 || end === -1) throw new Error("No JSON array in response.");
   return text.slice(start, end + 1);
-}
-
-function round2(n: number) {
-  return Math.round(n * 100) / 100;
 }

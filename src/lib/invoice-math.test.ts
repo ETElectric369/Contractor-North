@@ -1,5 +1,24 @@
 import { describe, it, expect } from "vitest";
-import { recalcTotals, resolveDrawCredit, drawAmount, progressSummary, shouldBlockStandardImport, isStandardBillingBlocker, groupInvoiceLines, paidStatus, invoiceTypeLabel, invoiceBalance } from "@/lib/invoice-math";
+import { recalcTotals, resolveDrawCredit, drawAmount, progressSummary, shouldBlockStandardImport, isStandardBillingBlocker, groupInvoiceLines, paidStatus, invoiceTypeLabel, invoiceBalance, subtotalTaxTotal } from "@/lib/invoice-math";
+
+describe("subtotalTaxTotal — one rollup for invoices, quotes, POs", () => {
+  it("cents-rounds subtotal, tax, total", () => {
+    expect(subtotalTaxTotal([10.005, 2.5], 0.0725)).toEqual({ subtotal: 12.51, tax: 0.91, total: 13.42 });
+  });
+  it("no tax → total equals subtotal (the PO case)", () => {
+    expect(subtotalTaxTotal([100, 49.99], 0)).toEqual({ subtotal: 149.99, tax: 0, total: 149.99 });
+  });
+  it("negative line (a credit) flows through", () => {
+    expect(subtotalTaxTotal([100, -40], 0)).toMatchObject({ subtotal: 60, total: 60 });
+  });
+  it("a quote and the invoice it converts to agree to the cent (same fn, same inputs)", () => {
+    const lines = [2000, 3200, 137.77];
+    const rate = 0.0725;
+    const quote = subtotalTaxTotal(lines, rate);
+    const invoice = recalcTotals(lines, [], rate, "draft");
+    expect({ subtotal: invoice.subtotal, tax: invoice.tax, total: invoice.total }).toEqual(quote);
+  });
+});
 
 describe("invoiceBalance — one balance definition", () => {
   it("total − paid, rounded to cents", () => {

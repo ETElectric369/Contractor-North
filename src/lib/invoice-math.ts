@@ -36,19 +36,30 @@ export function invoiceBalance(total: number | null | undefined, amountPaid: num
   return cents(Math.max(0, fin(total) - fin(amountPaid)));
 }
 
-/** Recompute an invoice's rollup from its line totals + payments. Negative line
- *  items (a "Less previous billings" credit) flow through naturally. Amounts are
- *  rounded to cents so float dust (0.01 + 2.01 summing to 2.0199…) can't leave a
- *  fully-paid invoice stuck "partial". Status never disturbs a voided invoice. */
+/** Subtotal / tax / total from a set of line totals + a tax rate — the money rollup
+ *  shared by invoices, quotes, and POs. Each figure is rounded to cents so float dust
+ *  (0.01 + 2.01 = 2.0199…) can't accumulate, and — critically — a quote and the invoice
+ *  it converts into round IDENTICALLY, because they run THIS one function. Negative line
+ *  items (a "Less previous billings" credit) flow through naturally. */
+export function subtotalTaxTotal(
+  lineTotals: number[],
+  taxRate: number,
+): { subtotal: number; tax: number; total: number } {
+  const subtotal = cents(lineTotals.reduce((s, n) => s + fin(n), 0));
+  const tax = cents(subtotal * fin(taxRate));
+  const total = cents(subtotal + tax);
+  return { subtotal, tax, total };
+}
+
+/** Recompute an invoice's rollup from its line totals + payments. Adds amountPaid + the
+ *  derived status on top of subtotalTaxTotal(). Status never disturbs a voided invoice. */
 export function recalcTotals(
   lineTotals: number[],
   paymentAmounts: number[],
   taxRate: number,
   currentStatus: string,
 ): { subtotal: number; tax: number; total: number; amountPaid: number; status: string } {
-  const subtotal = cents(lineTotals.reduce((s, n) => s + fin(n), 0));
-  const tax = cents(subtotal * fin(taxRate));
-  const total = cents(subtotal + tax);
+  const { subtotal, tax, total } = subtotalTaxTotal(lineTotals, taxRate);
   const amountPaid = cents(paymentAmounts.reduce((s, n) => s + fin(n), 0));
   const status = paidStatus(total, amountPaid, currentStatus);
   return { subtotal, tax, total, amountPaid, status };

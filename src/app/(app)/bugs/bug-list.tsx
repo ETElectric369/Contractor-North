@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Image as ImageIcon, Check, X, RotateCcw } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { formatDate } from "@/lib/utils";
 import { setBugReportStatus, type BugReport } from "@/app/(app)/bug-report-actions";
 
 const TABS = [
@@ -70,7 +71,7 @@ export function BugList({ initial }: { initial: BugReport[] }) {
                   <div className="mt-0.5 truncate text-xs text-slate-400">
                     {r.page ?? ""}
                     {r.reporter ? ` · ${r.reporter}` : ""}
-                    {r.created_at ? ` · ${new Date(r.created_at).toLocaleDateString()}` : ""}
+                    {r.created_at ? ` · ${formatDate(r.created_at)}` : ""}
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-2.5">

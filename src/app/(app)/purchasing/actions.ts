@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { subtotalTaxTotal } from "@/lib/invoice-math";
 
 export type Result = { ok: boolean; error?: string; id?: string };
 
@@ -261,10 +262,14 @@ async function recalcPoTotals(supabase: any, poId: string) {
     .from("purchase_order_items")
     .select("line_total")
     .eq("po_id", poId);
-  const raw = items?.reduce((s: number, i: any) => s + Number(i.line_total ?? 0), 0) ?? 0;
-  const subtotal = Math.round(raw * 100) / 100; // cents-round so PO totals don't carry float dust
+  // A PO carries no tax, so total == subtotal; the shared rollup still cents-rounds it
+  // the same way an invoice/quote does, so PO dust can't diverge from the rest of the app.
+  const { subtotal, total } = subtotalTaxTotal(
+    (items ?? []).map((i: any) => Number(i.line_total ?? 0)),
+    0,
+  );
   await supabase
     .from("purchase_orders")
-    .update({ subtotal, total: subtotal })
+    .update({ subtotal, total })
     .eq("id", poId);
 }
