@@ -20,6 +20,10 @@ export default async function InquiriesPage() {
       .select("*, referrer:profiles!inquiries_referred_by_fkey(full_name)")
       .is("converted_at", null)
       .neq("status", "lost")
+      // Hottest qualified leads first (priority = size × readiness × reachability). Legacy /
+      // manually-added leads are all priority 0, so they tie here and keep the original
+      // follow-up-due → newest ordering below — an org with no triaged leads is unaffected.
+      .order("priority", { ascending: false })
       .order("next_follow_up_at", { ascending: true, nullsFirst: false })
       .order("created_at", { ascending: false }),
     listCustomerOptions(supabase),

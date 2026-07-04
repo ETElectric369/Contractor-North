@@ -9,7 +9,8 @@ export type CustomerStatus = "lead" | "active" | "inactive";
 // use in the interfaces below AND re-exported so `@/lib/types` stays the one import site.
 import type { JobStatus } from "./job-status";
 import type { QuoteStatus, WorkOrderStatus } from "./statuses";
-export type { JobStatus, QuoteStatus, WorkOrderStatus };
+import type { LeadBucket } from "./lead-triage";
+export type { JobStatus, QuoteStatus, WorkOrderStatus, LeadBucket };
 export type ChangeOrderStatus = "pending" | "approved" | "rejected";
 export type TimeEntryStatus = "open" | "closed";
 export type TimeEntrySource = "app" | "auto_gps" | "text" | "manual";
@@ -74,7 +75,7 @@ export interface Inquiry {
   zip: string | null;
   message: string | null;
   notes: string | null;
-  source: "manual" | "public_form";
+  source: "manual" | "public_form" | "tahoe_deck";
   status: InquiryStatus;
   next_follow_up_at: string | null;
   last_contacted_at: string | null;
@@ -84,6 +85,14 @@ export interface Inquiry {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  // Lead triage (migration 0097) — set for qualified inbound leads (e.g. the Tahoe Deck
+  // configurator via /api/inbound/lead); null/0/false for legacy + manually-added leads.
+  project_type: string | null;
+  lead_bucket: LeadBucket | null;
+  estimate_total: number | null;
+  site_inspection_required: boolean;
+  priority: number;
+  intake: { reason?: string; estimate?: { total?: number; lines?: unknown[] } | null; [k: string]: unknown } | null;
 }
 
 export interface Customer {

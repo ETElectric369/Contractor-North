@@ -11,7 +11,8 @@ import { ConvertMenu } from "./convert-menu";
 import { markInquiryContacted, setInquiryStatus } from "./actions";
 import { useToast } from "@/components/toast";
 import { formatDate } from "@/lib/utils";
-import type { Inquiry } from "@/lib/types";
+import type { Inquiry, LeadBucket } from "@/lib/types";
+import { LEAD_BUCKETS } from "@/lib/lead-triage";
 
 const statusTone: Record<string, "blue" | "amber" | "indigo" | "green" | "slate"> = {
   new: "blue",
@@ -20,6 +21,10 @@ const statusTone: Record<string, "blue" | "amber" | "indigo" | "green" | "slate"
   won: "green",
   lost: "slate",
 };
+
+// The A/B/C readiness chip — colour + Chris's dot language (🟢 ready · 🟡 measure · 🔵 consult).
+const BUCKET_TONE: Record<LeadBucket, "green" | "amber" | "blue"> = { A: "green", B: "amber", C: "blue" };
+const BUCKET_DOT: Record<LeadBucket, string> = { A: "🟢", B: "🟡", C: "🔵" };
 
 const STATUSES = ["new", "contacted", "quoted", "won", "lost"];
 
@@ -64,9 +69,26 @@ export function InquiryRow({
           <span className="font-medium text-slate-900">{inquiry.name}</span>
           {inquiry.company_name && <span className="text-xs text-slate-400">{inquiry.company_name}</span>}
           <Badge tone={statusTone[inquiry.status] ?? "slate"}>{inquiry.status}</Badge>
+          {/* Triage — the A/B/C readiness bucket and the big-job site-visit gate come from
+              /api/inbound/lead (Tahoe Deck). Legacy/manual leads have neither and show nothing. */}
+          {inquiry.lead_bucket && (
+            <Badge tone={BUCKET_TONE[inquiry.lead_bucket]} title={LEAD_BUCKETS[inquiry.lead_bucket].blurb}>
+              {BUCKET_DOT[inquiry.lead_bucket]} {inquiry.lead_bucket} · {LEAD_BUCKETS[inquiry.lead_bucket].label}
+            </Badge>
+          )}
+          {inquiry.site_inspection_required && (
+            <Badge tone="red" title="Estimated over the site-inspection threshold — needs a human site visit before a firm price.">
+              🚩 Site visit
+            </Badge>
+          )}
           {inquiry.source === "public_form" && (
             <Badge tone="slate">
               <Globe className="mr-1 inline h-3 w-3" />web
+            </Badge>
+          )}
+          {inquiry.source === "tahoe_deck" && (
+            <Badge tone="slate">
+              <Globe className="mr-1 inline h-3 w-3" />deck site
             </Badge>
           )}
           {/* Referral credit ("Brian at the bar") — who shared the link this lead came through. */}
@@ -83,6 +105,7 @@ export function InquiryRow({
           )}
           <span>Added {formatDate(inquiry.created_at)}</span>
           {inquiry.last_contacted_at && <span>· Contacted {formatDate(inquiry.last_contacted_at)}</span>}
+          {inquiry.intake?.reason && <span className="text-slate-400">· {inquiry.intake.reason}</span>}
         </div>
         {inquiry.message && <p className="mt-1.5 text-sm text-slate-600">{inquiry.message}</p>}
       </div>
