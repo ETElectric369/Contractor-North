@@ -8,6 +8,7 @@ import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Modal } from "@/components/ui/modal";
 import { Card } from "@/components/ui/card";
+import { DataTable } from "@/components/ui/data-table";
 import { formatCurrency } from "@/lib/utils";
 import { createPriceItem, deletePriceItem, bulkImportPriceItems, type PriceItemInput } from "./actions";
 import { EditPriceItemButton } from "./edit-price-item-button";
@@ -167,46 +168,45 @@ export function PriceListManager({ items }: { items: PriceItem[] }) {
       </div>
 
       <Card className="overflow-hidden">
-        <div className="hidden grid-cols-12 gap-3 border-b border-slate-100 bg-slate-50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400 md:grid">
-          <div className="col-span-2">Code</div>
-          <div className="col-span-4">Description</div>
-          <div className="col-span-2">Category</div>
-          <div className="col-span-1 text-right">Buy</div>
-          <div className="col-span-1 text-right">MU%</div>
-          <div className="col-span-1 text-right">Sell</div>
-          <div className="col-span-1"></div>
-        </div>
-        <ul className="divide-y divide-slate-100">
-          {filtered.map((i) => (
-            <li key={i.id} className="grid grid-cols-2 gap-2 px-4 py-2.5 text-sm md:grid-cols-12 md:items-center md:gap-3">
-              <div className="col-span-2 font-mono text-xs text-slate-500">{i.code ?? "—"}</div>
-              <div className="col-span-4 font-medium text-slate-900">{i.description}</div>
-              <div className="col-span-2 text-slate-500">{i.category ?? "—"}</div>
-              <div className="col-span-1 text-right text-slate-600">{formatCurrency(i.buy_price)}</div>
-              <div className="col-span-1 text-right text-slate-500">{Number(i.markup_pct)}%</div>
-              <div className="col-span-1 text-right font-medium text-slate-900">{formatCurrency(sell(i.buy_price, i.markup_pct))}</div>
-              <div className="col-span-1 flex items-center justify-end gap-1">
-                <EditPriceItemButton item={i} />
-                <button
-                  onClick={() => {
-                    if (!confirm(`Delete "${i.description}" from the price list?`)) return;
-                    start(async () => { await deletePriceItem(i.id); router.refresh(); });
-                  }}
-                  disabled={pending}
-                  className="rounded-md p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                  title="Delete"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </div>
-            </li>
-          ))}
-          {filtered.length === 0 && (
-            <li className="px-4 py-10 text-center text-sm text-slate-400">
+        <DataTable
+          rows={filtered}
+          rowKey={(i) => i.id}
+          mobileCols={2}
+          empty={
+            <p className="px-4 py-10 text-center text-sm text-slate-400">
               {items.length === 0 ? "No items yet. Add one, or import your CED price list via CSV." : "No matches."}
-            </li>
-          )}
-        </ul>
+            </p>
+          }
+          columns={[
+            { header: "Code", span: 2, className: "font-mono text-xs text-slate-500", cell: (i) => i.code ?? "—" },
+            { header: "Description", span: 4, className: "text-sm font-medium text-slate-900", cell: (i) => i.description },
+            { header: "Category", span: 2, className: "text-sm text-slate-500", cell: (i) => i.category ?? "—" },
+            { header: "Buy", span: 1, align: "right", className: "text-sm text-slate-600", cell: (i) => formatCurrency(i.buy_price) },
+            { header: "MU%", span: 1, align: "right", className: "text-sm text-slate-500", cell: (i) => `${Number(i.markup_pct)}%` },
+            { header: "Sell", span: 1, align: "right", className: "text-sm font-medium text-slate-900", cell: (i) => formatCurrency(sell(i.buy_price, i.markup_pct)) },
+            {
+              header: "",
+              span: 1,
+              className: "flex items-center justify-end gap-1",
+              cell: (i) => (
+                <>
+                  <EditPriceItemButton item={i} />
+                  <button
+                    onClick={() => {
+                      if (!confirm(`Delete "${i.description}" from the price list?`)) return;
+                      start(async () => { await deletePriceItem(i.id); router.refresh(); });
+                    }}
+                    disabled={pending}
+                    className="rounded-md p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                    title="Delete"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </>
+              ),
+            },
+          ]}
+        />
       </Card>
 
       {/* CSV import modal */}

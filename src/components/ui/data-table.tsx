@@ -39,6 +39,7 @@ export function DataTable<T>({
   rows,
   rowKey,
   rowHref,
+  rowAction,
   mobileCols = 1,
   empty,
 }: {
@@ -46,6 +47,11 @@ export function DataTable<T>({
   rows: T[];
   rowKey: (row: T) => React.Key;
   rowHref?: (row: T) => string | null;
+  /** An overlay control (e.g. a draft-delete trash button) rendered as a sibling ON TOP of a
+   *  tap-through row — for the rare case where a row is a Link AND needs its own action. The
+   *  node should position itself (absolute right-…). Rows with no whole-row link put actions in
+   *  a cell instead. */
+  rowAction?: (row: T) => React.ReactNode;
   mobileCols?: 1 | 2;
   empty?: React.ReactNode;
 }) {
@@ -75,15 +81,25 @@ export function DataTable<T>({
       <ul className="divide-y divide-slate-100">
         {rows.map((row) => {
           const href = rowHref?.(row) ?? null;
+          const action = rowAction?.(row) ?? null;
+          const inner = href ? (
+            <Link href={href} className={`${rowGrid} hover:bg-slate-50`}>{cellsFor(row)}</Link>
+          ) : (
+            cellsFor(row)
+          );
+          // With an overlay action the <li> is the positioning context; the grid moves to an
+          // inner element so the action can float over it. Otherwise keep the lean structure.
+          if (action) {
+            return (
+              <li key={rowKey(row)} className="relative">
+                {href ? inner : <div className={rowGrid}>{cellsFor(row)}</div>}
+                {action}
+              </li>
+            );
+          }
           return (
             <li key={rowKey(row)} className={href ? undefined : rowGrid}>
-              {href ? (
-                <Link href={href} className={`${rowGrid} hover:bg-slate-50`}>
-                  {cellsFor(row)}
-                </Link>
-              ) : (
-                cellsFor(row)
-              )}
+              {inner}
             </li>
           );
         })}

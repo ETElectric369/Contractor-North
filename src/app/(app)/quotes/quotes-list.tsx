@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Trash2, Copy, Check } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
+import { DataTable } from "@/components/ui/data-table";
 import { useToast } from "@/components/toast";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { deleteQuote, resolveDuplicateDrafts } from "./actions";
@@ -48,35 +49,67 @@ export function QuotesList({
       )}
 
       <Card className="overflow-hidden">
-        <div className="hidden grid-cols-12 gap-4 border-b border-slate-100 bg-slate-50 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-400 md:grid">
-          <div className="col-span-2">Estimate #</div>
-          <div className="col-span-4">Customer</div>
-          <div className="col-span-2">Date</div>
-          <div className="col-span-2 text-right">Total</div>
-          <div className="col-span-2 text-right">Status</div>
-        </div>
-        <ul className="divide-y divide-slate-100">
-          {quotes.map((q) => (
-            <QuoteRowItem key={q.id} q={q} isStaff={isStaff} />
-          ))}
-        </ul>
+        <DataTable<QuoteRow>
+          rows={quotes}
+          rowKey={(q) => q.id}
+          rowHref={(q) => `/quotes/${q.id}`}
+          mobileCols={2}
+          // Per-draft delete floats over the row (sent/accepted keep the guarded menu on the
+          // quote page). The Status cell reserves pr-8 so the badge never sits under it.
+          rowAction={(q) => (isStaff && (q.status ?? "") === "draft" ? <DeleteDraftButton quoteId={q.id} /> : null)}
+          columns={[
+            {
+              header: "Estimate #",
+              span: 2,
+              className: "font-medium text-slate-900",
+              cell: (q) => (
+                <>
+                  {q.quote_number}
+                  <span className="ml-2 align-middle rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                    {(q.doc_type ?? "quote") === "estimate" ? "Est" : "Quote"}
+                  </span>
+                </>
+              ),
+            },
+            {
+              header: "Customer",
+              span: 4,
+              className: "text-sm text-slate-600",
+              cell: (q) => (
+                <>
+                  {q.customers?.name ?? "—"}
+                  {q.title && <span className="block text-xs text-slate-400">{q.title}</span>}
+                </>
+              ),
+            },
+            { header: "Date", span: 2, className: "text-sm text-slate-500", cell: (q) => formatDate(q.created_at) },
+            { header: "Total", span: 2, align: "right", className: "text-sm font-medium text-slate-900", cell: (q) => formatCurrency(q.total) },
+            {
+              header: "Status",
+              span: 2,
+              align: "right",
+              className: "flex items-center justify-end gap-2 pr-8",
+              cell: (q) => <Badge tone={statusTone(q.status ?? "")}>{q.status}</Badge>,
+            },
+          ]}
+        />
       </Card>
     </>
   );
 }
 
-function QuoteRowItem({ q, isStaff }: { q: QuoteRow; isStaff: boolean }) {
+/** The per-draft trash affordance that floats over a quote row (its own transition state). */
+function DeleteDraftButton({ quoteId }: { quoteId: string }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
-  const isDraft = (q.status ?? "") === "draft";
 
   function onDelete(e: React.MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
     if (!confirm("Delete this draft?")) return;
     start(async () => {
-      const res = await deleteQuote(q.id);
+      const res = await deleteQuote(quoteId);
       if (!res.ok) return toast(res.error ?? "Couldn't delete the draft.", "error");
       toast("Draft deleted.", "success");
       router.refresh();
@@ -84,46 +117,16 @@ function QuoteRowItem({ q, isStaff }: { q: QuoteRow; isStaff: boolean }) {
   }
 
   return (
-    <li className="relative">
-      <Link
-        href={`/quotes/${q.id}`}
-        className="grid grid-cols-2 gap-2 px-5 py-3 hover:bg-slate-50 md:grid-cols-12 md:items-center md:gap-4"
-      >
-        <div className="col-span-2 font-medium text-slate-900">
-          {q.quote_number}
-          <span className="ml-2 align-middle rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-            {(q.doc_type ?? "quote") === "estimate" ? "Est" : "Quote"}
-          </span>
-        </div>
-        <div className="col-span-4 text-sm text-slate-600">
-          {q.customers?.name ?? "—"}
-          {q.title && <span className="block text-xs text-slate-400">{q.title}</span>}
-        </div>
-        <div className="col-span-2 text-sm text-slate-500">{formatDate(q.created_at)}</div>
-        <div className="col-span-2 text-right text-sm font-medium text-slate-900">
-          {formatCurrency(q.total)}
-        </div>
-        {/* Leave room on the right for the draft trash affordance so it never
-            overlaps the status badge. */}
-        <div className="col-span-2 flex items-center justify-end gap-2 pr-8 md:pr-8">
-          <Badge tone={statusTone(q.status ?? "")}>{q.status}</Badge>
-        </div>
-      </Link>
-      {/* Per-draft delete — only drafts (sent/accepted keep the guarded menu on
-          the quote page). Confirm-gated, toasts, refreshes. */}
-      {isStaff && isDraft && (
-        <button
-          type="button"
-          onClick={onDelete}
-          disabled={pending}
-          aria-label="Delete this draft"
-          title="Delete this draft"
-          className="absolute right-4 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
-        >
-          <Trash2 className="h-4 w-4" />
-        </button>
-      )}
-    </li>
+    <button
+      type="button"
+      onClick={onDelete}
+      disabled={pending}
+      aria-label="Delete this draft"
+      title="Delete this draft"
+      className="absolute right-4 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+    >
+      <Trash2 className="h-4 w-4" />
+    </button>
   );
 }
 
