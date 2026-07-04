@@ -186,18 +186,18 @@ export function WeatherWidget({
 
   if (compact) {
     return (
-      <div className="relative flex min-w-0 shrink-0 items-center gap-1.5 text-xs text-slate-500">
+      <div className="relative flex min-w-0 shrink-0 items-center gap-2 text-xs text-slate-500">
         {data?.iconUri ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={data.iconUri} alt={data.description} className="h-5 w-5" />
+          <img src={data.iconUri} alt={data.description} className="h-9 w-9" />
         ) : (
-          <Cloud className="h-4 w-4 text-sky-400" />
+          <Cloud className="h-7 w-7 text-sky-400" />
         )}
         {status === "loading" || !data ? (
           <span>—</span>
         ) : (
           <>
-            <span className="whitespace-nowrap font-semibold text-slate-700">{data.tempF}°F</span>
+            <span className="whitespace-nowrap text-lg font-semibold leading-none text-slate-700">{data.tempF}°F</span>
             <span className="max-w-[9rem] truncate">{data.description}</span>
             {source === "device" &&
               !usingDevice &&

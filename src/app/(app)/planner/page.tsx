@@ -2,7 +2,6 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { CalendarCheck, ChevronLeft, ChevronRight, UserPlus, Receipt, Navigation, FolderClosed, ListTodo } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { PageHeader } from "@/components/page-header";
 import { RefreshOnVisible } from "@/components/refresh-on-visible";
 import { WeatherWidget } from "@/components/weather-widget";
 import { getMoneyPipeline } from "@/lib/billing-pipeline";
@@ -473,20 +472,22 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     <div className="mx-auto max-w-3xl">
       {/* Reopen the app / return to this tab → pull fresh schedule data (no manual reload). */}
       <RefreshOnVisible />
-      <PageHeader title="My Day" description={niceDay} />
-
-      {/* Ambience strip (Erik-spec): SMALL weather + the daily quote in one slim line
-          up top — never a card, never competing with the clock. Layout/content here is
-          customize-on-request; tweak freely when he asks. */}
-      <div className="mb-3 flex items-center gap-3">
+      {/* Header + weather (Erik-spec): the bigger weather widget fills the space to the RIGHT
+          of the date at EVERY width (a plain flex row, not PageHeader's stack-on-mobile). The
+          daily quote gets its OWN line below so it never truncates or crowds the clock box. */}
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">My Day</h1>
+          <p className="mt-1 text-sm text-slate-500">{niceDay}</p>
+        </div>
         <WeatherWidget
           compact
           location={orgLocation}
           label={(org as any)?.city ?? undefined}
           source={getOrgSettings((org as any)?.settings).weather_source}
         />
-        <p className="min-w-0 flex-1 truncate text-right text-xs italic text-slate-400">&ldquo;{dailyQuote}&rdquo;</p>
       </div>
+      <p className="mb-4 text-sm italic text-slate-400">&ldquo;{dailyQuote}&rdquo;</p>
 
       {/* Live time clock — clock in/out is the app's #1 impulse verb, so it sits
           first, at scroll position zero, doubling as the on-the-clock status line. */}

@@ -723,6 +723,14 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
   const statusText = status ?? (streaming ? (tokens > 2 ? "responding…" : "thinking…") : listening ? "listening…" : speaking ? "talking…" : null);
   return (
     <div className={`flex min-h-0 flex-1 flex-col overflow-hidden ${glass ? "bg-transparent" : "rounded-xl border border-slate-200 bg-white"}`}>
+      {/* THE WINDSHIELD — pinned at the TOP so the driver card is the hero: the chat log
+          scrolls BELOW it, so incoming text never pushes it off-screen. shrink-0 = fixed
+          height; it's the "driver screen," the conversation is secondary context under it. */}
+      {card ? (
+        <div className="shrink-0">
+          <DriverCard card={card} onDismiss={() => setCard(null)} />
+        </div>
+      ) : null}
       {/* GLASS: a clean command box — the ESTIMATOR summary + its line items, the live status line,
           then one line per conversation turn expanding down. No header/footer chrome; the topbar
           waveform button is the only control (voice + stop), the panel handle moves/collapses it. */}
@@ -864,11 +872,6 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
           </span>
         </div>
       ) : null}
-
-      {/* The driver HUD card — the "windshield". Nort fills the glass with one glanceable card
-          (job / estimate / customer / day) when you ask to pull something up. Shows in both the
-          floating N-Box (driving) and the full page. */}
-      {card ? <DriverCard card={card} onDismiss={() => setCard(null)} /> : null}
 
       {/* The full estimate card — non-glass only; the glass drawer shows the ESTIMATOR line + items. */}
       {draft && !glass ? <LiveQuote draft={draft} onSave={saveDraft} onDismiss={() => setDraft(null)} saving={savingDraft} /> : null}
