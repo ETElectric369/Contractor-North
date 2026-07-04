@@ -1,8 +1,8 @@
-import Link from "next/link";
 import { CreditCard } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
+import { DataTable } from "@/components/ui/data-table";
 import { FactsGrid, StatTile } from "@/components/ui/stat-tile";
 import { formatCurrency, formatDate } from "@/lib/utils";
 
@@ -57,36 +57,19 @@ export default async function PaymentsPage() {
           </FactsGrid>
 
           <Card className="overflow-hidden">
-            <div className="hidden grid-cols-12 gap-4 border-b border-slate-100 bg-slate-50 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-400 md:grid">
-              <div className="col-span-3">Date</div>
-              <div className="col-span-4">Customer</div>
-              <div className="col-span-2">Invoice</div>
-              <div className="col-span-1">Method</div>
-              <div className="col-span-2 text-right">Amount</div>
-            </div>
-            <ul className="divide-y divide-slate-100">
-              {payments.map((p) => {
-                const inv = p.invoices;
-                return (
-                  <li key={p.id}>
-                    <Link
-                      href={inv ? `/billing/${inv.id}` : "/billing"}
-                      className="grid grid-cols-2 gap-2 px-5 py-3 hover:bg-slate-50 md:grid-cols-12 md:items-center md:gap-4"
-                    >
-                      <div className="col-span-3 text-sm text-slate-600">{formatDate(p.paid_at)}</div>
-                      <div className="col-span-4 text-sm font-medium text-slate-900">
-                        {inv?.customers?.name ?? "—"}
-                      </div>
-                      <div className="col-span-2 text-sm text-slate-500">{inv?.invoice_number ?? "—"}</div>
-                      <div className="col-span-1 text-xs capitalize text-slate-500">{p.method}</div>
-                      <div className="col-span-2 text-right text-sm font-semibold text-green-700">
-                        {formatCurrency(p.amount)}
-                      </div>
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
+            <DataTable<any>
+              rows={payments}
+              rowKey={(p) => p.id}
+              rowHref={(p) => (p.invoices ? `/billing/${p.invoices.id}` : "/billing")}
+              mobileCols={2}
+              columns={[
+                { header: "Date", span: 3, className: "text-sm text-slate-600", cell: (p) => formatDate(p.paid_at) },
+                { header: "Customer", span: 4, className: "text-sm font-medium text-slate-900", cell: (p) => p.invoices?.customers?.name ?? "—" },
+                { header: "Invoice", span: 2, className: "text-sm text-slate-500", cell: (p) => p.invoices?.invoice_number ?? "—" },
+                { header: "Method", span: 1, className: "text-xs capitalize text-slate-500", cell: (p) => p.method },
+                { header: "Amount", span: 2, align: "right", className: "text-sm font-semibold text-green-700", cell: (p) => formatCurrency(p.amount) },
+              ]}
+            />
           </Card>
         </>
       )}

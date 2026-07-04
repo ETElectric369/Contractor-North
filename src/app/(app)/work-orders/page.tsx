@@ -1,9 +1,9 @@
-import Link from "next/link";
 import { ClipboardList } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
+import { DataTable } from "@/components/ui/data-table";
 import { formatDateTime } from "@/lib/utils";
 import { listActiveTechs } from "@/lib/schedule-options";
 import { NewWorkOrderButton } from "./new-wo-button";
@@ -56,39 +56,19 @@ export default async function WorkOrdersPage({
         </EmptyState>
       ) : (
         <Card className="overflow-hidden">
-          <div className="hidden grid-cols-12 gap-4 border-b border-slate-100 bg-slate-50 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-400 md:grid">
-            <div className="col-span-2">WO #</div>
-            <div className="col-span-4">Title</div>
-            <div className="col-span-3">Job / Customer</div>
-            <div className="col-span-2">Scheduled</div>
-            <div className="col-span-1 text-right">Status</div>
-          </div>
-          <ul className="divide-y divide-slate-100">
-            {workOrders.map((w: any) => (
-              <li key={w.id}>
-                <Link
-                  href={`/work-orders/${w.id}`}
-                  className="grid grid-cols-2 gap-2 px-5 py-3 hover:bg-slate-50 md:grid-cols-12 md:items-center md:gap-4"
-                >
-                  <div className="col-span-2 font-medium text-slate-900">
-                    {w.wo_number}
-                  </div>
-                  <div className="col-span-4 text-sm text-slate-700">{w.title}</div>
-                  <div className="col-span-3 text-sm text-slate-500">
-                    {w.jobs?.name ?? w.customers?.name ?? "—"}
-                  </div>
-                  <div className="col-span-2 text-sm text-slate-500">
-                    {w.scheduled_for ? formatDateTime(w.scheduled_for) : "—"}
-                  </div>
-                  <div className="col-span-1 md:text-right">
-                    <Badge tone={statusTone(w.status)}>
-                      {w.status.replace("_", " ")}
-                    </Badge>
-                  </div>
-                </Link>
-              </li>
-            ))}
-          </ul>
+          <DataTable<any>
+            rows={workOrders}
+            rowKey={(w) => w.id}
+            rowHref={(w) => `/work-orders/${w.id}`}
+            mobileCols={2}
+            columns={[
+              { header: "WO #", span: 2, className: "font-medium text-slate-900", cell: (w) => w.wo_number },
+              { header: "Title", span: 4, className: "text-sm text-slate-700", cell: (w) => w.title },
+              { header: "Job / Customer", span: 3, className: "text-sm text-slate-500", cell: (w) => w.jobs?.name ?? w.customers?.name ?? "—" },
+              { header: "Scheduled", span: 2, className: "text-sm text-slate-500", cell: (w) => (w.scheduled_for ? formatDateTime(w.scheduled_for) : "—") },
+              { header: "Status", span: 1, align: "right", cell: (w) => <Badge tone={statusTone(w.status)}>{w.status.replace("_", " ")}</Badge> },
+            ]}
+          />
         </Card>
       )}
     </div>
