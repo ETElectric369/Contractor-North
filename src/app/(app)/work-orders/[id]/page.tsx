@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Briefcase, User, Calendar, Printer } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatDateTime } from "@/lib/utils";
@@ -37,7 +38,7 @@ export default async function WorkOrderDetailPage({
     supabase
       .from("jobs")
       .select("id, job_number, name")
-      .in("status", ["estimate", "scheduled", "in_progress", "on_hold"])
+      .in("status", ACTIVE_JOB_STATUSES)
       .order("created_at", { ascending: false })
       .limit(100),
     supabase.from("profiles").select("id, full_name").eq("active", true).order("full_name"),

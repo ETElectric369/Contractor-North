@@ -36,3 +36,15 @@ export async function jobProgressFinancials(supabase: any, jobId: string): Promi
     markupPercent: getOrgSettings((org as any)?.settings).material_markup_percent,
   });
 }
+
+/** Dollars already collected on a job BEFORE the invoice being viewed — i.e. every
+ *  prior draw's payments, floored at 0 and rounded to cents. Feeds the "Received to
+ *  date" line of the progress report on both the in-app billing page and the print
+ *  layout, so the two can't drift. `fin.collected` is all payments across the job;
+ *  subtract this invoice's own amount_paid to get what came in on earlier draws. */
+export function receivedBeforeThisInvoice(
+  fin: JobProgressFinancials,
+  amountPaid: number | string | null | undefined,
+): number {
+  return Math.max(0, Math.round((fin.collected - Number(amountPaid ?? 0)) * 100) / 100);
+}

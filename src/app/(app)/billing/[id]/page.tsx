@@ -14,7 +14,7 @@ import { SectionActionsMenu } from "@/components/section-actions-menu";
 import { invoiceSectionTree } from "@/lib/nav-tree";
 import { deleteInvoice } from "../actions";
 import { getOrgSettings } from "@/lib/org-settings";
-import { jobProgressFinancials } from "@/lib/job-financials";
+import { jobProgressFinancials, receivedBeforeThisInvoice } from "@/lib/job-financials";
 import { ProgressReportCard } from "@/components/progress-report-card";
 import type { Invoice, InvoiceItem, Payment } from "@/lib/types";
 
@@ -177,7 +177,7 @@ export default async function InvoicePage({
           <ProgressReportCard
             estimate={fin.estimate}
             workToDate={fin.workToDate}
-            received={Math.max(0, Math.round((fin.collected - Number(inv.amount_paid ?? 0)) * 100) / 100)}
+            received={receivedBeforeThisInvoice(fin, inv.amount_paid)}
             thisAmount={Number(inv.total ?? 0)}
             billingType={fin.billingType}
           />

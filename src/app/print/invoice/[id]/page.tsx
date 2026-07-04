@@ -6,7 +6,7 @@ import { PrintButton } from "@/components/print-button";
 import { companyFromOrg } from "@/components/doc-letterhead";
 import { templateFor } from "@/components/doc-templates";
 import { getOrgSettings } from "@/lib/org-settings";
-import { jobProgressFinancials } from "@/lib/job-financials";
+import { jobProgressFinancials, receivedBeforeThisInvoice } from "@/lib/job-financials";
 import { invoiceTypeLabel } from "@/lib/invoice-math";
 import { InvoiceDocument } from "@/components/invoice-document";
 import { docTitle } from "@/lib/doc-title";
@@ -93,7 +93,7 @@ export default async function InvoicePrintPage({ params }: { params: Promise<{ i
             ? {
                 estimate: fin.estimate,
                 workToDate: fin.workToDate,
-                received: Math.max(0, Math.round((fin.collected - Number(inv.amount_paid ?? 0)) * 100) / 100),
+                received: receivedBeforeThisInvoice(fin, inv.amount_paid),
                 thisAmount: Number(inv.total ?? 0),
                 billingType: fin.billingType,
               }

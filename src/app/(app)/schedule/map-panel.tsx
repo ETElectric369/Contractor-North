@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { JobsMap } from "@/components/jobs-map";
+import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 
 /** Map view of the unified Schedule hub (was /map). */
 export async function MapPanel() {
@@ -13,7 +14,7 @@ export async function MapPanel() {
       .select("id, name, address, customers(name)")
       .not("address", "is", null)
       .neq("address", "")
-      .in("status", ["estimate", "scheduled", "in_progress", "on_hold"])
+      .in("status", ACTIVE_JOB_STATUSES)
       .order("scheduled_start", { ascending: true, nullsFirst: false })
       .limit(60),
     supabase.from("profiles").select("home_address").eq("id", user?.id ?? "").maybeSingle(),

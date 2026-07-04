@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { PageHeader } from "@/components/page-header";
 import { OrganizeManager, type OrganizedItemRow } from "./organize-manager";
 
@@ -17,7 +18,7 @@ export default async function OrganizePage() {
     supabase
       .from("jobs")
       .select("id, job_number, name")
-      .in("status", ["estimate", "scheduled", "in_progress", "on_hold"])
+      .in("status", ACTIVE_JOB_STATUSES)
       .order("created_at", { ascending: false })
       .limit(100),
   ]);

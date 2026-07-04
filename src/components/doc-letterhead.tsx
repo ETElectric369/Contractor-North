@@ -1,4 +1,3 @@
-import { Zap } from "lucide-react";
 import { COMPANY } from "@/lib/company";
 import type { Organization } from "@/lib/types";
 import { accentHex } from "@/lib/org-settings";
@@ -34,33 +33,4 @@ export function companyFromOrg(org: Organization | null): CompanyInfo {
     brand: accentHex((org as { settings?: { glass_tint?: string } } | null)?.settings?.glass_tint),
     logo: org?.logo_url || "",
   };
-}
-
-/** Left-hand letterhead block for printed documents. */
-export function Letterhead({ co }: { co: CompanyInfo }) {
-  const meta = [
-    [co.address1, co.address2].filter(Boolean).join(", "),
-    co.cityStateZip,
-    co.phone,
-    co.email,
-    co.license,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-
-  return (
-    <div className="flex items-center gap-3">
-      <div
-        className="flex h-11 w-11 items-center justify-center rounded-lg text-white"
-        style={{ backgroundColor: co.brand }}
-      >
-        <Zap className="h-6 w-6" />
-      </div>
-      <div>
-        <div className="text-xl font-bold text-slate-900">{co.name}</div>
-        <div className="text-xs text-slate-500">{co.tagline}</div>
-        {meta && <div className="mt-1 text-xs text-slate-500">{meta}</div>}
-      </div>
-    </div>
-  );
 }

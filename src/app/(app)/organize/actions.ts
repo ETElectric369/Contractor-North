@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { requireStaff } from "@/lib/staff-guard";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { OVERHEAD_CATEGORIES } from "./constants";
@@ -186,7 +187,7 @@ export async function analyzeAndFile(input: {
   const { data: jobs } = await supabase
     .from("jobs")
     .select("id, job_number, name, address, city, customers(name)")
-    .in("status", ["estimate", "scheduled", "in_progress", "on_hold"])
+    .in("status", ACTIVE_JOB_STATUSES)
     .order("created_at", { ascending: false })
     .limit(40);
   const jobList = (jobs ?? []).map((j: any) => ({
@@ -747,7 +748,7 @@ export async function aiReviewItem(id: string): Promise<{ ok: boolean; message: 
   const { data: jobs } = await supabase
     .from("jobs")
     .select("id, job_number, name, address, customers(name)")
-    .in("status", ["estimate", "scheduled", "in_progress", "on_hold"])
+    .in("status", ACTIVE_JOB_STATUSES)
     .order("created_at", { ascending: false })
     .limit(40);
   const jobList = (jobs ?? []).map((j: any) => ({

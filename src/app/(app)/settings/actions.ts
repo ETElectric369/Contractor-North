@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
+import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
 import { formatPhone, formatState, formatZip, titleCase } from "@/lib/utils";
@@ -353,7 +354,7 @@ export async function syncScheduleToGoogle(): Promise<Result & { synced?: number
     .gte("scheduled_start", new Date().toISOString())
     .lte("scheduled_start", new Date(Date.now() + 60 * 86400_000).toISOString())
     .not("scheduled_start", "is", null)
-    .in("status", ["estimate", "scheduled", "in_progress", "on_hold"]);
+    .in("status", ACTIVE_JOB_STATUSES);
   if (!jobs?.length) return { ok: true, synced: 0 };
 
   let synced = 0;
