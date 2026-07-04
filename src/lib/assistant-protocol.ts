@@ -93,9 +93,28 @@ export type HudFact = {
   value: string;
 };
 
+/** One row of a projected LIST block — an estimate line, an appointment, a duplicate
+ *  contact, a job in a set. label on the left, value on the right, an optional dimmer sub. */
+export type HudRow = {
+  label: string;
+  /** Right-aligned value, e.g. "$3,600", "8:00a", "(530) 933-6686". */
+  value?: string | null;
+  /** A quieter second line under the label, e.g. "24 hr × $150", "Tue Jul 15". */
+  sub?: string | null;
+  /** Optional deep link so a parked tap opens that row's record. */
+  href?: string | null;
+};
+
+/**
+ * The glass Nort projects — a COMPOSABLE card, not a fixed shape. Nort fills only the
+ * blocks it needs and they stack in order: eyebrow → title → address → scope → facts
+ * tiles → a titled ROWS list (line items, a day's appointments, duplicate contacts side
+ * by side, a set of jobs) → an optional total → the one look-ahead line. Think hologram
+ * projector: same frame, any content.
+ */
 export type AgentHudCard = {
-  kind: "job" | "estimate" | "invoice" | "customer" | "schedule" | "task";
-  /** The headline — the customer / entity name. */
+  kind: "job" | "estimate" | "invoice" | "customer" | "schedule" | "task" | "list";
+  /** The headline — the customer / entity name (or a list heading like "3 duplicate Millers"). */
   title: string;
   /** A short context line, e.g. "on the clock · J-012" or "draft estimate". */
   eyebrow?: string | null;
@@ -105,6 +124,12 @@ export type AgentHudCard = {
   address?: string | null;
   /** Up to ~4 big glanceable tiles (gate code, balance due, hours, …). */
   facts?: HudFact[];
+  /** A projected LIST — estimate line items, a day's appointments, duplicate contacts, jobs. */
+  rows?: HudRow[];
+  /** Heading above the rows, e.g. "Line items", "Today's stops", "3 versions on file". */
+  rowsTitle?: string | null;
+  /** A bold total row under the list, e.g. { label: "Total", value: "$7,350" }. */
+  total?: HudFact | null;
   /** The one look-ahead line, e.g. "next: 8:00 at the Lim's, 6 min away". */
   next?: string | null;
   /** Deep link to the full screen, so tapping the card opens it when parked. */

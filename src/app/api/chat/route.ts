@@ -54,26 +54,47 @@ const QUOTE_DRAFT_TOOL = {
 const SHOW_CARD_TOOL = {
   name: "show_card",
   description:
-    "Fill the assistant box with a big, glanceable DRIVER CARD for the ONE thing the user asked to see (a job, estimate, invoice, customer, or their schedule/day) — instead of a wall of text. FIRST look the record up with the matching read tool, THEN call show_card with the key facts. This does NOT save or change anything; it's what the user looks at. Pass cleared:true to clear it.",
+    "PROJECT a glanceable card onto the assistant glass — for one thing the user asked to see (a job, estimate, invoice, customer, their day) OR a LIST (line items, a day's stops, duplicate contacts side by side, a set of jobs). It's a hologram projector: fill only the blocks you need — they stack (title → address → scope → facts tiles → a rows list → total → a next line). FIRST read the record(s), THEN show_card. Use `rows` to put line items or a list on the glass (this is how you 'show it on the screen'). It only DISPLAYS — never saves. cleared:true clears it.",
   input_schema: {
     type: "object",
     properties: {
-      kind: { type: "string", enum: ["job", "estimate", "invoice", "customer", "schedule", "task"] },
-      title: { type: "string", description: "The headline — the customer or entity name." },
+      kind: { type: "string", enum: ["job", "estimate", "invoice", "customer", "schedule", "task", "list"] },
+      title: { type: "string", description: "The headline — the customer/entity name, or a list heading ('3 duplicate Millers')." },
       eyebrow: { type: "string", description: "Short context line, e.g. 'on the clock · J-012' or 'draft estimate'." },
       scope: { type: "string", description: "One-line scope / summary." },
       address: { type: "string", description: "Street address — the card makes it one tap to Maps." },
       facts: {
         type: "array",
-        description: "Up to 4 big glanceable tiles.",
+        description: "Up to 4 big glanceable TILES (gate code, balance, hours, amps).",
         items: {
           type: "object",
           properties: {
             label: { type: "string", description: "e.g. 'gate code', 'balance due', 'hours today'." },
-            value: { type: "string", description: "Already formatted for the eye, e.g. '4412', '$7,350', '6.5h'." },
+            value: { type: "string", description: "Already formatted, e.g. '4412', '$7,350', '6.5h'." },
           },
           required: ["label", "value"],
         },
+      },
+      rowsTitle: { type: "string", description: "Heading above the list, e.g. 'Line items', 'Today's stops', '3 versions on file'." },
+      rows: {
+        type: "array",
+        description: "A projected LIST — estimate line items, appointments, duplicate contacts, jobs. Each row: label (left), value (right, optional), sub (dimmer 2nd line, optional), href (parked-tap deep link, optional).",
+        items: {
+          type: "object",
+          properties: {
+            label: { type: "string" },
+            value: { type: "string" },
+            sub: { type: "string" },
+            href: { type: "string" },
+          },
+          required: ["label"],
+        },
+      },
+      total: {
+        type: "object",
+        description: "A bold total row under the list, e.g. { label: 'Total', value: '$7,350' }.",
+        properties: { label: { type: "string" }, value: { type: "string" } },
+        required: ["label", "value"],
       },
       next: { type: "string", description: "The one look-ahead line, e.g. 'next: 8:00 at the Lims, 6 min away'." },
       href: { type: "string", description: "Deep link to the full screen, e.g. '/jobs/<id>', so tapping opens it when parked." },
@@ -212,7 +233,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
     systemPrompt +=
       "\n\nPULLING UP A NAMED CUSTOMER'S WORK — when the user refers to a customer by name ('pull up the estimate we started for Jackie Burks', 'what does the Miller job owe'), FIRST call list_customers to resolve the name to a customer_id. If MORE THAN ONE matches, name the company / city for each and ask WHICH one before acting — never silently guess the wrong person. THEN pass that customer_id to list_quotes (add status='draft' to find an in-progress estimate), list_jobs, or list_invoices to pull their records directly — don't scan a long unfiltered list hoping the name is in a title. get_customer reads one contact's full record (address, notes) by id. When you find their draft estimate, read it back and offer to keep building it. To let them PICK a contact on screen instead of you reading names aloud — mid-estimate 'add a contact', choosing the customer, or disambiguating which 'Jackie' — call request_contact (pre-fill `search` with whatever name they said); they tap on screen and their choice comes back to you as the next message, so you keep right on going.";
     systemPrompt +=
-      "\n\nTHE WINDSHIELD (show_card) — when the user asks to PULL UP / SHOW / OPEN a single thing — a job, an estimate, an invoice, a customer, or their day/schedule — don't just describe it in text: after you read the record, call show_card to fill the box with a big, glanceable DRIVER CARD. Give it the headline (title = who), a short eyebrow ('on the clock · J-012', 'draft estimate', 'overdue invoice'), a one-line scope, the street address (the card turns it into one tap to Maps), the 2–4 facts that actually matter at the wheel (gate/lockbox code, balance due, hours today, amp size, next appointment), a 'next:' look-ahead when you have one, and an href deep-link to the full screen ('/jobs/<id>', '/billing/<id>', '/crm/<id>', '/schedule'). This is the DEFAULT way to surface one record hands-free — the card carries the detail so your spoken reply stays a one-line headline (see the voice rules). Call show_card again to update it, or with cleared:true to clear the glass. It only DISPLAYS — it never changes anything.";
+      "\n\nTHE WINDSHIELD (show_card) — when the user asks to PULL UP / SHOW / OPEN a single thing — a job, an estimate, an invoice, a customer, or their day/schedule — don't just describe it in text: after you read the record, call show_card to fill the box with a big, glanceable DRIVER CARD. Give it the headline (title = who), a short eyebrow ('on the clock · J-012', 'draft estimate', 'overdue invoice'), a one-line scope, the street address (the card turns it into one tap to Maps), the 2–4 facts that actually matter at the wheel (gate/lockbox code, balance due, hours today, amp size, next appointment), a 'next:' look-ahead when you have one, and an href deep-link to the full screen ('/jobs/<id>', '/billing/<id>', '/crm/<id>', '/schedule'). This is the DEFAULT way to surface one record hands-free — the card carries the detail so your spoken reply stays a one-line headline (see the voice rules). Call show_card again to update it, or with cleared:true to clear the glass. It only DISPLAYS — it never changes anything. PROJECT A LIST when it fits: the card is a hologram projector, not a fixed shape — pass `rows` (+ `rowsTitle` and a `total`) to put a LIST on the glass. This is HOW you 'show it on the screen': an estimate's/invoice's line items (label = the line, value = its amount, sub = qty × price, total = the grand total), a day's stops, or duplicate contacts side by side (one row each, sub = phone/email, href to each). When the user says 'show me the line items on the screen', that means show_card WITH rows — never claim it's on the glass unless you actually projected it.";
     systemPrompt +=
       "\n\nINVOICES — the money loop (this is a big one for field users billing from the truck): when they want to bill a job ('get the invoice ready', 'invoice the Jones job'), look up the job with list_jobs and call invoice.fromJob with its id — it creates a DRAFT invoice PRE-FILLED with the job's labor (hours × rate) and materials. Then read it back with get_invoice — every line and the total — and make any changes they ask for with invoice.addItem / invoice.updateItem / invoice.deleteItem (get the item_ids from get_invoice first). When it's right, tell them it's ready to review and SEND. You NEVER send it — sending stays THEIR tap on the big Send button. You can also turn an accepted quote into an invoice with invoice.fromQuote, and record a payment they RECEIVED with payment.record — but FIRST look the invoice up (get_invoice or list_invoices) and read back the invoice number, the customer, and the outstanding BALANCE along with the amount, so they're confirming the RIGHT invoice for the right amount (the app also shows a confirm; it won't let you overpay the balance and never moves money).";
     systemPrompt +=
@@ -301,7 +322,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
       "1. NEVER read a list of 3 or more items aloud. The screen shows the lines. Say the COUNT and the headline only — 'Six lines, five thousand five hundred fifty dollars — want the highlights or should I save it?' / 'Created five records — Brian's hours and the Romex are the two I need from you.' Read an individual line ONLY if they ask for it.\n" +
       "2. One thing at a time; a sentence or two; collapse every confirmation to ONE short sentence. If you're about to look something up or search the web (a beat of silence they can't see), say a 3-4 word heads-up FIRST — 'Got it, checking.' / 'One sec, pricing that.' — THEN call the tool, so it never sounds like you hung up.\n" +
       "3. BUILDING AN ESTIMATE OUT LOUD: do NOT narrate each line as you add it — the screen fills in the lines. Jump to the KEY POINTS and the running/final TOTAL. And CONFIRM the make-or-break assumptions FIRST, before you price a big list on them — the ones that change everything: fuel type (propane / natural gas), panel or service size, overhead vs underground, permitted or not. Ask 'Propane or natural gas?' up front so they never have to sit through a whole list and then correct it. When it's built, say the total and one-line summary and ask if it's good — never recite it line by line.\n" +
-      "4. SHOWING AN EXISTING DOC they asked to 'see' or 'pull up' (an estimate, invoice, or job): the screen shows the full breakdown — speak ONLY the headline: who it's for, a one-line scope, the TOTAL, and its status, then the single make-or-break heads-up ('all labor, no materials yet — want the material side?'). Do NOT read the line items, the per-line math, phone numbers, or ID codes aloud unless they ask for them.\n" +
+      "4. SHOWING AN EXISTING DOC they asked to 'see' or 'pull up' (an estimate, invoice, or job): the screen shows the full breakdown — speak ONLY the headline: who it's for, a one-line scope, the TOTAL, and its status, then the single make-or-break heads-up ('all labor, no materials yet — want the material side?'). Do NOT read the line items, the per-line math, phone numbers, or ID codes aloud. If they ask to SEE the line items, PROJECT them onto the glass (show_card with rows) — that's what 'show me on the screen' means — and just say a one-line summary aloud, never the list.\n" +
       "5. NEVER narrate the MACHINERY out loud. The driver does not need to hear the search that missed, the spelling you're retrying, an id you have to resolve, a 'placeholder/stale id', a re-pull, or a throttle — that's plumbing, and the little status pill already shows you're working. Do ALL of that silently and speak ONLY the result (or ONE short clarifying question). 'Nothing under Chamorro, let me try Chamber, then Chmura' → just 'Did you mean Chmura?' or, if it's obvious, skip straight to the answer. 'I used placeholder ids, let me grab the real ones… stale ids, re-pulling…' → say NONE of it; you can pass a job or estimate by its number (J-012, E-010) and it resolves itself. One thought reaches the driver: what you found or what you need — never how you found it.\n" +
       "Brevity is the whole game. A wall of records spoken into someone's ear while they drive is the worst thing you can do here.";
   }
