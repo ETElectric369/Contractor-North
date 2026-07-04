@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { isStaffRole } from "@/lib/actions/perms";
 import { notFound } from "next/navigation";
 import { Home, ChevronRight, MapPin, Receipt, Plus, Printer, Phone, type LucideIcon } from "lucide-react";
 // The More-panel chip icons must come through a "use client" re-export so the
@@ -205,7 +206,7 @@ export default async function JobDetailPage({
     data: { user },
   } = await supabase.auth.getUser();
   const { data: meRow } = await supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle();
-  const viewerIsStaff = ["owner", "admin", "office"].includes((meRow as any)?.role ?? "");
+  const viewerIsStaff = isStaffRole((meRow as any)?.role ?? "");
   const [{ data: techs }, { data: jobCodes }, { data: lists }, { data: org }, { data: allCustomers }, { data: allJobs }, { data: codeTemplates }, { data: openEntryRow }] = await Promise.all([
     // Staff get hourly_rate + bill_rate for the add-time/edit modals' pay-rate
     // anchor; NON-staff keep the narrow select. The gate matters here: this array

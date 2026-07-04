@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { isStaffRole } from "@/lib/actions/perms";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
@@ -24,7 +25,7 @@ export default async function AuditPage() {
     .select("role")
     .eq("id", user?.id ?? "")
     .maybeSingle();
-  if (!me || !["owner", "admin", "office"].includes(me.role)) redirect("/planner");
+  if (!me || !isStaffRole(me.role)) redirect("/planner");
 
   // RLS already scopes this to the org + staff-read; newest first.
   const { data: rows } = await supabase

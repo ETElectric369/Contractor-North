@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { isStaffRole } from "@/lib/actions/perms";
 import { createClient } from "@/lib/supabase/server";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { getActionItems } from "@/lib/action-items/query";
@@ -74,7 +75,7 @@ export async function runVoiceCommand(transcript: string, history: VoiceTurn[] =
 
   // Context for acting on EXISTING items hands-free: the current inbox + the team.
   const { data: prof } = await supabase.from("profiles").select("role, org_id").eq("id", user.id).maybeSingle();
-  const isStaff = ["owner", "admin", "office"].includes((prof as any)?.role ?? "");
+  const isStaff = isStaffRole((prof as any)?.role ?? "");
   const { data: orgRow } = await supabase
     .from("organizations")
     .select("settings")

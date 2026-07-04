@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { isStaffRole } from "@/lib/actions/perms";
 import { createClient } from "@/lib/supabase/server";
 import { listBugReports } from "@/app/(app)/bug-report-actions";
 import { BugList } from "./bug-list";
@@ -16,7 +17,7 @@ export default async function BugsPage() {
   const { data: me } = user
     ? await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle()
     : { data: null };
-  const isStaff = ["owner", "admin", "office"].includes((me as { role?: string } | null)?.role ?? "");
+  const isStaff = isStaffRole((me as { role?: string } | null)?.role ?? "");
   if (!isStaff) redirect("/planner");
 
   const reports = await listBugReports();

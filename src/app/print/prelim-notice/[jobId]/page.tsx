@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { isStaffRole } from "@/lib/actions/perms";
 import { createClient } from "@/lib/supabase/server";
 import { PrintButton } from "@/components/print-button";
 import { buildPrelimNotice } from "@/lib/prelim-notice";
@@ -18,7 +19,7 @@ export default async function PrelimNoticePage({ params }: { params: Promise<{ j
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) notFound();
   const { data: me } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
-  if (!me || !["owner", "admin", "office"].includes((me as any).role)) notFound();
+  if (!me || !isStaffRole((me as any).role)) notFound();
 
   const { data: job } = await supabase
     .from("jobs")

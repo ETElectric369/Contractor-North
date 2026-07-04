@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { isStaffRole } from "@/lib/actions/perms";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { getOrgSettings } from "@/lib/org-settings";
@@ -21,7 +22,7 @@ export default async function PayrollPage({
     data: { user },
   } = await supabase.auth.getUser();
   const { data: me } = await supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle();
-  if (!me || !["owner", "admin", "office"].includes(me.role)) redirect("/timeclock");
+  if (!me || !isStaffRole(me.role)) redirect("/timeclock");
 
   const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
   const settings = getOrgSettings((org as any)?.settings);

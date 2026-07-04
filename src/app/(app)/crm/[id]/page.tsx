@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { isStaffRole } from "@/lib/actions/perms";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Mail, Phone, MapPin, Plus } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
@@ -43,7 +44,7 @@ export default async function CustomerDetailPage({
   // matching the job page.
   const { data: { user } } = await supabase.auth.getUser();
   const { data: meRow } = await supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle();
-  const viewerIsStaff = ["owner", "admin", "office"].includes((meRow as any)?.role ?? "");
+  const viewerIsStaff = isStaffRole((meRow as any)?.role ?? "");
 
   const [{ data: jobs }, { data: quotes }, { data: invoices }, { data: pricingLevels }, { data: credits }, { data: staffRows }] = await Promise.all([
     supabase.from("jobs").select("*").eq("customer_id", id).order("created_at", { ascending: false }),

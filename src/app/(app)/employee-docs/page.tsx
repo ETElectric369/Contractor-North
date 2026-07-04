@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { isStaffRole } from "@/lib/actions/perms";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { EmployeeDocsManager } from "./employee-docs-manager";
@@ -15,7 +16,7 @@ export default async function EmployeeDocsPage() {
     .select("org_id, role")
     .eq("id", user?.id ?? "")
     .maybeSingle();
-  if (!me || !["owner", "admin", "office"].includes(me.role)) redirect("/planner");
+  if (!me || !isStaffRole(me.role)) redirect("/planner");
 
   const [{ data: employees }, { data: docRows }] = await Promise.all([
     supabase.from("profiles").select("id, full_name").order("full_name"),

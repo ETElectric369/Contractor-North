@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useRef, useState } from "react";
+import { isStaffRole } from "@/lib/actions/perms";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { AudioLines, Square, X, ChevronDown, ChevronUp, GripHorizontal } from "lucide-react";
 import { AssistantChat } from "@/app/(app)/assistant/assistant-chat";
@@ -44,7 +45,7 @@ function DebriefEntry({ onLaunch }: { onLaunch: () => void }) {
         if (!user) return;
         const { data: prof } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
         const role = (prof as { role?: string } | null)?.role ?? "";
-        if (["owner", "admin", "office"].includes(role)) onLaunch();
+        if (isStaffRole(role)) onLaunch();
       } catch {
         /* best-effort: no debrief beats a crash on open */
       }

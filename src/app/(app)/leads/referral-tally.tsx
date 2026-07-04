@@ -1,4 +1,5 @@
 import { ChevronRight } from "lucide-react";
+import { isStaffRole } from "@/lib/actions/perms";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -43,7 +44,7 @@ export async function ReferralTally() {
     .select("role")
     .eq("id", user?.id ?? "")
     .maybeSingle();
-  if (!me || !["owner", "admin", "office"].includes(me.role)) return null;
+  if (!me || !isStaffRole(me.role)) return null;
 
   // ALL referred leads — the open-leads list above filters converted/lost out,
   // so this card is the only place a converted referral keeps its credit visible.

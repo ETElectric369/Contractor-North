@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { isStaffRole } from "@/lib/actions/perms";
 import Link from "next/link";
 import { TrendingUp, Receipt, FileText, Wallet } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
@@ -22,7 +23,7 @@ export default async function AnalyticsPage() {
     data: { user },
   } = await supabase.auth.getUser();
   const { data: me } = await supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle();
-  if (!me || !["owner", "admin", "office"].includes(me.role)) redirect("/planner");
+  if (!me || !isStaffRole(me.role)) redirect("/planner");
 
   const yearAgo = new Date();
   yearAgo.setMonth(yearAgo.getMonth() - 11);

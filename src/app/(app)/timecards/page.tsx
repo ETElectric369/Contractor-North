@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { isStaffRole } from "@/lib/actions/perms";
 import { redirect } from "next/navigation";
 import { AlertTriangle, ChevronLeft, ChevronRight, Clock } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
@@ -54,7 +55,7 @@ export default async function TimecardsPage({
     .select("role")
     .eq("id", user?.id ?? "")
     .maybeSingle();
-  if (!me || !["owner", "admin", "office"].includes(me.role)) {
+  if (!me || !isStaffRole(me.role)) {
     redirect("/timeclock");
   }
 

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isStaffRole } from "@/lib/actions/perms";
 import { gcalExchangeCode } from "@/lib/google-calendar";
 import { createClient } from "@/lib/supabase/server";
 import { verifyOAuthState } from "@/lib/oauth-state";
@@ -27,7 +28,7 @@ export async function GET(req: Request) {
     .select("org_id, role")
     .eq("id", user.id)
     .maybeSingle();
-  if (!profile?.org_id || !["owner", "admin", "office"].includes(profile.role)) {
+  if (!profile?.org_id || !isStaffRole(profile.role)) {
     return NextResponse.redirect(`${site}/settings?gcal=denied`);
   }
 

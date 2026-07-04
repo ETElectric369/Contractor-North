@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { isStaffRole } from "@/lib/actions/perms";
 import { Briefcase, MapPin, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader, EmptyState } from "@/components/page-header";
@@ -35,7 +36,7 @@ export default async function JobsPage({
     listCustomerOptions(supabase),
     user ? supabase.from("profiles").select("role").eq("id", user.id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
-  const isStaff = ["owner", "admin", "office"].includes((me as { role?: string } | null)?.role ?? "");
+  const isStaff = isStaffRole((me as { role?: string } | null)?.role ?? "");
   const jobs = (jobsData ?? []) as (Job & { customers: { name: string } | null })[];
 
   // Default (unfiltered) view: active jobs up top, completed/invoiced sink to the

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { isStaffRole } from "@/lib/actions/perms";
 import { redirect } from "next/navigation";
 import { CalendarCheck, ChevronLeft, ChevronRight, UserPlus, Receipt, Navigation, FolderClosed, ListTodo } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
@@ -83,7 +84,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   ]);
 
   const openEntry = (openRows ?? [])[0] as any | undefined;
-  const isStaff = ["owner", "admin", "office"].includes((me as any)?.role ?? "");
+  const isStaff = isStaffRole((me as any)?.role ?? "");
 
   // THE week lives at /schedule for staff — My Day keeps a week only for techs,
   // who can't see /schedule (office-only). A role-gated single map ≠ duplication.

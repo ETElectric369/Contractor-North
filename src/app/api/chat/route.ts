@@ -1,4 +1,5 @@
 import type Anthropic from "@anthropic-ai/sdk";
+import { isStaffRole } from "@/lib/actions/perms";
 import { createClient } from "@/lib/supabase/server";
 import {
   getAnthropic,
@@ -201,7 +202,7 @@ export async function POST(req: Request) {
     // The B8 money/office read tools (money_pipeline, payroll_summary, get_bill, get_purchase_order,
     // list_kits, list_organize) — staff-only, kept next to their defs in assistant-tools.
     ...STAFF_ONLY_DATA_TOOLS]);
-  const isStaffCaller = ["owner", "admin", "office"].includes(role ?? "");
+  const isStaffCaller = isStaffRole(role ?? "");
   const dataTools = isStaffCaller ? DATA_TOOLS : DATA_TOOLS.filter((t) => !STAFF_ONLY_READ.has(t.name));
   const orgS = getOrgSettings((org as any)?.settings);
   const playbook = orgS.quote_playbook?.trim();

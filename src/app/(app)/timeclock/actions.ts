@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { isStaffRole } from "@/lib/actions/perms";
 import { createClient } from "@/lib/supabase/server";
 import { visibleJobIdOrNull } from "@/lib/job-visibility";
 import { requireStaff } from "@/lib/staff-guard";
@@ -28,7 +29,7 @@ export async function clockIn(input: {
   // backdate freely (forgot to clock in). A TECH/field employee can only round the
   // LIVE start BACK to the nearest half hour — so they can't pad hours by backdating.
   const { data: meRow } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
-  const isStaff = !!meRow && ["owner", "admin", "office"].includes((meRow as { role?: string }).role ?? "");
+  const isStaff = !!meRow && isStaffRole((meRow as { role?: string }).role ?? "");
 
   // Only attach a job the caller can actually see (RLS-scoped) — a stray/foreign
   // job_id (e.g. from a hand-built action call) would otherwise persist as a
@@ -259,7 +260,7 @@ export async function clockOut(input: {
   // legitimately defers the codes to completeAutoClockOut.
   if (!input.auto) {
     const { data: me } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
-    const isStaff = ["owner", "admin", "office"].includes((me as { role?: string } | null)?.role ?? "");
+    const isStaff = isStaffRole((me as { role?: string } | null)?.role ?? "");
     const allocOk = (input.allocations ?? []).some((a) => a.job_code && a.hours > 0);
     if (!isStaff && !allocOk) {
       return { ok: false, error: "Add the job code(s) you worked and the hours before clocking out." };

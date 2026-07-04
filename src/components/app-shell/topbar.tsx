@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { isStaffRole } from "@/lib/actions/perms";
 import { ArrowLeft, Search } from "lucide-react";
 import { GlobalAssistant } from "@/components/global-assistant";
 import { GlobalQuickAdd } from "@/components/global-quick-add";
@@ -24,7 +25,7 @@ export function Topbar({
   // Staff = owner/admin/office — the same rule the layout uses (it already
   // passes the full profile, so no extra plumbing). Gates the staff-only
   // quick-add verbs to match the dock/strip/palette filtering.
-  const isStaff = ["owner", "admin", "office"].includes(profile?.role ?? "");
+  const isStaff = isStaffRole(profile?.role ?? "");
 
   return (
     // Sea-glass top bar via a TRANSLUCENT bg only — deliberately NO backdrop-filter. A

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { isStaffRole } from "@/lib/actions/perms";
 import { FileText, Plus } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader, EmptyState } from "@/components/page-header";
@@ -24,7 +25,7 @@ export default async function QuotesPage({
   const { data: me } = user
     ? await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle()
     : { data: null };
-  const isStaff = !!me && ["owner", "admin", "office"].includes((me as { role?: string }).role ?? "");
+  const isStaff = !!me && isStaffRole((me as { role?: string }).role ?? "");
 
   let query = supabase.from("quotes").select("*, customers(name, company_name)");
   if (filter) query = query.eq("doc_type", filter);

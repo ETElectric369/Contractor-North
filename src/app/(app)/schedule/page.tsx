@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { isStaffRole } from "@/lib/actions/perms";
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
@@ -36,7 +37,7 @@ export default async function SchedulePage({
     .select("role")
     .eq("id", user?.id ?? "")
     .maybeSingle();
-  if (!me || !["owner", "admin", "office"].includes(me.role)) {
+  if (!me || !isStaffRole(me.role)) {
     redirect("/planner");
   }
 

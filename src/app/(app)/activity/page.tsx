@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { isStaffRole } from "@/lib/actions/perms";
 import { redirect } from "next/navigation";
 import { Briefcase, FileText, Receipt, CalendarCheck, CheckCircle2, Clock } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
@@ -44,7 +45,7 @@ export default async function ActivityPage() {
   const { data: me } = user
     ? await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle()
     : { data: null };
-  if (!me || !["owner", "admin", "office"].includes((me as { role?: string }).role ?? "")) redirect("/planner");
+  if (!me || !isStaffRole((me as { role?: string }).role ?? "")) redirect("/planner");
 
   const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
 

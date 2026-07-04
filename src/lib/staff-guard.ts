@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { isStaffRole } from "@/lib/actions/perms";
 
 /** Resolve a Supabase client ONLY if the caller is signed in AND staff
  *  (owner/admin/office). Returns { error } otherwise. Use as the first line of
@@ -18,6 +19,6 @@ export async function requireStaff() {
   } = await supabase.auth.getUser();
   if (!user) return { error: "Not signed in." as const };
   const { data: me } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
-  if (!me || !["owner", "admin", "office"].includes(me.role)) return { error: "This action is staff-only." as const };
+  if (!me || !isStaffRole(me.role)) return { error: "This action is staff-only." as const };
   return { supabase, userId: user.id };
 }

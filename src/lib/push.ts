@@ -1,5 +1,6 @@
 import "server-only";
 import webpush from "web-push";
+import { STAFF_ROLES } from "@/lib/actions/perms";
 import { createServiceClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/observe";
 
@@ -30,7 +31,7 @@ export async function orgStaffIds(orgId: string | null | undefined): Promise<str
       .from("profiles")
       .select("id")
       .eq("org_id", orgId)
-      .in("role", ["owner", "admin", "office"]);
+      .in("role", STAFF_ROLES);
     return (data ?? []).map((p: any) => p.id);
   } catch {
     return [];

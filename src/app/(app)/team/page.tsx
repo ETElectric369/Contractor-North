@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { isStaffRole } from "@/lib/actions/perms";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
@@ -41,7 +42,7 @@ export default async function TeamPage() {
   const profile = me as Profile | null;
 
   // Office-only surface. Techs land here from no nav link; guard direct URLs too.
-  if (!profile || !["owner", "admin", "office"].includes(profile.role)) {
+  if (!profile || !isStaffRole(profile.role)) {
     redirect("/planner");
   }
   const isAdmin = profile.role === "owner" || profile.role === "admin";

@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { isStaffRole } from "@/lib/actions/perms";
 import { createClient } from "@/lib/supabase/server";
 import { Dock } from "@/components/app-shell/dock";
 import { Topbar } from "@/components/app-shell/topbar";
@@ -109,7 +110,7 @@ export default async function AppLayout({
   // The unified "Needs action" inbox count, surfaced on the dock Home icon (it
   // already includes the organize/needs-review captures, so no separate badge).
   const tz = settings.timezone || "America/Los_Angeles";
-  const isStaff = ["owner", "admin", "office"].includes(profile.role);
+  const isStaff = isStaffRole(profile.role);
   const needsAction = await getActionItemsCount({
     todayStr: todayStrInTz(tz),
     isStaff,

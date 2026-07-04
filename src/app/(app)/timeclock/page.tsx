@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { isStaffRole } from "@/lib/actions/perms";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
@@ -30,7 +31,7 @@ export default async function TimeclockPage() {
     .maybeSingle();
   const lang = prof?.language ?? "en";
   const t = translator(lang);
-  const isStaff = !!prof && ["owner", "admin", "office"].includes(prof.role);
+  const isStaff = !!prof && isStaffRole(prof.role);
 
   const { data: members } = isStaff
     ? await supabase

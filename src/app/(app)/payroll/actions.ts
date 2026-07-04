@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { isStaffRole } from "@/lib/actions/perms";
 import { createClient } from "@/lib/supabase/server";
 import { getOrgSettings } from "@/lib/org-settings";
 import { tzDayStartUtc } from "@/lib/tz";
@@ -16,7 +17,7 @@ async function staffClient() {
   } = await supabase.auth.getUser();
   if (!user) return { error: "Not signed in." as const };
   const { data: me } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
-  if (!me || !["owner", "admin", "office"].includes(me.role)) return { error: "Not allowed." as const };
+  if (!me || !isStaffRole(me.role)) return { error: "Not allowed." as const };
   return { supabase, userId: user.id };
 }
 
