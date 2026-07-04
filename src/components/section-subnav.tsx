@@ -72,13 +72,16 @@ export function SectionSubnav({ isStaff }: { isStaff?: boolean }) {
           <Link
             key={c.id}
             href={c.href!}
-            className={`relative flex flex-1 items-center justify-center gap-1.5 rounded-xl px-2.5 py-2 text-sm font-medium transition-colors ${
+            // Icon ON TOP of the label — same stack as the dock tiles (Erik's bug report:
+            // "change order inside button, icon on top of text just like dock"), not icon
+            // beside text. gap-1 + an 18px icon + 11px label matches the dock's proportions.
+            className={`relative flex flex-1 flex-col items-center justify-center gap-1 rounded-xl px-2 py-2 text-[11px] font-medium leading-none transition-colors ${
               active
                 ? "seaglass-active"
                 : "glass glass-gloss text-slate-600 hover:text-[color:rgb(var(--glass-ink))]"
             }`}
           >
-            <Icon className="relative z-10 h-4 w-4 shrink-0" />
+            <Icon className="relative z-10 h-[18px] w-[18px] shrink-0" />
             <span className="relative z-10">{c.label}</span>
           </Link>
         );
