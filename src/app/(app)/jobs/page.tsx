@@ -5,6 +5,7 @@ import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { JOB_STATUS_PRIORITY, jobStatusLabel } from "@/lib/job-status";
+import { listCustomerOptions } from "@/lib/schedule-options";
 import { formatDate } from "@/lib/utils";
 import { NewJobButton } from "../schedule/new-job-button";
 import { JobImportButton } from "./job-import-button";
@@ -31,7 +32,7 @@ export default async function JobsPage({
   } = await supabase.auth.getUser();
   const [{ data: jobsData }, { data: customers }, { data: me }] = await Promise.all([
     query,
-    supabase.from("customers").select("id, name").order("name"),
+    listCustomerOptions(supabase),
     user ? supabase.from("profiles").select("role").eq("id", user.id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
   const isStaff = ["owner", "admin", "office"].includes((me as { role?: string } | null)?.role ?? "");

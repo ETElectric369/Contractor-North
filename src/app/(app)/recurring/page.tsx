@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { listCustomerOptions } from "@/lib/schedule-options";
 import { RecurringButton, type RecurringValue } from "./recurring-button";
 import { RecurringRowActions, GenerateDueButton } from "./recurring-actions-ui";
 
@@ -19,7 +20,7 @@ export default async function RecurringPage() {
 
   const [{ data: templates }, { data: customers }] = await Promise.all([
     supabase.from("recurring_templates").select("*, customers(name)").order("next_date"),
-    supabase.from("customers").select("id, name").order("name"),
+    listCustomerOptions(supabase),
   ]);
 
   const custOpts = (customers ?? []).map((c: any) => ({ id: c.id, name: c.name }));

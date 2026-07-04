@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { getOrgSettings } from "@/lib/org-settings";
+import { listActiveTechs } from "@/lib/schedule-options";
 import { todayStrInTz } from "@/lib/tz";
 
 const TASK_SELECT =
@@ -58,7 +59,7 @@ export async function getTasksPageData(
       openQ,
       doneQ,
       supabase.from("jobs").select("id, job_number, name").order("created_at", { ascending: false }).limit(100),
-      supabase.from("profiles").select("id, full_name").eq("active", true).order("full_name"),
+      listActiveTechs(supabase),
     ]);
 
   // The ?mine cut filters by assignee — which drops the UNASSIGNED subtasks of a

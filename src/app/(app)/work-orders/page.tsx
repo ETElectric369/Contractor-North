@@ -5,6 +5,7 @@ import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatDateTime } from "@/lib/utils";
+import { listActiveTechs } from "@/lib/schedule-options";
 import { NewWorkOrderButton } from "./new-wo-button";
 
 export const dynamic = "force-dynamic";
@@ -27,7 +28,7 @@ export default async function WorkOrdersPage({
       .select("id, job_number, name")
       .order("created_at", { ascending: false })
       .limit(100),
-    supabase.from("profiles").select("id, full_name").eq("active", true),
+    listActiveTechs(supabase),
   ]);
 
   const workOrders = wos ?? [];

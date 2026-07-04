@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { getMoneyPipeline } from "@/lib/billing-pipeline";
+import { listCustomerOptions } from "@/lib/schedule-options";
 import { NewInvoiceButton } from "./new-invoice-button";
 import { InvoiceJobButton } from "./invoice-job-button";
 
@@ -20,7 +21,7 @@ export default async function BillingPage() {
     await Promise.all([
       getMoneyPipeline(supabase),
       supabase.from("quotes").select("id, quote_number, total, customers(name)").in("status", ["sent", "accepted"]).order("created_at", { ascending: false }).limit(100),
-      supabase.from("customers").select("id, name").order("name"),
+      listCustomerOptions(supabase),
       supabase.from("jobs").select("id, name, job_number, customer_id").not("status", "in", "(cancelled)").order("created_at", { ascending: false }).limit(300),
       supabase.from("customer_credits").select("amount").eq("disposition", "refund"),
       supabase.from("invoices").select("id, invoice_number, total, amount_paid, status, due_date, customers(name)").order("created_at", { ascending: false }),

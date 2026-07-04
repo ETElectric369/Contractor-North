@@ -10,7 +10,7 @@ import { Badge, statusTone } from "@/components/ui/badge";
 import { hoursBetween, formatCurrency, formatTime } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
 import { NavLink } from "@/components/nav-link";
-import { toJobOptions, toCustomerOptions, toStaffOptions } from "@/lib/schedule-options";
+import { toJobOptions, toCustomerOptions, toStaffOptions, listActiveTechs, listCustomerOptions } from "@/lib/schedule-options";
 import { todayBoundsInTz, prettyDay, tzDayStartUtc } from "@/lib/tz";
 import { DayClock } from "./day-clock";
 import { YourList } from "./your-list";
@@ -75,8 +75,8 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     // This pay week's logged hours (Monday-start — the same week a timecard means).
     supabase.from("time_entries").select("clock_in, clock_out, lunch_minutes, status").eq("profile_id", user?.id ?? "").gte("clock_in", payWeekStartUtc.toISOString()).lt("clock_in", dayEnd.toISOString()),
     // Options for the inline add/edit controls + the owner snapshot.
-    supabase.from("customers").select("id, name").order("name"),
-    supabase.from("profiles").select("id, full_name").eq("active", true).order("full_name"),
+    listCustomerOptions(supabase),
+    listActiveTechs(supabase),
     supabase.from("jobs").select("id, job_number, name, address").order("created_at", { ascending: false }).limit(200),
     supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle(),
     supabase.from("inquiries").select("id", { count: "exact", head: true }).is("converted_at", null).neq("status", "lost"),

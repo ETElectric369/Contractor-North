@@ -1,5 +1,6 @@
 import { UserPlus } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { listCustomerOptions } from "@/lib/schedule-options";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { FactsGrid, StatTile } from "@/components/ui/stat-tile";
@@ -21,7 +22,7 @@ export default async function InquiriesPage() {
       .neq("status", "lost")
       .order("next_follow_up_at", { ascending: true, nullsFirst: false })
       .order("created_at", { ascending: false }),
-    supabase.from("customers").select("id, name").order("name"),
+    listCustomerOptions(supabase),
   ]);
 
   const inquiries = (inqData ?? []) as Inquiry[];

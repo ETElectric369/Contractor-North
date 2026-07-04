@@ -8,6 +8,7 @@ import { dispatchAction } from "@/lib/action-items/dispatch";
 import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz } from "@/lib/tz";
 import { toIso } from "@/lib/forms";
+import { listActiveTechs } from "@/lib/schedule-options";
 import { executeAction } from "@/lib/actions/execute";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import type { Affordance } from "@/lib/action-items/types";
@@ -83,7 +84,7 @@ export async function runVoiceCommand(transcript: string, history: VoiceTurn[] =
   const today = todayStrInTz(tz);
   const [items, { data: peopleRows }, { data: jobRows }] = await Promise.all([
     getActionItems({ todayStr: today, isStaff, userId: user.id }),
-    supabase.from("profiles").select("id, full_name").eq("active", true),
+    listActiveTechs(supabase),
     supabase
       .from("jobs")
       .select("id, job_number, name")

@@ -15,6 +15,7 @@ import { invoiceSectionTree } from "@/lib/nav-tree";
 import { deleteInvoice } from "../actions";
 import { getOrgSettings } from "@/lib/org-settings";
 import { jobProgressFinancials, receivedBeforeThisInvoice } from "@/lib/job-financials";
+import { listCustomerOptions } from "@/lib/schedule-options";
 import { ProgressReportCard } from "@/components/progress-report-card";
 import type { Invoice, InvoiceItem, Payment } from "@/lib/types";
 
@@ -59,7 +60,7 @@ export default async function InvoicePage({
       supabase.from("tax_rates").select("id, name, rate, is_default").order("created_at"),
       supabase.from("organizations").select("settings").limit(1).maybeSingle(),
       isDraft
-        ? supabase.from("customers").select("id, name").order("name").limit(2000)
+        ? listCustomerOptions(supabase, 2000)
         : Promise.resolve({ data: [] as { id: string; name: string }[] }),
       isDraft
         ? supabase.from("jobs").select("id, name, job_number, customer_id").order("created_at", { ascending: false }).limit(2000)

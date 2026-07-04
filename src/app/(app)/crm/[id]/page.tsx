@@ -16,7 +16,7 @@ import { SectionActionsMenu } from "@/components/section-actions-menu";
 import { customerSectionTree } from "@/lib/nav-tree";
 import { NewJobButton } from "../../schedule/new-job-button";
 import { AppointmentButton } from "../../appointments/appointment-button";
-import { toJobOptions, toStaffOptions } from "@/lib/schedule-options";
+import { toJobOptions, toStaffOptions, listActiveTechs } from "@/lib/schedule-options";
 import { deleteCustomer } from "../actions";
 import type { Customer, Job, Quote } from "@/lib/types";
 
@@ -60,7 +60,7 @@ export default async function CustomerDetailPage({
       .eq("customer_id", id)
       .eq("status", "open"),
     // Assignee options for the New-appointment modal in the impulse row.
-    supabase.from("profiles").select("id, full_name").eq("active", true).order("full_name"),
+    listActiveTechs(supabase),
   ]);
 
   // The reverse of jobs.customer_id: jobs this contact is LINKED to as a sub / supplier / inspector

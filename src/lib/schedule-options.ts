@@ -13,13 +13,26 @@ export const toCustomerOptions = (rows: any[] | null | undefined): PickerOption[
 export const toStaffOptions = (rows: any[] | null | undefined): PickerOption[] =>
   (rows ?? []).map((s) => ({ id: s.id, label: s.full_name ?? "Unnamed" }));
 
+/** THE active-tech roster query — every assignee picker / crew list reads the same
+ *  active profiles, id+full_name, sorted by name, so the roster can't drift across
+ *  surfaces. Returns the Supabase query builder: await it, or drop it into a Promise.all. */
+export const listActiveTechs = (supabase: SupabaseClient) =>
+  supabase.from("profiles").select("id, full_name").eq("active", true).order("full_name");
+
+/** THE customer-picker query — id+name, alphabetical. Pass `limit` for the big billing
+ *  picker; omit it for the common short lists. Same drift-proofing as listActiveTechs. */
+export const listCustomerOptions = (supabase: SupabaseClient, limit?: number) => {
+  const q = supabase.from("customers").select("id, name").order("name");
+  return limit ? q.limit(limit) : q;
+};
+
 /** Fetch the jobs/customers/staff rows and map them to picker options — for
  *  callers that don't already have the rows on hand. */
 export async function getSchedulePickerOptions(supabase: SupabaseClient) {
   const [{ data: jobs }, { data: customers }, { data: staff }] = await Promise.all([
     supabase.from("jobs").select("id, job_number, name, address").order("created_at", { ascending: false }).limit(200),
-    supabase.from("customers").select("id, name").order("name"),
-    supabase.from("profiles").select("id, full_name").eq("active", true).order("full_name"),
+    listCustomerOptions(supabase),
+    listActiveTechs(supabase),
   ]);
   return {
     jobOpts: toJobOptions(jobs),
