@@ -1,6 +1,7 @@
 import { Zap } from "lucide-react";
 import type { CompanyInfo } from "./doc-letterhead";
 import { companyBlock } from "@/lib/company-lines";
+import { formatCurrency, formatCityStateZip } from "@/lib/utils";
 
 export type DocTemplate = "classic" | "modern" | "minimal";
 
@@ -161,6 +162,101 @@ export function DocHeader({
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+export type DocPartyCustomer = {
+  name?: string | null;
+  company_name?: string | null;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip?: string | null;
+  email?: string | null;
+  phone?: string | null;
+} | null;
+
+/** The "Bill to" / "Prepared for" party block shared by the invoice + quote bodies:
+ *  a two-column identity+contact | location grid, with contact behind a brand accent rule. */
+export function DocParty({ label, customer, brand }: { label: string; customer: DocPartyCustomer; brand: string }) {
+  const c = customer;
+  return (
+    <>
+      <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</div>
+      {c ? (
+        <div className="mt-1 grid grid-cols-2 gap-x-6 text-sm">
+          <div className="min-w-0">
+            <div className="font-medium text-slate-900">{c.name}</div>
+            {c.company_name && <div className="text-slate-700">{c.company_name}</div>}
+            {(c.phone || c.email) && (
+              <div className="mt-1.5 space-y-0.5 border-l-2 pl-2.5 text-slate-600" style={{ borderColor: brand }}>
+                {c.phone && <div>{c.phone}</div>}
+                {c.email && <div className="break-words">{c.email}</div>}
+              </div>
+            )}
+          </div>
+          <div className="min-w-0 text-slate-700">
+            {c.address && <div>{c.address}</div>}
+            {(c.city || c.state || c.zip) && <div>{formatCityStateZip(c.city, c.state, c.zip)}</div>}
+          </div>
+        </div>
+      ) : (
+        <div className="mt-1 text-sm text-slate-400">—</div>
+      )}
+    </>
+  );
+}
+
+/** The totals stack shared by both doc bodies. Pass `balance` (invoice) to render the
+ *  Paid + Balance-due rows and DE-emphasize Total so Balance becomes the bold final line;
+ *  OMIT it (quote) and Total itself is the bold emphasis. Tax-percent formatting is identical
+ *  either way — so a quote and the invoice it converts to always agree to the cent. */
+export function DocTotals({
+  subtotal,
+  taxRate,
+  tax,
+  total,
+  amountPaid,
+  balance,
+}: {
+  subtotal: number;
+  taxRate?: number | null;
+  tax: number;
+  total: number;
+  amountPaid?: number;
+  balance?: number;
+}) {
+  const hasBalance = balance != null;
+  return (
+    <div className="mt-4 flex justify-end">
+      <div className="w-64 space-y-1 text-sm">
+        <div className="flex justify-between text-slate-600"><span>Subtotal</span><span>{formatCurrency(subtotal)}</span></div>
+        <div className="flex justify-between text-slate-600">
+          <span>Tax{taxRate != null && taxRate > 0 ? ` (${(taxRate * 100).toFixed(2)}%)` : ""}</span>
+          <span>{formatCurrency(tax)}</span>
+        </div>
+        <div className={`flex justify-between border-t border-slate-300 pt-1 ${hasBalance ? "font-semibold text-slate-900" : "text-base font-bold text-slate-900"}`}>
+          <span>Total</span><span>{formatCurrency(total)}</span>
+        </div>
+        {hasBalance && amountPaid != null && amountPaid > 0 && (
+          <div className="flex justify-between text-slate-600"><span>Paid</span><span>−{formatCurrency(amountPaid)}</span></div>
+        )}
+        {hasBalance && (
+          <div className="flex justify-between border-t border-slate-300 pt-1 text-base font-bold text-slate-900"><span>Balance due</span><span>{formatCurrency(balance)}</span></div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** A titled document section (Notes, Terms): eyebrow + pre-wrapped text over a top rule.
+ *  `breakAvoid` keeps it from splitting across printed pages (the quote surface passes it). */
+export function DocNote({ label, text, breakAvoid = false }: { label: string; text: string; breakAvoid?: boolean }) {
+  return (
+    <div className={`mt-6 border-t border-slate-200 pt-4${breakAvoid ? " [break-inside:avoid]" : ""}`}>
+      <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</div>
+      <p className="mt-1 whitespace-pre-wrap text-sm text-slate-600">{text}</p>
     </div>
   );
 }

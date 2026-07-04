@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { formatCurrency, formatDate, formatCityStateZip } from "@/lib/utils";
-import { DocHeader } from "@/components/doc-templates";
+import { formatCurrency, formatDate } from "@/lib/utils";
+import { DocHeader, DocParty, DocTotals, DocNote } from "@/components/doc-templates";
 import { lineItemParts } from "@/components/line-item-text";
 
 /**
@@ -100,27 +100,7 @@ export function QuoteDocument({
       {/* Prepared-for (two columns: identity + contact | location), mirroring the
           invoice "Bill to" grouping — contact behind a brand accent rule. */}
       <div className="mt-6">
-        <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Prepared for</div>
-        {c ? (
-          <div className="mt-1 grid grid-cols-2 gap-x-6 text-sm">
-            <div className="min-w-0">
-              <div className="font-medium text-slate-900">{c.name}</div>
-              {c.company_name && <div className="text-slate-700">{c.company_name}</div>}
-              {(c.phone || c.email) && (
-                <div className="mt-1.5 space-y-0.5 border-l-2 pl-2.5 text-slate-600" style={{ borderColor: co.brand }}>
-                  {c.phone && <div>{c.phone}</div>}
-                  {c.email && <div className="break-words">{c.email}</div>}
-                </div>
-              )}
-            </div>
-            <div className="min-w-0 text-slate-700">
-              {c.address && <div>{c.address}</div>}
-              {(c.city || c.state || c.zip) && <div>{formatCityStateZip(c.city, c.state, c.zip)}</div>}
-            </div>
-          </div>
-        ) : (
-          <div className="mt-1 text-sm text-slate-400">—</div>
-        )}
+        <DocParty label="Prepared for" customer={c} brand={co.brand} />
       </div>
 
       {title && <div className="mt-5 text-base font-semibold text-slate-900">{title}</div>}
@@ -170,34 +150,14 @@ export function QuoteDocument({
         </tbody>
       </table>
 
-      {/* Totals */}
-      <div className="mt-4 flex justify-end">
-        <div className="w-64 space-y-1 text-sm">
-          <div className="flex justify-between text-slate-600"><span>Subtotal</span><span>{formatCurrency(subtotal)}</span></div>
-          <div className="flex justify-between text-slate-600">
-            <span>Tax{taxRate != null && taxRate > 0 ? ` (${(taxRate * 100).toFixed(2)}%)` : ""}</span>
-            <span>{formatCurrency(tax)}</span>
-          </div>
-          <div className="flex justify-between border-t border-slate-300 pt-1 text-base font-bold text-slate-900"><span>Total</span><span>{formatCurrency(total)}</span></div>
-        </div>
-      </div>
+      {/* Totals — no balance passed, so Total itself is the bold emphasis (no Paid/Balance rows). */}
+      <DocTotals subtotal={subtotal} taxRate={taxRate} tax={tax} total={total} />
 
       {/* Accept/decline — customer-facing surface only (the office print copy omits it). */}
       {acceptSlot && <div className="mt-8 [break-inside:avoid]">{acceptSlot}</div>}
 
-      {notes && (
-        <div className="mt-6 border-t border-slate-200 pt-4 [break-inside:avoid]">
-          <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Notes</div>
-          <p className="mt-1 whitespace-pre-wrap text-sm text-slate-600">{notes}</p>
-        </div>
-      )}
-
-      {terms && (
-        <div className="mt-6 border-t border-slate-200 pt-4 [break-inside:avoid]">
-          <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Terms</div>
-          <p className="mt-1 whitespace-pre-wrap text-sm text-slate-600">{terms}</p>
-        </div>
-      )}
+      {notes && <DocNote label="Notes" text={notes} breakAvoid />}
+      {terms && <DocNote label="Terms" text={terms} breakAvoid />}
 
       {showContact && (
         <div className="mt-10 text-center text-xs text-slate-400">

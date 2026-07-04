@@ -1,5 +1,5 @@
-import { formatCurrency, formatDate, formatCityStateZip } from "@/lib/utils";
-import { DocHeader } from "@/components/doc-templates";
+import { formatCurrency, formatDate } from "@/lib/utils";
+import { DocHeader, DocParty, DocTotals, DocNote } from "@/components/doc-templates";
 import { LineItemText } from "@/components/line-item-text";
 import { CostBreakdown } from "@/components/cost-breakdown";
 import { ProgressReportCard } from "@/components/progress-report-card";
@@ -97,27 +97,7 @@ export function InvoiceDocument({
           + Balance. Mirrors the letterhead grouping above — contact behind an accent rule. */}
       <div className="mt-6 flex items-start justify-between gap-6">
         <div className="min-w-0 flex-1">
-          <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Bill to</div>
-          {c ? (
-            <div className="mt-1 grid grid-cols-2 gap-x-6 text-sm">
-              <div className="min-w-0">
-                <div className="font-medium text-slate-900">{c.name}</div>
-                {c.company_name && <div className="text-slate-700">{c.company_name}</div>}
-                {(c.phone || c.email) && (
-                  <div className="mt-1.5 space-y-0.5 border-l-2 pl-2.5 text-slate-600" style={{ borderColor: co.brand }}>
-                    {c.phone && <div>{c.phone}</div>}
-                    {c.email && <div className="break-words">{c.email}</div>}
-                  </div>
-                )}
-              </div>
-              <div className="min-w-0 text-slate-700">
-                {c.address && <div>{c.address}</div>}
-                {(c.city || c.state || c.zip) && <div>{formatCityStateZip(c.city, c.state, c.zip)}</div>}
-              </div>
-            </div>
-          ) : (
-            <div className="mt-1 text-sm text-slate-400">—</div>
-          )}
+          <DocParty label="Bill to" customer={c} brand={co.brand} />
         </div>
         <div className="shrink-0 rounded-lg border border-slate-200 bg-slate-50 px-5 py-3 text-right">
           <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Balance due</div>
@@ -171,21 +151,8 @@ export function InvoiceDocument({
         <CostBreakdown items={items} className="w-64" />
       </div>
 
-      {/* Totals */}
-      <div className="mt-4 flex justify-end">
-        <div className="w-64 space-y-1 text-sm">
-          <div className="flex justify-between text-slate-600"><span>Subtotal</span><span>{formatCurrency(subtotal)}</span></div>
-          <div className="flex justify-between text-slate-600">
-            <span>Tax{taxRate != null && taxRate > 0 ? ` (${(taxRate * 100).toFixed(2)}%)` : ""}</span>
-            <span>{formatCurrency(tax)}</span>
-          </div>
-          <div className="flex justify-between border-t border-slate-300 pt-1 font-semibold text-slate-900"><span>Total</span><span>{formatCurrency(total)}</span></div>
-          {amountPaid > 0 && (
-            <div className="flex justify-between text-slate-600"><span>Paid</span><span>−{formatCurrency(amountPaid)}</span></div>
-          )}
-          <div className="flex justify-between border-t border-slate-300 pt-1 text-base font-bold text-slate-900"><span>Balance due</span><span>{formatCurrency(balance)}</span></div>
-        </div>
-      </div>
+      {/* Totals — invoice passes balance, so Paid + Balance-due render and Balance is the bold line. */}
+      <DocTotals subtotal={subtotal} taxRate={taxRate} tax={tax} total={total} amountPaid={amountPaid} balance={balance} />
 
       {progress && (
         <div className="mt-6">
@@ -216,19 +183,8 @@ export function InvoiceDocument({
         </div>
       )}
 
-      {notes && (
-        <div className="mt-6 border-t border-slate-200 pt-4">
-          <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Notes</div>
-          <p className="mt-1 whitespace-pre-wrap text-sm text-slate-600">{notes}</p>
-        </div>
-      )}
-
-      {terms && (
-        <div className="mt-6 border-t border-slate-200 pt-4">
-          <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Terms</div>
-          <p className="mt-1 whitespace-pre-wrap text-sm text-slate-600">{terms}</p>
-        </div>
-      )}
+      {notes && <DocNote label="Notes" text={notes} />}
+      {terms && <DocNote label="Terms" text={terms} />}
 
       <div className="mt-10 text-center text-xs text-slate-400">
         {balance > 0
