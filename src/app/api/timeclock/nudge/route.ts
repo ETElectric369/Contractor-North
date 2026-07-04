@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase/server";
+import { requireCron } from "@/lib/cron-guard";
 import { sendSms } from "@/lib/sms";
 import { getOrgSettings } from "@/lib/org-settings";
 import { todayBoundsInTz } from "@/lib/tz";
@@ -14,20 +14,9 @@ import { todayBoundsInTz } from "@/lib/tz";
  *   GET /api/timeclock/nudge   Authorization: Bearer <CRON_SECRET>
  */
 export async function GET(request: Request) {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) {
-    return NextResponse.json({ error: "CRON_SECRET not configured." }, { status: 503 });
-  }
-  if (request.headers.get("authorization") !== `Bearer ${secret}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  let supabase;
-  try {
-    supabase = createServiceClient();
-  } catch {
-    return NextResponse.json({ error: "SUPABASE_SERVICE_ROLE_KEY not configured." }, { status: 500 });
-  }
+  const guard = requireCron(request);
+  if ("error" in guard) return guard.error;
+  const { supabase } = guard;
 
   const { data: orgs } = await supabase.from("organizations").select("id, settings");
   let checked = 0;
