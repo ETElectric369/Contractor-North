@@ -206,17 +206,32 @@ export async function POST(req: Request) {
   const dataTools = isStaffCaller ? DATA_TOOLS : DATA_TOOLS.filter((t) => !STAFF_ONLY_READ.has(t.name));
   const orgS = getOrgSettings((org as any)?.settings);
   const playbook = orgS.quote_playbook?.trim();
+  const catalogMode = orgS.estimating_mode === "catalog";
   let systemPrompt = ASSISTANT_SYSTEM_PROMPT;
-  // THE ESTIMATING METHOD — labor at the company rate, materials by LIVE market research (web_search),
-  // every quantity/size CALCULATED per NEC (not eyeballed), with a small safety buffer.
-  systemPrompt += `\n\nESTIMATING METHOD — use this whenever you price work, draft a quote/proposal, or build the Estimator:
+  // THE ESTIMATING METHOD — mode-aware. "catalog" companies (deck/carpentry & preset-price
+  // shops) bid from their OWN price list + kits, quantities from the customer's measurements,
+  // NO web research. "research" (default, electrical) prices materials by LIVE market research
+  // (web_search) with a buffer + NEC-calculated quantities. The research branch is byte-identical
+  // to what shipped before, so a research-mode org's prompt is unchanged.
+  if (catalogMode) {
+    systemPrompt += `\n\nESTIMATING METHOD — use this whenever you price work, draft a quote/proposal, or build the Estimator:
+- LABOR: ${orgS.default_labor_rate > 0 ? `bill labor at the company rate of $${orgS.default_labor_rate}/hr` : "the company labor rate isn't set yet — ask for it before pricing labor"}, unless labor is already baked into the company's catalog lines — then use those. Estimate the crew-hours the job realistically takes.
+- MATERIALS & WORK: price from the company's OWN catalog — search_price_list (and their saved kits) and use THOSE prices. This company bids from preset, pre-priced line items, NOT live market research — do NOT web_search for material prices. If a line the job needs isn't in the catalog, ASK for the price; never invent one.
+- QUANTITIES: compute from the MEASUREMENTS the customer gives — areas = length × width, linear feet of railing, stair counts, etc. Use the company's scoping questions (COMPANY PLAYBOOK below) to gather whatever's missing. Don't eyeball, and don't apply trade calcs that don't fit this work.
+- BE A PARTNER: if there's a better, safer, or cheaper way to do the work, say so in one line.
+- It's an estimate built from your catalog + the measurements — accuracy first.`;
+  } else {
+    systemPrompt += `\n\nESTIMATING METHOD — use this whenever you price work, draft a quote/proposal, or build the Estimator:
 - LABOR: ${orgS.default_labor_rate > 0 ? `bill labor at the company rate of $${orgS.default_labor_rate}/hr` : "the company labor rate isn't set yet — ask for it before pricing labor"}. Estimate the crew-hours the job realistically takes.
 - MATERIALS & EQUIPMENT: never guess a price. Use web_search to pull CURRENT prices for each item from a few sources (Home Depot, Lowe's, a local electrical supply house, Grainger), take the AVERAGE, and note what you found. Then add a ${orgS.material_buffer_percent}% buffer so the number holds.
 - ENGINEERING: calculate the real numbers per NEC — CALL the calc tools (calc_wire_size, calc_voltage_drop, calc_conduit_fill, calc_box_fill) for exact answers, don't eyeball sizes/quantities, and show what they returned so it's verifiable.
 - BE A PARTNER: if there's a better, safer, or cheaper way to do the work, say so in one line.
 - It's an estimate with a small buffer, not a guess — accuracy first.`;
+  }
   if (playbook) {
-    systemPrompt += `\n\nCOMPANY NOTES — apply these ON TOP of the method above. The METHOD governs the numbers (labor rate from settings, live web-searched material prices + buffer, NEC-calculated sizes/quantities); use these notes only for the company's habits, inclusions/exclusions, wording, and special cases. If a note states an old rate or markup that conflicts with the method/settings, the method wins — don't use stale numbers from here:\n${playbook}`;
+    systemPrompt += catalogMode
+      ? `\n\nCOMPANY PLAYBOOK — this IS your estimating script for this company: the scoping questions to ask, the project types, the material/style options, and how to turn the answers into catalog line items. Follow it. Ask these questions before pricing — or read them from the lead's intake if the customer already answered them on the way in:\n${playbook}`
+      : `\n\nCOMPANY NOTES — apply these ON TOP of the method above. The METHOD governs the numbers (labor rate from settings, live web-searched material prices + buffer, NEC-calculated sizes/quantities); use these notes only for the company's habits, inclusions/exclusions, wording, and special cases. If a note states an old rate or markup that conflicts with the method/settings, the method wins — don't use stale numbers from here:\n${playbook}`;
   }
   // STYLE — Erik: short, direct, no small talk. Register: contractors swear like sailors — mirror
   // them (mild, natural), but NEVER onto anything customer-facing or persisted to a record.

@@ -32,6 +32,12 @@ export interface OrgSettings {
   material_buffer_percent: number;
   /** Free-text "how we quote" playbook injected into AI quote drafts + assistant. */
   quote_playbook: string;
+  /** How this company prices work, which base estimating method Nort uses:
+   *  "research" = live web-searched material prices + trade-calculated quantities (the
+   *  electrical/trade default); "catalog" = bid from the company's OWN price list + saved
+   *  kits at their own prices, quantities from the customer's measurements (deck/carpentry
+   *  & any preset-price shop). The quote_playbook holds the company's specific scoping script. */
+  estimating_mode: "research" | "catalog";
   /** Employee handbook text (simple #/## headings + paragraphs). */
   employee_handbook: string;
 
@@ -100,6 +106,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   material_markup_percent: 25,
   material_buffer_percent: 10,
   quote_playbook: "",
+  estimating_mode: "research",
   employee_handbook: "",
   work_day_start: "08:00",
   work_day_end: "17:00",
