@@ -77,3 +77,38 @@ export type AgentDraft = {
   /** "building" while gathering, "ready" once read back + good to save. */
   status?: "building" | "ready";
 };
+
+// The DRIVER HUD CARD — the "windshield". When the user asks Nort to pull up / show an
+// entity (a job, estimate, invoice, customer, or the day), the agent calls show_card with
+// the KEY glanceable facts and the client fills the N-Box with one big, driver-safe card
+// instead of a wall of text. Emitted as a delimited block, same mid-stream extract rule as
+// DRAFT (the client keeps the LAST complete block).
+export const HUD_OPEN = "␞CN_HUD␞";
+export const HUD_CLOSE = "␞/CN_HUD␞";
+
+export type HudFact = {
+  /** Short label, e.g. "gate code", "balance due", "hours today". */
+  label: string;
+  /** The value, already formatted for the eye, e.g. "4412", "$7,350", "6.5h". */
+  value: string;
+};
+
+export type AgentHudCard = {
+  kind: "job" | "estimate" | "invoice" | "customer" | "schedule" | "task";
+  /** The headline — the customer / entity name. */
+  title: string;
+  /** A short context line, e.g. "on the clock · J-012" or "draft estimate". */
+  eyebrow?: string | null;
+  /** A one-line scope / summary. */
+  scope?: string | null;
+  /** Street address — the card turns it into one tap to Maps. */
+  address?: string | null;
+  /** Up to ~4 big glanceable tiles (gate code, balance due, hours, …). */
+  facts?: HudFact[];
+  /** The one look-ahead line, e.g. "next: 8:00 at the Lim's, 6 min away". */
+  next?: string | null;
+  /** Deep link to the full screen, so tapping the card opens it when parked. */
+  href?: string | null;
+  /** true = clear the card off the glass. */
+  cleared?: boolean;
+};

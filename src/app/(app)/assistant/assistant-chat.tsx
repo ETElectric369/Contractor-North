@@ -9,23 +9,31 @@ import { speakSmart, unlockAudio, stopSpeaking, splitSentences, SpeakQueue, star
 import { classifyConfirmReply } from "@/lib/confirm-parse";
 import * as speech from "@/lib/voice";
 import {
-  CONFIRM_MARKER, OPEN_MARKER, PICK_MARKER, STATUS_OPEN, STATUS_CLOSE, DRAFT_OPEN, DRAFT_CLOSE,
-  type AgentConfirm, type AgentOpen, type AgentPick, type AgentDraft,
+  CONFIRM_MARKER, OPEN_MARKER, PICK_MARKER, STATUS_OPEN, STATUS_CLOSE, DRAFT_OPEN, DRAFT_CLOSE, HUD_OPEN, HUD_CLOSE,
+  type AgentConfirm, type AgentOpen, type AgentPick, type AgentDraft, type AgentHudCard,
 } from "@/lib/assistant-protocol";
 import { confirmAgentAction, saveQuoteFromDraft, loadConversation, saveConversation, clearConversation, type PickerContact } from "./actions";
 import { ContactPicker } from "./contact-picker";
+import { DriverCard } from "@/components/driver-card";
 import { estimatorStore } from "@/lib/estimator-store";
 
 const money = (n: number) => `$${(Math.round(n * 100) / 100).toFixed(2)}`;
 
 /** Pull the visible text + the latest live quote draft + the transient tool-status out of the raw
  *  stream so far. */
-function parseStream(full: string): { text: string; draft: AgentDraft | null; status: string | null } {
+function parseStream(full: string): { text: string; draft: AgentDraft | null; card: AgentHudCard | null; status: string | null } {
   let draft: AgentDraft | null = null;
   const dre = new RegExp(DRAFT_OPEN + "([\\s\\S]*?)" + DRAFT_CLOSE, "g");
   const blocks = [...full.matchAll(dre)];
   if (blocks.length) {
     try { draft = JSON.parse(blocks[blocks.length - 1][1]); } catch {}
+  }
+  // The driver HUD card — same extract rule as DRAFT: keep the LAST complete block.
+  let card: AgentHudCard | null = null;
+  const hre = new RegExp(HUD_OPEN + "([\\s\\S]*?)" + HUD_CLOSE, "g");
+  const hblocks = [...full.matchAll(hre)];
+  if (hblocks.length) {
+    try { card = JSON.parse(hblocks[hblocks.length - 1][1]); } catch {}
   }
   // Transient tool-status ("Searching…"): show ONLY when it's the most recent thing in the stream
   // (nothing meaningful streamed after it yet), so it appears during the silent tool call and clears
@@ -33,20 +41,20 @@ function parseStream(full: string): { text: string; draft: AgentDraft | null; st
   let status: string | null = null;
   const lastClose = full.lastIndexOf(STATUS_CLOSE);
   if (lastClose >= 0) {
-    const after = full.slice(lastClose + STATUS_CLOSE.length).replace(dre, "").trim();
+    const after = full.slice(lastClose + STATUS_CLOSE.length).replace(dre, "").replace(hre, "").trim();
     if (!after) {
       const sb = [...full.matchAll(new RegExp(STATUS_OPEN + "([\\s\\S]*?)" + STATUS_CLOSE, "g"))];
       try { status = JSON.parse(sb[sb.length - 1][1]).label ?? null; } catch {}
     }
   }
-  let text = full.replace(dre, "").replace(new RegExp(STATUS_OPEN + "([\\s\\S]*?)" + STATUS_CLOSE, "g"), "");
-  // Drop a half-arrived draft/status block at the tail so raw JSON never flashes on screen.
-  for (const m of [DRAFT_OPEN, STATUS_OPEN]) {
+  let text = full.replace(dre, "").replace(hre, "").replace(new RegExp(STATUS_OPEN + "([\\s\\S]*?)" + STATUS_CLOSE, "g"), "");
+  // Drop a half-arrived draft/card/status block at the tail so raw JSON never flashes on screen.
+  for (const m of [DRAFT_OPEN, HUD_OPEN, STATUS_OPEN]) {
     const p = text.indexOf(m);
     if (p >= 0) text = text.slice(0, p);
   }
   text = text.split(CONFIRM_MARKER)[0].split(OPEN_MARKER)[0].split(PICK_MARKER)[0];
-  return { text, draft, status };
+  return { text, draft, card, status };
 }
 
 /** The Estimator — the live estimate building in front of you (the assistant's preview box). */
@@ -160,6 +168,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
   const [voiceMode, setVoiceModeState] = useState(false); // in a spoken conversation (drives the UI)
   const [speaking, setSpeaking] = useState(false); // Claude's reply is currently playing
   const [draft, setDraft] = useState<AgentDraft | null>(null); // the live quote being built
+  const [card, setCard] = useState<AgentHudCard | null>(null); // the driver HUD card filling the glass
   const [savingDraft, setSavingDraft] = useState(false);
   // Estimates saved THIS session — each collapses the live numbers into a clickable line that
   // links to the quote (the permanent log in /quotes).
@@ -168,6 +177,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
   // Publish the live estimate + speaking state to the shared store so the COMPACTED Estimator
   // (total + stop) can live on the topbar Talk button even when this drawer is closed.
   useEffect(() => { estimatorStore.setDraft(draft); }, [draft]);
+  useEffect(() => { estimatorStore.setCard(card); }, [card]);
   useEffect(() => { estimatorStore.setSpeaking(speaking); }, [speaking]);
   useEffect(() => { estimatorStore.setStreaming(streaming); }, [streaming]);
   // Publish listening too, so the topbar button can show a real red STOP whenever the mic is hot
@@ -404,6 +414,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     stopVoice();
     setMessages([]);
     setDraft(null);
+    setCard(null);
     setInput("");
     clearConversation().catch(() => {});
   }
@@ -509,10 +520,12 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         const { done, value } = await reader.read();
         if (done) break;
         full += decoder.decode(value, { stream: true });
-        const { text: visible, draft: liveDraft, status: liveStatus } = parseStream(full);
+        const { text: visible, draft: liveDraft, card: liveCard, status: liveStatus } = parseStream(full);
         // `cleared` = the agent just saved the estimate → wipe the preview so it stops
         // anchoring the conversation. Otherwise the quote fills in live as blocks arrive.
         if (liveDraft) setDraft((liveDraft as { cleared?: boolean }).cleared ? null : liveDraft);
+        // The driver HUD card fills the glass as its block arrives; cleared:true clears it.
+        if (liveCard) setCard(liveCard.cleared ? null : liveCard);
         setStatus(liveStatus); // transient "Searching…" pill while a tool runs
         setTokens(Math.max(1, Math.round(visible.length / 4))); // rough live token count for the status line
         setMessages((m) => {
@@ -851,6 +864,11 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
           </span>
         </div>
       ) : null}
+
+      {/* The driver HUD card — the "windshield". Nort fills the glass with one glanceable card
+          (job / estimate / customer / day) when you ask to pull something up. Shows in both the
+          floating N-Box (driving) and the full page. */}
+      {card ? <DriverCard card={card} onDismiss={() => setCard(null)} /> : null}
 
       {/* The full estimate card — non-glass only; the glass drawer shows the ESTIMATOR line + items. */}
       {draft && !glass ? <LiveQuote draft={draft} onSave={saveDraft} onDismiss={() => setDraft(null)} saving={savingDraft} /> : null}
