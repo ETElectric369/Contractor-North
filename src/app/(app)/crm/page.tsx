@@ -1,9 +1,9 @@
-import Link from "next/link";
 import { Users, Mail, Phone, Search } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
+import { DataTable } from "@/components/ui/data-table";
 import { Input } from "@/components/ui/input";
 import { NewCustomerButton } from "./new-customer-button";
 import { ImportCustomersButton } from "./import-customers-button";
@@ -72,27 +72,27 @@ export default async function CrmPage({
         </EmptyState>
       ) : (
         <Card className="overflow-hidden">
-          <div className="hidden grid-cols-12 gap-4 border-b border-slate-100 bg-slate-50 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-400 md:grid">
-            <div className="col-span-4">Name</div>
-            <div className="col-span-3">Contact</div>
-            <div className="col-span-2">Type</div>
-            <div className="col-span-2">Location</div>
-            <div className="col-span-1 text-right">Status</div>
-          </div>
-          <ul className="divide-y divide-slate-100">
-            {customers.map((c) => (
-              <li key={c.id}>
-                <Link
-                  href={`/crm/${c.id}`}
-                  className="grid grid-cols-1 gap-1 px-5 py-3 hover:bg-slate-50 md:grid-cols-12 md:items-center md:gap-4"
-                >
-                  <div className="col-span-4">
+          <DataTable<Customer>
+            rows={customers}
+            rowKey={(c) => c.id}
+            rowHref={(c) => `/crm/${c.id}`}
+            columns={[
+              {
+                header: "Name",
+                span: 4,
+                cell: (c) => (
+                  <>
                     <div className="font-medium text-slate-900">{c.name}</div>
-                    {c.company_name && (
-                      <div className="text-xs text-slate-400">{c.company_name}</div>
-                    )}
-                  </div>
-                  <div className="col-span-3 space-y-0.5 text-sm text-slate-500">
+                    {c.company_name && <div className="text-xs text-slate-400">{c.company_name}</div>}
+                  </>
+                ),
+              },
+              {
+                header: "Contact",
+                span: 3,
+                className: "space-y-0.5 text-sm text-slate-500",
+                cell: (c) => (
+                  <>
                     {c.email && (
                       <div className="flex items-center gap-1.5">
                         <Mail className="h-3.5 w-3.5" /> {c.email}
@@ -103,20 +103,19 @@ export default async function CrmPage({
                         <Phone className="h-3.5 w-3.5" /> {c.phone}
                       </div>
                     )}
-                  </div>
-                  <div className="col-span-2 text-sm capitalize text-slate-600">
-                    {c.type}
-                  </div>
-                  <div className="col-span-2 text-sm text-slate-500">
-                    {[c.city, c.state].filter(Boolean).join(", ") || "—"}
-                  </div>
-                  <div className="col-span-1 md:text-right">
-                    <Badge tone={statusTone(c.status)}>{c.status}</Badge>
-                  </div>
-                </Link>
-              </li>
-            ))}
-          </ul>
+                  </>
+                ),
+              },
+              { header: "Type", span: 2, className: "text-sm capitalize text-slate-600", cell: (c) => c.type },
+              {
+                header: "Location",
+                span: 2,
+                className: "text-sm text-slate-500",
+                cell: (c) => [c.city, c.state].filter(Boolean).join(", ") || "—",
+              },
+              { header: "Status", span: 1, align: "right", cell: (c) => <Badge tone={statusTone(c.status)}>{c.status}</Badge> },
+            ]}
+          />
         </Card>
       )}
     </div>
