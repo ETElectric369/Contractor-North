@@ -83,6 +83,7 @@ export function payLine(
 export function aggregatePayrollEntries(
   entries: any[],
   tz: string = "America/Los_Angeles",
+  fallbackRate?: number,
 ): PayrollRow[] {
   type Acc = PayrollRow & {
     baseline: number;
@@ -116,8 +117,10 @@ export function aggregatePayrollEntries(
     const h = hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes);
     // Gross is summed PER ENTRY at that entry's pay rate (rate_override ?? base), so a
     // mixed-rate week — a few supervisor-rate shifts among normal ones — pays correctly
-    // instead of flattening everything to the profile's base rate.
-    const rate = payRateForEntry(e);
+    // instead of flattening everything to the profile's base rate. fallbackRate is used
+    // only when a row carries no joined profile (the mark-paid snapshot passes the base
+    // rate explicitly) — the display path joins profiles, so it stays undefined there.
+    const rate = payRateForEntry(e, fallbackRate);
     const gross = h * rate;
     if (e.paid_at) {
       rec.paidHours += h;

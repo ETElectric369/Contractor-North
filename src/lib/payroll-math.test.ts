@@ -163,6 +163,48 @@ describe("aggregatePayrollEntries — two buckets", () => {
   });
 });
 
+describe("snapshot == display: mark-paid gross equals the approval screen", () => {
+  // The approval screen calls aggregatePayrollEntries(entries, tz) with profiles JOINED.
+  // markPeriodPaid now calls the SAME function on entries that DON'T join profiles, passing
+  // the profile's base rate as the fallback. Both paths must yield identical unpaid hours +
+  // gross, or the frozen payroll_runs snapshot the accountant exports diverges from what the
+  // owner approved on screen. These tests are the proof of that equality.
+  const tz = "America/Los_Angeles";
+
+  it("mixed base + override: unprofiled+fallback matches profiled join, to the cent", () => {
+    const rate = 25;
+    // What the approval screen loads (profiles joined, both entries unpaid):
+    const displayEntries = [
+      { clock_in: "2026-06-01T08:00:00Z", clock_out: "2026-06-01T16:00:00Z", lunch_minutes: 0, paid_at: null, mileage_paid_at: null, miles: 0, rate_override: null, profiles: { full_name: "Brian", hourly_rate: rate } },
+      { clock_in: "2026-06-02T08:00:00Z", clock_out: "2026-06-02T16:00:00Z", lunch_minutes: 0, paid_at: null, mileage_paid_at: null, miles: 0, rate_override: 60, profiles: { full_name: "Brian", hourly_rate: rate } },
+    ];
+    // What markPeriodPaid fetches (NO profiles, unpaid-only query) + the base rate as fallback:
+    const snapshotEntries = [
+      { clock_in: "2026-06-01T08:00:00Z", clock_out: "2026-06-01T16:00:00Z", lunch_minutes: 0, rate_override: null },
+      { clock_in: "2026-06-02T08:00:00Z", clock_out: "2026-06-02T16:00:00Z", lunch_minutes: 0, rate_override: 60 },
+    ];
+    const [disp] = aggregatePayrollEntries(displayEntries, tz);
+    const [snap] = aggregatePayrollEntries(snapshotEntries, tz, rate);
+    expect(snap.unpaidHours).toBe(disp.unpaidHours);
+    expect(snap.unpaidGross).toBe(disp.unpaidGross);
+    expect(snap.unpaidGross).toBe(680); // 8×25 + 8×60
+  });
+
+  it("lunch deductions and fractional cents carry identically through both paths", () => {
+    const rate = 33.33;
+    const displayEntries = [
+      { clock_in: "2026-06-01T08:00:00Z", clock_out: "2026-06-01T16:00:00Z", lunch_minutes: 30, paid_at: null, mileage_paid_at: null, miles: 0, rate_override: null, profiles: { hourly_rate: rate } },
+    ];
+    const snapshotEntries = [
+      { clock_in: "2026-06-01T08:00:00Z", clock_out: "2026-06-01T16:00:00Z", lunch_minutes: 30, rate_override: null },
+    ];
+    const [disp] = aggregatePayrollEntries(displayEntries, tz);
+    const [snap] = aggregatePayrollEntries(snapshotEntries, tz, rate);
+    expect(snap.unpaidHours).toBe(disp.unpaidHours); // 7.5
+    expect(snap.unpaidGross).toBe(disp.unpaidGross); // 7.5 × 33.33 = 249.975 (raw; caller rounds once)
+  });
+});
+
 describe("payRateForEntry — pay rate source of truth", () => {
   const e = (over: any, hourly?: number) => ({ rate_override: over, profiles: { hourly_rate: hourly } });
   it("rate_override wins when positive", () => {

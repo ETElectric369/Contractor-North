@@ -4,8 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getOrgSettings } from "@/lib/org-settings";
 import { tzDayStartUtc } from "@/lib/tz";
-import { hoursBetween } from "@/lib/utils";
-import { payRateForEntry } from "@/lib/payroll-math";
+import { aggregatePayrollEntries } from "@/lib/payroll-math";
 import { summarizeMileage } from "@/lib/mileage-math";
 
 export type Result = { ok: boolean; error?: string };
@@ -57,7 +56,7 @@ export async function markPeriodPaid(input: {
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const { supabase, userId } = ctx;
 
-  const { startIso, endIso } = await periodInstants(supabase, input.periodStart, input.periodEnd);
+  const { startIso, endIso, tz } = await periodInstants(supabase, input.periodStart, input.periodEnd);
   const openErr = await openEntryError(supabase, input.profileId, startIso, endIso);
   if (openErr) return { ok: false, error: openErr };
 
@@ -76,15 +75,15 @@ export async function markPeriodPaid(input: {
   const list = (entries ?? []) as any[];
   if (!list.length) return { ok: false, error: "No unpaid hours in this period." };
 
-  // Accumulate gross PER ENTRY at its own pay rate (rate_override ?? base) — the exact same
-  // resolver the approval screen uses, so the snapshot the accountant exports can't diverge
-  // from what the owner approved, and a mixed-rate week is paid correctly.
-  let hours = 0, gross = 0;
-  for (const e of list) {
-    const h = hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes);
-    hours += h;
-    gross += h * payRateForEntry(e, rate);
-  }
+  // Freeze the snapshot's hours+gross via the EXACT function the approval screen renders
+  // (aggregatePayrollEntries) — one code path, so the number the accountant exports can't
+  // drift from what the owner approved. Every fetched entry is unpaid (query filter) and
+  // one profile, so they roll into a single row's UNPAID bucket; pass the base rate as the
+  // fallback because this query doesn't join profiles. Miles aren't selected here, so the
+  // aggregator's mileage side reads 0 — exactly right, this is the base bucket only.
+  const [agg] = aggregatePayrollEntries(list, tz, rate);
+  const hours = agg?.unpaidHours ?? 0;
+  const gross = agg?.unpaidGross ?? 0;
   const r2 = (n: number) => Math.round(n * 100) / 100;
 
   const ids = list.map((e) => e.id);
