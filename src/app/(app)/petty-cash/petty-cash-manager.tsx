@@ -2,12 +2,13 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Pencil, ArrowDownCircle, ArrowUpCircle } from "lucide-react";
+import { Plus, Pencil, ArrowDownCircle, ArrowUpCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Modal, ModalActions } from "@/components/ui/modal";
+import { DeleteButton } from "@/components/ui/delete-button";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { useToast } from "@/components/toast";
 import { addPettyCash, updatePettyCash, deletePettyCash } from "./actions";
@@ -87,7 +88,7 @@ export function PettyCashManager({ items, balance }: { items: PettyTx[]; balance
                 {i.kind === "replenish" ? "+" : "−"}{formatCurrency(i.amount)}
               </span>
               <EditPettyCashButton tx={i} />
-              <button onClick={() => { if (!confirm("Delete this entry?")) return; start(async () => { const res = await deletePettyCash(i.id); if (!res?.ok) { toast(res?.error ?? "Couldn't delete — try again.", "error"); return; } toast("Entry deleted", "success"); router.refresh(); }); }} className="text-slate-300 hover:text-red-600" title="Delete"><Trash2 className="h-4 w-4" /></button>
+              <DeleteButton action={() => deletePettyCash(i.id)} confirm="Delete this entry?" done="Entry deleted" className="text-slate-300 hover:text-red-600 disabled:opacity-50" />
             </li>
           ))}
           {items.length === 0 && <li className="px-4 py-10 text-center text-sm text-slate-400">No transactions yet. Add cash to your box, then log expenses as you spend.</li>}

@@ -2,13 +2,14 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { FileText, Plus, Pencil, Trash2, ShieldCheck } from "lucide-react";
+import { FileText, Plus, Pencil, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Modal, ModalActions } from "@/components/ui/modal";
+import { DeleteButton } from "@/components/ui/delete-button";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { useToast } from "@/components/toast";
 import { createCompliance, updateCompliance, deleteCompliance } from "./actions";
@@ -161,7 +162,7 @@ export function ComplianceManager({ items, orgId }: { items: ComplianceItem[]; o
                   </div>
                   <div className="flex items-center gap-1">
                     <button onClick={() => openEdit(c)} className="text-slate-300 hover:text-slate-700" title="Edit"><Pencil className="h-4 w-4" /></button>
-                    <button onClick={() => { if (!confirm("Delete this item?")) return; start(async () => { const res = await deleteCompliance(c.id); if (!res?.ok) { toast(res?.error ?? "Couldn't delete — try again.", "error"); return; } toast("Item deleted", "success"); router.refresh(); }); }} className="text-slate-300 hover:text-red-600" title="Delete"><Trash2 className="h-4 w-4" /></button>
+                    <DeleteButton action={() => deleteCompliance(c.id)} confirm="Delete this item?" done="Item deleted" className="text-slate-300 hover:text-red-600 disabled:opacity-50" />
                   </div>
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
