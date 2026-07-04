@@ -1,4 +1,4 @@
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency, formatDate, formatCityStateZip } from "@/lib/utils";
 import { DocHeader } from "@/components/doc-templates";
 import { LineItemText } from "@/components/line-item-text";
 import { CostBreakdown } from "@/components/cost-breakdown";
@@ -112,7 +112,7 @@ export function InvoiceDocument({
               </div>
               <div className="min-w-0 text-slate-700">
                 {c.address && <div>{c.address}</div>}
-                {(c.city || c.state || c.zip) && <div>{[c.city, c.state, c.zip].filter(Boolean).join(", ")}</div>}
+                {(c.city || c.state || c.zip) && <div>{formatCityStateZip(c.city, c.state, c.zip)}</div>}
               </div>
             </div>
           ) : (

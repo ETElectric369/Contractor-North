@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { PrintButton } from "@/components/print-button";
 import { companyFromOrg } from "@/components/doc-letterhead";
 import { DocHeader, templateFor } from "@/components/doc-templates";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency, formatDate, formatCityStateZip } from "@/lib/utils";
 import { docTitle } from "@/lib/doc-title";
 import type { Metadata } from "next";
 import type { Organization } from "@/lib/types";
@@ -68,7 +68,7 @@ export default async function ChangeOrderPrintPage({
                 {customer.company_name && <div>{customer.company_name}</div>}
                 {customer.address && <div>{customer.address}</div>}
                 {(customer.city || customer.state || customer.zip) && (
-                  <div>{[customer.city, customer.state, customer.zip].filter(Boolean).join(", ")}</div>
+                  <div>{formatCityStateZip(customer.city, customer.state, customer.zip)}</div>
                 )}
               </div>
             ) : (

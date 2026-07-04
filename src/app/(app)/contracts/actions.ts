@@ -6,7 +6,7 @@ import { getOrgSettings, accentHex } from "@/lib/org-settings";
 import { scheduleStatus, contractTotalFromQuotes, type Milestone } from "@/lib/payment-schedule-math";
 import { buildContractBody } from "@/lib/contract-body";
 import { sendEmail, renderReminderEmail, ownerBcc } from "@/lib/email";
-import { formatDate } from "@/lib/utils";
+import { formatDate, formatCityStateZip } from "@/lib/utils";
 
 type Result = { ok: boolean; error?: string; id?: string };
 
@@ -14,11 +14,8 @@ function contractLink(token: string) {
   return `${process.env.NEXT_PUBLIC_SITE_URL || ""}/c/${token}`;
 }
 
-/** "City, ST ZIP" from loose parts. */
-function csz(x: { city?: string | null; state?: string | null; zip?: string | null } | null | undefined): string {
-  const cs = [x?.city, x?.state].filter(Boolean).join(", ");
-  return [cs, x?.zip].filter(Boolean).join(" ").trim();
-}
+const csz = (x: { city?: string | null; state?: string | null; zip?: string | null } | null | undefined) =>
+  formatCityStateZip(x?.city, x?.state, x?.zip);
 
 /** Generate (or regenerate the draft of) a contract from a job — auto-filling the
  *  parties, property, scope, dates, billing model + payment schedule, and terms. */

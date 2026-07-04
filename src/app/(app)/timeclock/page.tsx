@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { isStaffRole } from "@/lib/actions/perms";
+import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
@@ -57,7 +58,7 @@ export default async function TimeclockPage() {
     supabase
       .from("jobs")
       .select("id, job_number, name, address, city, state, zip, code_template_id")
-      .in("status", ["scheduled", "in_progress", "estimate"])
+      .in("status", ACTIVE_JOB_STATUSES)
       .order("created_at", { ascending: false })
       .limit(50),
     supabase

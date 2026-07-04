@@ -3,13 +3,11 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { createClient } from "@/lib/supabase/server";
 import { PrintButton } from "@/components/print-button";
 import { buildPrelimNotice } from "@/lib/prelim-notice";
+import { formatCityStateZip } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
-function csz(x: any): string {
-  const cs = [x?.city, x?.state].filter(Boolean).join(", ");
-  return [cs, x?.zip].filter(Boolean).join(" ").trim();
-}
+const csz = (x: any) => formatCityStateZip(x?.city, x?.state, x?.zip);
 
 export default async function PrelimNoticePage({ params }: { params: Promise<{ jobId: string }> }) {
   const { jobId } = await params;

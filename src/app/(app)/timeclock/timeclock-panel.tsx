@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
-import { hoursBetween, formatDuration } from "@/lib/utils";
+import { hoursBetween, formatDuration, formatFullAddress } from "@/lib/utils";
 import { translator } from "@/lib/i18n";
 import { drivingDistanceMiles } from "@/lib/google-maps";
 import { getPosition } from "@/lib/geo";
@@ -332,7 +332,7 @@ export function TimeclockPanel({
   function jobAddressForMiles(): string {
     const id = allocations.find((a) => a.job_id)?.job_id || openEntry?.job_id || "";
     const j = jobs.find((x) => x.id === id);
-    return j ? [j.address, j.city, j.state, j.zip].filter(Boolean).join(", ").trim() : "";
+    return j ? formatFullAddress(j.address, j.city, j.state, j.zip) : "";
   }
   function autoMiles() {
     const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;

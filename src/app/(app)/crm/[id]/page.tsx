@@ -9,7 +9,7 @@ import { Badge, statusTone } from "@/components/ui/badge";
 import { RowList } from "@/components/ui/row-list";
 import { Button } from "@/components/ui/button";
 import { Tabs } from "@/components/tabs";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, formatCityStateZip, formatFullAddress } from "@/lib/utils";
 import { EditCustomerButton } from "./edit-customer-button";
 import { MergeCustomerButton } from "./merge-customer-button";
 import { PortalLinkButton } from "./portal-link-button";
@@ -115,14 +115,14 @@ export default async function CustomerDetailPage({
             ) : null}
             {(c.address || c.city || c.state || c.zip) && (
               <NavLink
-                address={[c.address, c.city, c.state, c.zip].filter(Boolean).join(", ")}
+                address={formatFullAddress(c.address, c.city, c.state, c.zip)}
                 className="flex items-start gap-2 text-slate-600 hover:text-brand"
               >
                 <MapPin className="mt-0.5 h-4 w-4 text-slate-400" />
                 <span>
                   {c.address}
                   {c.address && <br />}
-                  {[c.city, c.state, c.zip].filter(Boolean).join(", ")}
+                  {formatCityStateZip(c.city, c.state, c.zip)}
                 </span>
               </NavLink>
             )}

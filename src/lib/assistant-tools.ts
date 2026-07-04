@@ -1,7 +1,7 @@
 import "server-only";
 import type Anthropic from "@anthropic-ai/sdk";
 import { tzDayStartUtc, todayStrInTz, payPeriodForOffset } from "@/lib/tz";
-import { escapeLike, hoursBetween } from "@/lib/utils";
+import { escapeLike, hoursBetween, formatFullAddress } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { getMoneyPipeline } from "@/lib/billing-pipeline";
@@ -666,7 +666,7 @@ export async function runDataTool(
           status: c.status,
           phone: c.phone,
           email: c.email,
-          address: [c.address, c.city, c.state, c.zip].filter(Boolean).join(", ") || null,
+          address: formatFullAddress(c.address, c.city, c.state, c.zip) || null,
           notes: c.notes,
         });
       }

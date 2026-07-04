@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { PrintButton } from "@/components/print-button";
 import { companyFromOrg } from "@/components/doc-letterhead";
 import { DocHeader, templateFor } from "@/components/doc-templates";
-import { formatDate } from "@/lib/utils";
+import { formatDate, formatCityStateZip } from "@/lib/utils";
 import { ContractSign } from "./sign";
 
 export const dynamic = "force-dynamic";
@@ -56,7 +56,7 @@ export default async function PublicContractPage({ params }: { params: Promise<{
               <div className="font-medium text-slate-900">{c.name}</div>
               {c.company_name && <div>{c.company_name}</div>}
               {c.address && <div>{c.address}</div>}
-              {(c.city || c.state || c.zip) && <div>{[c.city, c.state, c.zip].filter(Boolean).join(", ")}</div>}
+              {(c.city || c.state || c.zip) && <div>{formatCityStateZip(c.city, c.state, c.zip)}</div>}
             </div>
           ) : null}
         </div>

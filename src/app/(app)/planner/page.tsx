@@ -8,7 +8,7 @@ import { WeatherWidget } from "@/components/weather-widget";
 import { getMoneyPipeline } from "@/lib/billing-pipeline";
 import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
-import { hoursBetween, formatCurrency, formatTime } from "@/lib/utils";
+import { hoursBetween, formatCurrency, formatTime, formatCityStateZip } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
 import { NavLink } from "@/components/nav-link";
 import { toJobOptions, toCustomerOptions, toStaffOptions, listActiveTechs, listCustomerOptions } from "@/lib/schedule-options";
@@ -231,7 +231,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   const clockJobs = todayJobs.map((j: any) => ({ id: j.id, label: `${j.job_number} — ${j.name}` }));
 
   const org = orgRow;
-  const orgLocation = [(org as any)?.city, (org as any)?.state, (org as any)?.zip].filter(Boolean).join(", ") || null;
+  const orgLocation = formatCityStateZip((org as any)?.city, (org as any)?.state, (org as any)?.zip) || null;
   const QUOTES = [
     "Service. Integrity. Reliability.",
     "Measure twice, cut once.",

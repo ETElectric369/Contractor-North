@@ -1,5 +1,29 @@
 import { describe, it, expect } from "vitest";
-import { hoursBetween, formatCurrency } from "@/lib/utils";
+import { hoursBetween, formatCurrency, formatCityStateZip, formatFullAddress } from "@/lib/utils";
+
+describe("formatCityStateZip — the one canonical 'City, ST ZIP'", () => {
+  it("joins city+state with a comma, ZIP after a SPACE (owner-chosen format)", () => {
+    expect(formatCityStateZip("Truckee", "CA", "96161")).toBe("Truckee, CA 96161");
+  });
+  it("drops empty parts cleanly", () => {
+    expect(formatCityStateZip("Truckee", "CA", null)).toBe("Truckee, CA");
+    expect(formatCityStateZip(null, "CA", "96161")).toBe("CA 96161");
+    expect(formatCityStateZip("Truckee", null, null)).toBe("Truckee");
+    expect(formatCityStateZip(null, null, null)).toBe("");
+  });
+});
+
+describe("formatFullAddress — 'Street, City, ST ZIP'", () => {
+  it("prepends the street, comma-joined to the city/state/zip tail", () => {
+    expect(formatFullAddress("10244 Schaffer Rd", "Truckee", "CA", "96161")).toBe("10244 Schaffer Rd, Truckee, CA 96161");
+  });
+  it("with no street, is just the tail", () => {
+    expect(formatFullAddress(null, "Truckee", "CA", "96161")).toBe("Truckee, CA 96161");
+  });
+  it("empty everywhere → empty string", () => {
+    expect(formatFullAddress(null, null, null, null)).toBe("");
+  });
+});
 
 describe("hoursBetween", () => {
   const start = "2026-06-01T08:00:00Z";

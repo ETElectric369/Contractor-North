@@ -1,6 +1,7 @@
 import { COMPANY } from "@/lib/company";
 import type { Organization } from "@/lib/types";
 import { accentHex } from "@/lib/org-settings";
+import { formatCityStateZip } from "@/lib/utils";
 
 export interface CompanyInfo {
   name: string;
@@ -17,10 +18,7 @@ export interface CompanyInfo {
 
 /** Build display company info from the org record, falling back to defaults. */
 export function companyFromOrg(org: Organization | null): CompanyInfo {
-  const cityStateZip = [org?.city, org?.state, org?.zip]
-    .filter(Boolean)
-    .join(", ")
-    .replace(/, (\S+)$/, " $1"); // "City, ST 12345"
+  const cityStateZip = formatCityStateZip(org?.city, org?.state, org?.zip); // "City, ST 12345"
   return {
     name: org?.name || COMPANY.name,
     tagline: COMPANY.tagline,

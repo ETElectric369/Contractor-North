@@ -18,6 +18,29 @@ export function formatCurrency(value: number | null | undefined) {
   return currency.format(Number.isFinite(n) ? n : 0);
 }
 
+/** THE canonical city/state/zip tail: "City, ST ZIP" — city+state comma-joined, ZIP
+ *  appended after a SPACE (owner-chosen; a comma-before-ZIP variant had drifted across
+ *  invoices/contracts/portal). Empty parts drop out ("City ZIP", "ST", etc. as apply). */
+export function formatCityStateZip(
+  city?: string | null,
+  state?: string | null,
+  zip?: string | null,
+): string {
+  const cityState = [city, state].filter(Boolean).join(", ");
+  return [cityState, zip].filter(Boolean).join(" ").trim();
+}
+
+/** THE canonical one-line address: "123 Main St, City, ST ZIP" — street then the
+ *  city/state/zip tail, comma-joined; any empty part drops out. */
+export function formatFullAddress(
+  address?: string | null,
+  city?: string | null,
+  state?: string | null,
+  zip?: string | null,
+): string {
+  return [address, formatCityStateZip(city, state, zip)].filter(Boolean).join(", ");
+}
+
 // THE business timezone all dates render in. The server runs in UTC, so without a
 // timeZone every server-rendered date prints UTC and disagrees with the browser —
 // the recurring off-by-one / "timezone again" bug. Single source of truth; override

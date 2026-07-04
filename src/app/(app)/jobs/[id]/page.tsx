@@ -20,6 +20,8 @@ import {
   formatDuration,
   hoursBetween,
   initials,
+  formatCityStateZip,
+  formatFullAddress,
 } from "@/lib/utils";
 import { JobDocuments } from "./job-documents";
 import { JobPhotos } from "./job-photos";
@@ -259,11 +261,11 @@ export default async function JobDetailPage({
   const contactOptions = (allCustomers ?? []).map((c: any) => ({ id: c.id, name: c.name, type: c.type ?? null }));
   const thisJobOpt = [{ id: j.id, job_number: j.job_number, name: j.name }];
   // Appointment button takes {id,label} option lists.
-  const apptJobOpts = [{ id: j.id, label: `${j.job_number} · ${j.name}`, address: [j.address, j.city, j.state, j.zip].filter(Boolean).join(", ") || null }];
+  const apptJobOpts = [{ id: j.id, label: `${j.job_number} · ${j.name}`, address: formatFullAddress(j.address, j.city, j.state, j.zip) || null }];
   const apptCustOpts = (allCustomers ?? []).map((c: any) => ({ id: c.id, label: c.name }));
   const apptStaffOpts = (techs ?? []).map((t: any) => ({ id: t.id, label: t.full_name ?? "Unnamed" }));
-  const companyAddress = [org?.address_line1, org?.city, org?.state, org?.zip].filter(Boolean).join(", ");
-  const jobAddress = [j.address, j.city, j.state, j.zip].filter(Boolean).join(", ");
+  const companyAddress = formatFullAddress(org?.address_line1, org?.city, org?.state, org?.zip);
+  const jobAddress = formatFullAddress(j.address, j.city, j.state, j.zip);
   const tz = getOrgSettings((org as any)?.settings).timezone; // business tz for time-entry dates
 
   // Costing. laborCost = what we PAY (pay rate); billableLabor = what we CHARGE
@@ -435,7 +437,7 @@ export default async function JobDetailPage({
                       <NavLink address={jobAddress} className="flex min-h-[44px] items-center gap-1 text-left hover:text-brand">
                         <MapPin className="h-3.5 w-3.5 shrink-0 text-slate-400" /> {j.address}
                         {[j.city, j.state, j.zip].filter(Boolean).length > 0 && (
-                          <span>· {[j.city, j.state, j.zip].filter(Boolean).join(", ")}</span>
+                          <span>· {formatCityStateZip(j.city, j.state, j.zip)}</span>
                         )}
                       </NavLink>
                     ) : "—"}
@@ -785,7 +787,7 @@ export default async function JobDetailPage({
             insurance={(insuranceClaim as any) ?? null}
             defaults={{
               ownerName: (j.customers as any)?.name ?? undefined,
-              ownerAddress: [(j.customers as any)?.address, [(j.customers as any)?.city, (j.customers as any)?.state].filter(Boolean).join(", "), (j.customers as any)?.zip].filter(Boolean).join(" ").trim() || undefined,
+              ownerAddress: formatFullAddress((j.customers as any)?.address, (j.customers as any)?.city, (j.customers as any)?.state, (j.customers as any)?.zip) || undefined,
               estimatedAmount: contractTotal,
             }}
           />
