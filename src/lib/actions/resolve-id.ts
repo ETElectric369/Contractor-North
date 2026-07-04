@@ -182,9 +182,16 @@ export function resolveContactId(supabase: ResolverClient, value: string | null 
   return resolveEntityId(supabase, "customers", value, { nameColumns: ["name", "company_name"], thing: "contact" });
 }
 
-/** Job: match on the job name. */
+/** Job: match on the job name OR its display number (J-012) — the number is exactly what
+ *  Nort sees on the card and says out loud, so accepting it kills the "grab the real id" loop. */
 export function resolveJobId(supabase: ResolverClient, value: string | null | undefined): Promise<ResolveResult> {
-  return resolveEntityId(supabase, "jobs", value, { nameColumns: ["name"], thing: "job" });
+  return resolveEntityId(supabase, "jobs", value, { nameColumns: ["name", "job_number"], thing: "job" });
+}
+
+/** Quote / estimate: match on its display number (E-010 / Q-012) or title — same reason as
+ *  the job number above. quote_number is unique per org, so a number resolves to exactly one. */
+export function resolveQuoteId(supabase: ResolverClient, value: string | null | undefined): Promise<ResolveResult> {
+  return resolveEntityId(supabase, "quotes", value, { nameColumns: ["quote_number", "title"], thing: "estimate" });
 }
 
 /** Crew member / assignee: profiles' name column is full_name. */

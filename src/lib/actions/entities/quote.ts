@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { saveQuote, addQuoteItem, updateQuoteItem, deleteQuoteItem, createJobFromQuote, updateQuoteStatus, setQuoteType, updateQuoteMeta, setQuoteCustomer, setQuoteJob, findRecentDraftQuote, duplicateQuote } from "@/app/(app)/quotes/actions";
 import { createClient } from "@/lib/supabase/server";
-import { resolveCustomerId, resolveJobId } from "../resolve-id";
+import { resolveCustomerId, resolveJobId, resolveQuoteId } from "../resolve-id";
 import type { ActionDef } from "../types";
 
 export const quoteActions: Record<string, ActionDef> = {
@@ -142,17 +142,20 @@ export const quoteActions: Record<string, ActionDef> = {
     group: "quote",
     label: "Attach quote to job",
     description:
-      "Pin an EXISTING quote/estimate to a job (or null to unpin) — 'leave the estimate with the job'. Resolve both ids first (list_quotes, list_jobs) and pass the uuids, never names. The quote then shows on the job's Quotes tab. Use this instead of re-creating a quote that's already saved.",
-    input: z.object({ id: z.string().uuid(), job_id: z.string().uuid().nullable() }),
+      "Pin an EXISTING quote/estimate to a job (or null to unpin) — 'leave the estimate with the job'. Pass the quote and the job by their DISPLAY NUMBER (E-010, J-012), name, or id — whatever you have; it's resolved server-side, so you do NOT need to go fetch uuids first. The quote then shows on the job's Quotes tab. Use this instead of re-creating a quote that's already saved.",
+    // Loosened to a plain string so a doc number (E-010 / J-012) resolves server-side instead
+    // of failing uuid validation and sending the agent into a "grab the real id" retry loop.
+    input: z.object({ id: z.string(), job_id: z.string().nullable() }),
     auth: "staff",
     effect: "write",
     handler: async (i) => {
-      // job_id is schema-constrained to a uuid|null here, so this only ever fast-paths — but
-      // routing through the resolver keeps the pattern uniform (and future-proofs a loosened schema).
       const supabase = await createClient();
+      const quote = await resolveQuoteId(supabase, i.id);
+      if ("error" in quote) return { ok: false, error: quote.error };
+      if (!quote.id) return { ok: false, error: "Which estimate? Give me its number (E-010), title, or id." };
       const job = await resolveJobId(supabase, i.job_id);
       if ("error" in job) return { ok: false, error: job.error };
-      return setQuoteJob(i.id, job.id);
+      return setQuoteJob(quote.id, job.id);
     },
   },
   "quote.create": {
