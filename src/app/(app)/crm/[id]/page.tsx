@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { NavLink } from "@/components/nav-link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
+import { RowList } from "@/components/ui/row-list";
 import { Button } from "@/components/ui/button";
 import { Tabs } from "@/components/tabs";
 import { formatCurrency } from "@/lib/utils";
@@ -157,38 +158,30 @@ export default async function CustomerDetailPage({
       count: (jobs?.length ?? 0) + linkedJobs.length,
       content: (
         <Card className="overflow-hidden">
-          <ul className="divide-y divide-slate-100">
-            {(jobs as Job[] | null)?.map((j) => (
-              <li key={j.id}>
-                <Link href={`/jobs/${j.id}`} className="flex items-center justify-between px-5 py-3 hover:bg-slate-50">
-                  <div>
-                    <div className="text-sm font-medium text-slate-900">{j.name}</div>
-                    <div className="text-xs text-slate-400">{j.job_number}</div>
-                  </div>
-                  <Badge tone={statusTone(j.status)}>{j.status.replace("_", " ")}</Badge>
-                </Link>
-              </li>
-            ))}
-            {(!jobs || jobs.length === 0) && linkedJobs.length === 0 && empty("jobs")}
-          </ul>
+          <RowList
+            items={((jobs as Job[] | null) ?? []).map((j) => ({
+              key: j.id,
+              label: j.name,
+              sub: j.job_number,
+              badge: { tone: statusTone(j.status), text: j.status.replace("_", " ") },
+              href: `/jobs/${j.id}`,
+            }))}
+            empty={(!jobs || jobs.length === 0) && linkedJobs.length === 0 ? empty("jobs") : null}
+          />
           {linkedJobs.length > 0 && (
             <>
               <div className="border-t border-slate-100 bg-slate-50 px-5 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
                 Linked to (as a sub / contact)
               </div>
-              <ul className="divide-y divide-slate-100">
-                {linkedJobs.map((j: any) => (
-                  <li key={j.linkId}>
-                    <Link href={`/jobs/${j.id}`} className="flex items-center justify-between px-5 py-3 hover:bg-slate-50">
-                      <div>
-                        <div className="text-sm font-medium text-slate-900">{j.name}</div>
-                        <div className="text-xs text-slate-400">{j.job_number} · {j.role}</div>
-                      </div>
-                      <Badge tone={statusTone(j.status)}>{String(j.status).replace("_", " ")}</Badge>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
+              <RowList
+                items={linkedJobs.map((j: any) => ({
+                  key: j.linkId,
+                  label: j.name,
+                  sub: `${j.job_number} · ${j.role}`,
+                  badge: { tone: statusTone(j.status), text: String(j.status).replace("_", " ") },
+                  href: `/jobs/${j.id}`,
+                }))}
+              />
             </>
           )}
         </Card>
@@ -200,20 +193,16 @@ export default async function CustomerDetailPage({
       count: quotes?.length ?? 0,
       content: (
         <Card className="overflow-hidden">
-          <ul className="divide-y divide-slate-100">
-            {(quotes as Quote[] | null)?.map((q) => (
-              <li key={q.id}>
-                <Link href={`/quotes/${q.id}`} className="flex items-center justify-between px-5 py-3 hover:bg-slate-50">
-                  <span className="text-sm font-medium text-slate-900">{q.quote_number}</span>
-                  <span className="flex items-center gap-3">
-                    <span className="text-sm">{formatCurrency(q.total)}</span>
-                    <Badge tone={statusTone(q.status)}>{q.status}</Badge>
-                  </span>
-                </Link>
-              </li>
-            ))}
-            {(!quotes || quotes.length === 0) && empty("estimates")}
-          </ul>
+          <RowList
+            items={((quotes as Quote[] | null) ?? []).map((q) => ({
+              key: q.id,
+              label: q.quote_number,
+              value: formatCurrency(q.total),
+              badge: { tone: statusTone(q.status), text: q.status },
+              href: `/quotes/${q.id}`,
+            }))}
+            empty={empty("estimates")}
+          />
         </Card>
       ),
     },
@@ -223,20 +212,16 @@ export default async function CustomerDetailPage({
       count: invoices?.length ?? 0,
       content: (
         <Card className="overflow-hidden">
-          <ul className="divide-y divide-slate-100">
-            {(invoices ?? []).map((iv: any) => (
-              <li key={iv.id}>
-                <Link href={`/billing/${iv.id}`} className="flex items-center justify-between px-5 py-3 hover:bg-slate-50">
-                  <span className="text-sm font-medium text-slate-900">{iv.invoice_number}</span>
-                  <span className="flex items-center gap-3">
-                    <span className="text-sm">{formatCurrency(iv.total)}</span>
-                    <Badge tone={statusTone(iv.status)}>{iv.status}</Badge>
-                  </span>
-                </Link>
-              </li>
-            ))}
-            {(!invoices || invoices.length === 0) && empty("invoices")}
-          </ul>
+          <RowList
+            items={(invoices ?? []).map((iv: any) => ({
+              key: iv.id,
+              label: iv.invoice_number,
+              value: formatCurrency(iv.total),
+              badge: { tone: statusTone(iv.status), text: iv.status },
+              href: `/billing/${iv.id}`,
+            }))}
+            empty={empty("invoices")}
+          />
         </Card>
       ),
     },
