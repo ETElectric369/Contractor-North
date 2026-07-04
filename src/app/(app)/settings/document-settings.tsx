@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input, Label, Textarea } from "@/components/ui/input";
+import { Label, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import type { OrgSettings } from "@/lib/org-settings";
 import { updateOrgSettings } from "./actions";

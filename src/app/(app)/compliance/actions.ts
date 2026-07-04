@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { INSURANCE_TYPES, COMPLIANCE_TYPES, AUDIT_TYPES } from "@/lib/compliance-types";

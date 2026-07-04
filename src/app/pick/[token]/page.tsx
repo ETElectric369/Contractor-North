@@ -26,7 +26,6 @@ export default async function PickDatePage({
   const p = data as {
     org_name: string;
     logo_url: string | null;
-    brand_color: string | null;
     phone: string | null;
     kind: string;
     label: string;

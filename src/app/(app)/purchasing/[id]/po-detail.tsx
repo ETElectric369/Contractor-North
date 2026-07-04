@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
-import { Badge, statusTone } from "@/components/ui/badge";
+import { Badge } from "@/components/ui/badge";
 import { formatCurrency } from "@/lib/utils";
 import type { PurchaseOrder, PurchaseOrderItem } from "@/lib/types";
 import {

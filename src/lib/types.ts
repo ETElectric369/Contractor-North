@@ -55,7 +55,6 @@ export interface Organization {
   email: string | null;
   license: string | null;
   default_tax_rate: number;
-  brand_color: string;
   doc_template: string;
   doc_templates: Record<string, string>;
   settings: Record<string, unknown>;

@@ -46,7 +46,7 @@ export function EmployeeDocsManager({
   docs: Doc[];
 }) {
   const router = useRouter();
-  const [pending, start] = useTransition();
+  const [, start] = useTransition();
   const fileRef = useRef<HTMLInputElement>(null);
   const [emp, setEmp] = useState(employees[0]?.id ?? "");
   const [type, setType] = useState("Driver License");

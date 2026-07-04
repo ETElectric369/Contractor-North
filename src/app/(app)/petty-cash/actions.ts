@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
 
 export type Result = { ok: boolean; error?: string };

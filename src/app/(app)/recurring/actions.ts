@@ -2,7 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
-import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
 import { drawAmount } from "@/lib/invoice-math";
 import { getOrgSettings } from "@/lib/org-settings";
