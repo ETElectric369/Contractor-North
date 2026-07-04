@@ -29,7 +29,13 @@ export async function POST(req: Request) {
     return new Response(`Webhook signature failed: ${e?.message}`, { status: 400 });
   }
 
-  const supabase = createServiceClient();
+  let supabase: ReturnType<typeof createServiceClient>;
+  try {
+    supabase = createServiceClient();
+  } catch {
+    // Never let a missing service key surface as an unhandled 500 + stack trace.
+    return new Response("Server not configured", { status: 500 });
+  }
 
   async function recordInvoicePayment(
     invoiceId: string | undefined,

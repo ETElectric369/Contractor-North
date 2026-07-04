@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { formatCurrency, formatDate } from "@/lib/utils";
-import { DocHeader, DocParty, DocTotals, DocNote } from "@/components/doc-templates";
+import { DocHeader, DocParty, DocTotals, DocNote, type DocPartyCustomer } from "@/components/doc-templates";
 import { lineItemParts } from "@/components/line-item-text";
 
 /**
@@ -26,17 +26,6 @@ export type QuoteDocItem = {
   unit_price: number;
   line_total: number;
 };
-
-export type QuoteDocCustomer = {
-  name?: string | null;
-  company_name?: string | null;
-  address?: string | null;
-  city?: string | null;
-  state?: string | null;
-  zip?: string | null;
-  email?: string | null;
-  phone?: string | null;
-} | null;
 
 export function QuoteDocument({
   co,
@@ -66,7 +55,7 @@ export function QuoteDocument({
   createdAt: string | Date;
   validUntil?: string | Date | null;
   title?: string | null;
-  customer: QuoteDocCustomer;
+  customer: DocPartyCustomer;
   items: QuoteDocItem[];
   subtotal: number;
   taxRate?: number | null;

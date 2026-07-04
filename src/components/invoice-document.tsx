@@ -1,5 +1,5 @@
 import { formatCurrency, formatDate } from "@/lib/utils";
-import { DocHeader, DocParty, DocTotals, DocNote } from "@/components/doc-templates";
+import { DocHeader, DocParty, DocTotals, DocNote, type DocPartyCustomer } from "@/components/doc-templates";
 import { LineItemText } from "@/components/line-item-text";
 import { CostBreakdown } from "@/components/cost-breakdown";
 import { ProgressReportCard } from "@/components/progress-report-card";
@@ -20,17 +20,6 @@ export type InvoiceDocItem = InvoiceLine & {
   unit_price: number;
   line_total: number;
 };
-
-export type InvoiceDocCustomer = {
-  name?: string | null;
-  company_name?: string | null;
-  address?: string | null;
-  city?: string | null;
-  state?: string | null;
-  zip?: string | null;
-  email?: string | null;
-  phone?: string | null;
-} | null;
 
 export function InvoiceDocument({
   co,
@@ -62,7 +51,7 @@ export function InvoiceDocument({
   title?: string | null;
   billingLabel?: string | null;
   description?: string | null;
-  customer: InvoiceDocCustomer;
+  customer: DocPartyCustomer;
   items: InvoiceDocItem[];
   subtotal: number;
   taxRate?: number | null;
