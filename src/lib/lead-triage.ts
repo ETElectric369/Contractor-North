@@ -119,3 +119,30 @@ export function classifyLead(
 
   return { bucket, siteInspectionRequired, showInstantPrice, priority, reason };
 }
+
+/** One priced line from a partner configurator's estimate (Tahoe Deck sends these in
+ *  intake.estimate.lines). Shape is the contract in POST /api/inbound/lead's JSDoc and
+ *  matches the quote builder's DraftLineItem, so these seed a draft estimate 1:1. */
+export type EstimateLine = { description: string; quantity: number; unit: string; unit_price: number };
+
+/**
+ * Pull the configurator's priced lines out of a lead's stashed intake jsonb
+ * (intake.estimate.lines) as clean EstimateLines. Everything is coerced defensively — the
+ * JSON crossed the wire from a partner — and any row without a description is dropped, so
+ * the result is always safe to hand to saveQuote(). Missing/'' anything → an empty list.
+ */
+export function estimateLinesFromIntake(intake: unknown): EstimateLine[] {
+  const raw = (intake as { estimate?: { lines?: unknown } } | null)?.estimate?.lines;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((l) => {
+      const line = (l ?? {}) as Record<string, unknown>;
+      return {
+        description: String(line.description ?? "").trim(),
+        quantity: Number(line.quantity) || 0,
+        unit: line.unit ? String(line.unit) : "ea",
+        unit_price: Number(line.unit_price) || 0,
+      };
+    })
+    .filter((l) => l.description.length > 0);
+}

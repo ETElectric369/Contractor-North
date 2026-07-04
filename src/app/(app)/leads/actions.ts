@@ -4,6 +4,9 @@ import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
 import { requireStaff } from "@/lib/staff-guard";
 import { formatPhone, formatState, formatZip, titleCase } from "@/lib/utils";
+import { getOrgSettings } from "@/lib/org-settings";
+import { PROJECT_TYPES, estimateLinesFromIntake } from "@/lib/lead-triage";
+import { saveQuote } from "../quotes/actions";
 
 export type Result = { ok: boolean; error?: string; id?: string; redirect?: string };
 
@@ -175,7 +178,32 @@ export async function convertInquiry(
 
   if (target === "quote") {
     newStatus = "quoted";
-    redirect = `/quotes/new?customer=${customerId}`;
+    // If the lead arrived with a priced estimate (the Tahoe Deck configurator sends
+    // intake.estimate.lines), seed a real draft estimate from those lines and open it —
+    // lead → priced draft in one click. Manual leads / design consults with nothing to
+    // price fall back to the empty new-quote form, exactly as before.
+    const lines = estimateLinesFromIntake(inq.intake);
+    if (lines.length) {
+      const { data: orgRow } = await supabase.from("organizations").select("settings").maybeSingle();
+      const validUntil = new Date();
+      validUntil.setDate(validUntil.getDate() + (getOrgSettings(orgRow?.settings).quote_expiry_days || 30));
+      const label = PROJECT_TYPES.find((p) => p.value === inq.project_type)?.label;
+      const reason = typeof (inq.intake as { reason?: unknown } | null)?.reason === "string"
+        ? (inq.intake as { reason: string }).reason
+        : null;
+      const res = await saveQuote({
+        customer_id: customerId,
+        title: label ? `${label} — ${inq.name}` : `Estimate — ${inq.name}`,
+        notes: reason ? `From lead — ${reason}` : "From lead.",
+        tax_rate: 0, // never infer tax on a seeded draft; the office sets it on review
+        valid_until: validUntil.toISOString().slice(0, 10),
+        items: lines,
+      });
+      if (!res.ok) return { ok: false, error: res.error };
+      redirect = `/quotes/${res.id}`;
+    } else {
+      redirect = `/quotes/new?customer=${customerId}`;
+    }
   } else if (target === "estimate" || target === "job") {
     // An estimate is still in the pipeline; a scheduled job means the inquiry is won.
     newStatus = target === "estimate" ? "quoted" : "won";

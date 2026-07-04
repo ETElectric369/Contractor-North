@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { classifyLead, DEFAULT_SITE_INSPECTION_THRESHOLD } from "@/lib/lead-triage";
+import { classifyLead, DEFAULT_SITE_INSPECTION_THRESHOLD, estimateLinesFromIntake } from "@/lib/lead-triage";
 
 const contact = { name: "Bob", email: "b@x.com", phone: "555", address: "1 Main" };
 
@@ -55,5 +55,45 @@ describe("classifyLead — priority ordering", () => {
     const ready = classifyLead({ hasPlans: true, estimateTotal: 10000 });
     const consult = classifyLead({ needsDesignHelp: true, estimateTotal: 10000 });
     expect(ready.priority).toBeGreaterThan(consult.priority);
+  });
+});
+
+describe("estimateLinesFromIntake — configurator lines → draft quote lines", () => {
+  const intake = (lines: unknown) => ({ estimate: { total: 0, lines }, reason: "x" });
+
+  it("maps the documented {description,quantity,unit,unit_price} shape 1:1", () => {
+    const out = estimateLinesFromIntake(
+      intake([{ description: "Deck build", quantity: 320, unit: "SQ FT", unit_price: 75 }]),
+    );
+    expect(out).toEqual([{ description: "Deck build", quantity: 320, unit: "SQ FT", unit_price: 75 }]);
+  });
+
+  it("defaults a missing unit to 'ea' and coerces numeric strings", () => {
+    const out = estimateLinesFromIntake(intake([{ description: "Footings", quantity: "4", unit_price: "1500" }]));
+    expect(out).toEqual([{ description: "Footings", quantity: 4, unit: "ea", unit_price: 1500 }]);
+  });
+
+  it("drops rows without a description, keeps a 0-qty note line", () => {
+    const out = estimateLinesFromIntake(
+      intake([
+        { description: "", quantity: 5, unit_price: 10 },
+        { quantity: 5, unit_price: 10 },
+        { description: "Allowance", quantity: 0, unit_price: 0 },
+      ]),
+    );
+    expect(out).toEqual([{ description: "Allowance", quantity: 0, unit: "ea", unit_price: 0 }]);
+  });
+
+  it("garbage/absent numbers become 0, not NaN", () => {
+    const out = estimateLinesFromIntake(intake([{ description: "Trim", quantity: "abc", unit_price: undefined }]));
+    expect(out).toEqual([{ description: "Trim", quantity: 0, unit: "ea", unit_price: 0 }]);
+  });
+
+  it("returns [] for any malformed / missing intake", () => {
+    expect(estimateLinesFromIntake(null)).toEqual([]);
+    expect(estimateLinesFromIntake({})).toEqual([]);
+    expect(estimateLinesFromIntake({ estimate: {} })).toEqual([]);
+    expect(estimateLinesFromIntake({ estimate: { lines: "not-an-array" } })).toEqual([]);
+    expect(estimateLinesFromIntake({ estimate: { lines: [] } })).toEqual([]);
   });
 });
