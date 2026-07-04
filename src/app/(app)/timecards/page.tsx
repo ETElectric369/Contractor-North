@@ -4,6 +4,7 @@ import { AlertTriangle, ChevronLeft, ChevronRight, Clock } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
+import { FactsGrid, StatTile } from "@/components/ui/stat-tile";
 import { Badge } from "@/components/ui/badge";
 import {
   formatDuration,
@@ -252,31 +253,21 @@ export default async function TimecardsPage({
         </Card>
       )}
 
-      <div className="mb-4 grid grid-cols-3 gap-4 sm:max-w-2xl">
-        <Card>
-          <CardContent className="py-4">
-            <div className="text-2xl font-bold text-slate-900">{formatDuration(crewTotal)}</div>
-            <div className="text-xs text-slate-500">Crew hours ({label})</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="py-4">
-            <div className="text-2xl font-bold text-slate-900">{techs.length}</div>
-            <div className="text-xs text-slate-500">People with entries</div>
-          </CardContent>
-        </Card>
+      <FactsGrid cols={3} className="mb-4 sm:max-w-2xl">
+        <StatTile label={`Crew hours (${label})`} value={formatDuration(crewTotal)} />
+        <StatTile label="People with entries" value={techs.length} />
         {/* Miles are DATA — no app-computed dollars here. Mileage pay is a
             human-typed settlement on /payroll, never rate×miles. */}
-        <Card>
-          <CardContent className="py-4">
-            <div className="text-2xl font-bold text-slate-900">{crewBusinessMiles.toFixed(1)} mi</div>
-            <div className="text-xs text-slate-500">
+        <StatTile
+          label={
+            <>
               Business miles
               {crewMiles > crewBusinessMiles ? <span className="text-slate-400"> · {crewMiles.toFixed(1)} logged</span> : null}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+            </>
+          }
+          value={`${crewBusinessMiles.toFixed(1)} mi`}
+        />
+      </FactsGrid>
 
       {perCode.size > 0 && (
         <Card className="mb-6">

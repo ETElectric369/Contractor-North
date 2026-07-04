@@ -1,7 +1,8 @@
 import { UserPlus } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader, EmptyState } from "@/components/page-header";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
+import { FactsGrid, StatTile } from "@/components/ui/stat-tile";
 import { InquiryModal } from "./inquiry-modal";
 import { InquiryRow } from "./inquiry-row";
 import { ReferralTally } from "./referral-tally";
@@ -43,20 +44,10 @@ export default async function InquiriesPage() {
       <ReferralTally />
 
       {inquiries.length > 0 && (
-        <div className="mb-4 grid grid-cols-2 gap-4 sm:max-w-sm">
-          <Card>
-            <CardContent className="py-4">
-              <div className="text-2xl font-bold text-slate-900">{inquiries.length}</div>
-              <div className="text-xs text-slate-500">Open inquiries</div>
-            </CardContent>
-          </Card>
-          <Card className={dueToday ? "border-amber-200 bg-amber-50" : ""}>
-            <CardContent className="py-4">
-              <div className="text-2xl font-bold text-slate-900">{dueToday}</div>
-              <div className="text-xs text-slate-500">Follow-ups due</div>
-            </CardContent>
-          </Card>
-        </div>
+        <FactsGrid cols={2} className="mb-4 sm:max-w-sm">
+          <StatTile label="Open inquiries" value={inquiries.length} />
+          <StatTile label="Follow-ups due" value={dueToday} tone={dueToday > 0 ? "warning" : "default"} />
+        </FactsGrid>
       )}
 
       {inquiries.length === 0 ? (

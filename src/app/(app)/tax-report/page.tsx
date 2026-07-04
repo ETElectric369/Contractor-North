@@ -3,6 +3,7 @@ import { Calculator } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
+import { FactsGrid, StatTile } from "@/components/ui/stat-tile";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
 import { summarizeMileage } from "@/lib/mileage-math";
@@ -133,20 +134,10 @@ export default async function TaxReportPage({
         ))}
       </div>
 
-      <div className="mb-6 grid grid-cols-2 gap-4 sm:max-w-lg">
-        <Card>
-          <CardContent className="py-4">
-            <div className="text-2xl font-bold text-slate-900">{formatCurrency(totalTax)}</div>
-            <div className="text-xs text-slate-500">Tax collected</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="py-4">
-            <div className="text-2xl font-bold text-slate-900">{formatCurrency(totalTaxable)}</div>
-            <div className="text-xs text-slate-500">Taxable sales</div>
-          </CardContent>
-        </Card>
-      </div>
+      <FactsGrid cols={2} className="mb-6 sm:max-w-lg">
+        <StatTile label="Tax collected" value={formatCurrency(totalTax)} />
+        <StatTile label="Taxable sales" value={formatCurrency(totalTaxable)} />
+      </FactsGrid>
 
       {businessMiles > 0 && (
         <Card className="mb-6 sm:max-w-lg">

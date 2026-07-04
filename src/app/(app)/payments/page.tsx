@@ -3,6 +3,7 @@ import { CreditCard } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
+import { FactsGrid, StatTile } from "@/components/ui/stat-tile";
 import { formatCurrency, formatDate } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -50,16 +51,10 @@ export default async function PaymentsPage() {
         />
       ) : (
         <>
-          <div className="mb-4 grid grid-cols-2 gap-3 sm:max-w-md">
-            <div className="rounded-xl bg-green-50 px-4 py-3">
-              <div className="text-xs font-medium text-green-700">This month</div>
-              <div className="text-2xl font-bold text-green-900">{formatCurrency(monthTotal)}</div>
-            </div>
-            <div className="rounded-xl bg-slate-50 px-4 py-3">
-              <div className="text-xs font-medium text-slate-500">Total collected</div>
-              <div className="text-2xl font-bold text-slate-900">{formatCurrency(total)}</div>
-            </div>
-          </div>
+          <FactsGrid cols={2} className="mb-4 sm:max-w-md">
+            <StatTile label="This month" value={formatCurrency(monthTotal)} tone="accent" />
+            <StatTile label="Total collected" value={formatCurrency(total)} />
+          </FactsGrid>
 
           <Card className="overflow-hidden">
             <div className="hidden grid-cols-12 gap-4 border-b border-slate-100 bg-slate-50 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-400 md:grid">

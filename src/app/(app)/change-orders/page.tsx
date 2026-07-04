@@ -3,6 +3,7 @@ import { GitPullRequestArrow, Printer } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
+import { FactsGrid, StatTile } from "@/components/ui/stat-tile";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { NewChangeOrderButton } from "./new-co-button";
 import { CoStatusControl } from "./co-status-control";
@@ -52,24 +53,10 @@ export default async function ChangeOrdersPage() {
         </EmptyState>
       ) : (
         <>
-          <div className="mb-4 grid grid-cols-2 gap-4 sm:max-w-md">
-            <Card>
-              <CardContent className="py-4">
-                <div className="text-2xl font-bold text-slate-900">
-                  {formatCurrency(approvedTotal)}
-                </div>
-                <div className="text-xs text-slate-500">Approved changes</div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="py-4">
-                <div className="text-2xl font-bold text-slate-900">
-                  {pendingCount}
-                </div>
-                <div className="text-xs text-slate-500">Pending approval</div>
-              </CardContent>
-            </Card>
-          </div>
+          <FactsGrid cols={2} className="mb-4 sm:max-w-md">
+            <StatTile label="Approved changes" value={formatCurrency(approvedTotal)} />
+            <StatTile label="Pending approval" value={pendingCount} />
+          </FactsGrid>
 
           <Card className="overflow-hidden">
             <ul className="divide-y divide-slate-100">
