@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { FactsGrid, StatTile } from "@/components/ui/stat-tile";
+import { DataTable } from "@/components/ui/data-table";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
 import { summarizeMileage } from "@/lib/mileage-math";
@@ -159,24 +160,17 @@ export default async function TaxReportPage({
         <EmptyState icon={Calculator} title="No invoices in this period" description="Tax collected on issued invoices will appear here." />
       ) : (
         <Card className="overflow-hidden">
-          <div className="hidden grid-cols-12 gap-3 border-b border-slate-100 bg-slate-50 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-400 md:grid">
-            <div className="col-span-4">Jurisdiction / rate</div>
-            <div className="col-span-2 text-right">Rate</div>
-            <div className="col-span-2 text-right">Invoices</div>
-            <div className="col-span-2 text-right">Taxable</div>
-            <div className="col-span-2 text-right">Tax</div>
-          </div>
-          <ul className="divide-y divide-slate-100">
-            {rows.map((r) => (
-              <li key={r.name + r.pct} className="grid grid-cols-2 gap-2 px-5 py-3 text-sm md:grid-cols-12 md:items-center md:gap-3">
-                <div className="col-span-4 font-medium text-slate-900">{r.name}</div>
-                <div className="col-span-2 text-right text-slate-500">{r.pct.toFixed(3)}%</div>
-                <div className="col-span-2 text-right text-slate-500">{r.count}</div>
-                <div className="col-span-2 text-right text-slate-600">{formatCurrency(r.taxable)}</div>
-                <div className="col-span-2 text-right font-medium text-slate-900">{formatCurrency(r.tax)}</div>
-              </li>
-            ))}
-          </ul>
+          <DataTable
+            rows={rows}
+            rowKey={(r) => r.name + r.pct}
+            columns={[
+              { header: "Jurisdiction / rate", span: 4, className: "text-sm font-medium text-slate-900", cell: (r) => r.name },
+              { header: "Rate", span: 2, align: "right", className: "text-sm text-slate-500", cell: (r) => `${r.pct.toFixed(3)}%` },
+              { header: "Invoices", span: 2, align: "right", className: "text-sm text-slate-500", cell: (r) => r.count },
+              { header: "Taxable", span: 2, align: "right", className: "text-sm text-slate-600", cell: (r) => formatCurrency(r.taxable) },
+              { header: "Tax", span: 2, align: "right", className: "text-sm font-medium text-slate-900", cell: (r) => formatCurrency(r.tax) },
+            ]}
+          />
         </Card>
       )}
 
