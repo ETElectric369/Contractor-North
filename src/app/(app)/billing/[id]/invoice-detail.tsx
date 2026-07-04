@@ -10,6 +10,7 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/components/toast";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
+import { invoiceBalance } from "@/lib/invoice-math";
 import { LineItemText } from "@/components/line-item-text";
 import { CostBreakdown } from "@/components/cost-breakdown";
 import type { Invoice, InvoiceItem, Payment } from "@/lib/types";
@@ -73,7 +74,7 @@ export function InvoiceDetail({
   const [pending, start] = useTransition();
   const refresh = () => router.refresh();
 
-  const balance = Number(invoice.total) - Number(invoice.amount_paid);
+  const balance = invoiceBalance(invoice.total, invoice.amount_paid);
 
   // invoice description (scope shown above the line items)
   const [descr, setDescr] = useState((invoice as any).description ?? "");

@@ -10,7 +10,7 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { tzLocalHourUtc, todayStrInTz } from "@/lib/tz";
 import { requireStaff } from "@/lib/staff-guard";
 import { computeJobLaborBilling, fetchJobLaborRows } from "@/lib/labor-billing";
-import { recalcTotals, resolveDrawCredit, shouldBlockStandardImport } from "@/lib/invoice-math";
+import { recalcTotals, resolveDrawCredit, shouldBlockStandardImport, invoiceBalance } from "@/lib/invoice-math";
 import { standardBillingBlockerOnJob, standardBillingConflictError } from "@/lib/billing-guards";
 import { scheduleStatus, contractTotalFromQuotes, type Milestone } from "@/lib/payment-schedule-math";
 import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
@@ -89,7 +89,7 @@ export async function textInvoice(
     return { ok: false, error: "This customer has no phone number." };
 
   const { data: org } = await supabase.from("organizations").select("name").maybeSingle();
-  const balance = Number(invoice.total) - Number(invoice.amount_paid);
+  const balance = invoiceBalance(invoice.total, invoice.amount_paid);
   const link = publicInvoiceLink((invoice as any).public_token);
   const body = `${org?.name ?? "Your contractor"}: Invoice ${invoice.invoice_number}, balance $${balance.toFixed(2)}. View/pay: ${link}`;
 
@@ -1004,8 +1004,8 @@ export async function recordPayment(input: {
   if (!inv) return { ok: false, error: "Invoice not found." };
 
   // M4: a misheard amount ("$30k" on a $3k invoice) shouldn't silently overpay + mark paid.
-  const balance = Math.round((Number(inv.total) - Number(inv.amount_paid)) * 100) / 100;
-  const cap = Math.max(0, balance);
+  // invoiceBalance already rounds to cents AND floors at 0 — the exact cap this guard wants.
+  const cap = invoiceBalance(inv.total, inv.amount_paid);
   if (input.amount > cap + 0.01) {
     return {
       ok: false,

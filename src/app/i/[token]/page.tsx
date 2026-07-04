@@ -6,7 +6,7 @@ import { templateFor } from "@/components/doc-templates";
 import { billingEnabled } from "@/lib/stripe";
 import { formatCurrency } from "@/lib/utils";
 import { docTitle } from "@/lib/doc-title";
-import { invoiceTypeLabel } from "@/lib/invoice-math";
+import { invoiceTypeLabel, invoiceBalance } from "@/lib/invoice-math";
 import { InvoiceDocument } from "@/components/invoice-document";
 import type { Metadata } from "next";
 import type { Organization } from "@/lib/types";
@@ -40,7 +40,7 @@ export default async function PublicInvoicePage({
   const org = data.org as Organization | null;
   const co = companyFromOrg(org);
   const template = templateFor(org, "invoice");
-  const balance = Number(inv.total) - Number(inv.amount_paid);
+  const balance = invoiceBalance(inv.total, inv.amount_paid);
 
   return (
     <div className="min-h-screen bg-slate-100 py-8 print:bg-white print:py-0">

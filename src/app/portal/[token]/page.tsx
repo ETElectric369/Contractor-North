@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { FileText, FileSignature, Receipt, Briefcase } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { invoiceBalance } from "@/lib/invoice-math";
 import { accentHex } from "@/lib/org-settings";
 import { formatCurrency, formatDate } from "@/lib/utils";
 
@@ -58,7 +59,7 @@ export default async function CustomerPortalPage({ params }: { params: Promise<{
         {invoices.length > 0 && (
           <Section icon={<Receipt className="h-4 w-4" />} title="Invoices" brand={brand}>
             {invoices.map((i: any) => {
-              const bal = Number(i.total) - Number(i.amount_paid);
+              const bal = invoiceBalance(i.total, i.amount_paid);
               return (
                 <Row
                   key={i.public_token}

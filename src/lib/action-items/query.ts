@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { ActionItem, ActionKind } from "./types";
 import { AFFORDANCES, KIND_STREAM } from "./types";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
+import { invoiceBalance } from "@/lib/invoice-math";
 import { lienStatus } from "@/lib/lien-math";
 import { formatCurrency, formatDateShort, DEFAULT_TIMEZONE } from "@/lib/utils";
 import { todayStrInTz } from "@/lib/tz";
@@ -301,7 +302,7 @@ export async function getActionItems(ctx: {
   // reaches the inbox by AGE even before a due_date is entered.
   const todayMs = Date.parse(todayStr);
   for (const inv of (invR.data ?? []) as any[]) {
-    const balance = Number(inv.total ?? 0) - Number(inv.amount_paid ?? 0);
+    const balance = invoiceBalance(inv.total, inv.amount_paid);
     if (balance < 0.005) continue; // effectively paid; status just lagging
     // Days past due (only when a due_date is set) and days since created.
     const daysOverDue = inv.due_date ? Math.floor((todayMs - Date.parse(inv.due_date)) / 86_400_000) : null;

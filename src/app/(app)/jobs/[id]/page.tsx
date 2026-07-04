@@ -8,6 +8,7 @@ import {
   ClipboardCheck, FileText, Wallet, Receipt as ReceiptTab, StickyNote, Stamp, FileDiff,
 } from "./job-tab-icons";
 import { createClient } from "@/lib/supabase/server";
+import { invoiceBalance } from "@/lib/invoice-math";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { Tabs, type TabDef } from "@/components/tabs";
@@ -312,11 +313,11 @@ export default async function JobDetailPage({
   );
   // Open invoices (non-void, balance still owed) — targets for "record a payment".
   const openInvoices = (invoices ?? [])
-    .filter((i: any) => i.status !== "void" && Number(i.total ?? 0) - Number(i.amount_paid ?? 0) > 0.005)
+    .filter((i: any) => i.status !== "void" && invoiceBalance(i.total, i.amount_paid) > 0.005)
     .map((i: any) => ({
       id: i.id,
       number: i.invoice_number,
-      balance: Math.round((Number(i.total ?? 0) - Number(i.amount_paid ?? 0)) * 100) / 100,
+      balance: invoiceBalance(i.total, i.amount_paid),
     }));
   const invoiceIds = (invoices ?? []).map((i: any) => i.id);
   const { data: refundRows } = invoiceIds.length

@@ -1,5 +1,6 @@
 import "server-only";
 import { sendEmail, renderReminderEmail, money } from "@/lib/email";
+import { invoiceBalance } from "@/lib/invoice-math";
 import { todayStrInTz } from "@/lib/tz";
 import { reportError } from "@/lib/observe";
 import { getOrgSettings, accentHex } from "@/lib/org-settings";
@@ -73,7 +74,7 @@ export async function sendDueReminders(supabase: any): Promise<Counts> {
         .in("status", ["sent", "partial"])
         .lt("due_date", today);
       for (const inv of invs ?? []) {
-        const bal = Number(inv.total) - Number(inv.amount_paid);
+        const bal = invoiceBalance(inv.total, inv.amount_paid);
         if (bal <= 0.005) continue;
         const cust = (inv as any).customers;
         if (!cust?.email) { counts.skipped_no_email++; continue; }

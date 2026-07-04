@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatCurrency } from "@/lib/utils";
+import { invoiceBalance } from "@/lib/invoice-math";
 import { laborCostForJob } from "@/lib/labor-billing";
 
 export const dynamic = "force-dynamic";
@@ -73,7 +74,7 @@ export default async function AnalyticsPage() {
   const now = Date.now();
   const aging = { current: 0, d30: 0, d60: 0, d90: 0 };
   for (const i of openInvoices as any[]) {
-    const bal = Number(i.total) - Number(i.amount_paid);
+    const bal = invoiceBalance(i.total, i.amount_paid);
     if (bal <= 0) continue;
     const ref = i.due_date ? new Date(i.due_date).getTime() : new Date(i.created_at).getTime();
     const days = (now - ref) / 86400_000;

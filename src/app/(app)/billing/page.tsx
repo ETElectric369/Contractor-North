@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { getMoneyPipeline } from "@/lib/billing-pipeline";
+import { invoiceBalance } from "@/lib/invoice-math";
 import { listCustomerOptions } from "@/lib/schedule-options";
 import { NewInvoiceButton } from "./new-invoice-button";
 import { InvoiceJobButton } from "./invoice-job-button";
@@ -150,7 +151,7 @@ export default async function BillingPage() {
           <Card className="overflow-hidden">
             <ul className="divide-y divide-slate-100">
               {list.map((inv: any) => {
-                const balance = Number(inv.total) - Number(inv.amount_paid);
+                const balance = invoiceBalance(inv.total, inv.amount_paid);
                 return (
                   <li key={inv.id}>
                     <Link href={`/billing/${inv.id}`} className="flex items-center justify-between gap-3 px-5 py-3 hover:bg-slate-50">

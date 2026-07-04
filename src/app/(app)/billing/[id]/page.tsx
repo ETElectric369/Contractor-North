@@ -15,6 +15,7 @@ import { invoiceSectionTree } from "@/lib/nav-tree";
 import { deleteInvoice } from "../actions";
 import { getOrgSettings } from "@/lib/org-settings";
 import { jobProgressFinancials, receivedBeforeThisInvoice } from "@/lib/job-financials";
+import { invoiceBalance } from "@/lib/invoice-math";
 import { listCustomerOptions } from "@/lib/schedule-options";
 import { ProgressReportCard } from "@/components/progress-report-card";
 import type { Invoice, InvoiceItem, Payment } from "@/lib/types";
@@ -120,7 +121,7 @@ export default async function InvoicePage({
         <div className="flex flex-wrap items-center gap-2 self-start">
           {/* Collect-payment is only meaningful once the invoice is actually billed:
               you can't collect on an unsent draft. Hidden until it leaves draft. */}
-          {billingEnabled && !isDraft && Number(inv.total) - Number(inv.amount_paid) > 0 && (
+          {billingEnabled && !isDraft && invoiceBalance(inv.total, inv.amount_paid) > 0 && (
             <a
               href={`/api/pay/${(inv as any).public_token}`}
               target="_blank"
