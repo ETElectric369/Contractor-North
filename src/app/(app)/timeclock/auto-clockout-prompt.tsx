@@ -113,8 +113,8 @@ export function AutoClockoutPrompt({ entry, jobCodes, jobs }: { entry: Entry; jo
             </div>
           ))}
           <div className="flex items-center justify-between">
-            <button type="button" onClick={() => setAllocations((p) => [...p, { job_id: "", job_code: "", hours: 0, minutes: 0, description: "" }])} className="inline-flex items-center gap-1 rounded-lg bg-white px-2.5 py-1 text-xs font-medium text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50">
-              <Plus className="h-3.5 w-3.5" /> Add another code
+            <button type="button" onClick={() => setAllocations((p) => [...p, { job_id: "", job_code: "", hours: 0, minutes: 0, description: "" }])} className="inline-flex items-center gap-1.5 rounded-lg bg-white px-2.5 py-1 text-xs font-medium text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50">
+              <Plus className="h-4 w-4 shrink-0" /> Add Another Code
             </button>
             <span className={`text-xs ${Math.abs(allocated - worked) > 0.1 ? "text-amber-600" : "text-slate-500"}`}>
               {formatDuration(allocated)} of {formatDuration(worked)} worked
@@ -124,7 +124,7 @@ export function AutoClockoutPrompt({ entry, jobCodes, jobs }: { entry: Entry; jo
 
         {error && <p className="text-sm text-red-600">{error}</p>}
         <Button onClick={save} disabled={pending || !ok} className="w-full">
-          {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving</> : "Save my hours"}
+          {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving</> : "Save My Hours"}
         </Button>
       </CardContent>
     </Card>

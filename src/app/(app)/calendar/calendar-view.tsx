@@ -476,7 +476,7 @@ export function CalendarView({
             onClick={() => setTrayOpen(true)}
             className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-100"
           >
-            To schedule · {unscheduled.length} <ChevronDown className="h-3.5 w-3.5" />
+            To Schedule · {unscheduled.length} <ChevronDown className="h-3.5 w-3.5" />
           </button>
         ))}
 

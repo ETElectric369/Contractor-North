@@ -81,7 +81,7 @@ export function NewListButton({ jobs, defaultJobId }: { jobs: JobOption[]; defau
   return (
     <>
       <Button onClick={() => setOpen(true)}>
-        <Plus className="h-4 w-4" /> New list
+        <Plus className="h-4 w-4" /> New List
       </Button>
 
       <Modal
@@ -94,7 +94,7 @@ export function NewListButton({ jobs, defaultJobId }: { jobs: JobOption[]; defau
             onSave={onSave}
             saving={saving}
             disabled={!name.trim()}
-            saveLabel="Create list"
+            saveLabel="Create List"
           />
         }
       >
@@ -152,7 +152,7 @@ export function NewListButton({ jobs, defaultJobId }: { jobs: JobOption[]; defau
                 </>
               ) : (
                 <>
-                  <Sparkles className="h-4 w-4" /> Generate items
+                  <Sparkles className="h-4 w-4" /> Generate Items
                 </>
               )}
             </Button>

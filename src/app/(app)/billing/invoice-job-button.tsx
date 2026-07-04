@@ -24,7 +24,7 @@ export function InvoiceJobButton({ jobId }: { jobId: string }) {
         disabled={pending}
         className="rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-dark disabled:opacity-60"
       >
-        {pending ? "Creating…" : "Create invoice →"}
+        {pending ? "Creating…" : "Create Invoice →"}
       </button>
     </div>
   );

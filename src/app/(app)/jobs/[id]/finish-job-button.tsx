@@ -70,11 +70,11 @@ export function FinishJobButton({
     <>
       {menuItem ? (
         <button type="button" onClick={() => setOpen(true)} className={MANAGE_ROW_CLS}>
-          <CheckCircle2 className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Finish job
+          <CheckCircle2 className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Finish Job
         </button>
       ) : (
         <Button onClick={() => setOpen(true)}>
-          <CheckCircle2 className="h-4 w-4" /> Finish job
+          <CheckCircle2 className="h-4 w-4" /> Finish Job
         </Button>
       )}
 
@@ -86,7 +86,7 @@ export function FinishJobButton({
           warn ? (
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => { setOpen(false); router.refresh(); }}>Close</Button>
-              {doneId && <Button onClick={() => router.push(`/billing/${doneId}`)}>Review &amp; send →</Button>}
+              {doneId && <Button onClick={() => router.push(`/billing/${doneId}`)}>Review &amp; Send →</Button>}
             </div>
           ) : (
             <ModalActions
@@ -94,7 +94,7 @@ export function FinishJobButton({
               onSave={go}
               saving={pending}
               disabled={!timeIn || !costsIn}
-              saveLabel={wantSend ? "Finish & send invoice" : "Finish & review invoice"}
+              saveLabel={wantSend ? "Finish & Send Invoice" : "Finish & Review Invoice"}
             />
           )
         }

@@ -76,11 +76,11 @@ export function JobEditButton({
     <>
       {menuItem ? (
         <button type="button" onClick={() => setOpen(true)} className={MANAGE_ROW_CLS}>
-          <Pencil className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Edit job
+          <Pencil className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Edit Job
         </button>
       ) : (
         <Button variant="outline" onClick={() => setOpen(true)}>
-          <Pencil className="h-4 w-4" /> Edit job
+          <Pencil className="h-4 w-4" /> Edit Job
         </Button>
       )}
 
@@ -90,7 +90,7 @@ export function JobEditButton({
           onClose={() => setOpen(false)}
           title="Edit job"
           footer={
-            <ModalActions onCancel={() => setOpen(false)} submit saving={pending} saveLabel="Save changes" />
+            <ModalActions onCancel={() => setOpen(false)} submit saving={pending} saveLabel="Save Changes" />
           }
         >
           <div className="space-y-4">
@@ -109,7 +109,7 @@ export function JobEditButton({
                 onClick={() => setNewCust((v) => !v)}
                 className="text-xs font-medium text-brand hover:underline"
               >
-                {newCust ? "Pick existing" : "+ New customer"}
+                {newCust ? "Pick Existing" : "+ New Customer"}
               </button>
             </div>
             {newCust ? (

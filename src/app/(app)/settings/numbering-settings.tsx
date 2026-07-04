@@ -117,7 +117,7 @@ export function NumberingSettings({
 
       <div className="flex items-center gap-3">
         <Button size="sm" onClick={save} disabled={pending}>
-          {pending ? "Saving…" : "Save numbering"}
+          {pending ? "Saving…" : "Save Numbering"}
         </Button>
         {done && (
           <span className="flex items-center gap-1 text-sm text-green-600">

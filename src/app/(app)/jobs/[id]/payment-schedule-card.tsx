@@ -62,7 +62,7 @@ export function PaymentScheduleCard({
             <div className="text-xs text-slate-500">Billed by actual work to date — request the next payment any time.</div>
             {error && <div className="mt-1 text-sm text-red-600">{error}</div>}
           </div>
-          <Button onClick={requestNext} disabled={pending}>Request next payment</Button>
+          <Button onClick={requestNext} disabled={pending}>Request Next Payment</Button>
         </CardContent>
       </Card>
     );
@@ -85,7 +85,7 @@ export function PaymentScheduleCard({
           <div className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center">
             <div className="text-sm text-slate-600">No payment schedule yet.</div>
             <div className="mt-0.5 text-xs text-slate-400">Set deposit / progress / final draws as a % of the contract.</div>
-            <Button variant="outline" size="sm" className="mt-3" onClick={() => setEditing(true)}>Set up schedule</Button>
+            <Button variant="outline" size="sm" className="mt-3" onClick={() => setEditing(true)}>Set Up Schedule</Button>
           </div>
         ) : (
           <>
@@ -118,7 +118,7 @@ export function PaymentScheduleCard({
               {billingStarted && <span className="text-xs text-slate-400">Schedule locked — billing started</span>}
               {status.next ? (
                 <Button onClick={requestNext} disabled={pending}>
-                  Request next payment <ArrowRight className="h-4 w-4" />
+                  Request Next Payment <ArrowRight className="h-4 w-4" />
                 </Button>
               ) : (
                 <span className="text-sm font-medium text-emerald-600">All payments billed</span>
@@ -195,7 +195,7 @@ function ScheduleEditor({
       open
       onClose={() => !pending && onClose()}
       title="Payment schedule"
-      footer={<ModalActions onCancel={onClose} onSave={save} saving={pending} saveLabel="Save schedule" />}
+      footer={<ModalActions onCancel={onClose} onSave={save} saving={pending} saveLabel="Save Schedule" />}
     >
       <div className="space-y-3">
         {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
@@ -220,7 +220,7 @@ function ScheduleEditor({
           ))}
         </div>
         <button onClick={() => setRows([...rows, { label: "", percent: 0 }])} className="flex items-center gap-1 text-sm font-medium text-brand hover:underline">
-          <Plus className="h-4 w-4" /> Add payment
+          <Plus className="h-4 w-4" /> Add Payment
         </button>
         <div className={`text-right text-sm font-medium ${Math.abs(sum - 100) < 0.5 ? "text-slate-500" : "text-amber-600"}`}>Total: {sum}%</div>
       </div>

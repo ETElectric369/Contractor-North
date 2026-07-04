@@ -146,7 +146,7 @@ export function OrgSettingsForm({ org }: { org: Organization }) {
       </div>
       <div className="flex items-center gap-3">
         <Button type="submit" disabled={pending}>
-          {pending ? "Saving…" : "Save changes"}
+          {pending ? "Saving…" : "Save Changes"}
         </Button>
         {done && (
           <span className="flex items-center gap-1 text-sm font-medium text-green-600">

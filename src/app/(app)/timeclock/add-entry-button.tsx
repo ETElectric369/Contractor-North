@@ -131,7 +131,7 @@ export function AddEntryButton({
   return (
     <>
       <Button variant="outline" onClick={() => setOpen(true)}>
-        <Plus className="h-4 w-4" /> Add entry
+        <Plus className="h-4 w-4" /> Add Entry
       </Button>
 
       <Modal
@@ -143,7 +143,7 @@ export function AddEntryButton({
             onCancel={() => setOpen(false)}
             onSave={submit}
             saving={pending}
-            saveLabel="Add entry"
+            saveLabel="Add Entry"
           />
         }
       >

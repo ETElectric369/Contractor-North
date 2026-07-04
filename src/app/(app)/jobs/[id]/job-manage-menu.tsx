@@ -157,7 +157,7 @@ export function JobManageMenu({
               ) : (
                 <Receipt className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" />
               )}
-              Create invoice
+              Create Invoice
             </button>
           )}
           {/* Techs see just the clean short list (Customer + All jobs) — no divider needed. */}
@@ -168,7 +168,7 @@ export function JobManageMenu({
             </button>
           )}
           <button onClick={() => go("/jobs")} className={MANAGE_ROW_CLS}>
-            <List className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> All jobs
+            <List className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> All Jobs
           </button>
           {isStaff && deleteJob && (
             <>
@@ -183,7 +183,7 @@ export function JobManageMenu({
                 ) : (
                   <Trash2 className="h-4 w-4 shrink-0" />
                 )}
-                Delete job
+                Delete Job
               </button>
             </>
           )}

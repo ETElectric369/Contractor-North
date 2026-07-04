@@ -72,7 +72,7 @@ export function LienInsuranceCard({
           <div className="flex items-center justify-between">
             <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Mechanics lien rights</div>
             <button onClick={() => setEditLien(true)} className="text-xs font-medium text-brand hover:underline">
-              {lien ? "Edit" : "Track lien rights"}
+              {lien ? "Edit" : "Track Lien Rights"}
             </button>
           </div>
           {lien ? (
@@ -108,7 +108,7 @@ export function LienInsuranceCard({
               <FileWarning className="h-3.5 w-3.5" /> Insurance claim
             </div>
             <button onClick={() => setEditIns(true)} className="text-xs font-medium text-brand hover:underline">
-              {insurance ? "Edit" : "Add claim"}
+              {insurance ? "Edit" : "Add Claim"}
             </button>
           </div>
           {insurance ? (

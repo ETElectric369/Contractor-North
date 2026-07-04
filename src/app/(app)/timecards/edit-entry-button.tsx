@@ -197,7 +197,7 @@ export function EditEntryButton({
             onCancel={() => setOpen(false)}
             onSave={save}
             saving={pending}
-            saveLabel="Save changes"
+            saveLabel="Save Changes"
             extra={
               <Button
                 variant="ghost"
@@ -281,7 +281,7 @@ export function EditEntryButton({
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium text-slate-700">Split across jobs</span>
               <button type="button" onClick={addSplit} className="text-xs font-semibold text-brand hover:underline">
-                + Add job
+                + Add Job
               </button>
             </div>
             <p className="mt-1 text-xs text-slate-500">

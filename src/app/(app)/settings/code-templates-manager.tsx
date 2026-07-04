@@ -74,7 +74,7 @@ export function CodeTemplatesManager({ templates, codes }: { templates: Template
           ))}
         </ul>
       )}
-      <Button variant="outline" onClick={openNew}><Plus className="h-4 w-4" /> New template</Button>
+      <Button variant="outline" onClick={openNew}><Plus className="h-4 w-4" /> New Template</Button>
 
       <Modal
         open={editing !== null}

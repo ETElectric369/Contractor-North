@@ -8,7 +8,7 @@ import { setBugReportStatus, type BugReport } from "@/app/(app)/bug-report-actio
 const TABS = [
   { key: "open", label: "Open" },
   { key: "fixed", label: "Fixed" },
-  { key: "wontfix", label: "Won't fix" },
+  { key: "wontfix", label: "Won't Fix" },
   { key: "all", label: "All" },
 ] as const;
 
@@ -82,15 +82,15 @@ export function BugList({ initial }: { initial: BugReport[] }) {
                   {st === "open" ? (
                     <>
                       <button onClick={() => setStatus(r.id, "fixed")} title="Mark fixed" className="flex items-center gap-1 text-xs text-slate-400 hover:text-green-600">
-                        <Check className="h-3.5 w-3.5" /> fixed
+                        <Check className="h-3.5 w-3.5" /> Fixed
                       </button>
                       <button onClick={() => setStatus(r.id, "wontfix")} title="Won't fix" className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-700">
-                        <X className="h-3.5 w-3.5" /> won&apos;t
+                        <X className="h-3.5 w-3.5" /> Won&apos;t
                       </button>
                     </>
                   ) : (
                     <button onClick={() => setStatus(r.id, "open")} title="Re-open" className="flex items-center gap-1 text-xs text-slate-400 hover:text-amber-600">
-                      <RotateCcw className="h-3.5 w-3.5" /> re-open
+                      <RotateCcw className="h-3.5 w-3.5" /> Re-open
                     </button>
                   )}
                 </div>

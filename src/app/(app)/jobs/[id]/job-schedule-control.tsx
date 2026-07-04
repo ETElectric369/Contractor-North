@@ -159,7 +159,7 @@ export function JobScheduleControl({
           onClick={addRange}
           className="inline-flex items-center gap-1 text-xs font-medium text-brand hover:underline"
         >
-          <Plus className="h-3.5 w-3.5" /> Add date range
+          <Plus className="h-3.5 w-3.5" /> Add Date Range
         </button>
         {pending && <span className="text-xs text-slate-400">Saving…</span>}
         {saved && !pending && (

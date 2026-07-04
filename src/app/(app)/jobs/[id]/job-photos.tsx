@@ -78,7 +78,7 @@ export function JobPhotos({ orgId, jobId, docs }: { orgId: string; jobId: string
         <input ref={captureRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onFiles} />
         <Button onClick={() => (onPhone() ? captureRef.current?.click() : fileRef.current?.click())} disabled={busy}>
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
-          Take photo
+          Take Photo
         </Button>
         <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={busy}>
           <Upload className="h-4 w-4" /> Upload

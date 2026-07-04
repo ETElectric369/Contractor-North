@@ -308,9 +308,9 @@ function PoLine({
           <button
             onClick={receive}
             disabled={pending || recv <= 0}
-            className="inline-flex items-center gap-1 rounded-md bg-brand-light px-2 py-1 text-xs font-medium text-brand hover:bg-brand-light/70 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-md bg-brand-light px-2 py-1 text-xs font-medium text-brand hover:bg-brand-light/70 disabled:opacity-50"
           >
-            <PackageCheck className="h-3.5 w-3.5" /> Receive
+            <PackageCheck className="h-4 w-4 shrink-0" /> Receive
           </button>
         </div>
       ) : null}

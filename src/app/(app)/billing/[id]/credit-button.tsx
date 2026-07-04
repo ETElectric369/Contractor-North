@@ -54,14 +54,14 @@ export function CreditButton({
     <>
       {menuItem ? (
         <button type="button" onClick={() => setOpen(true)} className={ACTIONS_ROW_CLS}>
-          <RotateCcw className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Credit / refund
+          <RotateCcw className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Credit / Refund
         </button>
       ) : (
         <button
           onClick={() => setOpen(true)}
           className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
         >
-          <RotateCcw className="h-4 w-4" /> Credit / refund
+          <RotateCcw className="h-4 w-4" /> Credit / Refund
         </button>
       )}
       <Modal

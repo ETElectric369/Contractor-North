@@ -486,7 +486,7 @@ export function GeofenceMonitor({
               {phase === "picking" ? (
                 <>
                   <Button className="w-full" disabled={!pickedValid} onClick={clockOutPicked}>
-                    Clock out at that time
+                    Clock Out at That Time
                   </Button>
                   <div className="flex gap-2">
                     <Button
@@ -501,7 +501,7 @@ export function GeofenceMonitor({
                       Back
                     </Button>
                     <Button variant="ghost" className="flex-1" onClick={stillWorking}>
-                      Still working
+                      Still Working
                     </Button>
                   </div>
                 </>
@@ -513,7 +513,7 @@ export function GeofenceMonitor({
                         <Loader2 className="h-4 w-4 animate-spin" /> Clocking out…
                       </>
                     ) : (
-                      "Clock out now"
+                      "Clock Out Now"
                     )}
                   </Button>
                   <div className="flex gap-2">
@@ -527,10 +527,10 @@ export function GeofenceMonitor({
                         setPhase("picking");
                       }}
                     >
-                      Pick the time…
+                      Pick the Time…
                     </Button>
                     <Button variant="ghost" className="flex-1" disabled={phase === "saving"} onClick={stillWorking}>
-                      Still working
+                      Still Working
                     </Button>
                   </div>
                 </>

@@ -50,7 +50,7 @@ export function SplashSettings({ settings }: { settings: OrgSettings }) {
         <p className="mt-1 text-xs text-slate-400">Leave blank for a clean branded gradient.</p>
       </div>
       <div className="flex items-center gap-3">
-        <Button size="sm" onClick={save} disabled={pending}>{pending ? "Saving…" : "Save splash"}</Button>
+        <Button size="sm" onClick={save} disabled={pending}>{pending ? "Saving…" : "Save Splash"}</Button>
         {done && <span className="flex items-center gap-1 text-sm font-medium text-green-600"><Check className="h-4 w-4" /> Saved</span>}
       </div>
     </div>

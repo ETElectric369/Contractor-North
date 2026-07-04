@@ -97,7 +97,7 @@ export function QuoteItemsEditor({ quote, items }: { quote: Quote; items: QuoteL
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
           <span className="text-sm font-semibold text-slate-900">Line items</span>
           <Button size="sm" variant="outline" onClick={() => setDetailsOpen(true)}>
-            <Pencil className="h-3.5 w-3.5" /> Edit details
+            <Pencil className="h-4 w-4" /> Edit Details
           </Button>
         </div>
         {error && !detailsOpen && (
@@ -219,7 +219,7 @@ export function QuoteItemsEditor({ quote, items }: { quote: Quote; items: QuoteL
         onClose={() => setDetailsOpen(false)}
         title="Edit quote details"
         footer={
-          <ModalActions onCancel={() => setDetailsOpen(false)} onSave={saveDetails} saving={pending} saveLabel="Save changes" />
+          <ModalActions onCancel={() => setDetailsOpen(false)} onSave={saveDetails} saving={pending} saveLabel="Save Changes" />
         }
       >
         <div className="space-y-4">

@@ -188,7 +188,7 @@ export function BillsReceipts({
         activeId={tab}
         onChange={(id) => setTab(id as "po" | "bills" | "receipts")}
         tabs={[
-          { id: "po", label: "Purchase orders", count: pos.length },
+          { id: "po", label: "Purchase Orders", count: pos.length },
           { id: "bills", label: "Bills", count: bills.length },
           { id: "receipts", label: "Receipts", count: docs.length },
         ]}
@@ -273,7 +273,7 @@ export function BillsReceipts({
             <div className="flex items-center justify-between">
               <span className="text-xs text-slate-500">{shownBills.length} bills · {formatCurrency(totalBills)} total</span>
               <Button size="sm" onClick={addBill} disabled={pending || !supplier.trim()}>
-                <Plus className="h-3.5 w-3.5" /> Add bill
+                <Plus className="h-3.5 w-3.5" /> Add Bill
               </Button>
             </div>
           </div>
@@ -281,7 +281,7 @@ export function BillsReceipts({
           <div className="mb-3 flex gap-2">
             {([
               ["all", `All (${bills.length})`],
-              ["jobs", `Job bills (${bills.filter((b) => b.job_id).length})`],
+              ["jobs", `Job Bills (${bills.filter((b) => b.job_id).length})`],
               ["overhead", `Overhead (${bills.filter((b) => !b.job_id).length})`],
             ] as const).map(([id, label]) => (
               <button

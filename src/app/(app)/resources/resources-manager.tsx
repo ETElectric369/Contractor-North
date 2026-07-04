@@ -117,7 +117,7 @@ export function ResourcesManager({ resources }: { resources: Resource[] }) {
           <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search contacts…" className="pl-9" />
         </div>
-        <Button size="sm" onClick={() => { if (adding) { closeForm(); } else { setEditingId(null); setError(null); resetForm(); setAdding(true); } }}><Plus className="h-3.5 w-3.5" /> Add contact</Button>
+        <Button size="sm" onClick={() => { if (adding) { closeForm(); } else { setEditingId(null); setError(null); resetForm(); setAdding(true); } }}><Plus className="h-3.5 w-3.5" /> Add Contact</Button>
       </div>
 
       {(adding || editingId) && (
@@ -136,7 +136,7 @@ export function ResourcesManager({ resources }: { resources: Resource[] }) {
           <div><Label htmlFor="r-notes">Notes</Label><Textarea id="r-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Hours, account #, inspection request line, etc." /></div>
           <div className="flex justify-end gap-2">
             <Button size="sm" variant="outline" onClick={closeForm}>Cancel</Button>
-            <Button size="sm" onClick={save} disabled={pending || !name.trim()}>{pending ? "Saving…" : editingId ? "Save changes" : "Save contact"}</Button>
+            <Button size="sm" onClick={save} disabled={pending || !name.trim()}>{pending ? "Saving…" : editingId ? "Save Changes" : "Save Contact"}</Button>
           </div>
         </Card>
       )}

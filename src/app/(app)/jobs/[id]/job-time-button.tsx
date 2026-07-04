@@ -184,7 +184,7 @@ export function JobTimeButton({
         </div>
       )}
       <Button type="button" variant="outline" size="sm" onClick={doLogHours} disabled={pending || hours <= 0}>
-        Log {hours > 0 ? `${hours}h` : "hours"} on this job
+        Log {hours > 0 ? `${hours}h` : "hours"} on This Job
       </Button>
     </div>
   );
@@ -204,8 +204,8 @@ export function JobTimeButton({
         }
         title="Time"
       >
-        {state === "here" ? <Clock className="h-4 w-4" /> : state === "switch" ? <ArrowLeftRight className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-        {state === "in" && "Clock in"}
+        {state === "here" ? <Clock className="h-4 w-4 shrink-0" /> : state === "switch" ? <ArrowLeftRight className="h-4 w-4 shrink-0" /> : <Play className="h-4 w-4 shrink-0" />}
+        {state === "in" && "Clock In"}
         {state === "switch" && (
           <>
             Switch<span className="hidden sm:inline">&nbsp;here</span>
@@ -239,12 +239,12 @@ export function JobTimeButton({
             saving={pending}
             saveLabel={
               state === "in"
-                ? "Clock me in"
+                ? "Clock Me In"
                 : state === "switch"
-                  ? "Switch to this job"
+                  ? "Switch to This Job"
                   : isStaff
-                    ? "Clock me out"
-                    : "Clock out on the Timeclock"
+                    ? "Clock Me Out"
+                    : "Clock Out on the Timeclock"
             }
           />
         }

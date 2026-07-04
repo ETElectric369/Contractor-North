@@ -85,7 +85,7 @@ export function AvatarUpload({
         <div className="flex gap-2">
           <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()} disabled={busy}>
             {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Camera className="h-3.5 w-3.5" />}
-            {url ? "Change photo" : "Add photo"}
+            {url ? "Change Photo" : "Add Photo"}
           </Button>
           {url && (
             <Button size="sm" variant="outline" onClick={remove} disabled={busy} className="text-red-600">

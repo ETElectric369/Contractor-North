@@ -82,7 +82,7 @@ export function RecurringButton({
           <Pencil className="h-4 w-4" />
         </button>
       ) : (
-        <Button onClick={() => setOpen(true)}><Plus className="h-4 w-4" /> New recurring</Button>
+        <Button onClick={() => setOpen(true)}><Plus className="h-4 w-4" /> New Recurring</Button>
       )}
 
       <Modal
@@ -176,7 +176,7 @@ export function RecurringButton({
                   ))}
                 </div>
                 <div className="mt-1.5 flex items-center justify-between">
-                  <button type="button" onClick={addItem} className="text-sm font-medium text-brand hover:underline">+ Add line</button>
+                  <button type="button" onClick={addItem} className="text-sm font-medium text-brand hover:underline">+ Add Line</button>
                   <span className="text-sm font-semibold text-slate-900">Subtotal: {formatCurrency(itemsTotal)}</span>
                 </div>
                 <input type="hidden" name="line_items" value={JSON.stringify(items)} />

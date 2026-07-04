@@ -11,7 +11,7 @@ export function NewFormButton() {
   return (
     <>
       <Button onClick={() => setOpen(true)}>
-        <Plus className="h-4 w-4" /> New form
+        <Plus className="h-4 w-4" /> New Form
       </Button>
 
       <FormEditor open={open} onClose={() => setOpen(false)} />

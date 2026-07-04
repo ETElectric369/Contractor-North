@@ -76,7 +76,7 @@ export function JobPermits({ jobId, permits }: { jobId: string; permits: Permit[
     <div>
       <div className="mb-3 flex items-center justify-between">
         <div className="text-sm text-slate-500">{permits.length} permit{permits.length === 1 ? "" : "s"}</div>
-        <Button size="sm" variant="outline" onClick={() => setAdding((a) => !a)}><Plus className="h-3.5 w-3.5" /> Add permit</Button>
+        <Button size="sm" variant="outline" onClick={() => setAdding((a) => !a)}><Plus className="h-3.5 w-3.5" /> Add Permit</Button>
       </div>
 
       {adding && (
@@ -100,7 +100,7 @@ export function JobPermits({ jobId, permits }: { jobId: string; permits: Permit[
           <div><Label htmlFor="p-notes">Notes</Label><Textarea id="p-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} /></div>
           <div className="flex justify-end gap-2">
             <Button size="sm" variant="outline" onClick={() => setAdding(false)}>Cancel</Button>
-            <Button size="sm" onClick={add} disabled={pending}>{pending ? "Saving…" : "Save permit"}</Button>
+            <Button size="sm" onClick={add} disabled={pending}>{pending ? "Saving…" : "Save Permit"}</Button>
           </div>
         </div>
       )}
@@ -125,7 +125,7 @@ export function JobPermits({ jobId, permits }: { jobId: string; permits: Permit[
                         rel="noreferrer"
                         className="rounded bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-blue-700 hover:bg-blue-100"
                       >
-                        Check with city ↗
+                        Check with City ↗
                       </a>
                     )}
                   </div>

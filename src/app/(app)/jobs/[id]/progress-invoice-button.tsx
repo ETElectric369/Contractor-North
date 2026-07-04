@@ -147,7 +147,7 @@ export function ProgressInvoiceButton({
   return (
     <>
       <Button variant="outline" onClick={() => setOpen(true)}>
-        <Percent className="h-3.5 w-3.5" /> Progress payment
+        <Percent className="h-3.5 w-3.5" /> Progress Payment
       </Button>
       <Modal
         open={open}
@@ -158,7 +158,7 @@ export function ProgressInvoiceButton({
             onCancel={() => setOpen(false)}
             onSave={go}
             saving={pending}
-            saveLabel={mode === "payment" ? "Record payment" : `Create ${kind === "deposit" ? "deposit" : kind === "final" ? "final invoice" : "invoice"}`}
+            saveLabel={mode === "payment" ? "Record Payment" : `Create ${kind === "deposit" ? "Deposit" : kind === "final" ? "Final Invoice" : "Invoice"}`}
             disabled={!canSave}
           />
         }
@@ -189,8 +189,8 @@ export function ProgressInvoiceButton({
               activeId={mode}
               onSelect={(id) => setMode(id as "payment" | "invoice")}
               items={[
-                { id: "payment", label: "Record a payment" },
-                { id: "invoice", label: "New invoice" },
+                { id: "payment", label: "Record a Payment" },
+                { id: "invoice", label: "New Invoice" },
               ]}
             />
           )}
@@ -228,7 +228,7 @@ export function ProgressInvoiceButton({
                     <NumberInput id="pamt" value={payAmount} onValueChange={setPayAmount} className="w-40" />
                     {selected && payAmount !== selected.balance && (
                       <button type="button" onClick={() => setPayAmount(selected.balance)} className="text-xs font-medium text-brand">
-                        Full balance
+                        Full Balance
                       </button>
                     )}
                   </div>
@@ -273,12 +273,12 @@ export function ProgressInvoiceButton({
                   showActuals
                     ? [
                         { id: "actuals", label: "Actual T&M" },
-                        { id: "percent", label: "% of est." },
+                        { id: "percent", label: "% of Est." },
                         { id: "fixed", label: "Fixed" },
                       ]
                     : [
-                        { id: "percent", label: "% of remaining" },
-                        { id: "fixed", label: "Fixed amount" },
+                        { id: "percent", label: "% of Remaining" },
+                        { id: "fixed", label: "Fixed Amount" },
                       ]
                 }
               />
@@ -328,12 +328,12 @@ export function ProgressInvoiceButton({
                   <div className="mt-2 flex flex-wrap gap-2">
                     {remainingToEstimate > 0 && (
                       <button type="button" onClick={() => setFixed(remainingToEstimate)} className="rounded-full border border-slate-300 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-50">
-                        To estimate ({formatCurrency(remainingToEstimate)})
+                        To Estimate ({formatCurrency(remainingToEstimate)})
                       </button>
                     )}
                     {isTM && unbilledWork > 0 && (
                       <button type="button" onClick={() => setFixed(unbilledWork)} className="rounded-full border border-slate-300 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-50">
-                        Work to date ({formatCurrency(unbilledWork)})
+                        Work to Date ({formatCurrency(unbilledWork)})
                       </button>
                     )}
                   </div>

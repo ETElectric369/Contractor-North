@@ -111,11 +111,11 @@ export function InquiryModal({ inquiry, mode = "new" }: { inquiry?: Inquiry; mod
     <>
       {editing ? (
         <Button size="sm" variant="outline" onClick={openModal}>
-          <Pencil className="h-3.5 w-3.5" /> Edit
+          <Pencil className="h-4 w-4" /> Edit
         </Button>
       ) : (
         <Button onClick={openModal}>
-          <Plus className="h-4 w-4" /> New lead
+          <Plus className="h-4 w-4" /> New Lead
         </Button>
       )}
 
@@ -130,7 +130,7 @@ export function InquiryModal({ inquiry, mode = "new" }: { inquiry?: Inquiry; mod
               onCancel={discard}
               submit
               saving={pending}
-              saveLabel={editing ? "Save changes" : "Create lead"}
+              saveLabel={editing ? "Save Changes" : "Create Lead"}
             />
           }
         >

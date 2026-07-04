@@ -113,7 +113,7 @@ export function JobCodesManager({ jobCodes }: { jobCodes: JobCode[] }) {
           ))}
         </ul>
       )}
-      <Button variant="outline" onClick={openNew}><Plus className="h-4 w-4" /> New job code</Button>
+      <Button variant="outline" onClick={openNew}><Plus className="h-4 w-4" /> New Job Code</Button>
 
       <Modal
         open={editing !== null}

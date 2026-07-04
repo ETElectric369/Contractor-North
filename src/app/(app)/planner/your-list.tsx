@@ -174,7 +174,7 @@ export function YourList({
           Nothing urgent today.{" "}
           {grabHref && (
             <Link href={grabHref} className="font-medium text-brand hover:underline">
-              Grab one →
+              Grab One →
             </Link>
           )}
         </p>
@@ -307,10 +307,10 @@ export function YourList({
               }
               className={SHEET_ROW}
             >
-              Move due date to tomorrow
+              Move Due Date to Tomorrow
             </button>
             <MoveToDay
-              label="Pick a day"
+              label="Pick a Day"
               triggerClassName={SHEET_ROW}
               onPick={async (iso) => {
                 if (!iso) return { ok: true };
@@ -322,7 +322,7 @@ export function YourList({
                 return res;
               }}
             >
-              Pick a day…
+              Pick a Day…
             </MoveToDay>
             <button
               type="button"
@@ -334,7 +334,7 @@ export function YourList({
               }
               className={SHEET_ROW}
             >
-              Someday (clear date)
+              Someday (Clear Date)
             </button>
             <button
               type="button"
@@ -351,7 +351,7 @@ export function YourList({
               }
               className={SHEET_ROW}
             >
-              {sheetTask.pinned ? "Unpin from today" : "Pin to today"}
+              {sheetTask.pinned ? "Unpin From Today" : "Pin to Today"}
             </button>
             <Link
               href={sheetTask.job_id ? `/jobs/${sheetTask.job_id}?tab=tasks` : `/tasks/${sheetTask.category}`}

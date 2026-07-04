@@ -137,7 +137,7 @@ export function InsuranceManager({ items, orgId }: { items: InsuranceItem[]; org
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-end gap-2">
         <ImportDocsButton orgId={orgId} page="Insurance" />
-        <Button size="sm" onClick={() => setAdding((a) => !a)}><Plus className="h-3.5 w-3.5" /> Add policy</Button>
+        <Button size="sm" onClick={() => setAdding((a) => !a)}><Plus className="h-3.5 w-3.5" /> Add Policy</Button>
       </div>
 
       {adding && (
@@ -157,7 +157,7 @@ export function InsuranceManager({ items, orgId }: { items: InsuranceItem[]; org
             <input ref={certInputRef} id="i-cert" type="file" accept="application/pdf,image/*" className="hidden" onChange={(e) => setCertFile(e.target.files?.[0] ?? null)} />
             <div className="flex items-center gap-2">
               <Button size="sm" variant="outline" onClick={() => certInputRef.current?.click()}>
-                <Paperclip className="h-3.5 w-3.5" /> {certFile ? "Change file" : "Attach file"}
+                <Paperclip className="h-3.5 w-3.5" /> {certFile ? "Change File" : "Attach File"}
               </Button>
               {certFile && (
                 <span className="flex min-w-0 items-center gap-1 text-xs text-slate-500">
@@ -239,11 +239,11 @@ export function InsuranceManager({ items, orgId }: { items: InsuranceItem[]; org
             <div className="flex flex-wrap items-center gap-2">
               {(editing as InsuranceItem).signedUrl && (
                 <a href={(editing as InsuranceItem).signedUrl!} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-sm font-medium text-sky-700 hover:underline">
-                  <FileText className="h-4 w-4" /> View current
+                  <FileText className="h-4 w-4" /> View Current
                 </a>
               )}
               <Button size="sm" variant="outline" onClick={() => editCertRef.current?.click()} disabled={pending}>
-                <Paperclip className="h-3.5 w-3.5" /> {(editing as InsuranceItem).file_url ? "Replace" : "Attach file"}
+                <Paperclip className="h-3.5 w-3.5" /> {(editing as InsuranceItem).file_url ? "Replace" : "Attach File"}
               </Button>
               {(editing as InsuranceItem).file_url && (
                 <Button size="sm" variant="outline" onClick={() => removeCert(editing as InsuranceItem)} disabled={pending}>

@@ -156,7 +156,7 @@ export function PriceListManager({ items }: { items: PriceItem[] }) {
             <Upload className="h-3.5 w-3.5" /> Import CSV
           </Button>
           <Button size="sm" onClick={add} disabled={pending || !desc.trim()}>
-            <Plus className="h-3.5 w-3.5" /> Add item
+            <Plus className="h-3.5 w-3.5" /> Add Item
           </Button>
         </div>
       </Card>
@@ -243,7 +243,7 @@ export function PriceListManager({ items }: { items: PriceItem[] }) {
               </div>
               <div className="flex justify-end gap-2">
                 <Button variant="outline" onClick={() => { setHeaders([]); setDataRows([]); setMapping({}); }}>Back</Button>
-                <Button onClick={runImport} disabled={pending}>{pending ? "Importing…" : `Import ${dataRows.length} items`}</Button>
+                <Button onClick={runImport} disabled={pending}>{pending ? "Importing…" : `Import ${dataRows.length} Items`}</Button>
               </div>
             </>
           )}

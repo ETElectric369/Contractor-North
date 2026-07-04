@@ -106,7 +106,7 @@ export function ShareQrButton() {
                 </p>
                 <div className="flex gap-2">
                   <Button onClick={share} className="flex-1">
-                    <Share2 className="mr-1.5 h-4 w-4" /> Send the link
+                    <Share2 className="mr-1.5 h-4 w-4" /> Send the Link
                   </Button>
                   <Button onClick={copy} variant="outline" className="shrink-0">
                     <Copy className="h-4 w-4" />

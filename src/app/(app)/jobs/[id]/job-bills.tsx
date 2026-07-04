@@ -67,7 +67,7 @@ export function JobBills({ jobId, bills }: { jobId: string; bills: Bill[] }) {
           {bills.length} bill{bills.length === 1 ? "" : "s"} · {formatCurrency(total)}
         </div>
         <Button size="sm" variant="outline" onClick={() => setAdding((a) => !a)}>
-          <Plus className="h-3.5 w-3.5" /> Add bill
+          <Plus className="h-3.5 w-3.5" /> Add Bill
         </Button>
       </div>
 
@@ -81,7 +81,7 @@ export function JobBills({ jobId, bills }: { jobId: string; bills: Bill[] }) {
             onSave={add}
             saving={pending}
             disabled={!supplier.trim()}
-            saveLabel="Save changes"
+            saveLabel="Save Changes"
           />
         }
       >
@@ -206,7 +206,7 @@ function JobBillEditModal({ bill, onClose }: { bill: Bill; onClose: () => void }
       open
       onClose={onClose}
       title="Edit bill"
-      footer={<ModalActions onCancel={onClose} onSave={save} saving={pending} disabled={!supplier.trim()} saveLabel="Save changes" />}
+      footer={<ModalActions onCancel={onClose} onSave={save} saving={pending} disabled={!supplier.trim()} saveLabel="Save Changes" />}
     >
       <div className="space-y-3">
         {error && <p className="text-sm text-red-600">{error}</p>}

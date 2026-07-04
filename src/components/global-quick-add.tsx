@@ -17,13 +17,13 @@ import { QuickCaptureSheet } from "@/components/quick-capture";
 // staffOnly mirrors the dock/strip/palette gating — a tech tapping "New appointment"
 // was silently redirected to /planner by the staff gate; techs create tasks + jobs.
 const ACTIONS: { label: string; href: string; icon: LucideIcon; staffOnly?: boolean }[] = [
-  { label: "New task", href: "/tasks?new=1", icon: ListTodo },
-  { label: "New lead", href: "/leads?new=1", icon: UserSearch, staffOnly: true },
-  { label: "New customer", href: "/crm?new=1", icon: UserPlus, staffOnly: true },
-  { label: "New job", href: "/jobs?new=1", icon: Briefcase },
-  { label: "New appointment", href: "/schedule?new=appointment", icon: CalendarPlus, staffOnly: true },
-  { label: "New estimate", href: "/quotes/new", icon: FileText, staffOnly: true },
-  { label: "New invoice", href: "/billing?new=1", icon: Receipt, staffOnly: true },
+  { label: "New Task", href: "/tasks?new=1", icon: ListTodo },
+  { label: "New Lead", href: "/leads?new=1", icon: UserSearch, staffOnly: true },
+  { label: "New Customer", href: "/crm?new=1", icon: UserPlus, staffOnly: true },
+  { label: "New Job", href: "/jobs?new=1", icon: Briefcase },
+  { label: "New Appointment", href: "/schedule?new=appointment", icon: CalendarPlus, staffOnly: true },
+  { label: "New Estimate", href: "/quotes/new", icon: FileText, staffOnly: true },
+  { label: "New Invoice", href: "/billing?new=1", icon: Receipt, staffOnly: true },
 ];
 
 /** Quick "+" create menu. `placement="topbar"` renders an inline button with a
@@ -62,7 +62,7 @@ export function GlobalQuickAdd({
         }}
         className="relative z-10 flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15"
       >
-        <Zap className="h-4 w-4 text-[rgb(var(--glass-ink))]" /> Capture anything
+        <Zap className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Capture Anything
       </button>
       {ACTIONS.filter((a) => isStaff || !a.staffOnly).map((a) => (
         <button
@@ -73,7 +73,7 @@ export function GlobalQuickAdd({
           }}
           className="relative z-10 flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15"
         >
-          <a.icon className="h-4 w-4 text-[rgb(var(--glass-ink))]" /> {a.label}
+          <a.icon className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> {a.label}
         </button>
       ))}
     </>

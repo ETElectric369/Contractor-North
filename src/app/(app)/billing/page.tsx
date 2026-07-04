@@ -82,7 +82,7 @@ export default async function BillingPage() {
                 // Schedule job → draws bill via "Request next payment" on the job's payment
                 // schedule, not a standard invoice (createInvoiceForJob rejects schedule jobs).
                 <Link href={`/jobs/${j.id}?tab=invoices`} className="shrink-0 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-dark">
-                  Request payment →
+                  Request Payment →
                 </Link>
               ) : (
                 <InvoiceJobButton jobId={j.id} />
@@ -104,7 +104,7 @@ export default async function BillingPage() {
                 </div>
                 <div className="flex shrink-0 items-center gap-3">
                   <span className="text-sm font-medium text-slate-900">{money(inv.total)}</span>
-                  <span className="inline-flex items-center text-xs font-semibold text-brand">Review &amp; send <ChevronRight className="h-3.5 w-3.5" /></span>
+                  <span className="inline-flex items-center text-xs font-semibold text-brand">Review &amp; Send <ChevronRight className="h-3.5 w-3.5" /></span>
                 </div>
               </Link>
             </li>
@@ -127,7 +127,7 @@ export default async function BillingPage() {
                 </div>
                 <div className="flex shrink-0 items-center gap-3">
                   <span className={`text-sm font-medium ${inv.overdue ? "text-red-700" : "text-slate-900"}`}>{money(inv.balance)}</span>
-                  <span className="inline-flex items-center text-xs font-semibold text-brand">Record payment <ChevronRight className="h-3.5 w-3.5" /></span>
+                  <span className="inline-flex items-center text-xs font-semibold text-brand">Record Payment <ChevronRight className="h-3.5 w-3.5" /></span>
                 </div>
               </Link>
             </li>

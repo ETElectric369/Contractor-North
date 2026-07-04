@@ -80,7 +80,7 @@ export default async function InvoicePage({
         href="/billing"
         className="mb-4 inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800"
       >
-        <ArrowLeft className="h-4 w-4" /> Back to billing
+        <ArrowLeft className="h-4 w-4" /> Back to Billing
       </Link>
 
       <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -126,7 +126,7 @@ export default async function InvoicePage({
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700"
             >
-              <CreditCard className="h-4 w-4" /> Collect payment
+              <CreditCard className="h-4 w-4" /> Collect Payment
             </a>
           )}
           <EmailButton
@@ -143,7 +143,7 @@ export default async function InvoicePage({
               href="#record-payment"
               className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark"
             >
-              <Banknote className="h-4 w-4" /> Record payment
+              <Banknote className="h-4 w-4" /> Record Payment
             </a>
           )}
           <Link

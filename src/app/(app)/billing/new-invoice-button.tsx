@@ -161,7 +161,7 @@ export function NewInvoiceButton({
   return (
     <>
       <Button onClick={openModal}>
-        <Plus className="h-4 w-4" /> New invoice
+        <Plus className="h-4 w-4" /> New Invoice
       </Button>
 
       <Modal
@@ -195,7 +195,7 @@ export function NewInvoiceButton({
                   : "border-slate-200 text-slate-600"
               }`}
             >
-              From an estimate
+              From an Estimate
             </button>
             <button
               onClick={() => setMode("blank")}
@@ -205,7 +205,7 @@ export function NewInvoiceButton({
                   : "border-slate-200 text-slate-600"
               }`}
             >
-              Blank invoice
+              Blank Invoice
             </button>
           </div>
 

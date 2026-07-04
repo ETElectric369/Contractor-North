@@ -83,7 +83,7 @@ export function EditPermitButton({ permit, jobId }: { permit: Permit; jobId?: st
         open={open}
         onClose={() => setOpen(false)}
         title="Edit permit"
-        footer={<ModalActions onCancel={() => setOpen(false)} onSave={save} saving={pending} saveLabel="Save changes" />}
+        footer={<ModalActions onCancel={() => setOpen(false)} onSave={save} saving={pending} saveLabel="Save Changes" />}
       >
         <div className="space-y-3">
           {error && <p className="text-sm text-red-600">{error}</p>}

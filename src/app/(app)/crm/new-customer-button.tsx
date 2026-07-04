@@ -142,7 +142,7 @@ export function NewCustomerButton() {
   return (
     <>
       <Button onClick={openFresh}>
-        <Plus className="h-4 w-4" /> New customer
+        <Plus className="h-4 w-4" /> New Customer
       </Button>
 
       <form action={onSubmit}>
@@ -155,7 +155,7 @@ export function NewCustomerButton() {
               onCancel={() => setOpen(false)}
               submit
               saving={pending}
-              saveLabel="Create customer"
+              saveLabel="Create Customer"
             />
           }
         >
@@ -167,7 +167,7 @@ export function NewCustomerButton() {
                 onClick={importContact}
                 className="inline-flex items-center gap-2 text-sm font-semibold text-brand hover:text-brand-dark"
               >
-                <Contact className="h-4 w-4" /> Import 1 contact from my phone
+                <Contact className="h-4 w-4 shrink-0" /> Import 1 Contact From My Phone
               </button>
               <p className="mt-1 text-[11px] leading-snug text-slate-400">
                 {hasPicker

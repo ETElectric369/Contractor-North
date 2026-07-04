@@ -151,7 +151,7 @@ export function NewJobButton({
   return (
     <>
       <Button onClick={openModal}>
-        <Plus className="h-4 w-4" /> New job
+        <Plus className="h-4 w-4" /> New Job
       </Button>
 
       <form action={onSubmit}>
@@ -165,7 +165,7 @@ export function NewJobButton({
               onCancel={discard}
               submit
               saving={pending}
-              saveLabel="Create job"
+              saveLabel="Create Job"
             />
           }
         >
@@ -195,7 +195,7 @@ export function NewJobButton({
                   onClick={() => patch({ new_customer: !form.new_customer })}
                   className="text-xs font-medium text-brand hover:underline"
                 >
-                  {form.new_customer ? "Pick existing" : "+ New customer"}
+                  {form.new_customer ? "Pick Existing" : "+ New Customer"}
                 </button>
               </div>
               {form.new_customer ? (

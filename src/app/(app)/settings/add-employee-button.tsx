@@ -64,7 +64,7 @@ export function AddEmployeeButton({ configured }: { configured: boolean }) {
   return (
     <>
       <Button variant="outline" onClick={() => setOpen(true)}>
-        <UserPlus className="h-4 w-4" /> Add employee
+        <UserPlus className="h-4 w-4" /> Add Employee
       </Button>
 
       <Modal
@@ -78,7 +78,7 @@ export function AddEmployeeButton({ configured }: { configured: boolean }) {
               onSave={save}
               saving={pending}
               disabled={!configured || !name.trim() || !email.includes("@")}
-              saveLabel="Create employee"
+              saveLabel="Create Employee"
             />
           )
         }

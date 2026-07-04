@@ -41,7 +41,7 @@ export function QuotePlaybookForm({ settings }: { settings: OrgSettings }) {
         placeholder={"e.g.\n• Always include a 1-year workmanship warranty line\n• Standard exclusions: permits, sales tax, equipment rental, drywall patch\n• Buy full 500 ft wire rolls; leftover is shop stock\n• We don't run aluminum branch circuits\n• Round each estimate up to the nearest $25\n• Note a 10% deposit due to schedule"}
       />
       <div className="flex items-center gap-3">
-        <Button onClick={save} disabled={pending}>{pending ? "Saving…" : "Save playbook"}</Button>
+        <Button onClick={save} disabled={pending}>{pending ? "Saving…" : "Save Playbook"}</Button>
         {done && (
           <span className="flex items-center gap-1 text-sm font-medium text-green-600">
             <Check className="h-4 w-4" /> Saved

@@ -96,7 +96,7 @@ export function InquiryRow({
           </div>
         </div>
         <Button size="sm" variant="outline" onClick={contacted} disabled={pending}>
-          <CheckCircle2 className="h-3.5 w-3.5" /> Contacted
+          <CheckCircle2 className="h-4 w-4" /> Contacted
         </Button>
         <div className="text-right">
           <label className="mb-0.5 block text-[10px] uppercase tracking-wide text-slate-400">Status</label>

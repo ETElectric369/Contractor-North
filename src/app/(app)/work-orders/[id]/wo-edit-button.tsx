@@ -71,7 +71,7 @@ export function WoEditButton({
           onClose={() => setOpen(false)}
           title="Edit work order"
           footer={
-            <ModalActions onCancel={() => setOpen(false)} submit saving={pending} saveLabel="Save changes" />
+            <ModalActions onCancel={() => setOpen(false)} submit saving={pending} saveLabel="Save Changes" />
           }
         >
           <div className="space-y-4">

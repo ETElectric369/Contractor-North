@@ -36,7 +36,7 @@ export function QuickCostButton({
   orgId,
   jobId,
   jobs,
-  label = "Add cost",
+  label = "Add Cost",
   className,
   onOpen,
   onClose,
@@ -194,7 +194,7 @@ export function QuickCostButton({
   return (
     <>
       <button type="button" className={className ?? DEFAULT_TRIGGER} onClick={openModal}>
-        <Wallet className="h-4 w-4" /> {label}
+        <Wallet className="h-4 w-4 shrink-0" /> {label}
       </button>
       <Modal
         open={open}

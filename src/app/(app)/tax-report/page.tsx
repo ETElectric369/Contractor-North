@@ -31,10 +31,10 @@ function rangeFor(period: Period, tz: string) {
 }
 
 const LABELS: Record<Period, string> = {
-  month: "This month",
-  quarter: "This quarter",
-  ytd: "Year to date",
-  year: "Last year",
+  month: "This Month",
+  quarter: "This Quarter",
+  ytd: "Year to Date",
+  year: "Last Year",
 };
 
 export default async function TaxReportPage({

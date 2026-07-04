@@ -114,7 +114,7 @@ export function MoveToDay({
             {clearable && (
               <div className="mr-auto">
                 <Button type="button" variant="outline" onClick={() => pick(null)} disabled={busy} className="text-red-600">
-                  Clear date
+                  Clear Date
                 </Button>
               </div>
             )}

@@ -26,7 +26,7 @@ export function GenerateDueButton({ count }: { count: number }) {
         }
         disabled={pending}
       >
-        <Zap className="h-4 w-4" /> {pending ? "Generating…" : `Generate ${count} due`}
+        <Zap className="h-4 w-4" /> {pending ? "Generating…" : `Generate ${count} Due`}
       </Button>
     </div>
   );

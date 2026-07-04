@@ -258,7 +258,7 @@ export default async function TimeclockPage() {
         {isStaff && (
           <div className="border-t border-slate-100 px-5 py-3">
             <Link href="/timecards" className="text-sm font-medium text-brand hover:underline">
-              Crew hours →
+              Crew Hours →
             </Link>
           </div>
         )}

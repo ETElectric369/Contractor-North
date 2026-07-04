@@ -354,7 +354,7 @@ export function AppointmentButton({
               submit
               formId="appt-form"
               saving={pending}
-              saveLabel={mode === "propose" ? "Create link" : "Save appointment"}
+              saveLabel={mode === "propose" ? "Create Link" : "Save Appointment"}
               extra={
                 editing ? (
                   <Button type="button" variant="outline" onClick={remove} disabled={pending} className="text-red-600">
@@ -380,13 +380,13 @@ export function AppointmentButton({
               <div className="flex flex-wrap gap-2">
                 <Button type="button" size="sm" onClick={copyLink}>
                   {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                  {copied ? "Copied" : "Copy link"}
+                  {copied ? "Copied" : "Copy Link"}
                 </Button>
                 <a
                   href={`sms:?body=${encodeURIComponent(`Hi! Pick a time that works and we'll lock it in: ${pickLink}`)}`}
                   className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-dark"
                 >
-                  <MessageSquare className="h-3.5 w-3.5" /> Text it
+                  <MessageSquare className="h-4 w-4 shrink-0" /> Text It
                 </a>
               </div>
             </div>
@@ -427,8 +427,8 @@ export function AppointmentButton({
               activeId={mode}
               onSelect={(id) => setMode(id as typeof mode)}
               items={[
-                { id: "set", label: "Set a time" },
-                { id: "propose", label: "Propose times" },
+                { id: "set", label: "Set a Time" },
+                { id: "propose", label: "Propose Times" },
               ]}
             />
           )}
@@ -529,7 +529,7 @@ export function AppointmentButton({
 
           {editing && appointment && !appointment.job_id && (
             <Button type="button" variant="outline" onClick={convertToJob} disabled={pending} className="w-full">
-              Convert to job →
+              Convert to Job →
             </Button>
           )}
           </>

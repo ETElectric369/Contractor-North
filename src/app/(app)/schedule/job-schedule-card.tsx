@@ -97,7 +97,7 @@ export function JobScheduleCard({
           return res;
         }}
       >
-        <CalendarSync className="h-3.5 w-3.5" /> Move to a day
+        <CalendarSync className="h-4 w-4 shrink-0" /> Move to a Day
       </MoveToDay>
     </div>
   );

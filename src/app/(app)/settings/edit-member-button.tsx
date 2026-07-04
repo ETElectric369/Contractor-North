@@ -84,7 +84,7 @@ export function EditMemberButton({
     <>
       {menuItem ? (
         <button onClick={() => setOpen(true)} className={rowClassName}>
-          <UserCog className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Edit &amp; role
+          <UserCog className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Edit &amp; Role
         </button>
       ) : (
         <button onClick={() => setOpen(true)} className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Edit member">
@@ -101,7 +101,7 @@ export function EditMemberButton({
             onCancel={() => setOpen(false)}
             onSave={save}
             saving={pending}
-            saveLabel="Save changes"
+            saveLabel="Save Changes"
             cancelLabel="Cancel"
           />
         }

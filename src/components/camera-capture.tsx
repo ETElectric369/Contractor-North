@@ -124,14 +124,14 @@ export function CameraCapture({
           ) : shot ? (
             <>
               <button onClick={() => setShot(null)} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700">
-                <RotateCcw className="h-4 w-4" /> Retake
+                <RotateCcw className="h-4 w-4 shrink-0" /> Retake
               </button>
               <button
                 onClick={usePhoto}
                 disabled={encoding}
                 className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
               >
-                {encoding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Use photo
+                {encoding ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <Check className="h-4 w-4 shrink-0" />} Use Photo
               </button>
             </>
           ) : (
@@ -140,7 +140,7 @@ export function CameraCapture({
               disabled={!ready}
               className="inline-flex items-center gap-2 rounded-full bg-brand px-6 py-3 text-sm font-semibold text-white disabled:opacity-50"
             >
-              <Camera className="h-5 w-5" /> Capture
+              <Camera className="h-5 w-5 shrink-0" /> Capture
             </button>
           )}
         </div>

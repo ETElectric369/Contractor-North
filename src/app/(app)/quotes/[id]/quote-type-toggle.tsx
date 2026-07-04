@@ -24,7 +24,7 @@ export function QuoteTypeToggle({ id, value }: { id: string; value: "estimate" |
         activeId={type}
         onSelect={(id) => pick(id as "estimate" | "quote")}
         items={[
-          { id: "quote", label: "Quote (fixed)" },
+          { id: "quote", label: "Quote (Fixed)" },
           { id: "estimate", label: "Estimate (T&M)" },
         ]}
       />

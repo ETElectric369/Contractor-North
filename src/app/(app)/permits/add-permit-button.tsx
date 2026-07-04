@@ -52,13 +52,13 @@ export function AddPermitButton({ jobs }: { jobs: JobOpt[] }) {
   return (
     <>
       <Button onClick={() => setOpen(true)}>
-        <Plus className="h-4 w-4" /> Add permit
+        <Plus className="h-4 w-4" /> Add Permit
       </Button>
       <Modal
         open={open}
         onClose={() => setOpen(false)}
         title="Add a permit"
-        footer={<ModalActions onCancel={() => setOpen(false)} onSave={save} saving={pending} saveLabel="Add permit" />}
+        footer={<ModalActions onCancel={() => setOpen(false)} onSave={save} saving={pending} saveLabel="Add Permit" />}
       >
         <div className="space-y-3">
           {error && <p className="text-sm text-red-600">{error}</p>}

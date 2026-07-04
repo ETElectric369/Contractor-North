@@ -49,7 +49,7 @@ export default async function WorkOrderDetailPage({
         href="/work-orders"
         className="mb-4 inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800"
       >
-        <ArrowLeft className="h-4 w-4" /> Back to work orders
+        <ArrowLeft className="h-4 w-4" /> Back to Work Orders
       </Link>
 
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -71,7 +71,7 @@ export default async function WorkOrderDetailPage({
             href={`/print/work-order/${w.id}`}
             className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
           >
-            <Printer className="h-4 w-4" /> Print / PDF
+            <Printer className="h-4 w-4 shrink-0" /> Print / PDF
           </Link>
           <WoStatusControl id={w.id} status={w.status} />
           <SectionActionsMenu

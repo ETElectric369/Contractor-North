@@ -97,12 +97,12 @@ export function ProposeDatesButton({
       {menuItem ? (
         <button type="button" onClick={() => setOpen(true)} className={MANAGE_ROW_CLS}>
           <CalendarPlus className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" />
-          {pendingProposal ? "Dates offered…" : "Propose dates"}
+          {pendingProposal ? "Dates Offered…" : "Propose Dates"}
         </button>
       ) : (
         <Button variant="outline" onClick={() => setOpen(true)}>
           <CalendarPlus className="h-4 w-4" />
-          {pendingProposal ? "Dates offered…" : "Propose dates"}
+          {pendingProposal ? "Dates Offered…" : "Propose Dates"}
         </Button>
       )}
 
@@ -116,7 +116,7 @@ export function ProposeDatesButton({
               onCancel={() => setOpen(false)}
               onSave={create}
               saving={busy}
-              saveLabel="Create link"
+              saveLabel="Create Link"
             />
           )
         }
@@ -138,13 +138,13 @@ export function ProposeDatesButton({
               <div className="flex flex-wrap gap-2">
                 <Button size="sm" onClick={copy}>
                   {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                  {copied ? "Copied" : "Copy link"}
+                  {copied ? "Copied" : "Copy Link"}
                 </Button>
                 <a
                   href={`sms:${customerPhone ?? ""}${customerPhone ? "&" : "?"}body=${smsBody}`}
                   className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-dark"
                 >
-                  <MessageSquare className="h-3.5 w-3.5" /> Text it
+                  <MessageSquare className="h-4 w-4 shrink-0" /> Text It
                 </a>
                 {pendingProposal && (
                   <Button size="sm" variant="outline" onClick={cancel} disabled={busy} className="text-red-600">

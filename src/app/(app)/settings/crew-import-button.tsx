@@ -83,7 +83,7 @@ export function CrewImportButton() {
   return (
     <>
       <Button variant="outline" onClick={() => { reset(); setOpen(true); }}>
-        <Upload className="h-4 w-4" /> Import crew (CSV)
+        <Upload className="h-4 w-4" /> Import Crew (CSV)
       </Button>
       <Modal
         open={open}
@@ -93,7 +93,7 @@ export function CrewImportButton() {
           results ? (
             <ModalActions onCancel={() => setOpen(false)} cancelLabel="Done" />
           ) : (
-            <ModalActions onCancel={() => setOpen(false)} onSave={run} saving={pending} saveLabel={rows.length ? `Add ${rows.length} employees` : "Add employees"} disabled={!rows.length} />
+            <ModalActions onCancel={() => setOpen(false)} onSave={run} saving={pending} saveLabel={rows.length ? `Add ${rows.length} Employees` : "Add Employees"} disabled={!rows.length} />
           )
         }
       >

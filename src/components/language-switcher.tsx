@@ -27,7 +27,7 @@ export function LanguageSwitcher({ current }: { current?: string }) {
       title={lang === "en" ? "Cambiar a Español" : "Switch to English"}
       className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-60"
     >
-      <Globe className="h-4 w-4" />
+      <Globe className="h-4 w-4 shrink-0" />
       {lang.toUpperCase()}
     </button>
   );

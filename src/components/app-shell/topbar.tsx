@@ -59,7 +59,7 @@ export function Topbar({
           title="Search & commands (⌘K)"
           aria-label="Search and commands"
         >
-          <Search className="h-4 w-4" />
+          <Search className="h-4 w-4 shrink-0" />
           <span className="hidden text-sm md:inline">Search</span>
           <span className="hidden rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-400 md:inline">⌘K</span>
         </button>

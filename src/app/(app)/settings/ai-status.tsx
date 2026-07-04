@@ -47,7 +47,7 @@ export function AiStatus({ configured, model }: { configured: boolean; model: st
         <>
           <div className="flex flex-wrap items-center gap-3">
             <Button size="sm" variant="outline" onClick={runTest} disabled={testing}>
-              {testing ? "Testing…" : "Run live test"}
+              {testing ? "Testing…" : "Run Live Test"}
             </Button>
             {result?.live && (
               <span className="text-sm font-medium text-green-600">✓ AI is live and responding.</span>

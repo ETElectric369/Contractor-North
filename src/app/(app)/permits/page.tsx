@@ -66,7 +66,7 @@ export default async function PermitsPage() {
                       rel="noreferrer"
                       className="mt-0.5 inline-block rounded bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-blue-700 hover:bg-blue-100"
                     >
-                      Check with city ↗
+                      Check with City ↗
                     </a>
                   )}
                 </div>

@@ -243,7 +243,7 @@ export function QuoteBuilder({
                 </>
               ) : (
                 <>
-                  <Sparkles className="h-4 w-4" /> Generate line items
+                  <Sparkles className="h-4 w-4" /> Generate Line Items
                 </>
               )}
             </Button>
@@ -260,7 +260,7 @@ export function QuoteBuilder({
                 variant="outline"
                 onClick={() => setItems((p) => [...p, blankItem()])}
               >
-                <Plus className="h-3.5 w-3.5" /> Add
+                <Plus className="h-4 w-4" /> Add
               </Button>
             </div>
 
@@ -464,7 +464,7 @@ export function QuoteBuilder({
               <p className="pt-2 text-sm text-red-600">{saveError}</p>
             )}
             <Button className="mt-2 w-full" onClick={onSave} disabled={saving}>
-              {saving ? "Saving…" : "Save estimate"}
+              {saving ? "Saving…" : "Save Estimate"}
             </Button>
           </CardContent>
         </Card>

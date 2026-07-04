@@ -37,7 +37,7 @@ export function HandbookView({ text, isAdmin }: { text: string; isAdmin: boolean
           <Textarea rows={28} value={draft} onChange={(e) => setDraft(e.target.value)} className="font-mono text-xs" />
           <div className="flex gap-2">
             <Button onClick={save} disabled={pending}>
-              <Check className="h-4 w-4" /> {pending ? "Saving…" : "Save handbook"}
+              <Check className="h-4 w-4" /> {pending ? "Saving…" : "Save Handbook"}
             </Button>
             <Button variant="outline" onClick={() => { setEditing(false); setDraft(text); }}>Cancel</Button>
           </div>
@@ -53,7 +53,7 @@ export function HandbookView({ text, isAdmin }: { text: string; isAdmin: boolean
       {isAdmin && (
         <div className="flex justify-end">
           <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
-            <Pencil className="h-3.5 w-3.5" /> Edit handbook
+            <Pencil className="h-3.5 w-3.5" /> Edit Handbook
           </Button>
         </div>
       )}

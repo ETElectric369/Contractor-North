@@ -89,7 +89,7 @@ export function LogoUpload({
               ) : (
                 <Upload className="h-4 w-4" />
               )}
-              {logo ? "Replace logo" : "Upload logo"}
+              {logo ? "Replace Logo" : "Upload Logo"}
             </Button>
             {logo && (
               <Button type="button" variant="ghost" onClick={remove} disabled={busy}>

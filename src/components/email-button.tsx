@@ -61,7 +61,7 @@ function SendChip({
           : "inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-60"
       }
     >
-      {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-4 w-4" />}
+      {busy ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <Icon className="h-4 w-4 shrink-0" />}
       {label}
     </button>
   );
@@ -100,7 +100,7 @@ export function EmailButton({
   return (
     <div className="flex items-center gap-2">
       <SendChip
-        label={isInvoice ? "Send invoice" : "Email"}
+        label={isInvoice ? "Send Invoice" : "Email"}
         icon={Mail}
         primary={isInvoice}
         confirmText={emailConfirm}

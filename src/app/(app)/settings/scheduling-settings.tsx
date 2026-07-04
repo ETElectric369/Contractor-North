@@ -149,7 +149,7 @@ export function SchedulingSettings({
       </div>
 
       <div className="flex items-center gap-3">
-        <Button onClick={save} disabled={pending}>{pending ? "Saving…" : "Save changes"}</Button>
+        <Button onClick={save} disabled={pending}>{pending ? "Saving…" : "Save Changes"}</Button>
         {done && <span className="flex items-center gap-1 text-sm font-medium text-green-600"><Check className="h-4 w-4" /> Saved</span>}
       </div>
     </div>

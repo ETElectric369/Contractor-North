@@ -207,7 +207,7 @@ export default async function SettingsPage({
                       href="/print/business-card"
                       className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
                     >
-                      Print business cards →
+                      Print Business Cards →
                     </a>
                   </div>
                 </div>
@@ -219,7 +219,7 @@ export default async function SettingsPage({
         // "Money & docs" — dollars, tax/pricing, document numbering & design, QBO/Stripe.
         {
           id: "money",
-          label: "Money & docs",
+          label: "Money & Docs",
           icon: Wallet,
           content: (
             <div className="space-y-6">
@@ -280,7 +280,7 @@ export default async function SettingsPage({
                 {billingEnabled ? (
                   <div className="mt-4 flex gap-2">
                     {(org as Organization).subscription_status === "active" ? (
-                      <form action={openPortal}><Button variant="outline">Manage billing</Button></form>
+                      <form action={openPortal}><Button variant="outline">Manage Billing</Button></form>
                     ) : (
                       <form action={startCheckout}><Button>Subscribe</Button></form>
                     )}

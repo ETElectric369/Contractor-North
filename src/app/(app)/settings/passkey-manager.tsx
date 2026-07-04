@@ -65,7 +65,7 @@ export function PasskeyManager({ passkeys }: { passkeys: Passkey[] }) {
         {pending ? (
           <><Loader2 className="h-4 w-4 animate-spin" /> Waiting for your tap…</>
         ) : (
-          <><Fingerprint className="h-4 w-4" /> {passkeys.length ? "Add another passkey" : "Set up Face ID / passkey"}</>
+          <><Fingerprint className="h-4 w-4" /> {passkeys.length ? "Add Another Passkey" : "Set Up Face ID / Passkey"}</>
         )}
       </Button>
     </div>

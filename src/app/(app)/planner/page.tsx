@@ -434,7 +434,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     : "";
 
   const navBtnCls =
-    "inline-flex shrink-0 items-center gap-1 rounded-lg border border-brand/30 bg-brand-light/40 px-2.5 py-1.5 text-xs font-medium text-brand hover:bg-brand-light";
+    "inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-brand/30 bg-brand-light/40 px-2.5 py-1.5 text-xs font-medium text-brand hover:bg-brand-light";
   const agendaRows = (items: Agenda[]) =>
     items.map((i) => (
       <li key={i.key} className="flex items-center gap-3 px-5 py-3">
@@ -453,7 +453,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         <div className="flex shrink-0 items-center gap-1">
           {i.address && (
             <NavLink address={i.address} className={navBtnCls}>
-              <Navigation className="h-4 w-4" /> <span className="hidden sm:inline">Navigate</span>
+              <Navigation className="h-4 w-4 shrink-0" /> <span className="hidden sm:inline">Navigate</span>
             </NavLink>
           )}
           {/* Row verbs (staff): the edit pencil kills the old dead-end (appt row →
@@ -519,7 +519,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
               </Link>
               {weekOffset !== 0 && (
                 <Link href="/planner?view=week" className="px-1 text-xs font-medium text-brand hover:underline">
-                  This week
+                  This Week
                 </Link>
               )}
               <Link
@@ -590,9 +590,9 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
                 {currentJob.address && (
                   <NavLink
                     address={currentJob.address}
-                    className="flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-[rgb(var(--glass-ink))] text-white shadow-sm hover:bg-[rgb(var(--glass-ink))]/90"
+                    className="flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-[rgb(var(--glass-ink))] text-white shadow-sm hover:bg-[rgb(var(--glass-ink))]/90"
                   >
-                    <Navigation className="h-4 w-4" /> Navigate
+                    <Navigation className="h-4 w-4 shrink-0" /> Navigate
                   </NavLink>
                 )}
                 <Link href={`/jobs/${currentJob.id}`} className="flex min-h-[44px] items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50">
@@ -655,7 +655,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
               className="flex min-h-[44px] items-center gap-x-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm hover:bg-slate-50"
             >
               <span className="flex items-center gap-1.5 font-semibold text-slate-900">
-                <FolderClosed className="h-4 w-4 text-slate-400" /> Office
+                <FolderClosed className="h-4 w-4 shrink-0 text-slate-400" /> Office
               </span>
               <span className="text-slate-600">
                 <strong>{officeCount}</strong>
@@ -670,7 +670,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
               className="flex min-h-[44px] items-center gap-x-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm hover:bg-slate-50"
             >
               <span className="flex items-center gap-1.5 font-semibold text-slate-900">
-                <ListTodo className="h-4 w-4 text-slate-400" /> Everything else
+                <ListTodo className="h-4 w-4 shrink-0 text-slate-400" /> Everything Else
               </span>
               <span className="text-slate-600">
                 <strong>{elseCount}</strong>
@@ -701,7 +701,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
               href={view === "week" ? `/planner?view=week${weekOffset ? `&week=${weekOffset}` : ""}&actions=all` : "/planner?actions=all"}
               className="block border-t border-slate-100 px-5 py-2.5 text-center text-sm font-medium text-brand hover:bg-slate-50"
             >
-              Show all {actionItems.length} →
+              Show All {actionItems.length} →
             </Link>
           )}
         </Card>
@@ -721,7 +721,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           href="/billing"
           className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm hover:bg-slate-50"
         >
-          <span className="flex items-center gap-1.5 font-semibold text-slate-900"><Receipt className="h-4 w-4 text-brand" /> Money</span>
+          <span className="flex items-center gap-1.5 font-semibold text-slate-900"><Receipt className="h-4 w-4 shrink-0 text-brand" /> Money</span>
           {pipeline.doneNotInvoiced.length > 0 && (
             <span className="text-rose-700"><strong>{pipeline.doneNotInvoiced.length}</strong> to invoice{pipeline.toInvoiceTotal > 0 ? ` · ${formatCurrency(pipeline.toInvoiceTotal)}` : ""}</span>
           )}

@@ -520,7 +520,7 @@ export function TimeclockPanel({
             </div>
           ) : (
             <Button type="button" variant="outline" className="w-full" onClick={() => setSwitching(true)}>
-              <ArrowLeftRight className="h-4 w-4" /> Switch job
+              <ArrowLeftRight className="h-4 w-4" /> Switch Job
             </Button>
           )}
 
@@ -545,9 +545,9 @@ export function TimeclockPanel({
               <button
                 type="button"
                 onClick={addAlloc}
-                className="inline-flex items-center gap-1 rounded-lg bg-white px-2.5 py-1 text-xs font-medium text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-white px-2.5 py-1 text-xs font-medium text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"
               >
-                <Plus className="h-3.5 w-3.5" /> {t("tc_addJob")}
+                <Plus className="h-4 w-4 shrink-0" /> {t("tc_addJob")}
               </button>
             </div>
             <p className="mb-2 text-xs text-slate-500">
@@ -668,11 +668,11 @@ export function TimeclockPanel({
                 >
                   {listening ? (
                     <>
-                      <MicOff className="h-3.5 w-3.5" /> {t("tc_stop")}
+                      <MicOff className="h-4 w-4 shrink-0" /> {t("tc_stop")}
                     </>
                   ) : (
                     <>
-                      <Mic className="h-3.5 w-3.5" /> {t("tc_dictate")}
+                      <Mic className="h-4 w-4 shrink-0" /> {t("tc_dictate")}
                     </>
                   )}
                 </button>

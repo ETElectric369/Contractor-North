@@ -120,7 +120,7 @@ export function JobAddTimeEntry({
   return (
     <>
       <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
-        <Plus className="h-3.5 w-3.5" /> Add time entry
+        <Plus className="h-3.5 w-3.5" /> Add Time Entry
       </Button>
       <Modal
         open={open}
@@ -131,7 +131,7 @@ export function JobAddTimeEntry({
             onCancel={() => setOpen(false)}
             onSave={save}
             saving={pending}
-            saveLabel="Save entry"
+            saveLabel="Save Entry"
           />
         }
       >

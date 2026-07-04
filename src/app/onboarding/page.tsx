@@ -107,7 +107,7 @@ export default async function OnboardingPage({
               <p className="mt-1 text-xs text-slate-500">Sets your starter job codes — you can change them anytime in Settings.</p>
             </div>
             <Button type="submit" size="lg" className="w-full">
-              Create company & continue
+              Create Company & Continue
             </Button>
           </form>
         </div>

@@ -126,7 +126,7 @@ export function PushSettings({ initialPrefs }: { initialPrefs: Record<string, bo
           </div>
         </div>
         <Button onClick={enabled ? disable : enable} disabled={busy} variant={enabled ? "outline" : "primary"}>
-          {busy ? "…" : enabled ? "Turn off" : "Enable"}
+          {busy ? "…" : enabled ? "Turn Off" : "Enable"}
         </Button>
       </div>
       {msg && <p className="text-xs text-slate-500">{msg}</p>}

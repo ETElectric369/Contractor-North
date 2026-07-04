@@ -21,14 +21,19 @@ const variants: Record<Variant, string> = {
   destructive: "bg-red-600 text-white hover:bg-red-700",
 };
 
+// ONE SOURCE OF TRUTH for a button's internals. Height + label size + horizontal padding
+// AND the icon size all live here, keyed to `size`. The `[&_svg]:size-*` utility sizes any
+// lucide icon child from the button itself (a descendant selector, so it overrides whatever
+// h-4/h-5 a caller hand-passed) — so every <Button> renders with a consistent icon-to-text
+// scale without each call site setting it. (base adds shrink-0 so an icon never squishes.)
 const sizes: Record<Size, string> = {
-  sm: "h-8 px-3 text-sm",
+  sm: "h-8 px-3 text-sm [&_svg]:size-4",
   // md is the DEFAULT button. Bumped 40px → 44px so every default control (e.g. the My Day
   // clock in/out) clears the 44px touch-target minimum for gloved field hands on a phone.
-  md: "h-11 px-4 text-sm",
-  lg: "h-12 px-6 text-base",
+  md: "h-11 px-4 text-sm [&_svg]:size-4",
+  lg: "h-12 px-6 text-base [&_svg]:size-5",
   // Icon buttons sit at the same 44px touch target so a tap doesn't miss.
-  icon: "h-11 w-11",
+  icon: "h-11 w-11 [&_svg]:size-5",
 };
 
 export interface ButtonProps
@@ -42,7 +47,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     <button
       ref={ref}
       className={cn(
-        "btn-gloss inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--glass-ink))] focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
+        "btn-gloss inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg font-medium transition-colors [&_svg]:shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgb(var(--glass-ink))] focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
         variants[variant],
         sizes[size],
         className,

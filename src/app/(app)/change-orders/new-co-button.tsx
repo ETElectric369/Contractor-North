@@ -36,7 +36,7 @@ export function NewChangeOrderButton({ jobs }: { jobs: JobOption[] }) {
   return (
     <>
       <Button onClick={() => setOpen(true)}>
-        <Plus className="h-4 w-4" /> New change order
+        <Plus className="h-4 w-4" /> New Change Order
       </Button>
 
       <form action={onSubmit}>
@@ -49,7 +49,7 @@ export function NewChangeOrderButton({ jobs }: { jobs: JobOption[] }) {
               onCancel={() => setOpen(false)}
               submit
               saving={pending}
-              saveLabel="Create change order"
+              saveLabel="Create Change Order"
             />
           }
         >

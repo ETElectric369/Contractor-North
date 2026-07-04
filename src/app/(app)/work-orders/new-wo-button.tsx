@@ -50,7 +50,7 @@ export function NewWorkOrderButton({
   return (
     <>
       <Button onClick={() => setOpen(true)}>
-        <Plus className="h-4 w-4" /> New work order
+        <Plus className="h-4 w-4" /> New Work Order
       </Button>
 
       <form action={onSubmit}>
@@ -63,7 +63,7 @@ export function NewWorkOrderButton({
               onCancel={() => setOpen(false)}
               submit
               saving={pending}
-              saveLabel="Create work order"
+              saveLabel="Create Work Order"
             />
           }
         >

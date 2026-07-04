@@ -63,7 +63,7 @@ export function ContractCard({ jobId, contract }: { jobId: string; contract: Con
               Generate a signable contract from this job — parties, scope, dates, payment schedule, and terms auto‑fill.
             </p>
             <Button className="mt-3" onClick={() => run(() => generateContractFromJob(jobId))} disabled={pending}>
-              Generate contract
+              Generate Contract
             </Button>
           </div>
         ) : c.status === "signed" ? (
@@ -73,7 +73,7 @@ export function ContractCard({ jobId, contract }: { jobId: string; contract: Con
               By {c.signed_name}
               {c.signed_at ? ` on ${formatDate(c.signed_at)}` : ""}.{" "}
               <a href={link} target="_blank" rel="noopener" className="font-medium text-emerald-700 underline">
-                View signed contract
+                View Signed Contract
               </a>
             </div>
           </div>
@@ -82,7 +82,7 @@ export function ContractCard({ jobId, contract }: { jobId: string; contract: Con
             <p className="text-sm text-slate-600">Sent to the customer — awaiting signature.</p>
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <a href={link} target="_blank" rel="noopener" className="text-sm font-medium text-brand underline">
-                Open signing page
+                Open Signing Page
               </a>
               <Button variant="outline" size="sm" onClick={() => run(() => sendContract(c.id))} disabled={pending}>
                 Resend
@@ -96,9 +96,9 @@ export function ContractCard({ jobId, contract }: { jobId: string; contract: Con
           <div>
             <p className="text-sm text-slate-600">Draft ready. Review the terms, then send it to the customer to sign.</p>
             <div className="mt-3 flex flex-wrap items-center gap-2">
-              <Button size="sm" onClick={() => setEditing(true)}>Review &amp; edit</Button>
+              <Button size="sm" onClick={() => setEditing(true)}>Review &amp; Edit</Button>
               <Button variant="outline" size="sm" onClick={() => run(() => sendContract(c.id))} disabled={pending}>
-                Send to customer
+                Send to Customer
               </Button>
               <Button variant="ghost" size="sm" onClick={() => run(() => generateContractFromJob(jobId))} disabled={pending}>
                 Regenerate
@@ -148,7 +148,7 @@ function ContractEditor({ contract, onClose, onSaved }: { contract: ContractRow;
       open
       onClose={() => !pending && onClose()}
       title="Review contract"
-      footer={<ModalActions onCancel={onClose} onSave={save} saving={pending} saveLabel="Save draft" />}
+      footer={<ModalActions onCancel={onClose} onSave={save} saving={pending} saveLabel="Save Draft" />}
     >
       <div className="space-y-3">
         {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}

@@ -58,7 +58,7 @@ export function MergeCustomerButton({
   return (
     <>
       <Button variant="outline" onClick={() => setOpen(true)}>
-        <GitMerge className="h-4 w-4" /> Merge into…
+        <GitMerge className="h-4 w-4" /> Merge Into…
       </Button>
 
       <Modal
@@ -71,7 +71,7 @@ export function MergeCustomerButton({
             onSave={onMerge}
             saving={pending}
             destructive
-            saveLabel="Merge & delete"
+            saveLabel="Merge & Delete"
           />
         }
       >

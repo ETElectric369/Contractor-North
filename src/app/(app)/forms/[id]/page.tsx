@@ -57,7 +57,7 @@ export default async function FormDetailPage({
         href="/forms"
         className="mb-4 inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800"
       >
-        <ArrowLeft className="h-4 w-4" /> Back to forms
+        <ArrowLeft className="h-4 w-4" /> Back to Forms
       </Link>
 
       <div className="mb-6 flex items-start justify-between gap-4">

@@ -719,7 +719,7 @@ export default async function JobDetailPage({
               href={`/quotes/new?customer=${j.customer_id ?? ""}&job=${j.id}`}
               className="btn-gloss inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-[rgb(var(--glass-ink))] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[rgb(var(--glass-ink))]/90"
             >
-              <Plus className="h-4 w-4" /> New estimate
+              <Plus className="h-4 w-4 shrink-0" /> New Estimate
             </Link>
           </div>
           <Card className="overflow-hidden">
@@ -792,7 +792,7 @@ export default async function JobDetailPage({
     },
     {
       id: "change-orders",
-      label: "Change orders",
+      label: "Change Orders",
       count: changeOrders?.length ?? 0,
       content: (
         <div className="space-y-3">
@@ -834,7 +834,7 @@ export default async function JobDetailPage({
     },
     {
       id: "wos",
-      label: "Work orders",
+      label: "Work Orders",
       count: workOrders?.length ?? 0,
       content: (
         <div className="space-y-3">

@@ -73,7 +73,7 @@ export function DocumentSettings({ settings }: { settings: OrgSettings }) {
         <Textarea id="ds-footer" rows={2} value={footer} onChange={(e) => setFooter(e.target.value)} placeholder="Shown at the bottom of estimates, invoices & work orders (license #, thank-you note, etc.)" />
       </div>
       <div className="flex items-center gap-3">
-        <Button onClick={save} disabled={pending}>{pending ? "Saving…" : "Save changes"}</Button>
+        <Button onClick={save} disabled={pending}>{pending ? "Saving…" : "Save Changes"}</Button>
         {done && <span className="flex items-center gap-1 text-sm font-medium text-green-600"><Check className="h-4 w-4" /> Saved</span>}
       </div>
     </div>

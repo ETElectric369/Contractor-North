@@ -97,7 +97,7 @@ export function JobImportButton() {
   return (
     <>
       <Button variant="outline" onClick={() => { reset(); setOpen(true); }}>
-        <Upload className="h-4 w-4" /> Import jobs
+        <Upload className="h-4 w-4" /> Import Jobs
       </Button>
       <Modal
         open={open}
@@ -107,7 +107,7 @@ export function JobImportButton() {
           results ? (
             <ModalActions onCancel={() => setOpen(false)} cancelLabel="Done" />
           ) : (
-            <ModalActions onCancel={() => setOpen(false)} onSave={run} saving={pending} saveLabel={rows.length ? `Import ${rows.length} jobs` : "Import jobs"} disabled={!rows.length} />
+            <ModalActions onCancel={() => setOpen(false)} onSave={run} saving={pending} saveLabel={rows.length ? `Import ${rows.length} Jobs` : "Import Jobs"} disabled={!rows.length} />
           )
         }
       >

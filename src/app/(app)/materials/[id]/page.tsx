@@ -51,7 +51,7 @@ export default async function MaterialListPage({
         href="/materials"
         className="mb-4 inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800"
       >
-        <ArrowLeft className="h-4 w-4" /> Back to material lists
+        <ArrowLeft className="h-4 w-4" /> Back to Material Lists
       </Link>
 
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -78,9 +78,9 @@ export default async function MaterialListPage({
         <div className="flex flex-wrap items-center gap-2">
           <Link
             href={`/print/material-list/${l.id}`}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
           >
-            <ListChecks className="h-4 w-4" /> Pick list
+            <ListChecks className="h-4 w-4 shrink-0" /> Pick List
           </Link>
           <NewPoButton
             jobs={l.jobs ? [{ id: l.jobs.id, job_number: l.jobs.job_number, name: l.jobs.name }] : []}

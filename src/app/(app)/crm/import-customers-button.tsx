@@ -175,7 +175,7 @@ export function ImportCustomersButton({ csv = true, label }: { csv?: boolean; la
           onClick={() => fileRef.current?.click()}
           title={!csv ? "iPhone: open a contact → Share Contact → Save to Files, then pick it here" : undefined}
         >
-          <Upload className="h-4 w-4" /> {label ?? (csv ? "Import contacts" : "Import a contact")}
+          <Upload className="h-4 w-4" /> {label ?? (csv ? "Import Contacts" : "Import a Contact")}
         </Button>
         {!csv && (
           <span className="text-[11px] text-slate-400">
@@ -201,7 +201,7 @@ export function ImportCustomersButton({ csv = true, label }: { csv?: boolean; la
               onCancel={() => setOpen(false)}
               onSave={runImport}
               saving={pending}
-              saveLabel={`Import ${dataRows.length} rows`}
+              saveLabel={`Import ${dataRows.length} Rows`}
             />
           ) : msg ? (
             // A VCF import (or any info/error message) clears the headers, so the

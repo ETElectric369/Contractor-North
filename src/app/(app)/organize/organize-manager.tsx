@@ -319,7 +319,7 @@ export function OrganizeManager({
             <div className="mt-2.5 flex flex-wrap items-center gap-2">
               <Button size="sm" onClick={() => aiReview(item)} disabled={pending || aiBusy === item.id}>
                 {aiBusy === item.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-                {aiBusy === item.id ? "Reviewing…" : "AI review & file"}
+                {aiBusy === item.id ? "Reviewing…" : "AI Review & File"}
               </Button>
               <span className="flex items-center gap-1.5">
                 <Briefcase className="h-3.5 w-3.5 text-slate-400" />
@@ -353,7 +353,7 @@ export function OrganizeManager({
               )}
               {item.kind === "receipt" && item.amount != null && (
                 <Button size="sm" variant="outline" onClick={() => file(item, { type: "petty_cash" })} disabled={pending}>
-                  <Coins className="h-3.5 w-3.5" /> Petty cash
+                  <Coins className="h-3.5 w-3.5" /> Petty Cash
                 </Button>
               )}
               <Button size="sm" variant="outline" onClick={() => setEditing(item)} disabled={pending}>
@@ -495,13 +495,13 @@ export function OrganizeManager({
           </div>
           <div className="flex flex-wrap justify-center gap-2">
             <Button onClick={takePhoto} disabled={busy}>
-              <Camera className="h-4 w-4" /> Take photo
+              <Camera className="h-4 w-4" /> Take Photo
             </Button>
             <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={busy}>
               <Upload className="h-4 w-4" /> Upload
             </Button>
             <Button variant={listening ? "destructive" : "outline"} onClick={voiceNote}>
-              <Mic className="h-4 w-4" /> {listening ? "Stop & save" : "Voice note"}
+              <Mic className="h-4 w-4" /> {listening ? "Stop & Save" : "Voice Note"}
             </Button>
             <input ref={fileRef} type="file" multiple accept="image/*,application/pdf" className="hidden" onChange={onFiles} />
             <input ref={captureRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onFiles} />
@@ -534,7 +534,7 @@ export function OrganizeManager({
         tabs={[
           {
             id: "attention",
-            label: "Needs attention",
+            label: "Needs Attention",
             count: tray.length,
             icon: <AlertCircle className="h-4 w-4" />,
             content:

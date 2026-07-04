@@ -58,7 +58,7 @@ export function GcalCard({
           <Badge tone="green">Connected</Badge>
           <Button size="sm" onClick={sync} disabled={pending}>
             <RefreshCw className={`h-3.5 w-3.5 ${pending ? "animate-spin" : ""}`} />
-            Push schedule to Google
+            Push Schedule to Google
           </Button>
           <Button size="sm" variant="outline" onClick={disconnect} disabled={pending}>
             Disconnect
@@ -70,7 +70,7 @@ export function GcalCard({
             href="/api/google/connect"
             className="inline-flex items-center gap-2 rounded-lg bg-[rgb(var(--glass-ink))] px-4 py-2 text-sm font-medium text-white hover:bg-[rgb(var(--glass-ink))]/90"
           >
-            <CalendarCheck className="h-4 w-4" /> Connect Google Calendar
+            <CalendarCheck className="h-4 w-4 shrink-0" /> Connect Google Calendar
           </a>
           <p className="mt-2 text-xs text-slate-400">
             Scheduled jobs (next 60 days) push to your calendar as events — re-run the push after

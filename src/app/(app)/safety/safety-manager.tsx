@@ -61,7 +61,7 @@ export function SafetyManager({
         },
         {
           id: "toolbox",
-          label: "Toolbox talks",
+          label: "Toolbox Talks",
           count: toolbox.length,
           icon: <Users className="h-4 w-4" />,
           content: <SafetyPanel kind="toolbox" employees={employees} jobs={jobs} records={toolbox} />,
@@ -137,7 +137,7 @@ function SafetyPanel({
           )}
         </div>
         <div><Label htmlFor="s-desc">{isIncident ? "Details / corrective action" : "Notes"}</Label><Textarea id="s-desc" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} /></div>
-        <div className="flex justify-end"><Button size="sm" onClick={add} disabled={pending || !title.trim()}><Plus className="h-3.5 w-3.5" /> Add {isIncident ? "incident" : "talk"}</Button></div>
+        <div className="flex justify-end"><Button size="sm" onClick={add} disabled={pending || !title.trim()}><Plus className="h-3.5 w-3.5" /> Add {isIncident ? "Incident" : "Talk"}</Button></div>
       </Card>
 
       <ul className="space-y-2">

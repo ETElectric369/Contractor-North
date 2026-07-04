@@ -39,7 +39,7 @@ export function MapsProviderToggle() {
                 active ? "seaglass-active border-transparent" : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
               }`}
             >
-              {active && <Check className="relative z-10 h-4 w-4" />} <span className="relative z-10">{o.label}</span>
+              {active && <Check className="relative z-10 h-4 w-4 shrink-0" />} <span className="relative z-10">{o.label}</span>
             </button>
           );
         })}

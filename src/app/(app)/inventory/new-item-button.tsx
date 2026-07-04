@@ -30,7 +30,7 @@ export function NewItemButton() {
   return (
     <>
       <Button onClick={() => setOpen(true)}>
-        <Plus className="h-4 w-4" /> New item
+        <Plus className="h-4 w-4" /> New Item
       </Button>
 
       <form action={onSubmit}>

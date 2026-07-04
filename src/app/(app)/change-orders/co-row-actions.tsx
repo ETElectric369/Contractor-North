@@ -67,7 +67,7 @@ export function CoRowActions({
           onClose={() => setOpen(false)}
           title={`Edit ${co.co_number}`}
           footer={
-            <ModalActions onCancel={() => setOpen(false)} submit saving={pending} saveLabel="Save changes" />
+            <ModalActions onCancel={() => setOpen(false)} submit saving={pending} saveLabel="Save Changes" />
           }
         >
           <div className="space-y-4">

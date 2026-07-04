@@ -68,7 +68,7 @@ export default async function LoginPage({
                 <Label htmlFor="password" className="mb-0">Password</Label>
                 {!isSignup && (
                   <Link href="/forgot" className="text-xs font-medium text-brand hover:underline">
-                    Forgot password?
+                    Forgot Password?
                   </Link>
                 )}
               </div>
@@ -81,7 +81,7 @@ export default async function LoginPage({
               size="lg"
               formAction={isSignup ? signup : login}
             >
-              {isSignup ? "Create account" : "Sign in"}
+              {isSignup ? "Create Account" : "Sign In"}
             </Button>
           </form>
 
@@ -90,7 +90,7 @@ export default async function LoginPage({
               <>
                 Already have an account?{" "}
                 <Link href="/login" className="font-medium text-brand hover:underline">
-                  Sign in
+                  Sign In
                 </Link>
               </>
             ) : (

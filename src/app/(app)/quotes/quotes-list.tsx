@@ -214,10 +214,10 @@ function DupClusterRow({ cluster }: { cluster: DupCluster }) {
                 type="button"
                 onClick={() => keepAndClean(d.id)}
                 disabled={pending}
-                className="shrink-0 inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-white px-2 py-1 text-[11px] font-medium text-emerald-700 transition-colors hover:bg-emerald-50 disabled:opacity-50"
+                className="shrink-0 inline-flex items-center gap-1.5 rounded-md border border-emerald-200 bg-white px-2 py-1 text-[11px] font-medium text-emerald-700 transition-colors hover:bg-emerald-50 disabled:opacity-50"
                 title="Keep this one, delete the rest"
               >
-                <Check className="h-3 w-3" /> Keep this
+                <Check className="h-4 w-4 shrink-0" /> Keep This
               </button>
             </li>
           );

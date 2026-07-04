@@ -110,10 +110,10 @@ export function CustomerSelect({
       <div className="flex shrink-0 items-center gap-2">
         <button
           onClick={() => setEditing(true)}
-          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+          className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-800"
           title="Change customer"
         >
-          <Pencil className="h-3.5 w-3.5" /> Change
+          <Pencil className="h-4 w-4 shrink-0" /> Change
         </button>
         {customer && <EditCustomerButton customer={customer} />}
       </div>

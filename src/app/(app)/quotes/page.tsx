@@ -44,7 +44,7 @@ export default async function QuotesPage({
       <PageHeader title={heading} description="Estimates are time-&-materials by default — switch any one to a fixed-price quote.">
         <Link href="/quotes/new">
           <Button>
-            <Plus className="h-4 w-4" /> New estimate
+            <Plus className="h-4 w-4" /> New Estimate
           </Button>
         </Link>
       </PageHeader>
@@ -57,7 +57,7 @@ export default async function QuotesPage({
         >
           <Link href="/quotes/new">
             <Button>
-              <Plus className="h-4 w-4" /> New estimate
+              <Plus className="h-4 w-4" /> New Estimate
             </Button>
           </Link>
         </EmptyState>

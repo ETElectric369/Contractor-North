@@ -34,7 +34,7 @@ export function JobClockButton({ jobId, isStaff = true }: { jobId: string; isSta
           }}
           disabled={pending}
         >
-          <Play className="h-3.5 w-3.5" /> Clock in
+          <Play className="h-3.5 w-3.5" /> Clock In
         </Button>
       </div>
       <ClockStartPicker onChange={(iso) => setStartAt(iso ?? "")} staff={isStaff} />

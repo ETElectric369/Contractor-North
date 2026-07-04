@@ -38,7 +38,7 @@ export default async function NewQuotePage({
         href="/quotes"
         className="mb-4 inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800"
       >
-        <ArrowLeft className="h-4 w-4" /> Back to estimates
+        <ArrowLeft className="h-4 w-4 shrink-0" /> Back to Estimates
       </Link>
       <PageHeader
         title="New estimate"

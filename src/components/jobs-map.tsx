@@ -51,7 +51,7 @@ export function JobsMap({ jobs, homeAddress }: { jobs: MapJob[]; homeAddress?: s
             const marker = new g.maps.Marker({ map, position: loc, title: j.name });
             marker.addListener("click", () => {
               info.setContent(
-                `<div style="font-size:13px"><strong>${j.name}</strong><br/>${j.customer ?? ""}<br/><a href="/jobs/${j.id}">Open job →</a></div>`,
+                `<div style="font-size:13px"><strong>${j.name}</strong><br/>${j.customer ?? ""}<br/><a href="/jobs/${j.id}">Open Job →</a></div>`,
               );
               info.open(map, marker);
             });

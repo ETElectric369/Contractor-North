@@ -118,7 +118,7 @@ export function FillForm({
 
       <div className="flex items-center gap-3 pt-1">
         <Button onClick={onSubmit} disabled={pending}>
-          {pending ? "Submitting…" : "Submit form"}
+          {pending ? "Submitting…" : "Submit Form"}
         </Button>
         {done && (
           <span className="flex items-center gap-1 text-sm font-medium text-green-600">

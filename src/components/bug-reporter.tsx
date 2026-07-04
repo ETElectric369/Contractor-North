@@ -151,7 +151,7 @@ export function BugReporter({ orgId }: { orgId: string }) {
               </p>
               {error && <p className="text-sm text-red-600">{error}</p>}
               <Button onClick={submit} disabled={pending} className="w-full">
-                {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> Sending</> : "Send report"}
+                {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> Sending</> : "Send Report"}
               </Button>
             </div>
           )}
@@ -175,7 +175,7 @@ export function BugReporter({ orgId }: { orgId: string }) {
                       {r.status === "fixed" ? (
                         <span className="text-xs text-green-600">fixed</span>
                       ) : (
-                        <button onClick={() => markFixed(r.id)} className="text-xs text-slate-400 hover:text-green-600">mark fixed</button>
+                        <button onClick={() => markFixed(r.id)} className="text-xs text-slate-400 hover:text-green-600">Mark Fixed</button>
                       )}
                     </div>
                   </li>

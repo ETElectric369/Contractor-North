@@ -360,7 +360,7 @@ export function InvoiceDetail({
             <div>
               <Label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">Customer / Job</Label>
               <Button size="sm" variant="outline" onClick={openLink} disabled={pending}>
-                <Pencil className="mr-1 h-3.5 w-3.5" /> Edit customer / job
+                <Pencil className="mr-1 h-3.5 w-3.5" /> Edit Customer / Job
               </Button>
             </div>
           )}
@@ -458,16 +458,16 @@ export function InvoiceDetail({
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50/60 px-3 py-2.5">
             <span className="text-xs font-medium text-slate-500">Import:</span>
             <Button size="sm" variant="outline" onClick={() => runImport(importQuoteItemsIntoInvoice, "Estimate items")} disabled={pending}>
-              From estimate
+              From Estimate
             </Button>
             {invoice.job_id && (
               <>
                 <Button size="sm" variant="outline" onClick={() => runImport(importLaborIntoInvoice, "Labor")} disabled={pending}>
-                  Labor from timecards
+                  Labor From Timecards
                 </Button>
                 <div className="flex items-center gap-1.5">
                   <Button size="sm" variant="outline" onClick={() => runImport((id) => importCostsIntoInvoice(id, markup), "Materials")} disabled={pending}>
-                    Materials from costs
+                    Materials From Costs
                   </Button>
                   <NumberInput value={markup} onValueChange={setMarkup} className="h-8 w-14 text-center text-sm" aria-label="Material markup percent" />
                   <span className="text-xs text-slate-400">% markup</span>
@@ -667,7 +667,7 @@ export function InvoiceDetail({
               </div>
             </div>
             <Button className="w-full" onClick={pay} disabled={pending}>
-              {pending ? "Saving…" : "Record payment"}
+              {pending ? "Saving…" : "Record Payment"}
             </Button>
             </>
             )}

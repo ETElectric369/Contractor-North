@@ -66,25 +66,25 @@ export default async function QuoteDetailPage({
     center: { label: q.quote_number, icon: "fileText" },
     nodes: [
       existingInv
-        ? { id: "qm-inv", label: "View invoice", icon: "receipt", href: `/billing/${existingInv.id}` }
-        : { id: "qm-inv", label: "Create invoice", icon: "receipt", run: createInvoiceFromQuote.bind(null, q.id), hrefPrefix: "/billing/" },
+        ? { id: "qm-inv", label: "View Invoice", icon: "receipt", href: `/billing/${existingInv.id}` }
+        : { id: "qm-inv", label: "Create Invoice", icon: "receipt", run: createInvoiceFromQuote.bind(null, q.id), hrefPrefix: "/billing/" },
       (q as any).job_id
-        ? { id: "qm-job", label: "View job", icon: "briefcase", href: `/jobs/${(q as any).job_id}` }
-        : { id: "qm-job", label: "Create job", icon: "briefcase", run: createJobFromQuote.bind(null, q.id), hrefPrefix: "/jobs/" },
+        ? { id: "qm-job", label: "View Job", icon: "briefcase", href: `/jobs/${(q as any).job_id}` }
+        : { id: "qm-job", label: "Create Job", icon: "briefcase", run: createJobFromQuote.bind(null, q.id), hrefPrefix: "/jobs/" },
       ...(lineItems.length > 0
         ? [
             existingWo
-              ? { id: "qm-wo", label: "View work order", icon: "clipboardCheck", href: `/work-orders/${existingWo.id}` }
-              : { id: "qm-wo", label: "Create work order", icon: "clipboardCheck", run: createWorkOrderFromQuote.bind(null, q.id), hrefPrefix: "/work-orders/" },
+              ? { id: "qm-wo", label: "View Work Order", icon: "clipboardCheck", href: `/work-orders/${existingWo.id}` }
+              : { id: "qm-wo", label: "Create Work Order", icon: "clipboardCheck", run: createWorkOrderFromQuote.bind(null, q.id), hrefPrefix: "/work-orders/" },
             existingMl
-              ? { id: "qm-ml", label: "View material list", icon: "boxes", href: `/materials/${existingMl.id}` }
-              : { id: "qm-ml", label: "Create material list", icon: "boxes", run: createMaterialListFromQuote.bind(null, q.id), hrefPrefix: "/materials/" },
+              ? { id: "qm-ml", label: "View Material List", icon: "boxes", href: `/materials/${existingMl.id}` }
+              : { id: "qm-ml", label: "Create Material List", icon: "boxes", run: createMaterialListFromQuote.bind(null, q.id), hrefPrefix: "/materials/" },
           ]
         : []),
       { id: "qm-print", label: "Print / PDF", icon: "fileSpreadsheet", href: `/print/quote/${q.id}` },
       {
         id: "qm-del",
-        label: "Delete quote",
+        label: "Delete Quote",
         icon: "trash",
         danger: true,
         confirmText: `Delete quote ${q.quote_number}? Its line items go with it.`,
@@ -100,7 +100,7 @@ export default async function QuoteDetailPage({
         href="/quotes"
         className="mb-4 inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800"
       >
-        <ArrowLeft className="h-4 w-4" /> Back to quotes
+        <ArrowLeft className="h-4 w-4 shrink-0" /> Back to Quotes
       </Link>
 
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">

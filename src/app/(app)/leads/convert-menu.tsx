@@ -66,7 +66,7 @@ export function ConvertMenu({
     <>
       <div className="relative">
         <Button size="sm" onClick={() => setMenuOpen((v) => !v)}>
-          Convert <ChevronDown className="h-3.5 w-3.5" />
+          Convert <ChevronDown className="h-4 w-4" />
         </Button>
         {menuOpen && (
           <>

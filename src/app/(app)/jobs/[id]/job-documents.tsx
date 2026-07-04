@@ -215,10 +215,10 @@ export function JobDocuments({
         <input ref={captureRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onFiles} />
         <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={busy}>
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-          Upload file
+          Upload File
         </Button>
         <Button variant="outline" type="button" onClick={takePhoto} disabled={busy}>
-          <Camera className="h-4 w-4" /> Take photo
+          <Camera className="h-4 w-4" /> Take Photo
         </Button>
       </div>
 
@@ -308,15 +308,15 @@ export function JobDocuments({
                   <button
                     onClick={() => recordCost(d)}
                     disabled={billing === d.id}
-                    className="inline-flex shrink-0 items-center gap-1 rounded-md border border-brand/30 bg-brand/5 px-2 py-1 text-xs font-medium text-brand hover:bg-brand/10 disabled:opacity-50"
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-brand/30 bg-brand/5 px-2 py-1 text-xs font-medium text-brand hover:bg-brand/10 disabled:opacity-50"
                     title="AI reads the receipt and adds it to this job's costs"
                   >
                     {billing === d.id ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
                     ) : (
-                      <DollarSign className="h-3.5 w-3.5" />
+                      <DollarSign className="h-4 w-4 shrink-0" />
                     )}
-                    Record as cost
+                    Record as Cost
                   </button>
                 )}
                 {d.category && <Badge tone="blue">{d.category}</Badge>}

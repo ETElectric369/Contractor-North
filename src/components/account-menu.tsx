@@ -117,7 +117,7 @@ export function AccountMenu({
           <div className="relative z-10 my-1 border-t border-white/50" />
           <form action={signOut}>
             <button className="relative z-10 flex min-h-[44px] w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15">
-              <LogOut className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Sign out
+              <LogOut className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Sign Out
             </button>
           </form>
         </div>

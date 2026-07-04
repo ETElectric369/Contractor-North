@@ -40,16 +40,16 @@ export function CoStatusControl({
       <button
         onClick={() => set("approved")}
         disabled={pending}
-        className="inline-flex items-center gap-1 rounded-lg bg-green-50 px-2 py-1 text-xs font-medium text-green-700 hover:bg-green-100"
+        className="inline-flex items-center gap-1.5 rounded-lg bg-green-50 px-2 py-1 text-xs font-medium text-green-700 hover:bg-green-100"
       >
-        <Check className="h-3.5 w-3.5" /> Approve
+        <Check className="h-4 w-4 shrink-0" /> Approve
       </button>
       <button
         onClick={() => set("rejected")}
         disabled={pending}
-        className="inline-flex items-center gap-1 rounded-lg bg-red-50 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
+        className="inline-flex items-center gap-1.5 rounded-lg bg-red-50 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
       >
-        <X className="h-3.5 w-3.5" /> Reject
+        <X className="h-4 w-4 shrink-0" /> Reject
       </button>
     </div>
   );

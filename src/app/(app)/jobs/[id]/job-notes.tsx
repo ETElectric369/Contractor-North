@@ -77,13 +77,13 @@ export function JobNotes({
       />
       <div className="mt-2 flex flex-wrap items-center gap-3">
         <Button size="sm" onClick={save} disabled={pending}>
-          {pending ? "Saving…" : "Save notes"}
+          {pending ? "Saving…" : "Save Notes"}
         </Button>
         {orgId && (
           <>
             <Button size="sm" variant="outline" onClick={() => captureRef.current?.click()} disabled={photoBusy}>
               {photoBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Camera className="h-3.5 w-3.5" />}
-              Take photo
+              Take Photo
             </Button>
             <input
               ref={captureRef}

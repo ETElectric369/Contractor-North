@@ -167,7 +167,7 @@ export function ImportDocsButton({ orgId, page }: { orgId: string; page: "Insura
           <Landmark className="h-3.5 w-3.5" /> From CSLB
         </Button>
         <Button size="sm" variant="outline" onClick={() => inputRef.current?.click()} disabled={busy}>
-          <Upload className="h-3.5 w-3.5" /> {busy ? "Importing…" : "Import documents"}
+          <Upload className="h-3.5 w-3.5" /> {busy ? "Importing…" : "Import Documents"}
         </Button>
       </div>
       {rows.length > 0 && (

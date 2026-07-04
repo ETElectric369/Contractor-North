@@ -193,7 +193,7 @@ function JobTaskEditModal({ task, jobId, onClose }: { task: Task; jobId: string;
       open
       onClose={onClose}
       title="Edit task"
-      footer={<ModalActions onCancel={onClose} onSave={save} saving={pending} saveLabel="Save changes" />}
+      footer={<ModalActions onCancel={onClose} onSave={save} saving={pending} saveLabel="Save Changes" />}
     >
       <div className="space-y-4">
         {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}

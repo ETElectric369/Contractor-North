@@ -245,7 +245,7 @@ export default async function CustomerDetailPage({
   return (
     <div className="mx-auto max-w-4xl">
       <Link href="/crm" className="mb-4 inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800">
-        <ArrowLeft className="h-4 w-4" /> Back to customers
+        <ArrowLeft className="h-4 w-4 shrink-0" /> Back to Customers
       </Link>
 
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -267,7 +267,7 @@ export default async function CustomerDetailPage({
               href={`tel:${c.phone}`}
               className="btn-gloss inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-[rgb(var(--glass-ink))] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[rgb(var(--glass-ink))]/90"
             >
-              <Phone className="h-4 w-4" /> Call
+              <Phone className="h-4 w-4 shrink-0" /> Call
             </a>
           )}
           <NewJobButton customers={[{ id: c.id, name: c.name }]} defaultCustomerId={c.id} />
@@ -279,7 +279,7 @@ export default async function CustomerDetailPage({
           />
           <Link href={`/quotes/new?customer=${c.id}`}>
             <Button>
-              <Plus className="h-4 w-4" /> New estimate
+              <Plus className="h-4 w-4" /> New Estimate
             </Button>
           </Link>
           <SectionActionsMenu

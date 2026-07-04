@@ -100,7 +100,7 @@ export function FormEditor({
           onSave={onSave}
           saving={pending}
           disabled={!name.trim()}
-          saveLabel={isEdit ? "Save changes" : "Create form"}
+          saveLabel={isEdit ? "Save Changes" : "Create Form"}
         />
       }
     >
@@ -138,7 +138,7 @@ export function FormEditor({
                 setFields((p) => [...p, { label: "", type: "text", options: "" }])
               }
             >
-              <Plus className="h-3.5 w-3.5" /> Add field
+              <Plus className="h-3.5 w-3.5" /> Add Field
             </Button>
           </div>
           <div className="space-y-2">

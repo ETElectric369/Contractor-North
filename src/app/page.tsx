@@ -56,16 +56,16 @@ export default async function Home() {
             {signedIn ? (
               <Link href="/planner">
                 <Button>
-                  Open app <ArrowRight className="h-4 w-4" />
+                  Open App <ArrowRight className="h-4 w-4" />
                 </Button>
               </Link>
             ) : (
               <>
                 <Link href="/login">
-                  <Button variant="ghost">Sign in</Button>
+                  <Button variant="ghost">Sign In</Button>
                 </Link>
                 <Link href="/login?mode=signup">
-                  <Button>Get started</Button>
+                  <Button>Get Started</Button>
                 </Link>
               </>
             )}
@@ -89,7 +89,7 @@ export default async function Home() {
           <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Link href={signedIn ? "/planner" : "/login?mode=signup"}>
               <Button size="lg" className="bg-white text-brand hover:bg-slate-100">
-                {signedIn ? "Open the app" : "Get started free"}
+                {signedIn ? "Open the App" : "Get Started Free"}
                 <ArrowRight className="h-4 w-4" />
               </Button>
             </Link>
@@ -100,7 +100,7 @@ export default async function Home() {
                   variant="outline"
                   className="border-white/40 bg-transparent text-white hover:bg-white/10"
                 >
-                  Sign in
+                  Sign In
                 </Button>
               </Link>
             )}
@@ -156,7 +156,7 @@ export default async function Home() {
           </div>
           <Link href={signedIn ? "/planner" : "/login?mode=signup"}>
             <Button size="lg">
-              {signedIn ? "Open the app" : "Create your account"}
+              {signedIn ? "Open the App" : "Create Your Account"}
               <ArrowRight className="h-4 w-4" />
             </Button>
           </Link>
