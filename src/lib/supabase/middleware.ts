@@ -17,6 +17,7 @@ const PUBLIC_PATHS = [
   "/api/contracts",
   "/api/timeclock",
   "/api/automations",
+  "/api/inbound",
   "/api/health",
   "/_next",
   "/favicon",
