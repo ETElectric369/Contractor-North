@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Zap, ListTodo, Briefcase, CalendarPlus, FileText, Receipt, UserPlus, UserSearch, X, type LucideIcon } from "lucide-react";
 import { QuickCaptureSheet } from "@/components/quick-capture";
+import { GLASS_MENU_CLASS } from "@/components/ui/glass-menu";
 
 // Add-cost is NOT here — it lives on My Day's Now card + the job header (job-scoped,
 // works cleanly). A self-loading copy in this dropdown was redundant + fiddly.
@@ -104,7 +105,7 @@ export function GlobalQuickAdd({
                 override a Tailwind `fixed`. top 4.5rem clears the 4rem header. */}
             <div
               style={{ position: "fixed", top: "4.5rem", right: "0.5rem" }}
-              className="glass glass-gloss glass-menu z-[90] w-60 overflow-hidden rounded-lg py-1.5 shadow-xl"
+              className={`${GLASS_MENU_CLASS} w-60`}
             >
               {items}
             </div>

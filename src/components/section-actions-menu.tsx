@@ -3,6 +3,7 @@
 import { Children, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MoreHorizontal, Loader2, Trash2 } from "lucide-react";
+import { GLASS_MENU_CLASS } from "@/components/ui/glass-menu";
 import type { NavTree, TreeNode } from "@/lib/nav-tree";
 import { resolveNavTree, type BloomNode } from "./app-shell/glass-bloom";
 import { executeAction } from "@/lib/actions/execute";
@@ -175,7 +176,7 @@ export function SectionActionsMenu({
         // as the LAST (rightmost) control of every detail header's actions row.
         <div
           style={{ position: "absolute", right: 0, top: "calc(100% + 0.25rem)" }}
-          className="glass glass-gloss glass-menu z-[90] w-56 overflow-hidden rounded-lg py-1.5 shadow-xl"
+          className={`${GLASS_MENU_CLASS} w-56`}
         >
           {children}
           {hasChildren && main.length > 0 && DIVIDER}

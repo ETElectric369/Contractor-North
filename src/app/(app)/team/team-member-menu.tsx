@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MoreHorizontal, Loader2, Pause, Play, Trash2 } from "lucide-react";
+import { GLASS_MENU_CLASS } from "@/components/ui/glass-menu";
 import { EditMemberButton } from "../settings/edit-member-button";
 import { setMemberActive, memberFootprint, removeMember } from "../settings/actions";
 
@@ -138,7 +139,7 @@ export function TeamMemberMenu({
         // the row's rightmost control.
         <div
           style={{ position: "absolute", right: 0, top: "calc(100% + 0.25rem)" }}
-          className="glass glass-gloss glass-menu z-[90] w-56 overflow-hidden rounded-lg py-1.5 shadow-xl"
+          className={`${GLASS_MENU_CLASS} w-56`}
         >
           {/* Opaque backing — the roster list can sit inside a card; keep the glass rows
               from reading the content behind them (the "ghost row" bug). */}

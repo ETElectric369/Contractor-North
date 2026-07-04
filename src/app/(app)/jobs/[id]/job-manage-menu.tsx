@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MoreHorizontal, Loader2, Receipt, Users, List, Trash2 } from "lucide-react";
+import { GLASS_MENU_CLASS } from "@/components/ui/glass-menu";
 
 /** The one menu-row style — shared with the modal-owning items (Edit / Propose /
  *  Finish) composed in as children, so every row in the panel looks identical. */
@@ -137,7 +138,7 @@ export function JobManageMenu({
         // Manage is the dock's rightmost control.
         <div
           style={{ position: "absolute", right: 0, top: "calc(100% + 0.25rem)" }}
-          className="glass glass-gloss glass-menu z-[90] w-60 overflow-hidden rounded-lg py-1.5 shadow-xl"
+          className={`${GLASS_MENU_CLASS} w-60`}
         >
           {/* Opaque backing — the "ghost Edit pill" / menu-opacity bug. This panel
               hangs INSIDE the dock bar, which has its own backdrop-filter; that makes

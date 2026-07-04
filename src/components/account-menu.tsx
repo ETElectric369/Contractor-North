@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { LogOut, Settings } from "lucide-react";
+import { GLASS_MENU_CLASS } from "@/components/ui/glass-menu";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { ShareQrButton } from "@/components/share-qr-button";
 import { initials } from "@/lib/utils";
@@ -86,7 +87,7 @@ export function AccountMenu({
            Tailwind `fixed`. top 4.5rem clears the 4rem header. */
         <div
           style={{ position: "fixed", top: "4.5rem", right: "0.5rem" }}
-          className="glass glass-gloss glass-menu z-[90] w-60 overflow-hidden rounded-lg py-1.5 shadow-xl"
+          className={`${GLASS_MENU_CLASS} w-60`}
         >
           {/* Who am I — moved out of the bar (it was hidden < sm anyway). */}
           <div className="relative z-10 border-b border-white/50 px-4 pb-2.5 pt-1">
