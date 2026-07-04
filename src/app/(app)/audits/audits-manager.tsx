@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { EmptyState } from "@/components/page-header";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { formatDate } from "@/lib/utils";
 import { useToast } from "@/components/toast";
@@ -111,9 +112,11 @@ export function AuditsManager({ items }: { items: ComplianceItem[] }) {
       )}
 
       {items.length === 0 ? (
-        <p className="py-10 text-center text-sm text-slate-400">
-          Log safety, OSHA, insurance, and financial audits — with their findings and the next follow-up date.
-        </p>
+        <EmptyState
+          icon={ClipboardCheck}
+          title="No audits logged yet"
+          description="Log safety, OSHA, insurance, and financial audits — with their findings and the next follow-up date."
+        />
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
           {sorted.map((c) => {

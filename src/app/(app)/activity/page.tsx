@@ -3,7 +3,7 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { redirect } from "next/navigation";
 import { Briefcase, FileText, Receipt, CalendarCheck, CheckCircle2, Clock } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { PageHeader } from "@/components/page-header";
+import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { hoursBetween, formatDuration, formatDateShort, DEFAULT_TIMEZONE } from "@/lib/utils";
 import { todayStrInTz } from "@/lib/tz";
@@ -80,7 +80,7 @@ export default async function ActivityPage() {
       <PageHeader title="Activity" description="Recent business activity across the shop — last 30 days." />
 
       {feed.length === 0 ? (
-        <Card className="py-12 text-center text-sm text-slate-400">No recent activity.</Card>
+        <EmptyState icon={Clock} title="No recent activity" description="Jobs, invoices, and payments across the shop will show up here as they happen." />
       ) : (
         <Card className="overflow-hidden">
           <ul className="divide-y divide-slate-100">

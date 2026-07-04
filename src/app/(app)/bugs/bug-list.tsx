@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Image as ImageIcon, Check, X, RotateCcw } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { EmptyState } from "@/components/page-header";
 import { formatDate } from "@/lib/utils";
 import { setBugReportStatus, type BugReport } from "@/app/(app)/bug-report-actions";
 
@@ -57,9 +58,11 @@ export function BugList({ initial }: { initial: BugReport[] }) {
       </div>
 
       {shown.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-slate-200 px-4 py-10 text-center text-sm text-slate-400">
-          {tab === "open" ? "Nothing open — all clear." : "Nothing here."}
-        </div>
+        <EmptyState
+          icon={Check}
+          title={tab === "open" ? "Nothing open" : "Nothing here"}
+          description={tab === "open" ? "All clear — no open bug reports to triage." : undefined}
+        />
       ) : (
         <ul className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 bg-white">
           {shown.map((r) => {

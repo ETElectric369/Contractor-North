@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { EmptyState } from "@/components/page-header";
 import { useToast } from "@/components/toast";
 import { createResource, updateResource, deleteResource } from "./actions";
 
@@ -142,9 +143,11 @@ export function ResourcesManager({ resources }: { resources: Resource[] }) {
       )}
 
       {resources.length === 0 ? (
-        <p className="py-10 text-center text-sm text-slate-400">
-          No contacts yet. Add your building department, inspectors, utilities (e.g. NV Energy), and permit portals.
-        </p>
+        <EmptyState
+          icon={MapPin}
+          title="No contacts yet"
+          description="Add your building department, inspectors, utilities (e.g. NV Energy), and permit portals."
+        />
       ) : (
         groups.map(([cat, list]) => (
           <div key={cat}>
