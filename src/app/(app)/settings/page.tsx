@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { User, Building2, Wallet, CalendarDays, Plug } from "lucide-react";
 import { SettingsSubnav } from "./settings-subnav";
-import { getOrgSettings } from "@/lib/org-settings";
+import { getOrgSettings, accentHex } from "@/lib/org-settings";
 import { OrgSettingsForm } from "./org-settings-form";
 import { DocumentDesigner } from "./document-designer";
 import { LogoUpload } from "./logo-upload";
@@ -234,7 +234,7 @@ export default async function SettingsPage({
                 <DocumentDesigner
                   templates={(org as Organization).doc_templates || {}}
                   fallback={(org as Organization).doc_template || "classic"}
-                  brand={(org as Organization).brand_color || "#0b57c4"}
+                  brand={accentHex(settings.glass_tint)}
                 />
               </Section>
               <Section title="QuickBooks">

@@ -1,6 +1,7 @@
 import { Zap } from "lucide-react";
 import { COMPANY } from "@/lib/company";
 import type { Organization } from "@/lib/types";
+import { accentHex } from "@/lib/org-settings";
 
 export interface CompanyInfo {
   name: string;
@@ -30,7 +31,7 @@ export function companyFromOrg(org: Organization | null): CompanyInfo {
     phone: org?.phone || COMPANY.phone,
     email: org?.email || COMPANY.email,
     license: org?.license || COMPANY.license,
-    brand: org?.brand_color || "#0b57c4",
+    brand: accentHex((org as { settings?: { glass_tint?: string } } | null)?.settings?.glass_tint),
     logo: org?.logo_url || "",
   };
 }

@@ -6,7 +6,8 @@ export interface OrgSettings {
   currency: string; // ISO 4217, e.g. "USD"
   timezone: string; // IANA, e.g. "America/Los_Angeles"
   tax_number: string; // EIN / tax #
-  /** App "glass" accent (the dock/bloom tint) — chrome only; documents keep brand_color. */
+  /** The ONE org accent color (sea-glass tint). Drives the whole app AND documents —
+   *  there is no separate company brand_color anymore. Pick it in Settings. */
   glass_tint: string; // hex, e.g. "#1b9488" (sea-glass teal)
 
   // Documents
@@ -167,3 +168,19 @@ export const TIMEZONES = [
   "America/Anchorage",
   "Pacific/Honolulu",
 ];
+
+/**
+ * The single accent color for DOCUMENTS + public pages (quotes, invoices, contracts,
+ * portal, inquiry, business card), derived from the org's sea-glass tint — the same
+ * darkened "ink" the app chrome uses (--glass-ink). There is no separate brand_color
+ * anymore: the tint is the brand. Returns a hex string.
+ */
+export function accentHex(glassTintHex?: string | null): string {
+  const h = (glassTintHex || DEFAULT_SETTINGS.glass_tint).replace("#", "");
+  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  const n = parseInt(full, 16);
+  const [r, g, b] =
+    !Number.isFinite(n) || full.length !== 6 ? [27, 148, 136] : [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  const d = (c: number) => Math.round(c * 0.62).toString(16).padStart(2, "0");
+  return `#${d(r)}${d(g)}${d(b)}`;
+}

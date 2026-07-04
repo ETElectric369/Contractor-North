@@ -1,6 +1,6 @@
 import "server-only";
 import { sendEmail, renderInvoiceNoticeEmail, ownerBcc } from "@/lib/email";
-import { getOrgSettings } from "@/lib/org-settings";
+import { getOrgSettings, accentHex } from "@/lib/org-settings";
 import { companyFromOrg } from "@/components/doc-letterhead";
 import { companyBlock } from "@/lib/company-lines";
 import { invoiceBalance } from "@/lib/invoice-math";
@@ -30,7 +30,7 @@ export async function deliverInvoiceEmail(
     // Scope to THIS invoice's org explicitly — under the RLS-bypassing service client
     // (the recurring cron) an unfiltered query sees every org and would error on
     // .maybeSingle() or leak another tenant's branding/reply-to to this customer.
-    supabase.from("organizations").select("name, brand_color, phone, email, address_line1, address_line2, city, state, zip, license, logo_url, settings").eq("id", (invoice as any).org_id).maybeSingle(),
+    supabase.from("organizations").select("name, phone, email, address_line1, address_line2, city, state, zip, license, logo_url, settings").eq("id", (invoice as any).org_id).maybeSingle(),
   ]);
   // Never email an empty invoice (a blank $0 mis-send) — protects every caller.
   if (!items || items.length === 0) return { ok: false, error: "This invoice has no line items to send." };
@@ -46,7 +46,7 @@ export async function deliverInvoiceEmail(
   const html = renderInvoiceNoticeEmail({
     company: {
       name: org?.name ?? "Contractor North",
-      brand: org?.brand_color ?? "#0b57c4",
+      brand: accentHex(getOrgSettings((org as any)?.settings).glass_tint),
       tagline: co.tagline,
       phone: org?.phone,
       email: org?.email,

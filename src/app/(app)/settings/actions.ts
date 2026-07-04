@@ -75,7 +75,6 @@ export async function updateOrganization(formData: FormData): Promise<Result> {
       phone: norm(formatPhone(String(formData.get("phone") ?? ""))),
       email: emptyToNull(formData.get("email")),
       license: emptyToNull(formData.get("license")),
-      brand_color: String(formData.get("brand_color") ?? "#0b57c4") || "#0b57c4",
       default_tax_rate: Number.isFinite(taxPct) ? taxPct / 100 : 0,
       settings: mergedSettings,
     })

@@ -2,6 +2,7 @@ import "server-only";
 import { sendEmail, renderReminderEmail, money } from "@/lib/email";
 import { todayStrInTz } from "@/lib/tz";
 import { reportError } from "@/lib/observe";
+import { getOrgSettings, accentHex } from "@/lib/org-settings";
 import { reminderSuppressed } from "@/lib/automations-math";
 
 /** The opt-in customer-reminder engine (run by the daily automations cron). For each
@@ -21,7 +22,7 @@ export async function sendDueReminders(supabase: any): Promise<Counts> {
 
   const { data: orgs } = await supabase
     .from("organizations")
-    .select("id, name, brand_color, phone, email, settings");
+    .select("id, name, phone, email, settings");
 
   for (const org of orgs ?? []) {
     const s = org.settings ?? {};
@@ -30,7 +31,7 @@ export async function sendDueReminders(supabase: any): Promise<Counts> {
     const today = todayStrInTz(tz);
     const brand = {
       name: org.name || "Contractor North",
-      brand: org.brand_color || "#0b57c4",
+      brand: accentHex(getOrgSettings(org.settings).glass_tint),
       phone: org.phone,
       email: org.email,
     };

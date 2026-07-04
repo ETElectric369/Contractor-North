@@ -3,11 +3,15 @@
 /* ── Contractor North theme ───────────────────────────────────────────────
    Brand color echoes the CED blue from the letterhead.                      */
 /* Plain @theme so brand utilities reference var(--color-brand) and can be
-   overridden per-organization at runtime (see the app layout). */
+   overridden per-organization at runtime (see the app layout).
+   SEA-GLASS LOCK-IN: there is no separate "company blue" anymore — `brand` IS the
+   sea-glass tint. These defaults derive from the default glass tint (#1b9488) so
+   public pages (login / onboarding / portal / q) that don't hit the app layout still
+   read teal, not the old CED blue. The app layout overrides them per-org from glass_tint. */
 @theme {
-  --color-brand: #0b57c4;
-  --color-brand-dark: #084298;
-  --color-brand-light: #e8f0fc;
+  --color-brand: #115c54;
+  --color-brand-dark: #0c433d;
+  --color-brand-light: #e4f2f1;
 }
 
 @theme inline {

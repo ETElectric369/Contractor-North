@@ -3,7 +3,7 @@ import { ArrowLeft, Phone, Mail, Globe } from "lucide-react";
 import QRCode from "qrcode";
 import { createClient } from "@/lib/supabase/server";
 import { PrintButton } from "@/components/print-button";
-import { getOrgSettings } from "@/lib/org-settings";
+import { getOrgSettings, accentHex } from "@/lib/org-settings";
 import { docTitle } from "@/lib/doc-title";
 import type { Metadata } from "next";
 import type { Organization } from "@/lib/types";
@@ -42,7 +42,7 @@ export default async function BusinessCardPage() {
     <div className="flex h-[2in] w-[3.5in] overflow-hidden rounded border border-slate-300 bg-white">
       <div className="flex flex-1 flex-col justify-between p-3">
         <div>
-          <div className="text-[13px] font-bold leading-tight" style={{ color: o?.brand_color || "#0b57c4" }}>
+          <div className="text-[13px] font-bold leading-tight" style={{ color: accentHex(settings.glass_tint) }}>
             {o?.name ?? "Your Company"}
           </div>
           {license && <div className="text-[8px] text-slate-500">{license}</div>}
@@ -61,7 +61,7 @@ export default async function BusinessCardPage() {
           <div className="flex items-center gap-1"><Globe className="h-2.5 w-2.5" /> {inquiryUrl.replace(/^https?:\/\//, "")}</div>
         </div>
       </div>
-      <div className="flex w-[1.15in] flex-col items-center justify-center gap-1 p-2" style={{ background: `${o?.brand_color || "#0b57c4"}10` }}>
+      <div className="flex w-[1.15in] flex-col items-center justify-center gap-1 p-2" style={{ background: `${accentHex(settings.glass_tint)}10` }}>
         {/* Tappable when the card is viewed on a screen (shared digitally); inert in print. */}
         <a href={inquiryUrl} target="_blank" rel="noopener noreferrer">
           {/* eslint-disable-next-line @next/next/no-img-element */}

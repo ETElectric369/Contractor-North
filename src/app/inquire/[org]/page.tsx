@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { Phone, Mail, MapPin, Zap } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { accentHex } from "@/lib/org-settings";
 import { InquiryForm } from "./inquiry-form";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +17,7 @@ export default async function InquirePage({ params, searchParams }: { params: Pr
   const o = (data ?? null) as any;
   if (!o || !o.name) notFound();
 
-  const brand = o.brand_color || "#0b57c4";
+  const brand = accentHex((o as { glass_tint?: string } | null)?.glass_tint);
   const bg = o.splash_bg_url || "";
   const headline = o.splash_headline || o.name;
   const tagline = o.splash_tagline || "";

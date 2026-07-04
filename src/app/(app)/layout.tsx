@@ -26,6 +26,10 @@ function hexToRgbTriplet(hex: string): string {
 function darken(triplet: string, f = 0.62): string {
   return triplet.split(" ").map((c) => Math.round(Number(c) * f)).join(" ");
 }
+/** Mix each channel toward white — for the soft `brand-light` background tint. */
+function lighten(triplet: string, f = 0.88): string {
+  return triplet.split(" ").map((c) => Math.round(Number(c) + (255 - Number(c)) * f)).join(" ");
+}
 
 export default async function AppLayout({
   children,
@@ -60,7 +64,7 @@ export default async function AppLayout({
 
   const { data: org } = await supabase
     .from("organizations")
-    .select("name, logo_url, brand_color, subscription_status, trial_ends_at, settings")
+    .select("name, logo_url, subscription_status, trial_ends_at, settings")
     .eq("id", profile.org_id)
     .maybeSingle();
 
@@ -91,11 +95,16 @@ export default async function AppLayout({
     redirect("/subscribe");
   }
 
-  // Apply the org's brand color across the app shell (white-label).
-  const brand = org?.brand_color || "#0b57c4";
   const branding = { name: org?.name ?? null, logo: org?.logo_url ?? null };
-  // The glass tint is a separate per-org chrome accent (documents keep brand_color).
+  // ONE per-org color source: the sea-glass tint. `brand` (the solid accent used by
+  // bg-brand / text-brand across the app AND on documents) now DERIVES from the tint —
+  // there is no separate company blue anymore. Ink = the strong fill (matches the CTA
+  // button); brand-light = a soft tint background. The org's chosen tint recolors the
+  // whole app + its invoices in one knob (Settings → the tint picker).
   const glassTint = hexToRgbTriplet(settings.glass_tint);
+  const brandInk = darken(glassTint);
+  const brandInkDark = darken(glassTint, 0.45);
+  const brandLight = lighten(glassTint);
 
   // The unified "Needs action" inbox count, surfaced on the dock Home icon (it
   // already includes the organize/needs-review captures, so no separate badge).
@@ -113,10 +122,11 @@ export default async function AppLayout({
       className="app-backdrop flex h-dvh overflow-hidden"
       style={
         {
-          "--color-brand": brand,
-          "--color-brand-dark": brand,
+          "--color-brand": `rgb(${brandInk})`,
+          "--color-brand-dark": `rgb(${brandInkDark})`,
+          "--color-brand-light": `rgb(${brandLight})`,
           "--glass-tint": glassTint,
-          "--glass-ink": darken(glassTint),
+          "--glass-ink": brandInk,
         } as React.CSSProperties
       }
     >

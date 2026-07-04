@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { DatePicker } from "./date-picker";
+import { accentHex } from "@/lib/org-settings";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +37,7 @@ export default async function PickDatePage({
     chosen_date: string | null;
     chosen_at: string | null;
   };
-  const brand = p.brand_color || "#0b57c4";
+  const brand = accentHex((p as { glass_tint?: string }).glass_tint);
   const hasTimes = (p.dates ?? []).some((d) => typeof d === "object");
 
   return (

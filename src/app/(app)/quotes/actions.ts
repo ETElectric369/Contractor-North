@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
-import { getOrgSettings } from "@/lib/org-settings";
+import { getOrgSettings, accentHex } from "@/lib/org-settings";
 import { sendEmail, renderQuoteNoticeEmail, ownerBcc } from "@/lib/email";
 import { sendSms } from "@/lib/sms";
 import { createWorkOrderFromQuote } from "../work-orders/actions";
@@ -78,7 +78,7 @@ export async function emailQuote(
 
   const { data: org } = await supabase
     .from("organizations")
-    .select("name, brand_color, phone, email, settings")
+    .select("name, phone, email, settings")
     .maybeSingle();
 
   // Link-only notice (no re-rendered line-item table): the canonical document
@@ -89,7 +89,7 @@ export async function emailQuote(
     number: quote.quote_number,
     company: {
       name: org?.name ?? "Contractor North",
-      brand: org?.brand_color ?? "#0b57c4",
+      brand: accentHex(getOrgSettings((org as any)?.settings).glass_tint),
       phone: org?.phone,
       email: org?.email,
     },

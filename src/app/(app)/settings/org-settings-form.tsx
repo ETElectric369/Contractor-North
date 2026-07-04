@@ -86,20 +86,7 @@ export function OrgSettingsForm({ org }: { org: Organization }) {
           />
         </div>
         <div>
-          <Label htmlFor="brand_color">Brand color</Label>
-          <div className="flex items-center gap-2">
-            <input
-              id="brand_color"
-              name="brand_color"
-              type="color"
-              defaultValue={org.brand_color}
-              className="h-10 w-14 cursor-pointer rounded-lg border border-slate-300 bg-white"
-            />
-            <span className="text-xs text-slate-400">Used on your documents</span>
-          </div>
-        </div>
-        <div>
-          <Label htmlFor="glass_tint">App glass color</Label>
+          <Label htmlFor="glass_tint">Your color</Label>
           <div className="flex items-center gap-2">
             <input
               id="glass_tint"
@@ -108,7 +95,7 @@ export function OrgSettingsForm({ org }: { org: Organization }) {
               defaultValue={s.glass_tint}
               className="h-10 w-14 cursor-pointer rounded-lg border border-slate-300 bg-white"
             />
-            <span className="text-xs text-slate-400">The dock & menu tint</span>
+            <span className="text-xs text-slate-400">One sea-glass tint — colors the whole app <em>and</em> your documents</span>
           </div>
         </div>
         <div>

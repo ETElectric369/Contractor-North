@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { FileText, FileSignature, Receipt, Briefcase } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { accentHex } from "@/lib/org-settings";
 import { formatCurrency, formatDate } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -26,7 +27,7 @@ export default async function CustomerPortalPage({ params }: { params: Promise<{
   if (!data || !data.customer) notFound();
 
   const org = data.org ?? {};
-  const brand = org.brand_color || "#0b57c4";
+  const brand = accentHex((org as { glass_tint?: string }).glass_tint);
   const invoices = data.invoices ?? [];
   const contracts = data.contracts ?? [];
   const quotes = data.quotes ?? [];

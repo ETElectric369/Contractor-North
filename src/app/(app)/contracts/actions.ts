@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireStaff } from "@/lib/staff-guard";
-import { getOrgSettings } from "@/lib/org-settings";
+import { getOrgSettings, accentHex } from "@/lib/org-settings";
 import { scheduleStatus, contractTotalFromQuotes, type Milestone } from "@/lib/payment-schedule-math";
 import { buildContractBody } from "@/lib/contract-body";
 import { sendEmail, renderReminderEmail, ownerBcc } from "@/lib/email";
@@ -156,10 +156,10 @@ export async function sendContract(id: string): Promise<Result> {
   const customer = (c as any).customers;
   if (!customer?.email) return { ok: false, error: "This customer has no email address." };
 
-  const { data: org } = await supabase.from("organizations").select("name, brand_color, phone, email, settings").maybeSingle();
+  const { data: org } = await supabase.from("organizations").select("name, phone, email, settings").maybeSingle();
   const link = contractLink((c as any).public_token);
   const html = renderReminderEmail({
-    company: { name: org?.name ?? "Contractor North", brand: org?.brand_color ?? "#0b57c4", phone: org?.phone, email: org?.email },
+    company: { name: org?.name ?? "Contractor North", brand: accentHex(getOrgSettings((org as any)?.settings).glass_tint), phone: org?.phone, email: org?.email },
     customerName: customer.name,
     heading: "Your contract is ready to review and sign",
     message: `Please review contract ${(c as any).contract_number ?? ""} and sign it online. If anything looks off, just reply to this email.`,
