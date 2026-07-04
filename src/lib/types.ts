@@ -4,21 +4,12 @@
 export type UserRole = "owner" | "admin" | "office" | "tech";
 export type CustomerType = "residential" | "commercial" | "industrial" | "subcontractor";
 export type CustomerStatus = "lead" | "active" | "inactive";
-export type JobStatus =
-  | "estimate"
-  | "scheduled"
-  | "in_progress"
-  | "on_hold"
-  | "complete"
-  | "invoiced"
-  | "cancelled";
-export type QuoteStatus = "draft" | "sent" | "accepted" | "declined" | "expired";
-export type WorkOrderStatus =
-  | "draft"
-  | "assigned"
-  | "in_progress"
-  | "complete"
-  | "cancelled";
+// Status types are derived from their canonical as-const arrays (one spine each) so the
+// DB enum, the type, the dropdowns, and the write-guards can't drift. Imported for local
+// use in the interfaces below AND re-exported so `@/lib/types` stays the one import site.
+import type { JobStatus } from "./job-status";
+import type { QuoteStatus, WorkOrderStatus } from "./statuses";
+export type { JobStatus, QuoteStatus, WorkOrderStatus };
 export type ChangeOrderStatus = "pending" | "approved" | "rejected";
 export type TimeEntryStatus = "open" | "closed";
 export type TimeEntrySource = "app" | "auto_gps" | "text" | "manual";

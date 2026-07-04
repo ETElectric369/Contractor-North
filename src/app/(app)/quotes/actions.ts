@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
 import { subtotalTaxTotal } from "@/lib/invoice-math";
+import { QUOTE_STATUSES } from "@/lib/statuses";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { getOrgSettings, accentHex } from "@/lib/org-settings";
 import { sendEmail, renderQuoteNoticeEmail, ownerBcc } from "@/lib/email";
@@ -544,6 +545,8 @@ export async function createJobFromQuote(
 }
 
 export async function updateQuoteStatus(id: string, status: string) {
+  if (!(QUOTE_STATUSES as readonly string[]).includes(status))
+    return { ok: false as const, error: `Status must be one of: ${QUOTE_STATUSES.join(", ")}.` };
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false as const, error: ctx.error };
   const supabase = ctx.supabase;

@@ -2,16 +2,15 @@
 
 import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
-import { createClient } from "@/lib/supabase/server";
+import { requireStaff } from "@/lib/staff-guard";
+import { WORK_ORDER_STATUSES } from "@/lib/statuses";
 
 export type Result = { ok: boolean; error?: string; id?: string };
 
 export async function createWorkOrder(formData: FormData): Promise<Result> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { supabase, userId } = ctx;
 
   const title = String(formData.get("title") ?? "").trim();
   if (!title) return { ok: false, error: "Title is required." };
@@ -40,7 +39,7 @@ export async function createWorkOrder(formData: FormData): Promise<Result> {
       status: String(formData.get("status") ?? "draft"),
       assigned_to: emptyToNull(formData.get("assigned_to")),
       scheduled_for: scheduled ? new Date(scheduled).toISOString() : null,
-      created_by: user.id,
+      created_by: userId,
     })
     .select("id")
     .single();
@@ -55,11 +54,9 @@ export async function createWorkOrder(formData: FormData): Promise<Result> {
  *  from the quote's line items (quantity + description, no prices — a WO is the
  *  field crew's instruction sheet, not a price sheet). Inherits job + customer. */
 export async function createWorkOrderFromQuote(quoteId: string): Promise<Result> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { supabase, userId } = ctx;
 
   const { data: quote, error: qErr } = await supabase
     .from("quotes")
@@ -106,7 +103,7 @@ export async function createWorkOrderFromQuote(quoteId: string): Promise<Result>
       customer_id: quote.customer_id,
       quote_id: quote.id,
       status: "draft",
-      created_by: user.id,
+      created_by: userId,
     })
     .select("id")
     .single();
@@ -122,7 +119,9 @@ export async function createWorkOrderFromQuote(quoteId: string): Promise<Result>
  *  never touches its column (it used to null the description/assignee/schedule on any
  *  partial edit). The edit form submits every field, so the UI is unchanged. */
 export async function updateWorkOrder(id: string, formData: FormData): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { supabase } = ctx;
   const clean: Record<string, unknown> = {};
 
   if (formData.has("title")) {
@@ -161,8 +160,9 @@ export async function updateWorkOrder(id: string, formData: FormData): Promise<R
 }
 
 export async function deleteWorkOrder(id: string): Promise<Result> {
-  const supabase = await createClient();
-  const { error } = await supabase.from("work_orders").delete().eq("id", id);
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { error } = await ctx.supabase.from("work_orders").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/work-orders");
   return { ok: true };
@@ -172,8 +172,11 @@ export async function setWorkOrderStatus(
   id: string,
   status: string,
 ): Promise<Result> {
-  const supabase = await createClient();
-  const { error } = await supabase
+  if (!(WORK_ORDER_STATUSES as readonly string[]).includes(status))
+    return { ok: false, error: `Status must be one of: ${WORK_ORDER_STATUSES.join(", ")}.` };
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { error } = await ctx.supabase
     .from("work_orders")
     .update({ status })
     .eq("id", id);
