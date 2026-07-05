@@ -20,6 +20,7 @@ const PUBLIC_PATHS = [
   "/api/timeclock",
   "/api/automations",
   "/api/inbound",
+  "/api/site-chat",
   "/api/health",
   "/_next",
   "/favicon",

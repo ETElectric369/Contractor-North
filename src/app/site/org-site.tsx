@@ -5,6 +5,7 @@ import { accentHex } from "@/lib/org-settings";
 import type { PublicOrg } from "@/lib/public-org";
 import { PortfolioGallery } from "../estimate/[handle]/portfolio-gallery";
 import { ContactForm } from "./contact-form";
+import { AskNort } from "./ask-nort";
 
 /**
  * The org marketing homepage — one template, 100% data-driven from the org record + settings.
@@ -246,6 +247,8 @@ export function OrgSite({ org }: { org: PublicOrg }) {
           </div>
         </div>
       </footer>
+
+      {handle && <AskNort handle={handle} orgName={org.name} brand={brand} />}
     </div>
   );
 }
