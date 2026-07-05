@@ -99,6 +99,11 @@ export interface OrgSettings {
   /** Human service-area label for the public site (e.g. "Truckee & North Tahoe"). Falls back
    *  to the org's city/state. Keeps the homepage template org-agnostic. */
   service_area: string;
+  /** Public-site layout theme. Same data, different presentation so two orgs on the platform
+   *  don't look identical: "classic" = full-bleed photo hero w/ dark overlay (the original);
+   *  "bold" = saturated brand color-block hero with the photo as a framed card (contractor punch);
+   *  "minimal" = light, airy, editorial hero (upscale remodel/design feel). Default "classic". */
+  site_theme: "classic" | "bold" | "minimal";
   /** Instagram handle (no @) for the public site footer. Empty = no Instagram link. */
   social_instagram: string;
   /** A custom domain the org has pointed at North for its public site (e.g. "tahoedeck.com",
@@ -163,6 +168,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   site_inspection_threshold: 20000,
   portfolio: [],
   service_area: "",
+  site_theme: "classic",
   social_instagram: "",
   custom_domain: "",
   reviews: [],

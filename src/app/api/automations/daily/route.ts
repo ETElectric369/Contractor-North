@@ -49,5 +49,15 @@ export async function GET(request: Request) {
   // The "Close out your day" nudge moved to the EVENING cron (eod-reminder, 6pm local-ish) —
   // Erik: the debrief is a NIGHT ritual; mornings keep the day-ahead digest only.
 
+  try {
+    // Housekeeping: drop stale public-endpoint rate-limit windows (>1 day old) so the
+    // rate_limits table stays tiny. Cheap, idempotent, no-op when already clean.
+    await supabase.rpc("rate_limit_gc");
+    result.rate_limit_gc = true;
+  } catch (e: any) {
+    result.rate_limit_gc_error = e?.message ?? "failed";
+    reportError("cron-rate-limit-gc", e);
+  }
+
   return NextResponse.json(result);
 }

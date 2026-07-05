@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Phone, Mail, MapPin, ArrowRight, Check, ShieldCheck, Clock, Zap, Instagram, Star } from "lucide-react";
-import { accentHex } from "@/lib/org-settings";
+import { accentHex, type OrgSettings } from "@/lib/org-settings";
 import type { PublicOrg } from "@/lib/public-org";
 import { PortfolioGallery } from "../estimate/[handle]/portfolio-gallery";
 import { ContactForm } from "./contact-form";
@@ -25,6 +25,120 @@ export function orgSiteMetadata(org: PublicOrg): Metadata {
     openGraph: { title, description, type: "website", images: hero ? [hero] : [] },
     twitter: { card: "summary_large_image", title, description, images: hero ? [hero] : [] },
   };
+}
+
+/** The hero — the one section that carries a site's visual identity, so it's where the theme
+ *  lives. All three variants render the SAME headline/tagline/CTA/credentials; only the framing
+ *  differs. Body sections below the hero are shared across themes. */
+function Hero({
+  theme,
+  headline,
+  tagline,
+  brand,
+  hero,
+  area,
+  estimateHref,
+  ctaLabel,
+  hasPhotos,
+  creds,
+}: {
+  theme: OrgSettings["site_theme"];
+  headline: string;
+  tagline: string;
+  brand: string;
+  hero: string;
+  area: string;
+  estimateHref: string;
+  ctaLabel: string;
+  hasPhotos: boolean;
+  creds: string[];
+}) {
+  const cta = (
+    <Link href={estimateHref} className="inline-flex items-center gap-2 rounded-lg px-6 py-3.5 text-base font-semibold text-white shadow-lg" style={{ backgroundColor: brand }}>
+      {ctaLabel} <ArrowRight className="h-5 w-5" />
+    </Link>
+  );
+
+  // BOLD — saturated brand color-block, photo as a framed card. Contractor punch.
+  if (theme === "bold") {
+    return (
+      <section id="top" className="relative isolate overflow-hidden text-white" style={{ background: `linear-gradient(135deg, ${brand} 0%, #0f172a 100%)` }}>
+        <div className="mx-auto grid max-w-6xl items-center gap-10 px-4 py-20 sm:py-24 lg:grid-cols-2">
+          <div>
+            {area && <p className="mb-4 inline-block rounded-full bg-white/15 px-3 py-1 text-xs font-bold uppercase tracking-[0.2em]">{area}</p>}
+            <h1 className="text-4xl font-black leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl">{headline}</h1>
+            {tagline && <p className="mt-5 max-w-xl text-lg text-white/85">{tagline}</p>}
+            <div className="mt-8 flex flex-wrap items-center gap-3">
+              <Link href={estimateHref} className="inline-flex items-center gap-2 rounded-lg bg-white px-6 py-3.5 text-base font-bold shadow-lg" style={{ color: brand }}>
+                {ctaLabel} <ArrowRight className="h-5 w-5" />
+              </Link>
+              {hasPhotos && (
+                <a href="#work" className="inline-flex items-center gap-2 rounded-lg border border-white/40 px-6 py-3.5 text-base font-semibold hover:bg-white/10">See our work</a>
+              )}
+            </div>
+            {creds.length > 0 && <p className="mt-6 text-sm font-medium text-white/75">{creds.join("  ·  ")}</p>}
+          </div>
+          {hero && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={hero} alt="" className="aspect-[4/3] w-full rounded-2xl object-cover shadow-2xl ring-1 ring-white/20" />
+          )}
+        </div>
+      </section>
+    );
+  }
+
+  // MINIMAL — light, airy, editorial. Photo as a tall rounded card. Upscale remodel/design feel.
+  if (theme === "minimal") {
+    return (
+      <section id="top" className="border-b border-slate-100" style={{ background: `linear-gradient(180deg, ${brand}0a, #ffffff 65%)` }}>
+        <div className="mx-auto grid max-w-6xl items-center gap-12 px-4 py-20 sm:py-28 lg:grid-cols-2">
+          <div>
+            {area && <p className="mb-4 text-sm font-semibold uppercase tracking-[0.25em]" style={{ color: brand }}>{area}</p>}
+            <h1 className="text-4xl font-semibold leading-[1.1] tracking-tight text-slate-900 sm:text-5xl">{headline}</h1>
+            {tagline && <p className="mt-5 max-w-xl text-lg text-slate-600">{tagline}</p>}
+            <div className="mt-8 flex flex-wrap items-center gap-3">
+              <Link href={estimateHref} className="inline-flex items-center gap-2 rounded-full px-6 py-3.5 text-base font-semibold text-white shadow-sm" style={{ backgroundColor: brand }}>
+                {ctaLabel} <ArrowRight className="h-5 w-5" />
+              </Link>
+              {hasPhotos && (
+                <a href="#work" className="inline-flex items-center gap-2 rounded-full border border-slate-300 px-6 py-3.5 text-base font-semibold text-slate-700 hover:border-slate-400">See our work</a>
+              )}
+            </div>
+            {creds.length > 0 && <p className="mt-6 text-sm font-medium text-slate-500">{creds.join("  ·  ")}</p>}
+          </div>
+          {hero && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={hero} alt="" className="aspect-[4/3] w-full rounded-[2rem] object-cover shadow-xl lg:aspect-[4/5]" />
+          )}
+        </div>
+      </section>
+    );
+  }
+
+  // CLASSIC (default) — full-bleed photo hero with a dark overlay. The original.
+  return (
+    <section id="top" className="relative isolate overflow-hidden">
+      {hero && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={hero} alt="" aria-hidden className="absolute inset-0 -z-10 h-full w-full object-cover" />
+      )}
+      <div className="absolute inset-0 -z-10" style={{ background: "linear-gradient(180deg, rgba(2,6,23,.55), rgba(2,6,23,.72))" }} />
+      <div className="mx-auto max-w-6xl px-4 py-24 sm:py-32">
+        <div className="max-w-2xl">
+          {area && <p className="mb-3 text-sm font-semibold uppercase tracking-[0.2em] text-white/80">{area}</p>}
+          <h1 className="text-4xl font-extrabold leading-tight tracking-tight text-white drop-shadow sm:text-5xl">{headline}</h1>
+          {tagline && <p className="mt-4 max-w-xl text-lg text-slate-100">{tagline}</p>}
+          <div className="mt-8 flex flex-wrap items-center gap-3">
+            {cta}
+            {hasPhotos && (
+              <a href="#work" className="inline-flex items-center gap-2 rounded-lg border border-white/40 px-6 py-3.5 text-base font-semibold text-white hover:bg-white/10">See our work</a>
+            )}
+          </div>
+          {creds.length > 0 && <p className="mt-6 text-sm font-medium text-white/85">{creds.join("  ·  ")}</p>}
+        </div>
+      </div>
+    </section>
+  );
 }
 
 export function OrgSite({ org }: { org: PublicOrg }) {
@@ -90,36 +204,19 @@ export function OrgSite({ org }: { org: PublicOrg }) {
         </div>
       </header>
 
-      {/* Hero */}
-      <section id="top" className="relative isolate overflow-hidden">
-        {hero && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={hero} alt="" aria-hidden className="absolute inset-0 -z-10 h-full w-full object-cover" />
-        )}
-        <div className="absolute inset-0 -z-10" style={{ background: "linear-gradient(180deg, rgba(2,6,23,.55), rgba(2,6,23,.72))" }} />
-        <div className="mx-auto max-w-6xl px-4 py-24 sm:py-32">
-          <div className="max-w-2xl">
-            {area && <p className="mb-3 text-sm font-semibold uppercase tracking-[0.2em] text-white/80">{area}</p>}
-            <h1 className="text-4xl font-extrabold leading-tight tracking-tight text-white drop-shadow sm:text-5xl">
-              {s.splash_headline || `${org.name} — quality work, done right`}
-            </h1>
-            {s.splash_tagline && <p className="mt-4 max-w-xl text-lg text-slate-100">{s.splash_tagline}</p>}
-            <div className="mt-8 flex flex-wrap items-center gap-3">
-              <Link href={estimateHref} className="inline-flex items-center gap-2 rounded-lg px-6 py-3.5 text-base font-semibold text-white shadow-lg" style={{ backgroundColor: brand }}>
-                {ctaLabel} <ArrowRight className="h-5 w-5" />
-              </Link>
-              {photos.length > 0 && (
-                <a href="#work" className="inline-flex items-center gap-2 rounded-lg border border-white/40 px-6 py-3.5 text-base font-semibold text-white hover:bg-white/10">
-                  See our work
-                </a>
-              )}
-            </div>
-            {creds.length > 0 && (
-              <p className="mt-6 text-sm font-medium text-white/85">{creds.join("  ·  ")}</p>
-            )}
-          </div>
-        </div>
-      </section>
+      {/* Hero — presentation varies by settings.site_theme; the copy/CTA/data are identical. */}
+      <Hero
+        theme={s.site_theme}
+        headline={s.splash_headline || `${org.name} — quality work, done right`}
+        tagline={s.splash_tagline}
+        brand={brand}
+        hero={hero}
+        area={area}
+        estimateHref={estimateHref}
+        ctaLabel={ctaLabel}
+        hasPhotos={photos.length > 0}
+        creds={creds}
+      />
 
       {/* Trust band */}
       <section className="border-b border-slate-100 bg-slate-50">
