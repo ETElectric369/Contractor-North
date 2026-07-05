@@ -494,6 +494,10 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
           inputUncached += u?.input_tokens ?? 0;
           convo.push({ role: "assistant", content: final.content });
 
+          // web_search runs server-side and can pause a long turn (stop_reason "pause_turn").
+          // Re-invoke with the partial already pushed so the search can finish — WITHOUT adding a
+          // tool_result (there's no client tool to answer). Breaking here would drop the answer.
+          if ((final.stop_reason as string) === "pause_turn") continue;
           if (final.stop_reason !== "tool_use") break;
 
           const toolUses = final.content.filter(
