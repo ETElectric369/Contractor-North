@@ -1,17 +1,16 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
 
-// Vanity domains whose ROOT should serve a public page instead of the app homepage.
-// Each org can point its own domain at North; the root rewrites to that org's public
-// surface (an inquiry splash, or the deck estimate configurator). Env-overridable.
+// Vanity domains whose ROOT serves an org's Contractor-North-hosted homepage instead of the
+// app homepage. Each org points its own domain at North; the root rewrites to /site/<handle>.
+// Env-overridable so new orgs can be added without a code change once the editor UI exists.
 const SPLASH_DOMAIN = (process.env.SPLASH_DOMAIN || "etelectric369.com").toLowerCase();
-const SPLASH_ORG_ID =
-  process.env.SPLASH_ORG_ID || "60195593-2e18-4230-bc8e-7a32d36d038d";
+const SPLASH_HANDLE = process.env.SPLASH_HANDLE || "et-electric";
 const DECK_DOMAIN = (process.env.DECK_DOMAIN || "tahoedeck.com").toLowerCase();
 const DECK_HANDLE = process.env.DECK_HANDLE || "tahoe-deck";
 
 const VANITY_ROOTS: { domain: string; rewriteTo: string }[] = [
-  { domain: SPLASH_DOMAIN, rewriteTo: `/inquire/${SPLASH_ORG_ID}` },
+  { domain: SPLASH_DOMAIN, rewriteTo: `/site/${SPLASH_HANDLE}` },
   { domain: DECK_DOMAIN, rewriteTo: `/site/${DECK_HANDLE}` },
 ];
 

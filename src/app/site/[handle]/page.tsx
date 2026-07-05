@@ -45,7 +45,11 @@ export default async function SiteHome({ params }: { params: Promise<{ handle: s
   const creds = String(s.splash_credentials || "").split("\n").map((x) => x.trim()).filter(Boolean);
   const area = s.service_area || [org.city, org.state].filter(Boolean).join(", ");
   const ig = (s.social_instagram || "").replace(/^@/, "").trim();
-  const estimateHref = `/estimate/${handle}`;
+  // Primary CTA: orgs that price from a catalog get the instant configurator; everyone else
+  // (e.g. an electrician on the research method) routes to the branded inquiry form.
+  const hasConfigurator = s.estimating_mode === "catalog";
+  const estimateHref = hasConfigurator ? `/estimate/${handle}` : `/inquire/${org.id}`;
+  const ctaLabel = hasConfigurator ? "Get your free instant estimate" : "Request a free estimate";
   const telHref = org.phone ? `tel:${org.phone.replace(/[^0-9+]/g, "")}` : null;
 
   const jsonLd = {
@@ -74,8 +78,8 @@ export default async function SiteHome({ params }: { params: Promise<{ handle: s
             )}
           </a>
           <nav className="hidden items-center gap-6 text-sm font-medium text-slate-600 md:flex">
-            <a href="#work" className="hover:text-slate-900">Our work</a>
-            <a href="#services" className="hover:text-slate-900">Services</a>
+            {photos.length > 0 && <a href="#work" className="hover:text-slate-900">Our work</a>}
+            {services.length > 0 && <a href="#services" className="hover:text-slate-900">Services</a>}
             <a href="#contact" className="hover:text-slate-900">Contact</a>
           </nav>
           <div className="flex items-center gap-2">
@@ -107,11 +111,13 @@ export default async function SiteHome({ params }: { params: Promise<{ handle: s
             {s.splash_tagline && <p className="mt-4 max-w-xl text-lg text-slate-100">{s.splash_tagline}</p>}
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Link href={estimateHref} className="inline-flex items-center gap-2 rounded-lg px-6 py-3.5 text-base font-semibold text-white shadow-lg" style={{ backgroundColor: brand }}>
-                Get your free instant estimate <ArrowRight className="h-5 w-5" />
+                {ctaLabel} <ArrowRight className="h-5 w-5" />
               </Link>
-              <a href="#work" className="inline-flex items-center gap-2 rounded-lg border border-white/40 px-6 py-3.5 text-base font-semibold text-white hover:bg-white/10">
-                See our work
-              </a>
+              {photos.length > 0 && (
+                <a href="#work" className="inline-flex items-center gap-2 rounded-lg border border-white/40 px-6 py-3.5 text-base font-semibold text-white hover:bg-white/10">
+                  See our work
+                </a>
+              )}
             </div>
             {creds.length > 0 && (
               <p className="mt-6 text-sm font-medium text-white/85">{creds.join("  ·  ")}</p>
@@ -125,7 +131,7 @@ export default async function SiteHome({ params }: { params: Promise<{ handle: s
         <div className="mx-auto grid max-w-6xl grid-cols-2 gap-6 px-4 py-8 sm:grid-cols-4">
           {[
             { icon: ShieldCheck, label: org.license || "Licensed & insured" },
-            { icon: Zap, label: "Instant online estimates" },
+            { icon: Zap, label: hasConfigurator ? "Instant online estimates" : "Free estimates" },
             { icon: MapPin, label: area || "Serving your area" },
             { icon: Clock, label: "Free consultation" },
           ].map((f, i) => {
@@ -145,8 +151,8 @@ export default async function SiteHome({ params }: { params: Promise<{ handle: s
       {/* Services */}
       {services.length > 0 && (
         <section id="services" className="mx-auto max-w-6xl px-4 py-16">
-          <h2 className="text-3xl font-extrabold tracking-tight">What we build</h2>
-          <p className="mt-2 max-w-2xl text-slate-600">From a fresh custom deck to stairs, railings, and everything in between — built to last in the mountains.</p>
+          <h2 className="text-3xl font-extrabold tracking-tight">What we do</h2>
+          <p className="mt-2 max-w-2xl text-slate-600">Quality craftsmanship from the smallest fix to the biggest build — done right, on time.</p>
           <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {services.map((svc, i) => (
               <div key={i} className="flex items-start gap-3 rounded-2xl border border-slate-200 p-5">
@@ -170,12 +176,16 @@ export default async function SiteHome({ params }: { params: Promise<{ handle: s
       {/* Instant-estimate CTA */}
       <section className="px-4 py-20" style={{ background: `linear-gradient(160deg, ${brand}12, transparent 70%)` }}>
         <div className="mx-auto max-w-3xl text-center">
-          <h2 className="text-3xl font-extrabold tracking-tight sm:text-4xl">Know your number in two minutes</h2>
+          <h2 className="text-3xl font-extrabold tracking-tight sm:text-4xl">
+            {hasConfigurator ? "Know your number in two minutes" : "Ready to get started?"}
+          </h2>
           <p className="mx-auto mt-3 max-w-xl text-lg text-slate-600">
-            Answer a few quick questions and get a real ballpark instantly — no waiting days for a callback.
+            {hasConfigurator
+              ? "Answer a few quick questions and get a real ballpark instantly — no waiting days for a callback."
+              : "Tell us about your project and we'll get right back to you with a free estimate."}
           </p>
           <Link href={estimateHref} className="mt-8 inline-flex items-center gap-2 rounded-lg px-7 py-4 text-base font-semibold text-white shadow-lg" style={{ backgroundColor: brand }}>
-            Start your free estimate <ArrowRight className="h-5 w-5" />
+            {ctaLabel} <ArrowRight className="h-5 w-5" />
           </Link>
         </div>
       </section>
