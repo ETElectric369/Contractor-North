@@ -1,6 +1,8 @@
 import { laborCostForJob } from "@/lib/labor-billing";
 import { jobProgressFinancials } from "@/lib/job-financials";
 
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
 /**
  * Job profitability — the ONE allocation-aware computation shared by /analytics, the job hub, and
  * (now) Nort's get_job_financials / list_job_profitability tools, so a job can never show two
@@ -147,4 +149,41 @@ export async function listJobProfitability(
   if (opts.sort === "loss") rows = [...rows].sort((a, b) => a.profit - b.profit);
   const limit = Math.min(40, Math.max(1, opts.limit ?? 15));
   return rows.slice(0, limit);
+}
+
+// ── Profit by work type ──────────────────────────────────────────────────────
+export type ProfitByType = { type: string; jobs: number; revenue: number; cost: number; profit: number; marginPct: number | null };
+
+/** Pure — roll per-job profit rows up by work type. `typeOf` maps job id → type name. */
+export function computeProfitByType(rows: JobProfitRow[], typeOf: Map<string, string>): ProfitByType[] {
+  const groups = new Map<string, { revenue: number; cost: number; profit: number; jobs: number }>();
+  for (const r of rows) {
+    const type = typeOf.get(r.id) ?? "Uncategorized";
+    const g = groups.get(type) ?? { revenue: 0, cost: 0, profit: 0, jobs: 0 };
+    g.revenue += r.rev;
+    g.cost += r.cost;
+    g.profit += r.profit;
+    g.jobs += 1;
+    groups.set(type, g);
+  }
+  return [...groups.entries()]
+    .map(([type, g]) => ({
+      type,
+      jobs: g.jobs,
+      revenue: round2(g.revenue),
+      cost: round2(g.cost),
+      profit: round2(g.profit),
+      marginPct: g.revenue > 0 ? Math.round((g.profit / g.revenue) * 100) : null,
+    }))
+    .sort((a, b) => b.profit - a.profit);
+}
+
+/** Which KIND of work makes money — job profit grouped by the job's code-template ("Panel swap",
+ *  "Service call", "Deck build"…). Jobs with no template group under "Uncategorized". */
+export async function listProfitByType(supabase: any): Promise<ProfitByType[]> {
+  const rows = computeJobProfitRows(await fetchProfitInputs(supabase));
+  const { data: jobTypes } = await supabase.from("jobs").select("id, job_code_templates(name)");
+  const typeOf = new Map<string, string>();
+  for (const j of (jobTypes ?? []) as any[]) typeOf.set(j.id, j.job_code_templates?.name ?? "Uncategorized");
+  return computeProfitByType(rows, typeOf);
 }

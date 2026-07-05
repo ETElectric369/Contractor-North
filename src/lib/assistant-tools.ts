@@ -9,8 +9,9 @@ import { invoiceBalance } from "@/lib/invoice-math";
 import { aggregatePayrollEntries, payRateForEntry } from "@/lib/payroll-math";
 import { summarizeMileage } from "@/lib/mileage-math";
 import { searchPaidPrices } from "@/lib/pricing/learned-prices";
-import { getJobFinancials, listJobProfitability } from "@/lib/analytics/job-profitability";
-import { getArAging, getRevenueTrend, getQuoteStats } from "@/lib/analytics/money-metrics";
+import { getJobFinancials, listJobProfitability, listProfitByType } from "@/lib/analytics/job-profitability";
+import { getArAging, getRevenueTrend, getQuoteStats, getCustomerValue } from "@/lib/analytics/money-metrics";
+import { getHoursBreakdown } from "@/lib/analytics/time-breakdown";
 
 /**
  * Read-only data tools for the in-app assistant.
@@ -235,6 +236,24 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
     description:
       "Estimate close rate + pipeline. Returns quotes won vs lost, the win rate %, how many are awaiting an answer, and the total dollar value sitting in sent-but-undecided estimates (pipeline value). Use for 'what's my win rate?', 'how much is in open estimates?'.",
     input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "profit_by_type",
+    description:
+      "Which KIND of work makes money — job profit grouped by work type (the job's code-template, e.g. 'Panel swap', 'Service call', 'Deck build'). Returns per type: job count, revenue, cost, profit, and margin %. Use for 'what's my most profitable type of work?', 'am I underpricing panel swaps?'. Jobs with no assigned type group under 'Uncategorized'.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "customer_value",
+    description:
+      "Best customers by lifetime value. Returns each customer's total cash collected (net of voided invoices), how many jobs they've had, and when they last paid — sorted by collected, highest first. Use for 'who are my best repeat customers?', 'who's worth the most to me?', or spotting quiet regulars (check the last-paid date).",
+    input_schema: { type: "object", properties: { limit: { type: "integer", description: "Max customers (default 15, max 40)." } } },
+  },
+  {
+    name: "hours_breakdown",
+    description:
+      "Where the crew's time went — closed hours grouped by JOB and by COST CODE over a recent window. Returns total hours plus the top jobs and top codes by hours. Use for 'where is my time going?', 'how many hours on the Miller job this month?', 'how much rough-in vs service lately?'. Defaults to the last 30 days.",
+    input_schema: { type: "object", properties: { days: { type: "integer", description: "Look-back window in days (default 30, max 365)." } } },
   },
   {
     name: "list_tasks",
@@ -503,6 +522,9 @@ export const STAFF_ONLY_DATA_TOOLS = new Set<string>([
   "ar_aging", // who owes money, aged — outstanding A/R
   "revenue_trend", // cash collected by month — revenue
   "quote_win_rate", // close rate + pipeline value
+  "profit_by_type", // margin by work type (cost + profit)
+  "customer_value", // lifetime collected per customer (revenue)
+  "hours_breakdown", // crew hours by job + cost code (labor)
   "lookup_my_price", // what the company paid for materials (buy-side cost from their bills)
   "get_bill", // supplier bill + its cost breakdown
   "get_purchase_order", // vendor PO + costs (unit_cost is buy-side pricing)
@@ -1684,6 +1706,35 @@ export async function runDataTool(
           awaiting_answer: s.awaiting,
           win_rate_pct: s.winRatePct,
           pipeline_value_sent: s.pipelineValue,
+        });
+      }
+
+      case "profit_by_type": {
+        const rows = await listProfitByType(supabase);
+        return JSON.stringify({
+          count: rows.length,
+          note: "Profit grouped by work type — same per-job cost/revenue math as /analytics. Jobs with no type are 'Uncategorized'.",
+          types: rows,
+        });
+      }
+
+      case "customer_value": {
+        const rows = await getCustomerValue(supabase, clampLimit(input.limit, 15));
+        return JSON.stringify({
+          count: rows.length,
+          note: "Lifetime cash collected per customer (net of voided invoices) + job count, best first.",
+          customers: rows,
+        });
+      }
+
+      case "hours_breakdown": {
+        const days = input.days ? Math.min(365, Math.max(1, Math.round(Number(input.days)))) : 30;
+        const h = await getHoursBreakdown(supabase, days);
+        return JSON.stringify({
+          window_days: h.sinceDays,
+          total_hours: h.totalHours,
+          by_job: h.byJob.slice(0, 20),
+          by_code: h.byCode.slice(0, 20),
         });
       }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeJobProfitRows } from "@/lib/analytics/job-profitability";
+import { computeJobProfitRows, computeProfitByType, type JobProfitRow } from "@/lib/analytics/job-profitability";
 
 const job = (id: string, status = "in_progress") => ({ id, job_number: `J-${id}`, name: `Job ${id}`, status });
 // a closed entry fully allocated to `jobId` for `hours` at pay rate `rate`
@@ -105,5 +105,24 @@ describe("computeJobProfitRows — job profit SSOT (reconciles /analytics + job 
     });
     expect(rows[0].rev).toBe(0);
     expect(rows[0].profit).toBe(-50);
+  });
+});
+
+describe("computeProfitByType — margin by work type", () => {
+  const row = (id: string, rev: number, cost: number): JobProfitRow => ({ id, job_number: `J-${id}`, name: `Job ${id}`, status: "complete", rev, cost, profit: rev - cost });
+
+  it("groups jobs by type, sums money, computes margin %, sorts by profit", () => {
+    const rows = [row("a", 1000, 600), row("b", 500, 450), row("c", 2000, 1000)];
+    const typeOf = new Map([["a", "Panel swap"], ["b", "Panel swap"], ["c", "Service call"]]);
+    const out = computeProfitByType(rows, typeOf);
+    expect(out).toEqual([
+      { type: "Service call", jobs: 1, revenue: 2000, cost: 1000, profit: 1000, marginPct: 50 },
+      { type: "Panel swap", jobs: 2, revenue: 1500, cost: 1050, profit: 450, marginPct: 30 },
+    ]);
+  });
+
+  it("jobs with no type fall under 'Uncategorized'; null margin when zero revenue", () => {
+    const out = computeProfitByType([row("x", 0, 200)], new Map());
+    expect(out).toEqual([{ type: "Uncategorized", jobs: 1, revenue: 0, cost: 200, profit: -200, marginPct: null }]);
   });
 });

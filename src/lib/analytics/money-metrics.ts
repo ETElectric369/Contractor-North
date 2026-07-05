@@ -126,3 +126,45 @@ export async function getQuoteStats(supabase: any): Promise<QuoteStats> {
   const { data } = await supabase.from("quotes").select("status, total");
   return computeQuoteStats(data ?? []);
 }
+
+// ── Customer value (lifetime collected + jobs, best first) ────────────────────
+export type CustomerValue = { customer: string; collected: number; jobs: number; lastPaid: string | null };
+
+/** Pure — lifetime CASH collected per customer (payments net of void invoices) + job count. */
+export function computeCustomerValue(
+  payments: any[],
+  jobCountByCustomer: Map<string, number>,
+  nameById: Map<string, string>,
+): CustomerValue[] {
+  const byCust = new Map<string, { collected: number; lastPaid: string | null }>();
+  for (const p of payments ?? []) {
+    const inv = p.invoices;
+    const cid = inv?.customer_id;
+    if (!cid || inv?.status === "void") continue; // voided invoice → money reversed
+    const g = byCust.get(cid) ?? { collected: 0, lastPaid: null };
+    g.collected += Number(p.amount);
+    if (p.paid_at && (!g.lastPaid || p.paid_at > g.lastPaid)) g.lastPaid = p.paid_at;
+    byCust.set(cid, g);
+  }
+  return [...byCust.entries()]
+    .map(([cid, g]) => ({
+      customer: nameById.get(cid) ?? "Unknown",
+      collected: round2(g.collected),
+      jobs: jobCountByCustomer.get(cid) ?? 0,
+      lastPaid: g.lastPaid,
+    }))
+    .sort((a, b) => b.collected - a.collected);
+}
+
+export async function getCustomerValue(supabase: any, limit = 15): Promise<CustomerValue[]> {
+  const [{ data: payments }, { data: jobs }, { data: customers }] = await Promise.all([
+    supabase.from("payments").select("amount, paid_at, invoices(customer_id, status)"),
+    supabase.from("jobs").select("customer_id"),
+    supabase.from("customers").select("id, name"),
+  ]);
+  const jobCount = new Map<string, number>();
+  for (const j of (jobs ?? []) as any[]) if (j.customer_id) jobCount.set(j.customer_id, (jobCount.get(j.customer_id) ?? 0) + 1);
+  const nameById = new Map<string, string>();
+  for (const c of (customers ?? []) as any[]) nameById.set(c.id, c.name);
+  return computeCustomerValue(payments ?? [], jobCount, nameById).slice(0, Math.min(40, Math.max(1, limit)));
+}

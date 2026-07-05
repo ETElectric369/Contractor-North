@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeArAging, computeRevenueTrend, computeQuoteStats } from "@/lib/analytics/money-metrics";
+import { computeArAging, computeRevenueTrend, computeQuoteStats, computeCustomerValue } from "@/lib/analytics/money-metrics";
 
 describe("computeArAging — A/R buckets (reconciles /analytics)", () => {
   const NOW = Date.UTC(2026, 6, 5); // 2026-07-05
@@ -88,5 +88,21 @@ describe("computeQuoteStats — win rate & pipeline", () => {
     const s = computeQuoteStats([{ status: "sent", total: 100 }, { status: "draft" }]);
     expect(s.winRatePct).toBeNull();
     expect(s.pipelineValue).toBe(100);
+  });
+});
+
+describe("computeCustomerValue — lifetime collected per customer", () => {
+  it("sums collected (skips void), tracks last paid + job count, best first", () => {
+    const payments = [
+      { amount: 1000, paid_at: "2026-06-01", invoices: { customer_id: "c1", status: "paid" } },
+      { amount: 500, paid_at: "2026-07-01", invoices: { customer_id: "c1", status: "paid" } },
+      { amount: 2000, paid_at: "2026-05-01", invoices: { customer_id: "c2", status: "paid" } },
+      { amount: 999, paid_at: "2026-07-05", invoices: { customer_id: "c2", status: "void" } }, // reversed
+    ];
+    const out = computeCustomerValue(payments, new Map([["c1", 3], ["c2", 1]]), new Map([["c1", "Alice"], ["c2", "Bob"]]));
+    expect(out).toEqual([
+      { customer: "Bob", collected: 2000, jobs: 1, lastPaid: "2026-05-01" },
+      { customer: "Alice", collected: 1500, jobs: 3, lastPaid: "2026-07-01" },
+    ]);
   });
 });
