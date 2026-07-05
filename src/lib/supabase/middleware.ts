@@ -10,6 +10,7 @@ const PUBLIC_PATHS = [
   "/c/",
   "/portal/",
   "/inquire",
+  "/estimate/",
   "/pick/",
   "/api/places",
   "/api/pay",

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
-import { classifyLead, DEFAULT_SITE_INSPECTION_THRESHOLD, type LeadIntake } from "@/lib/lead-triage";
+import { DEFAULT_SITE_INSPECTION_THRESHOLD, type LeadIntake } from "@/lib/lead-triage";
+import { createTriagedInquiry } from "@/lib/inquiries/create-triaged-inquiry";
 
 export const runtime = "nodejs";
 
@@ -73,13 +74,11 @@ export async function POST(req: Request) {
 
   const threshold =
     Number((org as any).settings?.site_inspection_threshold) || DEFAULT_SITE_INSPECTION_THRESHOLD;
-  const triage = classifyLead(intake, { inspectionThreshold: threshold });
 
-  // org_id set explicitly — the set_org_id trigger has no auth context on a service call.
-  const { data: inq, error } = await supabase
-    .from("inquiries")
-    .insert({
-      org_id: (org as any).id,
+  let id: string;
+  let triage;
+  try {
+    ({ id, triage } = await createTriagedInquiry(supabase, (org as any).id, {
       name,
       company_name: customer.company_name ?? null,
       email: customer.email ?? null,
@@ -90,21 +89,18 @@ export async function POST(req: Request) {
       zip: customer.zip ?? null,
       type: customer.type ?? "residential",
       message: String(body.message ?? "").trim() || null,
-      source: String(body.source ?? "tahoe_deck").slice(0, 40),
-      project_type: project.type ?? null,
-      lead_bucket: triage.bucket,
-      estimate_total: total || null,
-      site_inspection_required: triage.siteInspectionRequired,
-      priority: triage.priority,
-      intake: { ...project, estimate, reason: triage.reason },
-    })
-    .select("id")
-    .single();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      source: String(body.source ?? "tahoe_deck"),
+      intake,
+      intakeJson: { ...project, estimate },
+      inspectionThreshold: threshold,
+    }));
+  } catch (e) {
+    return NextResponse.json({ error: e instanceof Error ? e.message : "Insert failed." }, { status: 500 });
+  }
 
   return NextResponse.json({
     ok: true,
-    inquiry_id: inq.id,
+    inquiry_id: id,
     bucket: triage.bucket,
     show_instant_price: triage.showInstantPrice,
     site_inspection_required: triage.siteInspectionRequired,

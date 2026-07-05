@@ -1,0 +1,180 @@
+/**
+ * Deck estimate engine — Tahoe Deck's bid model turned into a deterministic calculator, so
+ * a homeowner on the public configurator gets an instant itemized ballpark and the office
+ * gets a draft it can refine. It reads RATES from the org's own price list BY CODE (not
+ * hardcoded numbers), so when Chris edits his price list the estimate moves with it. Pure +
+ * testable: no I/O, no catalog fetch here — the caller passes a rate(code) lookup.
+ *
+ * This is Chris's business math; the assumptions it has to make (railing from the footprint,
+ * footing count from area, which height band applies) are returned in `assumptions` so the
+ * UI can show them and the office can adjust. Reusable shape for other trades later: a
+ * different trade ships its own answers + compute fn, everything downstream is shared.
+ */
+import type { EstimateLine } from "@/lib/lead-triage";
+
+export type DeckMaterial = "wood" | "composite";
+export type DeckShape = "rectangle" | "irregular";
+
+/** Every price-list code the deck estimate can reference. The public configurator exposes
+ *  ONLY these rates to the browser (not the whole catalog). Keep in sync with the adds below. */
+export const DECK_ESTIMATE_CODES = [
+  "ND-DECK", "DS8", "DS-COMP",
+  "DS5A", "DS5B", "DS5C",
+  "DS6C", "DS6D",
+  "ND-RAIL", "ND-STRAIL", "ND-STAIR3",
+  "DS1B", "DS-SLIDER", "DS9",
+  "DS3D", "DS3C",
+] as const;
+
+/** What the configurator collects. Measurements are the homeowner's best guess; the office
+ *  confirms on site. railingLf null → derive it from the footprint. */
+export type DeckAnswers = {
+  projectType: string; // matches lead-triage ProjectType
+  material: DeckMaterial;
+  lengthFt: number;
+  widthFt: number;
+  heightFt: number; // height at the tallest point
+  railingLf: number | null;
+  stairFlights: number; // sets of stairs (each > 3 steps)
+  stairRailingLf: number;
+  shape: DeckShape;
+  wrapAround: boolean;
+  manDoors: number;
+  sliderDoors: number;
+  trpa: boolean; // property in the Tahoe basin / TRPA jurisdiction
+};
+
+/** catalog code → unit price (the org's price list). Returns 0 for an unknown/absent code,
+ *  which makes the engine simply skip that line. */
+export type Rate = (code: string) => number;
+
+export type DeckEstimate = {
+  lines: EstimateLine[];
+  total: number;
+  area: number;
+  assumptions: string[];
+};
+
+const n = (x: unknown): number => {
+  const v = Number(x);
+  return Number.isFinite(v) && v > 0 ? v : 0;
+};
+const round2 = (v: number): number => Math.round(v * 100) / 100;
+
+/** Railing when the homeowner didn't give a number: an attached rectangle has railing on 3
+ *  sides (both lengths + the far width), a wrap-around on all 4. Rough, flagged, adjustable. */
+function derivedRailingLf(L: number, W: number, wrap: boolean): number {
+  if (L <= 0 || W <= 0) return 0;
+  return wrap ? 2 * L + 2 * W : 2 * L + W;
+}
+
+/**
+ * Build the code→customer-rate map from price-list rows. Applies markup so the rate is the
+ * SELL price (buy × (1 + markup%/100)) — matching every other customer-facing price in the
+ * app (quote builder, AI, convert→quote), so the estimate and any draft seeded from it agree.
+ * Dedupes deterministically: pass rows NEWEST-FIRST (order by updated_at desc) and the first
+ * row per code wins, so a duplicate active code can't make two callers pick different prices.
+ */
+export function buildDeckRates(
+  rows: { code: string | null; buy_price: number | null; markup_pct: number | null }[],
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const r of rows) {
+    const code = String(r?.code ?? "");
+    if (!code || code in out) continue; // first (newest) wins
+    out[code] = (Number(r?.buy_price) || 0) * (1 + (Number(r?.markup_pct) || 0) / 100);
+  }
+  return out;
+}
+
+export function computeDeckEstimate(a: DeckAnswers, rate: Rate): DeckEstimate {
+  const lines: EstimateLine[] = [];
+  const assumptions: string[] = [];
+  const L = n(a.lengthFt);
+  const W = n(a.widthFt);
+  const H = n(a.heightFt);
+  const area = round2(L * W);
+
+  const add = (code: string, description: string, quantity: number, unit: string) => {
+    const unit_price = rate(code);
+    if (quantity > 0 && unit_price > 0) {
+      lines.push({ description, quantity: round2(quantity), unit, unit_price });
+    }
+  };
+
+  const isResurface = a.projectType === "resurface";
+  const isStainOnly = a.projectType === "staining";
+  const isFullReplace = a.projectType === "full_replacement";
+  const buildsDeck =
+    a.projectType === "new_deck" || a.projectType === "extension" || isFullReplace || isResurface;
+
+  // Base surface. Resurface reuses the frame (cheaper board-replacement rate); a full build
+  // is the per-sq-ft deck rate. Railing/stairs/door lines below compose on top, so a
+  // "railing only" or "stairs only" job still prices correctly with no base line.
+  if (area > 0) {
+    if (isResurface) add("DS8", "Deck resurface — replace decking on the existing frame", area, "SQ FT");
+    else if (buildsDeck) add("ND-DECK", "Deck build", area, "SQ FT");
+  }
+
+  // Composite upgrade over wood.
+  if (a.material === "composite" && buildsDeck && area > 0) {
+    add("DS-COMP", "Composite decking upgrade", area, "SQ FT");
+  }
+
+  // Height band — one band by the tallest point (higher deck = more structure/access cost).
+  if (buildsDeck && area > 0) {
+    if (H > 30) add("DS5C", "Height supplement — over 30 ft", area, "SQ FT");
+    else if (H > 20) add("DS5B", "Height supplement — over 20 ft", area, "SQ FT");
+    else if (H > 10) add("DS5A", "Height supplement — over 10 ft", area, "SQ FT");
+  }
+
+  // Shape complexity.
+  if (buildsDeck && area > 0) {
+    if (a.shape === "irregular") add("DS6C", "Irregular shape", area, "SQ FT");
+    if (a.wrapAround) add("DS6D", "Wrap-around", area, "SQ FT");
+  }
+
+  // Railing: use the measured value; else derive from the footprint, but ONLY for a new
+  // build — a resurface keeps its existing railing, so don't invent one.
+  const measuredRail = a.railingLf != null && a.railingLf > 0;
+  const railingLf = measuredRail
+    ? n(a.railingLf)
+    : buildsDeck && !isResurface
+      ? derivedRailingLf(L, W, a.wrapAround)
+      : 0;
+  if (!measuredRail && railingLf > 0) {
+    assumptions.push(`Railing estimated at ${Math.round(railingLf)} LF from the footprint — confirmed on site.`);
+  }
+  add("ND-RAIL", "Deck railing", railingLf, "LF");
+
+  // Stairs.
+  add("ND-STAIR3", "Stairs (set)", n(a.stairFlights), "EA");
+  add("ND-STRAIL", "Stair railing", n(a.stairRailingLf), "LF");
+
+  // Door waterproofing where a deck meets the house.
+  add("DS1B", "Man-door waterproofing", n(a.manDoors), "EA");
+  add("DS-SLIDER", "Slider-door waterproofing", n(a.sliderDoors), "EA");
+
+  // Footings — a size-based heuristic; the real count comes from the layout on site.
+  if (buildsDeck && !isResurface && area > 0) {
+    const footings = Math.max(4, Math.ceil(area / 60));
+    assumptions.push(`Footings estimated at ${footings} (about 1 per 60 sq ft) — final count set on site.`);
+    add("DS9", "Concrete footings & piers", footings, "EA");
+  }
+
+  // Tear-out on a full replacement.
+  if (isFullReplace && area > 0) add("DS3D", "Demo & waste hauling", area, "SQ FT");
+
+  // Regional compliance.
+  if (a.trpa) add("DS3C", "TRPA compliance", 1, "EA");
+
+  if (isStainOnly) {
+    assumptions.push("Refinishing/staining jobs are priced after a quick look — we'll reach out.");
+  }
+  if (buildsDeck && area > 0) {
+    assumptions.push("Permitting, engineering, and excavation (if the site needs them) are added after review.");
+  }
+
+  const total = Math.round(lines.reduce((s, l) => s + l.quantity * l.unit_price, 0));
+  return { lines, total, area, assumptions };
+}

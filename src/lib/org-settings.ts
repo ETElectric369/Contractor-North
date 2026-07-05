@@ -85,6 +85,14 @@ export interface OrgSettings {
   splash_bg_url: string;
   splash_bullets: string; // one bullet per line
   splash_credentials: string; // e.g. "Licensed · Bonded · Insured · CA C-10 #…"
+
+  /** Public URL slug for this org's customer-facing estimate configurator at
+   *  /estimate/<handle> (e.g. "tahoe-deck"). Empty = the configurator is off for this org.
+   *  Lives in settings (not a column) so it resolves the same way lead_inbound_secret does. */
+  public_handle: string;
+  /** Job size (configurator/estimate total) at or above which a lead is routed to a human
+   *  site inspection and never shown an instant firm price. Mirrors lead-triage's default. */
+  site_inspection_threshold: number;
 }
 
 export const DEFAULT_SETTINGS: OrgSettings = {
@@ -132,6 +140,8 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   splash_bg_url: "",
   splash_bullets: "",
   splash_credentials: "",
+  public_handle: "",
+  site_inspection_threshold: 20000,
 };
 
 /** Merge stored settings over defaults so every key is always present. */
