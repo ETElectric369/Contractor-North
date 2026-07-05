@@ -9,6 +9,7 @@ import { invoiceBalance } from "@/lib/invoice-math";
 import { aggregatePayrollEntries, payRateForEntry } from "@/lib/payroll-math";
 import { summarizeMileage } from "@/lib/mileage-math";
 import { searchPaidPrices } from "@/lib/pricing/learned-prices";
+import { getJobFinancials, listJobProfitability } from "@/lib/analytics/job-profitability";
 
 /**
  * Read-only data tools for the in-app assistant.
@@ -191,6 +192,29 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
         limit: { type: "integer", description: "Max items (default 15, max 40)." },
       },
       required: ["search"],
+    },
+  },
+  {
+    name: "get_job_financials",
+    description:
+      "Is a specific job making money? Returns that job's PROFIT — revenue collected (cash paid, net of refunds) minus cost (labor at pay rate + materials) — PLUS budget burn: the quoted estimate, cost to date, remaining vs estimate, % of the estimate spent, and whether it's over budget. Reconciles to the penny with the job page and /analytics. Get the job's id first (list_jobs). CAVEAT to disclose: a cost entered as BOTH a purchase order AND a bill is counted twice (there's no link between them yet), so mention that if the cost looks inflated.",
+    input_schema: {
+      type: "object",
+      properties: { job_id: { type: "string", description: "The job's id (from list_jobs)." } },
+      required: ["job_id"],
+    },
+  },
+  {
+    name: "list_job_profitability",
+    description:
+      "Which jobs made or lost money, ranked. Returns each job's revenue collected (net refunds), cost (labor + materials), and profit. sort 'profit' = most profitable first (default); sort 'loss' = biggest loss first (use for 'which jobs am I losing money on'). Optional status filter: a specific job status, or 'active' for all in-progress work. Same cost/revenue math as the job page + /analytics. Disclose the PO+bill double-count caveat if a cost looks inflated.",
+    input_schema: {
+      type: "object",
+      properties: {
+        limit: { type: "integer", description: "Max jobs (default 15, max 40)." },
+        status: { type: "string", description: "Optional: a single job status (e.g. 'in_progress', 'complete') or 'active' for all in-progress work." },
+        sort: { type: "string", enum: ["profit", "loss"], description: "profit = best first (default); loss = worst first." },
+      },
     },
   },
   {
@@ -455,6 +479,8 @@ const VALID_TOOL_NAMES = new Set(DATA_TOOLS.map((t) => t.name));
 export const STAFF_ONLY_DATA_TOOLS = new Set<string>([
   "money_pipeline", // to-invoice / drafts / outstanding / overdue — the owner's money board
   "payroll_summary", // per-employee gross pay + hours
+  "get_job_financials", // one job's profit + budget burn (labor cost + margin)
+  "list_job_profitability", // jobs ranked by profit/loss (cost + margin)
   "lookup_my_price", // what the company paid for materials (buy-side cost from their bills)
   "get_bill", // supplier bill + its cost breakdown
   "get_purchase_order", // vendor PO + costs (unit_cost is buy-side pricing)
@@ -1570,6 +1596,41 @@ export async function runDataTool(
           count: prices.length,
           note: prices.length ? "Real prices this company has paid, from their own bills." : "No purchase history yet for that item — fall back to the price list or web_search.",
           items: prices,
+        });
+      }
+
+      case "get_job_financials": {
+        const jobId = String(input.job_id ?? "").trim();
+        if (!jobId) return JSON.stringify({ error: "Provide a job_id (use list_jobs to find it)." });
+        const f = await getJobFinancials(supabase, jobId);
+        if (!f) return JSON.stringify({ error: "Job not found." });
+        return JSON.stringify({
+          job_number: f.job_number,
+          name: f.name,
+          status: f.status,
+          revenue_collected: f.rev,
+          cost: f.cost,
+          profit: f.profit,
+          estimate: f.estimate,
+          work_to_date: f.workToDate,
+          invoiced: f.invoiced,
+          billing_type: f.billingType,
+          remaining_vs_estimate: f.remaining,
+          percent_of_estimate_spent: f.burnPct,
+          over_budget: f.overBudget,
+          note: "Revenue = cash collected net of refunds. Cost = labor (pay rate, split-aware) + materials. A cost entered as BOTH a PO and a bill is counted twice.",
+        });
+      }
+
+      case "list_job_profitability": {
+        const statusIn = String(input.status ?? "").trim();
+        const statuses = statusIn === "active" ? [...ACTIVE_JOB_STATUSES] : statusIn ? [statusIn] : undefined;
+        const sort = input.sort === "loss" ? "loss" : "profit";
+        const rows = await listJobProfitability(supabase, { limit: clampLimit(input.limit, 15), statuses, sort });
+        return JSON.stringify({
+          count: rows.length,
+          note: "Profit = revenue collected (net refunds) − cost (labor + materials). Same math as /analytics.",
+          jobs: rows.map((r) => ({ job_number: r.job_number, name: r.name, status: r.status, revenue: r.rev, cost: r.cost, profit: r.profit })),
         });
       }
 

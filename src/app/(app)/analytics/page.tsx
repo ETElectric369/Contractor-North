@@ -8,7 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatCurrency } from "@/lib/utils";
 import { invoiceBalance } from "@/lib/invoice-math";
-import { laborCostForJob } from "@/lib/labor-billing";
+import { computeJobProfitRows } from "@/lib/analytics/job-profitability";
 
 export const dynamic = "force-dynamic";
 
@@ -101,47 +101,17 @@ export default async function AnalyticsPage() {
   const winRate = decided > 0 ? (q.accepted / decided) * 100 : null;
 
   // ── Job profitability ─────────────────────────────────────────────────────
-  // Materials/bills cost by job (labor is added per-job below via the shared,
-  // allocation-aware laborCostForJob — so a split shift's pay is attributed the
-  // SAME way the job hub does it, instead of dumping 100% onto e.job_id).
-  const matCost = new Map<string, number>();
-  const addMat = (id: string | null, v: number) => {
-    if (!id) return;
-    matCost.set(id, (matCost.get(id) ?? 0) + v);
-  };
-  // KNOWN DOUBLE-COUNT (mirrored on the job hub): a cost entered as BOTH a purchase
-  // order AND a supplier bill is counted twice (PO total + bill amount) — there's no
-  // FK linking a bill to the PO it pays, so we can't dedupe yet. Recording one or the
-  // other (not both) keeps this honest. Fix is a po_id on bills.
-  for (const p of (pos ?? []) as any[]) addMat(p.job_id, Number(p.total));
-  for (const b of (bills ?? []) as any[]) addMat(b.job_id, Number(b.amount));
-
-  // Refunds per job — netted out of revenue exactly like the job hub does (revenue =
-  // collected − refunds), so the same job shows the same profit on both surfaces. A
-  // refund is keyed to a job through the invoice it reversed.
-  const refundByJob = new Map<string, number>();
-  for (const r of (jobRefunds ?? []) as any[]) {
-    const jid = r.invoices?.job_id;
-    if (jid) refundByJob.set(jid, (refundByJob.get(jid) ?? 0) + Number(r.amount ?? 0));
-  }
-
-  // Revenue per job = CASH COLLECTED (amount_paid on non-void invoices) net of refunds,
-  // not the sum of invoice totals — otherwise a progress invoice + the final double-count.
-  const revenueByJob = new Map<string, number>();
-  for (const i of (invoices ?? []) as any[]) {
-    if (i.job_id && i.status !== "void")
-      revenueByJob.set(i.job_id, (revenueByJob.get(i.job_id) ?? 0) + Number(i.amount_paid ?? 0));
-  }
-  const jobRows = ((jobs ?? []) as any[])
-    .map((j) => {
-      // Match the job hub: revenue = max(0, collected − refunds).
-      const rev = Math.max(0, (revenueByJob.get(j.id) ?? 0) - (refundByJob.get(j.id) ?? 0));
-      const c = laborCostForJob((entries ?? []) as any[], j.id).cost + (matCost.get(j.id) ?? 0);
-      return { ...j, rev, cost: c, profit: rev - c };
-    })
-    .filter((j) => j.rev > 0 || j.cost > 0)
-    .sort((a, b) => b.profit - a.profit)
-    .slice(0, 8);
+  // The ONE allocation-aware computation (revenue = collected − refunds; cost = split-aware
+  // labor + materials), now shared with the job hub AND Nort's get_job_financials /
+  // list_job_profitability tools so a job can't show two different profits anywhere.
+  const jobRows = computeJobProfitRows({
+    jobs: jobs ?? [],
+    invoices: invoices ?? [],
+    pos: pos ?? [],
+    bills: bills ?? [],
+    jobRefunds: jobRefunds ?? [],
+    entries: entries ?? [],
+  }).slice(0, 8);
 
   // ── Overhead (year to date, by category) ─────────────────────────────────
   const overhead = new Map<string, number>();
