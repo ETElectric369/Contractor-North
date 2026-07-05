@@ -586,6 +586,46 @@ export async function updateMemberRate(
   return { ok: true };
 }
 
+/** Set the org's public website handle (its address at /site/<handle>). Slugified, and checked
+ *  unique across ALL orgs via the service client — RLS would hide other orgs, so a plain query
+ *  could never catch a collision. Empty handle takes the public site down. */
+export async function setPublicHandle(
+  raw: string,
+): Promise<{ ok: boolean; error?: string; handle?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const orgId = await myOrgId(supabase);
+  if (!orgId) return { ok: false, error: "No organization." };
+
+  const handle = String(raw ?? "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  if (handle && !/^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$/.test(handle)) {
+    return { ok: false, error: "Use 2–40 letters, numbers, or hyphens." };
+  }
+  if (handle) {
+    const svc = createServiceClient();
+    const { data: taken } = await svc
+      .from("organizations")
+      .select("id")
+      .eq("settings->>public_handle", handle)
+      .neq("id", orgId)
+      .maybeSingle();
+    if (taken) return { ok: false, error: "That web address is already taken — try another." };
+  }
+
+  const { data: org } = await supabase.from("organizations").select("settings").eq("id", orgId).single();
+  const merged = { ...(org?.settings ?? {}), public_handle: handle };
+  const { error } = await supabase.from("organizations").update({ settings: merged }).eq("id", orgId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/settings");
+  revalidatePath("/", "layout");
+  return { ok: true, handle };
+}
+
 /** Merge a partial settings patch into organizations.settings (JSONB). */
 export async function updateOrgSettings(
   patch: Record<string, unknown>,

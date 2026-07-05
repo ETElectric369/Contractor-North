@@ -20,6 +20,8 @@ import { AutomationSettings } from "./automation-settings";
 import { TaxRatesManager } from "./tax-rates-manager";
 import { JobCodesManager } from "./job-codes-manager";
 import { SplashSettings } from "./splash-settings";
+import { WebsiteSettings } from "./website-settings";
+import { PortfolioManager } from "./portfolio-manager";
 import { AiStatus } from "./ai-status";
 import { QuotePlaybookForm } from "./quote-playbook-form";
 import { AvatarUpload } from "./avatar-upload";
@@ -171,6 +173,12 @@ export default async function SettingsPage({
           icon: Building2,
           content: (
             <div className="space-y-6">
+              <Section title="Your website">
+                <WebsiteSettings settings={settings} siteUrl={siteUrl} />
+              </Section>
+              <Section title="Portfolio photos">
+                <PortfolioManager orgId={(org as Organization).id} initial={settings.portfolio ?? []} />
+              </Section>
               <Section title="Company details"><OrgSettingsForm org={org as Organization} /></Section>
               <Section title="Company logo">
                 <LogoUpload orgId={(org as Organization).id} current={(org as Organization).logo_url} />
