@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { DEFAULT_SITE_INSPECTION_THRESHOLD, type LeadIntake } from "@/lib/lead-triage";
 import { createTriagedInquiry } from "@/lib/inquiries/create-triaged-inquiry";
+import { rateLimited, clientIp } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -25,6 +26,10 @@ export const runtime = "nodejs";
 export async function POST(req: Request) {
   const key = req.headers.get("x-inbound-key") ?? "";
   if (!key) return NextResponse.json({ error: "Missing x-inbound-key." }, { status: 401 });
+
+  if (await rateLimited(`inbound:${clientIp(req.headers)}`, 60, 60)) {
+    return NextResponse.json({ error: "Too many requests." }, { status: 429 });
+  }
 
   let supabase;
   try {

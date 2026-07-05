@@ -6,6 +6,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { createTriagedInquiry } from "@/lib/inquiries/create-triaged-inquiry";
 import type { LeadIntake } from "@/lib/lead-triage";
 import { computeDeckEstimate, buildDeckRates, DECK_ESTIMATE_CODES, type DeckAnswers } from "@/lib/estimate/deck";
+import { rateLimited, clientIp } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -14,23 +15,13 @@ export const runtime = "nodejs";
  * marketing site. Hard-sandboxed on purpose: it resolves ONE org by handle, all data access is
  * scoped to that org's id, the ONLY tools are (1) search that org's own price list and (2) capture
  * a lead for that org — no customer data, no other orgs, no writes beyond the intended lead. Cheap
- * model, bounded tool loop, input caps, and a best-effort per-instance throttle keep cost + abuse
- * down. The LLM runs the conversation; prices come from the org's real catalog, not the model.
+ * model, bounded tool loop, input caps, and a distributed (Postgres-backed) per-IP rate limit keep
+ * cost + abuse down. The LLM runs the conversation; prices come from the org's real catalog, not the model.
  */
 const MODEL = process.env.SITE_CHAT_MODEL || "claude-haiku-4-5-20251001";
 const MAX_ROUNDS = 4;
 const MAX_MESSAGES = 24;
 const MAX_LEN = 4000;
-
-// Best-effort per-instance throttle (proper distributed rate-limiting is a follow-up).
-const hits = new Map<string, { n: number; t: number }>();
-function throttled(ip: string): boolean {
-  const now = Date.now();
-  const rec = hits.get(ip);
-  if (!rec || now - rec.t > 60_000) { hits.set(ip, { n: 1, t: now }); return false; }
-  rec.n++;
-  return rec.n > 12; // ~12 messages/min per instance per IP
-}
 
 const TOOLS = [
   {
@@ -242,8 +233,9 @@ export async function POST(req: Request) {
   if (!handle || !rawMessages.length) return NextResponse.json({ error: "Bad request." }, { status: 400 });
   if (rawMessages.length > MAX_MESSAGES) return NextResponse.json({ error: "Let's start a fresh conversation." }, { status: 400 });
 
-  const ip = (req.headers.get("x-forwarded-for") || "").split(",")[0].trim() || "anon";
-  if (throttled(ip)) return NextResponse.json({ error: "One sec — try again in a moment." }, { status: 429 });
+  if (await rateLimited(`chat:${clientIp(req.headers)}`, 15, 60)) {
+    return NextResponse.json({ error: "One sec — try again in a moment." }, { status: 429 });
+  }
 
   const org = await getPublicOrgByHandle(handle);
   if (!org) return NextResponse.json({ error: "Not available." }, { status: 404 });

@@ -1,9 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { createServiceClient } from "@/lib/supabase/server";
 import { getOrgSettings } from "@/lib/org-settings";
 import { createTriagedInquiry } from "@/lib/inquiries/create-triaged-inquiry";
+import { rateLimited, clientIp } from "@/lib/rate-limit";
 
 export type ContactResult = { ok: boolean; error?: string };
 
@@ -23,6 +25,11 @@ export async function submitSiteContact(
   const phone = String(payload?.phone ?? "").trim();
   const email = String(payload?.email ?? "").trim();
   if (!phone && !email) return { ok: false, error: "Add a phone or email so we can reach you." };
+
+  const ip = clientIp(await headers());
+  if (await rateLimited(`contact:${ip}`, 10, 60)) {
+    return { ok: false, error: "Too many requests — please try again in a moment." };
+  }
 
   const supabase = createServiceClient();
   const { data: org } = await supabase.from("organizations").select("id, settings").eq("id", orgId).maybeSingle();
