@@ -17,9 +17,11 @@ import type { Profile } from "@/lib/types";
 export function Topbar({
   profile,
   lang,
+  branding,
 }: {
   profile: Profile | null;
   lang?: string;
+  branding?: { name: string | null; logo: string | null };
 }) {
   const router = useRouter();
   // Staff = owner/admin/office — the same rule the layout uses (it already
@@ -47,6 +49,15 @@ export function Topbar({
       >
         <ArrowLeft className="h-5 w-5" />
       </button>
+
+      {/* Org skin — the company's own logo (or name) top-left, so the app wears their brand.
+          Matters most on mobile, where the branded dock/sidebar isn't visible. */}
+      {branding?.logo ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={branding.logo} alt={branding.name ?? "Company"} className="ml-1 h-8 w-auto max-w-[160px] object-contain" />
+      ) : branding?.name ? (
+        <span className="ml-1 truncate text-base font-extrabold tracking-tight text-[rgb(var(--glass-ink))]">{branding.name}</span>
+      ) : null}
 
       <div className="flex-1" />
 
