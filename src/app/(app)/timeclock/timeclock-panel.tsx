@@ -185,6 +185,12 @@ export function TimeclockPanel({
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, [openEntry]);
+  // Time text (elapsed timer + local clock-in time) is derived from the client's clock/timezone,
+  // so it CANNOT match the server-rendered HTML — that mismatch was throwing React #418 on clocked-in
+  // techs, which bails hydration and breaks interactivity (the "back button doesn't work" report).
+  // Gate the timezone-local clock-in time until mounted; the ticking totals use suppressHydrationWarning.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   // Pre-seed the "jobs worked today" breakdown so the everyday case (one code all
   // day) is a single confirm. Segments already recorded by mid-shift switches seed
@@ -449,11 +455,11 @@ export function TimeclockPanel({
           </div>
 
           <div className="text-center">
-            <div className="text-5xl font-bold tabular-nums tracking-tight text-slate-900">
+            <div className="text-5xl font-bold tabular-nums tracking-tight text-slate-900" suppressHydrationWarning>
               {formatDuration(elapsed)}
             </div>
             <div className="mt-1 text-sm text-slate-400">
-              {t("tc_since")} {new Date(openEntry.clock_in).toLocaleTimeString()}
+              {t("tc_since")} <span suppressHydrationWarning>{mounted ? new Date(openEntry.clock_in).toLocaleTimeString() : ""}</span>
               {openEntry.gps_in ? " · 📍" : ""}
             </div>
           </div>
@@ -627,7 +633,7 @@ export function TimeclockPanel({
                 ))}
                 {/* Amber only when the TECH's edits don't add up — the untouched live
                     row tracks the shift, so it can't drift into a false warning. */}
-                <div className={`text-right text-xs ${allocsDirty && Math.abs(allocatedHours - elapsed) > 0.1 ? "text-amber-600" : "text-slate-500"}`}>
+                <div className={`text-right text-xs ${allocsDirty && Math.abs(allocatedHours - elapsed) > 0.1 ? "text-amber-600" : "text-slate-500"}`} suppressHydrationWarning>
                   {t("tc_allocated")}: {formatDuration(allocatedHours)} of {formatDuration(elapsed)} worked
                 </div>
               </div>

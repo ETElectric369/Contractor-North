@@ -25,11 +25,17 @@ export default async function CompliancePage() {
 
   // Imported documents live in the private "documents" bucket — sign view links server-side
   // (same rails as insurance certificates) so a filed license/permit doc is one tap away.
+  // Per-item try/catch: a storage hiccup or a stale/bad file path must NOT throw the whole
+  // Promise.all and white-screen the page (it just drops that one doc link).
   const items = await Promise.all(
     filtered.map(async (i) => {
       if (!i.file_url) return { ...i, signedUrl: null as string | null };
-      const { data } = await supabase.storage.from("documents").createSignedUrl(i.file_url, 3600);
-      return { ...i, signedUrl: data?.signedUrl ?? null };
+      try {
+        const { data } = await supabase.storage.from("documents").createSignedUrl(i.file_url, 3600);
+        return { ...i, signedUrl: data?.signedUrl ?? null };
+      } catch {
+        return { ...i, signedUrl: null as string | null };
+      }
     }),
   );
 
