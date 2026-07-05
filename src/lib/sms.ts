@@ -26,10 +26,12 @@ export function smsConfigured(): boolean {
 export async function sendSms(
   to: string | null | undefined,
   body: string,
+  fromOverride?: string | null,
 ): Promise<boolean> {
   if (!to) return false;
   const auth = twilioAuth();
-  const from = process.env.TWILIO_FROM_NUMBER;
+  // Per-org number (each org texts under its OWN registered brand) → else the platform default.
+  const from = (fromOverride && fromOverride.trim()) || process.env.TWILIO_FROM_NUMBER;
   if (!auth || !from) {
     console.log(`[sms] (Twilio not configured) would text ${to}: ${body}`);
     return false;

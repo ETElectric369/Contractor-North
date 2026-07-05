@@ -105,6 +105,13 @@ export interface OrgSettings {
    *  no scheme/www). Resolved by the by-domain route so the domain serves /site content without
    *  a code change. Empty = the org uses its free <handle>.contractornorth.com subdomain. */
   custom_domain: string;
+  /** Customer testimonials shown on the public site. Real quotes the org enters themselves —
+   *  never seeded/fabricated. Empty hides the section. */
+  reviews: { name: string; text: string; rating?: number }[];
+  /** This org's own Twilio "from" number (E.164, e.g. "+15305551234") for its outbound texts,
+   *  so each org sends under its OWN registered number/brand. Empty = fall back to the platform
+   *  default (TWILIO_FROM_NUMBER). Critical for multi-tenant A2P compliance. */
+  sms_from_number: string;
 }
 
 export const DEFAULT_SETTINGS: OrgSettings = {
@@ -158,6 +165,8 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   service_area: "",
   social_instagram: "",
   custom_domain: "",
+  reviews: [],
+  sms_from_number: "",
 };
 
 /** Merge stored settings over defaults so every key is always present. */

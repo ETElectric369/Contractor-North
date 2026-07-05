@@ -71,7 +71,7 @@ export async function GET(request: Request) {
         continue; // done for the day
       }
 
-      const sent = await sendSms(t.phone, message);
+      const sent = await sendSms(t.phone, message, (org.settings as any)?.sms_from_number);
       if (sent) reminded++;
     }
   }

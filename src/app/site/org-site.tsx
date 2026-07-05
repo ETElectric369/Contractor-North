@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Phone, Mail, MapPin, ArrowRight, Check, ShieldCheck, Clock, Zap, Instagram } from "lucide-react";
+import { Phone, Mail, MapPin, ArrowRight, Check, ShieldCheck, Clock, Zap, Instagram, Star } from "lucide-react";
 import { accentHex } from "@/lib/org-settings";
 import type { PublicOrg } from "@/lib/public-org";
 import { PortfolioGallery } from "../estimate/[handle]/portfolio-gallery";
@@ -35,6 +35,7 @@ export function OrgSite({ org }: { org: PublicOrg }) {
   const creds = String(s.splash_credentials || "").split("\n").map((x) => x.trim()).filter(Boolean);
   const area = s.service_area || [org.city, org.state].filter(Boolean).join(", ");
   const ig = (s.social_instagram || "").replace(/^@/, "").trim();
+  const reviews = (s.reviews ?? []).filter((r) => r && r.text && r.name);
   // Primary CTA: orgs that price from a catalog get the instant configurator; everyone else
   // (e.g. an electrician on the research method) routes to the branded inquiry form.
   const hasConfigurator = s.estimating_mode === "catalog";
@@ -70,6 +71,7 @@ export function OrgSite({ org }: { org: PublicOrg }) {
           <nav className="hidden items-center gap-6 text-sm font-medium text-slate-600 md:flex">
             {photos.length > 0 && <a href="#work" className="hover:text-slate-900">Our work</a>}
             {services.length > 0 && <a href="#services" className="hover:text-slate-900">Services</a>}
+            {reviews.length > 0 && <a href="#reviews" className="hover:text-slate-900">Reviews</a>}
             <a href="#contact" className="hover:text-slate-900">Contact</a>
           </nav>
           <div className="flex items-center gap-2">
@@ -161,6 +163,29 @@ export function OrgSite({ org }: { org: PublicOrg }) {
         <div id="work" className="border-t border-slate-100 bg-slate-50/60 pt-14">
           <PortfolioGallery photos={photos} brand={brand} />
         </div>
+      )}
+
+      {/* Reviews */}
+      {reviews.length > 0 && (
+        <section id="reviews" className="mx-auto max-w-6xl px-4 py-16">
+          <h2 className="text-3xl font-extrabold tracking-tight">What our customers say</h2>
+          <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {reviews.map((r, i) => {
+              const stars = Math.max(1, Math.min(5, Math.round(r.rating ?? 5)));
+              return (
+                <figure key={i} className="flex flex-col rounded-2xl border border-slate-200 p-6">
+                  <div className="mb-3 flex gap-0.5" aria-label={`${stars} out of 5 stars`}>
+                    {Array.from({ length: 5 }).map((_, j) => (
+                      <Star key={j} className="h-4 w-4" fill={j < stars ? brand : "none"} style={{ color: brand }} />
+                    ))}
+                  </div>
+                  <blockquote className="flex-1 text-slate-700">&ldquo;{r.text}&rdquo;</blockquote>
+                  <figcaption className="mt-4 text-sm font-semibold text-slate-900">— {r.name}</figcaption>
+                </figure>
+              );
+            })}
+          </div>
+        </section>
       )}
 
       {/* Instant-estimate CTA */}

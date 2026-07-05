@@ -47,6 +47,7 @@ export async function GET(request: Request) {
       const sent = await sendSms(
         t.phone,
         `Good morning ${t.full_name ?? ""}! You haven't clocked in yet. Open Contractor North to clock in.`,
+        (org.settings as any)?.sms_from_number,
       );
       if (sent) texted++;
     }

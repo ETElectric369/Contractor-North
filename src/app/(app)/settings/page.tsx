@@ -22,6 +22,7 @@ import { JobCodesManager } from "./job-codes-manager";
 import { SplashSettings } from "./splash-settings";
 import { WebsiteSettings } from "./website-settings";
 import { PortfolioManager } from "./portfolio-manager";
+import { ReviewsManager } from "./reviews-manager";
 import { AiStatus } from "./ai-status";
 import { QuotePlaybookForm } from "./quote-playbook-form";
 import { AvatarUpload } from "./avatar-upload";
@@ -179,6 +180,9 @@ export default async function SettingsPage({
               </Section>
               <Section title="Portfolio photos">
                 <PortfolioManager orgId={(org as Organization).id} initial={settings.portfolio ?? []} />
+              </Section>
+              <Section title="Reviews">
+                <ReviewsManager initial={settings.reviews ?? []} />
               </Section>
               <Section title="Company details"><OrgSettingsForm org={org as Organization} /></Section>
               <Section title="Company logo">

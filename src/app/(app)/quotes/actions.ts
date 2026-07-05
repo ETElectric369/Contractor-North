@@ -45,11 +45,11 @@ export async function textQuote(
     return { ok: false, error: "This customer has no phone number." };
 
   const label = ((quote as any).doc_type ?? "quote") === "estimate" ? "Estimate" : "Quote";
-  const { data: org } = await supabase.from("organizations").select("name").maybeSingle();
+  const { data: org } = await supabase.from("organizations").select("name, settings").maybeSingle();
   const link = publicQuoteLink((quote as any).public_token);
   const body = `${org?.name ?? "Your contractor"}: ${label} ${quote.quote_number} ($${Number(quote.total).toFixed(2)}). View: ${link}`;
 
-  const sent = await sendSms(customer.phone, body);
+  const sent = await sendSms(customer.phone, body, (org as any)?.settings?.sms_from_number);
   if (!sent)
     return { ok: false, error: "Text not sent — add your Twilio account to enable SMS." };
   // Mark as sent once texted (unless already accepted/declined) — mirrors emailQuote.

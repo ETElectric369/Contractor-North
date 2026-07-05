@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { Input, Label } from "@/components/ui/input";
 import type { OrgSettings } from "@/lib/org-settings";
 import { updateOrgSettings } from "./actions";
 
@@ -23,9 +24,20 @@ export function AutomationSettings({ settings }: { settings: OrgSettings }) {
   const [appts, setAppts] = useState(settings.remind_appointments);
   const [autoSend, setAutoSend] = useState(settings.auto_send_invoice_on_complete);
   const [copyOwner, setCopyOwner] = useState(settings.copy_owner_on_emails);
+  const [smsFrom, setSmsFrom] = useState(settings.sms_from_number ?? "");
   const [, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+
+  function saveSmsFrom() {
+    if (smsFrom.trim() === (settings.sms_from_number ?? "").trim()) return;
+    setErr(null);
+    start(async () => {
+      const res = await updateOrgSettings({ sms_from_number: smsFrom.trim() });
+      if (!res.ok) setErr(res.error ?? "Couldn't save your number.");
+      else { setSaved(true); setTimeout(() => setSaved(false), 1500); }
+    });
+  }
 
   // Save a toggle. On failure REVERT the optimistic flip + surface the error, so the switch
   // can never sit showing a state that didn't actually save (these gate real customer email).
@@ -63,6 +75,13 @@ export function AutomationSettings({ settings }: { settings: OrgSettings }) {
           </li>
         ))}
       </ul>
+      <div className="rounded-lg border border-slate-200 p-4">
+        <Label htmlFor="sms-from">Your text-message number</Label>
+        <Input id="sms-from" value={smsFrom} onChange={(e) => setSmsFrom(e.target.value)} onBlur={saveSmsFrom} placeholder="+15305551234" className="max-w-[220px]" inputMode="tel" />
+        <p className="mt-1 text-xs text-slate-400">
+          Register a number with Twilio under your business, then paste it here in +1 format. Your customer and crew texts send from this number, under your own brand. Leave blank to use the platform default.
+        </p>
+      </div>
       {err && <p className="text-sm text-red-600">{err}</p>}
       {saved && <p className="text-sm font-medium text-green-600">Saved</p>}
     </div>

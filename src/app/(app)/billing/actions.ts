@@ -88,12 +88,12 @@ export async function textInvoice(
   if (!customer?.phone)
     return { ok: false, error: "This customer has no phone number." };
 
-  const { data: org } = await supabase.from("organizations").select("name").maybeSingle();
+  const { data: org } = await supabase.from("organizations").select("name, settings").maybeSingle();
   const balance = invoiceBalance(invoice.total, invoice.amount_paid);
   const link = publicInvoiceLink((invoice as any).public_token);
   const body = `${org?.name ?? "Your contractor"}: Invoice ${invoice.invoice_number}, balance $${balance.toFixed(2)}. View/pay: ${link}`;
 
-  const sent = await sendSms(customer.phone, body);
+  const sent = await sendSms(customer.phone, body, (org as any)?.settings?.sms_from_number);
   if (!sent)
     return { ok: false, error: "Text not sent — add your Twilio account to enable SMS." };
   if (invoice.status === "draft") {
