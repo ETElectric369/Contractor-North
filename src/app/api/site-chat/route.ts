@@ -96,7 +96,9 @@ const clampNum = (x: unknown, lo: number, hi: number): number => {
   return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : 0;
 };
 
-function deckEstimate(input: unknown, deckRates: Record<string, number>): string {
+type DeckEstimateResult = ReturnType<typeof computeDeckEstimate>;
+
+function deckEstimate(input: unknown, deckRates: Record<string, number>): { summary: string; est: DeckEstimateResult } {
   const a = (input ?? {}) as Record<string, unknown>;
   const answers: DeckAnswers = {
     projectType: String(a.projectType ?? "new_deck"),
@@ -114,12 +116,13 @@ function deckEstimate(input: unknown, deckRates: Record<string, number>): string
     trpa: !!a.trpa,
   };
   const est = computeDeckEstimate(answers, (code) => deckRates[code] ?? 0);
-  return JSON.stringify({
+  const summary = JSON.stringify({
     total: est.total,
     area: est.area,
     lines: est.lines.map((l) => ({ item: l.description, qty: l.quantity, unit: l.unit, amount: Math.round(l.quantity * l.unit_price) })),
     assumptions: est.assumptions,
   });
+  return { summary, est };
 }
 
 function systemPrompt(org: PublicOrg, area: string, threshold: number, isDeck: boolean): string {
@@ -177,6 +180,7 @@ async function captureLead(
   supabase: ReturnType<typeof createServiceClient>,
   org: PublicOrg,
   input: unknown,
+  lastEstimate: DeckEstimateResult | null,
 ): Promise<string> {
   const raw = (input ?? {}) as Record<string, unknown>;
   const name = String(raw.name ?? "").trim().slice(0, 120);
@@ -185,7 +189,10 @@ async function captureLead(
   if (!name) return JSON.stringify({ ok: false, error: "Ask for their name first." });
   if (!phone && !email) return JSON.stringify({ ok: false, error: "Ask for a phone or email so they can be reached." });
   const summary = String(raw.project_summary ?? "").trim().slice(0, 500) || null;
-  const total = Number(raw.estimate_total) || 0;
+  // Prefer the deterministic deck total + line items (so the office can one-click convert the
+  // lead to a priced draft quote); fall back to whatever total the model passed.
+  const total = lastEstimate?.total || Number(raw.estimate_total) || 0;
+  const lines = lastEstimate?.lines ?? [];
   const intake: LeadIntake = {
     projectType: null,
     estimateTotal: total,
@@ -199,7 +206,11 @@ async function captureLead(
       message: summary,
       source: "site_chat",
       intake,
-      intakeJson: { source: "site_chat", project_summary: summary, estimate: total ? { total } : null },
+      intakeJson: {
+        source: "site_chat",
+        project_summary: summary,
+        estimate: total || lines.length ? { total, lines } : null,
+      },
       inspectionThreshold: org.settings.site_inspection_threshold,
     });
     return JSON.stringify({ ok: true });
@@ -263,6 +274,7 @@ export async function POST(req: Request) {
   const client = getAnthropic();
 
   let leadCaptured = false;
+  let lastEstimate: DeckEstimateResult | null = null;
   try {
     for (let round = 0; round < MAX_ROUNDS; round++) {
       const resp = await client.messages.create({ model: MODEL, max_tokens: 900, system, tools, messages: convo });
@@ -274,8 +286,8 @@ export async function POST(req: Request) {
         if (block.type !== "tool_use") continue;
         let out = "{}";
         if (block.name === "search_prices") out = await searchPrices(supabase, org.id, block.input);
-        else if (block.name === "deck_estimate") out = deckEstimate(block.input, deckRates);
-        else if (block.name === "capture_lead") { out = await captureLead(supabase, org, block.input); if (out.includes('"ok":true')) leadCaptured = true; }
+        else if (block.name === "deck_estimate") { const de = deckEstimate(block.input, deckRates); out = de.summary; lastEstimate = de.est; }
+        else if (block.name === "capture_lead") { out = await captureLead(supabase, org, block.input, lastEstimate); if (out.includes('"ok":true')) leadCaptured = true; }
         results.push({ type: "tool_result", tool_use_id: block.id, content: out });
       }
       convo.push({ role: "user", content: results });
