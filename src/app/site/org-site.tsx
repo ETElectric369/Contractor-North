@@ -4,6 +4,7 @@ import { Phone, Mail, MapPin, ArrowRight, Check, ShieldCheck, Clock, Zap, Instag
 import { accentHex } from "@/lib/org-settings";
 import type { PublicOrg } from "@/lib/public-org";
 import { PortfolioGallery } from "../estimate/[handle]/portfolio-gallery";
+import { ContactForm } from "./contact-form";
 
 /**
  * The org marketing homepage — one template, 100% data-driven from the org record + settings.
@@ -39,7 +40,8 @@ export function OrgSite({ org }: { org: PublicOrg }) {
   // Primary CTA: orgs that price from a catalog get the instant configurator; everyone else
   // (e.g. an electrician on the research method) routes to the branded inquiry form.
   const hasConfigurator = s.estimating_mode === "catalog";
-  const estimateHref = hasConfigurator ? `/estimate/${handle}` : `/inquire/${org.id}`;
+  // Catalog orgs → the instant configurator; everyone else → the on-page contact form.
+  const estimateHref = hasConfigurator ? `/estimate/${handle}` : "#contact-form";
   const ctaLabel = hasConfigurator ? "Get your free instant estimate" : "Request a free estimate";
   const telHref = org.phone ? `tel:${org.phone.replace(/[^0-9+]/g, "")}` : null;
 
@@ -203,6 +205,11 @@ export function OrgSite({ org }: { org: PublicOrg }) {
             {ctaLabel} <ArrowRight className="h-5 w-5" />
           </Link>
         </div>
+      </section>
+
+      {/* On-page contact / estimate-request form */}
+      <section id="contact-form" className="border-t border-slate-100 bg-slate-50 px-4 py-16">
+        <ContactForm orgId={org.id} brand={brand} heading={hasConfigurator ? "Prefer to just message us?" : "Request a free estimate"} />
       </section>
 
       {/* Footer / contact */}
