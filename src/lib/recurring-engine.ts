@@ -145,18 +145,24 @@ export async function generateDueTemplates(supabase: any, userId: string | null)
     .lte("next_date", today);
   let count = 0;
   for (const t of due ?? []) {
-    if (t.kind === "invoice") {
-      const ok = await runInvoiceTemplate(supabase, t, userId ?? t.created_by ?? null, today);
-      if (ok) count++;
-      continue;
-    }
-    let guard = 0;
-    let cur = { ...t };
-    while (cur.next_date <= today && guard++ < 24) {
-      const ok = await runTemplate(supabase, cur, userId ?? t.created_by ?? null);
-      if (!ok) break;
-      cur = { ...cur, next_date: advance(cur.next_date, cur.frequency) };
-      count++;
+    // Isolate each template: one malformed row (e.g. a bad next_date that makes new Date(...)
+    // throw) must NOT abort the whole run OR re-crash the cron every night. Name it, skip it.
+    try {
+      if (t.kind === "invoice") {
+        const ok = await runInvoiceTemplate(supabase, t, userId ?? t.created_by ?? null, today);
+        if (ok) count++;
+        continue;
+      }
+      let guard = 0;
+      let cur = { ...t };
+      while (cur.next_date <= today && guard++ < 24) {
+        const ok = await runTemplate(supabase, cur, userId ?? t.created_by ?? null);
+        if (!ok) break;
+        cur = { ...cur, next_date: advance(cur.next_date, cur.frequency) };
+        count++;
+      }
+    } catch (e) {
+      reportError("recurring-template-crash", e, { templateId: t?.id, kind: t?.kind });
     }
   }
   return count;
