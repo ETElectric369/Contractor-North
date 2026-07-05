@@ -101,6 +101,10 @@ export interface OrgSettings {
   service_area: string;
   /** Instagram handle (no @) for the public site footer. Empty = no Instagram link. */
   social_instagram: string;
+  /** A custom domain the org has pointed at North for its public site (e.g. "tahoedeck.com",
+   *  no scheme/www). Resolved by the by-domain route so the domain serves /site content without
+   *  a code change. Empty = the org uses its free <handle>.contractornorth.com subdomain. */
+  custom_domain: string;
 }
 
 export const DEFAULT_SETTINGS: OrgSettings = {
@@ -153,6 +157,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   portfolio: [],
   service_area: "",
   social_instagram: "",
+  custom_domain: "",
 };
 
 /** Merge stored settings over defaults so every key is always present. */

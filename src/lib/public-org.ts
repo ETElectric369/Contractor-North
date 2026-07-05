@@ -21,16 +21,10 @@ export type PublicOrg = {
  * parameterized. Returns null when the handle is unknown or the public site is switched off.
  * Wrapped in React cache() so a page + its generateMetadata share a single query per request.
  */
-export const getPublicOrgByHandle = cache(async (handle: string): Promise<PublicOrg | null> => {
-  const supabase = createServiceClient();
-  const { data } = await supabase
-    .from("organizations")
-    .select("id, name, phone, email, license, logo_url, city, state, settings")
-    .eq("settings->>public_handle", handle)
-    .maybeSingle();
+function toPublicOrg(data: unknown): PublicOrg | null {
   if (!data) return null;
   const settings = getOrgSettings((data as { settings?: unknown }).settings);
-  if (!settings.public_handle) return null;
+  if (!settings.public_handle) return null; // site switched off
   const o = data as Record<string, unknown>;
   return {
     id: o.id as string,
@@ -43,4 +37,24 @@ export const getPublicOrgByHandle = cache(async (handle: string): Promise<Public
     state: (o.state as string) ?? null,
     settings,
   };
+}
+
+const SELECT = "id, name, phone, email, license, logo_url, city, state, settings";
+
+export const getPublicOrgByHandle = cache(async (handle: string): Promise<PublicOrg | null> => {
+  const supabase = createServiceClient();
+  // .limit(1) so a stray duplicate can never make maybeSingle() throw and 404 a live site.
+  const { data } = await supabase.from("organizations").select(SELECT).eq("settings->>public_handle", handle).limit(1).maybeSingle();
+  return toPublicOrg(data);
+});
+
+/** Resolve an org by a custom domain it has pointed at us (settings.custom_domain). Host is
+ *  normalized (lowercased, port + a leading www. stripped) so www.example.com and example.com
+ *  both match a stored "example.com". Used by the by-domain public route. */
+export const getPublicOrgByDomain = cache(async (rawHost: string): Promise<PublicOrg | null> => {
+  const host = String(rawHost || "").toLowerCase().split(":")[0].replace(/^www\./, "").trim();
+  if (!host) return null;
+  const supabase = createServiceClient();
+  const { data } = await supabase.from("organizations").select(SELECT).eq("settings->>custom_domain", host).limit(1).maybeSingle();
+  return toPublicOrg(data);
 });

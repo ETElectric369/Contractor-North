@@ -626,7 +626,54 @@ export async function setPublicHandle(
   return { ok: true, handle };
 }
 
-/** Merge a partial settings patch into organizations.settings (JSONB). */
+/** Set the org's CUSTOM DOMAIN for its public site. Like setPublicHandle, this is a guarded
+ *  setter (NOT the generic passthrough) because it must be globally unique — otherwise one org
+ *  could claim another's domain and, via the by-domain resolver, knock their site offline. */
+export async function setCustomDomain(
+  raw: string,
+): Promise<{ ok: boolean; error?: string; domain?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const orgId = await myOrgId(supabase);
+  if (!orgId) return { ok: false, error: "No organization." };
+
+  const domain = String(raw ?? "")
+    .toLowerCase()
+    .trim()
+    .replace(/^https?:\/\//, "")
+    .replace(/^www\./, "")
+    .replace(/\/.*$/, "");
+  if (domain) {
+    if (domain.length > 253 || !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(domain)) {
+      return { ok: false, error: "Enter a valid domain like yourcompany.com." };
+    }
+    const svc = createServiceClient();
+    const { data: taken } = await svc
+      .from("organizations")
+      .select("id")
+      .eq("settings->>custom_domain", domain)
+      .neq("id", orgId)
+      .maybeSingle();
+    if (taken) return { ok: false, error: "That domain is already connected to another account." };
+  }
+
+  const { data: org } = await supabase.from("organizations").select("settings").eq("id", orgId).single();
+  const merged = { ...(org?.settings ?? {}), custom_domain: domain };
+  const { error } = await supabase.from("organizations").update({ settings: merged }).eq("id", orgId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/settings");
+  revalidatePath("/", "layout");
+  return { ok: true, domain };
+}
+
+/** Settings keys that must ONLY be set through their own validated/guarded actions (uniqueness,
+ *  secrets) — never via the generic passthrough, or a crafted patch could squat a domain/handle
+ *  or overwrite the inbound secret. */
+const PROTECTED_SETTINGS_KEYS = ["custom_domain", "public_handle", "lead_inbound_secret"];
+
+/** Merge a partial settings patch into organizations.settings (JSONB). Protected keys are
+ *  stripped — they have dedicated guarded setters. */
 export async function updateOrgSettings(
   patch: Record<string, unknown>,
 ): Promise<Result> {
@@ -634,12 +681,15 @@ export async function updateOrgSettings(
   const orgId = await myOrgId(supabase);
   if (!orgId) return { ok: false, error: "No organization." };
 
+  const safe = { ...patch };
+  for (const k of PROTECTED_SETTINGS_KEYS) delete safe[k];
+
   const { data: org } = await supabase
     .from("organizations")
     .select("settings")
     .eq("id", orgId)
     .single();
-  const merged = { ...(org?.settings ?? {}), ...patch };
+  const merged = { ...(org?.settings ?? {}), ...safe };
 
   const { error } = await supabase
     .from("organizations")

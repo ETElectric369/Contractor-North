@@ -96,6 +96,7 @@ export default async function SettingsPage({
   ]);
 
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "";
+  const sitesDomain = process.env.SITES_DOMAIN || "contractornorth.com";
   const settings = getOrgSettings((org as any)?.settings);
   const docCounters = await getDocCounters(); // null until migration 0088 is applied
 
@@ -174,7 +175,7 @@ export default async function SettingsPage({
           content: (
             <div className="space-y-6">
               <Section title="Your website">
-                <WebsiteSettings settings={settings} siteUrl={siteUrl} />
+                <WebsiteSettings settings={settings} siteUrl={siteUrl} sitesDomain={sitesDomain} />
               </Section>
               <Section title="Portfolio photos">
                 <PortfolioManager orgId={(org as Organization).id} initial={settings.portfolio ?? []} />
