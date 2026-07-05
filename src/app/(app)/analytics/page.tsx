@@ -7,12 +7,11 @@ import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatCurrency } from "@/lib/utils";
-import { invoiceBalance } from "@/lib/invoice-math";
 import { computeJobProfitRows } from "@/lib/analytics/job-profitability";
+import { computeArAging, computeRevenueTrend, computeQuoteStats } from "@/lib/analytics/money-metrics";
 
 export const dynamic = "force-dynamic";
 
-const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 const monthLabel = (k: string) =>
   // k is "YYYY-MM" — a wall month; render in UTC so it never slips to the prior month.
   new Date(`${k}-15T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", month: "short" });
@@ -50,55 +49,11 @@ export default async function AnalyticsPage() {
       supabase.from("customer_credits").select("amount, invoices(job_id)").eq("disposition", "refund"),
     ]);
 
-  // ── Revenue by month (collected payments, last 12 months) ────────────────
-  const months: string[] = [];
-  for (let i = 0; i < 12; i++) {
-    const d = new Date(yearAgo);
-    d.setMonth(d.getMonth() + i);
-    months.push(monthKey(d));
-  }
-  const revByMonth = new Map<string, number>(months.map((m) => [m, 0]));
-  for (const p of (payments ?? []) as any[]) {
-    // Voided invoice → money reversed (Erik's rule); don't count its payments.
-    if (p.invoices?.status === "void") continue;
-    const k = monthKey(new Date(p.paid_at));
-    if (revByMonth.has(k)) revByMonth.set(k, revByMonth.get(k)! + Number(p.amount));
-  }
-  const maxRev = Math.max(1, ...revByMonth.values());
-  // Net refunds out of the headline (money actually kept); the bars stay the
-  // gross cash-in trend.
-  const refunds12 = ((refunds ?? []) as any[]).reduce((s, r) => s + Number(r.amount ?? 0), 0);
-  const collected12 = [...revByMonth.values()].reduce((s, v) => s + v, 0) - refunds12;
-
-  // ── A/R aging ─────────────────────────────────────────────────────────────
-  const openInvoices = (invoices ?? []).filter((i: any) => !["paid", "void", "draft"].includes(i.status));
-  const now = Date.now();
-  const aging = { current: 0, d30: 0, d60: 0, d90: 0 };
-  for (const i of openInvoices as any[]) {
-    const bal = invoiceBalance(i.total, i.amount_paid);
-    if (bal <= 0) continue;
-    const ref = i.due_date ? new Date(i.due_date).getTime() : new Date(i.created_at).getTime();
-    const days = (now - ref) / 86400_000;
-    if (days <= 0) aging.current += bal;
-    else if (days <= 30) aging.d30 += bal;
-    else if (days <= 60) aging.d60 += bal;
-    else aging.d90 += bal;
-  }
-  const outstanding = aging.current + aging.d30 + aging.d60 + aging.d90;
-
-  // ── Quote win rate & pipeline ─────────────────────────────────────────────
-  const q = { accepted: 0, declined: 0, expired: 0, sent: 0, draft: 0, pipeline: 0 };
-  for (const x of (quotes ?? []) as any[]) {
-    if (x.status === "accepted") q.accepted++;
-    else if (x.status === "declined") q.declined++;
-    else if (x.status === "expired") q.expired++;
-    else if (x.status === "sent") {
-      q.sent++;
-      q.pipeline += Number(x.total);
-    } else q.draft++;
-  }
-  const decided = q.accepted + q.declined + q.expired;
-  const winRate = decided > 0 ? (q.accepted / decided) * 100 : null;
+  // ── Money metrics — the SAME computations Nort's revenue_trend / ar_aging / quote_win_rate
+  // tools call, so the dashboard and what Nort says can never diverge.
+  const trend = computeRevenueTrend(payments ?? [], refunds ?? [], new Date());
+  const ar = computeArAging((invoices ?? []) as any[], Date.now());
+  const qs = computeQuoteStats((quotes ?? []) as any[]);
 
   // ── Job profitability ─────────────────────────────────────────────────────
   // The ONE allocation-aware computation (revenue = collected − refunds; cost = split-aware
@@ -141,9 +96,9 @@ export default async function AnalyticsPage() {
       <PageHeader title="Analytics" description="How the business is actually doing — money in, money owed, win rate, job profit." />
 
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        {stat("Collected (12 mo)", formatCurrency(collected12), TrendingUp, "bg-green-50 text-green-600")}
-        {stat("Outstanding A/R", formatCurrency(outstanding), Receipt, "bg-red-50 text-red-600")}
-        {stat("Estimate win rate", winRate != null ? `${winRate.toFixed(0)}%` : "—", FileText, "bg-indigo-50 text-indigo-600")}
+        {stat("Collected (12 mo)", formatCurrency(trend.collected12), TrendingUp, "bg-green-50 text-green-600")}
+        {stat("Outstanding A/R", formatCurrency(ar.outstanding), Receipt, "bg-red-50 text-red-600")}
+        {stat("Estimate win rate", qs.winRatePct != null ? `${qs.winRatePct}%` : "—", FileText, "bg-indigo-50 text-indigo-600")}
         {stat("Overhead (all time)", formatCurrency(overheadTotal), Wallet, "bg-amber-50 text-amber-600")}
       </div>
 
@@ -153,19 +108,16 @@ export default async function AnalyticsPage() {
         </div>
         <CardContent className="py-5">
           <div className="flex h-40 items-end gap-1.5">
-            {months.map((m) => {
-              const v = revByMonth.get(m) ?? 0;
-              return (
-                <div key={m} className="flex flex-1 flex-col items-center gap-1" title={`${monthLabel(m)}: ${formatCurrency(v)}`}>
-                  <div className="text-[10px] text-slate-500">{v > 0 ? `$${Math.round(v / 1000)}k` : ""}</div>
-                  <div
-                    className="w-full rounded-t bg-brand/80"
-                    style={{ height: `${Math.max(2, (v / maxRev) * 100)}%` }}
-                  />
-                  <div className="text-[10px] text-slate-400">{monthLabel(m)}</div>
-                </div>
-              );
-            })}
+            {trend.series.map(({ month, collected: v }) => (
+              <div key={month} className="flex flex-1 flex-col items-center gap-1" title={`${monthLabel(month)}: ${formatCurrency(v)}`}>
+                <div className="text-[10px] text-slate-500">{v > 0 ? `$${Math.round(v / 1000)}k` : ""}</div>
+                <div
+                  className="w-full rounded-t bg-brand/80"
+                  style={{ height: `${Math.max(2, (v / trend.maxRev) * 100)}%` }}
+                />
+                <div className="text-[10px] text-slate-400">{monthLabel(month)}</div>
+              </div>
+            ))}
           </div>
         </CardContent>
       </Card>
@@ -177,21 +129,21 @@ export default async function AnalyticsPage() {
           </div>
           <CardContent className="space-y-2 py-5 text-sm">
             {[
-              ["Not yet due", aging.current, "bg-green-500"],
-              ["1–30 days late", aging.d30, "bg-amber-400"],
-              ["31–60 days late", aging.d60, "bg-orange-500"],
-              ["60+ days late", aging.d90, "bg-red-500"],
+              ["Not yet due", ar.buckets.current, "bg-green-500"],
+              ["1–30 days late", ar.buckets.d30, "bg-amber-400"],
+              ["31–60 days late", ar.buckets.d60, "bg-orange-500"],
+              ["60+ days late", ar.buckets.d90, "bg-red-500"],
             ].map(([label, v, tone]) => (
               <div key={label as string} className="flex items-center gap-3">
                 <span className="w-28 shrink-0 text-xs text-slate-500">{label as string}</span>
                 <div className="h-3 flex-1 overflow-hidden rounded bg-slate-100">
-                  <div className={`h-full ${tone as string}`} style={{ width: outstanding > 0 ? `${((v as number) / outstanding) * 100}%` : 0 }} />
+                  <div className={`h-full ${tone as string}`} style={{ width: ar.outstanding > 0 ? `${((v as number) / ar.outstanding) * 100}%` : 0 }} />
                 </div>
                 <span className="w-20 text-right font-medium text-slate-800">{formatCurrency(v as number)}</span>
               </div>
             ))}
             <p className="pt-2 text-xs text-slate-400">
-              {openInvoices.length} open invoice{openInvoices.length === 1 ? "" : "s"} · chase the red first
+              {ar.openCount} open invoice{ar.openCount === 1 ? "" : "s"} · chase the red first
             </p>
           </CardContent>
         </Card>
@@ -201,10 +153,10 @@ export default async function AnalyticsPage() {
             Estimates & pipeline
           </div>
           <CardContent className="space-y-2 py-5 text-sm">
-            <div className="flex justify-between"><span className="text-slate-500">Won</span><span className="font-medium text-green-600">{q.accepted}</span></div>
-            <div className="flex justify-between"><span className="text-slate-500">Lost / expired</span><span className="font-medium text-red-600">{q.declined + q.expired}</span></div>
-            <div className="flex justify-between"><span className="text-slate-500">Awaiting answer</span><span className="font-medium text-slate-800">{q.sent}</span></div>
-            <div className="flex justify-between border-t border-slate-100 pt-2"><span className="text-slate-500">Pipeline value (sent)</span><span className="font-semibold text-slate-900">{formatCurrency(q.pipeline)}</span></div>
+            <div className="flex justify-between"><span className="text-slate-500">Won</span><span className="font-medium text-green-600">{qs.won}</span></div>
+            <div className="flex justify-between"><span className="text-slate-500">Lost / expired</span><span className="font-medium text-red-600">{qs.lost}</span></div>
+            <div className="flex justify-between"><span className="text-slate-500">Awaiting answer</span><span className="font-medium text-slate-800">{qs.awaiting}</span></div>
+            <div className="flex justify-between border-t border-slate-100 pt-2"><span className="text-slate-500">Pipeline value (sent)</span><span className="font-semibold text-slate-900">{formatCurrency(qs.pipelineValue)}</span></div>
             {overhead.size > 0 && (
               <div className="border-t border-slate-100 pt-3">
                 <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Overhead by category</div>

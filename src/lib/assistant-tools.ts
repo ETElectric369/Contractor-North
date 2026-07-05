@@ -10,6 +10,7 @@ import { aggregatePayrollEntries, payRateForEntry } from "@/lib/payroll-math";
 import { summarizeMileage } from "@/lib/mileage-math";
 import { searchPaidPrices } from "@/lib/pricing/learned-prices";
 import { getJobFinancials, listJobProfitability } from "@/lib/analytics/job-profitability";
+import { getArAging, getRevenueTrend, getQuoteStats } from "@/lib/analytics/money-metrics";
 
 /**
  * Read-only data tools for the in-app assistant.
@@ -216,6 +217,24 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
         sort: { type: "string", enum: ["profit", "loss"], description: "profit = best first (default); loss = worst first." },
       },
     },
+  },
+  {
+    name: "ar_aging",
+    description:
+      "Who owes the company money, aged. Returns total outstanding A/R plus the four buckets — not yet due, 1-30, 31-60, and 60+ days late — and the most-overdue invoices (customer, invoice #, balance, days late), worst first. Use for 'who owes me?', 'how much is over 60 days?', 'who should I chase?'.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "revenue_trend",
+    description:
+      "How cash collected is trending. Returns money collected per month for the last 12 months, the total collected over that year (net of refunds), and the best/worst month. Use for 'how's revenue?', 'what did I collect this month vs last?', 'my best month?'.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "quote_win_rate",
+    description:
+      "Estimate close rate + pipeline. Returns quotes won vs lost, the win rate %, how many are awaiting an answer, and the total dollar value sitting in sent-but-undecided estimates (pipeline value). Use for 'what's my win rate?', 'how much is in open estimates?'.",
+    input_schema: { type: "object", properties: {} },
   },
   {
     name: "list_tasks",
@@ -481,6 +500,9 @@ export const STAFF_ONLY_DATA_TOOLS = new Set<string>([
   "payroll_summary", // per-employee gross pay + hours
   "get_job_financials", // one job's profit + budget burn (labor cost + margin)
   "list_job_profitability", // jobs ranked by profit/loss (cost + margin)
+  "ar_aging", // who owes money, aged — outstanding A/R
+  "revenue_trend", // cash collected by month — revenue
+  "quote_win_rate", // close rate + pipeline value
   "lookup_my_price", // what the company paid for materials (buy-side cost from their bills)
   "get_bill", // supplier bill + its cost breakdown
   "get_purchase_order", // vendor PO + costs (unit_cost is buy-side pricing)
@@ -1631,6 +1653,37 @@ export async function runDataTool(
           count: rows.length,
           note: "Profit = revenue collected (net refunds) − cost (labor + materials). Same math as /analytics.",
           jobs: rows.map((r) => ({ job_number: r.job_number, name: r.name, status: r.status, revenue: r.rev, cost: r.cost, profit: r.profit })),
+        });
+      }
+
+      case "ar_aging": {
+        const a = await getArAging(supabase);
+        return JSON.stringify({
+          outstanding: a.outstanding,
+          open_invoices: a.openCount,
+          buckets: { not_yet_due: a.buckets.current, days_1_30: a.buckets.d30, days_31_60: a.buckets.d60, days_60_plus: a.buckets.d90 },
+          most_overdue: a.invoices.slice(0, 20).map((r) => ({ invoice: r.invoice_number, customer: r.customer, balance: r.balance, days_late: r.daysLate })),
+        });
+      }
+
+      case "revenue_trend": {
+        const t = await getRevenueTrend(supabase);
+        return JSON.stringify({
+          collected_last_12mo: t.collected12,
+          by_month: t.series,
+          best_month: t.best,
+          worst_month: t.worst,
+        });
+      }
+
+      case "quote_win_rate": {
+        const s = await getQuoteStats(supabase);
+        return JSON.stringify({
+          won: s.won,
+          lost: s.lost,
+          awaiting_answer: s.awaiting,
+          win_rate_pct: s.winRatePct,
+          pipeline_value_sent: s.pipelineValue,
         });
       }
 
