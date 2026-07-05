@@ -96,6 +96,11 @@ export interface OrgSettings {
   /** Re-hosted project photos shown as the public portfolio/gallery (e.g. on the estimate
    *  configurator). `url` is a public storage URL owned by North — not a foreign CDN. */
   portfolio: { url: string; src?: string }[];
+  /** Human service-area label for the public site (e.g. "Truckee & North Tahoe"). Falls back
+   *  to the org's city/state. Keeps the homepage template org-agnostic. */
+  service_area: string;
+  /** Instagram handle (no @) for the public site footer. Empty = no Instagram link. */
+  social_instagram: string;
 }
 
 export const DEFAULT_SETTINGS: OrgSettings = {
@@ -146,6 +151,8 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   public_handle: "",
   site_inspection_threshold: 20000,
   portfolio: [],
+  service_area: "",
+  social_instagram: "",
 };
 
 /** Merge stored settings over defaults so every key is always present. */

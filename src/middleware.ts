@@ -12,7 +12,7 @@ const DECK_HANDLE = process.env.DECK_HANDLE || "tahoe-deck";
 
 const VANITY_ROOTS: { domain: string; rewriteTo: string }[] = [
   { domain: SPLASH_DOMAIN, rewriteTo: `/inquire/${SPLASH_ORG_ID}` },
-  { domain: DECK_DOMAIN, rewriteTo: `/estimate/${DECK_HANDLE}` },
+  { domain: DECK_DOMAIN, rewriteTo: `/site/${DECK_HANDLE}` },
 ];
 
 export async function middleware(request: NextRequest) {
