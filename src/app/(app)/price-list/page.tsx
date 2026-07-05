@@ -3,6 +3,7 @@ import { PageHeader } from "@/components/page-header";
 import { Tabs } from "@/components/tabs";
 import { PriceListManager } from "./price-list-manager";
 import { KitsManager } from "./kits-manager";
+import { PaidPrices } from "./paid-prices";
 
 export const dynamic = "force-dynamic";
 
@@ -42,6 +43,11 @@ export default async function PriceListPage() {
             label: "Kits",
             count: (kits ?? []).length,
             content: <KitsManager kits={(kits ?? []) as any} priceItems={priceItems as any} />,
+          },
+          {
+            id: "paid",
+            label: "What I've paid",
+            content: <PaidPrices />,
           },
         ]}
       />

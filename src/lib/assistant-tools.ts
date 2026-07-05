@@ -8,6 +8,7 @@ import { getMoneyPipeline } from "@/lib/billing-pipeline";
 import { invoiceBalance } from "@/lib/invoice-math";
 import { aggregatePayrollEntries, payRateForEntry } from "@/lib/payroll-math";
 import { summarizeMileage } from "@/lib/mileage-math";
+import { searchPaidPrices } from "@/lib/pricing/learned-prices";
 
 /**
  * Read-only data tools for the in-app assistant.
@@ -177,6 +178,19 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
         search: { type: "string", description: "Text to match against item description, part code, or category." },
         limit: { type: "integer", description: "Max rows (default 15, max 40)." },
       },
+    },
+  },
+  {
+    name: "lookup_my_price",
+    description:
+      "Look up what THIS company has ACTUALLY PAID for a material or part — learned live from the line items on the bills they've entered (their real net cost from their own suppliers). Returns the most recent price, the average, the low/high range, how many times they've bought it, and the last date/supplier. Use this FIRST when you need a material's cost: it's the company's true cost basis. Only fall back to the price list catalog or web_search when there's no purchase history for the item. Search by part description (e.g. '200a panel', 'romex 12-2', 'EV charger').",
+    input_schema: {
+      type: "object",
+      properties: {
+        search: { type: "string", description: "Text to match against the bill line-item description." },
+        limit: { type: "integer", description: "Max items (default 15, max 40)." },
+      },
+      required: ["search"],
     },
   },
   {
@@ -441,6 +455,7 @@ const VALID_TOOL_NAMES = new Set(DATA_TOOLS.map((t) => t.name));
 export const STAFF_ONLY_DATA_TOOLS = new Set<string>([
   "money_pipeline", // to-invoice / drafts / outstanding / overdue — the owner's money board
   "payroll_summary", // per-employee gross pay + hours
+  "lookup_my_price", // what the company paid for materials (buy-side cost from their bills)
   "get_bill", // supplier bill + its cost breakdown
   "get_purchase_order", // vendor PO + costs (unit_cost is buy-side pricing)
   "list_kits", // saved quote-bundle pricing
@@ -1546,6 +1561,15 @@ export async function runDataTool(
             sell_price: money(Number(r.buy_price) * (1 + Number(r.markup_pct) / 100)),
             supplier: r.supplier,
           })),
+        });
+      }
+
+      case "lookup_my_price": {
+        const prices = await searchPaidPrices(supabase, String(input.search ?? ""), clampLimit(input.limit, 15));
+        return JSON.stringify({
+          count: prices.length,
+          note: prices.length ? "Real prices this company has paid, from their own bills." : "No purchase history yet for that item — fall back to the price list or web_search.",
+          items: prices,
         });
       }
 

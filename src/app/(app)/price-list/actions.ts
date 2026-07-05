@@ -3,8 +3,18 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
+import { searchPaidPrices, type LearnedPrice } from "@/lib/pricing/learned-prices";
 
 export type Result = { ok: boolean; error?: string; imported?: number };
+
+/** "What I've paid" — real material costs learned from this org's own bills. Staff-only (cost data),
+ *  RLS-scoped to the org via the authed client. Returns [] when there's no purchase history. */
+export async function searchMyPrices(query: string): Promise<{ ok: boolean; items: LearnedPrice[]; error?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, items: [], error: ctx.error };
+  const items = await searchPaidPrices(ctx.supabase, String(query ?? ""), 40);
+  return { ok: true, items };
+}
 
 export interface PriceItemInput {
   code?: string | null;
