@@ -22,3 +22,15 @@ export function parseCSV(text: string): string[][] {
   if (cur.length || row.length) { row.push(cur); rows.push(row); }
   return rows.filter((r) => r.some((x) => x.trim() !== ""));
 }
+
+/** Parse a CSV to objects keyed by its (lowercased, trimmed) header row; values trimmed. */
+export function csvToObjects(text: string): Record<string, string>[] {
+  const rows = parseCSV(text);
+  if (rows.length < 2) return [];
+  const headers = rows[0].map((h) => h.trim().toLowerCase());
+  return rows.slice(1).map((r) => {
+    const o: Record<string, string> = {};
+    headers.forEach((h, i) => { o[h] = (r[i] ?? "").trim(); });
+    return o;
+  });
+}

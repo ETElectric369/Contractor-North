@@ -10,6 +10,7 @@ import { Card } from "@/components/ui/card";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { formatCurrency } from "@/lib/utils";
 import { createKit, updateKit, deleteKit, addKitItem, updateKitItem, deleteKitItem } from "./kit-actions";
+import { ImportKitsButton } from "./import-kits-button";
 
 interface KitItem { id: string; description: string; quantity: number; unit: string; unit_price: number; }
 interface Kit { id: string; name: string; category: string | null; kit_items: KitItem[]; }
@@ -172,6 +173,10 @@ export function KitsManager({ kits, priceItems }: { kits: Kit[]; priceItems: Pri
   return (
     <div className="space-y-4">
       <Card className="p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <span className="text-sm font-medium text-slate-500">Build a kit by hand, or import a spreadsheet of presets.</span>
+          <ImportKitsButton />
+        </div>
         <div className="flex items-end gap-2">
           <div className="flex-1"><Label htmlFor="k-name">New kit name</Label><Input id="k-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. 200A panel upgrade" /></div>
           <div className="w-40"><Label htmlFor="k-cat">Category</Label><Input id="k-cat" value={category} onChange={(e) => setCategory(e.target.value)} /></div>
