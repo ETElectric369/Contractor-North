@@ -232,3 +232,23 @@ export function accentHex(glassTintHex?: string | null): string {
   const d = (c: number) => Math.round(c * 0.62).toString(16).padStart(2, "0");
   return `#${d(r)}${d(g)}${d(b)}`;
 }
+
+/**
+ * An org's OWN canonical public base URL for customer-facing links (invoice/quote emails, portal).
+ * Per-tenant + resolved at send time, so links follow the domain the org has configured with ZERO
+ * build-time env to update — the moment their custom domain goes live, their emails point at it:
+ *   1. their custom domain (etelectric369.com) if set, else
+ *   2. their free {handle}.{SITES_DOMAIN} subdomain, else
+ *   3. a platform fallback (NEXT_PUBLIC_SITE_URL, then the Vercel URL) for an org with neither.
+ * No trailing slash. (App routes like /i/<token> resolve on the org's custom domain too.)
+ */
+export function orgPublicBaseUrl(settings: OrgSettings): string {
+  const domain = (settings.custom_domain || "").trim().replace(/^https?:\/\//, "").replace(/\/+$/, "");
+  if (domain) return `https://${domain}`;
+  const handle = (settings.public_handle || "").trim();
+  if (handle) {
+    const sitesDomain = (process.env.SITES_DOMAIN || "contractornorth.com").trim();
+    return `https://${handle}.${sitesDomain}`;
+  }
+  return (process.env.NEXT_PUBLIC_SITE_URL || "https://contractor-north.vercel.app").replace(/\/+$/, "");
+}

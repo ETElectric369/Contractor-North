@@ -1,6 +1,6 @@
 import "server-only";
 import { sendEmail, renderInvoiceNoticeEmail, ownerBcc } from "@/lib/email";
-import { getOrgSettings, accentHex } from "@/lib/org-settings";
+import { getOrgSettings, accentHex, orgPublicBaseUrl } from "@/lib/org-settings";
 import { companyFromOrg } from "@/components/doc-letterhead";
 import { companyBlock } from "@/lib/company-lines";
 import { invoiceBalance } from "@/lib/invoice-math";
@@ -35,7 +35,7 @@ export async function deliverInvoiceEmail(
   // Never email an empty invoice (a blank $0 mis-send) — protects every caller.
   if (!items || items.length === 0) return { ok: false, error: "This invoice has no line items to send." };
 
-  const site = process.env.NEXT_PUBLIC_SITE_URL || "https://contractor-north.vercel.app";
+  const site = orgPublicBaseUrl(getOrgSettings((org as any)?.settings));
   const link = `${site}/i/${(invoice as any).public_token}`;
   const portalLink = customer.portal_token ? `${site}/portal/${customer.portal_token}` : undefined;
   const balance = invoiceBalance(invoice.total, invoice.amount_paid);

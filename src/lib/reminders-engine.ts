@@ -3,7 +3,7 @@ import { sendEmail, renderReminderEmail, money } from "@/lib/email";
 import { invoiceBalance } from "@/lib/invoice-math";
 import { todayStrInTz } from "@/lib/tz";
 import { reportError } from "@/lib/observe";
-import { getOrgSettings, accentHex } from "@/lib/org-settings";
+import { getOrgSettings, accentHex, orgPublicBaseUrl } from "@/lib/org-settings";
 import { reminderSuppressed } from "@/lib/automations-math";
 
 /** The opt-in customer-reminder engine (run by the daily automations cron). For each
@@ -17,7 +17,6 @@ type Counts = { invoice_due: number; quote_followup: number; appointment: number
 const DAY = 86_400_000;
 
 export async function sendDueReminders(supabase: any): Promise<Counts> {
-  const site = process.env.NEXT_PUBLIC_SITE_URL || "";
   const now = Date.now();
   const counts: Counts = { invoice_due: 0, quote_followup: 0, appointment: 0, skipped_no_email: 0 };
 
@@ -36,6 +35,9 @@ export async function sendDueReminders(supabase: any): Promise<Counts> {
       phone: org.phone,
       email: org.email,
     };
+    // Links land on THIS org's own domain (custom domain → their subdomain → fallback), so a
+    // customer's invoice/quote button points at the brand they hired, not a generic app URL.
+    const site = orgPublicBaseUrl(getOrgSettings(org.settings));
 
     // Has a reminder of (kind, entity) already gone out within `withinDays`, or hit `cap`?
     // Fail CLOSED: if the dedup read errors, suppress — never risk re-spamming a customer.
