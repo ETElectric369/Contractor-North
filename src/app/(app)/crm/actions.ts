@@ -7,8 +7,22 @@ import { formatPhone, formatState, formatZip, titleCase } from "@/lib/utils";
 import { requireStaff } from "@/lib/staff-guard";
 import { sendEmail, renderReminderEmail, ownerBcc } from "@/lib/email";
 import { getOrgSettings, accentHex } from "@/lib/org-settings";
+import { findDuplicateGroups, type DupCustomer, type DupGroup } from "@/lib/crm/duplicates";
 
 export type ActionResult = { ok: boolean; error?: string; id?: string };
+
+/** Scan the whole contact book for LIKELY duplicates (shared phone / email / name), grouped so the
+ *  office can review and fold each group into one record via the existing mergeCustomers. Read-only
+ *  + staff-gated + RLS-scoped; it only SUGGESTS — nothing merges until the user confirms. */
+export async function findDuplicateContacts(): Promise<{ ok: boolean; error?: string; groups?: DupGroup[] }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { data } = await ctx.supabase
+    .from("customers")
+    .select("id, name, company_name, email, phone, type, status, created_at")
+    .order("created_at", { ascending: true });
+  return { ok: true, groups: findDuplicateGroups((data ?? []) as DupCustomer[]) };
+}
 
 /** Email the customer their passwordless portal link (invoices, contracts, quotes,
  *  project status). The link is their unguessable portal_token — bookmark, no login. */

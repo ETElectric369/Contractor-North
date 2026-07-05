@@ -7,6 +7,7 @@ import { DataTable } from "@/components/ui/data-table";
 import { Input } from "@/components/ui/input";
 import { NewCustomerButton } from "./new-customer-button";
 import { ImportCustomersButton } from "./import-customers-button";
+import { DuplicatesButton } from "./duplicates-button";
 import { sanitizeSearch } from "@/lib/utils";
 import type { Customer } from "@/lib/types";
 
@@ -43,6 +44,7 @@ export default async function CrmPage({
           {/* Bulk import (CSV/vCard) — the deliberate, infrequent SEEK door for the whole
               customer book, moved here from Settings > Company (import belongs to Contacts). */}
           <ImportCustomersButton csv label="Import" />
+          <DuplicatesButton />
         </div>
       </PageHeader>
 
