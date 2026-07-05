@@ -93,6 +93,9 @@ export interface OrgSettings {
   /** Job size (configurator/estimate total) at or above which a lead is routed to a human
    *  site inspection and never shown an instant firm price. Mirrors lead-triage's default. */
   site_inspection_threshold: number;
+  /** Re-hosted project photos shown as the public portfolio/gallery (e.g. on the estimate
+   *  configurator). `url` is a public storage URL owned by North — not a foreign CDN. */
+  portfolio: { url: string; src?: string }[];
 }
 
 export const DEFAULT_SETTINGS: OrgSettings = {
@@ -142,6 +145,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   splash_credentials: "",
   public_handle: "",
   site_inspection_threshold: 20000,
+  portfolio: [],
 };
 
 /** Merge stored settings over defaults so every key is always present. */

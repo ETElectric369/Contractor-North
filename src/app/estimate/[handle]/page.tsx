@@ -3,6 +3,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { accentHex, getOrgSettings } from "@/lib/org-settings";
 import { DECK_ESTIMATE_CODES, buildDeckRates } from "@/lib/estimate/deck";
 import { Configurator } from "./configurator";
+import { PortfolioGallery } from "./portfolio-gallery";
 
 export const dynamic = "force-dynamic";
 
@@ -37,15 +38,19 @@ export default async function EstimatePage({ params }: { params: Promise<{ handl
   const rates = buildDeckRates((catalog ?? []) as { code: string | null; buy_price: number | null; markup_pct: number | null }[]);
 
   const orgName = (org as { name: string }).name;
+  const photos = (settings.portfolio ?? []).map((p) => p.url).filter(Boolean);
   return (
-    <Configurator
-      handle={handle}
-      orgName={orgName}
-      brand={brand}
-      rates={rates}
-      threshold={settings.site_inspection_threshold}
-      headline={settings.splash_headline || `${orgName} — Deck Estimate`}
-      tagline={settings.splash_tagline || "Answer a few quick questions for an instant ballpark."}
-    />
+    <>
+      <Configurator
+        handle={handle}
+        orgName={orgName}
+        brand={brand}
+        rates={rates}
+        threshold={settings.site_inspection_threshold}
+        headline={settings.splash_headline || `${orgName} — Deck Estimate`}
+        tagline={settings.splash_tagline || "Answer a few quick questions for an instant ballpark."}
+      />
+      <PortfolioGallery photos={photos} brand={brand} />
+    </>
   );
 }
