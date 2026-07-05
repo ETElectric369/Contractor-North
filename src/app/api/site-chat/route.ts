@@ -93,6 +93,22 @@ const clampNum = (x: unknown, lo: number, hi: number): number => {
   return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : 0;
 };
 
+// A visitor's uploaded photos arrive as URLs (minted by /api/site-chat/upload). Only URLs from
+// OUR public lead-uploads bucket may be handed to the model — an arbitrary attacker-supplied URL
+// would turn the model's image fetch into an SSRF / abuse vector. Validate the exact prefix + cap.
+const MAX_IMAGES = 3;
+const LEAD_UPLOAD_PREFIX = `${process.env.NEXT_PUBLIC_SUPABASE_URL ?? ""}/storage/v1/object/public/lead-uploads/`;
+function validImageUrls(input: unknown): string[] {
+  if (!Array.isArray(input) || !LEAD_UPLOAD_PREFIX.startsWith("https://")) return [];
+  const out: string[] = [];
+  for (const u of input) {
+    const url = typeof u === "string" ? u.trim() : "";
+    if (url.startsWith(LEAD_UPLOAD_PREFIX) && url.length < 500 && !out.includes(url)) out.push(url);
+    if (out.length >= MAX_IMAGES) break;
+  }
+  return out;
+}
+
 type DeckEstimateResult = ReturnType<typeof computeDeckEstimate>;
 
 function deckEstimate(input: unknown, deckRates: Record<string, number>): { summary: string; est: DeckEstimateResult } {
@@ -144,6 +160,7 @@ function systemPrompt(org: PublicOrg, area: string, threshold: number, isDeck: b
     playbook ? `\nHOW ${org.name} SCOPES & PRICES A JOB (this is your script — use it to ask the right questions, quote set packages, and set expectations):\n${playbook}` : "",
     `\nWHAT TO DO:
 ${pricingHow}
+- If the customer attaches a PHOTO, look at it: identify what you can (e.g. panel brand & amperage, wiring/condition, access, deck size/shape) and use it to sharpen your questions and the estimate. Mention what you noticed so they know you saw it.
 - ALWAYS call it a preliminary estimate, subject to confirmation once ${org.name} reviews the details.${
       isDeck
         ? `\n- THIS IS A DECK COMPANY: for any deck job, gather the measurements (length, width, tallest-point height, wood or composite, railing feet, stairs, doors onto the deck, and whether it's in the Tahoe/TRPA basin), then call deck_estimate for an EXACT preliminary number — prefer it over doing the math yourself.`
@@ -186,6 +203,7 @@ async function captureLead(
   org: PublicOrg,
   input: unknown,
   lastEstimate: DeckEstimateResult | null,
+  attachments: string[],
 ): Promise<string> {
   const raw = (input ?? {}) as Record<string, unknown>;
   const name = String(raw.name ?? "").trim().slice(0, 120);
@@ -193,7 +211,11 @@ async function captureLead(
   const email = String(raw.email ?? "").trim().slice(0, 120);
   if (!name) return JSON.stringify({ ok: false, error: "Ask for their name first." });
   if (!phone && !email) return JSON.stringify({ ok: false, error: "Ask for a phone or email so they can be reached." });
-  const summary = String(raw.project_summary ?? "").trim().slice(0, 500) || null;
+  const projectSummary = String(raw.project_summary ?? "").trim().slice(0, 500) || null;
+  // Fold the uploaded photo links into the lead's message so they're visible/clickable in the
+  // office lead view today (structured copy also lives in intakeJson.attachments).
+  const attachLine = attachments.length ? `📎 Customer photos:\n${attachments.join("\n")}` : "";
+  const summary = [projectSummary, attachLine].filter(Boolean).join("\n\n") || null;
   // Prefer the deterministic deck total + line items (so the office can one-click convert the
   // lead to a priced draft quote); fall back to whatever total the model passed.
   const total = lastEstimate?.total || Number(raw.estimate_total) || 0;
@@ -213,8 +235,9 @@ async function captureLead(
       intake,
       intakeJson: {
         source: "site_chat",
-        project_summary: summary,
+        project_summary: projectSummary,
         estimate: total || lines.length ? { total, lines } : null,
+        attachments: attachments.length ? attachments : undefined,
       },
       inspectionThreshold: org.settings.site_inspection_threshold,
     });
@@ -239,7 +262,7 @@ function lastAssistantText(convo: Anthropic.MessageParam[]): string {
 }
 
 export async function POST(req: Request) {
-  let body: { handle?: unknown; messages?: unknown };
+  let body: { handle?: unknown; messages?: unknown; images?: unknown };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "Bad request." }, { status: 400 }); }
 
   const handle = String(body?.handle ?? "");
@@ -259,6 +282,19 @@ export async function POST(req: Request) {
       !!m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string" && m.content.trim().length > 0)
     .map((m) => ({ role: m.role, content: String(m.content).slice(0, MAX_LEN) }));
   if (!convo.length || convo[convo.length - 1].role !== "user") return NextResponse.json({ error: "Bad request." }, { status: 400 });
+
+  // Photos the visitor attached THIS turn (URLs from our upload endpoint only). Attach them to the
+  // current user message as vision blocks so Nort can read them; they only ride this one turn.
+  const images = validImageUrls(body?.images);
+  if (images.length) {
+    const last = convo[convo.length - 1];
+    if (typeof last.content === "string") {
+      last.content = [
+        { type: "text", text: last.content },
+        ...images.map((url) => ({ type: "image", source: { type: "url", url } })),
+      ] as unknown as Anthropic.MessageParam["content"];
+    }
+  }
 
   const supabase = createServiceClient();
   const area = org.settings.service_area || [org.city, org.state].filter(Boolean).join(", ");
@@ -303,7 +339,7 @@ export async function POST(req: Request) {
         let out = "{}";
         if (block.name === "search_prices") out = await searchPrices(supabase, org.id, block.input);
         else if (block.name === "deck_estimate") { const de = deckEstimate(block.input, deckRates); out = de.summary; lastEstimate = de.est; }
-        else if (block.name === "capture_lead") { out = await captureLead(supabase, org, block.input, lastEstimate); if (out.includes('"ok":true')) leadCaptured = true; }
+        else if (block.name === "capture_lead") { out = await captureLead(supabase, org, block.input, lastEstimate, images); if (out.includes('"ok":true')) leadCaptured = true; }
         results.push({ type: "tool_result", tool_use_id: block.id, content: out });
       }
       if (!results.length) break; // no client tool to respond to — avoid an invalid empty message
