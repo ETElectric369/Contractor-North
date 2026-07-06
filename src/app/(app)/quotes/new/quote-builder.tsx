@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Sparkles, Loader2 } from "lucide-react";
+import { Plus, Trash2, Sparkles, Loader2, ChevronDown, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
@@ -126,6 +126,7 @@ export function QuoteBuilder({
       quantity: Number(it.quantity) || 1,
       unit: it.unit || "ea",
       unit_price: Number(it.unit_price) || 0,
+      group: k.name, // tag each line with its group so the estimate reads as collapsible groups
     }));
     setItems([...real, ...kitLines]);
   }
@@ -169,6 +170,23 @@ export function QuoteBuilder({
   const subtotal = items.reduce((s, i) => s + i.quantity * i.unit_price, 0);
   const tax = subtotal * (taxRate || 0);
   const total = subtotal + tax;
+
+  // Group the lines by their `group` tag (from a kit) so the estimate reads as collapsible groups —
+  // Chris sees "Stairs ▸" with its sub-items nested. Each entry keeps its FLAT index so the existing
+  // edit/remove handlers keep working. Ungrouped (individually-added) lines fall under group "".
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const toggleGroup = (g: string) =>
+    setCollapsed((s) => { const n = new Set(s); if (n.has(g)) n.delete(g); else n.add(g); return n; });
+  const grouped = useMemo(() => {
+    const order: string[] = [];
+    const map = new Map<string, { it: DraftLineItem; idx: number }[]>();
+    items.forEach((it, idx) => {
+      const g = it.group ?? "";
+      if (!map.has(g)) { map.set(g, []); order.push(g); }
+      map.get(g)!.push({ it, idx });
+    });
+    return order.map((g) => ({ group: g, entries: map.get(g)! }));
+  }, [items]);
 
   function updateItem(idx: number, patch: Partial<DraftLineItem>) {
     setItems((prev) =>
@@ -308,57 +326,56 @@ export function QuoteBuilder({
             )}
 
             <div className="space-y-2">
-              {items.map((it, idx) => (
-                <div
-                  key={idx}
-                  className="grid grid-cols-12 items-start gap-2 rounded-lg border border-slate-100 p-2"
-                >
-                  <div className="col-span-12 sm:col-span-5">
-                    <Input
-                      placeholder="Description"
-                      value={it.description}
-                      onChange={(e) =>
-                        updateItem(idx, { description: e.target.value })
-                      }
-                    />
+              {grouped.map(({ group, entries }) => {
+                const gSub = entries.reduce((s, { it }) => s + it.quantity * it.unit_price, 0);
+                const isCollapsed = collapsed.has(group);
+                return (
+                  <div key={group || "__ungrouped"} className={group ? "overflow-hidden rounded-lg border border-slate-200" : ""}>
+                    {group && (
+                      <button
+                        type="button"
+                        onClick={() => toggleGroup(group)}
+                        className="flex w-full items-center gap-2 bg-slate-50 px-3 py-2 text-left hover:bg-slate-100"
+                      >
+                        {isCollapsed ? <ChevronRight className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
+                        <span className="text-sm font-semibold text-slate-800">{group}</span>
+                        <span className="text-xs text-slate-400">· {entries.length} item{entries.length === 1 ? "" : "s"}</span>
+                        <span className="ml-auto text-sm font-medium text-slate-600">{formatCurrency(gSub)}</span>
+                      </button>
+                    )}
+                    {!(group && isCollapsed) && (
+                      <div className={`space-y-2 ${group ? "p-2" : ""}`}>
+                        {entries.map(({ it, idx }) => (
+                          <div key={idx} className="grid grid-cols-12 items-start gap-2 rounded-lg border border-slate-100 p-2">
+                            <div className="col-span-12 sm:col-span-5">
+                              <Input placeholder="Description" value={it.description} onChange={(e) => updateItem(idx, { description: e.target.value })} />
+                            </div>
+                            <div className="col-span-3 sm:col-span-2">
+                              <NumberInput placeholder="Qty" value={it.quantity} onValueChange={(n) => updateItem(idx, { quantity: n })} />
+                            </div>
+                            <div className="col-span-3 sm:col-span-1">
+                              <Input placeholder="ea" value={it.unit} onChange={(e) => updateItem(idx, { unit: e.target.value })} />
+                            </div>
+                            <div className="col-span-4 sm:col-span-2">
+                              <NumberInput placeholder="Unit $" value={it.unit_price} onValueChange={(n) => updateItem(idx, { unit_price: n })} />
+                            </div>
+                            <div className="col-span-2 flex items-center justify-end gap-1 sm:col-span-2">
+                              <span className="text-sm font-medium text-slate-700">{formatCurrency(it.quantity * it.unit_price)}</span>
+                              <button
+                                onClick={() => setItems((p) => p.filter((_, i) => i !== idx))}
+                                className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                                aria-label="Remove line"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  <div className="col-span-3 sm:col-span-2">
-                    <NumberInput
-                      placeholder="Qty"
-                      value={it.quantity}
-                      onValueChange={(n) => updateItem(idx, { quantity: n })}
-                    />
-                  </div>
-                  <div className="col-span-3 sm:col-span-1">
-                    <Input
-                      placeholder="ea"
-                      value={it.unit}
-                      onChange={(e) => updateItem(idx, { unit: e.target.value })}
-                    />
-                  </div>
-                  <div className="col-span-4 sm:col-span-2">
-                    <NumberInput
-                      placeholder="Unit $"
-                      value={it.unit_price}
-                      onValueChange={(n) => updateItem(idx, { unit_price: n })}
-                    />
-                  </div>
-                  <div className="col-span-2 flex items-center justify-end gap-1 sm:col-span-2">
-                    <span className="text-sm font-medium text-slate-700">
-                      {formatCurrency(it.quantity * it.unit_price)}
-                    </span>
-                    <button
-                      onClick={() =>
-                        setItems((p) => p.filter((_, i) => i !== idx))
-                      }
-                      className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                      aria-label="Remove line"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </CardContent>
         </Card>

@@ -123,6 +123,9 @@ export interface DraftLineItem {
   quantity: number;
   unit: string;
   unit_price: number;
+  /** Optional group this line belongs to (a kit/"job code group" like Stairs, Decking) — a
+   *  build-time organizer so the estimate reads as collapsible groups. Not persisted yet. */
+  group?: string;
 }
 
 export interface SaveQuoteInput {
