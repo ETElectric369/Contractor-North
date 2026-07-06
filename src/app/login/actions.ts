@@ -93,6 +93,36 @@ export async function updatePassword(formData: FormData) {
   redirect("/planner");
 }
 
+const enc = encodeURIComponent;
+
+/** Passwordless login — email the user a 6-digit code (no password to remember). Existing users
+ *  only (new accounts sign up separately). The 6-digit code appears in the email IF the Supabase
+ *  "Magic Link" template includes {{ .Token }}; the magic link in the same email also works. */
+export async function sendLoginCode(formData: FormData) {
+  const supabase = await createClient();
+  const email = String(formData.get("email") ?? "").trim().toLowerCase();
+  if (!email) redirect(`/login?mode=code&error=${enc("Enter your email.")}`);
+  const { error } = await supabase.auth.signInWithOtp({
+    email,
+    options: { shouldCreateUser: false, emailRedirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback` },
+  });
+  if (error) redirect(`/login?mode=code&error=${enc(error.message)}`);
+  redirect(`/login?mode=code&email=${enc(email)}&sent=1`);
+}
+
+/** Verify the 6-digit code the user typed → establishes a session. */
+export async function verifyLoginCode(formData: FormData) {
+  const supabase = await createClient();
+  const email = String(formData.get("email") ?? "").trim().toLowerCase();
+  const token = String(formData.get("code") ?? "").replace(/\D/g, "").slice(0, 6);
+  const back = `/login?mode=code&email=${enc(email)}&sent=1`;
+  if (!email || token.length < 6) redirect(`${back}&error=${enc("Enter the 6-digit code from your email.")}`);
+  const { error } = await supabase.auth.verifyOtp({ email, token, type: "email" });
+  if (error) redirect(`${back}&error=${enc(error.message)}`);
+  revalidatePath("/", "layout");
+  redirect("/planner");
+}
+
 export async function signOut() {
   const supabase = await createClient();
   await supabase.auth.signOut();
