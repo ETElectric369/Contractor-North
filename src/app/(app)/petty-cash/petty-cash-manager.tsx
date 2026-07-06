@@ -49,10 +49,13 @@ export function PettyCashManager({ items, balance }: { items: PettyTx[]; balance
 
   return (
     <div className="space-y-4">
+      {/* grid-cols-3 stays (3 quick stats), but the currency shrinks on a phone + tabular-nums so a
+          big number fits the narrow card instead of spilling past its edge (bug: "numbers went off
+          the edge, didn't auto-calibrate"). min-w-0 lets it shrink inside the grid track. */}
       <div className="grid grid-cols-3 gap-4 sm:max-w-lg">
-        <Card><CardContent className="py-4"><div className="text-2xl font-bold text-slate-900">{formatCurrency(balance)}</div><div className="text-xs text-slate-500">Cash on hand</div></CardContent></Card>
-        <Card><CardContent className="py-4"><div className="text-2xl font-bold text-red-600">{formatCurrency(spent)}</div><div className="text-xs text-slate-500">Spent</div></CardContent></Card>
-        <Card><CardContent className="py-4"><div className="text-2xl font-bold text-green-600">{formatCurrency(added)}</div><div className="text-xs text-slate-500">Added</div></CardContent></Card>
+        <Card><CardContent className="min-w-0 py-4"><div className="truncate text-lg font-bold tabular-nums leading-tight text-slate-900 sm:text-2xl">{formatCurrency(balance)}</div><div className="text-xs text-slate-500">Cash on hand</div></CardContent></Card>
+        <Card><CardContent className="min-w-0 py-4"><div className="truncate text-lg font-bold tabular-nums leading-tight text-red-600 sm:text-2xl">{formatCurrency(spent)}</div><div className="text-xs text-slate-500">Spent</div></CardContent></Card>
+        <Card><CardContent className="min-w-0 py-4"><div className="truncate text-lg font-bold tabular-nums leading-tight text-green-600 sm:text-2xl">{formatCurrency(added)}</div><div className="text-xs text-slate-500">Added</div></CardContent></Card>
       </div>
 
       <Card className="p-4">
