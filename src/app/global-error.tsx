@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import * as Sentry from "@sentry/nextjs";
+import { reportClientError } from "@/app/report-client-error";
 
 /** Catches errors thrown in the root layout itself. Must render <html>/<body>. */
 export default function GlobalError({
@@ -14,6 +15,10 @@ export default function GlobalError({
   useEffect(() => {
     console.error(error);
     Sentry.captureException(error); // no-op until a DSN is configured
+    void reportClientError("global-error", error?.message ?? String(error), {
+      digest: error?.digest,
+      url: typeof window !== "undefined" ? window.location.pathname : undefined,
+    });
   }, [error]);
 
   return (

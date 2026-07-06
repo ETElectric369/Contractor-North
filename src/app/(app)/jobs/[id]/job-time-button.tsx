@@ -195,6 +195,10 @@ export function JobTimeButton({
         type="button"
         onClick={openModal}
         className={triggerCls}
+        // elapsedMs is a Date.now()-based live ticker, so its server/client first render
+        // differs → React #418. suppressHydrationWarning covers the aria-label here + the
+        // ticker text span below; the value self-corrects on the tick.
+        suppressHydrationWarning
         aria-label={
           state === "in"
             ? "Clock in to this job"
@@ -214,7 +218,7 @@ export function JobTimeButton({
         {state === "here" && (
           <>
             <span className="hidden sm:inline">On clock ·&nbsp;</span>
-            <span className="tabular-nums">{fmtHm(elapsedMs)}</span>
+            <span className="tabular-nums" suppressHydrationWarning>{fmtHm(elapsedMs)}</span>
           </>
         )}
       </button>

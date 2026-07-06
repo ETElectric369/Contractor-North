@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { AlertTriangle } from "lucide-react";
+import { reportClientError } from "@/app/report-client-error";
 
 /** Segment error boundary for the assistant. A render crash anywhere in the chat / Estimator
  *  now shows this graceful fallback (with a reset) instead of blanking the whole app. When
@@ -17,6 +18,10 @@ export default function AssistantError({
   useEffect(() => {
     // Surface it in the console too, so it's visible even before Sentry is provisioned.
     console.error("Assistant crashed:", error);
+    void reportClientError("assistant-boundary", error?.message ?? String(error), {
+      digest: error?.digest,
+      url: typeof window !== "undefined" ? window.location.pathname : undefined,
+    });
   }, [error]);
 
   return (

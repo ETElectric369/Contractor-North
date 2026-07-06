@@ -86,8 +86,13 @@ export function DayClock({
         <div className="min-w-0 flex-1">
           {open ? (
             <>
-              <div className="text-xl font-bold tabular-nums text-slate-900">{fmtHms(liveMs)}</div>
-              <div className="truncate text-xs text-slate-500">
+              {/* Live tickers derive from Date.now() (the `now` state), so the server's first
+                  render and the client's first render differ by the elapsed ms → React #418
+                  hydration error, which was tearing up /planner for anyone on the clock. The
+                  values self-correct on the 1s tick, so suppressHydrationWarning is the right
+                  fix (same idiom as the cn-v405 timeclock-panel fix). */}
+              <div className="text-xl font-bold tabular-nums text-slate-900" suppressHydrationWarning>{fmtHms(liveMs)}</div>
+              <div className="truncate text-xs text-slate-500" suppressHydrationWarning>
                 On the clock{open.jobLabel ? ` · ${open.jobLabel}` : ""} · {fmtHm(totalMs)} today · {fmtHm(totalWeekMs)} pay week
               </div>
             </>

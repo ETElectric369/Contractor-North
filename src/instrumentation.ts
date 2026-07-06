@@ -15,5 +15,25 @@ export async function register() {
   }
 }
 
-// Lets Next forward server-side request errors (incl. server actions) to Sentry.
-export const onRequestError = Sentry.captureRequestError;
+// Next forwards every server-side request error here (RSC render throws incl. their
+// `digest`, server actions, route handlers). We log it to OUR sentry_events table (works
+// with no DSN) AND forward to Sentry (a no-op until a DSN is set). This is the capture path
+// that was missing — auto-caught render errors used to hit only the dark Sentry no-op, so
+// the sink stayed empty while the app crashed. Import observe lazily + guarded so a capture
+// failure (e.g. under the edge runtime) can never break the request itself.
+export async function onRequestError(
+  ...args: Parameters<typeof Sentry.captureRequestError>
+): Promise<void> {
+  const [err, request, context] = args;
+  try {
+    const { reportError } = await import("@/lib/observe");
+    reportError("rsc-render", err, {
+      digest: (err as { digest?: string } | undefined)?.digest,
+      path: (request as { path?: string } | undefined)?.path,
+      routerKind: (context as { routerKind?: string } | undefined)?.routerKind,
+    });
+  } catch {
+    /* observability must never break a request */
+  }
+  Sentry.captureRequestError(...args);
+}

@@ -8,6 +8,7 @@ import { billingEnabled } from "@/lib/stripe";
 import { hasActiveAccess, isCompedOrg } from "@/lib/subscription";
 import { getOrgSettings } from "@/lib/org-settings";
 import { getActionItemsCount } from "@/lib/action-items/query";
+import { reportError } from "@/lib/observe";
 import { todayStrInTz } from "@/lib/tz";
 import { GeofenceMonitor } from "@/components/geofence-monitor";
 import { BugReporter } from "@/components/bug-reporter";
@@ -63,11 +64,27 @@ export default async function AppLayout({
   // Reversible: an owner/admin flipping active back lets them in again.
   if (profile.active === false) redirect("/account-deactivated");
 
-  const { data: org } = await supabase
-    .from("organizations")
-    .select("name, logo_url, subscription_status, trial_ends_at, settings")
-    .eq("id", profile.org_id)
-    .maybeSingle();
+  type OrgLite = {
+    name: string | null;
+    logo_url: string | null;
+    subscription_status: string | null;
+    trial_ends_at: string | null;
+    settings: unknown;
+  };
+  let org: OrgLite | null = null;
+  try {
+    const { data } = await supabase
+      .from("organizations")
+      .select("name, logo_url, subscription_status, trial_ends_at, settings")
+      .eq("id", profile.org_id)
+      .maybeSingle();
+    org = (data as OrgLite | null) ?? null;
+  } catch (e) {
+    // A transient org-read failure must not tear down the whole shell — degrade to
+    // defaults (branding → nulls, settings → DEFAULT_SETTINGS below, billing gate is
+    // already guarded on `org &&`). Logged so it's visible in the ops sink.
+    reportError("app-layout:org", e);
+  }
 
   const settings = getOrgSettings((org as any)?.settings);
 
@@ -81,13 +98,18 @@ export default async function AppLayout({
     | { id: string; gps_in: GeoPoint | null; clock_in: string; job: { job_number: string; name: string } | null }
     | null = null;
   if (settings.geofence_logout) {
-    const { data: oe } = await supabase
-      .from("time_entries")
-      .select("id, gps_in, clock_in, job:job_id(job_number, name)")
-      .eq("profile_id", user.id)
-      .eq("status", "open")
-      .maybeSingle();
-    if (oe) openEntry = oe as any;
+    try {
+      const { data: oe } = await supabase
+        .from("time_entries")
+        .select("id, gps_in, clock_in, job:job_id(job_number, name)")
+        .eq("profile_id", user.id)
+        .eq("status", "open")
+        .maybeSingle();
+      if (oe) openEntry = oe as any;
+    } catch (e) {
+      // Degrade: the geofence monitor just won't mount this render. Never crash the shell.
+      reportError("app-layout:open-entry", e);
+    }
   }
 
   // Billing gate (only when Stripe is configured): trial expired & not subscribed.
@@ -111,11 +133,19 @@ export default async function AppLayout({
   // already includes the organize/needs-review captures, so no separate badge).
   const tz = settings.timezone || "America/Los_Angeles";
   const isStaff = isStaffRole(profile.role);
-  const needsAction = await getActionItemsCount({
-    todayStr: todayStrInTz(tz),
-    isStaff,
-    userId: user.id,
-  });
+  // The dock badge is cosmetic — a failure anywhere in the ~21-query action-items fan-out
+  // must NEVER crash every route (this unguarded await was the app-wide single point of
+  // failure). Degrade to 0 and log it to the ops sink so the underlying error stays visible.
+  let needsAction = 0;
+  try {
+    needsAction = await getActionItemsCount({
+      todayStr: todayStrInTz(tz),
+      isStaff,
+      userId: user.id,
+    });
+  } catch (e) {
+    reportError("app-layout:action-items", e);
+  }
   const badges = { "/planner": needsAction };
 
   return (

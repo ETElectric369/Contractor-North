@@ -1,7 +1,22 @@
 import "server-only";
-import { createHash } from "node:crypto";
 import * as Sentry from "@sentry/nextjs";
 import { createServiceClient } from "@/lib/supabase/server";
+
+/** Small pure-JS hash (FNV-1a with two seeds → 16 hex chars) for the sentry_events dedup key.
+ *  Deliberately NOT node:crypto: this module is now pulled into the edge bundle by the
+ *  instrumentation onRequestError hook, and node: URIs don't bundle for edge. The key only
+ *  needs to be stable + unique-ish — a rare collision merely merges two rows in the ops log. */
+function dedupKey(s: string): string {
+  const fnv = (seed: number) => {
+    let h = seed >>> 0;
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 0x01000193);
+    }
+    return (h >>> 0).toString(16).padStart(8, "0");
+  };
+  return fnv(0x811c9dc5) + fnv(0x9e3779b1);
+}
 
 /**
  * Report a background / best-effort failure that must NOT surface to the user but
@@ -24,7 +39,7 @@ export function reportError(where: string, e: unknown, extra?: Record<string, un
 function logToDb(where: string, e: unknown, extra?: Record<string, unknown>): void {
   try {
     const message = (e instanceof Error ? e.message : String(e ?? "")).slice(0, 500);
-    const key = createHash("sha1").update(`${where}::${message}`).digest("hex").slice(0, 40);
+    const key = dedupKey(`${where}::${message}`);
     const sb = createServiceClient();
     void sb
       .rpc("record_app_error", {
