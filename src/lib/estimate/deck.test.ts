@@ -1,13 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { computeDeckEstimate, buildDeckRates, type DeckAnswers } from "@/lib/estimate/deck";
 
-// Chris's real Tahoe Deck catalog rates (by code), so the math is his math.
+// Chris's real Tahoe Deck / GiddyUp catalog rates (by his reference code), so the math is his math.
 const RATES: Record<string, number> = {
-  "ND-DECK": 75, "DS8": 40, "DS-COMP": 12,
+  "D1": 75, "DS8": 40, "DS2": 12,
   "DS5A": 12, "DS5B": 40, "DS5C": 80,
   "DS6C": 15, "DS6D": 10,
-  "ND-RAIL": 175, "ND-STRAIL": 295, "ND-STAIR3": 750,
-  "DS1B": 2750, "DS-SLIDER": 1650, "DS9": 1500,
+  "D2": 175, "D5": 295, "D4": 750,
+  "DS1B": 1250, "DS1A": 1650, "DS9": 1500,
   "DS3C": 6000, "DS3D": 8,
 };
 const rate = (c: string) => RATES[c] ?? 0;
@@ -61,18 +61,18 @@ describe("computeDeckEstimate — partial jobs compose", () => {
   it("resurface reuses the frame: cheaper board rate, no invented railing, no footings", () => {
     const e = computeDeckEstimate(base({ projectType: "resurface", lengthFt: 10, widthFt: 10 }), rate);
     expect(e.lines).toHaveLength(1);
-    expect(e.total).toBe(100 * 40); // DS8, not ND-DECK; no derived railing; no footings
+    expect(e.total).toBe(100 * 40); // DS8, not D1; no derived railing; no footings
   });
 });
 
 describe("buildDeckRates — markup + deterministic dedup", () => {
   it("applies markup so the rate is the customer SELL price (buy × (1+markup))", () => {
-    const r = buildDeckRates([{ code: "ND-DECK", buy_price: 60, markup_pct: 25 }]);
-    expect(r["ND-DECK"]).toBe(75); // 60 * 1.25 — matches the rest of the app's pricing
+    const r = buildDeckRates([{ code: "D1", buy_price: 60, markup_pct: 25 }]);
+    expect(r["D1"]).toBe(75); // 60 * 1.25 — matches the rest of the app's pricing
   });
   it("markup 0 leaves the buy price as-is (Chris's current catalog)", () => {
-    const r = buildDeckRates([{ code: "ND-DECK", buy_price: 75, markup_pct: 0 }]);
-    expect(r["ND-DECK"]).toBe(75);
+    const r = buildDeckRates([{ code: "D1", buy_price: 75, markup_pct: 0 }]);
+    expect(r["D1"]).toBe(75);
   });
   it("dedups a duplicate active code deterministically — first (newest) row wins", () => {
     // Caller passes rows newest-first; a stale duplicate must not override the current one.
@@ -91,7 +91,7 @@ describe("buildDeckRates — markup + deterministic dedup", () => {
 
 describe("computeDeckEstimate — robustness", () => {
   it("skips any line whose catalog code is missing (rate 0), never emits a $0 line", () => {
-    const onlyDeck = (c: string) => (c === "ND-DECK" ? 75 : 0);
+    const onlyDeck = (c: string) => (c === "D1" ? 75 : 0);
     const e = computeDeckEstimate(base({ lengthFt: 10, widthFt: 10, railingLf: 30 }), onlyDeck);
     expect(e.lines).toHaveLength(1); // railing + footings codes absent → skipped
     expect(e.total).toBe(7500);

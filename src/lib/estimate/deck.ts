@@ -18,11 +18,11 @@ export type DeckShape = "rectangle" | "irregular";
 /** Every price-list code the deck estimate can reference. The public configurator exposes
  *  ONLY these rates to the browser (not the whole catalog). Keep in sync with the adds below. */
 export const DECK_ESTIMATE_CODES = [
-  "ND-DECK", "DS8", "DS-COMP",
+  "D1", "DS8", "DS2",
   "DS5A", "DS5B", "DS5C",
   "DS6C", "DS6D",
-  "ND-RAIL", "ND-STRAIL", "ND-STAIR3",
-  "DS1B", "DS-SLIDER", "DS9",
+  "D2", "D5", "D4",
+  "DS1B", "DS1A", "DS9",
   "DS3D", "DS3C",
 ] as const;
 
@@ -113,12 +113,12 @@ export function computeDeckEstimate(a: DeckAnswers, rate: Rate): DeckEstimate {
   // "railing only" or "stairs only" job still prices correctly with no base line.
   if (area > 0) {
     if (isResurface) add("DS8", "Deck resurface — replace decking on the existing frame", area, "SQ FT");
-    else if (buildsDeck) add("ND-DECK", "Deck build", area, "SQ FT");
+    else if (buildsDeck) add("D1", "Deck build", area, "SQ FT");
   }
 
   // Composite upgrade over wood.
   if (a.material === "composite" && buildsDeck && area > 0) {
-    add("DS-COMP", "Composite decking upgrade", area, "SQ FT");
+    add("DS2", "Composite decking upgrade", area, "SQ FT");
   }
 
   // Height band — one band by the tallest point (higher deck = more structure/access cost).
@@ -145,15 +145,17 @@ export function computeDeckEstimate(a: DeckAnswers, rate: Rate): DeckEstimate {
   if (!measuredRail && railingLf > 0) {
     assumptions.push(`Railing estimated at ${Math.round(railingLf)} LF from the footprint — confirmed on site.`);
   }
-  add("ND-RAIL", "Deck railing", railingLf, "LF");
+  add("D2", "Deck railing", railingLf, "LF");
 
-  // Stairs.
-  add("ND-STAIR3", "Stairs (set)", n(a.stairFlights), "EA");
-  add("ND-STRAIL", "Stair railing", n(a.stairRailingLf), "LF");
+  // Stairs. D4 = Chris's "Stairs >3 steps" rate. OPEN: his GiddyUp bills this per-EA at a
+  // quantity that looks like step-count (a bid had qty 15) — confirm whether stairFlights should
+  // carry sets or individual steps; the code→rate mapping is right either way.
+  add("D4", "Stairs (>3 steps)", n(a.stairFlights), "EA");
+  add("D5", "Stair railing", n(a.stairRailingLf), "LF");
 
   // Door waterproofing where a deck meets the house.
   add("DS1B", "Man-door waterproofing", n(a.manDoors), "EA");
-  add("DS-SLIDER", "Slider-door waterproofing", n(a.sliderDoors), "EA");
+  add("DS1A", "Slider-door waterproofing", n(a.sliderDoors), "EA");
 
   // Footings — a size-based heuristic; the real count comes from the layout on site.
   if (buildsDeck && !isResurface && area > 0) {
