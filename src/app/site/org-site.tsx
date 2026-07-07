@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Phone, Mail, MapPin, ArrowRight, Check, ShieldCheck, Clock, Zap, Instagram, Star } from "lucide-react";
-import { accentHex, type OrgSettings } from "@/lib/org-settings";
+import { accentHex, orgPublicBaseUrl, parseGeoFromMapUrl, type OrgSettings } from "@/lib/org-settings";
 import type { PublicOrg } from "@/lib/public-org";
 import { PortfolioGallery } from "../estimate/[handle]/portfolio-gallery";
 import { ContactForm } from "./contact-form";
@@ -160,14 +160,32 @@ export function OrgSite({ org }: { org: PublicOrg }) {
   const ctaLabel = hasConfigurator ? "Get your free instant estimate" : "Request a free estimate";
   const telHref = org.phone ? `tel:${org.phone.replace(/[^0-9+]/g, "")}` : null;
 
+  // schema.org LocalBusiness markup — how Google connects this site to the real-world business.
+  // The linchpin is `sameAs`/`hasMap` pointing at the org's Google Business Profile: it tells
+  // Google "this website IS that map listing," so the site's trust and the GBP's reviews/rank
+  // reinforce each other instead of looking like two separate entities. `geo` is parsed from the
+  // GBP link when it carries coordinates. NAP (name/phone/address) mirrors the org record, which
+  // must match the GBP verbatim for the binding to hold.
+  const siteUrl = orgPublicBaseUrl(s);
+  const gbpUrl = (s.google_business_url || "").trim();
+  const geo = parseGeoFromMapUrl(gbpUrl);
+  const sameAs = [gbpUrl, ig ? `https://www.instagram.com/${ig}` : ""].filter(Boolean);
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "HomeAndConstructionBusiness",
+    "@id": `${siteUrl}/#business`,
     name: org.name,
+    url: siteUrl,
     ...(org.phone ? { telephone: org.phone } : {}),
     ...(org.email ? { email: org.email } : {}),
+    ...(org.logo_url ? { logo: org.logo_url } : {}),
     ...(hero ? { image: hero } : {}),
-    ...(area ? { address: { "@type": "PostalAddress", addressLocality: org.city, addressRegion: org.state } } : {}),
+    ...(area ? { areaServed: area } : {}),
+    priceRange: "$$",
+    ...(area ? { address: { "@type": "PostalAddress", addressLocality: org.city, addressRegion: org.state, addressCountry: "US" } } : {}),
+    ...(geo ? { geo: { "@type": "GeoCoordinates", latitude: geo.lat, longitude: geo.lng } } : {}),
+    ...(gbpUrl ? { hasMap: gbpUrl } : {}),
+    ...(sameAs.length ? { sameAs } : {}),
   };
 
   return (

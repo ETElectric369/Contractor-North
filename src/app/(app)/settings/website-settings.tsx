@@ -28,6 +28,7 @@ export function WebsiteSettings({
   const [area, setArea] = useState(settings.service_area ?? "");
   const [ig, setIg] = useState(settings.social_instagram ?? "");
   const [domain, setDomain] = useState(settings.custom_domain ?? "");
+  const [gbp, setGbp] = useState(settings.google_business_url ?? "");
   const [theme, setTheme] = useState<OrgSettings["site_theme"]>(settings.site_theme ?? "classic");
   const [pending, start] = useTransition();
   const [done, setDone] = useState(false);
@@ -47,7 +48,7 @@ export function WebsiteSettings({
       const cd = await setCustomDomain(domain);
       if (!cd.ok) { setError(cd.error ?? "Couldn't save the domain."); return; }
       setDomain(cd.domain ?? "");
-      const res = await updateOrgSettings({ service_area: area.trim(), social_instagram: ig.replace(/^@/, "").trim(), site_theme: theme });
+      const res = await updateOrgSettings({ service_area: area.trim(), social_instagram: ig.replace(/^@/, "").trim(), site_theme: theme, google_business_url: gbp.trim() });
       if (!res.ok) { setError(res.error ?? "Couldn't save."); return; }
       setDone(true);
       setTimeout(() => setDone(false), 2500);
@@ -93,6 +94,15 @@ export function WebsiteSettings({
         <Label htmlFor="ws-area">Service area</Label>
         <Input id="ws-area" value={area} onChange={(e) => setArea(e.target.value)} placeholder="e.g. Truckee & North Tahoe" />
         <p className="mt-1 text-xs text-slate-400">Shown in the hero, trust bar, and footer.</p>
+      </div>
+
+      <div>
+        <Label htmlFor="ws-gbp">Google Business Profile</Label>
+        <Input id="ws-gbp" value={gbp} onChange={(e) => setGbp(e.target.value)} placeholder="https://maps.google.com/…  (your Google Maps listing)" />
+        <p className="mt-1 text-xs text-slate-400">
+          Paste your Google Maps listing link. This ties your website to your Google listing for local
+          search — the biggest lever for showing up in the map results when someone nearby searches for you.
+        </p>
       </div>
 
       <div>

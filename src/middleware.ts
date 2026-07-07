@@ -12,6 +12,24 @@ const EXTRA_APP_HOSTS = new Set(
   (process.env.APP_HOSTS || "").toLowerCase().split(",").map((s) => s.trim()).filter(Boolean),
 );
 
+// Legacy CMS paths (Squarespace/Wix/WordPress defaults + Tahoe Deck's old Squarespace slugs).
+// When an org moves its domain to North, its old deep URLs (/about, /portfolio, a /blog-1-1/* post)
+// have no equivalent route here — North's public site is a single page with #anchors — so they'd
+// 404. We 301 them to the homepage instead: bookmarks, business cards, and Google's old index
+// entries all land on the live site (which carries the portfolio + instant-estimate CTA) rather
+// than a dead end. Only ever runs on a NON-app host, so it can't touch the app's own routes.
+const LEGACY_EXACT = new Set([
+  "/about", "/about-us", "/portfolio", "/gallery", "/services", "/our-work",
+  "/projects", "/contact", "/contact-us", "/home", "/store", "/shop",
+  "/blog", "/blog-1-1", "/testimonials", "/reviews", "/faq",
+]);
+const LEGACY_PREFIX = ["/blog/", "/blog-1-1/", "/shop/", "/store/", "/products", "/product/", "/gallery/", "/portfolio/", "/services/"];
+function isLegacyCmsPath(pathname: string): boolean {
+  const p = pathname.replace(/\/+$/, "") || "/"; // tolerate a trailing slash
+  if (LEGACY_EXACT.has(p)) return true;
+  return LEGACY_PREFIX.some((pre) => pathname.startsWith(pre));
+}
+
 /** Is this host the app itself (login/dashboard) rather than an org's public marketing site?
  *  Infra hosts (localhost, bare IPs, Vercel URLs) and the platform apex serve the app; only a
  *  real, non-app DOMAIN reaches the org-site resolver. */
@@ -27,9 +45,20 @@ function isAppHost(host: string): boolean {
 export async function middleware(request: NextRequest) {
   const host = (request.headers.get("host") || "").toLowerCase().split(":")[0];
 
+  const onOrgSite = host && !isAppHost(host);
+
+  // On a pointed org domain, 301 old-CMS URLs to the homepage so a migrated site's stale links
+  // never 404. Runs before the root rewrite; only on non-app hosts, so app routes are untouched.
+  if (onOrgSite && request.nextUrl.pathname !== "/" && isLegacyCmsPath(request.nextUrl.pathname)) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/";
+    url.search = "";
+    return NextResponse.redirect(url, 301);
+  }
+
   // Only the ROOT of an org's public site is rewritten to /site content. Deeper paths
   // (/estimate, /inquire, /login, assets) and the app's own hosts flow through untouched.
-  if (request.nextUrl.pathname === "/" && host && !isAppHost(host)) {
+  if (request.nextUrl.pathname === "/" && onOrgSite) {
     const url = request.nextUrl.clone();
     if (host.endsWith(`.${SITES_DOMAIN}`)) {
       // Free subdomain: the subdomain IS the org handle — no DB lookup needed.

@@ -110,6 +110,11 @@ export interface OrgSettings {
    *  no scheme/www). Resolved by the by-domain route so the domain serves /site content without
    *  a code change. Empty = the org uses its free <handle>.contractornorth.com subdomain. */
   custom_domain: string;
+  /** The org's Google Business Profile / Google Maps place URL (paste the link straight from
+   *  Google Maps). THE local-SEO anchor: it's emitted as schema.org `sameAs` + `hasMap` on the
+   *  public site — the signal that binds this website to that map listing so Google treats them
+   *  as one business — and any lat/lng in the URL becomes the site's `geo`. Empty = no binding. */
+  google_business_url: string;
   /** Customer testimonials shown on the public site. Real quotes the org enters themselves —
    *  never seeded/fabricated. Empty hides the section. */
   reviews: { name: string; text: string; rating?: number }[];
@@ -171,9 +176,24 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   site_theme: "classic",
   social_instagram: "",
   custom_domain: "",
+  google_business_url: "",
   reviews: [],
   sms_from_number: "",
 };
+
+/** Pull a { lat, lng } from a pasted Google Maps URL if one is present. Prefers the place
+ *  marker (`!3d<lat>!4d<lng>`) over the viewport center (`@<lat>,<lng>`) — the marker is the
+ *  actual business pin. Returns null when the URL carries no coordinates (e.g. a bare ?cid= link). */
+export function parseGeoFromMapUrl(url: string | null | undefined): { lat: number; lng: number } | null {
+  const u = String(url || "");
+  const m = u.match(/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/) || u.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
+  if (!m) return null;
+  const lat = Number(m[1]);
+  const lng = Number(m[2]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  return { lat, lng };
+}
 
 /** Merge stored settings over defaults so every key is always present. */
 export function getOrgSettings(raw: unknown): OrgSettings {
