@@ -446,6 +446,10 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
     async start(controller) {
       const emit = (t: string) => controller.enqueue(encoder.encode(t));
       const toolsUsed = new Set<string>();
+      // Accumulate Nort's VISIBLE reply across all rounds so the finally block can persist
+      // the turn to conversations/messages — giving Nort a real transcript (cross-session
+      // memory) + a day's-end record to review. Marker-stripped, same as the client sees.
+      let assistantReply = "";
       // Cache telemetry for the audit row — lets us verify hits from the DB (cache_read > 0).
       let cacheRead = 0;
       let cacheWrite = 0;
@@ -472,20 +476,20 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
           // Strip the directive markers from MODEL text so a prompt-injection can't forge a
           // confirm card, a maps-open, or a fake quote preview — markers are only ever emitted
           // by the server.
-          turn.on("text", (text) =>
-            emit(
-              text
-                .split(CONFIRM_MARKER).join("")
-                .split(OPEN_MARKER).join("")
-                .split(PICK_MARKER).join("")
-                .split(STATUS_OPEN).join("")
-                .split(STATUS_CLOSE).join("")
-                .split(DRAFT_OPEN).join("")
-                .split(DRAFT_CLOSE).join("")
-                .split(HUD_OPEN).join("")
-                .split(HUD_CLOSE).join(""),
-            ),
-          );
+          turn.on("text", (text) => {
+            const clean = text
+              .split(CONFIRM_MARKER).join("")
+              .split(OPEN_MARKER).join("")
+              .split(PICK_MARKER).join("")
+              .split(STATUS_OPEN).join("")
+              .split(STATUS_CLOSE).join("")
+              .split(DRAFT_OPEN).join("")
+              .split(DRAFT_CLOSE).join("")
+              .split(HUD_OPEN).join("")
+              .split(HUD_CLOSE).join("");
+            assistantReply += clean;
+            emit(clean);
+          });
           const final = await turn.finalMessage();
           // Accumulate cache telemetry across rounds (usage fields are 0/undefined pre-caching).
           const u = final.usage as unknown as { cache_read_input_tokens?: number; cache_creation_input_tokens?: number; input_tokens?: number };
@@ -692,6 +696,41 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
           } catch {
             /* audit is best-effort */
           }
+        }
+
+        // Persist this turn (the user's last message + Nort's reply) so Nort builds a real
+        // TRANSCRIPT — cross-session memory + a day's-end record to review and keep linking
+        // the nerves. Best-effort; RLS (conversations_owner) scopes it to this user. Grouped
+        // one conversation per user per day so a day reads as one thread.
+        try {
+          const lastUser = [...messages].reverse().find((m) => m.role === "user");
+          if (lastUser?.content?.trim() && assistantReply.trim()) {
+            const { data: recent } = await supabase
+              .from("conversations")
+              .select("id, created_at")
+              .eq("user_id", user.id)
+              .order("created_at", { ascending: false })
+              .limit(1);
+            let convoId = recent?.[0]?.id as string | undefined;
+            const sameDay =
+              !!recent?.[0] && new Date(recent[0].created_at).toDateString() === new Date().toDateString();
+            if (!convoId || !sameDay) {
+              const { data: created } = await supabase
+                .from("conversations")
+                .insert({ user_id: user.id, title: `Nort · ${new Date().toLocaleDateString()}` })
+                .select("id")
+                .single();
+              convoId = created?.id;
+            }
+            if (convoId) {
+              await supabase.from("messages").insert([
+                { conversation_id: convoId, role: "user", content: lastUser.content.slice(0, 8000) },
+                { conversation_id: convoId, role: "assistant", content: assistantReply.trim().slice(0, 8000) },
+              ]);
+            }
+          }
+        } catch {
+          /* transcript persistence is best-effort — never affects the response */
         }
       }
     },
