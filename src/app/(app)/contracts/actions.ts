@@ -165,6 +165,7 @@ export async function sendContract(id: string): Promise<Result> {
   const res = await sendEmail({
     to: customer.email,
     subject: `Contract ${(c as any).contract_number ?? ""} from ${org?.name ?? "us"}`,
+    fromName: org?.name ?? undefined,
     html,
     replyTo: org?.email ?? undefined,
     bcc: ownerBcc(getOrgSettings((org as any)?.settings).copy_owner_on_emails, org?.email),

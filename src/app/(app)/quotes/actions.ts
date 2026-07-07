@@ -106,6 +106,7 @@ export async function emailQuote(
   const res = await sendEmail({
     to: customer.email,
     subject: `${label} ${quote.quote_number} from ${org?.name ?? "us"}`,
+    fromName: org?.name ?? undefined,
     html,
     replyTo: org?.email ?? undefined,
     bcc: ownerBcc(getOrgSettings((org as any)?.settings).copy_owner_on_emails, org?.email),

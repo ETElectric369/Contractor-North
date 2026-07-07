@@ -52,6 +52,7 @@ export async function emailPortalLink(customerId: string): Promise<ActionResult>
   const res = await sendEmail({
     to: c.email,
     subject: `Your ${org?.name ?? "customer"} portal`.trim(),
+    fromName: org?.name ?? undefined,
     html,
     replyTo: org?.email ?? undefined,
     bcc: ownerBcc(getOrgSettings((org as any)?.settings).copy_owner_on_emails, org?.email),

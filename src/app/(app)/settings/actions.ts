@@ -194,6 +194,7 @@ export async function createInvitation(formData: FormData): Promise<Result & { l
   const link = `${base}/login?mode=signup&email=${encodeURIComponent(email)}`;
   await sendEmail({
     to: email,
+    fromName: orgName,
     subject: `You're invited to join ${orgName} on Contractor North`,
     html: `<div style="font-family:system-ui,-apple-system,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#0f172a">
       <h2 style="margin:0 0 8px">You've been invited to ${esc(orgName)}</h2>

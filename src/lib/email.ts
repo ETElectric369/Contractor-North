@@ -14,15 +14,45 @@ export function ownerBcc(copyOwner: boolean, ownerEmail?: string | null): string
   return copyOwner && ownerEmail ? ownerEmail : undefined;
 }
 
+/** The bare address out of an "Name <addr>" (or a bare-address) EMAIL_FROM. */
+function addressOf(from: string): string {
+  const m = from.match(/<([^>]+)>/);
+  return (m ? m[1] : from).trim();
+}
+
+/** A display name safe to sit in a From header — strip quote/angle/CR-LF chars that could
+ *  break the header or inject a second address, cap the length, fall back if it empties out. */
+function sanitizeFromName(name: string): string {
+  return String(name).replace(/["<>\r\n]/g, "").trim().slice(0, 78) || "Contractor North";
+}
+
+/**
+ * Build the From header for an org's outbound mail. `fromName` (the sending org's business
+ * name) becomes the visible sender over the SAME verified address from `base` (EMAIL_FROM) —
+ * so each tenant's mail reads as their own business, while DKIM alignment / deliverability
+ * (which key off the address's domain, not the display name) stay intact. No `fromName` →
+ * `base` verbatim. Exported for testing the header-injection sanitization.
+ */
+export function composeFrom(base: string, fromName?: string | null): string {
+  if (!fromName) return base;
+  return `"${sanitizeFromName(fromName)}" <${addressOf(base)}>`;
+}
+
 export async function sendEmail(input: {
   to: string;
   subject: string;
   html: string;
   replyTo?: string;
   bcc?: string | string[];
+  /** The SENDING ORG's name. When set, it becomes the visible sender ("Tahoe Deck <…>") so
+   *  each tenant's mail is branded as THEIR business, not the one platform default. Only the
+   *  display name changes — the verified sending ADDRESS (and therefore DKIM alignment /
+   *  deliverability) is untouched. Absent → the raw EMAIL_FROM, verbatim. */
+  fromName?: string;
 }): Promise<{ ok: boolean; error?: string }> {
   const key = process.env.RESEND_API_KEY;
-  const from = process.env.EMAIL_FROM || "Contractor North <onboarding@resend.dev>";
+  const base = process.env.EMAIL_FROM || "Contractor North <onboarding@resend.dev>";
+  const from = composeFrom(base, input.fromName);
   if (!key) {
     console.log(`[email] (not configured) would send "${input.subject}" to ${input.to}`);
     return { ok: false, error: "Email isn't set up yet. Add RESEND_API_KEY to enable it." };

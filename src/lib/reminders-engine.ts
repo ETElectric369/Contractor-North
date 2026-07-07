@@ -91,6 +91,7 @@ export async function sendDueReminders(supabase: any): Promise<Counts> {
         const r = await sendEmail({
           to: cust.email,
           subject: `Payment reminder: Invoice ${inv.invoice_number} from ${brand.name}`,
+          fromName: brand.name,
           html,
           replyTo: brand.email ?? undefined,
         });
@@ -123,6 +124,7 @@ export async function sendDueReminders(supabase: any): Promise<Counts> {
         const r = await sendEmail({
           to: cust.email,
           subject: `Following up on your quote from ${brand.name}`,
+          fromName: brand.name,
           html,
           replyTo: brand.email ?? undefined,
         });
@@ -155,6 +157,7 @@ export async function sendDueReminders(supabase: any): Promise<Counts> {
         const r = await sendEmail({
           to: cust.email,
           subject: `Reminder: your upcoming appointment with ${brand.name}`,
+          fromName: brand.name,
           html,
           replyTo: brand.email ?? undefined,
         });
