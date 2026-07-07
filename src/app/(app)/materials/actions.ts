@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { getOrgSettings } from "@/lib/org-settings";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { visibleJobIdOrNull } from "@/lib/job-visibility";
 
@@ -259,6 +260,37 @@ export async function createMaterialListFromQuote(quoteId: string): Promise<Resu
     est_cost: it.unit_price != null ? Number(it.unit_price) : null,
     sort_order: it.sort_order ?? idx,
   }));
+
+  // Catalog orgs (Tahoe Deck): the granular MATERIAL kits (Framing, Hardware, Decking…) are
+  // the POST-ACCEPTANCE purchasing breakdown — deliberately kept OFF the estimate, seeded onto
+  // the job's materials list here so the crew has the buy-list grouped by scope. Prefixed with
+  // the kit name (material_list_items has no group column). Only on first creation (idempotent
+  // return above), so re-running never duplicates the groups. RLS scopes kits to this org.
+  const { data: orgRow } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+  if (getOrgSettings((orgRow as any)?.settings).estimating_mode === "catalog") {
+    const { data: matKits } = await supabase
+      .from("kits")
+      .select("name, kit_items(description, quantity, unit, unit_price, sort_order)")
+      .not("name", "in", '("Decks","Remodels")')
+      .order("name");
+    let so = rows.length;
+    for (const k of (matKits ?? []) as any[]) {
+      const kitItems = [...(k.kit_items ?? [])].sort((a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+      for (const it of kitItems) {
+        rows.push({
+          list_id: list.id,
+          description: `${k.name} — ${it.description}`,
+          part_number: null,
+          quantity: Number(it.quantity) || 1,
+          unit: it.unit || "ea",
+          vendor: null,
+          est_cost: it.unit_price != null ? Number(it.unit_price) : null,
+          sort_order: so++,
+        });
+      }
+    }
+  }
+
   const { error: itemsErr } = await supabase.from("material_list_items").insert(rows);
   if (itemsErr) return { ok: false, error: itemsErr.message };
 
