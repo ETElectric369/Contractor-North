@@ -70,8 +70,8 @@ export function ConvertMenu({
         </Button>
         {menuOpen && (
           <>
-            <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-            <div className="absolute right-0 top-full z-20 mt-1 w-40 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+            <div className="fixed inset-0 z-[75]" onClick={() => setMenuOpen(false)} />
+            <div className="absolute right-0 top-full z-[80] mt-1 w-40 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
               {(["customer", "quote", "estimate", "job"] as Target[]).map((t) => (
                 <button
                   key={t}
