@@ -3,6 +3,7 @@ import { ArrowLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { getOrgSettings } from "@/lib/org-settings";
+import { buildDeckRates, DECK_ESTIMATE_CODES } from "@/lib/estimate/deck";
 import { QuoteBuilder } from "./quote-builder";
 
 export const dynamic = "force-dynamic";
@@ -40,6 +41,15 @@ export default async function NewQuotePage({
   const estimateKits = catalogMode
     ? (kits ?? []).filter((k: any) => k.name === "Decks" || k.name === "Remodels")
     : (kits ?? []);
+  // Deck generator rates (catalog orgs) — the deck price codes → sell price, from the same
+  // price list, so the on-page generator matches the public configurator to the penny.
+  const deckRates = catalogMode
+    ? buildDeckRates(
+        (priceItems ?? [])
+          .filter((p: any) => p.code && (DECK_ESTIMATE_CODES as readonly string[]).includes(p.code))
+          .map((p: any) => ({ code: p.code, buy_price: p.buy_price, markup_pct: p.markup_pct })),
+      )
+    : undefined;
 
   return (
     <div>
@@ -66,6 +76,8 @@ export default async function NewQuotePage({
         taxRates={(taxRates ?? []) as any}
         kits={estimateKits as any}
         quoteExpiryDays={expiryDays}
+        deckRates={deckRates}
+        showDeckGenerator={catalogMode}
       />
     </div>
   );

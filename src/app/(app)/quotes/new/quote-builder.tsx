@@ -15,6 +15,7 @@ import {
   generateQuoteDraft,
   type DraftLineItem,
 } from "../actions";
+import { DeckGeneratorPanel } from "./deck-generator-panel";
 
 interface CustomerOption {
   id: string;
@@ -60,6 +61,8 @@ export function QuoteBuilder({
   taxRates = [],
   kits = [],
   quoteExpiryDays = 30,
+  deckRates,
+  showDeckGenerator = false,
 }: {
   customers: CustomerOption[];
   preselected?: string;
@@ -69,6 +72,9 @@ export function QuoteBuilder({
   taxRates?: TaxRateLite[];
   kits?: KitLite[];
   quoteExpiryDays?: number;
+  /** Deck price codes → sell price (catalog orgs) — feeds the on-page deck generator. */
+  deckRates?: Record<string, number>;
+  showDeckGenerator?: boolean;
 }) {
   const router = useRouter();
   const defaultRate = taxRates.find((t) => t.is_default);
@@ -129,6 +135,13 @@ export function QuoteBuilder({
       group: k.name, // tag each line with its group so the estimate reads as collapsible groups
     }));
     setItems([...real, ...kitLines]);
+  }
+
+  // The deck generator drops its computed lines in (tagged group "Decks"), keeping any
+  // real lines already entered — same append rule as addKit.
+  function addGeneratedLines(lines: DraftLineItem[]) {
+    const real = items.filter((i) => i.description.trim());
+    setItems([...real, ...lines]);
   }
 
   const [scope, setScope] = useState("");
@@ -267,6 +280,11 @@ export function QuoteBuilder({
             </Button>
           </CardContent>
         </Card>
+
+        {/* Deck generator (catalog orgs) — dimensions in, priced deck lines dropped in. */}
+        {showDeckGenerator && deckRates && (
+          <DeckGeneratorPanel rates={deckRates} onDrop={addGeneratedLines} />
+        )}
 
         {/* Line items */}
         <Card>
