@@ -361,6 +361,53 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
     return new Response("No messages", { status: 400 });
   }
 
+  // CROSS-SESSION MEMORY: Nort persists every turn to conversations/messages, but until now it never
+  // read them BACK — so it had no recall of yesterday, or even of earlier today after a page reload
+  // ("Nort doesn't have any memory from yesterday or just now"). Fold a compact, recency-ordered
+  // digest of the recent transcript into the prompt. Deduped against the LIVE thread (body.messages)
+  // so we never echo the current session verbatim. Best-effort; RLS (messages_owner via the
+  // conversations join) scopes it to this user, so no cross-tenant/other-user leak is possible.
+  try {
+    const { data: convos } = await supabase
+      .from("conversations")
+      .select("id")
+      .order("created_at", { ascending: false })
+      .limit(6);
+    const convoIds = (convos ?? []).map((c: { id: string }) => c.id);
+    if (convoIds.length) {
+      const { data: hist } = await supabase
+        .from("messages")
+        .select("role, content, created_at")
+        .in("conversation_id", convoIds)
+        .order("created_at", { ascending: false }) // newest first
+        .limit(40);
+      const key = (role: string, content: string) => `${role}:${content.trim().slice(0, 200)}`;
+      const live = new Set(messages.map((m) => key(m.role, m.content)));
+      let budget = 3000; // ~750 tokens of history is plenty for continuity without bloating the prompt
+      const kept: string[] = [];
+      for (const m of (hist ?? []) as { role: string; content: string; created_at: string }[]) {
+        if (!m.content?.trim() || live.has(key(m.role, m.content))) continue;
+        const day = new Date(m.created_at).toLocaleDateString();
+        const who = m.role === "user" ? "Them" : "You";
+        const text = String(m.content).replace(/\s+/g, " ").trim().slice(0, 300);
+        const line = `[${day}] ${who}: ${text}`;
+        if (budget - line.length < 0) break;
+        budget -= line.length;
+        kept.push(line); // still newest-first
+      }
+      kept.reverse(); // chronological, oldest → newest
+      if (kept.length) {
+        systemPrompt +=
+          "\n\nRECENT HISTORY WITH THIS PERSON — earlier chats (oldest to newest), for CONTINUITY only. " +
+          "Lean on it when they say 'yesterday' / 'earlier' / 'like we talked about', so you actually " +
+          "remember what was discussed and what you already saved. Don't recite it back unprompted:\n" +
+          kept.join("\n");
+      }
+    }
+  } catch {
+    /* history recall is best-effort — never blocks the reply */
+  }
+
   let client;
   try {
     client = getAnthropic();
