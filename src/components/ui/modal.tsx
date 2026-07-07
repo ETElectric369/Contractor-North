@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { X } from "lucide-react";
 import { Button } from "./button";
 import { lockBodyForModal, unlockBodyForModal } from "./modal-lock";
@@ -40,6 +40,12 @@ export function Modal({
   // API DOES track the keyboard — cap the panel to it so the footer always stays above
   // it. Undefined (no visualViewport) → fall back to the max-h-[100dvh] class.
   const [kbMaxH, setKbMaxH] = useState<string | undefined>(undefined);
+  // Anchor the overlay to the VISUAL viewport, not the layout viewport. On iOS the keyboard pans
+  // the visual viewport DOWN (offsetTop grows) to lift a focused bottom field above the keyboard —
+  // which shoves a `fixed inset-0` overlay off the top of the screen (the "address field pushes the
+  // whole form off-screen" bug). Tracking vv geometry keeps the overlay pinned inside the visible
+  // slice. Undefined off-iOS (no visualViewport) → the overlay falls back to `fixed inset-0`.
+  const [vvRect, setVvRect] = useState<CSSProperties | undefined>(undefined);
   const requestClose = () => {
     if (dirty && !confirmDiscard) {
       setConfirmDiscard(true);
@@ -78,18 +84,39 @@ export function Modal({
     };
   }, [open]);
 
-  // Track the visual viewport (which shrinks under the keyboard) and cap the panel
-  // to it, so the pinned footer sits ABOVE the keyboard instead of under it.
+  // Follow the visual viewport (position the overlay) AND cap the panel to it. On iOS the keyboard
+  // pans the visual viewport down rather than shrinking the layout viewport, so a `fixed inset-0`
+  // overlay drifts off the top when a bottom field is focused. Update on BOTH resize AND scroll —
+  // the pan arrives as scroll events, not just resize — rAF-throttled to avoid keyboard-animation
+  // thrash. The panel cap (kbMaxH) still keeps the footer above the keyboard.
   useEffect(() => {
     if (!open || typeof window === "undefined" || !window.visualViewport) return;
     const vv = window.visualViewport;
-    const update = () => setKbMaxH(`${Math.max(200, Math.round(vv.height - 24))}px`);
+    let raf = 0;
+    const update = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        // Keyboard closed → viewport is full-height again; clamp any residual offset (an iOS
+        // WebKit quirk can leave offsetTop stuck briefly after the keyboard dismisses).
+        const kbClosed = vv.height >= window.innerHeight - 1;
+        setVvRect({
+          position: "fixed",
+          top: kbClosed ? 0 : vv.offsetTop,
+          left: kbClosed ? 0 : vv.offsetLeft,
+          width: vv.width,
+          height: vv.height,
+        });
+        setKbMaxH(`${Math.max(200, Math.round(vv.height - 24))}px`);
+      });
+    };
     update();
     vv.addEventListener("resize", update);
     vv.addEventListener("scroll", update);
     return () => {
+      cancelAnimationFrame(raf);
       vv.removeEventListener("resize", update);
       vv.removeEventListener("scroll", update);
+      setVvRect(undefined);
       setKbMaxH(undefined);
     };
   }, [open]);
@@ -106,7 +133,10 @@ export function Modal({
     // off the top with no way back to the address/time fields. Now the overlay itself scrolls, so
     // the top is always reachable. In the normal case the panel fits, nothing scrolls here, and
     // the header/footer stay pinned via the panel's own flex layout.
-    <div className="fixed inset-0 z-[120] overflow-y-auto overscroll-contain">
+    <div
+      style={vvRect}
+      className={`z-[120] overflow-y-auto overscroll-contain ${vvRect ? "" : "fixed inset-0"}`}
+    >
       <div className="fixed inset-0 bg-slate-900/40" />
       <div onClick={requestClose} className="relative flex min-h-full items-start justify-center p-3 sm:items-center">
         {/* Cap the panel to the viewport: the HEADER and FOOTER are fixed (shrink-0)
