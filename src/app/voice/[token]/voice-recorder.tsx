@@ -278,11 +278,20 @@ export function VoiceRecorder({
             </h1>
             <div className="space-y-4 text-[15px] leading-relaxed text-slate-600">
               <p>
-                {/* ✍️ ERIK — replace this paragraph with your real story: why Bryan, what Iboga
-                    and his work mean to you, and why you'd be honored to have his voice. */}
-                My name is Erik. I&apos;m building a helper called <strong>Nort</strong> — the voice inside an app that
-                supports tradespeople through their day. I&apos;m asking you because of who you are and the work
-                you&apos;ve done; it would mean the world to me to have your voice be the one that speaks.
+                My name is Erik Taylor — an electrical contractor in the Reno/Tahoe area, and a
+                survivor. In May of 2025, on a sure path to the grave, my family stepped in and sent
+                me to sit through an Iboga ceremony. It saved my life.
+              </p>
+              <p>
+                You&apos;re my hero. You&apos;re doing God&apos;s work, and it&apos;s a joy to listen to you speak. I&apos;m
+                building an app called Contractor North, with an assistant named <strong>Nort</strong> — my North
+                Star, my guiding light — and I would be honored beyond words for your voice to be that
+                guiding light for contractors everywhere.
+              </p>
+              <p>
+                We&apos;re the people who build everything for everyone — the ones listening to you while we
+                drive endlessly — and we carry a lot of dark weight. I couldn&apos;t think of a better voice,
+                or a better chance to help others heal the way I was helped. Thank you for being here.
               </p>
               <p>
                 Here&apos;s all it takes: read a few short things out loud, then just talk naturally for a little while.
