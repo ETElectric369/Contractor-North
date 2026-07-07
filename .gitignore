@@ -47,3 +47,5 @@ yarn-error.log*
 # remote-control automation state + logs (local only)
 /automation/
 /Contractor_North_Subscriptions.xlsx
+/Tahoe_Deck_SEO_Source_of_Truth.pdf
+/ET_Electric_SEO_Source_of_Truth.pdf
