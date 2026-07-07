@@ -3,18 +3,22 @@ import {
   Zap,
   Sparkles,
   Users,
-  FileText,
   CalendarDays,
   Clock,
   ShoppingCart,
   Receipt,
   ArrowRight,
   Check,
+  Bot,
+  TrendingUp,
+  Globe,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { Button } from "@/components/ui/button";
 
 export const dynamic = "force-dynamic";
+
+const TRADES = "Electricians · Deck builders · Remodelers · Plumbers · HVAC · GCs — every trade";
 
 async function getSignedIn(): Promise<boolean> {
   try {
@@ -30,12 +34,15 @@ async function getSignedIn(): Promise<boolean> {
 }
 
 const FEATURES = [
-  { icon: Sparkles, title: "AI quoting", desc: "Describe the work; get a priced, line-itemed estimate in seconds." },
+  { icon: Bot, title: "Nort, your AI assistant", desc: "Ask for anything — draft a quote, who's on the clock, this month's profit." },
+  { icon: Sparkles, title: "AI estimating", desc: "Describe the work; get a priced, line-itemed quote in minutes." },
   { icon: Users, title: "CRM", desc: "Leads, customers, and every quote and job in one place." },
-  { icon: CalendarDays, title: "Scheduling", desc: "Dispatch jobs and work orders with a clear daily agenda." },
-  { icon: Clock, title: "Timeclock + GPS", desc: "Clock in/out with location, lunch, job codes, and voice notes." },
-  { icon: ShoppingCart, title: "Purchasing", desc: "Turn material take-offs into CED purchase orders and receive them." },
-  { icon: Receipt, title: "Billing", desc: "Invoice from a quote, record payments, track what's outstanding." },
+  { icon: CalendarDays, title: "Scheduling", desc: "Dispatch jobs and crews with a clear daily agenda." },
+  { icon: Clock, title: "Timeclock + GPS", desc: "Clock in/out with location, lunch, job codes, and mileage." },
+  { icon: ShoppingCart, title: "Materials & purchasing", desc: "Turn take-offs into purchase orders and receive them." },
+  { icon: Receipt, title: "Billing & payments", desc: "Invoice from a quote, take card or ACH, track what's owed." },
+  { icon: TrendingUp, title: "Job profitability", desc: "Budget vs. actual on every job — know your margin as you go." },
+  { icon: Globe, title: "Your own website", desc: "A polished site with an instant-estimate button, hosted for you." },
 ];
 
 export default async function Home() {
@@ -77,14 +84,18 @@ export default async function Home() {
       <section className="relative overflow-hidden bg-gradient-to-br from-brand to-brand-dark">
         <div className="mx-auto max-w-6xl px-4 py-20 text-center sm:px-6 sm:py-28">
           <div className="mx-auto mb-6 inline-flex items-center gap-2 rounded-full bg-white/15 px-4 py-1.5 text-sm font-medium text-white backdrop-blur">
-            <Sparkles className="h-4 w-4" /> AI-powered field service
+            <Sparkles className="h-4 w-4" /> One platform for the trades
           </div>
           <h1 className="mx-auto max-w-3xl text-4xl font-bold tracking-tight text-white sm:text-5xl">
-            Run your electrical business from one place.
+            Run your entire contractor business from one place.
           </h1>
           <p className="mx-auto mt-5 max-w-2xl text-lg text-white/85">
-            Quotes, CRM, scheduling, work orders, timeclock, purchasing, and
-            billing — built for electrical contractors, powered by AI.
+            Quotes, scheduling, timeclock, purchasing, and billing in one workflow —
+            with an AI assistant that handles the busywork and your own website that
+            brings in the leads.
+          </p>
+          <p className="mx-auto mt-4 max-w-2xl text-sm font-medium uppercase tracking-wider text-white/60">
+            {TRADES}
           </p>
           <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Link href={signedIn ? "/planner" : "/login?mode=signup"}>
@@ -145,7 +156,7 @@ export default async function Home() {
               Ready to get organized?
             </h2>
             <ul className="mt-3 space-y-1.5 text-sm text-slate-600">
-              {["No more paper timecards", "Quotes out the same day", "Know what's owed at a glance"].map(
+              {["Quotes out the same day", "Know your margin on every job", "A website that brings in leads", "No more paper timecards"].map(
                 (t) => (
                   <li key={t} className="flex items-center gap-2">
                     <Check className="h-4 w-4 text-brand" /> {t}
