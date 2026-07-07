@@ -100,15 +100,24 @@ export function Modal({
     size === "sm" ? "max-w-sm" : size === "md" ? "max-w-md" : size === "xl" ? "max-w-2xl" : "max-w-lg";
 
   return (
-    <div className="fixed inset-0 z-[120] flex items-start justify-center p-3 sm:items-center">
-      <div className="absolute inset-0 bg-slate-900/40" onClick={requestClose} />
-      {/* Cap the panel to the viewport: the HEADER and FOOTER are fixed (shrink-0)
-          and only the middle BODY scrolls, so the action row is always reachable
-          on a short phone (esp. with the keyboard up). */}
-      <div
-        style={kbMaxH ? { maxHeight: kbMaxH } : undefined}
-        className={`relative z-10 flex max-h-[calc(100dvh-1.5rem)] w-full ${maxW} flex-col rounded-2xl bg-white shadow-xl`}
-      >
+    // Scroll the WHOLE overlay so a panel taller than the *visible* viewport can never strand its
+    // top off-screen: on iOS the keyboard shrinks the visual viewport and scrolls it, and some
+    // installed PWAs miscompute 100dvh — either way a tall form (e.g. New Appointment) could run
+    // off the top with no way back to the address/time fields. Now the overlay itself scrolls, so
+    // the top is always reachable. In the normal case the panel fits, nothing scrolls here, and
+    // the header/footer stay pinned via the panel's own flex layout.
+    <div className="fixed inset-0 z-[120] overflow-y-auto overscroll-contain">
+      <div className="fixed inset-0 bg-slate-900/40" />
+      <div onClick={requestClose} className="relative flex min-h-full items-start justify-center p-3 sm:items-center">
+        {/* Cap the panel to the viewport: the HEADER and FOOTER are fixed (shrink-0)
+            and only the middle BODY scrolls, so the action row is always reachable
+            on a short phone (esp. with the keyboard up). stopPropagation so a tap inside
+            the panel never bubbles to the backdrop-close on the wrapper. */}
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={kbMaxH ? { maxHeight: kbMaxH } : undefined}
+          className={`relative z-10 flex max-h-[calc(100dvh-1.5rem)] w-full ${maxW} flex-col rounded-2xl bg-white shadow-xl`}
+        >
         <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-6 py-4">
           <h2 className="text-base font-semibold text-slate-900">{title}</h2>
           <button
@@ -131,6 +140,7 @@ export function Modal({
             {footer}
           </div>
         )}
+        </div>
       </div>
     </div>
   );

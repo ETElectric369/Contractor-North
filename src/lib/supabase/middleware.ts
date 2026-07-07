@@ -13,6 +13,7 @@ const PUBLIC_PATHS = [
   "/estimate/",
   "/site/",
   "/voice/", // authorized voice-donation portal — the invitee has no account (token-gated)
+
   "/pick/",
   "/api/places",
   "/api/pay",
