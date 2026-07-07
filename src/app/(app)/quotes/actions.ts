@@ -449,6 +449,9 @@ export async function saveQuote(input: SaveQuoteInput) {
       quantity: it.quantity,
       unit: it.unit || "ea",
       unit_price: it.unit_price,
+      // The scope group (Framing, Decking, Electrical…) — persists the grouped-view groups
+      // so they survive a save/reload, and forms the estimate's per-category budget buckets.
+      category: it.group ?? null,
       sort_order: idx,
     }));
     const { error: itemsErr } = await supabase
@@ -487,7 +490,7 @@ export async function duplicateQuote(
 
   const { data: items } = await supabase
     .from("quote_line_items")
-    .select("description, quantity, unit, unit_price")
+    .select("description, quantity, unit, unit_price, category")
     .eq("quote_id", id)
     .order("sort_order");
 
@@ -503,6 +506,7 @@ export async function duplicateQuote(
       quantity: Number(it.quantity) || 1,
       unit: it.unit || "ea",
       unit_price: Number(it.unit_price) || 0,
+      group: it.category ?? undefined, // keep the scope group on a duplicate
     })),
   });
   if (!res.ok) return { ok: false, error: res.error };
