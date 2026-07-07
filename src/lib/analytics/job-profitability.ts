@@ -167,6 +167,76 @@ export async function getJobBudgetByCategory(supabase: any, jobId: string): Prom
     .sort((a, b) => b.budget - a.budget);
 }
 
+export type ActualCategory = { category: string; actual: number };
+
+/** ACTUAL costs by scope category — bills grouped by scope_category (0105), plus purchase
+ *  orders folded into "Uncategorized" (POs carry no scope). Highest first. The scope strings
+ *  match the estimate's (quote_line_items.category), so this joins to getJobBudgetByCategory. */
+export async function getJobActualByCategory(supabase: any, jobId: string): Promise<ActualCategory[]> {
+  const [{ data: bills }, { data: pos }] = await Promise.all([
+    supabase.from("bills").select("amount, scope_category").eq("job_id", jobId),
+    supabase.from("purchase_orders").select("total").eq("job_id", jobId),
+  ]);
+  const map = new Map<string, number>();
+  for (const b of (bills ?? []) as any[]) {
+    const cat = String(b.scope_category ?? "").trim() || "Uncategorized";
+    map.set(cat, (map.get(cat) ?? 0) + (Number(b.amount) || 0));
+  }
+  const poTotal = ((pos ?? []) as any[]).reduce((s, p) => s + (Number(p.total) || 0), 0);
+  if (poTotal) map.set("Uncategorized", (map.get("Uncategorized") ?? 0) + poTotal);
+  return [...map.entries()]
+    .map(([category, actual]) => ({ category, actual: Math.round(actual * 100) / 100 }))
+    .sort((a, b) => b.actual - a.actual);
+}
+
+export type BudgetVsActualRow = {
+  category: string;
+  budget: number;
+  actual: number;
+  remaining: number; // budget − actual
+  burnPct: number | null; // actual / budget (null when no budget for this scope)
+  overBudget: boolean;
+};
+
+/** PURE: merge budget-by-scope + actual-by-scope into per-scope variance rows (union of keys). */
+export function mergeBudgetActual(budget: BudgetCategory[], actual: ActualCategory[]): BudgetVsActualRow[] {
+  const b = new Map(budget.map((x) => [x.category, x.budget]));
+  const a = new Map(actual.map((x) => [x.category, x.actual]));
+  const cats = [...new Set([...b.keys(), ...a.keys()])];
+  return cats
+    .map((category) => {
+      const bud = b.get(category) ?? 0;
+      const act = a.get(category) ?? 0;
+      return {
+        category,
+        budget: bud,
+        actual: act,
+        remaining: Math.round((bud - act) * 100) / 100,
+        burnPct: bud > 0 ? Math.round((act / bud) * 100) : null,
+        overBudget: bud > 0 && act > bud,
+      };
+    })
+    .sort((x, y) => y.budget - x.budget || y.actual - x.actual);
+}
+
+/** One job's per-scope budget-vs-actual: the estimate budget by scope vs actual costs by
+ *  scope. This is what lets Nort say "framing specifically is 83% over" — the masked overrun. */
+export async function getJobBudgetVsActual(supabase: any, jobId: string): Promise<BudgetVsActualRow[]> {
+  const [budget, actual] = await Promise.all([
+    getJobBudgetByCategory(supabase, jobId),
+    getJobActualByCategory(supabase, jobId),
+  ]);
+  return mergeBudgetActual(budget, actual);
+}
+
+/** The distinct estimate SCOPE strings for a job (minus "Uncategorized") — the allowed set the
+ *  receipt AI must pick from so a tagged cost joins the budget. Empty when the job has no
+ *  scoped estimate (then costs stay Uncategorized). */
+export async function listJobScopes(supabase: any, jobId: string): Promise<string[]> {
+  const budget = await getJobBudgetByCategory(supabase, jobId);
+  return budget.map((b) => b.category).filter((c) => c && c !== "Uncategorized");
+}
+
 /** Ranked job profitability across the org. sort "profit" = most profitable first (default);
  *  "loss" = biggest loss first. Optional status filter (e.g. active jobs only). */
 export async function listJobProfitability(

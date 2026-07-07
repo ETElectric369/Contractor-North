@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { requireStaff } from "@/lib/staff-guard";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
+import { listJobScopes } from "@/lib/analytics/job-profitability";
 import { OVERHEAD_CATEGORIES } from "./constants";
 
 export type Result = { ok: boolean; error?: string };
@@ -79,6 +80,7 @@ async function insertItemizedBill(
     amount: number | null;
     bill_date: string | null;
     category: string;
+    scope_category?: string | null; // the JOB SCOPE (Framing, Decking…) for budget-vs-actual
     notes: string;
     created_by: string;
   },
@@ -438,6 +440,14 @@ export async function billJobReceipt(documentId: string): Promise<{
     ? { type: "image", source: { type: "base64", media_type: mime, data: base64 } }
     : { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } };
 
+  // Budget-vs-actual: the job's estimate scopes. The receipt AI tags this whole cost with the
+  // best-fit scope so ACTUAL costs join the estimate BUDGET by scope (the per-scope variance
+  // Nort reads). Empty = the job has no scoped estimate → the cost stays Uncategorized.
+  const jobScopes = await listJobScopes(supabase, doc.job_id);
+  const scopeSchemaLine = jobScopes.length
+    ? `\n  "scope_category": one of ${jobScopes.map((s) => `"${s.replace(/"/g, "")}"`).join(" | ")} | "Uncategorized" — the JOB SCOPE this whole receipt belongs to (the single best fit for what was bought; "Uncategorized" if unclear),`
+    : "";
+
   let parsed: any;
   try {
     const client = getAnthropic();
@@ -451,7 +461,7 @@ Respond with ONLY a JSON object (no prose):
   "vendor": store/supplier name or null,
   "amount": grand total in dollars as a number (the amount actually paid), or null only if you truly cannot read it,
   "date": "YYYY-MM-DD" printed on the receipt, or null,
-  "line_items": [{"description": item name, "quantity": number, "unit_price": price each (number), "amount": line total (number), "category": one of "Materials" | "Electrical" | "Tools" | "Fasteners" | "Lumber" | "Plumbing" | "Paint" | "Rental" | "Tax" | "Other"}],
+  "line_items": [{"description": item name, "quantity": number, "unit_price": price each (number), "amount": line total (number), "category": one of "Materials" | "Electrical" | "Tools" | "Fasteners" | "Lumber" | "Plumbing" | "Paint" | "Rental" | "Tax" | "Other"}],${scopeSchemaLine}
   "confidence": "low" | "medium" | "high"
 }
 Transcribe EVERY readable line, including tax as its own line. Use [] for line_items only if nothing is legible.
@@ -474,6 +484,11 @@ In every "description", write inches as the word in (e.g. "6 in EMT", not 6") an
   const lines = cleanLines(parsed.line_items);
   const vendor = parsed.vendor ? String(parsed.vendor).slice(0, 200) : doc.name || "Receipt";
   const confidence = ["low", "medium", "high"].includes(parsed.confidence) ? parsed.confidence : "medium";
+  // Trust the AI's scope only if it's one of THIS job's real scopes (never let it invent one);
+  // else leave null → Uncategorized. This is what makes budget and actual join by scope.
+  const allowedScopes = new Set([...jobScopes, "Uncategorized"]);
+  const scopeCategory =
+    jobScopes.length && allowedScopes.has(String(parsed.scope_category ?? "")) ? String(parsed.scope_category) : null;
 
   // Fall back to the line-item sum if Claude couldn't read a printed grand total.
   const lineSum = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
@@ -493,6 +508,7 @@ In every "description", write inches as the word in (e.g. "6 in EMT", not 6") an
       amount,
       bill_date: itemDate,
       category: "Receipt",
+      scope_category: scopeCategory, // job scope for budget-vs-actual (null → Uncategorized)
       notes: `Receipt recorded as cost: ${doc.name}`,
       created_by: ctx.userId,
     },

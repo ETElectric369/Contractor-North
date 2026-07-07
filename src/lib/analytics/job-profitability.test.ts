@@ -1,5 +1,36 @@
 import { describe, it, expect } from "vitest";
-import { computeJobProfitRows, computeProfitByType, type JobProfitRow } from "@/lib/analytics/job-profitability";
+import { computeJobProfitRows, computeProfitByType, mergeBudgetActual, type JobProfitRow } from "@/lib/analytics/job-profitability";
+
+describe("mergeBudgetActual — per-scope budget vs actual", () => {
+  it("joins budget + actual by scope and flags over/under (the masked-overrun catch)", () => {
+    const rows = mergeBudgetActual(
+      [
+        { category: "Framing", budget: 26510 },
+        { category: "Decking", budget: 40350 },
+        { category: "Demo", budget: 10500 },
+      ],
+      [
+        { category: "Framing", actual: 48390 },
+        { category: "Demo", actual: 25600 },
+        // Decking not started → no actual row
+      ],
+    );
+    const framing = rows.find((r) => r.category === "Framing")!;
+    expect(framing.overBudget).toBe(true);
+    expect(framing.burnPct).toBe(183); // 48390/26510
+    expect(framing.remaining).toBe(26510 - 48390);
+    const decking = rows.find((r) => r.category === "Decking")!;
+    expect(decking.actual).toBe(0); // not started — the money hiding spot
+    expect(decking.overBudget).toBe(false);
+  });
+  it("actual-only scope (e.g. an unbudgeted 'Uncategorized' spend) surfaces with null burnPct", () => {
+    const rows = mergeBudgetActual([], [{ category: "Uncategorized", actual: 2286 }]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].budget).toBe(0);
+    expect(rows[0].burnPct).toBeNull();
+    expect(rows[0].overBudget).toBe(false);
+  });
+});
 
 const job = (id: string, status = "in_progress") => ({ id, job_number: `J-${id}`, name: `Job ${id}`, status });
 // a closed entry fully allocated to `jobId` for `hours` at pay rate `rate`
