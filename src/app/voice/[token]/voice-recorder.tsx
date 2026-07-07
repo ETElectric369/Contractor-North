@@ -1,20 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { Mic, Square, Play, RotateCcw, Check, ArrowRight, Heart, ShieldCheck } from "lucide-react";
+import { Mic, Square, RotateCcw, Check, ArrowRight, Heart, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { extForMime, type VoicePrompt } from "@/lib/voice-script";
+import { extForMime, FREE_RECORD, TARGET_SECONDS, type VoicePrompt } from "@/lib/voice-script";
 import { saveConsent, uploadClip, completeRecording } from "./actions";
 
-type Step = "welcome" | "consent" | "record" | "done";
+type Step = "welcome" | "consent" | "record" | "free" | "done";
 const BRAND = "#1b9488";
 
-const CANDIDATE_MIMES = [
-  "audio/webm;codecs=opus",
-  "audio/webm",
-  "audio/mp4",
-  "audio/ogg;codecs=opus",
-];
+const CANDIDATE_MIMES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
 function pickMime(): string {
   if (typeof MediaRecorder === "undefined") return "";
   return CANDIDATE_MIMES.find((m) => {
@@ -57,6 +52,8 @@ export function VoiceRecorder({
   const [seconds, setSeconds] = useState(0);
   const [clipUrl, setClipUrl] = useState<string | null>(null);
   const [doneKeys, setDoneKeys] = useState<Set<string>>(new Set());
+  const [extraCount, setExtraCount] = useState(0);
+  const [totalSeconds, setTotalSeconds] = useState(0);
 
   const streamRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -66,7 +63,6 @@ export function VoiceRecorder({
 
   const prompt = prompts[idx];
 
-  // Cleanup on unmount: stop mic + timer + free the preview URL.
   useEffect(() => {
     return () => {
       streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -147,61 +143,122 @@ export function VoiceRecorder({
     }
   }
 
-  function reRecord() {
+  function resetTake() {
     if (clipUrl) URL.revokeObjectURL(clipUrl);
     setClipUrl(null);
     blobRef.current = null;
     setPhase("idle");
   }
 
-  function advance(markDone: boolean) {
-    const next = new Set(doneKeys);
-    if (markDone) next.add(prompt.key);
-    setDoneKeys(next);
-    if (clipUrl) URL.revokeObjectURL(clipUrl);
-    setClipUrl(null);
-    blobRef.current = null;
-    setPhase("idle");
-    if (idx < prompts.length - 1) {
-      setIdx(idx + 1);
-    } else {
-      finish(next.size);
-    }
-  }
-
-  function useClip() {
+  // Upload the current take under `key`, add its length to the running total, then run `then`.
+  function uploadThen(key: string, then: () => void) {
     const blob = blobRef.current;
     if (!blob) return;
     setError(null);
+    const took = seconds;
     start(async () => {
       const fd = new FormData();
       fd.append("token", token);
-      fd.append("promptKey", prompt.key);
-      fd.append("file", blob, `${prompt.key}.${extForMime(blob.type)}`);
+      fd.append("promptKey", key);
+      fd.append("file", blob, `${key}.${extForMime(blob.type)}`);
       const res = await uploadClip(fd);
       if (!res.ok) {
         setError(res.error ?? "Upload failed — please try again.");
         return;
       }
-      advance(true);
+      setTotalSeconds((s) => s + took);
+      then();
     });
   }
 
-  function finish(count: number) {
+  function acceptFixed() {
+    uploadThen(prompt.key, () => advance(true));
+  }
+  function acceptFree() {
+    uploadThen(`extra-${extraCount + 1}`, () => {
+      setExtraCount((n) => n + 1);
+      resetTake();
+    });
+  }
+
+  function advance(markDone: boolean) {
+    if (markDone) setDoneKeys((prev) => new Set(prev).add(prompt.key));
+    resetTake();
+    if (idx < prompts.length - 1) setIdx(idx + 1);
+    else setStep("free"); // guided prompts done → open "keep going" step
+  }
+
+  function finish() {
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+    const count = doneKeys.size + extraCount;
     start(async () => {
       await completeRecording(token, count);
       setStep("done");
     });
   }
 
-  const mmss = `${String(Math.floor(seconds / 60)).padStart(1, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+  const mmss = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+  const totalMin = Math.round(totalSeconds / 60);
+  const pct = Math.min(100, Math.round((totalSeconds / TARGET_SECONDS) * 100));
+
+  // Shared record controls (idle → recording → review). `onAccept` differs per step.
+  function recorder(onAccept: () => void) {
+    return (
+      <div className="rounded-2xl border border-slate-200 bg-white p-6">
+        {phase === "idle" && (
+          <div className="flex flex-col items-center gap-3">
+            <button
+              onClick={startRecording}
+              disabled={pending}
+              className="flex h-20 w-20 items-center justify-center rounded-full text-white shadow-lg transition active:scale-95"
+              style={{ backgroundColor: BRAND }}
+              aria-label="Start recording"
+            >
+              <Mic className="h-8 w-8" />
+            </button>
+            <span className="text-sm text-slate-500">Tap to record</span>
+          </div>
+        )}
+        {phase === "recording" && (
+          <div className="flex flex-col items-center gap-3">
+            <button
+              onClick={stopRecording}
+              className="flex h-20 w-20 items-center justify-center rounded-full bg-red-500 text-white shadow-lg transition active:scale-95"
+              aria-label="Stop recording"
+            >
+              <Square className="h-7 w-7" fill="white" />
+            </button>
+            <span className="flex items-center gap-2 text-sm font-medium text-red-600">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-red-500" /> Recording… {mmss}
+            </span>
+          </div>
+        )}
+        {phase === "review" && clipUrl && (
+          <div className="space-y-4">
+            {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+            <audio src={clipUrl} controls className="w-full" />
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={resetTake} disabled={pending}>
+                <RotateCcw className="h-4 w-4" /> Re-record
+              </Button>
+              <Button onClick={onAccept} disabled={pending}>
+                {pending ? "Saving…" : (
+                  <>
+                    <Check className="h-4 w-4" /> Sounds good — save
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white text-slate-900">
       <div className="mx-auto max-w-2xl px-5 py-10 sm:py-14">
-        {/* header */}
         <div className="mb-8 flex items-center gap-2">
           <span className="flex h-9 w-9 items-center justify-center rounded-xl text-white" style={{ backgroundColor: BRAND }}>
             <Mic className="h-5 w-5" />
@@ -223,14 +280,13 @@ export function VoiceRecorder({
               <p>
                 {/* ✍️ ERIK — replace this paragraph with your real story: why Bryan, what Iboga
                     and his work mean to you, and why you'd be honored to have his voice. */}
-                My name is Erik. I'm building a helper called <strong>Nort</strong> — the voice inside an app that
-                supports tradespeople through their day. I'm asking you because of who you are and the work
-                you've done; it would mean the world to me to have your voice be the one that speaks.
+                My name is Erik. I&apos;m building a helper called <strong>Nort</strong> — the voice inside an app that
+                supports tradespeople through their day. I&apos;m asking you because of who you are and the work
+                you&apos;ve done; it would mean the world to me to have your voice be the one that speaks.
               </p>
               <p>
-                Here's all it takes: read a few short things out loud, say a couple of sentences in your own words,
-                and give your permission. About ten minutes. Everything stays private, and you can change your mind
-                at any time.
+                Here&apos;s all it takes: read a few short things out loud, then just talk naturally for a little while.
+                Everything stays private, and you can change your mind at any time.
               </p>
             </div>
             {purpose && <p className="text-sm text-slate-500">{purpose}</p>}
@@ -238,7 +294,7 @@ export function VoiceRecorder({
               <div className="mb-1 flex items-center gap-2 font-semibold text-slate-800">
                 <ShieldCheck className="h-4 w-4" style={{ color: BRAND }} /> A quick note on your choice
               </div>
-              You're in control. Nothing is used unless you agree on the next screen, and you can withdraw your
+              You&apos;re in control. Nothing is used unless you agree on the next screen, and you can withdraw your
               permission anytime just by reaching out.
             </div>
             <Button onClick={() => { setError(null); setStep("consent"); }} className="w-full sm:w-auto">
@@ -281,18 +337,16 @@ export function VoiceRecorder({
           </div>
         )}
 
-        {/* ── RECORD ── */}
+        {/* ── RECORD (guided prompts) ── */}
         {step === "record" && prompt && (
           <div className="space-y-6">
             <div className="flex items-center justify-between text-sm text-slate-500">
-              <span>
-                Step {idx + 1} of {prompts.length}
-              </span>
+              <span>Step {idx + 1} of {prompts.length}</span>
               <span className="flex items-center gap-1.5">
                 {prompts.map((p, i) => (
                   <span
                     key={p.key}
-                    className="h-1.5 w-6 rounded-full"
+                    className="h-1.5 w-5 rounded-full"
                     style={{ backgroundColor: doneKeys.has(p.key) ? BRAND : i === idx ? "#94a3b8" : "#e2e8f0" }}
                   />
                 ))}
@@ -313,61 +367,58 @@ export function VoiceRecorder({
               </blockquote>
             )}
 
-            {/* recorder controls */}
-            <div className="rounded-2xl border border-slate-200 bg-white p-6">
-              {phase === "idle" && (
-                <div className="flex flex-col items-center gap-3">
-                  <button
-                    onClick={startRecording}
-                    disabled={pending}
-                    className="flex h-20 w-20 items-center justify-center rounded-full text-white shadow-lg transition active:scale-95"
-                    style={{ backgroundColor: BRAND }}
-                    aria-label="Start recording"
-                  >
-                    <Mic className="h-8 w-8" />
-                  </button>
-                  <span className="text-sm text-slate-500">Tap to record</span>
-                </div>
-              )}
-
-              {phase === "recording" && (
-                <div className="flex flex-col items-center gap-3">
-                  <button
-                    onClick={stopRecording}
-                    className="flex h-20 w-20 items-center justify-center rounded-full bg-red-500 text-white shadow-lg transition active:scale-95"
-                    aria-label="Stop recording"
-                  >
-                    <Square className="h-7 w-7" fill="white" />
-                  </button>
-                  <span className="flex items-center gap-2 text-sm font-medium text-red-600">
-                    <span className="h-2 w-2 animate-pulse rounded-full bg-red-500" /> Recording… {mmss}
-                  </span>
-                </div>
-              )}
-
-              {phase === "review" && clipUrl && (
-                <div className="space-y-4">
-                  <audio src={clipUrl} controls className="w-full" />
-                  <div className="flex flex-wrap gap-2">
-                    <Button variant="outline" onClick={reRecord} disabled={pending}>
-                      <RotateCcw className="h-4 w-4" /> Re-record
-                    </Button>
-                    <Button onClick={useClip} disabled={pending}>
-                      {pending ? "Saving…" : (
-                        <>
-                          <Check className="h-4 w-4" /> Sounds good — next
-                        </>
-                      )}
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </div>
+            {recorder(acceptFixed)}
 
             {phase === "idle" && prompt.kind === "natural" && (
               <button onClick={() => advance(false)} disabled={pending} className="text-sm text-slate-400 underline hover:text-slate-600">
                 Skip this one
               </button>
+            )}
+          </div>
+        )}
+
+        {/* ── FREE (keep going as long as you like) ── */}
+        {step === "free" && (
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-xl font-bold tracking-tight">{FREE_RECORD.heading}</h2>
+              <p className="mt-2 text-[15px] leading-relaxed text-slate-600">{FREE_RECORD.blurb}</p>
+            </div>
+
+            {/* running total + gentle target */}
+            <div className="rounded-xl border border-slate-200 bg-white p-4">
+              <div className="flex items-center justify-between text-sm">
+                <span className="font-medium text-slate-700">
+                  Recorded so far: ~{totalMin} min{extraCount > 0 ? ` · ${extraCount} extra take${extraCount === 1 ? "" : "s"}` : ""}
+                </span>
+                <span className="text-slate-400">a good clone loves ~20 min</span>
+              </div>
+              <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: BRAND }} />
+              </div>
+            </div>
+
+            <ul className="flex flex-wrap gap-2">
+              {FREE_RECORD.ideas.map((idea) => (
+                <li key={idea} className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-500">
+                  {idea}
+                </li>
+              ))}
+            </ul>
+
+            {recorder(acceptFree)}
+
+            {phase === "idle" && (
+              <div className="flex items-center gap-3">
+                <Button onClick={finish} disabled={pending}>
+                  {pending ? "Finishing…" : (
+                    <>
+                      <Check className="h-4 w-4" /> I&apos;m all done
+                    </>
+                  )}
+                </Button>
+                <span className="text-sm text-slate-400">…or tap the mic to add another</span>
+              </div>
             )}
           </div>
         )}
@@ -380,10 +431,10 @@ export function VoiceRecorder({
             </div>
             <h1 className="text-2xl font-bold tracking-tight">Thank you, {firstName}.</h1>
             <p className="mx-auto max-w-md text-[15px] leading-relaxed text-slate-600">
-              That's everything. Your recordings and your permission are saved. It genuinely means a lot — your
+              That&apos;s everything. Your recordings and your permission are saved. It genuinely means a lot — your
               voice is going to help a lot of people get through their workday.
             </p>
-            <p className="text-sm text-slate-400">You can close this page. If you'd ever like to add more or change your mind, just reach out.</p>
+            <p className="text-sm text-slate-400">You can close this page. If you&apos;d ever like to add more or change your mind, just reach out.</p>
           </div>
         )}
       </div>

@@ -11,7 +11,9 @@ import { CONSENT_VERSION, VOICE_PROMPTS, extForMime } from "@/lib/voice-script";
 // write arbitrary objects. No secrets leave; nothing here can touch another org's data.
 
 const VALID_KEYS = new Set(VOICE_PROMPTS.map((p) => p.key));
+const EXTRA_KEY = /^extra-\d{1,3}$/; // free-record "keep going" takes
 const MAX_CLIP_BYTES = 50 * 1024 * 1024;
+const isValidKey = (k: string) => VALID_KEYS.has(k) || EXTRA_KEY.test(k);
 
 type Result = { ok: boolean; error?: string };
 
@@ -50,7 +52,7 @@ export async function uploadClip(formData: FormData): Promise<Result> {
   const file = formData.get("file");
   const invite = await resolveInvite(token);
   if (!invite) return { ok: false, error: "This link isn't valid." };
-  if (!VALID_KEYS.has(promptKey)) return { ok: false, error: "Unknown prompt." };
+  if (!isValidKey(promptKey)) return { ok: false, error: "Unknown prompt." };
   if (!(file instanceof File) || file.size === 0) return { ok: false, error: "No audio to upload." };
   if (file.size > MAX_CLIP_BYTES) return { ok: false, error: "That recording is too large — try a shorter take." };
   const mime = file.type || "audio/webm";

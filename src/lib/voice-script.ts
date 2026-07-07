@@ -6,6 +6,24 @@
 
 export const CONSENT_VERSION = "2026-07-07";
 
+/** A great Professional Voice Clone wants roughly this much clean speech. Used only as a friendly
+ *  progress nudge in the free-record step — never enforced. */
+export const TARGET_SECONDS = 20 * 60;
+
+/** Copy for the open-ended "keep going" step after the guided prompts. */
+export const FREE_RECORD = {
+  heading: "Want to keep going? (This is where it gets good.)",
+  blurb:
+    "You've done the essentials — that alone works. But the more natural talking you record, the more the voice sounds truly like you. Talk about anything: a memory, an opinion, something you care about. Record as many takes as you like, in your own time.",
+  ideas: [
+    "Something you've changed your mind about, and why.",
+    "Advice you'd give your younger self.",
+    "A person you're grateful for — tell us about them.",
+    "What you'd want the world to understand.",
+    "Just describe what's around you right now.",
+  ],
+};
+
 /** The written agreement the invitee signs (types their name to) before recording. Plain-English
  *  and deliberately clear on scope + revocability — informed consent, not fine print. */
 export const CONSENT_TEXT = [
@@ -89,6 +107,22 @@ export const VOICE_PROMPTS: VoicePrompt[] = [
     instruction:
       "Again, no script. Describe your morning — where you are, what you see, how the day feels. Wander wherever you like; the more relaxed and real, the better.",
     targetSeconds: 90,
+  },
+  {
+    key: "natural-advice",
+    kind: "natural",
+    label: "From the heart",
+    instruction:
+      "If you were speaking to one person at their lowest moment, what would you want them to hear? Say it to them, in your own voice.",
+    targetSeconds: 90,
+  },
+  {
+    key: "natural-teach",
+    kind: "natural",
+    label: "Teach us something",
+    instruction:
+      "Pick something you know well and care about, and explain it the way you'd tell a friend over coffee. Take a few minutes.",
+    targetSeconds: 120,
   },
 ];
 
