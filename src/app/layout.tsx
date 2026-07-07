@@ -10,7 +10,7 @@ export const metadata: Metadata = {
   applicationName: "Contractor North",
   title: "Contractor North",
   description:
-    "AI-powered field service platform for electrical contractors — CRM, quoting, scheduling, work orders, and timeclock.",
+    "AI-powered field service platform for contractors — CRM, quoting, scheduling, work orders, and timeclock.",
   appleWebApp: { capable: true, statusBarStyle: "default", title: "North" },
   icons: { apple: "/apple-touch-icon.png" },
   other: {

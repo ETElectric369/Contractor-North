@@ -4,7 +4,7 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "Contractor North",
     short_name: "North",
-    description: "AI-powered field service platform for electrical contractors.",
+    description: "AI-powered field service platform for contractors.",
     start_url: "/planner",
     scope: "/",
     display: "standalone",

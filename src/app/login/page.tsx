@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { login, signup, sendLoginCode, verifyLoginCode } from "./actions";
+import { APP_VERSION } from "@/lib/version";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { PasswordInput } from "@/components/ui/password-input";
@@ -32,7 +33,8 @@ export default async function LoginPage({
             <img src="/cn-logo.svg" alt="Contractor North" className="h-full w-full" />
           </div>
           <h1 className="text-2xl font-bold tracking-tight">Contractor North</h1>
-          <p className="mt-1 text-sm text-white/80">Field service platform for electrical contractors</p>
+          <p className="mt-1 text-sm text-white/80">The all-in-one platform for contractors</p>
+          <p className="mt-2 text-[11px] font-medium tracking-wider text-white/40">{APP_VERSION}</p>
         </div>
 
         <div className="rounded-2xl bg-white p-8 shadow-xl">

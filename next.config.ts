@@ -15,6 +15,17 @@ const nextConfig: NextConfig = {
       { protocol: "https", hostname: "**.supabase.co" },
     ],
   },
+  async headers() {
+    return [
+      {
+        // The service worker MUST always be revalidated. If sw.js is HTTP-cached, the
+        // browser keeps re-using the old copy and never notices a new deploy — that's
+        // how an installed PWA gets stranded on stale code (the appointment-bug saga).
+        source: "/sw.js",
+        headers: [{ key: "Cache-Control", value: "no-cache, no-store, must-revalidate" }],
+      },
+    ];
+  },
 };
 
 export default nextConfig;
