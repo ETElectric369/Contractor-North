@@ -4,6 +4,7 @@ import { Phone, Mail, MapPin, ArrowRight, Check, ShieldCheck, Clock, Zap, Instag
 import { accentHex, orgPublicBaseUrl, parseGeoFromMapUrl, type OrgSettings } from "@/lib/org-settings";
 import type { PublicOrg } from "@/lib/public-org";
 import { PortfolioGallery } from "../estimate/[handle]/portfolio-gallery";
+import { SpecialtyShowcase } from "./specialty-showcase";
 import { ContactForm } from "./contact-form";
 import { AskNort } from "./ask-nort";
 
@@ -145,7 +146,8 @@ export function OrgSite({ org }: { org: PublicOrg }) {
   const s = org.settings;
   const handle = s.public_handle;
   const brand = accentHex(s.glass_tint);
-  const photos = (s.portfolio ?? []).map((p) => p.url).filter(Boolean);
+  const portfolio = (s.portfolio ?? []).filter((p) => p.url);
+  const photos = portfolio.map((p) => p.url);
   const hero = s.splash_bg_url || photos[0] || "";
   const services = String(s.splash_bullets || "").split("\n").map((x) => x.trim()).filter(Boolean);
   const creds = String(s.splash_credentials || "").split("\n").map((x) => x.trim()).filter(Boolean);
@@ -258,6 +260,13 @@ export function OrgSite({ org }: { org: PublicOrg }) {
         </div>
       </section>
 
+      {/* Signature-specialty showcase — an elegant dark gallery band spotlighting the org's marquee
+          offering (e.g. custom lighting). Data-driven: hidden unless a headline is set. Features the
+          first several captioned portfolio photos; the full set still shows in "Our work" below. */}
+      {s.specialty_headline && portfolio.length > 0 && (
+        <SpecialtyShowcase headline={s.specialty_headline} blurb={s.specialty_blurb} brand={brand} photos={portfolio.slice(0, 6)} />
+      )}
+
       {/* Services */}
       {services.length > 0 && (
         <section id="services" className="mx-auto max-w-6xl px-4 py-16">
@@ -279,7 +288,7 @@ export function OrgSite({ org }: { org: PublicOrg }) {
       {/* Portfolio */}
       {photos.length > 0 && (
         <div id="work" className="border-t border-slate-100 bg-slate-50/60 pt-14">
-          <PortfolioGallery photos={photos} brand={brand} />
+          <PortfolioGallery photos={portfolio} brand={brand} orgName={org.name} />
         </div>
       )}
 

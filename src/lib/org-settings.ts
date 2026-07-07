@@ -94,8 +94,16 @@ export interface OrgSettings {
    *  site inspection and never shown an instant firm price. Mirrors lead-triage's default. */
   site_inspection_threshold: number;
   /** Re-hosted project photos shown as the public portfolio/gallery (e.g. on the estimate
-   *  configurator). `url` is a public storage URL owned by North — not a foreign CDN. */
-  portfolio: { url: string; src?: string }[];
+   *  configurator). `url` is a public storage URL owned by North — not a foreign CDN. `caption`
+   *  is an optional short line shown on hover + in the lightbox (and used in the specialty
+   *  showcase); it also becomes the image alt text for SEO/accessibility. */
+  portfolio: { url: string; src?: string; caption?: string }[];
+  /** Optional SIGNATURE-SPECIALTY showcase — an elegant, dark editorial band on the public
+   *  homepage that spotlights the one thing this org most wants to sell (e.g. "Custom Lighting
+   *  Design & Fabrication"). It features the first several captioned portfolio photos. Empty
+   *  headline = the section is hidden, so orgs that don't set it are unaffected. */
+  specialty_headline: string;
+  specialty_blurb: string;
   /** Human service-area label for the public site (e.g. "Truckee & North Tahoe"). Falls back
    *  to the org's city/state. Keeps the homepage template org-agnostic. */
   service_area: string;
@@ -172,6 +180,8 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   public_handle: "",
   site_inspection_threshold: 20000,
   portfolio: [],
+  specialty_headline: "",
+  specialty_blurb: "",
   service_area: "",
   site_theme: "classic",
   social_instagram: "",

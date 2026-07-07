@@ -34,7 +34,7 @@ export default async function EstimatePage({ params }: { params: Promise<{ handl
   const rates = buildDeckRates((catalog ?? []) as { code: string | null; buy_price: number | null; markup_pct: number | null }[]);
 
   const orgName = org.name;
-  const photos = (settings.portfolio ?? []).map((p) => p.url).filter(Boolean);
+  const photos = (settings.portfolio ?? []).filter((p) => p.url);
   return (
     <>
       <Configurator
