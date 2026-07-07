@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist } from "next/font/google";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 import { PwaRegister } from "@/components/pwa-register";
 
@@ -42,6 +43,9 @@ export default function RootLayout({
       <body className="font-sans antialiased">
         {children}
         <PwaRegister />
+        {/* Core Web Vitals (LCP/CLS/INP) — Pro Speed Insights. Ranks the public marketing
+            sites for local SEO and surfaces slow routes now that Sentry perf tracing is gone. */}
+        <SpeedInsights />
       </body>
     </html>
   );

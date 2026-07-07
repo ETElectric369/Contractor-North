@@ -46,3 +46,4 @@ yarn-error.log*
 
 # remote-control automation state + logs (local only)
 /automation/
+/Contractor_North_Subscriptions.xlsx

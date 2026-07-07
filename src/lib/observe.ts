@@ -1,5 +1,4 @@
 import "server-only";
-import * as Sentry from "@sentry/nextjs";
 import { createServiceClient } from "@/lib/supabase/server";
 
 /** Small pure-JS hash (FNV-1a with two seeds → 16 hex chars) for the sentry_events dedup key.
@@ -20,15 +19,13 @@ function dedupKey(s: string): string {
 
 /**
  * Report a background / best-effort failure that must NOT surface to the user but
- * also must not vanish silently. Sends it to (1) the server console, (2) Sentry (a
- * no-op until NEXT_PUBLIC_SENTRY_DSN is set), and (3) our OWN sentry_events table so
- * the errors are a queryable ops log the operator + Claude triage each session — no
- * Sentry webhook to configure. Never throws — observability must never break the caller.
+ * also must not vanish silently. Sends it to (1) the server console and (2) our OWN
+ * sentry_events table so the errors are a queryable ops log the operator + Claude triage
+ * each session. Never throws — observability must never break the caller.
  */
 export function reportError(where: string, e: unknown, extra?: Record<string, unknown>): void {
   try {
     console.error(`[${where}]`, e instanceof Error ? e.message : e, extra ?? "");
-    Sentry.captureException(e, { tags: { where }, extra });
     logToDb(where, e, extra);
   } catch {
     /* never let reporting throw */

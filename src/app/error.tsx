@@ -3,7 +3,6 @@
 import { useEffect } from "react";
 import Link from "next/link";
 import { AlertTriangle } from "lucide-react";
-import * as Sentry from "@sentry/nextjs";
 import { Button } from "@/components/ui/button";
 import { reportClientError } from "@/app/report-client-error";
 
@@ -16,7 +15,6 @@ export default function Error({
 }) {
   useEffect(() => {
     console.error(error);
-    Sentry.captureException(error); // no-op until a DSN is configured
     void reportClientError("error-boundary", error?.message ?? String(error), {
       digest: error?.digest,
       url: typeof window !== "undefined" ? window.location.pathname : undefined,

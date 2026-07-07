@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/cron-guard";
 import { generateDueTemplates } from "@/lib/recurring-engine";
-import { sendDueReminders } from "@/lib/reminders-engine";
 import { sendDayAheadDigests } from "@/lib/action-items/digest";
 import { reportError } from "@/lib/observe";
 
@@ -11,7 +10,6 @@ export const runtime = "nodejs";
  * The daily automation runner (Vercel Cron). One scheduled endpoint that does the
  * org-wide background work the app can't do interactively:
  *   - generate due recurring jobs/expenses (all orgs),
- *   - send opt-in customer reminders (quote follow-up / invoice due / appts),
  *   - push the staff "day ahead" digest (needs-action count + top items → /planner),
  *   - push the "Close out your day" money-leak nudge (stray time / uncosted work /
  *     missing return visit — YESTERDAY's gaps, since this cron runs mornings).
@@ -31,13 +29,8 @@ export async function GET(request: Request) {
     result.recurring_error = e?.message ?? "failed";
     reportError("cron-recurring", e);
   }
-  try {
-    // Opt-in only: sends nothing for an org whose reminder toggles are off.
-    result.reminders = await sendDueReminders(supabase);
-  } catch (e: any) {
-    result.reminders_error = e?.message ?? "failed";
-    reportError("cron-reminders", e);
-  }
+  // Customer reminders (quote follow-up / invoice due / appts) moved to their OWN cron
+  // /api/automations/reminders (a few times a day, not just here) — see that route.
   try {
     // Staff "day ahead" push digest — opt-in per user (push_prefs.day_ahead,
     // enforced inside sendPushToProfiles); an org with no open items sends nothing.
