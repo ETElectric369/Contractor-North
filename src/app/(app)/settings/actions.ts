@@ -7,6 +7,7 @@ import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
 import { formatPhone, formatState, formatZip, titleCase } from "@/lib/utils";
 import { reportError } from "@/lib/observe";
+import { sendEmail } from "@/lib/email";
 
 export async function disconnectQuickbooks(): Promise<Result> {
   const supabase = await createClient();
@@ -161,7 +162,7 @@ export async function setDocTemplate(template: string): Promise<Result> {
   return { ok: true };
 }
 
-export async function createInvitation(formData: FormData): Promise<Result> {
+export async function createInvitation(formData: FormData): Promise<Result & { link?: string }> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -181,9 +182,30 @@ export async function createInvitation(formData: FormData): Promise<Result> {
     invited_by: user.id,
   });
   if (error) return { ok: false, error: error.message };
+
+  // ACTUALLY SEND the invite — the row alone was invisible to the invitee (the reported
+  // "invite not received" bug). They join by signing up with THIS email (pending_invite /
+  // accept_invitation, migration 0005), so the email points them at signup. The link is also
+  // returned so the owner can share it directly (text/DM) even if email lags or bounces.
+  const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
+  const { data: org } = await supabase.from("organizations").select("name").eq("id", orgId).maybeSingle();
+  const orgName = (org as { name?: string } | null)?.name || "the team";
+  const base = process.env.NEXT_PUBLIC_SITE_URL || "";
+  const link = `${base}/login?mode=signup&email=${encodeURIComponent(email)}`;
+  await sendEmail({
+    to: email,
+    subject: `You're invited to join ${orgName} on Contractor North`,
+    html: `<div style="font-family:system-ui,-apple-system,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#0f172a">
+      <h2 style="margin:0 0 8px">You've been invited to ${esc(orgName)}</h2>
+      <p style="color:#475569;line-height:1.6">You've been added to <strong>${esc(orgName)}</strong> on Contractor North as a ${esc(role)}. Create your account with <strong>this email</strong> (${esc(email)}) and you'll join the team automatically.</p>
+      <p style="margin:24px 0"><a href="${link}" style="background:#0b57c4;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600;display:inline-block">Create your account</a></p>
+      <p style="color:#94a3b8;font-size:13px;word-break:break-all">Or open this link: ${link}</p>
+    </div>`,
+  }).catch(() => {}); // best-effort — the returned link is the guaranteed fallback
+
   revalidatePath("/team");
   revalidatePath("/settings");
-  return { ok: true };
+  return { ok: true, link };
 }
 
 export async function deleteInvitation(id: string): Promise<Result> {

@@ -40,6 +40,7 @@ export function InviteManager({
         setError(res.error ?? "Could not invite.");
         return;
       }
+      toast("Invite emailed — or copy the link to text it", "success");
       router.refresh();
     });
   }
