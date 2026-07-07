@@ -78,7 +78,7 @@ export async function getActionItems(ctx: {
 
   const empty = Promise.resolve({ data: [] as any[] });
 
-  const [jobsR, inqR, apptR, orgR, invR, quoteR, draftR, conR, lienR, bugR, openTimeR, recentTimeR, matJobsR, matSegR] = await Promise.all([
+  const [jobsR, inqR, apptR, orgR, invR, quoteR, acceptedR, draftR, conR, lienR, bugR, openTimeR, recentTimeR, matJobsR, matSegR] = await Promise.all([
     // Unscheduled jobs — staff only (the "resting place" for things needing a date).
     // EVERY still-in-flight dateless job, not just estimate/scheduled: an in_progress
     // or on_hold job whose date was cleared must not vanish from every scheduling
@@ -146,6 +146,17 @@ export async function getActionItems(ctx: {
           .select("id, quote_number, doc_type, status, total, valid_until, created_at, customers(name)")
           .eq("status", "sent")
           .order("created_at", { ascending: true })
+          .limit(50)
+      : empty,
+    // Accepted estimates — THE WIN. The customer said yes; this must scream "schedule the
+    // job now" (the signal Erik lost when an accept showed nothing). The job's
+    // scheduled_start (joined) tells us if it's been handled → the item self-clears.
+    isStaff
+      ? supabase
+          .from("quotes")
+          .select("id, quote_number, doc_type, accepted_at, job_id, customers(name), jobs:job_id(scheduled_start)")
+          .eq("status", "accepted")
+          .order("accepted_at", { ascending: false })
           .limit(50)
       : empty,
     // Draft invoices — billed-up work that never went out the door.
@@ -229,7 +240,16 @@ export async function getActionItems(ctx: {
   // assignment site means a new kind can't ship with a forgotten/mismatched stream.
   const items: Omit<ActionItem, "stream">[] = [];
 
+  // Accepted estimates whose job isn't scheduled yet surface below as the richer
+  // "Accepted — schedule it" item; hold their job ids so the plain "to schedule" list
+  // doesn't ALSO show them (one won job, one line).
+  const wonUnscheduledJobIds = new Set<string>();
+  for (const a of (acceptedR.data ?? []) as any[]) {
+    if (!a.jobs?.scheduled_start && a.job_id) wonUnscheduledJobIds.add(a.job_id);
+  }
+
   for (const j of (jobsR.data ?? []) as any[]) {
+    if (wonUnscheduledJobIds.has(j.id)) continue; // shown as "Accepted — schedule it" instead
     items.push({
       id: j.id,
       kind: "job_to_schedule",
@@ -241,6 +261,24 @@ export async function getActionItems(ctx: {
       done: false,
       href: `/jobs/${j.id}`,
       affordances: AFFORDANCES.job_to_schedule,
+    });
+  }
+
+  // The WIN: an accepted estimate whose job still has no date. Urgency 2, money stream →
+  // top of the inbox, so a "yes" can never again slip by unseen.
+  for (const a of (acceptedR.data ?? []) as any[]) {
+    if (a.jobs?.scheduled_start) continue; // scheduled → win captured, item self-clears
+    items.push({
+      id: a.id,
+      kind: "quote_accepted",
+      title: `${a.quote_number || "Estimate"} accepted — schedule the job`,
+      subtitle: a.customers?.name ?? null,
+      who: null,
+      when: a.accepted_at ?? null,
+      urgency: 2,
+      done: false,
+      href: a.job_id ? `/jobs/${a.job_id}` : `/quotes/${a.id}`,
+      affordances: AFFORDANCES.quote_accepted,
     });
   }
 

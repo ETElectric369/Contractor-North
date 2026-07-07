@@ -28,6 +28,7 @@ export type ActionKind =
   | "organize" // a capture (receipt/note/doc) needing a filing decision
   | "invoice_overdue" // a sent/partial invoice past its due date (A/R)
   | "quote_awaiting" // a sent quote/estimate gone quiet or nearing its valid-until
+  | "quote_accepted" // an estimate the customer just ACCEPTED — schedule the job now (the win)
   | "invoice_draft" // a draft invoice never sent (billed-up money sitting in limbo)
   | "lien_deadline" // a lien prelim/recording deadline coming due or past
   | "contract_unsigned" // a contract sent but not yet signed
@@ -65,6 +66,7 @@ export const KIND_STREAM: Record<ActionKind, Stream> = {
   organize: "waiting",
   invoice_overdue: "money",
   quote_awaiting: "money",
+  quote_accepted: "money", // a won deal is the freshest money event — renders at the very top
   invoice_draft: "money",
   lien_deadline: "waiting", // compliance clock — legal, not A/R
   contract_unsigned: "waiting",
@@ -108,6 +110,7 @@ export const KIND_META: Record<ActionKind, { label: string; tone: "slate" | "blu
   organize: { label: "To file", tone: "slate" },
   invoice_overdue: { label: "Overdue invoice", tone: "amber" },
   quote_awaiting: { label: "Awaiting reply", tone: "green" },
+  quote_accepted: { label: "Accepted — schedule it", tone: "green" },
   invoice_draft: { label: "Draft invoice", tone: "slate" },
   lien_deadline: { label: "Lien deadline", tone: "amber" },
   contract_unsigned: { label: "Unsigned contract", tone: "blue" },
@@ -137,6 +140,9 @@ export const AFFORDANCES: Record<ActionKind, Affordance[]> = {
   // public share), so bumping it would change the offer, not defer the reminder —
   // open-only until quotes grow a follow-up field.
   quote_awaiting: ["open"],
+  // Open-only: tapping lands on the JOB, where the inline schedule editor sets the date
+  // (which self-clears this item). A dedicated "schedule" verb comes with the funnel wave.
+  quote_accepted: ["open"],
   invoice_draft: ["open"],
   lien_deadline: ["open"],
   contract_unsigned: ["open"],

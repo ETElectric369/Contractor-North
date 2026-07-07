@@ -1,8 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
+import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
 import { subtotalTaxTotal } from "@/lib/invoice-math";
 import { QUOTE_STATUSES } from "@/lib/statuses";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
@@ -547,17 +548,53 @@ export async function createJobFromQuote(
   return { ok: true, id: job.id };
 }
 
+/**
+ * Fire-and-forget: push the office that an estimate was accepted. Deep-links to the
+ * JOB (schedule it right there) when one exists. The in-app My Day "Accepted — schedule
+ * it" feeder is the always-works fallback for when push is off. Never throws.
+ */
+async function pushQuoteAccepted(id: string): Promise<void> {
+  try {
+    const sb = createServiceClient();
+    const { data: q } = await sb
+      .from("quotes")
+      .select("quote_number, org_id, job_id, customers(name)")
+      .eq("id", id)
+      .maybeSingle();
+    if (!q?.org_id) return;
+    const name = (q as { customers?: { name?: string } }).customers?.name;
+    await sendPushToProfiles(await orgStaffIds(q.org_id), "quote_accepted", {
+      title: "Estimate accepted",
+      body: `${q.quote_number || "An estimate"} was accepted${name ? ` by ${name}` : ""} — schedule the job.`,
+      url: q.job_id ? `/jobs/${q.job_id}` : "/quotes",
+    });
+  } catch {
+    /* best-effort */
+  }
+}
+
 export async function updateQuoteStatus(id: string, status: string) {
   if (!(QUOTE_STATUSES as readonly string[]).includes(status))
     return { ok: false as const, error: `Status must be one of: ${QUOTE_STATUSES.join(", ")}.` };
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false as const, error: ctx.error };
   const supabase = ctx.supabase;
-  const { error } = await supabase
-    .from("quotes")
-    .update({ status })
-    .eq("id", id);
+
+  // Acceptance is the moment work is won. The office "Accepted" dropdown used to just
+  // flip the status — no job, no signal — so an accepted estimate vanished (the bug Erik
+  // hit). Now it stamps accepted_at, ensures the job exists + linked (idempotent), and
+  // alerts the office in-app (the My Day feeder catches status='accepted') AND by push.
+  const patch: Record<string, unknown> =
+    status === "accepted" ? { status, accepted_at: new Date().toISOString() } : { status };
+  const { error } = await supabase.from("quotes").update(patch).eq("id", id);
   if (error) return { ok: false as const, error: error.message };
+
+  if (status === "accepted") {
+    await createJobFromQuote(id).catch(() => {}); // links quotes.job_id + spins up WO/materials
+    await pushQuoteAccepted(id);
+    revalidatePath("/planner"); // so the "Accepted — schedule it" item shows immediately
+    revalidatePath("/schedule");
+  }
   revalidatePath(`/quotes/${id}`);
   revalidatePath("/quotes");
   return { ok: true as const };
