@@ -2,16 +2,26 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { Settings, type LucideIcon } from "lucide-react";
+import { Settings, User, Building2, Wallet, CalendarDays, Plug, type LucideIcon } from "lucide-react";
 import type { DockNode, DockSection } from "@/lib/dock";
 import { SectionSheet } from "@/components/section-sheet";
 
-/** One settings cluster, in the shape the page already knows (id/label/icon). */
+/** One settings cluster. Only serializable data (id/label) crosses the server→client
+ *  boundary — the icon is resolved HERE by id (see CLUSTER_ICONS). Passing the lucide
+ *  component itself as a prop is a function-across-the-RSC-boundary, which threw
+ *  "Functions cannot be passed directly to Client Components" and crashed all of /settings. */
 export interface SettingsCluster {
   id: string;
   label: string;
-  icon: LucideIcon;
 }
+
+const CLUSTER_ICONS: Record<string, LucideIcon> = {
+  you: User,
+  company: Building2,
+  money: Wallet,
+  scheduling: CalendarDays,
+  integrations: Plug,
+};
 
 /**
  * SETTINGS' OWN side-tab — the cluster nav for /settings, now that Settings is its own
@@ -56,7 +66,7 @@ export function SettingsSubnav({
   const items: DockNode[] = clusters.map((c) => ({
     id: c.id,
     label: c.label,
-    icon: c.icon,
+    icon: CLUSTER_ICONS[c.id] ?? Settings,
     href: href(c.id),
   }));
 
@@ -69,7 +79,7 @@ export function SettingsSubnav({
       <div className="mb-5 hidden gap-1.5 border-b border-slate-200 pb-3 lg:flex">
         {clusters.map((c) => {
           const active = c.id === current;
-          const Icon = c.icon;
+          const Icon = CLUSTER_ICONS[c.id] ?? Settings;
           return (
             <Link
               key={c.id}

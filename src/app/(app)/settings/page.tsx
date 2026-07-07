@@ -367,8 +367,10 @@ export default async function SettingsPage({
   // to the first role-appropriate cluster (staff → "company", tech → "you"), exactly the old
   // <Tabs urlSync> default (tabs[0]). An unknown/gated tab falls back to that default too.
   const active = clusters.find((c) => c.id === tab) ?? clusters[0];
-  // The nav needs only id/label/icon per cluster — the panels render server-side below.
-  const navClusters = clusters.map((c) => ({ id: c.id, label: c.label, icon: c.icon }));
+  // The nav needs only id/label per cluster — the icon is resolved client-side by id in
+  // SettingsSubnav. (Passing c.icon, a lucide component/function, across the server→client
+  // boundary threw "Functions cannot be passed to Client Components" and crashed /settings.)
+  const navClusters = clusters.map((c) => ({ id: c.id, label: c.label }));
 
   return (
     <div className="mx-auto max-w-3xl">
