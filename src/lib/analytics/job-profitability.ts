@@ -137,6 +137,36 @@ export async function getJobFinancials(supabase: any, jobId: string): Promise<Jo
   };
 }
 
+export type BudgetCategory = { category: string; budget: number };
+
+/**
+ * The estimate's budget broken out by SCOPE category (Framing, Decking, Electrical…) from the
+ * job's quote line items' `category` (cn-v420) — summed across ALL the job's quotes, so an
+ * original estimate + change-order quotes roll up to the current budget (matching the Tahoe
+ * Deck Budget-vs-Actual sheet's "original + approved change orders"). Lets Nort see WHERE the
+ * budget lives and reason about concentration/masking ("decking $40k hasn't started, so the
+ * spend so far is all demo + framing"). Untagged lines fall under "Uncategorized". Highest
+ * first. Empty when the job has no quote (nothing to budget against).
+ */
+export async function getJobBudgetByCategory(supabase: any, jobId: string): Promise<BudgetCategory[]> {
+  const { data: quotes } = await supabase.from("quotes").select("id").eq("job_id", jobId);
+  const quoteIds = (quotes ?? []).map((q: { id: string }) => q.id);
+  if (quoteIds.length === 0) return [];
+  const { data: lines } = await supabase
+    .from("quote_line_items")
+    .select("category, line_total, quantity, unit_price")
+    .in("quote_id", quoteIds);
+  const map = new Map<string, number>();
+  for (const l of (lines ?? []) as any[]) {
+    const cat = String(l.category ?? "").trim() || "Uncategorized";
+    const amt = Number(l.line_total ?? (Number(l.quantity) || 0) * (Number(l.unit_price) || 0)) || 0;
+    map.set(cat, (map.get(cat) ?? 0) + amt);
+  }
+  return [...map.entries()]
+    .map(([category, budget]) => ({ category, budget: Math.round(budget * 100) / 100 }))
+    .sort((a, b) => b.budget - a.budget);
+}
+
 /** Ranked job profitability across the org. sort "profit" = most profitable first (default);
  *  "loss" = biggest loss first. Optional status filter (e.g. active jobs only). */
 export async function listJobProfitability(

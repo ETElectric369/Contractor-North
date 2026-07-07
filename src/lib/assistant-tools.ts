@@ -9,7 +9,7 @@ import { invoiceBalance } from "@/lib/invoice-math";
 import { aggregatePayrollEntries, payRateForEntry } from "@/lib/payroll-math";
 import { summarizeMileage } from "@/lib/mileage-math";
 import { searchPaidPrices } from "@/lib/pricing/learned-prices";
-import { getJobFinancials, listJobProfitability, listProfitByType } from "@/lib/analytics/job-profitability";
+import { getJobFinancials, getJobBudgetByCategory, listJobProfitability, listProfitByType } from "@/lib/analytics/job-profitability";
 import { getArAging, getRevenueTrend, getQuoteStats, getCustomerValue } from "@/lib/analytics/money-metrics";
 import { getHoursBreakdown } from "@/lib/analytics/time-breakdown";
 
@@ -199,7 +199,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "get_job_financials",
     description:
-      "Is a specific job making money? Returns that job's PROFIT — revenue collected (cash paid, net of refunds) minus cost (labor at pay rate + materials) — PLUS budget burn: the quoted estimate, cost to date, remaining vs estimate, % of the estimate spent, and whether it's over budget. Reconciles to the penny with the job page and /analytics. Get the job's id first (list_jobs). CAVEAT to disclose: a cost entered as BOTH a purchase order AND a bill is counted twice (there's no link between them yet), so mention that if the cost looks inflated.",
+      "Is a specific job making money? Returns that job's PROFIT — revenue collected (cash paid, net of refunds) minus cost (labor at pay rate + materials) — PLUS budget burn: the quoted estimate, cost to date, remaining vs estimate, % of the estimate spent, and whether it's over budget. Reconciles to the penny with the job page and /analytics. Get the job's id first (list_jobs). CAVEAT to disclose: a cost entered as BOTH a purchase order AND a bill is counted twice (there's no link between them yet), so mention that if the cost looks inflated. ALSO returns budget_by_category — the estimate split by scope (Framing, Decking, Electrical…) — so you can see where the budget is concentrated and warn about a total that looks fine only because big scopes (decking, railing) haven't started yet.",
     input_schema: {
       type: "object",
       properties: { job_id: { type: "string", description: "The job's id (from list_jobs)." } },
@@ -1648,6 +1648,7 @@ export async function runDataTool(
         if (!jobId) return JSON.stringify({ error: "Provide a job_id (use list_jobs to find it)." });
         const f = await getJobFinancials(supabase, jobId);
         if (!f) return JSON.stringify({ error: "Job not found." });
+        const budgetByCategory = await getJobBudgetByCategory(supabase, jobId);
         return JSON.stringify({
           job_number: f.job_number,
           name: f.name,
@@ -1662,7 +1663,13 @@ export async function runDataTool(
           remaining_vs_estimate: f.remaining,
           percent_of_estimate_spent: f.burnPct,
           over_budget: f.overBudget,
-          note: "Revenue = cash collected net of refunds. Cost = labor (pay rate, split-aware) + materials. A cost entered as BOTH a PO and a bill is counted twice.",
+          // The estimate's budget by scope category (Framing, Decking…) — where the money is
+          // ALLOCATED. Total cost above is not yet split by scope, so to judge a single
+          // category's over/under you still need its actual; but this reveals concentration
+          // and masking (a category budgeted big with the job barely started = burn is
+          // hiding in the started scopes). Empty when the estimate has no categories.
+          budget_by_category: budgetByCategory,
+          note: "Revenue = cash collected net of refunds. Cost = labor (pay rate, split-aware) + materials. A cost entered as BOTH a PO and a bill is counted twice. budget_by_category is the ESTIMATE split by scope; actual cost isn't split by scope yet, so flag a whole-job overrun/concentration, not a per-category actual.",
         });
       }
 
