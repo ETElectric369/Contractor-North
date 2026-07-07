@@ -22,6 +22,7 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   "task.bulkReschedule",
   "customer.create",
   "customer.update", // fix a misspelled name / add contact info (reversible edit)
+  "resource.create", // save a permit office / inspector / supplier to Resources (reversible tier-1, no money)
   "appointment.create",
   "appointment.update", // reschedule by voice (no cancel+recreate)
   "appointment.setStatus", // mark completed / cancelled
