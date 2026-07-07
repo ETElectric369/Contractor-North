@@ -384,12 +384,17 @@ export function InvoiceDetail({
               start(async () => {
                 const res = await setInvoiceStatus(invoice.id, next);
                 if (!res?.ok) { toast(res?.error ?? "Couldn't change the status — try again.", "error"); return; }
-                toast(next === "void" ? "Invoice voided" : "Status updated", "success");
+                toast(next === "void" ? "Invoice voided" : next === "sent" ? "Marked as sent" : "Status updated", "success");
                 refresh();
               });
             }}
           >
             <option value="draft">Draft</option>
+            {/* Escape hatch: you sent the PDF yourself (texted/AirDropped/emailed it OUTSIDE
+                the app), so record that it went out — the invoice leaves Draft and the job
+                reads as invoiced without forcing you back through the Send button. Draft-only,
+                so it can't be used to fake send-state on a live invoice. */}
+            {invoice.status === "draft" && <option value="sent">Sent — I sent it myself</option>}
             {/* Keep the current status visible even though it isn't a manual choice. */}
             {!["draft", "void"].includes(invoice.status) && (
               <option value={invoice.status} disabled>
