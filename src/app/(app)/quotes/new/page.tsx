@@ -30,7 +30,16 @@ export default async function NewQuotePage({
         .order("name"),
       supabase.from("organizations").select("settings").limit(1).maybeSingle(),
     ]);
-  const expiryDays = getOrgSettings((org as any)?.settings).quote_expiry_days;
+  const settings = getOrgSettings((org as any)?.settings);
+  const expiryDays = settings.quote_expiry_days;
+  // Catalog-mode orgs (Tahoe Deck) estimate from TWO scope kits — "Decks" and "Remodels".
+  // The granular material kits (Framing, Hardware, Decking…) are the POST-acceptance job
+  // breakdown, so they're hidden from the estimate picker here. Research orgs (ET Electric)
+  // still see every kit — nothing changes for them.
+  const catalogMode = settings.estimating_mode === "catalog";
+  const estimateKits = catalogMode
+    ? (kits ?? []).filter((k: any) => k.name === "Decks" || k.name === "Remodels")
+    : (kits ?? []);
 
   return (
     <div>
@@ -55,7 +64,7 @@ export default async function NewQuotePage({
         jobId={job}
         priceItems={(priceItems ?? []) as any}
         taxRates={(taxRates ?? []) as any}
-        kits={(kits ?? []) as any}
+        kits={estimateKits as any}
         quoteExpiryDays={expiryDays}
       />
     </div>
