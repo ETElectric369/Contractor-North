@@ -73,12 +73,19 @@ d("RLS multi-tenant isolation invariant", () => {
   // The org_id-scoped checks above are blind to user-scoped tables (no org_id column,
   // e.g. conversations/messages keyed by auth.uid()). These two checks cover them.
   it("no RLS-enabled table is left policy-less (RLS on + 0 policies = locked-out or misconfigured)", async () => {
+    // INTENTIONALLY server-only tables: RLS on + NO policy = deny-all to every authenticated
+    // user, so ONLY the service role (which bypasses RLS) can touch them. That's the CORRECT,
+    // secure config for these — written by the server, never read by a client:
+    //   rate_limits   — the Postgres rate-limit counters (rate_limit_hit/gc RPCs only)
+    //   sentry_events — the ops error sink (reportError → record_app_error RPC only; Claude queries it)
+    // The invariant catches a table ACCIDENTALLY left policy-less; these two are deliberate.
+    const SERVER_ONLY = new Set(["rate_limits", "sentry_events"]);
     const { rows } = await client.query(`
       select c.relname as tbl
       from pg_class c join pg_namespace n on n.oid=c.relnamespace
       where n.nspname='public' and c.relkind='r' and c.relrowsecurity
         and (select count(*) from pg_policies p where p.schemaname='public' and p.tablename=c.relname)=0`);
-    expect(rows.map((r: any) => r.tbl)).toEqual([]);
+    expect(rows.map((r: any) => r.tbl).filter((t: string) => !SERVER_ONLY.has(t))).toEqual([]);
   });
 
   it("user-scoped tables (conversations, messages) are RLS-protected even without org_id", async () => {
