@@ -288,10 +288,13 @@ export async function getActionItems(ctx: {
       id: q.id,
       kind: "inquiry",
       title: q.name,
-      subtitle: q.status === "new" ? "New inquiry" : "Follow up",
+      subtitle: q.status === "new" ? "New lead — reach out" : "Follow up",
       who: null,
       when: q.next_follow_up_at,
-      urgency: overdue ? 1 : 0,
+      // A brand-new, uncontacted lead is the hottest thing on the board (speed-to-lead wins
+      // the job) → top urgency so it sorts to the top of the Leads stream with the red flag.
+      // An overdue follow-up is next; a contacted, on-schedule lead is normal.
+      urgency: q.status === "new" ? 2 : overdue ? 1 : 0,
       done: false,
       href: "/leads",
       affordances: AFFORDANCES.inquiry,

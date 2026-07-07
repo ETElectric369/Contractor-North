@@ -10,6 +10,9 @@
  * office Leads row and the one-click convert→draft-quote path both read what they need.
  */
 import { classifyLead, type LeadIntake, type LeadTriage } from "@/lib/lead-triage";
+import { createNotifications } from "@/lib/notifications";
+import { sendPushToProfiles } from "@/lib/push";
+import { sendEmail } from "@/lib/email";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export interface CreateTriagedInquiryInput {
@@ -65,5 +68,51 @@ export async function createTriagedInquiry(
     .single();
 
   if (error) throw error;
-  return { id: data.id as string, triage };
+  const id = data.id as string;
+
+  // Fire the alarm — an inbound lead is money walking in the door, and speed-to-lead wins the
+  // job. Alert the sales/office crew on THREE channels so it can't be missed: the in-app bell
+  // (always works), web push (buzzes the phone), and an email to the office. All best-effort —
+  // a notify failure must NEVER stop the lead from landing in the pipeline.
+  try {
+    const [{ data: staff }, { data: orgRow }] = await Promise.all([
+      supabase.from("profiles").select("id, email").eq("org_id", orgId).in("role", ["owner", "admin", "office"]),
+      supabase.from("organizations").select("email, name").eq("id", orgId).maybeSingle(),
+    ]);
+    const staffIds = ((staff ?? []) as { id: string }[]).map((s) => s.id);
+    const money = input.intake.estimateTotal
+      ? `est. $${Math.round(input.intake.estimateTotal).toLocaleString()}`
+      : "quote request";
+    const where = [input.city, input.state].filter(Boolean).join(", ");
+    const title = `🔥 New lead — ${input.name}`;
+    const body = [input.intake.projectType, money, where].filter(Boolean).join(" · ") || "New quote request";
+
+    await createNotifications(orgId, staffIds, { type: "inquiry", title, body, url: "/leads" });
+    await sendPushToProfiles(staffIds, "inquiry", { title, body, url: "/leads" });
+
+    const to = (orgRow as { email?: string } | null)?.email
+      || ((staff ?? []) as { email?: string }[]).map((s) => s.email).find(Boolean);
+    if (to) {
+      const site = process.env.NEXT_PUBLIC_SITE_URL || "https://contractor-north.vercel.app";
+      const esc = (s: string) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
+      await sendEmail({
+        to,
+        fromName: (orgRow as { name?: string } | null)?.name || undefined,
+        subject: `New lead: ${input.name}${input.intake.estimateTotal ? ` (est. $${Math.round(input.intake.estimateTotal).toLocaleString()})` : ""}`,
+        html: `<div style="font-family:ui-sans-serif,system-ui,Arial,sans-serif;max-width:520px;color:#0f172a">
+          <h2 style="margin:0 0 6px">🔥 New lead — ${esc(input.name)}</h2>
+          <p style="color:#475569;margin:0 0 12px">${esc(body)}</p>
+          ${input.email ? `<p style="margin:2px 0">📧 ${esc(input.email)}</p>` : ""}
+          ${input.phone ? `<p style="margin:2px 0">📞 ${esc(input.phone)}</p>` : ""}
+          ${input.message ? `<p style="color:#334155;margin:12px 0;border-left:3px solid #cbd5e1;padding-left:10px">${esc(input.message)}</p>` : ""}
+          <p style="margin:18px 0"><a href="${site}/leads" style="background:#0b57c4;color:#fff;text-decoration:none;padding:11px 20px;border-radius:8px;font-weight:600;display:inline-block">Open the lead →</a></p>
+          <p style="color:#94a3b8;font-size:12px">Reach out fast — speed-to-lead wins the job.</p>
+        </div>`,
+      });
+    }
+  } catch {
+    /* notifications are best-effort — the lead must still land even if alerts fail */
+  }
+
+  return { id, triage };
 }
