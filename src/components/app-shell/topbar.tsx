@@ -5,6 +5,7 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { ArrowLeft, Search } from "lucide-react";
 import { GlobalAssistant } from "@/components/global-assistant";
 import { GlobalQuickAdd } from "@/components/global-quick-add";
+import { NotificationBell } from "@/components/app-shell/notification-bell";
 import { AccountMenu } from "@/components/account-menu";
 import type { Profile } from "@/lib/types";
 
@@ -75,6 +76,8 @@ export function Topbar({
           <span className="hidden text-sm md:inline">Search</span>
           <span className="hidden rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-400 md:inline">⌘K</span>
         </button>
+        {/* The in-app bell — the always-works notification channel (push-independent). */}
+        <NotificationBell />
         {/* The account seek door — always visible, far right: Sign out, language,
             estimate QR. See account-menu.tsx for THE MODAL RULE it hosts. */}
         <AccountMenu profile={profile} lang={lang} />

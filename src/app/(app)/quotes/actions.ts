@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
 import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
+import { createNotifications } from "@/lib/notifications";
 import { subtotalTaxTotal } from "@/lib/invoice-math";
 import { QUOTE_STATUSES } from "@/lib/statuses";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
@@ -563,11 +564,14 @@ async function pushQuoteAccepted(id: string): Promise<void> {
       .maybeSingle();
     if (!q?.org_id) return;
     const name = (q as { customers?: { name?: string } }).customers?.name;
-    await sendPushToProfiles(await orgStaffIds(q.org_id), "quote_accepted", {
+    const staff = await orgStaffIds(q.org_id);
+    const payload = {
       title: "Estimate accepted",
       body: `${q.quote_number || "An estimate"} was accepted${name ? ` by ${name}` : ""} — schedule the job.`,
       url: q.job_id ? `/jobs/${q.job_id}` : "/quotes",
-    });
+    };
+    await createNotifications(q.org_id, staff, { type: "quote_accepted", ...payload }); // the bell — always works
+    await sendPushToProfiles(staff, "quote_accepted", payload); // + push if the recipient enabled it
   } catch {
     /* best-effort */
   }

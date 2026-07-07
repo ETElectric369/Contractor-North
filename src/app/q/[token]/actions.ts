@@ -2,6 +2,7 @@
 
 import { createServiceClient } from "@/lib/supabase/server";
 import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
+import { createNotifications } from "@/lib/notifications";
 
 /**
  * Fire-and-forget: ping office staff that a customer accepted a quote. Called by
@@ -25,12 +26,16 @@ export async function notifyQuoteAccepted(token: string): Promise<void> {
 
     const name = (q as any).customers?.name;
     const who = name ? ` from ${name}` : "";
-    await sendPushToProfiles(await orgStaffIds(q.org_id), "quote_accepted", {
+    const jobId = (q as { job_id?: string }).job_id;
+    const staff = await orgStaffIds(q.org_id);
+    const payload = {
       title: "Estimate accepted",
       body: `${q.quote_number || "An estimate"} was accepted${who} — schedule the job.`,
       // Deep-link straight to the job so "schedule it right there" is one tap.
-      url: (q as { job_id?: string }).job_id ? `/jobs/${(q as { job_id?: string }).job_id}` : "/quotes",
-    });
+      url: jobId ? `/jobs/${jobId}` : "/quotes",
+    };
+    await createNotifications(q.org_id, staff, { type: "quote_accepted", ...payload }); // the bell
+    await sendPushToProfiles(staff, "quote_accepted", payload); // + push if enabled
   } catch {
     /* best-effort */
   }
