@@ -6,6 +6,8 @@ import { createClient } from "@/lib/supabase/server";
 import { RefreshOnVisible } from "@/components/refresh-on-visible";
 import { WeatherWidget } from "@/components/weather-widget";
 import { getMoneyPipeline } from "@/lib/billing-pipeline";
+import { getCrewStatus } from "@/lib/crew-status";
+import { CrewBoard } from "./crew-board";
 import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { hoursBetween, formatCurrency, formatTime, formatCityStateZip } from "@/lib/utils";
@@ -167,6 +169,8 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         .lt("completed_at", dayEnd.toISOString()),
     ),
   ]);
+  // The boss's live crew board (staff only) — every member's on/off-clock + job + hours today.
+  const crew = isStaff ? await getCrewStatus(supabase, todayStr) : [];
   const currentJob = ((curJobRes as any)?.data as any) ?? undefined;
   const sixPool = ((poolR as any)?.data ?? []) as any[];
   // THE shared rank (lib/six-rank — the same function behind the morning digest,
@@ -500,6 +504,10 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         jobs={clockJobs}
         isStaff={isStaff}
       />
+
+      {/* The boss's live crew board (staff only) — who's on the clock, on what, hours today.
+          Erik: "boss needs to see what everyone is doing all the time." */}
+      {isStaff && crew.length > 0 && <CrewBoard crew={crew} />}
 
       {/* TODAY — the execution feed in slot 2, so the 3-second glance (clock
           status + what's happening when) fits in one viewport, zero scroll. */}
