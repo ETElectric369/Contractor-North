@@ -165,7 +165,10 @@ function statusLabel(tool: string): string {
 }
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+// Pro raises the function ceiling (Hobby capped at 60s). Nort's tool loops + web_search can
+// occasionally run long; 120s keeps a genuinely-working answer from being cut off mid-stream,
+// without letting a truly hung request bill indefinitely.
+export const maxDuration = 120;
 
 interface ChatMessage {
   role: "user" | "assistant";
