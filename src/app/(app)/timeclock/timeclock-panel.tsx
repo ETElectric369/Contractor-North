@@ -116,6 +116,11 @@ export function TimeclockPanel({
   const [error, setError] = useState<string | null>(null);
   const [gpsNote, setGpsNote] = useState<string | null>(null); // "punch wasn't GPS-stamped" — surfaced, not silent
   const [pending, start] = useTransition();
+  // Clock-out is now a two-step "clock, then wrap up": the running view stays CLEAN (timer + Switch +
+  // Clock Out), and the day-breakdown questionnaire (jobs/hours, lunch/breaks, mileage, notes) only
+  // appears when they tap Clock Out. Erik: "the clock is just clock in/out; the questionnaire breaks
+  // down the day when they clock out." Nothing about the clock-out DATA changed — just when it's asked.
+  const [clockingOut, setClockingOut] = useState(false);
 
   // clock-in form
   const [jobId, setJobId] = useState("");
@@ -472,11 +477,10 @@ export function TimeclockPanel({
             </p>
           )}
 
-          {/* Mid-shift job switch — capture the split AS IT HAPPENS (the outgoing
-              job's hours are recorded server-side + a notes breadcrumb) instead of
-              reconstructing the day from memory at 4pm, which is how wrong hours
-              reached the wrong jobs. */}
-          {switching ? (
+          {/* Mid-shift job switch — a DURING-shift action, so it lives in the clean running view;
+              captures the split AS IT HAPPENS (outgoing job's hours recorded server-side + a notes
+              breadcrumb) instead of reconstructing the day from memory at 4pm. */}
+          {!clockingOut && (switching ? (
             <div className="space-y-2 rounded-xl border border-brand/30 bg-brand/5 p-3">
               <Label className="mb-0 flex items-center gap-1.5 text-slate-900">
                 <ArrowLeftRight className="h-4 w-4 text-brand" /> Switch job
@@ -528,7 +532,26 @@ export function TimeclockPanel({
             <Button type="button" variant="outline" className="w-full" onClick={() => setSwitching(true)}>
               <ArrowLeftRight className="h-4 w-4" /> Switch Job
             </Button>
+          ))}
+
+          {/* The big Clock Out — this OPENS the wrap-up questionnaire; it doesn't clock out yet. */}
+          {!clockingOut && (
+            <>
+              {error && <p className="text-sm text-red-600">{error}</p>}
+              <Button variant="destructive" size="lg" className="w-full" onClick={() => setClockingOut(true)} disabled={pending || switchPending}>
+                <Square className="h-5 w-5" /> {t("tc_clockOut")}
+              </Button>
+            </>
           )}
+
+          {/* WRAPPING UP — the clock-out questionnaire: confirm breaks, break the day into jobs,
+              mileage + notes, then clock out. Hidden until the Clock Out tap above. */}
+          {clockingOut && (
+            <>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <p className="text-sm font-semibold text-slate-900">Wrapping up your day</p>
+                <p className="mt-0.5 text-xs text-slate-500">You worked {formatDuration(elapsed)}. Break it down below, then clock out.</p>
+              </div>
 
           <label className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm ${requiredMeal && !lunchTaken ? "border-amber-300 bg-amber-50" : "border-slate-200"}`}>
             <input type="checkbox" checked={lunchTaken} onChange={(e) => setLunchTaken(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand" />
@@ -692,36 +715,43 @@ export function TimeclockPanel({
             />
           </div>
 
-          {error && <p className="text-sm text-red-600">{error}</p>}
-          {!isStaff && !allocOk && (
-            <p className="text-center text-xs font-medium text-amber-600">
-              Add the job code(s) you worked and the hours before clocking out.
-            </p>
-          )}
-          {/* Say WHY the button is disabled — it used to just sit grey. */}
-          {!breaksOk && (
-            <p className="text-center text-xs font-medium text-amber-600">
-              Confirm your break(s) above to clock out.
-            </p>
-          )}
+              {error && <p className="text-sm text-red-600">{error}</p>}
+              {!isStaff && !allocOk && (
+                <p className="text-center text-xs font-medium text-amber-600">
+                  Add the job code(s) you worked and the hours before clocking out.
+                </p>
+              )}
+              {/* Say WHY the button is disabled — it used to just sit grey. */}
+              {!breaksOk && (
+                <p className="text-center text-xs font-medium text-amber-600">
+                  Confirm your break(s) above to clock out.
+                </p>
+              )}
 
-          <Button
-            variant="destructive"
-            size="lg"
-            className="w-full"
-            onClick={doClockOut}
-            disabled={pending || !breaksOk || (!isStaff && !allocOk)}
-          >
-            {pending ? (
-              <>
-                <Loader2 className="h-5 w-5 animate-spin" /> {t("tc_clockingOut")}
-              </>
-            ) : (
-              <>
-                <Square className="h-5 w-5" /> {t("tc_clockOut")}
-              </>
-            )}
-          </Button>
+              <div className="flex gap-2">
+                <Button variant="outline" size="lg" onClick={() => setClockingOut(false)} disabled={pending}>
+                  Back
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="lg"
+                  className="flex-1"
+                  onClick={doClockOut}
+                  disabled={pending || !breaksOk || (!isStaff && !allocOk)}
+                >
+                  {pending ? (
+                    <>
+                      <Loader2 className="h-5 w-5 animate-spin" /> {t("tc_clockingOut")}
+                    </>
+                  ) : (
+                    <>
+                      <Square className="h-5 w-5" /> Confirm &amp; clock out
+                    </>
+                  )}
+                </Button>
+              </div>
+            </>
+          )}
         </CardContent>
       </Card>
     );
