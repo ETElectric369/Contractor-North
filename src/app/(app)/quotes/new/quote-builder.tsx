@@ -57,6 +57,7 @@ export function QuoteBuilder({
   customers,
   preselected,
   jobId,
+  inquiryId,
   priceItems = [],
   taxRates = [],
   kits = [],
@@ -68,6 +69,8 @@ export function QuoteBuilder({
   preselected?: string;
   /** When launched from a job, the quote attaches to it. */
   jobId?: string;
+  /** When launched from a lead conversion, the quote keeps the provenance backlink. */
+  inquiryId?: string;
   priceItems?: PriceItemLite[];
   taxRates?: TaxRateLite[];
   kits?: KitLite[];
@@ -232,6 +235,7 @@ export function QuoteBuilder({
       const res = await saveQuote({
         customer_id: customerId || null,
         job_id: jobId || null,
+        inquiry_id: inquiryId || null,
         title,
         notes,
         tax_rate: taxRate,

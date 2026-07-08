@@ -31,7 +31,7 @@ export default async function QuoteDetailPage({
 
   const { data: quote, error: quoteErr } = await supabase
     .from("quotes")
-    .select("*, customers(*)")
+    .select("*, customers(*), inquiry:inquiry_id(id, name)")
     .eq("id", id)
     .maybeSingle();
 
@@ -111,6 +111,12 @@ export default async function QuoteDetailPage({
             <QuoteTypeToggle id={q.id} value={(((q as any).doc_type ?? "quote") as "estimate" | "quote")} />
           </div>
           {q.title && <p className="mt-1 text-slate-600">{q.title}</p>}
+          {/* Provenance backlink — the lead this estimate was seeded from. */}
+          {(q as any).inquiry && (
+            <Link href={`/leads?focus=${(q as any).inquiry.id}`} className="mt-1 inline-block text-sm text-brand hover:underline">
+              ← from lead: {(q as any).inquiry.name}
+            </Link>
+          )}
           <p className="mt-1 text-sm text-slate-400">
             Created {formatDate(q.created_at)}
             {q.valid_until ? ` · Valid until ${formatDate(q.valid_until)}` : ""}

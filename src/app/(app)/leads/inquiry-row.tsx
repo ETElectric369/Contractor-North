@@ -46,7 +46,9 @@ export function InquiryRow({
   const [flash, setFlash] = useState(false);
 
   useEffect(() => {
-    if (!focused || !rowRef.current) return;
+    // On un-focus (e.g. a same-route nav to /leads that keeps this row mounted) clear the ring —
+    // otherwise the cleanup cancels the pending setFlash(false) and the highlight sticks on.
+    if (!focused || !rowRef.current) { setFlash(false); return; }
     rowRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
     setFlash(true);
     const t = setTimeout(() => setFlash(false), 2200);

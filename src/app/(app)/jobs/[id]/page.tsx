@@ -112,7 +112,7 @@ export default async function JobDetailPage({
 
   const { data: job, error: jobErr } = await supabase
     .from("jobs")
-    .select("*, customers(*)")
+    .select("*, customers(*), inquiry:inquiry_id(id, name)")
     .eq("id", id)
     .maybeSingle();
   if (jobErr) throw jobErr; // a real failure shouldn't masquerade as 404
@@ -875,9 +875,15 @@ export default async function JobDetailPage({
 
       <div className="mb-4">
         <h1 className="text-2xl font-bold text-slate-900">{j.name}</h1>
-        <div className="mt-1 flex items-center gap-2 text-sm text-slate-400">
+        <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-400">
           <span>{j.job_number}</span>
           <Badge tone={statusTone(j.status)}>{j.status.replace("_", " ")}</Badge>
+          {/* Provenance backlink — where this job came from (the lead it was converted from). */}
+          {(j as any).inquiry && (
+            <Link href={`/leads?focus=${(j as any).inquiry.id}`} className="text-brand hover:underline">
+              ← from lead: {(j as any).inquiry.name}
+            </Link>
+          )}
         </div>
       </div>
 

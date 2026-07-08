@@ -148,6 +148,15 @@ export async function convertInquiry(
   const { data: inq } = await supabase.from("inquiries").select("*").eq("id", id).maybeSingle();
   if (!inq) return { ok: false, error: "Lead not found." };
 
+  // Idempotency: a lead that's already been converted (customer/quote/estimate/job all stamp
+  // converted_at) must not be re-converted, or a SECOND customer + estimate/job would be created.
+  // This matters now because the provenance backlink deliberately re-surfaces converted leads on
+  // /leads with a live Convert menu — so this is the backstop. Inspection is exempt: it leaves the
+  // lead OPEN (converted_at stays null) so an inspected lead can still go on to become an estimate.
+  if (inq.converted_at && target !== "inspection") {
+    return { ok: false, error: "This lead was already converted — open its customer or estimate instead." };
+  }
+
   // INSPECTION — the pre-sale nerve, parallel to estimate. Books a site inspection onto the
   // Schedule and leaves the lead OPEN (converted_at stays null) so it can still become an
   // estimate afterward. No customer is forced — an inspection happens before the deal is won.
@@ -230,6 +239,7 @@ export async function convertInquiry(
         : null;
       const res = await saveQuote({
         customer_id: customerId,
+        inquiry_id: id, // provenance: this estimate traces back to the lead
         title: label ? `${label} — ${inq.name}` : `Estimate — ${inq.name}`,
         notes: reason ? `From lead — ${reason}` : "From lead.",
         tax_rate: 0, // never infer tax on a seeded draft; the office sets it on review
@@ -239,7 +249,9 @@ export async function convertInquiry(
       if (!res.ok) return { ok: false, error: res.error };
       redirect = `/quotes/${res.id}`;
     } else {
-      redirect = `/quotes/new?customer=${customerId}`;
+      // No priced intake lines (every manual lead) → open the blank builder, but thread the
+      // inquiry so the quote it saves still carries the provenance backlink.
+      redirect = `/quotes/new?customer=${customerId}&inquiry=${id}`;
     }
   } else if (target === "estimate" || target === "job") {
     // An estimate is still in the pipeline; a scheduled job means the inquiry is won.
@@ -248,6 +260,7 @@ export async function convertInquiry(
       .from("jobs")
       .insert({
         customer_id: customerId,
+        inquiry_id: id, // provenance: this estimate/job traces back to the lead
         name: `Job — ${inq.name}`,
         description: inq.message ?? null,
         status: target === "estimate" ? "estimate" : "scheduled",

@@ -134,6 +134,9 @@ export interface DraftLineItem {
 export interface SaveQuoteInput {
   customer_id: string | null;
   job_id?: string | null;
+  /** The lead this estimate was seeded from (provenance backlink) — set when a lead is
+      converted to a quote; null for quotes started from scratch. */
+  inquiry_id?: string | null;
   title: string;
   notes: string;
   tax_rate: number;
@@ -423,11 +426,22 @@ export async function saveQuote(input: SaveQuoteInput) {
     input.tax_rate || 0,
   );
 
+  // Defense-in-depth: only stamp inquiry_id if it resolves to a lead THIS caller can see (the
+  // select is RLS-bound, so a foreign-org id resolves to null). The FK check itself bypasses RLS,
+  // so without this a hand-crafted server-action POST could plant a cross-org pointer. Cheap —
+  // only runs on the rare lead-seeded quote (input.inquiry_id is otherwise null).
+  let inquiryId = input.inquiry_id || null;
+  if (inquiryId) {
+    const { data: inq } = await supabase.from("inquiries").select("id").eq("id", inquiryId).maybeSingle();
+    if (!inq) inquiryId = null;
+  }
+
   const { data: quote, error } = await supabase
     .from("quotes")
     .insert({
       customer_id: input.customer_id,
       job_id: input.job_id || null,
+      inquiry_id: inquiryId,
       title: input.title || null,
       notes: input.notes || null,
       tax_rate: input.tax_rate || 0,
@@ -523,7 +537,7 @@ export async function createJobFromQuote(
 
   const { data: q } = await supabase
     .from("quotes")
-    .select("id, job_id, customer_id, title, quote_number")
+    .select("id, job_id, customer_id, title, quote_number, inquiry_id")
     .eq("id", quoteId)
     .maybeSingle();
   if (!q) return { ok: false, error: "Quote not found." };
@@ -533,6 +547,7 @@ export async function createJobFromQuote(
     .from("jobs")
     .insert({
       customer_id: q.customer_id,
+      inquiry_id: q.inquiry_id ?? null, // carry the lead provenance forward: lead → quote → job
       name: q.title || `Job from ${q.quote_number}`,
       status: "scheduled",
       created_by: ctx.userId,

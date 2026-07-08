@@ -11,9 +11,9 @@ export const dynamic = "force-dynamic";
 export default async function NewQuotePage({
   searchParams,
 }: {
-  searchParams: Promise<{ customer?: string; job?: string }>;
+  searchParams: Promise<{ customer?: string; job?: string; inquiry?: string }>;
 }) {
-  const { customer, job } = await searchParams;
+  const { customer, job, inquiry } = await searchParams;
   const supabase = await createClient();
   const [{ data: customers }, { data: priceItems }, { data: taxRates }, { data: kits }, { data: org }] =
     await Promise.all([
@@ -72,6 +72,7 @@ export default async function NewQuotePage({
         }))}
         preselected={customer}
         jobId={job}
+        inquiryId={inquiry}
         priceItems={(priceItems ?? []) as any}
         taxRates={(taxRates ?? []) as any}
         kits={estimateKits as any}

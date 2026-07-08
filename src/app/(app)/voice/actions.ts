@@ -124,7 +124,7 @@ Params by intent:
 - create_appointment: { "title": string, "type": "appointment" | "inspection", "date": "YYYY-MM-DD", "time": "HH:MM" 24h (default "08:00") }
 - create_customer: { "name": string, "phone": string|null }
 - navigate: { "path": one of the known paths below }
-- act_on_item: { "item_id": EXACT id from the "needs action" list, "verb": "do"|"schedule"|"assign"|"convert"|"snooze"|"dismiss", "date": "YYYY-MM-DD" (for schedule/snooze), "assignee_name": string (for assign — match a team member), "target": "estimate"|"quote"|"job"|"customer" (for convert) }
+- act_on_item: { "item_id": EXACT id from the "needs action" list, "verb": "do"|"schedule"|"assign"|"convert"|"snooze"|"dismiss", "date": "YYYY-MM-DD" (for schedule/snooze), "assignee_name": string (for assign — match a team member), "target": "inspection"|"estimate"|"quote"|"job"|"customer" (for convert — "inspection" books a site visit and keeps the lead open) }
 - open_job: { "job_id": EXACT id from your jobs below }   ("open the Smith job", "pull up Tao Zhu", "edit J-12")
 - clock_in: { "job_id": EXACT id from your jobs below, or null for no job }   ("clock me in", "start the clock on the Smith job")
 - clock_out: { "miles": round-trip job miles as a number, or null }   ("clock me out", "clock out, 22 miles")
@@ -204,7 +204,7 @@ If this is a follow-up (earlier turns are shown), COMBINE everything said so far
       if (verb === "dismiss") {
         return { ok: false, message: `Dismissing deletes "${item.title}". Tap it on screen to confirm — I won't delete by voice.` };
       }
-      const payload: { date?: string; assignee?: string; target?: "customer" | "quote" | "estimate" | "job" } = {};
+      const payload: { date?: string; assignee?: string; target?: "inspection" | "customer" | "quote" | "estimate" | "job" } = {};
       if (p.date) payload.date = String(p.date);
       if (p.target) payload.target = String(p.target) as typeof payload.target;
       if (p.assignee_name) {

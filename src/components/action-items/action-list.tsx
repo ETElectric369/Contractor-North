@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Label, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { MoveToDay } from "@/components/move-to-day";
+import { useToast } from "@/components/toast";
 import { dispatchAction } from "@/lib/action-items/dispatch";
 import { KIND_META, KIND_STREAM, STREAM_LABEL, STREAM_ORDER, sortActionItems, type ActionItem, type Affordance } from "@/lib/action-items/types";
 
@@ -50,6 +51,7 @@ export function ActionList({
   emptyLabel?: string;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [doneIds, setDoneIds] = useState<Set<string>>(new Set());
   const [removedIds, setRemovedIds] = useState<Set<string>>(new Set());
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -148,7 +150,17 @@ export function ActionList({
   async function doConvert(item: ActionItem, target: "inspection" | "customer" | "quote" | "estimate" | "job") {
     setRemovedIds((s) => new Set(s).add(item.id)); // converted → leaves the inbox
     const ok = await run(item, "convert", { target });
-    if (ok) setConverting(null);
+    // The convert dispatch drops the redirect, so the row just vanishes — a toast is the only
+    // signal the crew gets that it worked (inspection especially: the site visit is now booked).
+    if (ok) {
+      setConverting(null);
+      toast(
+        target === "inspection"
+          ? "Inspection booked — check the schedule"
+          : `Converted to ${target}`,
+        "success",
+      );
+    }
   }
 
   if (visible.length === 0) {
@@ -277,7 +289,13 @@ export function ActionList({
               ["job", "Job"],
               ["customer", "Customer"],
             ] as const).map(([t, label]) => (
-              <Button key={t} type="button" variant="outline" onClick={() => converting && doConvert(converting, t)}>
+              <Button
+                key={t}
+                type="button"
+                variant="outline"
+                disabled={busyId === converting?.id}
+                onClick={() => converting && doConvert(converting, t)}
+              >
                 {label}
               </Button>
             ))}
