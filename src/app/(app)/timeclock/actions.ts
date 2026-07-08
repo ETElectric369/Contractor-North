@@ -719,6 +719,7 @@ export async function updateTimeEntry(input: {
 
   revalidatePath("/timecards");
   revalidatePath("/timeclock");
+  revalidatePath("/planner"); // an office hours/job edit changes My Day's totals + crew board
   if (input.job_id !== undefined) {
     for (const jid of new Set([oldJobId, input.job_id].filter(Boolean) as string[])) {
       revalidatePath(`/jobs/${jid}`);
@@ -818,6 +819,8 @@ export async function duplicateTimeEntry(id: string): Promise<ClockResult> {
   });
   if (error) return { ok: false, error: error.message };
   revalidatePath("/timecards");
+  revalidatePath("/timeclock");
+  revalidatePath("/planner"); // a duplicated entry changes My Day's hours + crew board
   return { ok: true };
 }
 
