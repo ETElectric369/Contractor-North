@@ -70,6 +70,28 @@ export async function createTriagedInquiry(
   if (error) throw error;
   const id = data.id as string;
 
+  // A >$20k lead flagged for a site inspection gets one AUTO-BOOKED onto the Schedule, so a big
+  // inbound lead never sits with no scheduled action. Service client → org_id explicit (no auth
+  // session for the set_org_id trigger). Best-effort: a booking failure must not stop the lead.
+  if (triage.siteInspectionRequired) {
+    try {
+      const when = new Date();
+      when.setDate(when.getDate() + 2);
+      when.setHours(9, 0, 0, 0);
+      await supabase.from("appointments").insert({
+        org_id: orgId,
+        type: "inspection",
+        title: `Site inspection: ${input.name}`,
+        starts_at: when.toISOString(),
+        location: input.address ?? null,
+        notes: input.message ?? null,
+        status: "scheduled",
+      });
+    } catch {
+      /* auto-booking is best-effort — the lead still lands even if it fails */
+    }
+  }
+
   // Fire the alarm — an inbound lead is money walking in the door, and speed-to-lead wins the
   // job. Alert the sales/office crew on THREE channels so it can't be missed: the in-app bell
   // (always works), web push (buzzes the phone), and an email to the office. All best-effort —

@@ -138,8 +138,8 @@ export async function deleteInquiry(id: string): Promise<Result> {
  */
 export async function convertInquiry(
   id: string,
-  target: "customer" | "quote" | "estimate" | "job",
-  opts: { customerId?: string | null } = {},
+  target: "inspection" | "customer" | "quote" | "estimate" | "job",
+  opts: { customerId?: string | null; startDate?: string } = {},
 ): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -147,6 +147,43 @@ export async function convertInquiry(
 
   const { data: inq } = await supabase.from("inquiries").select("*").eq("id", id).maybeSingle();
   if (!inq) return { ok: false, error: "Lead not found." };
+
+  // INSPECTION — the pre-sale nerve, parallel to estimate. Books a site inspection onto the
+  // Schedule and leaves the lead OPEN (converted_at stays null) so it can still become an
+  // estimate afterward. No customer is forced — an inspection happens before the deal is won.
+  if (target === "inspection") {
+    const startDate = opts.startDate || (() => {
+      const d = new Date();
+      d.setDate(d.getDate() + 2);
+      return d.toISOString().slice(0, 10);
+    })();
+    const startsAt = new Date(`${startDate}T00:00:00`);
+    startsAt.setHours(9, 0, 0, 0); // 9am (matches the follow-up auto-book; movable on the calendar)
+    const { error: aErr } = await supabase.from("appointments").insert({
+      type: "inspection",
+      title: `Site inspection: ${inq.name}`,
+      starts_at: startsAt.toISOString(),
+      location: inq.address,
+      notes: inq.message ?? inq.notes ?? null,
+      customer_id: opts.customerId || inq.customer_id || null,
+      created_by: ctx.userId,
+    });
+    if (aErr) return { ok: false, error: aErr.message };
+    // Engaged, not closed: mark contacted and resurface the lead around the inspection date.
+    await supabase
+      .from("inquiries")
+      .update({
+        status: "contacted",
+        last_contacted_at: new Date().toISOString(),
+        next_follow_up_at: startDate,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id);
+    revalidatePath("/leads");
+    revalidatePath("/schedule");
+    revalidatePath("/planner");
+    return { ok: true, redirect: `/schedule?view=day&date=${startDate}` };
+  }
 
   // Resolve the customer: link the chosen existing one, or create from inquiry.
   let customerId = opts.customerId || null;
