@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { setJobScheduleRanges, setJobAssignee, createJob, moveJobDay, createScheduleProposal } from "@/app/(app)/schedule/actions";
+import { setJobScheduleRanges, setJobCrew, createJob, moveJobDay, createScheduleProposal } from "@/app/(app)/schedule/actions";
 import { setJobStatus, finishJob, updateJobDescription } from "@/app/(app)/jobs/actions";
 import { linkJobContact, unlinkJobContact } from "@/app/(app)/jobs/[id]/job-contacts-actions";
 import { createClient } from "@/lib/supabase/server";
@@ -181,7 +181,7 @@ export const jobActions: Record<string, ActionDef> = {
     name: "job.assign",
     group: "job",
     label: "Assign job",
-    description: "Assign a job to a single employee (profile id), or an explicit null/empty to clear.",
+    description: "ADD an employee to a job's crew — keeps anyone already on it (a job can have several people). Pass an explicit null/empty assignee to clear the whole crew.",
     // assignee is REQUIRED (nullable): the old .default("") silently UNASSIGNED the job
     // whenever the field was omitted. Now omitting it asks instead of wiping.
     input: z.object({ id: z.string(), assignee: z.string().nullable() }),
@@ -189,14 +189,21 @@ export const jobActions: Record<string, ActionDef> = {
     effect: "write",
     handler: async (i) => {
       // Forgive names on BOTH sides: a job name as the id, and a crew member's name as the
-      // assignee. A single match resolves; zero/several ASK. An explicit null still unassigns.
+      // assignee. A single match resolves; zero/several ASK.
       const supabase = await createClient();
       const job = await resolveJobId(supabase, i.id);
       if ("error" in job) return { ok: false, error: job.error };
       if (!job.id) return { ok: false, error: "Which job should I assign?" };
+      // Explicit null/empty = clear the whole crew.
+      if (!i.assignee) return setJobCrew(job.id, []);
       const person = await resolveProfileId(supabase, i.assignee);
       if ("error" in person) return { ok: false, error: person.error };
-      return setJobAssignee(job.id, person.id ?? "");
+      if (!person.id) return { ok: false, error: "Which crew member should I add?" };
+      // ADD them to the existing crew — never wipe teammates (was setJobAssignee, which overwrote
+      // to one person: the same P1 bug the schedule card had). Read → append → dedup.
+      const { data: cur } = await supabase.from("jobs").select("assigned_to").eq("id", job.id).maybeSingle();
+      const next = Array.from(new Set([...(((cur?.assigned_to as string[] | null) ?? [])), person.id]));
+      return setJobCrew(job.id, next);
     },
   },
 };

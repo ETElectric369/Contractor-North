@@ -140,6 +140,23 @@ export async function setJobAssignee(
   return { ok: true };
 }
 
+/** Set a job's FULL crew (multi-assign). The picker sends the complete desired set, so ticking a
+ *  SECOND person ADDS them instead of replacing — the "put both me and Brian on it" fix. This is the
+ *  #1 item from both the audit and Nort's self-review: the old single-Select silently overwrote the
+ *  crew to one person. De-duped; empty = unassigned. Same guards/revalidation as setJobAssignee. */
+export async function setJobCrew(id: string, employeeIds: string[]): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const ids = Array.from(new Set((employeeIds ?? []).map(String).filter(Boolean)));
+  const { error } = await supabase.from("jobs").update({ assigned_to: ids }).eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/schedule");
+  revalidatePath("/planner");
+  revalidatePath(`/jobs/${id}`);
+  return { ok: true };
+}
+
 /** Offer the customer up to 3 date+time slots; returns the public pick token.
  *  A slot with no time schedules the job at 8 AM (legacy behavior). */
 export async function createScheduleProposal(
