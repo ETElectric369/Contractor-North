@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/cron-guard";
 import { generateDueTemplates } from "@/lib/recurring-engine";
 import { sendDayAheadDigests } from "@/lib/action-items/digest";
+import { generateNortReviewsForAllOrgs } from "@/lib/nort/review";
 import { reportError } from "@/lib/observe";
 
 export const runtime = "nodejs";
@@ -41,6 +42,15 @@ export async function GET(request: Request) {
   }
   // The "Close out your day" nudge moved to the EVENING cron (eod-reminder, 6pm local-ish) —
   // Erik: the debrief is a NIGHT ritual; mornings keep the day-ahead digest only.
+
+  try {
+    // Nort's self-review — read the crew's recent Nort conversations + bug reports and cluster them
+    // into "what to build/fix next." The active half of the learning loop; staff read it back in-app.
+    result.nort_reviews = await generateNortReviewsForAllOrgs(supabase);
+  } catch (e: any) {
+    result.nort_reviews_error = e?.message ?? "failed";
+    reportError("cron-nort-review", e);
+  }
 
   try {
     // Housekeeping: drop stale public-endpoint rate-limit windows (>1 day old) so the

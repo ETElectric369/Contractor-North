@@ -281,6 +281,12 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "get_nort_review",
+    description:
+      "Read your latest SELF-REVIEW — the digest you generate nightly by clustering the crew's recent Nort conversations + their bug reports into 'what to build/fix next' (a summary + ranked findings: gaps, bugs, recurring pain, wins). Use this when the owner asks what the crew is struggling with, what you should build or fix next, or 'what did you learn / what's the pulse'. Read-only, this company only.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
     name: "list_inquiries",
     description:
       "List incoming LEADS (inquiries) — the top of the sales funnel. Returns each lead's id, name, phone, status, and when it was last contacted. Use for 'who are my open leads', 'any new leads', 'who needs a follow-up'. Pass the id to contact or convert a lead.",
@@ -530,6 +536,7 @@ export const STAFF_ONLY_DATA_TOOLS = new Set<string>([
   "get_purchase_order", // vendor PO + costs (unit_cost is buy-side pricing)
   "list_kits", // saved quote-bundle pricing
   "list_organize", // receipts/notes inbox — carries vendor + amounts
+  "get_nort_review", // Nort's self-review — operational, owner-facing
 ]);
 
 /** Strip characters that would break a PostgREST `.or()` filter expression. */
@@ -1475,6 +1482,29 @@ export async function runDataTool(
             filed: b.created_at,
             reporter: b.profiles?.full_name ?? null,
           })),
+        });
+      }
+
+      case "get_nort_review": {
+        // The latest self-review row. RLS (nort_reviews_read) restricts to this org + staff, so a
+        // non-staff caller simply gets nothing. Written by the nightly service-role job.
+        const { data, error } = await supabase
+          .from("nort_reviews")
+          .select("summary, findings, counts, period_start, period_end, created_at")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        // Degrade gracefully before the table is provisioned / when there's nothing yet — never
+        // surface a raw DB error to the user for a "what's the pulse" ask.
+        if (error || !data) {
+          return JSON.stringify({ review: null, note: "No self-review yet — Nort generates one nightly from the day's conversations + bug reports." });
+        }
+        return JSON.stringify({
+          generated: data.created_at,
+          covers: { from: data.period_start, to: data.period_end },
+          based_on: data.counts,
+          summary: data.summary,
+          findings: data.findings,
         });
       }
 
