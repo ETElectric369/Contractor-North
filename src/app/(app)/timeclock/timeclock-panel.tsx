@@ -441,6 +441,32 @@ export function TimeclockPanel({
     });
   }
 
+  // "Clock out now — break it down later." Defers the job/hours breakdown: passes auto:true so
+  // the codes-and-hours requirement is skipped (the SAME escape the geofence auto-close uses), and
+  // the entry lands with no allocations. /timeclock resurfaces it (the AutoClockoutPrompt) the next
+  // time they open the page — which is every clock-in — so nothing bills to the wrong job silently.
+  function doClockOutLater() {
+    if (!openEntry) return;
+    setError(null);
+    start(async () => {
+      const gps = await getGps(3000);
+      try {
+        const res = await clockOut({
+          entry_id: openEntry.id,
+          lunch_minutes: lunchToUse,
+          notes,
+          gps,
+          miles,
+          auto: true,
+          allocations: [],
+        });
+        if (!res.ok) setError(res.error ?? "Could not clock out.");
+      } catch {
+        setError(OFFLINE_MSG);
+      }
+    });
+  }
+
   if (openEntry) {
     const elapsed = hoursBetween(openEntry.clock_in, new Date(now), lunchToUse);
     const jobLabel =
@@ -750,6 +776,18 @@ export function TimeclockPanel({
                   )}
                 </Button>
               </div>
+
+              {/* The escape hatch: clock out clean now, answer the breakdown later. It lands as an
+                  incomplete entry that /timeclock re-prompts on your next visit — so a busy crew
+                  never has to stand in the driveway filling in job codes. */}
+              <button
+                type="button"
+                onClick={doClockOutLater}
+                disabled={pending}
+                className="w-full pt-1 text-center text-xs font-medium text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline disabled:opacity-50"
+              >
+                Clock out now — I&apos;ll break it down later
+              </button>
             </>
           )}
         </CardContent>

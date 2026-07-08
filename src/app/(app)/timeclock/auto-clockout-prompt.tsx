@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { MapPin, Plus, Trash2, Coffee, Loader2 } from "lucide-react";
+import { Clock, Plus, Trash2, Coffee, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, Input } from "@/components/ui/input";
@@ -15,9 +15,10 @@ type JobOpt = { id: string; job_number: string; name: string; codes?: string[] }
 type Entry = { id: string; clock_in: string; clock_out: string; lunch_minutes: number; jobId: string | null; jobLabel: string };
 type AllocRow = { job_id: string; job_code: string; hours: number; minutes: number; description: string };
 
-/** Shown on /timeclock when the geofence auto-clocked the tech out (they drove off the
- *  job). They answer the clock-out questions after the fact: which code(s) + hours, and
- *  whether they took lunch. The clock in/out times are locked at the geofence times. */
+/** Shown on /timeclock when a clock-out left the breakdown unfinished — either the geofence
+ *  auto-clocked the tech out (they drove off the job) OR they tapped "break it down later" at
+ *  clock-out. They answer the questions after the fact: which code(s) + hours, and whether they
+ *  took lunch. The clock in/out times are locked; only the code split + lunch are added here. */
 export function AutoClockoutPrompt({ entry, jobCodes, jobs }: { entry: Entry; jobCodes: JobCode[]; jobs: JobOpt[] }) {
   const router = useRouter();
   const worked0 = hoursBetween(entry.clock_in, entry.clock_out, entry.lunch_minutes);
@@ -68,12 +69,12 @@ export function AutoClockoutPrompt({ entry, jobCodes, jobs }: { entry: Entry; jo
     <Card className="mb-4 border-amber-300 bg-amber-50/60">
       <CardContent className="space-y-4 py-5">
         <div className="flex items-start gap-2">
-          <MapPin className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+          <Clock className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
           <div>
             <div className="text-sm font-semibold text-amber-800">
-              You left {entry.jobLabel} and were clocked out at {new Date(entry.clock_out).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.
+              Finish your timecard — you clocked out at {new Date(entry.clock_out).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.
             </div>
-            <div className="text-xs text-amber-700">Log which code(s) you worked and how long, so the hours bill to the right job.</div>
+            <div className="text-xs text-amber-700">Break down the hours you worked: which code(s) and how long, so they bill to the right job.</div>
           </div>
         </div>
 
