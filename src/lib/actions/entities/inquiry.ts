@@ -44,8 +44,9 @@ export const inquiryActions: Record<string, ActionDef> = {
     name: "inquiry.convert",
     group: "inquiry",
     label: "Convert inquiry",
-    description: "Convert a lead/inquiry into a customer, quote, estimate, or job.",
-    input: z.object({ id: z.string(), target: z.enum(["customer", "quote", "estimate", "job"]).default("estimate") }),
+    description:
+      "Convert a lead/inquiry. Targets: 'inspection' books a site inspection on the schedule and keeps the lead open (use for big jobs that need a site visit before a firm price); 'quote'/'estimate' start a priced draft or estimate job; 'job' books the work; 'customer' just files them in the CRM.",
+    input: z.object({ id: z.string(), target: z.enum(["inspection", "customer", "quote", "estimate", "job"]).default("estimate") }),
     auth: "staff", // inquiries are staff-only in RLS — the registry gate now matches (Phase C)
     effect: "write",
     handler: (i) => convertInquiry(i.id, i.target),

@@ -77,7 +77,7 @@ export function ActionList({
   async function run(
     item: ActionItem,
     verb: Affordance,
-    payload?: { date?: string; assignee?: string; target?: "customer" | "quote" | "estimate" | "job" },
+    payload?: { date?: string; assignee?: string; target?: "inspection" | "customer" | "quote" | "estimate" | "job" },
   ) {
     setError(null);
     setBusyId(item.id);
@@ -145,7 +145,7 @@ export function ActionList({
     setSavingAssign(false);
     if (ok) setAssigning(null);
   }
-  async function doConvert(item: ActionItem, target: "customer" | "quote" | "estimate" | "job") {
+  async function doConvert(item: ActionItem, target: "inspection" | "customer" | "quote" | "estimate" | "job") {
     setRemovedIds((s) => new Set(s).add(item.id)); // converted → leaves the inbox
     const ok = await run(item, "convert", { target });
     if (ok) setConverting(null);
@@ -271,6 +271,7 @@ export function ActionList({
           <p className="text-sm text-slate-500">Turn this inquiry into:</p>
           <div className="grid grid-cols-2 gap-2">
             {([
+              ["inspection", "Inspection"],
               ["estimate", "Estimate"],
               ["quote", "Quote"],
               ["job", "Job"],
@@ -281,6 +282,9 @@ export function ActionList({
               </Button>
             ))}
           </div>
+          <p className="text-xs text-slate-400">
+            Inspection books a site visit in ~2 days and keeps the lead open — for big jobs that need a look before a firm price.
+          </p>
         </div>
       </Modal>
 

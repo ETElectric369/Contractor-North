@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { executeAction } from "@/lib/actions/execute";
 import type { ActionKind, Affordance } from "./types";
 
-type ConvertTarget = "customer" | "quote" | "estimate" | "job";
+type ConvertTarget = "inspection" | "customer" | "quote" | "estimate" | "job";
 
 type Result = { ok: boolean; error?: string };
 

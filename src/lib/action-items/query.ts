@@ -296,7 +296,9 @@ export async function getActionItems(ctx: {
       // An overdue follow-up is next; a contacted, on-schedule lead is normal.
       urgency: q.status === "new" ? 2 : overdue ? 1 : 0,
       done: false,
-      href: "/leads",
+      // Deep-link to THIS lead (not the bare list) so a tap on My Day scrolls to and
+      // flashes the exact row — the "new leads clickable on My Day" nerve.
+      href: `/leads?focus=${q.id}`,
       affordances: AFFORDANCES.inquiry,
     });
   }

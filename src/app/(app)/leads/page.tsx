@@ -11,7 +11,12 @@ import type { Inquiry } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-export default async function InquiriesPage() {
+export default async function InquiriesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ focus?: string }>;
+}) {
+  const { focus } = await searchParams;
   const supabase = await createClient();
 
   const [{ data: inqData }, { data: custData }] = await Promise.all([
@@ -67,7 +72,7 @@ export default async function InquiriesPage() {
         <Card>
           <ul className="divide-y divide-slate-100">
             {inquiries.map((i) => (
-              <InquiryRow key={i.id} inquiry={i} customers={customers} />
+              <InquiryRow key={i.id} inquiry={i} customers={customers} focused={i.id === focus} />
             ))}
           </ul>
         </Card>

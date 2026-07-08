@@ -1,9 +1,8 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Phone, Mail, CheckCircle2, Globe } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Phone, Mail, Globe } from "lucide-react";
 import { Input, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { InquiryModal } from "./inquiry-modal";
@@ -31,31 +30,44 @@ const STATUSES = ["new", "contacted", "quoted", "won", "lost"];
 export function InquiryRow({
   inquiry,
   customers,
+  focused = false,
 }: {
   inquiry: Inquiry;
   customers: { id: string; name: string }[];
+  /** True when My Day (or an estimate backlink) deep-linked to this exact lead —
+      scroll it into view and flash a highlight so the eye lands on the right row. */
+  focused?: boolean;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [followUp, setFollowUp] = useState(inquiry.next_follow_up_at ?? "");
   const toast = useToast();
+  const rowRef = useRef<HTMLLIElement>(null);
+  const [flash, setFlash] = useState(false);
+
+  useEffect(() => {
+    if (!focused || !rowRef.current) return;
+    rowRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    setFlash(true);
+    const t = setTimeout(() => setFlash(false), 2200);
+    return () => clearTimeout(t);
+  }, [focused]);
 
   const overdue =
     inquiry.next_follow_up_at && new Date(inquiry.next_follow_up_at) < new Date(new Date().toDateString());
 
-  function contacted() {
-    start(async () => {
-      const res = await markInquiryContacted(inquiry.id, followUp || null);
-      if (!res?.ok) { toast(res?.error ?? "Couldn't mark contacted — try again.", "error"); return; }
-      toast("Marked contacted", "success");
-      router.refresh();
-    });
-  }
-
+  // The Status dropdown is the ONE lead-state control (the old standalone "Contacted"
+  // button was redundant with it and crowded the row). Picking "Contacted" still does the
+  // full stamp — last_contacted_at + the follow-up date — via markInquiryContacted; every
+  // other status is a plain set.
   function changeStatus(status: string) {
     start(async () => {
-      const res = await setInquiryStatus(inquiry.id, status);
+      const res =
+        status === "contacted"
+          ? await markInquiryContacted(inquiry.id, followUp || null)
+          : await setInquiryStatus(inquiry.id, status);
       if (!res?.ok) { toast(res?.error ?? "Couldn't update status — try again.", "error"); return; }
+      if (status === "contacted") toast("Marked contacted", "success");
       // The list filters lost leads out, so the row vanishes — say it worked.
       if (status === "lost") toast("Marked lost", "success");
       router.refresh();
@@ -63,7 +75,13 @@ export function InquiryRow({
   }
 
   return (
-    <li className="flex flex-col gap-3 px-5 py-4 lg:flex-row lg:items-start lg:gap-4">
+    <li
+      ref={rowRef}
+      id={`lead-${inquiry.id}`}
+      className={`flex scroll-mt-24 flex-col gap-3 px-5 py-4 transition-colors lg:flex-row lg:items-start lg:gap-4 ${
+        flash ? "bg-brand/5 ring-2 ring-inset ring-brand" : ""
+      }`}
+    >
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-medium text-slate-900">{inquiry.name}</span>
@@ -118,9 +136,6 @@ export function InquiryRow({
             {overdue && <Badge tone="red">overdue</Badge>}
           </div>
         </div>
-        <Button size="sm" variant="outline" onClick={contacted} disabled={pending}>
-          <CheckCircle2 className="h-4 w-4" /> Contacted
-        </Button>
         <div className="text-right">
           <label className="mb-0.5 block text-[10px] uppercase tracking-wide text-slate-400">Status</label>
           <Select
