@@ -211,6 +211,14 @@ export async function POST(req: Request) {
   const playbook = orgS.quote_playbook?.trim();
   const catalogMode = orgS.estimating_mode === "catalog";
   let systemPrompt = ASSISTANT_SYSTEM_PROMPT;
+  // SUB-CACHING SPLIT: `systemPrompt` accumulates only the STABLE core (frozen instructions +
+  // org-config estimating method + playbook + write-tool rules) — byte-identical per org/role, so
+  // it becomes a CACHED system block (tools cache with it, since tools render before system). Every
+  // per-request/session bit — durable memory, voice mode, recent-history recall — accumulates in
+  // `volatilePrompt` instead and is appended as a SECOND, UNCACHED system block. Same total text as
+  // before (stable → memory → voice → recall), so zero behavior change; but the volatile tail can no
+  // longer bust the big cached prefix, so the cache finally HITS on repeat requests + agentic rounds.
+  let volatilePrompt = "";
   // THE ESTIMATING METHOD — mode-aware. "catalog" companies (deck/carpentry & preset-price
   // shops) bid from their OWN price list + kits, quantities from the customer's measurements,
   // NO web research. "research" (default, electrical) prices materials by LIVE market research
@@ -321,7 +329,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
       .order("created_at", { ascending: false })
       .limit(40);
     if (mem && mem.length) {
-      systemPrompt +=
+      volatilePrompt +=
         "\n\nWhat you've learned about THIS person over time — use it to adapt (their style, defaults, suppliers, trade); don't recite it back unprompted:\n" +
         mem.map((m: { content: string }) => `- ${m.content}`).join("\n");
     }
@@ -336,7 +344,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
     return new Response("Bad request", { status: 400 });
   }
   if (body.voice) {
-    systemPrompt +=
+    volatilePrompt +=
       "\n\nVOICE MODE — THIS OVERRIDES EVERY OTHER INSTRUCTION ABOUT READING THINGS BACK. Your reply is read OUT LOUD to someone who is probably DRIVING and can't look at the screen. Two hard rules that beat any 'read it back' / 'readback list' / 'read the whole quote' / 'read back the six' instruction above:\n" +
       "1. NEVER read a list of 3 or more items aloud. The screen shows the lines. Say the COUNT and the headline only — 'Six lines, five thousand five hundred fifty dollars — want the highlights or should I save it?' / 'Created five records — Brian's hours and the Romex are the two I need from you.' Read an individual line ONLY if they ask for it.\n" +
       "2. One thing at a time; a sentence or two; collapse every confirmation to ONE short sentence. If you're about to look something up or search the web (a beat of silence they can't see), say a 3-4 word heads-up FIRST — 'Got it, checking.' / 'One sec, pricing that.' — THEN call the tool, so it never sounds like you hung up.\n" +
@@ -397,7 +405,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
       }
       kept.reverse(); // chronological, oldest → newest
       if (kept.length) {
-        systemPrompt +=
+        volatilePrompt +=
           "\n\nRECENT HISTORY WITH THIS PERSON — earlier chats (oldest to newest), for CONTINUITY only. " +
           "Lean on it when they say 'yesterday' / 'earlier' / 'like we talked about', so you actually " +
           "remember what was discussed and what you already saved. Don't recite it back unprompted:\n" +
@@ -513,9 +521,15 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
           const turn = client.messages.stream({
             model: DEFAULT_MODEL,
             max_tokens: 2048,
-            // Block form so the system prompt carries the cache breakpoint (covers tools too —
-            // tools render before system, so one marker here caches both).
-            system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
+            // TWO system blocks: the big STABLE core carries the cache breakpoint (covers tools too —
+            // tools render before system, so one marker here caches both); the per-request/session
+            // VOLATILE tail (memory, voice, recall) follows UNcached, so it can't bust the cached
+            // prefix. This is the sub-caching win — repeat requests + agentic rounds read the core
+            // from cache (~10% cost) instead of re-processing thousands of tokens every time.
+            system: [
+              { type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } },
+              ...(volatilePrompt ? [{ type: "text" as const, text: volatilePrompt }] : []),
+            ],
             // Native web search (server-side, autonomous) so the assistant can research
             // LIVE prices, specs, and code while estimating — the core "do it like Claude
             // did the Tao Zhu quote" capability. Results are untrusted web text (the
