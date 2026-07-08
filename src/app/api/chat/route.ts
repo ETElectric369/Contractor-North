@@ -105,14 +105,19 @@ const SHOW_CARD_TOOL = {
   },
 } as const;
 
-// Long-term memory: save ONE durable fact about this person for future sessions.
+// Long-term memory: save ONE durable fact for future sessions. `scope` decides who it's for —
+// 'business' facts are SHARED with the whole crew (Nort learns the business once for everyone);
+// 'personal' facts stay private to this one person.
 const REMEMBER_TOOL = {
   name: "remember",
   description:
-    "Save ONE durable fact about THIS person so you recall it next time — how they like to work (e.g. 'prefers short answers'), their trade, usual suppliers, default markup, recurring customers, or a stated preference. Use it when you learn something worth keeping long-term; skip trivial or one-off details. One short sentence.",
+    "Save ONE durable fact so you recall it next time. Set scope: 'business' = how the COMPANY runs — usual suppliers, labor/markup defaults, crew, billing rhythm, recurring customers, a standing preference for how work is done (SHARED with the whole crew, so you learn the business once for everyone); 'personal' = one person's own working style (e.g. 'Erik prefers short answers', their language) that shouldn't be assumed for teammates. Default to 'business' — most of what's worth keeping is about the business. Use it when you learn something worth keeping long-term; skip trivial or one-off details. One short sentence.",
   input_schema: {
     type: "object",
-    properties: { fact: { type: "string", description: "The thing to remember, one short sentence." } },
+    properties: {
+      fact: { type: "string", description: "The thing to remember, one short sentence." },
+      scope: { type: "string", enum: ["business", "personal"], description: "'business' (shared, the default) or 'personal' (private to this person)." },
+    },
     required: ["fact"],
   },
 } as const;
@@ -296,7 +301,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
       "\n5. CLOSE WITH THE PLAN, one line: tomorrow's first job, the pickup list, the one thing that can't slip." +
       // The six-slot day: the debrief is where tomorrow's six get picked (task.setFocus pins them).
       "\n5b. PROPOSE TOMORROW'S SIX: read the pool (list_tasks — overdue + due tomorrow — plus schedule_overview for tomorrow's jobs) and read back UP TO SIX candidates, one line each; let them swap by voice. On their confirm, call task.setFocus {id, focus_date: tomorrow} for each pick, then close by reading the final six back. If the overdue+undated pool tops ~10, FIRST offer one bulk sweep ('want me to push the stale ones to next week, or close the dead ones?') via task.bulkReschedule / task.bulkComplete — drain the backlog before picking six." +
-      "\n6. LAST: if the interview revealed a durable pattern about how THIS business runs (usual crew hours, a supplier habit, a billing rhythm), save ONE fact with remember — this is how you learn the business." +
+      "\n6. LAST: if the interview revealed a durable pattern about how THIS business runs (usual crew hours, a supplier habit, a billing rhythm), save ONE fact with remember (scope 'business' — it's shared with the whole crew, so you learn the business once for everyone) — this is how you get smarter over time." +
       "\nIn voice mode keep every question to one short sentence.";
     // The morning half of the six-slot loop: the day opens with the six, not a number.
     systemPrompt +=
@@ -321,17 +326,26 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
       "\n\nIDS ARE UUIDS: every id argument (customer_id, job_id, profile_id, entry id…) must be a uuid RETURNED BY a list_* tool in this conversation. Never pass a name ('John Chmura'), a slug, or a placeholder ('{{JOB_ID}}') where an id belongs — if you don't have the uuid yet, look it up first, then write.";
   }
 
-  // MEMORY: feed in what we've learned about this person so the agent adapts to them.
+  // MEMORY: what Nort has learned. RLS returns the org's shared BUSINESS facts + THIS person's own
+  // PERSONAL facts, so it adapts to the company AND the individual. Split them so a teammate's style
+  // is never assumed for someone else; don't recite either back unprompted.
   try {
     const { data: mem } = await supabase
       .from("user_memory")
-      .select("content")
+      .select("content, scope")
       .order("created_at", { ascending: false })
-      .limit(40);
-    if (mem && mem.length) {
+      .limit(60);
+    const biz = (mem ?? []).filter((m: { scope?: string }) => m.scope !== "personal").map((m: { content: string }) => `- ${m.content}`);
+    const pers = (mem ?? []).filter((m: { scope?: string }) => m.scope === "personal").map((m: { content: string }) => `- ${m.content}`);
+    if (biz.length) {
       volatilePrompt +=
-        "\n\nWhat you've learned about THIS person over time — use it to adapt (their style, defaults, suppliers, trade); don't recite it back unprompted:\n" +
-        mem.map((m: { content: string }) => `- ${m.content}`).join("\n");
+        "\n\nWhat you know about THIS BUSINESS (learned over time, shared across the whole crew — suppliers, rates, crew, billing habits, how they run):\n" +
+        biz.slice(0, 40).join("\n");
+    }
+    if (pers.length) {
+      volatilePrompt +=
+        "\n\nWhat you know about THIS PERSON specifically (their own style/defaults — don't assume it for teammates):\n" +
+        pers.slice(0, 20).join("\n");
     }
   } catch {
     /* memory is best-effort */
@@ -602,14 +616,16 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
               results.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify({ ok: true, shown: true }) });
               continue;
             }
-            // Long-term memory: store one fact about this user (RLS-private to them).
+            // Long-term memory: store one fact. scope 'business' (default) is shared with the whole
+            // crew via RLS; 'personal' stays private to this user.
             if (tu.name === "remember") {
               const fact = String((tu.input as { fact?: unknown })?.fact ?? "").trim().slice(0, 400);
+              const scope = (tu.input as { scope?: unknown })?.scope === "personal" ? "personal" : "business";
               let ok = false;
               if (fact) {
                 // supabase-js returns {error}, it doesn't throw — so check it. Was: try/catch + an
                 // UNCONDITIONAL {ok:true}, so the model said "I'll remember that" even when nothing saved.
-                const { error } = await supabase.from("user_memory").insert({ user_id: user.id, content: fact });
+                const { error } = await supabase.from("user_memory").insert({ user_id: user.id, content: fact, scope });
                 ok = !error;
               }
               results.push({
