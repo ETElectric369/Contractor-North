@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getPublicOrgByHandle } from "@/lib/public-org";
+import { getPublicPosts } from "@/lib/public-posts";
 import { OrgSite, orgSiteMetadata } from "../org-site";
+import { handleLinkBase } from "../site-base";
 
 export const dynamic = "force-dynamic";
 
@@ -17,5 +19,8 @@ export default async function SiteHome({ params }: { params: Promise<{ handle: s
   const { handle } = await params;
   const org = await getPublicOrgByHandle(handle);
   if (!org) notFound();
-  return <OrgSite org={org} />;
+  // The Articles nav link appears only when the org has published posts.
+  const posts = await getPublicPosts(org.id);
+  const articlesHref = posts.length ? `${await handleLinkBase(handle)}/blog` : null;
+  return <OrgSite org={org} articlesHref={articlesHref} />;
 }

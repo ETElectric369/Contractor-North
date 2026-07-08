@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
+import { CONTENT_ROOTS } from "@/lib/site-content-roots";
 
 // The platform's own domain. A subdomain of it is a free org site: <handle>.SITES_DOMAIN.
 // Any OTHER host pointed at us is a custom domain, resolved by hostname in /site/by-domain.
@@ -13,21 +14,31 @@ const EXTRA_APP_HOSTS = new Set(
 );
 
 // Legacy CMS paths (Squarespace/Wix/WordPress defaults + Tahoe Deck's old Squarespace slugs).
-// When an org moves its domain to North, its old deep URLs (/about, /portfolio, a /blog-1-1/* post)
-// have no equivalent route here — North's public site is a single page with #anchors — so they'd
+// When an org moves its domain to North, its old deep URLs (/about, /portfolio) have no
+// equivalent route here — North's public site is a single page with #anchors — so they'd
 // 404. We 301 them to the homepage instead: bookmarks, business cards, and Google's old index
 // entries all land on the live site (which carries the portfolio + instant-estimate CTA) rather
 // than a dead end. Only ever runs on a NON-app host, so it can't touch the app's own routes.
+// NOTE: blog paths are NOT here — they route to the articles engine below, which serves a
+// migrated site's posts at their ORIGINAL URLs (and itself 301s home when no post matches).
 const LEGACY_EXACT = new Set([
   "/about", "/about-us", "/portfolio", "/gallery", "/services", "/our-work",
   "/projects", "/contact", "/contact-us", "/home", "/store", "/shop",
-  "/blog", "/blog-1-1", "/testimonials", "/reviews", "/faq",
+  "/testimonials", "/reviews", "/faq",
 ]);
-const LEGACY_PREFIX = ["/blog/", "/blog-1-1/", "/shop/", "/store/", "/products", "/product/", "/gallery/", "/portfolio/", "/services/"];
+const LEGACY_PREFIX = ["/shop/", "/store/", "/products", "/product/", "/gallery/", "/portfolio/", "/services/"];
 function isLegacyCmsPath(pathname: string): boolean {
   const p = pathname.replace(/\/+$/, "") || "/"; // tolerate a trailing slash
   if (LEGACY_EXACT.has(p)) return true;
   return LEGACY_PREFIX.some((pre) => pathname.startsWith(pre));
+}
+
+// Article-engine paths on an org host: /blog is the index; /blog/* and legacy /blog-1-1/*
+// (Squarespace's blog collection prefix) are posts served at their original URLs. The roots come
+// from the SHARED CONTENT_ROOTS so middleware routing and saveSitePost validation never drift.
+function isContentPath(pathname: string): boolean {
+  const p = pathname.replace(/\/+$/, "") || "/";
+  return CONTENT_ROOTS.some((root) => p === `/${root}` || p.startsWith(`/${root}/`));
 }
 
 /** Is this host the app itself (login/dashboard) rather than an org's public marketing site?
@@ -46,6 +57,26 @@ export async function middleware(request: NextRequest) {
   const host = (request.headers.get("host") || "").toLowerCase().split(":")[0];
 
   const onOrgSite = host && !isAppHost(host);
+
+  // Articles engine: on an org host, /blog* paths rewrite into the site content catch-all —
+  // the index at /blog, posts at their ORIGINAL paths (incl. Squarespace's /blog-1-1/<slug>).
+  // The catch-all page does the post lookup (middleware stays DB-free) and 301s home itself
+  // when nothing matches, preserving the old stale-link behavior.
+  if (onOrgSite && isContentPath(request.nextUrl.pathname)) {
+    const url = request.nextUrl.clone();
+    const p = url.pathname.replace(/\/+$/, "");
+    const content = p === "/blog-1-1" ? "/blog" : p; // the old collection index = our index
+    if (host.endsWith(`.${SITES_DOMAIN}`)) {
+      const sub = host.slice(0, host.length - SITES_DOMAIN.length - 1);
+      if (sub && !sub.includes(".") && !RESERVED_SUBS.has(sub)) {
+        url.pathname = `/site/${sub}${content}`;
+        return NextResponse.rewrite(url);
+      }
+    } else {
+      url.pathname = `/site/by-domain${content}`;
+      return NextResponse.rewrite(url);
+    }
+  }
 
   // On a pointed org domain, 301 old-CMS URLs to the homepage so a migrated site's stale links
   // never 404. Runs before the root rewrite; only on non-app hosts, so app routes are untouched.

@@ -1,5 +1,6 @@
 import { headers } from "next/headers";
 import { getPublicOrgByHandle, getPublicOrgByDomain } from "@/lib/public-org";
+import { getPublicPosts } from "@/lib/public-posts";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +30,12 @@ export async function GET() {
   if (org) {
     const handle = org.settings.public_handle;
     if (handle && org.settings.estimating_mode === "catalog") urls.push(`${base}/estimate/${handle}`);
+    // Articles — the index + every published post at its original path.
+    const posts = await getPublicPosts(org.id);
+    if (posts.length) {
+      urls.push(`${base}/blog`);
+      for (const p of posts) urls.push(`${base}/${p.path}`);
+    }
   }
 
   const xml = `<?xml version="1.0" encoding="UTF-8"?>

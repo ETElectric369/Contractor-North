@@ -142,7 +142,7 @@ function Hero({
   );
 }
 
-export function OrgSite({ org }: { org: PublicOrg }) {
+export function OrgSite({ org, articlesHref }: { org: PublicOrg; articlesHref?: string | null }) {
   const s = org.settings;
   const handle = s.public_handle;
   const brand = accentHex(s.glass_tint);
@@ -209,6 +209,7 @@ export function OrgSite({ org }: { org: PublicOrg }) {
             {photos.length > 0 && <a href="#work" className="hover:text-slate-900">Our work</a>}
             {services.length > 0 && <a href="#services" className="hover:text-slate-900">Services</a>}
             {reviews.length > 0 && <a href="#reviews" className="hover:text-slate-900">Reviews</a>}
+            {articlesHref && <Link href={articlesHref} className="hover:text-slate-900">Articles</Link>}
             <a href="#contact" className="hover:text-slate-900">Contact</a>
           </nav>
           <div className="flex items-center gap-2">

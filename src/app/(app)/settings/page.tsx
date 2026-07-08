@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { User, Building2, Wallet, CalendarDays, Plug } from "lucide-react";
 import { SettingsSubnav } from "./settings-subnav";
-import { getOrgSettings, accentHex } from "@/lib/org-settings";
+import { getOrgSettings, accentHex, orgPublicBaseUrl } from "@/lib/org-settings";
 import { OrgSettingsForm } from "./org-settings-form";
 import { DocumentDesigner } from "./document-designer";
 import { LogoUpload } from "./logo-upload";
@@ -23,6 +23,7 @@ import { SplashSettings } from "./splash-settings";
 import { WebsiteSettings } from "./website-settings";
 import { PortfolioManager } from "./portfolio-manager";
 import { ReviewsManager } from "./reviews-manager";
+import { PostsManager } from "./posts-manager";
 import { AiStatus } from "./ai-status";
 import { QuotePlaybookForm } from "./quote-playbook-form";
 import { AvatarUpload } from "./avatar-upload";
@@ -106,6 +107,14 @@ export default async function SettingsPage({
   const { data: crew } = await supabase.from("profiles").select("id, full_name, role").order("full_name");
   const members = (crew ?? []) as Pick<Profile, "id" | "full_name" | "role">[];
 
+  // Site articles (the SEO content layer) — RLS scopes to the org; staff-only tab below.
+  const { data: sitePosts } = isStaff
+    ? await supabase
+        .from("site_posts")
+        .select("id, path, title, description, cover_url, body_html, published, published_at")
+        .order("published_at", { ascending: false })
+    : { data: null };
+
   const { data: qboConn } = isAdmin
     ? await supabase.from("accounting_connections").select("realm_id, connected_at").maybeSingle()
     : { data: null };
@@ -183,6 +192,12 @@ export default async function SettingsPage({
               </Section>
               <Section title="Reviews">
                 <ReviewsManager initial={settings.reviews ?? []} />
+              </Section>
+              <Section title="Articles & blog">
+                <PostsManager
+                  initial={(sitePosts ?? []) as any}
+                  siteUrl={settings.public_handle ? orgPublicBaseUrl(settings) : null}
+                />
               </Section>
               <Section title="Company details"><OrgSettingsForm org={org as Organization} /></Section>
               <Section title="Company logo">
