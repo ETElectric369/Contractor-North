@@ -170,7 +170,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     ),
   ]);
   // The boss's live crew board (staff only) — every member's on/off-clock + job + hours today.
-  const crew = isStaff ? await getCrewStatus(supabase, todayStr) : [];
+  const crew = isStaff ? await getCrewStatus(supabase) : [];
   const currentJob = ((curJobRes as any)?.data as any) ?? undefined;
   const sixPool = ((poolR as any)?.data ?? []) as any[];
   // THE shared rank (lib/six-rank — the same function behind the morning digest,
@@ -505,8 +505,9 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         isStaff={isStaff}
       />
 
-      {/* The boss's live crew board (staff only) — who's on the clock, on what, hours today.
-          Erik: "boss needs to see what everyone is doing all the time." */}
+      {/* The boss's live crew presence board (staff only) — who's on the clock and on what.
+          Erik: "boss needs to see what everyone is doing all the time." Hours moved to payroll
+          (/timecards) — the crew-hours table isn't needed anywhere else. */}
       {isStaff && crew.length > 0 && <CrewBoard crew={crew} />}
 
       {/* TODAY — the execution feed in slot 2, so the 3-second glance (clock

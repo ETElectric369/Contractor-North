@@ -1,33 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Users } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import type { CrewMember } from "@/lib/crew-status";
 
 /**
- * The boss's live crew board — every active member, on/off the clock right now, their job, and
- * hours today. Erik: "boss needs to see what everyone is doing all the time." The open shift's
- * hours tick live (30s); suppressHydrationWarning on the ticking text because a Date.now()-
- * derived value differs server↔client on first paint (the #418 lesson). Clocked-in first.
+ * The boss's live crew presence board — every active member, on/off the clock right now, and the
+ * job they're on. Erik: "boss needs to see what everyone is doing all the time." Hours deliberately
+ * live only in payroll (/timecards) now, so this is presence-only — no ticking totals, no
+ * per-person hours table (Erik: that table isn't needed anywhere but payroll).
  */
 export function CrewBoard({ crew }: { crew: CrewMember[] }) {
-  const [now, setNow] = useState(() => Date.now());
-  const anyOn = crew.some((c) => c.clockedIn);
-
-  useEffect(() => {
-    if (!anyOn) return;
-    setNow(Date.now());
-    const t = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(t);
-  }, [anyOn]);
-
-  const liveHours = (c: CrewMember) =>
-    c.closedHoursToday +
-    (c.clockedIn && c.clockInIso ? Math.max(0, (now - new Date(c.clockInIso).getTime()) / 3_600_000) : 0);
-  const fmt = (h: number) => `${Math.floor(h)}h ${String(Math.round((h % 1) * 60)).padStart(2, "0")}m`;
-
   const onCount = crew.filter((c) => c.clockedIn).length;
   const sorted = [...crew].sort(
     (a, b) => Number(b.clockedIn) - Number(a.clockedIn) || a.name.localeCompare(b.name),
@@ -60,12 +44,6 @@ export function CrewBoard({ crew }: { crew: CrewMember[] }) {
                     : "On the clock · no job set"
                   : "Off the clock"}
               </div>
-            </div>
-            <div className="shrink-0 text-right">
-              <div className="text-sm font-semibold tabular-nums text-slate-700" suppressHydrationWarning>
-                {fmt(liveHours(c))}
-              </div>
-              <div className="text-[10px] uppercase tracking-wide text-slate-400">today</div>
             </div>
           </div>
         ))}
