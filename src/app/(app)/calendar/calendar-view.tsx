@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CalendarClock, CalendarDays, CalendarSync, Briefcase, ListTodo, SquareCheck, MapPin, Users } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CalendarClock, CalendarDays, CalendarSync, Briefcase, ListTodo, SquareCheck, MapPin, Users, Columns3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented";
 import { Card } from "@/components/ui/card";
@@ -368,6 +368,14 @@ export function CalendarView({
           </button>
         )}
         <span className="ml-1 min-w-0 flex-1 truncate text-sm font-semibold text-slate-900">{title}</span>
+        <Link
+          href="/schedule?view=crew"
+          aria-label="Everyone's Day (crew board)"
+          title="Everyone's Day — the whole crew, side by side"
+          className={`${iconBtn} text-slate-400 hover:bg-slate-100 hover:text-slate-700`}
+        >
+          <Columns3 className="h-4 w-4" />
+        </Link>
         <Link
           href="/schedule?view=map"
           aria-label="Job map"

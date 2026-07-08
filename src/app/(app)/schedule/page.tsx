@@ -7,6 +7,7 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz } from "@/lib/tz";
 import { CalendarPanel } from "./calendar-panel";
 import { MapPanel } from "./map-panel";
+import { CrewBoardPanel } from "./crew-board-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -77,6 +78,11 @@ export default async function SchedulePage({
         <MapPanel />
       </div>
     );
+  }
+
+  // "Everyone's Day" — the all-crew swimlane board (one lane per person for the day).
+  if (sp.view === "crew") {
+    return <CrewBoardPanel date={date} />;
   }
 
   // Unknown/legacy views (calendar, board, voice's view=calendar, …)
