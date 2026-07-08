@@ -36,7 +36,7 @@ export async function CrewBoardPanel({ date }: { date?: string }) {
       .in("status", ACTIVE_JOB_STATUSES as unknown as string[])
       .lte("scheduled_start", endIso)
       .or(`scheduled_end.gte.${startIso},and(scheduled_end.is.null,scheduled_start.gte.${startIso})`),
-    // Multi-day job segments that cover this calendar day (date-only, tz-clean).
+    // Segments that COVER this calendar day (date-only, tz-clean).
     supabase.from("job_schedule_segments").select("job_id").lte("start_date", day).gte("end_date", day),
     supabase
       .from("appointments")
@@ -47,9 +47,26 @@ export async function CrewBoardPanel({ date }: { date?: string }) {
       .order("starts_at"),
   ]);
 
-  // Fold in jobs that are on the day only via a segment (not their base scheduled range).
-  const byId = new Map<string, any>((rangeJobs ?? []).map((j: any) => [j.id, j]));
-  const missing = Array.from(new Set((segRows ?? []).map((s: any) => s.job_id))).filter((id) => id && !byId.has(id));
+  // SEGMENTS-FIRST (mirror the calendar, calendar-view.tsx): a job with multi-day segments is
+  // scheduled ONLY on the days a segment covers. Its base scheduled_start/scheduled_end is stretched
+  // min-start→max-end, so a non-contiguous job (Mon + Fri) would otherwise wrongly show on the Wed
+  // GAP day and inflate that person's load — wrecking the board's "who has room today". So: a
+  // segmented job appears only if a segment covers `day`; an unsegmented job uses the base-range
+  // overlap the query already applied.
+  const rangeArr = (rangeJobs ?? []) as any[];
+  const coverIds = new Set((segRows ?? []).map((s: any) => s.job_id).filter(Boolean));
+  const rangeIds = rangeArr.map((j) => j.id);
+  let segmentedIds = new Set<string>();
+  if (rangeIds.length) {
+    const { data: anySeg } = await supabase.from("job_schedule_segments").select("job_id").in("job_id", rangeIds);
+    segmentedIds = new Set((anySeg ?? []).map((s: any) => s.job_id));
+  }
+  const byId = new Map<string, any>();
+  for (const j of rangeArr) {
+    if (!segmentedIds.has(j.id) || coverIds.has(j.id)) byId.set(j.id, j);
+  }
+  // Defensive: a covering-segment job whose base range somehow didn't match the query — pull it in.
+  const missing = [...coverIds].filter((id) => id && !byId.has(id));
   if (missing.length) {
     const { data: segJobs } = await supabase
       .from("jobs")
@@ -76,17 +93,20 @@ export async function CrewBoardPanel({ date }: { date?: string }) {
   }));
 
   const members = (picker.staff ?? []) as { id: string; full_name: string | null }[];
+  const memberIds = new Set(members.map((m) => m.id));
   const lanes: Lane[] = members.map((m) => ({
     id: m.id,
     name: m.full_name ?? "Unnamed",
     jobs: jobs.filter((j) => j.assigned.includes(m.id)),
     appts: appointments.filter((a) => a.assigned === m.id),
   }));
+  // Unassigned = nobody on the CURRENT roster is on it. Catches empty assignments AND ones left on a
+  // former/inactive employee — those must still show here, never silently vanish from the board.
   const unassigned: Lane = {
     id: "__unassigned__",
     name: "Unassigned",
-    jobs: jobs.filter((j) => j.assigned.length === 0),
-    appts: appointments.filter((a) => !a.assigned),
+    jobs: jobs.filter((j) => !j.assigned.some((id) => memberIds.has(id))),
+    appts: appointments.filter((a) => !a.assigned || !memberIds.has(a.assigned)),
   };
 
   return (
