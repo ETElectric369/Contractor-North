@@ -251,6 +251,7 @@ export default async function SettingsPage({
                 <PagesManager
                   initial={sitePages as any}
                   siteUrl={settings.public_handle ? orgPublicBaseUrl(settings) : null}
+                  brand={accentHex(settings.glass_tint)}
                 />
               </Section>
               <Section title="Public lead link & QR">

@@ -6,12 +6,36 @@
  */
 export type BlockType = "heading" | "text" | "image" | "button" | "gallery";
 
+/** The per-block styling "toolbox" — the safe, structured set of visual controls (no free CSS).
+ *  align/size/font are enums; color is a validated #rrggbb hex (nothing else can be stored/rendered),
+ *  so the styling surface adds real design control with zero injection risk. */
+export type BlockStyle = {
+  align?: "left" | "center" | "right";
+  size?: "s" | "m" | "l" | "xl";
+  font?: "sans" | "serif" | "mono";
+  color?: string; // #rrggbb only (validated in normalizeBlocks AND re-checked in the renderer)
+};
+
 export type Block =
-  | { type: "heading"; props: { text: string; align?: "left" | "center" } }
-  | { type: "text"; props: { html: string } } // sanitized at write
-  | { type: "image"; props: { url: string; alt?: string; caption?: string } }
-  | { type: "button"; props: { label: string; href: string; align?: "left" | "center" } }
-  | { type: "gallery"; props: { images: { url: string; alt?: string }[] } };
+  | { type: "heading"; props: { text: string; align?: "left" | "center" }; style?: BlockStyle }
+  | { type: "text"; props: { html: string }; style?: BlockStyle } // html sanitized at write + read
+  | { type: "image"; props: { url: string; alt?: string; caption?: string }; style?: BlockStyle }
+  | { type: "button"; props: { label: string; href: string; align?: "left" | "center" }; style?: BlockStyle }
+  | { type: "gallery"; props: { images: { url: string; alt?: string }[] }; style?: BlockStyle };
+
+const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
+
+/** Coerce arbitrary jsonb into a safe BlockStyle — every field enum-checked, color hex-validated. */
+export function coerceStyle(raw: unknown): BlockStyle | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const r = raw as Record<string, unknown>;
+  const s: BlockStyle = {};
+  if (r.align === "left" || r.align === "center" || r.align === "right") s.align = r.align;
+  if (r.size === "s" || r.size === "m" || r.size === "l" || r.size === "xl") s.size = r.size;
+  if (r.font === "sans" || r.font === "serif" || r.font === "mono") s.font = r.font;
+  if (typeof r.color === "string" && HEX_COLOR.test(r.color)) s.color = r.color.toLowerCase();
+  return Object.keys(s).length ? s : undefined;
+}
 
 /** Editor metadata: label + a fresh default block for the "add block" palette. */
 export const BLOCK_PALETTE: { type: BlockType; label: string; hint: string; make: () => Block }[] = [
@@ -42,18 +66,19 @@ export function normalizeBlocks(raw: unknown): Block[] {
     if (!b || typeof b !== "object") continue;
     const type = (b as { type?: unknown }).type;
     const props = ((b as { props?: unknown }).props ?? {}) as Record<string, unknown>;
+    const style = coerceStyle((b as { style?: unknown }).style);
     switch (type) {
       case "heading":
-        out.push({ type, props: { text: cap(String(props.text ?? ""), MAX_TEXT_LEN), align: props.align === "center" ? "center" : "left" } });
+        out.push({ type, props: { text: cap(String(props.text ?? ""), MAX_TEXT_LEN), align: props.align === "center" ? "center" : "left" }, style });
         break;
       case "text":
-        out.push({ type, props: { html: cap(String(props.html ?? ""), MAX_HTML_LEN) } });
+        out.push({ type, props: { html: cap(String(props.html ?? ""), MAX_HTML_LEN) }, style });
         break;
       case "image":
-        out.push({ type, props: { url: cap(String(props.url ?? ""), MAX_TEXT_LEN), alt: cap(String(props.alt ?? ""), MAX_TEXT_LEN), caption: cap(String(props.caption ?? ""), MAX_TEXT_LEN) } });
+        out.push({ type, props: { url: cap(String(props.url ?? ""), MAX_TEXT_LEN), alt: cap(String(props.alt ?? ""), MAX_TEXT_LEN), caption: cap(String(props.caption ?? ""), MAX_TEXT_LEN) }, style });
         break;
       case "button":
-        out.push({ type, props: { label: cap(String(props.label ?? ""), MAX_TEXT_LEN), href: cap(String(props.href ?? ""), MAX_TEXT_LEN), align: props.align === "center" ? "center" : "left" } });
+        out.push({ type, props: { label: cap(String(props.label ?? ""), MAX_TEXT_LEN), href: cap(String(props.href ?? ""), MAX_TEXT_LEN), align: props.align === "center" ? "center" : "left" }, style });
         break;
       case "gallery": {
         const images = Array.isArray(props.images)
@@ -63,7 +88,7 @@ export function normalizeBlocks(raw: unknown): Block[] {
               .filter((i) => i.url)
               .slice(0, MAX_GALLERY_IMAGES)
           : [];
-        out.push({ type, props: { images } });
+        out.push({ type, props: { images }, style });
         break;
       }
       default:

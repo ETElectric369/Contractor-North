@@ -24,7 +24,7 @@ function cleanBlocks(blocks: Block[]): Block[] {
     blocks.map((b) => {
       if (b.type === "text") {
         const raw = b.props.html ?? "";
-        return { type: "text", props: { html: /<[a-z][\s\S]*>/i.test(raw) ? sanitizeHtml(raw) : textToHtml(raw) } };
+        return { type: "text", props: { html: /<[a-z][\s\S]*>/i.test(raw) ? sanitizeHtml(raw) : textToHtml(raw) }, style: b.style };
       }
       return b;
     }),

@@ -185,7 +185,7 @@ export default async function ContentWorkspace({ searchParams }: { searchParams:
           <PostsManager initial={(posts ?? []) as never} siteUrl={siteUrl} orgId={selected} />
         </Panel>
         <Panel icon={FileStack} title="Custom pages" brand={brand}>
-          <PagesManager initial={pages as never} siteUrl={siteUrl} orgId={selected} />
+          <PagesManager initial={pages as never} siteUrl={siteUrl} orgId={selected} brand={brand} />
         </Panel>
         <Panel icon={Megaphone} title="Homepage" brand={brand}>
           <SplashSettings settings={marketing} portfolio={marketing.portfolio ?? []} orgId={selected} />

@@ -11,7 +11,7 @@ import { sanitizeHtml } from "@/lib/sanitize-html";
  * dangerouslySetInnerHTML safe no matter how the row was written. Runs AFTER normalizeBlocks.
  */
 function sanitizeTextBlocks(blocks: Block[]): Block[] {
-  return blocks.map((b) => (b.type === "text" ? { type: "text", props: { html: sanitizeHtml(b.props.html) } } : b));
+  return blocks.map((b) => (b.type === "text" ? { type: "text", props: { html: sanitizeHtml(b.props.html) }, style: b.style } : b));
 }
 
 /** Public reads for custom builder PAGES (site_pages) — service client, published-only, always
