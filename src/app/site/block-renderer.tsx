@@ -6,6 +6,7 @@ import type { Block, BlockStyle } from "@/lib/site-blocks";
 function safeHref(raw: string): string {
   const s = String(raw ?? "").trim();
   if (!s) return "#";
+  if (/^#[a-z0-9]/i.test(s)) return s; // same-page anchor (e.g. #contact-form)
   if (/^\/(?!\/)/.test(s)) return s; // relative path (but not protocol-relative //)
   if (/^(https?:|mailto:|tel:)/i.test(s)) return s;
   return "#";
@@ -117,6 +118,15 @@ export function BlockRenderer({ blocks, brand }: { blocks: Block[]; brand: strin
               </div>
             );
           }
+          case "section":
+            // A wired section (gallery/reviews/contact/estimate). The real thing renders on the
+            // homepage via HomeBlockRenderer (which has org data); here (editor preview / a stray
+            // section on a plain page) show a labeled placeholder so it's clear what will appear.
+            return (
+              <div key={i} className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-10 text-center text-sm font-medium text-slate-400">
+                {b.props.key === "portfolio" ? "Photo gallery" : b.props.key === "reviews" ? "Reviews" : b.props.key === "contact" ? "Contact form" : "Estimate button"} — shown live on your homepage
+              </div>
+            );
           default:
             return null;
         }

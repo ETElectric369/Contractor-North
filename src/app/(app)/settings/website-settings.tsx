@@ -30,7 +30,6 @@ export function WebsiteSettings({
   const [domain, setDomain] = useState(settings.custom_domain ?? "");
   const [gbp, setGbp] = useState(settings.google_business_url ?? "");
   const [theme, setTheme] = useState<OrgSettings["site_theme"]>(settings.site_theme ?? "classic");
-  const [showName, setShowName] = useState(settings.show_name_with_logo ?? false);
   const [pending, start] = useTransition();
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -49,7 +48,7 @@ export function WebsiteSettings({
       const cd = await setCustomDomain(domain);
       if (!cd.ok) { setError(cd.error ?? "Couldn't save the domain."); return; }
       setDomain(cd.domain ?? "");
-      const res = await updateOrgSettings({ service_area: area.trim(), social_instagram: ig.replace(/^@/, "").trim(), site_theme: theme, google_business_url: gbp.trim(), show_name_with_logo: showName });
+      const res = await updateOrgSettings({ service_area: area.trim(), social_instagram: ig.replace(/^@/, "").trim(), site_theme: theme, google_business_url: gbp.trim() });
       if (!res.ok) { setError(res.error ?? "Couldn't save."); return; }
       setDone(true);
       setTimeout(() => setDone(false), 2500);
@@ -114,14 +113,6 @@ export function WebsiteSettings({
         </div>
         <p className="mt-1 text-xs text-slate-400">Leave blank to hide the Instagram link.</p>
       </div>
-
-      <label className="flex items-start gap-2 rounded-lg border border-slate-200 p-3 text-sm text-slate-700">
-        <input type="checkbox" checked={showName} onChange={(e) => setShowName(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand" />
-        <span>
-          <span className="font-medium">Show your business name as text</span>
-          <span className="mt-0.5 block text-xs text-slate-400">Puts your name in words in the header, hero, and footer — turn on if your logo is a symbol without the name in it.</span>
-        </span>
-      </label>
 
       <div>
         <Label>Site style</Label>

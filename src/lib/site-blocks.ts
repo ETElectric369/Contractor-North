@@ -4,7 +4,19 @@
  * composes pages safely with zero XSS surface. Adding a NEW block type = add one entry here + a
  * renderer case + an editor case (the only thing that ever needs a developer).
  */
-export type BlockType = "heading" | "text" | "image" | "button" | "gallery" | "banner";
+export type BlockType = "heading" | "text" | "image" | "button" | "gallery" | "banner" | "section";
+
+/** The wired homepage sections you drop into the layout as-is — they render live org data / behavior
+ *  (the gallery pulls your photos, contact captures leads, etc.), so they stay "smart" instead of
+ *  becoming dumb content. Only offered on the homepage builder. */
+export type SectionKey = "portfolio" | "reviews" | "contact" | "estimate";
+export const SECTION_KEYS: SectionKey[] = ["portfolio", "reviews", "contact", "estimate"];
+export const SECTION_PALETTE: { key: SectionKey; label: string; hint: string }[] = [
+  { key: "portfolio", label: "Photo gallery", hint: "Your portfolio photos (auto-updates)" },
+  { key: "reviews", label: "Reviews", hint: "Your customer reviews" },
+  { key: "contact", label: "Contact form", hint: "A lead-capture form + your contact info" },
+  { key: "estimate", label: "Estimate button", hint: "A band with your get-an-estimate button" },
+];
 
 /** The per-block styling "toolbox" — the safe, structured set of visual controls (no free CSS).
  *  align/size/font are enums; color is a validated #rrggbb hex (nothing else can be stored/rendered),
@@ -23,7 +35,9 @@ export type Block =
   | { type: "button"; props: { label: string; href: string; align?: "left" | "center" }; style?: BlockStyle }
   | { type: "gallery"; props: { images: { url: string; alt?: string }[] }; style?: BlockStyle }
   // A full-width band with a background image + dark overlay + centered heading/text/button.
-  | { type: "banner"; props: { bgUrl: string; heading: string; text?: string; buttonLabel?: string; buttonHref?: string }; style?: BlockStyle };
+  | { type: "banner"; props: { bgUrl: string; heading: string; text?: string; buttonLabel?: string; buttonHref?: string }; style?: BlockStyle }
+  // A wired homepage section (renders live org data / behavior) — see SectionKey.
+  | { type: "section"; props: { key: SectionKey }; style?: BlockStyle };
 
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 
@@ -106,6 +120,9 @@ export function normalizeBlocks(raw: unknown): Block[] {
           },
           style,
         });
+        break;
+      case "section":
+        if (SECTION_KEYS.includes(props.key as SectionKey)) out.push({ type, props: { key: props.key as SectionKey }, style });
         break;
       default:
         break; // unknown block type → dropped

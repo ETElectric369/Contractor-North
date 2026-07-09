@@ -5,6 +5,7 @@ import { accentHex, orgPublicBaseUrl, parseGeoFromMapUrl, type OrgSettings } fro
 import type { PublicOrg } from "@/lib/public-org";
 import { jsonLdSafe } from "@/lib/jsonld";
 import { renderReadyBlocks } from "@/lib/public-pages";
+import type { Block } from "@/lib/site-blocks";
 import { BlockRenderer } from "./block-renderer";
 import { PortfolioGallery } from "../estimate/[handle]/portfolio-gallery";
 import { SpecialtyShowcase } from "./specialty-showcase";
@@ -252,6 +253,22 @@ export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg;
         </div>
       </header>
 
+      {/* When the homepage has custom blocks, they ARE the homepage (below the header/footer chrome);
+          otherwise the designed template renders. So an org "graduates" to the block homepage just by
+          adding sections — no separate mode, and Tahoe Deck (no blocks) is untouched. */}
+      {homeBlocks.length > 0 ? (
+        <HomeBlockRenderer
+          blocks={homeBlocks}
+          org={org}
+          brand={brand}
+          portfolio={portfolio}
+          reviews={reviews}
+          estimateHref={estimateHref}
+          ctaLabel={ctaLabel}
+          hasConfigurator={hasConfigurator}
+        />
+      ) : (
+        <>
       {/* Hero — presentation varies by settings.site_theme; the copy/CTA/data are identical. */}
       <Hero
         theme={s.site_theme}
@@ -290,15 +307,6 @@ export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg;
         </div>
       </section>
 
-      {/* Custom homepage sections — the owner's own styled blocks (headings/text/images/banners/
-          buttons), built in the same visual editor as the custom pages. Sanitized on read. Hidden
-          when empty, so the designed template shows on its own. */}
-      {homeBlocks.length > 0 && (
-        <section className="border-b border-slate-100">
-          <BlockRenderer blocks={homeBlocks} brand={brand} />
-        </section>
-      )}
-
       {/* Signature-specialty showcase — an elegant dark gallery band spotlighting the org's marquee
           offering (e.g. custom lighting). Data-driven: hidden unless a headline is set. Features the
           first several captioned portfolio photos; the full set still shows in "Our work" below. */}
@@ -324,57 +332,12 @@ export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg;
         </section>
       )}
 
-      {/* Portfolio */}
-      {photos.length > 0 && (
-        <div id="work" className="border-t border-slate-100 bg-slate-50/60 pt-14">
-          <PortfolioGallery photos={portfolio} brand={brand} orgName={org.name} />
-        </div>
+      <PortfolioBand portfolio={portfolio} brand={brand} orgName={org.name} />
+      <ReviewsBand reviews={reviews} brand={brand} />
+      <EstimateBand hasConfigurator={hasConfigurator} estimateHref={estimateHref} ctaLabel={ctaLabel} brand={brand} />
+      <ContactBand orgId={org.id} brand={brand} hasConfigurator={hasConfigurator} />
+        </>
       )}
-
-      {/* Reviews */}
-      {reviews.length > 0 && (
-        <section id="reviews" className="mx-auto max-w-6xl px-4 py-16">
-          <h2 className="text-3xl font-extrabold tracking-tight">What our customers say</h2>
-          <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {reviews.map((r, i) => {
-              const stars = Math.max(1, Math.min(5, Math.round(r.rating ?? 5)));
-              return (
-                <figure key={i} className="flex flex-col rounded-2xl border border-slate-200 p-6">
-                  <div className="mb-3 flex gap-0.5" aria-label={`${stars} out of 5 stars`}>
-                    {Array.from({ length: 5 }).map((_, j) => (
-                      <Star key={j} className="h-4 w-4" fill={j < stars ? brand : "none"} style={{ color: brand }} />
-                    ))}
-                  </div>
-                  <blockquote className="flex-1 text-slate-700">&ldquo;{r.text}&rdquo;</blockquote>
-                  <figcaption className="mt-4 text-sm font-semibold text-slate-900">— {r.name}</figcaption>
-                </figure>
-              );
-            })}
-          </div>
-        </section>
-      )}
-
-      {/* Instant-estimate CTA */}
-      <section className="px-4 py-20" style={{ background: `linear-gradient(160deg, ${brand}12, transparent 70%)` }}>
-        <div className="mx-auto max-w-3xl text-center">
-          <h2 className="text-3xl font-extrabold tracking-tight sm:text-4xl">
-            {hasConfigurator ? "Know your number in two minutes" : "Ready to get started?"}
-          </h2>
-          <p className="mx-auto mt-3 max-w-xl text-lg text-slate-600">
-            {hasConfigurator
-              ? "Answer a few quick questions and get a real ballpark instantly — no waiting days for a callback."
-              : "Tell us about your project and we'll get right back to you with a free estimate."}
-          </p>
-          <Link href={estimateHref} className="mt-8 inline-flex items-center gap-2 rounded-lg px-7 py-4 text-base font-semibold text-white shadow-lg" style={{ backgroundColor: brand }}>
-            {ctaLabel} <ArrowRight className="h-5 w-5" />
-          </Link>
-        </div>
-      </section>
-
-      {/* On-page contact / estimate-request form */}
-      <section id="contact-form" className="border-t border-slate-100 bg-slate-50 px-4 py-16">
-        <ContactForm orgId={org.id} brand={brand} heading={hasConfigurator ? "Prefer to just message us?" : "Request a free estimate"} />
-      </section>
 
       {/* Footer / contact */}
       <footer id="contact" className="border-t border-slate-200 bg-slate-900 text-slate-300">
@@ -415,4 +378,105 @@ export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg;
       {handle && <AskNort handle={handle} orgName={org.name} brand={brand} />}
     </div>
   );
+}
+
+// ── The wired homepage sections, as standalone bands. Used by BOTH the default template AND the
+// block homepage (as "smart" section blocks), so there's ONE copy of each — no duplicated JSX. ──
+
+function PortfolioBand({ portfolio, brand, orgName }: { portfolio: { url: string; caption?: string }[]; brand: string; orgName: string }) {
+  if (!portfolio.length) return null;
+  return (
+    <div id="work" className="border-t border-slate-100 bg-slate-50/60 pt-14">
+      <PortfolioGallery photos={portfolio} brand={brand} orgName={orgName} />
+    </div>
+  );
+}
+
+function ReviewsBand({ reviews, brand }: { reviews: { name: string; text: string; rating?: number }[]; brand: string }) {
+  if (!reviews.length) return null;
+  return (
+    <section id="reviews" className="mx-auto max-w-6xl px-4 py-16">
+      <h2 className="text-3xl font-extrabold tracking-tight">What our customers say</h2>
+      <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        {reviews.map((r, i) => {
+          const stars = Math.max(1, Math.min(5, Math.round(r.rating ?? 5)));
+          return (
+            <figure key={i} className="flex flex-col rounded-2xl border border-slate-200 p-6">
+              <div className="mb-3 flex gap-0.5" aria-label={`${stars} out of 5 stars`}>
+                {Array.from({ length: 5 }).map((_, j) => (
+                  <Star key={j} className="h-4 w-4" fill={j < stars ? brand : "none"} style={{ color: brand }} />
+                ))}
+              </div>
+              <blockquote className="flex-1 text-slate-700">&ldquo;{r.text}&rdquo;</blockquote>
+              <figcaption className="mt-4 text-sm font-semibold text-slate-900">— {r.name}</figcaption>
+            </figure>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function EstimateBand({ hasConfigurator, estimateHref, ctaLabel, brand }: { hasConfigurator: boolean; estimateHref: string; ctaLabel: string; brand: string }) {
+  return (
+    <section className="px-4 py-20" style={{ background: `linear-gradient(160deg, ${brand}12, transparent 70%)` }}>
+      <div className="mx-auto max-w-3xl text-center">
+        <h2 className="text-3xl font-extrabold tracking-tight sm:text-4xl">{hasConfigurator ? "Know your number in two minutes" : "Ready to get started?"}</h2>
+        <p className="mx-auto mt-3 max-w-xl text-lg text-slate-600">
+          {hasConfigurator ? "Answer a few quick questions and get a real ballpark instantly — no waiting days for a callback." : "Tell us about your project and we'll get right back to you with a free estimate."}
+        </p>
+        <Link href={estimateHref} className="mt-8 inline-flex items-center gap-2 rounded-lg px-7 py-4 text-base font-semibold text-white shadow-lg" style={{ backgroundColor: brand }}>
+          {ctaLabel} <ArrowRight className="h-5 w-5" />
+        </Link>
+      </div>
+    </section>
+  );
+}
+
+function ContactBand({ orgId, brand, hasConfigurator }: { orgId: string; brand: string; hasConfigurator: boolean }) {
+  return (
+    <section id="contact-form" className="border-t border-slate-100 bg-slate-50 px-4 py-16">
+      <ContactForm orgId={orgId} brand={brand} heading={hasConfigurator ? "Prefer to just message us?" : "Request a free estimate"} />
+    </section>
+  );
+}
+
+/** Render a custom homepage: the owner's ordered home_blocks. Content blocks group into a
+ *  BlockRenderer; a "section" block renders its wired band (gallery/reviews/contact/estimate) with
+ *  live org data. This is what replaces the fixed template once the homepage has blocks. */
+function HomeBlockRenderer({
+  blocks, org, brand, portfolio, reviews, estimateHref, ctaLabel, hasConfigurator,
+}: {
+  blocks: Block[];
+  org: PublicOrg;
+  brand: string;
+  portfolio: { url: string; caption?: string }[];
+  reviews: { name: string; text: string; rating?: number }[];
+  estimateHref: string;
+  ctaLabel: string;
+  hasConfigurator: boolean;
+}) {
+  const out: React.ReactNode[] = [];
+  let run: Block[] = [];
+  let key = 0;
+  const flush = () => {
+    if (run.length) {
+      out.push(<BlockRenderer key={`r${key++}`} blocks={run} brand={brand} />);
+      run = [];
+    }
+  };
+  for (const b of blocks) {
+    if (b.type === "section") {
+      flush();
+      const k = `s${key++}`;
+      if (b.props.key === "portfolio") out.push(<PortfolioBand key={k} portfolio={portfolio} brand={brand} orgName={org.name} />);
+      else if (b.props.key === "reviews") out.push(<ReviewsBand key={k} reviews={reviews} brand={brand} />);
+      else if (b.props.key === "contact") out.push(<ContactBand key={k} orgId={org.id} brand={brand} hasConfigurator={hasConfigurator} />);
+      else if (b.props.key === "estimate") out.push(<EstimateBand key={k} hasConfigurator={hasConfigurator} estimateHref={estimateHref} ctaLabel={ctaLabel} brand={brand} />);
+    } else {
+      run.push(b);
+    }
+  }
+  flush();
+  return <>{out}</>;
 }

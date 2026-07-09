@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input, Textarea } from "@/components/ui/input";
 import { BlockRenderer } from "@/app/site/block-renderer";
 import { uploadSiteImage } from "@/lib/upload-site-image";
-import { BLOCK_PALETTE, type Block, type BlockStyle, type BlockType } from "@/lib/site-blocks";
+import { BLOCK_PALETTE, SECTION_PALETTE, type Block, type BlockStyle, type BlockType, type SectionKey } from "@/lib/site-blocks";
 
 /**
  * The reusable visual block editor — the sections list (add / reorder / remove), the per-block field
@@ -22,12 +22,15 @@ export function BlockEditor({
   brand = "#0f172a",
   orgId,
   previewTitle,
+  sections = false,
 }: {
   blocks: Block[];
   onChange: (blocks: Block[]) => void;
   brand?: string;
   orgId?: string;
   previewTitle?: string;
+  /** Offer the wired homepage sections (gallery/reviews/contact/estimate) in the palette. Homepage only. */
+  sections?: boolean;
 }) {
   const [preview, setPreview] = useState(false);
   const updateBlock = (i: number, props: Record<string, unknown>) =>
@@ -42,6 +45,7 @@ export function BlockEditor({
     onChange(n);
   };
   const addBlock = (t: BlockType) => onChange([...blocks, BLOCK_PALETTE.find((p) => p.type === t)!.make()]);
+  const addSection = (key: SectionKey) => onChange([...blocks, { type: "section", props: { key } }]);
   const remove = (i: number) => onChange(blocks.filter((_, j) => j !== i));
 
   return (
@@ -66,25 +70,39 @@ export function BlockEditor({
       ) : (
         <>
           {blocks.length === 0 && <p className="rounded-lg border border-dashed border-slate-300 px-4 py-5 text-center text-sm text-slate-400">No sections yet — add one below.</p>}
-          {blocks.map((b, i) => (
-            <div key={i} className="rounded-xl border border-slate-200 p-3">
-              <div className="mb-2 flex items-center gap-2">
-                <Badge tone="slate">{BLOCK_PALETTE.find((p) => p.type === b.type)?.label ?? b.type}</Badge>
-                <div className="ml-auto flex items-center gap-0.5">
-                  <button type="button" onClick={() => move(i, -1)} disabled={i === 0} className="rounded p-1 text-slate-400 hover:bg-slate-100 disabled:opacity-30"><ArrowUp className="h-4 w-4" /></button>
-                  <button type="button" onClick={() => move(i, 1)} disabled={i === blocks.length - 1} className="rounded p-1 text-slate-400 hover:bg-slate-100 disabled:opacity-30"><ArrowDown className="h-4 w-4" /></button>
-                  <button type="button" onClick={() => remove(i)} className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"><X className="h-4 w-4" /></button>
+          {blocks.map((b, i) => {
+            const sec = b.type === "section" ? SECTION_PALETTE.find((s) => s.key === b.props.key) : null;
+            return (
+              <div key={i} className="rounded-xl border border-slate-200 p-3">
+                <div className="flex items-center gap-2">
+                  <Badge tone={sec ? "blue" : "slate"}>{sec ? sec.label : BLOCK_PALETTE.find((p) => p.type === b.type)?.label ?? b.type}</Badge>
+                  {sec && <span className="min-w-0 truncate text-xs text-slate-400">{sec.hint}</span>}
+                  <div className="ml-auto flex items-center gap-0.5">
+                    <button type="button" onClick={() => move(i, -1)} disabled={i === 0} className="rounded p-1 text-slate-400 hover:bg-slate-100 disabled:opacity-30"><ArrowUp className="h-4 w-4" /></button>
+                    <button type="button" onClick={() => move(i, 1)} disabled={i === blocks.length - 1} className="rounded p-1 text-slate-400 hover:bg-slate-100 disabled:opacity-30"><ArrowDown className="h-4 w-4" /></button>
+                    <button type="button" onClick={() => remove(i)} className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"><X className="h-4 w-4" /></button>
+                  </div>
                 </div>
+                {!sec && (
+                  <div className="mt-2">
+                    <BlockFields block={b} orgId={orgId} onChange={(props) => updateBlock(i, props)} />
+                    <StyleToolbar block={b} onChange={(style) => updateStyle(i, style)} />
+                  </div>
+                )}
               </div>
-              <BlockFields block={b} orgId={orgId} onChange={(props) => updateBlock(i, props)} />
-              <StyleToolbar block={b} onChange={(style) => updateStyle(i, style)} />
-            </div>
-          ))}
+            );
+          })}
           <div className="flex flex-wrap gap-1.5 pt-1">
             {BLOCK_PALETTE.map((p) => (
               <button key={p.type} type="button" onClick={() => addBlock(p.type)} title={p.hint}
                 className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200">
                 <Plus className="h-3.5 w-3.5" /> {p.label}
+              </button>
+            ))}
+            {sections && SECTION_PALETTE.map((s) => (
+              <button key={s.key} type="button" onClick={() => addSection(s.key)} title={s.hint}
+                className="inline-flex items-center gap-1 rounded-lg bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100">
+                <Plus className="h-3.5 w-3.5" /> {s.label}
               </button>
             ))}
           </div>
@@ -219,7 +237,7 @@ function GalleryFields({ urls, orgId, onChange }: { urls: string[]; orgId?: stri
 
 /** The styling "toolbox" for one block — alignment, size, font, and color, all safe/structured. */
 function StyleToolbar({ block, onChange }: { block: Block; onChange: (style: BlockStyle) => void }) {
-  if (block.type === "gallery") return null;
+  if (block.type === "gallery" || block.type === "section") return null;
   const st = block.style ?? {};
   const set = (patch: Partial<BlockStyle>) => onChange({ ...st, ...patch });
   const showAlign = block.type !== "banner"; // a banner is always centered over its image

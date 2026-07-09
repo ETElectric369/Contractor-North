@@ -31,8 +31,13 @@ export function HomeBlocksEditor({ initial, brand, orgId }: { initial: Block[]; 
 
   return (
     <div className="space-y-3">
-      <p className="text-sm text-slate-500">Add your own sections to the homepage — they show below the hero. Same blocks, toolbox, images, and banners as the page builder.</p>
-      <BlockEditor blocks={blocks} onChange={setBlocks} brand={brand} orgId={orgId} />
+      <p className="text-sm text-slate-500">
+        Build your homepage from blocks — headings, text, images, banners, and the wired sections
+        (photo gallery, reviews, contact form, estimate button). As soon as you add a section here,
+        <strong> these become your homepage</strong> (the default template steps aside). Empty = the
+        default template.
+      </p>
+      <BlockEditor blocks={blocks} onChange={setBlocks} brand={brand} orgId={orgId} sections />
       {error && <p className="text-sm text-red-600">{error}</p>}
       <div className="flex items-center gap-3">
         <Button size="sm" onClick={save} disabled={pending}>{pending ? "Saving…" : "Save homepage sections"}</Button>
