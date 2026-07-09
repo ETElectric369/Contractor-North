@@ -4,7 +4,7 @@
  * composes pages safely with zero XSS surface. Adding a NEW block type = add one entry here + a
  * renderer case + an editor case (the only thing that ever needs a developer).
  */
-export type BlockType = "heading" | "text" | "image" | "button" | "gallery";
+export type BlockType = "heading" | "text" | "image" | "button" | "gallery" | "banner";
 
 /** The per-block styling "toolbox" — the safe, structured set of visual controls (no free CSS).
  *  align/size/font are enums; color is a validated #rrggbb hex (nothing else can be stored/rendered),
@@ -21,7 +21,9 @@ export type Block =
   | { type: "text"; props: { html: string }; style?: BlockStyle } // html sanitized at write + read
   | { type: "image"; props: { url: string; alt?: string; caption?: string }; style?: BlockStyle }
   | { type: "button"; props: { label: string; href: string; align?: "left" | "center" }; style?: BlockStyle }
-  | { type: "gallery"; props: { images: { url: string; alt?: string }[] }; style?: BlockStyle };
+  | { type: "gallery"; props: { images: { url: string; alt?: string }[] }; style?: BlockStyle }
+  // A full-width band with a background image + dark overlay + centered heading/text/button.
+  | { type: "banner"; props: { bgUrl: string; heading: string; text?: string; buttonLabel?: string; buttonHref?: string }; style?: BlockStyle };
 
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 
@@ -44,6 +46,7 @@ export const BLOCK_PALETTE: { type: BlockType; label: string; hint: string; make
   { type: "image", label: "Image", hint: "A single photo + caption", make: () => ({ type: "image", props: { url: "", alt: "", caption: "" } }) },
   { type: "button", label: "Button", hint: "A call-to-action link", make: () => ({ type: "button", props: { label: "", href: "", align: "left" } }) },
   { type: "gallery", label: "Gallery", hint: "A grid of photos", make: () => ({ type: "gallery", props: { images: [] } }) },
+  { type: "banner", label: "Banner", hint: "A background image with text over it", make: () => ({ type: "banner", props: { bgUrl: "", heading: "", text: "", buttonLabel: "", buttonHref: "" } }) },
 ];
 
 // Caps enforced at the normalization chokepoint that BOTH the public read (getPublicPageBySlug) and
@@ -91,6 +94,19 @@ export function normalizeBlocks(raw: unknown): Block[] {
         out.push({ type, props: { images }, style });
         break;
       }
+      case "banner":
+        out.push({
+          type,
+          props: {
+            bgUrl: cap(String(props.bgUrl ?? ""), MAX_TEXT_LEN),
+            heading: cap(String(props.heading ?? ""), MAX_TEXT_LEN),
+            text: cap(String(props.text ?? ""), MAX_TEXT_LEN),
+            buttonLabel: cap(String(props.buttonLabel ?? ""), MAX_TEXT_LEN),
+            buttonHref: cap(String(props.buttonHref ?? ""), MAX_TEXT_LEN),
+          },
+          style,
+        });
+        break;
       default:
         break; // unknown block type → dropped
     }

@@ -95,6 +95,28 @@ export function BlockRenderer({ blocks, brand }: { blocks: Block[]; brand: strin
               </div>
             );
           }
+          case "banner": {
+            const bg = safeImg(b.props.bgUrl);
+            if (!b.props.heading && !b.props.text && !bg) return null;
+            return (
+              <div key={i} className="relative isolate overflow-hidden rounded-2xl bg-slate-800">
+                {bg && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={bg} alt="" aria-hidden className="absolute inset-0 -z-10 h-full w-full object-cover" />
+                )}
+                <div className="absolute inset-0 -z-10 bg-black/45" />
+                <div className="px-6 py-20 text-center text-white sm:py-24">
+                  {b.props.heading && <h2 className={`font-bold tracking-tight ${HEADING_SIZE[st?.size ?? "l"]} ${fontCls(st)}`}>{b.props.heading}</h2>}
+                  {b.props.text && <p className="mx-auto mt-3 max-w-xl text-lg text-white/90">{b.props.text}</p>}
+                  {b.props.buttonLabel && (
+                    <Link href={safeHref(b.props.buttonHref ?? "")} className="mt-6 inline-block rounded-lg px-6 py-3 text-base font-semibold text-white shadow-sm" style={{ backgroundColor: safeColor(st) ?? brand }}>
+                      {b.props.buttonLabel}
+                    </Link>
+                  )}
+                </div>
+              </div>
+            );
+          }
           default:
             return null;
         }

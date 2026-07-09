@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { AlignCenter, AlignLeft, AlignRight, ArrowDown, ArrowUp, Eye, ExternalLink, FileStack, Pencil, Plus, Trash2, X } from "lucide-react";
+import { AlignCenter, AlignLeft, AlignRight, ArrowDown, ArrowUp, Eye, ExternalLink, FileStack, Loader2, Pencil, Plus, Trash2, Upload, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input, Label, Textarea } from "@/components/ui/input";
@@ -10,6 +10,7 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { useToast } from "@/components/toast";
 import { BLOCK_PALETTE, type Block, type BlockStyle, type BlockType } from "@/lib/site-blocks";
 import { BlockRenderer } from "@/app/site/block-renderer";
+import { uploadSiteImage } from "@/lib/upload-site-image";
 import { saveSitePage, deleteSitePage } from "./pages-actions";
 
 type PageRow = {
@@ -166,7 +167,7 @@ export function PagesManager({ initial, siteUrl, orgId, brand = "#0f172a" }: { i
                           <button type="button" onClick={() => setBlocks((bs) => bs.filter((_, j) => j !== i))} className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"><X className="h-4 w-4" /></button>
                         </div>
                       </div>
-                      <BlockFields block={b} onChange={(props) => updateBlock(i, props)} />
+                      <BlockFields block={b} orgId={orgId} onChange={(props) => updateBlock(i, props)} />
                       <StyleToolbar block={b} onChange={(style) => updateStyle(i, style)} />
                     </div>
                   ))}
@@ -206,7 +207,7 @@ export function PagesManager({ initial, siteUrl, orgId, brand = "#0f172a" }: { i
 }
 
 /** The per-type field editor for one block (content only — look/feel is the StyleToolbar below it). */
-function BlockFields({ block, onChange }: { block: Block; onChange: (props: Record<string, unknown>) => void }) {
+function BlockFields({ block, orgId, onChange }: { block: Block; orgId?: string; onChange: (props: Record<string, unknown>) => void }) {
   if (block.type === "heading")
     return <Input value={block.props.text} onChange={(e) => onChange({ text: e.target.value })} placeholder="Heading text" />;
   if (block.type === "text")
@@ -214,7 +215,7 @@ function BlockFields({ block, onChange }: { block: Block; onChange: (props: Reco
   if (block.type === "image")
     return (
       <div className="space-y-2">
-        <Input value={block.props.url} onChange={(e) => onChange({ url: e.target.value })} placeholder="Image URL (https://…)" />
+        <ImageField value={block.props.url} onChange={(url) => onChange({ url })} orgId={orgId} placeholder="Image URL (https://…)" />
         <div className="grid gap-2 sm:grid-cols-2">
           <Input value={block.props.alt ?? ""} onChange={(e) => onChange({ alt: e.target.value })} placeholder="Alt text (for SEO)" />
           <Input value={block.props.caption ?? ""} onChange={(e) => onChange({ caption: e.target.value })} placeholder="Caption (optional)" />
@@ -229,8 +230,63 @@ function BlockFields({ block, onChange }: { block: Block; onChange: (props: Reco
       </div>
     );
   if (block.type === "gallery")
-    return <GalleryFields urls={block.props.images.map((im) => im.url)} onChange={(urls) => onChange({ images: urls.map((url) => ({ url })) })} />;
+    return <GalleryFields urls={block.props.images.map((im) => im.url)} orgId={orgId} onChange={(urls) => onChange({ images: urls.map((url) => ({ url })) })} />;
+  if (block.type === "banner")
+    return (
+      <div className="space-y-2">
+        <div>
+          <span className="mb-1 block text-xs font-medium text-slate-500">Background image</span>
+          <ImageField value={block.props.bgUrl} onChange={(url) => onChange({ bgUrl: url })} orgId={orgId} placeholder="Background image URL" />
+        </div>
+        <Input value={block.props.heading} onChange={(e) => onChange({ heading: e.target.value })} placeholder="Heading (shown over the image)" />
+        <Input value={block.props.text ?? ""} onChange={(e) => onChange({ text: e.target.value })} placeholder="Subtext (optional)" />
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Input value={block.props.buttonLabel ?? ""} onChange={(e) => onChange({ buttonLabel: e.target.value })} placeholder="Button text (optional)" />
+          <Input value={block.props.buttonHref ?? ""} onChange={(e) => onChange({ buttonHref: e.target.value })} placeholder="Button link (optional)" />
+        </div>
+      </div>
+    );
   return null;
+}
+
+/** A URL input paired with an upload-from-device button (+ a thumbnail preview). Upload needs orgId
+ *  (the storage path is org-scoped); without it, URL-paste still works. */
+function ImageField({ value, onChange, orgId, placeholder }: { value: string; onChange: (url: string) => void; orgId?: string; placeholder?: string }) {
+  const ref = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = (e.target.files ?? [])[0];
+    if (!f || !orgId) return;
+    setErr(null);
+    setBusy(true);
+    try {
+      onChange(await uploadSiteImage(orgId, f));
+    } catch (x) {
+      setErr(x instanceof Error ? x.message : "Upload failed.");
+    } finally {
+      setBusy(false);
+      if (ref.current) ref.current.value = "";
+    }
+  }
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center gap-2">
+        <Input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />
+        <input ref={ref} type="file" accept="image/*" className="hidden" onChange={onFile} />
+        {orgId && (
+          <Button type="button" variant="outline" size="sm" onClick={() => ref.current?.click()} disabled={busy} title="Upload from your device">
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+          </Button>
+        )}
+      </div>
+      {err && <p className="text-xs text-red-600">{err}</p>}
+      {value && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={value} alt="" className="h-16 w-24 rounded border border-slate-200 object-cover" />
+      )}
+    </div>
+  );
 }
 
 /** The styling "toolbox" for one block — alignment, size, font, and color, all safe/structured.
@@ -239,8 +295,9 @@ function StyleToolbar({ block, onChange }: { block: Block; onChange: (style: Blo
   if (block.type === "gallery") return null;
   const st = block.style ?? {};
   const set = (patch: Partial<BlockStyle>) => onChange({ ...st, ...patch });
-  const full = block.type === "heading" || block.type === "text" || block.type === "button";
-  const colorLabel = block.type === "button" ? "Button color" : "Text color";
+  const showAlign = block.type !== "banner"; // a banner is always centered over its image
+  const full = block.type === "heading" || block.type === "text" || block.type === "button" || block.type === "banner";
+  const colorLabel = block.type === "button" || block.type === "banner" ? "Button color" : "Text color";
 
   const IconBtn = ({ on, onClick, children, title }: { on: boolean; onClick: () => void; children: React.ReactNode; title: string }) => (
     <button type="button" title={title} onClick={onClick} className={`rounded p-1 ${on ? "bg-white text-brand shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>{children}</button>
@@ -248,12 +305,14 @@ function StyleToolbar({ block, onChange }: { block: Block; onChange: (style: Blo
 
   return (
     <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg bg-slate-50 px-2 py-1.5 text-xs">
-      {/* Align — every styleable block */}
-      <div className="flex items-center gap-0.5">
-        <IconBtn on={(st.align ?? "left") === "left"} onClick={() => set({ align: "left" })} title="Left"><AlignLeft className="h-3.5 w-3.5" /></IconBtn>
-        <IconBtn on={st.align === "center"} onClick={() => set({ align: "center" })} title="Center"><AlignCenter className="h-3.5 w-3.5" /></IconBtn>
-        <IconBtn on={st.align === "right"} onClick={() => set({ align: "right" })} title="Right"><AlignRight className="h-3.5 w-3.5" /></IconBtn>
-      </div>
+      {/* Align — every styleable block except banner (centered) */}
+      {showAlign && (
+        <div className="flex items-center gap-0.5">
+          <IconBtn on={(st.align ?? "left") === "left"} onClick={() => set({ align: "left" })} title="Left"><AlignLeft className="h-3.5 w-3.5" /></IconBtn>
+          <IconBtn on={st.align === "center"} onClick={() => set({ align: "center" })} title="Center"><AlignCenter className="h-3.5 w-3.5" /></IconBtn>
+          <IconBtn on={st.align === "right"} onClick={() => set({ align: "right" })} title="Right"><AlignRight className="h-3.5 w-3.5" /></IconBtn>
+        </div>
+      )}
 
       {full && (
         <>
@@ -283,7 +342,24 @@ function StyleToolbar({ block, onChange }: { block: Block; onChange: (style: Blo
   );
 }
 
-function GalleryFields({ urls, onChange }: { urls: string[]; onChange: (urls: string[]) => void }) {
+function GalleryFields({ urls, orgId, onChange }: { urls: string[]; orgId?: string; onChange: (urls: string[]) => void }) {
+  const ref = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  async function onFiles(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []).filter((f) => f.type.startsWith("image/"));
+    if (!files.length || !orgId) return;
+    setBusy(true);
+    try {
+      const added: string[] = [];
+      for (const f of files) added.push(await uploadSiteImage(orgId, f));
+      onChange([...urls, ...added]);
+    } catch {
+      /* per-file failure surfaces nothing here; the row inputs still let them paste a URL */
+    } finally {
+      setBusy(false);
+      if (ref.current) ref.current.value = "";
+    }
+  }
   return (
     <div className="space-y-2">
       {urls.map((u, i) => (
@@ -292,7 +368,17 @@ function GalleryFields({ urls, onChange }: { urls: string[]; onChange: (urls: st
           <button type="button" onClick={() => onChange(urls.filter((_, j) => j !== i))} className="rounded-md p-2 text-slate-400 hover:text-red-600"><X className="h-4 w-4" /></button>
         </div>
       ))}
-      <button type="button" onClick={() => onChange([...urls, ""])} className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200"><Plus className="h-3.5 w-3.5" /> Add image</button>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" onClick={() => onChange([...urls, ""])} className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200"><Plus className="h-3.5 w-3.5" /> Add URL</button>
+        {orgId && (
+          <>
+            <input ref={ref} type="file" accept="image/*" multiple className="hidden" onChange={onFiles} />
+            <button type="button" onClick={() => ref.current?.click()} disabled={busy} className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200 disabled:opacity-50">
+              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />} Upload photos
+            </button>
+          </>
+        )}
+      </div>
     </div>
   );
 }

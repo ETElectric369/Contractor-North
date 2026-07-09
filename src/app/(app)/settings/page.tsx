@@ -252,6 +252,7 @@ export default async function SettingsPage({
                   initial={sitePages as any}
                   siteUrl={settings.public_handle ? orgPublicBaseUrl(settings) : null}
                   brand={accentHex(settings.glass_tint)}
+                  orgId={(org as Organization).id}
                 />
               </Section>
               <Section title="Public lead link & QR">
