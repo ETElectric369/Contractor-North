@@ -32,10 +32,17 @@ export function orgSiteMetadata(org: PublicOrg): Metadata {
 /** The hero — the one section that carries a site's visual identity, so it's where the theme
  *  lives. All three variants render the SAME headline/tagline/CTA/credentials; only the framing
  *  differs. Body sections below the hero are shared across themes. */
+const HEAD_SIZE: Record<"s" | "m" | "l", string> = {
+  s: "text-2xl sm:text-3xl",
+  m: "text-3xl sm:text-4xl",
+  l: "text-4xl sm:text-5xl",
+};
+
 function Hero({
   theme,
   name,
   headline,
+  headlineSize,
   tagline,
   brand,
   hero,
@@ -48,6 +55,7 @@ function Hero({
   theme: OrgSettings["site_theme"];
   name?: string;
   headline: string;
+  headlineSize?: OrgSettings["splash_headline_size"];
   tagline: string;
   brand: string;
   hero: string;
@@ -62,6 +70,7 @@ function Hero({
       {ctaLabel} <ArrowRight className="h-5 w-5" />
     </Link>
   );
+  const hSize = HEAD_SIZE[headlineSize ?? "l"];
 
   // BOLD — saturated brand color-block, photo as a framed card. Contractor punch.
   if (theme === "bold") {
@@ -71,7 +80,7 @@ function Hero({
           <div>
             {name && <p className="mb-2 text-2xl font-black tracking-tight">{name}</p>}
             {area && <p className="mb-4 inline-block rounded-full bg-white/15 px-3 py-1 text-xs font-bold uppercase tracking-[0.2em]">{area}</p>}
-            <h1 className="text-4xl font-black leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl">{headline}</h1>
+            {headline && <h1 className={`${hSize} font-black leading-[1.05] tracking-tight`}>{headline}</h1>}
             {tagline && <p className="mt-5 max-w-xl text-lg text-white/85">{tagline}</p>}
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Link href={estimateHref} className="inline-flex items-center gap-2 rounded-lg bg-white px-6 py-3.5 text-base font-bold shadow-lg" style={{ color: brand }}>
@@ -100,7 +109,7 @@ function Hero({
           <div>
             {name && <p className="mb-2 text-2xl font-bold tracking-tight text-slate-900">{name}</p>}
             {area && <p className="mb-4 text-sm font-semibold uppercase tracking-[0.25em]" style={{ color: brand }}>{area}</p>}
-            <h1 className="text-4xl font-semibold leading-[1.1] tracking-tight text-slate-900 sm:text-5xl">{headline}</h1>
+            {headline && <h1 className={`${hSize} font-semibold leading-[1.1] tracking-tight text-slate-900`}>{headline}</h1>}
             {tagline && <p className="mt-5 max-w-xl text-lg text-slate-600">{tagline}</p>}
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Link href={estimateHref} className="inline-flex items-center gap-2 rounded-full px-6 py-3.5 text-base font-semibold text-white shadow-sm" style={{ backgroundColor: brand }}>
@@ -133,7 +142,7 @@ function Hero({
         <div className="max-w-2xl">
           {name && <p className="mb-2 text-2xl font-extrabold tracking-tight text-white drop-shadow">{name}</p>}
           {area && <p className="mb-3 text-sm font-semibold uppercase tracking-[0.2em] text-white/80">{area}</p>}
-          <h1 className="text-4xl font-extrabold leading-tight tracking-tight text-white drop-shadow sm:text-5xl">{headline}</h1>
+          {headline && <h1 className={`${hSize} font-extrabold leading-tight tracking-tight text-white drop-shadow`}>{headline}</h1>}
           {tagline && <p className="mt-4 max-w-xl text-lg text-slate-100">{tagline}</p>}
           <div className="mt-8 flex flex-wrap items-center gap-3">
             {cta}
@@ -244,7 +253,8 @@ export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg;
       <Hero
         theme={s.site_theme}
         name={showName ? org.name : undefined}
-        headline={s.splash_headline || `${org.name} — quality work, done right`}
+        headline={s.splash_headline}
+        headlineSize={s.splash_headline_size}
         tagline={s.splash_tagline}
         brand={brand}
         hero={hero}

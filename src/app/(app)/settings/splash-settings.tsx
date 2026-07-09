@@ -16,6 +16,7 @@ type Photo = { url: string; caption?: string };
  *  or swapping the top image is one click. `portfolio`/`orgId` power the picker + upload. */
 export function SplashSettings({ settings, portfolio = [], orgId }: { settings: OrgSettings; portfolio?: Photo[]; orgId?: string }) {
   const [headline, setHeadline] = useState(settings.splash_headline);
+  const [headlineSize, setHeadlineSize] = useState<OrgSettings["splash_headline_size"]>(settings.splash_headline_size ?? "l");
   const [tagline, setTagline] = useState(settings.splash_tagline);
   const [bg, setBg] = useState(settings.splash_bg_url);
   const [bullets, setBullets] = useState(settings.splash_bullets);
@@ -29,7 +30,7 @@ export function SplashSettings({ settings, portfolio = [], orgId }: { settings: 
   function save() {
     setDone(false);
     start(async () => {
-      await updateOrgSettings({ splash_headline: headline, splash_tagline: tagline, splash_bg_url: bg, splash_bullets: bullets, splash_credentials: credentials }, orgId);
+      await updateOrgSettings({ splash_headline: headline, splash_headline_size: headlineSize, splash_tagline: tagline, splash_bg_url: bg, splash_bullets: bullets, splash_credentials: credentials }, orgId);
       setDone(true);
       setTimeout(() => setDone(false), 2500);
     });
@@ -109,8 +110,24 @@ export function SplashSettings({ settings, portfolio = [], orgId }: { settings: 
       </div>
 
       <div>
-        <Label htmlFor="sp-headline">Headline</Label>
-        <Input id="sp-headline" value={headline} onChange={(e) => setHeadline(e.target.value)} placeholder="e.g. High-End Custom Lighting" />
+        <div className="flex items-center justify-between gap-2">
+          <Label htmlFor="sp-headline" className="mb-0">Headline</Label>
+          <div className="flex items-center gap-1 text-xs">
+            <span className="text-slate-400">Size</span>
+            {(["s", "m", "l"] as const).map((sz) => (
+              <button
+                key={sz}
+                type="button"
+                onClick={() => setHeadlineSize(sz)}
+                className={`rounded px-2 py-0.5 font-semibold uppercase ${headlineSize === sz ? "bg-brand text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}
+              >
+                {sz}
+              </button>
+            ))}
+          </div>
+        </div>
+        <Input id="sp-headline" value={headline} onChange={(e) => setHeadline(e.target.value)} placeholder="e.g. High-End Custom Lighting" className="mt-1" />
+        <p className="mt-1 text-xs text-slate-400">Leave blank to hide the big headline entirely.</p>
       </div>
       <div>
         <Label htmlFor="sp-tagline">Tagline</Label>
