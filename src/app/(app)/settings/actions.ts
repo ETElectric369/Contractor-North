@@ -965,6 +965,35 @@ export async function saveJobCode(input: {
   return { ok: true };
 }
 
+/** Import a whole trade's starter codes at once (Settings → Scheduling → "Import a trade's codes").
+ *  Adds every code in the pack the org doesn't already have (case-insensitive on the code), so it's
+ *  safe to re-run and won't duplicate. Staff only; org-scoped. */
+export async function importTradeCodePack(packId: string): Promise<Result & { added?: number; skipped?: number }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { supabase } = ctx;
+  const orgId = await myOrgId(supabase);
+  if (!orgId) return { ok: false, error: "No organization." };
+
+  const { TRADE_CODE_PACKS } = await import("@/lib/trade-code-packs");
+  const pack = TRADE_CODE_PACKS.find((p) => p.id === packId);
+  if (!pack) return { ok: false, error: "Unknown trade pack." };
+
+  const { data: existing } = await supabase.from("job_codes").select("code").eq("org_id", orgId);
+  const have = new Set((existing ?? []).map((r) => String((r as { code: string }).code).trim().toUpperCase()));
+  const rows = pack.codes
+    .filter((c) => !have.has(c.code.toUpperCase()))
+    .map((c) => ({ org_id: orgId, code: c.code, description: c.description, billable: c.billable ?? true, active: true }));
+
+  if (rows.length) {
+    const { error } = await supabase.from("job_codes").insert(rows);
+    if (error) return { ok: false, error: error.message };
+  }
+  revalidatePath("/settings");
+  revalidatePath("/timeclock");
+  return { ok: true, added: rows.length, skipped: pack.codes.length - rows.length };
+}
+
 /** Flip a job code's active flag (soft enable/disable — inactive codes drop out
  *  of the timeclock picker). Staff only; RLS scopes it to the org. */
 export async function setJobCodeActive(id: string, active: boolean): Promise<Result> {

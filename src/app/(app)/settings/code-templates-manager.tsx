@@ -88,7 +88,18 @@ export function CodeTemplatesManager({ templates, codes }: { templates: Template
             <Input id="tname" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Full deck build" />
           </div>
           <div>
-            <Label>Codes for this job type</Label>
+            <div className="mb-1 flex items-center justify-between">
+              <Label className="mb-0">Codes for this job type</Label>
+              {codes.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setSelected(selected.length === codes.length ? [] : codes.map((c) => c.code))}
+                  className="text-xs font-medium text-brand hover:underline"
+                >
+                  {selected.length === codes.length ? "Clear all" : "Select all"}
+                </button>
+              )}
+            </div>
             {codes.length === 0 ? (
               <p className="text-xs text-slate-400">This org has no job codes yet.</p>
             ) : (

@@ -2,12 +2,13 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Pencil, Trash2, Tag } from "lucide-react";
+import { Plus, Pencil, Trash2, Tag, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
-import { Input, Label } from "@/components/ui/input";
+import { Input, Label, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { saveJobCode, setJobCodeActive, deleteJobCode } from "./actions";
+import { TRADE_PACK_OPTIONS } from "@/lib/trade-code-packs";
+import { saveJobCode, setJobCodeActive, deleteJobCode, importTradeCodePack } from "./actions";
 
 type JobCode = {
   id: string;
@@ -28,6 +29,20 @@ export function JobCodesManager({ jobCodes }: { jobCodes: JobCode[] }) {
   const [active, setActive] = useState(true);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [pack, setPack] = useState(TRADE_PACK_OPTIONS[0]?.id ?? "");
+  const [importMsg, setImportMsg] = useState<string | null>(null);
+
+  function runImport() {
+    setImportMsg(null);
+    start(async () => {
+      const res = await importTradeCodePack(pack);
+      if (!res.ok) return setImportMsg(res.error ?? "Could not import.");
+      const added = res.added ?? 0;
+      const skipped = res.skipped ?? 0;
+      setImportMsg(added === 0 ? "You already have all of those codes." : `Added ${added} code${added === 1 ? "" : "s"}${skipped ? ` (${skipped} already existed)` : ""}.`);
+      router.refresh();
+    });
+  }
 
   function openNew() {
     setEditing("new");
@@ -85,6 +100,23 @@ export function JobCodesManager({ jobCodes }: { jobCodes: JobCode[] }) {
         The cost / labor codes your crew picks on clock-in. Inactive codes drop out of the timeclock picker
         but stay on past entries.
       </p>
+
+      {/* Quick-start: import a whole trade's common codes at once (skips any you already have). */}
+      <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+        <div className="mb-2 text-sm font-medium text-slate-700">Import a trade&apos;s codes</div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Select value={pack} onChange={(e) => { setPack(e.target.value); setImportMsg(null); }} className="max-w-[220px]">
+            {TRADE_PACK_OPTIONS.map((o) => (
+              <option key={o.id} value={o.id}>{o.label} ({o.count})</option>
+            ))}
+          </Select>
+          <Button type="button" variant="outline" size="sm" onClick={runImport} disabled={pending}>
+            <Download className="h-4 w-4" /> Import codes
+          </Button>
+          {importMsg && <span className="text-xs font-medium text-slate-600">{importMsg}</span>}
+        </div>
+      </div>
+
       {jobCodes.length === 0 ? (
         <p className="text-xs text-slate-400">No job codes yet.</p>
       ) : (
