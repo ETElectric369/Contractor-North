@@ -82,6 +82,7 @@ export function FinishJobButton({
         open={open}
         onClose={() => !pending && setOpen(false)}
         title="Finish this job"
+        portal
         footer={
           warn ? (
             <div className="flex justify-end gap-2">

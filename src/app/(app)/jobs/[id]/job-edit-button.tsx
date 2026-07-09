@@ -84,16 +84,19 @@ export function JobEditButton({
         </Button>
       )}
 
-      <form action={onSubmit}>
-        <Modal
-          open={open}
-          onClose={() => setOpen(false)}
-          title="Edit job"
-          footer={
-            <ModalActions onCancel={() => setOpen(false)} submit saving={pending} saveLabel="Save Changes" />
-          }
-        >
-          <div className="space-y-4">
+      {/* portal + a form-INSIDE-the-modal (submitted by id) so this opens correctly even though the
+          trigger lives in the glass Manage menu — whose backdrop-filter would otherwise trap the
+          overlay. See Modal's `portal` prop. */}
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Edit job"
+        portal
+        footer={
+          <ModalActions onCancel={() => setOpen(false)} submit formId="job-edit-form" saving={pending} saveLabel="Save Changes" />
+        }
+      >
+        <form id="job-edit-form" action={onSubmit} className="space-y-4">
           {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
 
           <div>
@@ -223,9 +226,8 @@ export function JobEditButton({
               <p className="mt-1 text-xs text-slate-400">Limits the crew&apos;s clock-in/out code picker to this job&apos;s codes.</p>
             </div>
           )}
-          </div>
-        </Modal>
-      </form>
+        </form>
+      </Modal>
     </>
   );
 }

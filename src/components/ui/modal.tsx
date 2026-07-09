@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { Button } from "./button";
 import { lockBodyForModal, unlockBodyForModal } from "./modal-lock";
@@ -13,6 +14,7 @@ export function Modal({
   footer,
   size = "lg",
   dirty = false,
+  portal = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -30,6 +32,14 @@ export function Modal({
    *  a phone can't eat a half-filled form. Footer buttons (Cancel/Save) are
    *  caller-owned and bypass the guard. Default (absent) behavior unchanged. */
   dirty?: boolean;
+  /** Render the overlay into <body> via a portal. OFF by default (the overlay renders in place —
+   *  required for the common `<form><Modal/></form>` pattern where Save submits the wrapping form by
+   *  DOM nesting). Turn ON only when the Modal is mounted inside an ancestor with `backdrop-filter`,
+   *  `transform`, or `filter` — those make the ancestor the containing block for the modal's
+   *  `position:fixed` overlay, trapping + clipping it (e.g. a modal opened from a glass dropdown).
+   *  When portaled, a form INSIDE the modal must submit via ModalActions `formId` (the `form=` attr),
+   *  not DOM nesting. */
+  portal?: boolean;
 }) {
   // Two-tap discard guard state. Auto-disarms after a beat so a stray first
   // tap doesn't leave the modal permanently one tap away from discarding.
@@ -126,7 +136,7 @@ export function Modal({
   const maxW =
     size === "sm" ? "max-w-sm" : size === "md" ? "max-w-md" : size === "xl" ? "max-w-2xl" : "max-w-lg";
 
-  return (
+  const overlay = (
     // Scroll the WHOLE overlay so a panel taller than the *visible* viewport can never strand its
     // top off-screen: on iOS the keyboard shrinks the visual viewport and scrolls it, and some
     // installed PWAs miscompute 100dvh — either way a tall form (e.g. New Appointment) could run
@@ -174,6 +184,10 @@ export function Modal({
       </div>
     </div>
   );
+
+  // Portal to <body> to escape a backdrop-filter/transform ancestor's containing-block trap.
+  // Only in the browser (createPortal needs a real document); off-portal renders in place as before.
+  return portal && typeof document !== "undefined" ? createPortal(overlay, document.body) : overlay;
 }
 
 /**
