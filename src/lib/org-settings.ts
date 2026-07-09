@@ -85,6 +85,10 @@ export interface OrgSettings {
   splash_bg_url: string;
   splash_bullets: string; // one bullet per line
   splash_credentials: string; // e.g. "Licensed · Bonded · Insured · CA C-10 #…"
+  /** Show the business NAME as text (header wordmark + hero eyebrow + footer), alongside the logo.
+   *  On for orgs whose logo is an emblem/mark without the name in it (so the name is actually stated
+   *  on the page). Off by default — an org whose logo already contains the name isn't doubled up. */
+  show_name_with_logo: boolean;
 
   /** Public URL slug for this org's customer-facing estimate configurator at
    *  /estimate/<handle> (e.g. "tahoe-deck"). Empty = the configurator is off for this org.
@@ -177,6 +181,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   splash_bg_url: "",
   splash_bullets: "",
   splash_credentials: "",
+  show_name_with_logo: false,
   public_handle: "",
   site_inspection_threshold: 20000,
   portfolio: [],

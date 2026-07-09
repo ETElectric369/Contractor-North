@@ -34,6 +34,7 @@ export function orgSiteMetadata(org: PublicOrg): Metadata {
  *  differs. Body sections below the hero are shared across themes. */
 function Hero({
   theme,
+  name,
   headline,
   tagline,
   brand,
@@ -45,6 +46,7 @@ function Hero({
   creds,
 }: {
   theme: OrgSettings["site_theme"];
+  name?: string;
   headline: string;
   tagline: string;
   brand: string;
@@ -67,6 +69,7 @@ function Hero({
       <section id="top" className="relative isolate overflow-hidden text-white" style={{ background: `linear-gradient(135deg, ${brand} 0%, #0f172a 100%)` }}>
         <div className="mx-auto grid max-w-6xl items-center gap-10 px-4 py-20 sm:py-24 lg:grid-cols-2">
           <div>
+            {name && <p className="mb-2 text-2xl font-black tracking-tight">{name}</p>}
             {area && <p className="mb-4 inline-block rounded-full bg-white/15 px-3 py-1 text-xs font-bold uppercase tracking-[0.2em]">{area}</p>}
             <h1 className="text-4xl font-black leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl">{headline}</h1>
             {tagline && <p className="mt-5 max-w-xl text-lg text-white/85">{tagline}</p>}
@@ -95,6 +98,7 @@ function Hero({
       <section id="top" className="border-b border-slate-100" style={{ background: `linear-gradient(180deg, ${brand}0a, #ffffff 65%)` }}>
         <div className="mx-auto grid max-w-6xl items-center gap-12 px-4 py-20 sm:py-28 lg:grid-cols-2">
           <div>
+            {name && <p className="mb-2 text-2xl font-bold tracking-tight text-slate-900">{name}</p>}
             {area && <p className="mb-4 text-sm font-semibold uppercase tracking-[0.25em]" style={{ color: brand }}>{area}</p>}
             <h1 className="text-4xl font-semibold leading-[1.1] tracking-tight text-slate-900 sm:text-5xl">{headline}</h1>
             {tagline && <p className="mt-5 max-w-xl text-lg text-slate-600">{tagline}</p>}
@@ -127,6 +131,7 @@ function Hero({
       <div className="absolute inset-0 -z-10" style={{ background: "linear-gradient(180deg, rgba(2,6,23,.55), rgba(2,6,23,.72))" }} />
       <div className="mx-auto max-w-6xl px-4 py-24 sm:py-32">
         <div className="max-w-2xl">
+          {name && <p className="mb-2 text-2xl font-extrabold tracking-tight text-white drop-shadow">{name}</p>}
           {area && <p className="mb-3 text-sm font-semibold uppercase tracking-[0.2em] text-white/80">{area}</p>}
           <h1 className="text-4xl font-extrabold leading-tight tracking-tight text-white drop-shadow sm:text-5xl">{headline}</h1>
           {tagline && <p className="mt-4 max-w-xl text-lg text-slate-100">{tagline}</p>}
@@ -153,6 +158,9 @@ export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg;
   const services = String(s.splash_bullets || "").split("\n").map((x) => x.trim()).filter(Boolean);
   const creds = String(s.splash_credentials || "").split("\n").map((x) => x.trim()).filter(Boolean);
   const area = s.service_area || [org.city, org.state].filter(Boolean).join(", ");
+  // Show the business NAME as text (not just the logo image) when the org opts in — so the name is
+  // actually stated on the page even when the logo is a wordless emblem.
+  const showName = s.show_name_with_logo === true;
   const ig = (s.social_instagram || "").replace(/^@/, "").trim();
   const reviews = (s.reviews ?? []).filter((r) => r && r.text && r.name);
   // Primary CTA: orgs that price from a catalog get the instant configurator; everyone else
@@ -201,10 +209,11 @@ export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg;
       <header className="sticky top-0 z-40 border-b border-slate-200/70 bg-white/85 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
           <a href="#top" className="flex items-center gap-2">
-            {org.logo_url ? (
+            {org.logo_url && (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={org.logo_url} alt={org.name} className="h-9 w-auto" />
-            ) : (
+            )}
+            {(!org.logo_url || showName) && (
               <span className="text-lg font-extrabold tracking-tight">{org.name}</span>
             )}
           </a>
@@ -234,6 +243,7 @@ export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg;
       {/* Hero — presentation varies by settings.site_theme; the copy/CTA/data are identical. */}
       <Hero
         theme={s.site_theme}
+        name={showName ? org.name : undefined}
         headline={s.splash_headline || `${org.name} — quality work, done right`}
         tagline={s.splash_tagline}
         brand={brand}
@@ -348,11 +358,12 @@ export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg;
       <footer id="contact" className="border-t border-slate-200 bg-slate-900 text-slate-300">
         <div className="mx-auto grid max-w-6xl gap-8 px-4 py-14 sm:grid-cols-2">
           <div>
-            {org.logo_url ? (
+            {org.logo_url && (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={org.logo_url} alt={org.name} className="h-10 w-auto brightness-0 invert" />
-            ) : (
-              <span className="text-xl font-extrabold text-white">{org.name}</span>
+            )}
+            {(!org.logo_url || showName) && (
+              <span className={`text-xl font-extrabold text-white ${org.logo_url ? "mt-2 block" : ""}`}>{org.name}</span>
             )}
             {s.splash_tagline && <p className="mt-3 max-w-sm text-sm text-slate-400">{s.splash_tagline}</p>}
             {creds.length > 0 && <p className="mt-4 text-xs text-slate-500">{creds.join("  ·  ")}</p>}
