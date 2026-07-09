@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { Settings, User, Building2, Wallet, CalendarDays, Plug, type LucideIcon } from "lucide-react";
+import { Settings, User, Building2, Globe, Wallet, CalendarDays, Plug, type LucideIcon } from "lucide-react";
 import type { DockNode, DockSection } from "@/lib/dock";
 import { SectionSheet } from "@/components/section-sheet";
 
@@ -18,6 +18,7 @@ export interface SettingsCluster {
 const CLUSTER_ICONS: Record<string, LucideIcon> = {
   you: User,
   company: Building2,
+  website: Globe,
   money: Wallet,
   scheduling: CalendarDays,
   integrations: Plug,

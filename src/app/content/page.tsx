@@ -188,7 +188,7 @@ export default async function ContentWorkspace({ searchParams }: { searchParams:
           <PagesManager initial={pages as never} siteUrl={siteUrl} orgId={selected} />
         </Panel>
         <Panel icon={Megaphone} title="Homepage" brand={brand}>
-          <SplashSettings settings={marketing} orgId={selected} />
+          <SplashSettings settings={marketing} portfolio={marketing.portfolio ?? []} orgId={selected} />
         </Panel>
         <Panel icon={FileText} title="SEO &amp; specialty" brand={brand}>
           <SiteSeoFields settings={marketing} orgId={selected} />

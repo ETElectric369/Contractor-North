@@ -3,7 +3,7 @@ import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { User, Building2, Wallet, CalendarDays, Plug } from "lucide-react";
+import { User, Building2, Globe, Wallet, CalendarDays, Plug } from "lucide-react";
 import { SettingsSubnav } from "./settings-subnav";
 import { getOrgSettings, accentHex, orgPublicBaseUrl } from "@/lib/org-settings";
 import { normalizeBlocks } from "@/lib/site-blocks";
@@ -146,10 +146,13 @@ export default async function SettingsPage({
     ? await supabase.from("calendar_connections").select("id").eq("provider", "google").maybeSingle()
     : { data: null };
 
-  // QR for the public inquiry page (trucks, signs, business cards).
-  const inquiryUrl = process.env.SPLASH_DOMAIN
-    ? `https://${process.env.SPLASH_DOMAIN}`
-    : `${siteUrl || "https://contractor-north.vercel.app"}/inquire/${profile?.org_id}`;
+  // QR + lead link for the public inquiry page (trucks, signs, business cards). Point at the org's
+  // REAL public address (custom domain, else the free subdomain) — never the app's vercel.app URL,
+  // which read as "dev-server" junk on the settings page and made the printed QR stale.
+  const publicBase = settings.public_handle
+    ? orgPublicBaseUrl(settings)
+    : siteUrl || "https://contractor-north.vercel.app";
+  const inquiryUrl = `${publicBase}/inquire/${profile?.org_id}`;
   const inquiryQr = org
     ? await QRCode.toDataURL(inquiryUrl, { margin: 1, width: 280, color: { dark: "#0f172a" } })
     : null;
@@ -201,15 +204,36 @@ export default async function SettingsPage({
   // ── The admin clusters (staff only). ─────────────────────────────────────────────────
   const adminTabs = org && isStaff
     ? [
-        // "Company" — who we are + how leads reach us.
+        // "Company" — just who we are (identity + logo). The public site + how leads reach us moved
+        // to their own "Website" cluster below.
         {
           id: "company",
           label: "Company",
           icon: Building2,
           content: (
             <div className="space-y-6">
+              <Section title="Company details"><OrgSettingsForm org={org as Organization} /></Section>
+              <Section title="Company logo">
+                <LogoUpload orgId={(org as Organization).id} current={(org as Organization).logo_url} />
+              </Section>
+            </div>
+          ),
+        },
+        // "Website" — the whole public-site surface in ONE place, separate from company identity:
+        // address/domain/style, the homepage hero + copy, portfolio, reviews, articles, custom pages,
+        // the printable lead link/QR, and the external SEO/content editor seats. Staff-only (this
+        // whole cluster is gated by isStaff); an outside SEO pro edits the same surface via /content.
+        {
+          id: "website",
+          label: "Website",
+          icon: Globe,
+          content: (
+            <div className="space-y-6">
               <Section title="Your website">
                 <WebsiteSettings settings={settings} siteUrl={siteUrl} sitesDomain={sitesDomain} />
+              </Section>
+              <Section title="Homepage">
+                <SplashSettings settings={settings} portfolio={settings.portfolio ?? []} orgId={(org as Organization).id} />
               </Section>
               <Section title="Portfolio photos">
                 <PortfolioManager orgId={(org as Organization).id} initial={settings.portfolio ?? []} />
@@ -229,19 +253,12 @@ export default async function SettingsPage({
                   siteUrl={settings.public_handle ? orgPublicBaseUrl(settings) : null}
                 />
               </Section>
-              <Section title="SEO / content collaborators">
-                <CollaboratorsManager initial={(siteCollaborators ?? []) as any} />
-              </Section>
-              <Section title="Company details"><OrgSettingsForm org={org as Organization} /></Section>
-              <Section title="Company logo">
-                <LogoUpload orgId={(org as Organization).id} current={(org as Organization).logo_url} />
-              </Section>
-              <Section title="Public lead link">
+              <Section title="Public lead link & QR">
                 <p className="mb-2 text-sm text-slate-500">
                   Post this link online (or text/email it). Anyone who submits the form becomes a new lead in <strong>Leads</strong> — no login needed for them.
                 </p>
                 <code className="block break-all rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-700">
-                  {(siteUrl || "https://contractor-north.vercel.app")}/inquire/{(org as Organization).id}
+                  {inquiryUrl}
                 </code>
                 <div className="mt-4 flex flex-wrap items-center gap-4">
                   {inquiryQr && (
@@ -273,7 +290,9 @@ export default async function SettingsPage({
                   </div>
                 </div>
               </Section>
-              <Section title="Splash page"><SplashSettings settings={settings} /></Section>
+              <Section title="SEO / content collaborators">
+                <CollaboratorsManager initial={(siteCollaborators ?? []) as any} />
+              </Section>
             </div>
           ),
         },

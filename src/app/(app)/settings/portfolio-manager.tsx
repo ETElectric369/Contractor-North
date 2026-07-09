@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { prepareImageForUpload } from "@/lib/image-prep";
 import { updateOrgSettings } from "./actions";
 
-type Photo = { url: string; src?: string; path?: string };
+type Photo = { url: string; src?: string; path?: string; caption?: string };
 
 /**
  * Manage the public site's portfolio gallery: upload (multi), remove, reorder. Photos go to the
@@ -73,6 +73,15 @@ export function PortfolioManager({ orgId, initial }: { orgId: string; initial: P
     await persist(next);
   }
 
+  // Caption edits live in local state while typing; a blur (or Enter) commits the whole manifest so
+  // captions survive reorder/add (they were being dropped before — persist only wrote url/src/path).
+  const [captionDraft, setCaptionDraft] = useState<Record<number, string>>({});
+  function commitCaption(idx: number) {
+    const val = captionDraft[idx];
+    if (val === undefined || val === (photos[idx].caption ?? "")) return;
+    persist(photos.map((p, i) => (i === idx ? { ...p, caption: val } : p)));
+  }
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-3">
@@ -91,22 +100,33 @@ export function PortfolioManager({ orgId, initial }: { orgId: string; initial: P
           No photos yet. Add your best project shots — they show as the &ldquo;Our recent work&rdquo; gallery on your site.
         </p>
       ) : (
-        <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           {photos.map((p, i) => (
-            <div key={p.url} className="group relative aspect-square overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={p.url} alt={`Project ${i + 1}`} loading="lazy" className="h-full w-full object-cover" />
-              <div className="absolute inset-0 flex items-end justify-between bg-gradient-to-t from-black/50 to-transparent p-1.5 opacity-0 transition group-hover:opacity-100">
-                <button type="button" onClick={() => move(i, -1)} disabled={busy || i === 0} className="rounded bg-white/85 p-1 text-slate-700 disabled:opacity-30" aria-label="Move earlier">
-                  <ChevronLeft className="h-4 w-4" />
-                </button>
-                <button type="button" onClick={() => remove(i)} disabled={busy} className="rounded bg-white/85 p-1 text-red-600" aria-label="Remove photo">
-                  <Trash2 className="h-4 w-4" />
-                </button>
-                <button type="button" onClick={() => move(i, 1)} disabled={busy || i === photos.length - 1} className="rounded bg-white/85 p-1 text-slate-700 disabled:opacity-30" aria-label="Move later">
-                  <ChevronRight className="h-4 w-4" />
-                </button>
+            <div key={p.url} className="space-y-1">
+              <div className="group relative aspect-square overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={p.url} alt={p.caption || `Project ${i + 1}`} loading="lazy" className="h-full w-full object-cover" />
+                <div className="absolute inset-0 flex items-end justify-between bg-gradient-to-t from-black/50 to-transparent p-1.5 opacity-0 transition group-hover:opacity-100">
+                  <button type="button" onClick={() => move(i, -1)} disabled={busy || i === 0} className="rounded bg-white/85 p-1 text-slate-700 disabled:opacity-30" aria-label="Move earlier">
+                    <ChevronLeft className="h-4 w-4" />
+                  </button>
+                  <button type="button" onClick={() => remove(i)} disabled={busy} className="rounded bg-white/85 p-1 text-red-600" aria-label="Remove photo">
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                  <button type="button" onClick={() => move(i, 1)} disabled={busy || i === photos.length - 1} className="rounded bg-white/85 p-1 text-slate-700 disabled:opacity-30" aria-label="Move later">
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
+              {/* Caption = the on-site label AND the image's alt text (SEO). Blur/Enter saves. */}
+              <input
+                value={captionDraft[i] ?? p.caption ?? ""}
+                onChange={(e) => setCaptionDraft((d) => ({ ...d, [i]: e.target.value }))}
+                onBlur={() => commitCaption(i)}
+                onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                placeholder="Describe this photo…"
+                className="w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 placeholder:text-slate-400 focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+              />
             </div>
           ))}
         </div>
