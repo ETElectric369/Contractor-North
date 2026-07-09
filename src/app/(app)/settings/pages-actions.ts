@@ -5,6 +5,7 @@ import { resolveSiteContext } from "@/lib/site-editor-guard";
 import { sanitizeHtml, textToHtml } from "@/lib/sanitize-html";
 import { normalizeBlocks, type Block } from "@/lib/site-blocks";
 import { isReservedSlug } from "@/lib/site-reserved";
+import { updateOrgSettings } from "./actions";
 
 /**
  * Custom builder PAGES (site_pages). Editable by org staff and a granted external collaborator
@@ -90,20 +91,17 @@ export async function saveSitePage(input: {
 }
 
 /** Save the homepage's custom sections (settings.home_blocks) — same block model + text sanitization
- *  as pages, merged into the org's settings jsonb. Staff or a granted collaborator; org-scoped. */
+ *  as pages. Routes through updateOrgSettings, so it works for BOTH org staff (direct, protected-key
+ *  strip) AND a granted external collaborator (the whitelist RPC — home_blocks is a whitelisted array
+ *  key, so business config stays unreachable). Sanitized here at write; the homepage re-sanitizes on
+ *  read (renderReadyBlocks), so a direct-RPC write that skips this action still can't XSS the site. */
 export async function saveHomeBlocks(blocks: Block[], orgId?: string): Promise<Result> {
   const ctx = await resolveSiteContext(orgId);
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const clean = cleanBlocks(blocks ?? []);
-
-  const { data: org } = await ctx.supabase.from("organizations").select("settings").eq("id", ctx.orgId).single();
-  const merged = { ...((org?.settings as Record<string, unknown>) ?? {}), home_blocks: clean };
-  const { error } = await ctx.supabase.from("organizations").update({ settings: merged }).eq("id", ctx.orgId);
-  if (error) return { ok: false, error: error.message };
-  revalidatePath("/settings");
-  revalidatePath("/content");
-  revalidatePath("/", "layout");
-  return { ok: true };
+  const res = await updateOrgSettings({ home_blocks: clean }, orgId);
+  if (res.ok) revalidatePath("/", "layout");
+  return res;
 }
 
 export async function deleteSitePage(id: string, orgId?: string): Promise<Result> {

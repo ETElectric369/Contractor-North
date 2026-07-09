@@ -13,7 +13,7 @@ import { DEFAULT_SETTINGS, type OrgSettings } from "@/lib/org-settings";
 export const SITE_CONTENT_KEYS = [
   "splash_headline", "splash_tagline", "splash_bg_url", "splash_bullets", "splash_credentials",
   "portfolio", "specialty_headline", "specialty_blurb", "service_area", "site_theme",
-  "social_instagram", "google_business_url", "reviews",
+  "social_instagram", "google_business_url", "reviews", "home_blocks",
 ] as const satisfies readonly (keyof OrgSettings)[];
 
 /** Build a settings object safe to hand a collaborator's browser: real marketing values overlaid on

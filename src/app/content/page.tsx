@@ -7,11 +7,12 @@ import { marketingSettingsFor } from "@/lib/site-editor-guard";
 import { signOut } from "@/app/login/actions";
 import { PostsManager } from "../(app)/settings/posts-manager";
 import { PagesManager } from "../(app)/settings/pages-manager";
+import { HomeBlocksEditor } from "../(app)/settings/home-blocks-editor";
 import { SplashSettings } from "../(app)/settings/splash-settings";
 import { SiteSeoFields } from "../(app)/settings/site-seo-fields";
 import { ReviewsManager } from "../(app)/settings/reviews-manager";
 import { PortfolioManager } from "../(app)/settings/portfolio-manager";
-import { normalizeBlocks } from "@/lib/site-blocks";
+import { renderReadyBlocks } from "@/lib/public-pages";
 
 function Panel({ icon: Icon, title, brand, children }: { icon: typeof FileText; title: string; brand: string; children: React.ReactNode }) {
   return (
@@ -150,7 +151,7 @@ export default async function ContentWorkspace({ searchParams }: { searchParams:
     .order("created_at", { ascending: true });
   const pages = (rawPages ?? []).map((p) => ({
     ...(p as Record<string, unknown>),
-    blocks: normalizeBlocks((p as { blocks?: unknown }).blocks),
+    blocks: renderReadyBlocks((p as { blocks?: unknown }).blocks), // sanitize for the editor preview too
   }));
 
   const multi = grantedOrgs.length > 1;
@@ -187,8 +188,11 @@ export default async function ContentWorkspace({ searchParams }: { searchParams:
         <Panel icon={FileStack} title="Custom pages" brand={brand}>
           <PagesManager initial={pages as never} siteUrl={siteUrl} orgId={selected} brand={brand} />
         </Panel>
-        <Panel icon={Megaphone} title="Homepage" brand={brand}>
+        <Panel icon={Megaphone} title="Homepage hero &amp; copy" brand={brand}>
           <SplashSettings settings={marketing} portfolio={marketing.portfolio ?? []} orgId={selected} />
+        </Panel>
+        <Panel icon={FileStack} title="Homepage sections" brand={brand}>
+          <HomeBlocksEditor initial={renderReadyBlocks(marketing.home_blocks)} brand={brand} orgId={selected} />
         </Panel>
         <Panel icon={FileText} title="SEO &amp; specialty" brand={brand}>
           <SiteSeoFields settings={marketing} orgId={selected} />

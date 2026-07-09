@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { User, Building2, Globe, Wallet, CalendarDays, Plug } from "lucide-react";
 import { SettingsSubnav } from "./settings-subnav";
 import { getOrgSettings, accentHex, orgPublicBaseUrl } from "@/lib/org-settings";
-import { normalizeBlocks } from "@/lib/site-blocks";
+import { renderReadyBlocks } from "@/lib/public-pages";
 import { OrgSettingsForm } from "./org-settings-form";
 import { DocumentDesigner } from "./document-designer";
 import { LogoUpload } from "./logo-upload";
@@ -137,7 +137,9 @@ export default async function SettingsPage({
     : { data: null };
   const sitePages = (rawSitePages ?? []).map((p) => ({
     ...(p as Record<string, unknown>),
-    blocks: normalizeBlocks((p as { blocks?: unknown }).blocks),
+    // renderReadyBlocks (not just normalize) — the editor's Preview renders these client-side, so the
+    // text sink must be sanitized even here, in case a hostile direct write skipped the save action.
+    blocks: renderReadyBlocks((p as { blocks?: unknown }).blocks),
   }));
 
   const { data: qboConn } = isAdmin
@@ -237,7 +239,7 @@ export default async function SettingsPage({
                 <SplashSettings settings={settings} portfolio={settings.portfolio ?? []} orgId={(org as Organization).id} />
               </Section>
               <Section title="Homepage sections">
-                <HomeBlocksEditor initial={settings.home_blocks ?? []} brand={accentHex(settings.glass_tint)} orgId={(org as Organization).id} />
+                <HomeBlocksEditor initial={renderReadyBlocks(settings.home_blocks)} brand={accentHex(settings.glass_tint)} orgId={(org as Organization).id} />
               </Section>
               <Section title="Portfolio photos">
                 <PortfolioManager orgId={(org as Organization).id} initial={settings.portfolio ?? []} />
