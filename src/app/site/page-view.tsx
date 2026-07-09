@@ -17,7 +17,7 @@ export function customPageMetadata(org: PublicOrg, page: PublicPage): Metadata {
   return {
     title,
     description,
-    alternates: { canonical: `${orgPublicBaseUrl(org.settings)}/p/${page.slug}` },
+    alternates: { canonical: `${orgPublicBaseUrl(org.settings)}/${page.slug}` },
     openGraph: { title, description, type: "website" },
   };
 }

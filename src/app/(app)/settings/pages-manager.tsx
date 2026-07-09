@@ -94,10 +94,10 @@ export function PagesManager({ initial, siteUrl, orgId }: { initial: PageRow[]; 
                   {!p.published && <Badge tone="slate">draft</Badge>}
                   {p.nav_label && <Badge tone="blue">in menu</Badge>}
                 </div>
-                <div className="truncate text-xs text-slate-400">/p/{p.slug} · {p.blocks.length} block{p.blocks.length === 1 ? "" : "s"}</div>
+                <div className="truncate text-xs text-slate-400">/{p.slug} · {p.blocks.length} block{p.blocks.length === 1 ? "" : "s"}</div>
               </div>
               {siteUrl && p.published && (
-                <a href={`${siteUrl}/p/${p.slug}`} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="View">
+                <a href={`${siteUrl}/${p.slug}`} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="View">
                   <ExternalLink className="h-4 w-4" />
                 </a>
               )}
@@ -120,7 +120,7 @@ export function PagesManager({ initial, siteUrl, orgId }: { initial: PageRow[]; 
                 <Input id="pg-title" value={editing.title} onChange={(e) => setEditing({ ...editing, title: e.target.value })} placeholder="e.g. Custom Lighting" />
               </div>
               <div>
-                <Label htmlFor="pg-slug">Web address (/p/…)</Label>
+                <Label htmlFor="pg-slug">Web address (yoursite.com/…)</Label>
                 <Input id="pg-slug" value={editing.slug} onChange={(e) => setEditing({ ...editing, slug: e.target.value })} placeholder="blank = from the title" />
               </div>
             </div>

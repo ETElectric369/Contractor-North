@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { getPublicOrgByHandle, getPublicOrgByDomain } from "@/lib/public-org";
 import { getPublicPosts } from "@/lib/public-posts";
 import { getPublicPageSlugs } from "@/lib/public-pages";
+import { orgPublicBaseUrl } from "@/lib/org-settings";
 
 export const dynamic = "force-dynamic";
 
@@ -24,10 +25,14 @@ async function orgForHost(host: string) {
 export async function GET() {
   const host = (await headers()).get("host") || SITES_DOMAIN;
   const proto = host.startsWith("localhost") || host.startsWith("127.") ? "http" : "https";
-  const base = `${proto}://${host}`;
+  const org = await orgForHost(host);
+
+  // For an org, always advertise the CANONICAL base (the custom domain when set, else the free
+  // subdomain) — never the request host — so the sitemap can't list non-canonical duplicates of the
+  // pages' own rel=canonical (e.g. when the subdomain and a custom domain both serve the same site).
+  const base = org ? orgPublicBaseUrl(org.settings) : `${proto}://${host}`;
 
   const urls: string[] = [`${base}/`];
-  const org = await orgForHost(host);
   if (org) {
     const handle = org.settings.public_handle;
     if (handle && org.settings.estimating_mode === "catalog") urls.push(`${base}/estimate/${handle}`);
@@ -37,8 +42,8 @@ export async function GET() {
       urls.push(`${base}/blog`);
       for (const p of posts) urls.push(`${base}/${p.path}`);
     }
-    // Custom builder pages, each at /p/<slug>.
-    for (const slug of await getPublicPageSlugs(org.id)) urls.push(`${base}/p/${slug}`);
+    // Custom builder pages, each at its root-level /<slug>.
+    for (const slug of await getPublicPageSlugs(org.id)) urls.push(`${base}/${slug}`);
   }
 
   const xml = `<?xml version="1.0" encoding="UTF-8"?>

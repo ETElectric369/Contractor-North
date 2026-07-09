@@ -29,6 +29,6 @@ export default async function SiteByDomain() {
   if (!org) notFound();
   // On the org's own domain, article + page links live at the root (/blog, /p/<slug>).
   const [posts, navPages] = await Promise.all([getPublicPosts(org.id), getNavPages(org.id)]);
-  const pageLinks = navPages.map((p) => ({ href: `/p/${p.slug}`, label: p.nav_label }));
+  const pageLinks = navPages.map((p) => ({ href: `/${p.slug}`, label: p.nav_label }));
   return <OrgSite org={org} articlesHref={posts.length ? "/blog" : null} pageLinks={pageLinks} />;
 }

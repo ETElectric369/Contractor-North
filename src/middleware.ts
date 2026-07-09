@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
 import { CONTENT_ROOTS } from "@/lib/site-content-roots";
+import { pageSlugFromPath } from "@/lib/site-reserved";
 
 // The platform's own domain. A subdomain of it is a free org site: <handle>.SITES_DOMAIN.
 // Any OTHER host pointed at us is a custom domain, resolved by hostname in /site/by-domain.
@@ -33,13 +34,12 @@ function isLegacyCmsPath(pathname: string): boolean {
   return LEGACY_PREFIX.some((pre) => pathname.startsWith(pre));
 }
 
-// Org-site content routes rewritten into the /site catch-alls: articles at /blog, /blog/*, and
+// Org-site article routes rewritten into the /site catch-all: articles at /blog, /blog/*, and
 // legacy /blog-1-1/* (Squarespace's prefix, served at their original URLs, roots shared via
-// CONTENT_ROOTS); and custom builder pages at /p/<slug>. Both catch-alls do the DB lookup and
-// redirect home on a miss, so middleware stays DB-free.
+// CONTENT_ROOTS). The catch-all does the DB lookup and redirects home on a miss, so middleware
+// stays DB-free. Custom builder PAGES are handled separately (root-level slugs, see pageSlugFromPath).
 function isContentPath(pathname: string): boolean {
   const p = pathname.replace(/\/+$/, "") || "/";
-  if (/^\/p\/[a-z0-9]/i.test(p)) return true; // custom builder page: /p/<slug>
   return CONTENT_ROOTS.some((root) => p === `/${root}` || p.startsWith(`/${root}/`));
 }
 
@@ -80,8 +80,44 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  // On a pointed org domain, 301 old-CMS URLs to the homepage so a migrated site's stale links
-  // never 404. Runs before the root rewrite; only on non-app hosts, so app routes are untouched.
+  // Back-compat: the builder briefly served pages at /p/<slug> (cn-v461); the canonical URL is now
+  // the root-level /<slug> that matches a migrated site's original index. 301 the old form across.
+  if (onOrgSite) {
+    const m = request.nextUrl.pathname.match(/^\/p\/([a-z0-9][a-z0-9-]*)\/?$/i);
+    if (m) {
+      const url = request.nextUrl.clone();
+      url.pathname = `/${m[1].toLowerCase()}`;
+      url.search = "";
+      return NextResponse.redirect(url, 301);
+    }
+  }
+
+  // Custom builder PAGES at ROOT-level slugs (e.g. /about, /portfolio, /contact) — so a migrated
+  // site's already-indexed page URLs serve 200s in North's style. A single non-reserved segment is
+  // rewritten into the page route, which renders the page if it exists or, on a miss, 307s home
+  // (temporary — because a root slug is RECOVERABLE: the owner can build that page tomorrow, so we
+  // must not permanently poison it, matching the article-miss policy). pageSlugFromPath excludes the
+  // root, multi-segment paths, dotted assets, and every reserved app/content route.
+  if (onOrgSite) {
+    const slug = pageSlugFromPath(request.nextUrl.pathname);
+    if (slug) {
+      const url = request.nextUrl.clone();
+      if (host.endsWith(`.${SITES_DOMAIN}`)) {
+        const sub = host.slice(0, host.length - SITES_DOMAIN.length - 1);
+        if (sub && !sub.includes(".") && !RESERVED_SUBS.has(sub)) {
+          url.pathname = `/site/${sub}/p/${slug}`;
+          return NextResponse.rewrite(url);
+        }
+      } else {
+        url.pathname = `/site/by-domain/p/${slug}`;
+        return NextResponse.rewrite(url);
+      }
+    }
+  }
+
+  // On a pointed org domain, 301 remaining old-CMS URLs (multi-segment legacy prefixes like
+  // /shop/*, /gallery/*) to the homepage so a migrated site's stale links never 404. Single-segment
+  // paths were already handled above by the page resolver. Only on non-app hosts, app routes untouched.
   if (onOrgSite && request.nextUrl.pathname !== "/" && isLegacyCmsPath(request.nextUrl.pathname)) {
     const url = request.nextUrl.clone();
     url.pathname = "/";

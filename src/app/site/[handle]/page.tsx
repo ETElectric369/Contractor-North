@@ -24,6 +24,8 @@ export default async function SiteHome({ params }: { params: Promise<{ handle: s
   const base = await handleLinkBase(handle);
   const [posts, navPages] = await Promise.all([getPublicPosts(org.id), getNavPages(org.id)]);
   const articlesHref = posts.length ? `${base}/blog` : null;
-  const pageLinks = navPages.map((p) => ({ href: `${base}/p/${p.slug}`, label: p.nav_label }));
+  // On the org's own host base is "" → root /<slug> (the public URL); on the app-host preview base is
+  // /site/<handle> → the internal /p/<slug> route (root slugs are an org-host-only middleware rewrite).
+  const pageLinks = navPages.map((p) => ({ href: base ? `${base}/p/${p.slug}` : `/${p.slug}`, label: p.nav_label }));
   return <OrgSite org={org} articlesHref={articlesHref} pageLinks={pageLinks} />;
 }

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { resolveSiteContext } from "@/lib/site-editor-guard";
 import { sanitizeHtml, textToHtml } from "@/lib/sanitize-html";
 import { normalizeBlocks, type Block } from "@/lib/site-blocks";
+import { isReservedSlug } from "@/lib/site-reserved";
 
 /**
  * Custom builder PAGES (site_pages). Editable by org staff and a granted external collaborator
@@ -47,8 +48,10 @@ export async function saveSitePage(input: {
   const title = String(input.title ?? "").trim();
   if (!title) return { ok: false, error: "Give the page a title." };
 
-  let slug = slugify(String(input.slug ?? "") || title);
+  const slug = slugify(String(input.slug ?? "") || title);
   if (!slug) return { ok: false, error: "Give the page a valid web address." };
+  // Pages serve at root-level slugs (/about) — a reserved slug would shadow a real app/site route.
+  if (isReservedSlug(slug)) return { ok: false, error: `"${slug}" is a reserved address — pick another.` };
 
   const row: Record<string, unknown> = {
     org_id: ctx.orgId,
