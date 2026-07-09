@@ -143,7 +143,7 @@ function Hero({
   );
 }
 
-export function OrgSite({ org, articlesHref }: { org: PublicOrg; articlesHref?: string | null }) {
+export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg; articlesHref?: string | null; pageLinks?: { href: string; label: string }[] }) {
   const s = org.settings;
   const handle = s.public_handle;
   const brand = accentHex(s.glass_tint);
@@ -213,6 +213,9 @@ export function OrgSite({ org, articlesHref }: { org: PublicOrg; articlesHref?: 
             {services.length > 0 && <a href="#services" className="hover:text-slate-900">Services</a>}
             {reviews.length > 0 && <a href="#reviews" className="hover:text-slate-900">Reviews</a>}
             {articlesHref && <Link href={articlesHref} className="hover:text-slate-900">Articles</Link>}
+            {pageLinks.map((p) => (
+              <Link key={p.href} href={p.href} className="hover:text-slate-900">{p.label}</Link>
+            ))}
             <a href="#contact" className="hover:text-slate-900">Contact</a>
           </nav>
           <div className="flex items-center gap-2">

@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { getPublicOrgByHandle, getPublicOrgByDomain } from "@/lib/public-org";
 import { getPublicPosts } from "@/lib/public-posts";
+import { getPublicPageSlugs } from "@/lib/public-pages";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +37,8 @@ export async function GET() {
       urls.push(`${base}/blog`);
       for (const p of posts) urls.push(`${base}/${p.path}`);
     }
+    // Custom builder pages, each at /p/<slug>.
+    for (const slug of await getPublicPageSlugs(org.id)) urls.push(`${base}/p/${slug}`);
   }
 
   const xml = `<?xml version="1.0" encoding="UTF-8"?>

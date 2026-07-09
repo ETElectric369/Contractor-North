@@ -180,8 +180,8 @@ export function ArticlePage({ org, post, base }: { org: PublicOrg; post: PublicP
           // eslint-disable-next-line @next/next/no-img-element
           <img src={post.cover_url} alt={post.title} className="mt-8 w-full rounded-2xl object-cover" />
         )}
-        {/* body_html is sanitized at WRITE time (sanitize-html.ts) — the manager + importer are
-            the only write paths, both org-staff-gated. */}
+        {/* body_html is sanitized on READ in getPublicPostByPath (sanitize-html.ts) — safe here
+            regardless of write path, since RLS (not just the staff-gated action) governs writes. */}
         <article
           className="prose-article mt-8 space-y-4 text-[1.05rem] leading-relaxed text-slate-700 [&_a]:underline [&_blockquote]:border-l-4 [&_blockquote]:border-slate-200 [&_blockquote]:pl-4 [&_blockquote]:italic [&_h2]:mt-8 [&_h2]:text-2xl [&_h2]:font-bold [&_h2]:text-slate-900 [&_h3]:mt-6 [&_h3]:text-xl [&_h3]:font-semibold [&_h3]:text-slate-900 [&_img]:rounded-xl [&_li]:ml-5 [&_ol]:list-decimal [&_ul]:list-disc"
           dangerouslySetInnerHTML={{ __html: post.body_html }}

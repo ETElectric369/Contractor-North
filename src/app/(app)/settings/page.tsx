@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { User, Building2, Wallet, CalendarDays, Plug } from "lucide-react";
 import { SettingsSubnav } from "./settings-subnav";
 import { getOrgSettings, accentHex, orgPublicBaseUrl } from "@/lib/org-settings";
+import { normalizeBlocks } from "@/lib/site-blocks";
 import { OrgSettingsForm } from "./org-settings-form";
 import { DocumentDesigner } from "./document-designer";
 import { LogoUpload } from "./logo-upload";
@@ -24,6 +25,7 @@ import { WebsiteSettings } from "./website-settings";
 import { PortfolioManager } from "./portfolio-manager";
 import { ReviewsManager } from "./reviews-manager";
 import { PostsManager } from "./posts-manager";
+import { PagesManager } from "./pages-manager";
 import { CollaboratorsManager } from "./collaborators-manager";
 import { AiStatus } from "./ai-status";
 import { QuotePlaybookForm } from "./quote-playbook-form";
@@ -124,6 +126,19 @@ export default async function SettingsPage({
         .order("created_at", { ascending: false })
     : { data: null };
 
+  // Custom builder pages (the block/page builder) — RLS scopes to the org.
+  const { data: rawSitePages } = isStaff
+    ? await supabase
+        .from("site_pages")
+        .select("id, slug, title, description, blocks, published, nav_label, nav_order")
+        .order("nav_order", { ascending: true })
+        .order("created_at", { ascending: true })
+    : { data: null };
+  const sitePages = (rawSitePages ?? []).map((p) => ({
+    ...(p as Record<string, unknown>),
+    blocks: normalizeBlocks((p as { blocks?: unknown }).blocks),
+  }));
+
   const { data: qboConn } = isAdmin
     ? await supabase.from("accounting_connections").select("realm_id, connected_at").maybeSingle()
     : { data: null };
@@ -205,6 +220,12 @@ export default async function SettingsPage({
               <Section title="Articles & blog">
                 <PostsManager
                   initial={(sitePosts ?? []) as any}
+                  siteUrl={settings.public_handle ? orgPublicBaseUrl(settings) : null}
+                />
+              </Section>
+              <Section title="Custom pages">
+                <PagesManager
+                  initial={sitePages as any}
                   siteUrl={settings.public_handle ? orgPublicBaseUrl(settings) : null}
                 />
               </Section>

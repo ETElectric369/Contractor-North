@@ -1,5 +1,6 @@
 import { cache } from "react";
 import { createServiceClient } from "@/lib/supabase/server";
+import { sanitizeHtml } from "@/lib/sanitize-html";
 
 /**
  * Public reads for the org-site articles (site_posts) — the content layer of the site platform.
@@ -44,5 +45,11 @@ export const getPublicPostByPath = cache(async (orgId: string, path: string): Pr
     .eq("path", clean)
     .limit(1)
     .maybeSingle();
-  return (data as PublicPost) ?? null;
+  if (!data) return null;
+  // Sanitize on READ, not just at write. The write action sanitizes, but the real write boundary is
+  // RLS — a granted collaborator (or staff) could PATCH body_html directly via PostgREST, skipping the
+  // action. Re-sanitizing here (server-only) makes the public renderer safe regardless of how the row
+  // was written, closing the stored-XSS path into article-pages.tsx's dangerouslySetInnerHTML sink.
+  const post = data as PublicPost;
+  return { ...post, body_html: sanitizeHtml(post.body_html ?? "") };
 });

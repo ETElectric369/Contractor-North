@@ -1,15 +1,17 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { FileText, LogOut, Megaphone, Images, Star, ArrowLeft, ExternalLink, ChevronRight } from "lucide-react";
+import { FileText, FileStack, LogOut, Megaphone, Images, Star, ArrowLeft, ExternalLink, ChevronRight } from "lucide-react";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { getOrgSettings, orgPublicBaseUrl, accentHex } from "@/lib/org-settings";
 import { marketingSettingsFor } from "@/lib/site-editor-guard";
 import { signOut } from "@/app/login/actions";
 import { PostsManager } from "../(app)/settings/posts-manager";
+import { PagesManager } from "../(app)/settings/pages-manager";
 import { SplashSettings } from "../(app)/settings/splash-settings";
 import { SiteSeoFields } from "../(app)/settings/site-seo-fields";
 import { ReviewsManager } from "../(app)/settings/reviews-manager";
 import { PortfolioManager } from "../(app)/settings/portfolio-manager";
+import { normalizeBlocks } from "@/lib/site-blocks";
 
 function Panel({ icon: Icon, title, brand, children }: { icon: typeof FileText; title: string; brand: string; children: React.ReactNode }) {
   return (
@@ -139,6 +141,18 @@ export default async function ContentWorkspace({ searchParams }: { searchParams:
     .eq("org_id", selected)
     .order("published_at", { ascending: false });
 
+  // Custom builder pages (same RLS-bound client).
+  const { data: rawPages } = await supabase
+    .from("site_pages")
+    .select("id, slug, title, description, blocks, published, nav_label, nav_order")
+    .eq("org_id", selected)
+    .order("nav_order", { ascending: true })
+    .order("created_at", { ascending: true });
+  const pages = (rawPages ?? []).map((p) => ({
+    ...(p as Record<string, unknown>),
+    blocks: normalizeBlocks((p as { blocks?: unknown }).blocks),
+  }));
+
   const multi = grantedOrgs.length > 1;
 
   return (
@@ -169,6 +183,9 @@ export default async function ContentWorkspace({ searchParams }: { searchParams:
       <div className="space-y-6">
         <Panel icon={FileText} title="Articles" brand={brand}>
           <PostsManager initial={(posts ?? []) as never} siteUrl={siteUrl} orgId={selected} />
+        </Panel>
+        <Panel icon={FileStack} title="Custom pages" brand={brand}>
+          <PagesManager initial={pages as never} siteUrl={siteUrl} orgId={selected} />
         </Panel>
         <Panel icon={Megaphone} title="Homepage" brand={brand}>
           <SplashSettings settings={marketing} orgId={selected} />

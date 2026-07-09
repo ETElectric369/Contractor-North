@@ -33,11 +33,13 @@ function isLegacyCmsPath(pathname: string): boolean {
   return LEGACY_PREFIX.some((pre) => pathname.startsWith(pre));
 }
 
-// Article-engine paths on an org host: /blog is the index; /blog/* and legacy /blog-1-1/*
-// (Squarespace's blog collection prefix) are posts served at their original URLs. The roots come
-// from the SHARED CONTENT_ROOTS so middleware routing and saveSitePost validation never drift.
+// Org-site content routes rewritten into the /site catch-alls: articles at /blog, /blog/*, and
+// legacy /blog-1-1/* (Squarespace's prefix, served at their original URLs, roots shared via
+// CONTENT_ROOTS); and custom builder pages at /p/<slug>. Both catch-alls do the DB lookup and
+// redirect home on a miss, so middleware stays DB-free.
 function isContentPath(pathname: string): boolean {
   const p = pathname.replace(/\/+$/, "") || "/";
+  if (/^\/p\/[a-z0-9]/i.test(p)) return true; // custom builder page: /p/<slug>
   return CONTENT_ROOTS.some((root) => p === `/${root}` || p.startsWith(`/${root}/`));
 }
 

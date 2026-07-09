@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { getPublicOrgByDomain } from "@/lib/public-org";
 import { getPublicPosts } from "@/lib/public-posts";
+import { getNavPages } from "@/lib/public-pages";
 import { OrgSite, orgSiteMetadata } from "../org-site";
 
 export const dynamic = "force-dynamic";
@@ -26,7 +27,8 @@ export async function generateMetadata(): Promise<Metadata> {
 export default async function SiteByDomain() {
   const org = await orgFromHost();
   if (!org) notFound();
-  // On the org's own domain, article links live at the root (/blog).
-  const posts = await getPublicPosts(org.id);
-  return <OrgSite org={org} articlesHref={posts.length ? "/blog" : null} />;
+  // On the org's own domain, article + page links live at the root (/blog, /p/<slug>).
+  const [posts, navPages] = await Promise.all([getPublicPosts(org.id), getNavPages(org.id)]);
+  const pageLinks = navPages.map((p) => ({ href: `/p/${p.slug}`, label: p.nav_label }));
+  return <OrgSite org={org} articlesHref={posts.length ? "/blog" : null} pageLinks={pageLinks} />;
 }
