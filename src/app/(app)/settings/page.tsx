@@ -26,6 +26,7 @@ import { PortfolioManager } from "./portfolio-manager";
 import { ReviewsManager } from "./reviews-manager";
 import { PostsManager } from "./posts-manager";
 import { PagesManager } from "./pages-manager";
+import { HomeBlocksEditor } from "./home-blocks-editor";
 import { CollaboratorsManager } from "./collaborators-manager";
 import { AiStatus } from "./ai-status";
 import { QuotePlaybookForm } from "./quote-playbook-form";
@@ -234,6 +235,9 @@ export default async function SettingsPage({
               </Section>
               <Section title="Homepage">
                 <SplashSettings settings={settings} portfolio={settings.portfolio ?? []} orgId={(org as Organization).id} />
+              </Section>
+              <Section title="Homepage sections">
+                <HomeBlocksEditor initial={settings.home_blocks ?? []} brand={accentHex(settings.glass_tint)} orgId={(org as Organization).id} />
               </Section>
               <Section title="Portfolio photos">
                 <PortfolioManager orgId={(org as Organization).id} initial={settings.portfolio ?? []} />

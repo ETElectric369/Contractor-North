@@ -14,6 +14,12 @@ function sanitizeTextBlocks(blocks: Block[]): Block[] {
   return blocks.map((b) => (b.type === "text" ? { type: "text", props: { html: sanitizeHtml(b.props.html) }, style: b.style } : b));
 }
 
+/** Turn arbitrary stored jsonb into render-ready blocks: normalize/bound + sanitize the text sink.
+ *  THE read boundary for every block surface (custom pages AND homepage home_blocks) — server only. */
+export function renderReadyBlocks(raw: unknown): Block[] {
+  return sanitizeTextBlocks(normalizeBlocks(raw));
+}
+
 /** Public reads for custom builder PAGES (site_pages) — service client, published-only, always
  *  scoped to ONE org id resolved upstream by handle/domain (never caller input). Served at
  *  /p/<slug> on the org's site. */
@@ -39,7 +45,7 @@ export const getPublicPageBySlug = cache(async (orgId: string, slug: string): Pr
     .limit(1)
     .maybeSingle();
   if (!data) return null;
-  return { ...(data as PublicPage), blocks: sanitizeTextBlocks(normalizeBlocks((data as { blocks?: unknown }).blocks)) };
+  return { ...(data as PublicPage), blocks: renderReadyBlocks((data as { blocks?: unknown }).blocks) };
 });
 
 /** Every published page's slug, for the sitemap. */

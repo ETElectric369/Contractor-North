@@ -4,6 +4,8 @@ import { Phone, Mail, MapPin, ArrowRight, Check, ShieldCheck, Clock, Zap, Instag
 import { accentHex, orgPublicBaseUrl, parseGeoFromMapUrl, type OrgSettings } from "@/lib/org-settings";
 import type { PublicOrg } from "@/lib/public-org";
 import { jsonLdSafe } from "@/lib/jsonld";
+import { renderReadyBlocks } from "@/lib/public-pages";
+import { BlockRenderer } from "./block-renderer";
 import { PortfolioGallery } from "../estimate/[handle]/portfolio-gallery";
 import { SpecialtyShowcase } from "./specialty-showcase";
 import { ContactForm } from "./contact-form";
@@ -170,6 +172,7 @@ export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg;
   // Show the business NAME as text (not just the logo image) when the org opts in — so the name is
   // actually stated on the page even when the logo is a wordless emblem.
   const showName = s.show_name_with_logo === true;
+  const homeBlocks = renderReadyBlocks(s.home_blocks);
   const ig = (s.social_instagram || "").replace(/^@/, "").trim();
   const reviews = (s.reviews ?? []).filter((r) => r && r.text && r.name);
   // Primary CTA: orgs that price from a catalog get the instant configurator; everyone else
@@ -286,6 +289,15 @@ export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg;
           })}
         </div>
       </section>
+
+      {/* Custom homepage sections — the owner's own styled blocks (headings/text/images/banners/
+          buttons), built in the same visual editor as the custom pages. Sanitized on read. Hidden
+          when empty, so the designed template shows on its own. */}
+      {homeBlocks.length > 0 && (
+        <section className="border-b border-slate-100">
+          <BlockRenderer blocks={homeBlocks} brand={brand} />
+        </section>
+      )}
 
       {/* Signature-specialty showcase — an elegant dark gallery band spotlighting the org's marquee
           offering (e.g. custom lighting). Data-driven: hidden unless a headline is set. Features the

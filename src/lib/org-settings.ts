@@ -1,6 +1,8 @@
 // Org-wide preferences stored in organizations.settings (JSONB). Centralized
 // here with defaults so the app can read settings safely anywhere.
 
+import type { Block } from "@/lib/site-blocks";
+
 export interface OrgSettings {
   // Company
   currency: string; // ISO 4217, e.g. "USD"
@@ -92,6 +94,10 @@ export interface OrgSettings {
   /** Hero headline size. "l" = the original big headline; "m"/"s" dial it down. Empty headline hides
    *  the H1 entirely (no auto-fallback), so clearing the field really leaves it blank. */
   splash_headline_size: "s" | "m" | "l";
+  /** Custom homepage sections — the SAME styled blocks as the page builder, rendered on the homepage
+   *  (below the hero). Lets the owner build freeform content/banners on the front page. Empty = the
+   *  designed template only. Sanitized on write (saveHomeBlocks) AND on read (renderReadyBlocks). */
+  home_blocks: Block[];
 
   /** Public URL slug for this org's customer-facing estimate configurator at
    *  /estimate/<handle> (e.g. "tahoe-deck"). Empty = the configurator is off for this org.
@@ -186,6 +192,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   splash_credentials: "",
   show_name_with_logo: false,
   splash_headline_size: "l",
+  home_blocks: [],
   public_handle: "",
   site_inspection_threshold: 20000,
   portfolio: [],
