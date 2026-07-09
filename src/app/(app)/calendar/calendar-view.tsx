@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CalendarClock, CalendarDays, CalendarSync, Briefcase, ListTodo, SquareCheck, MapPin, Users, Columns3 } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CalendarClock, CalendarSync, Briefcase, ListTodo, MapPin, Users, Columns3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented";
 import { Card } from "@/components/ui/card";
@@ -515,6 +515,42 @@ export function CalendarView({
  *  ONLY when it's > 0; if the three together would crowd the cell (total > 6),
  *  it collapses to a single neutral total badge so 375px never overflows.
  *  Names live one tap down in the day drill — 10px truncated chips were noise. */
+/** Compact time like "8a" / "2:30p" for a month-cell pill. */
+function pillTime(iso: string): string {
+  const d = new Date(iso);
+  let h = d.getHours();
+  const m = d.getMinutes();
+  const ap = h >= 12 ? "p" : "a";
+  h = h % 12 || 12;
+  return m ? `${h}:${String(m).padStart(2, "0")}${ap}` : `${h}${ap}`;
+}
+
+const PILL_TONE: Record<"job" | "appt" | "apptProposed" | "task", string> = {
+  job: "bg-blue-50 text-blue-700",
+  appt: "bg-violet-50 text-violet-700",
+  apptProposed: "bg-violet-50 text-violet-400",
+  task: "bg-slate-100 text-slate-600",
+};
+
+/** Order a day's jobs/appts/tasks into labelled pills (timed first), for the month grid. */
+function monthPills(data: DayData | undefined): { label: string; tone: keyof typeof PILL_TONE; sort: number }[] {
+  if (!data) return [];
+  const out: { label: string; tone: keyof typeof PILL_TONE; sort: number }[] = [];
+  for (const { job } of data.jobs) {
+    const t = job.scheduled_start ? new Date(job.scheduled_start).getTime() : Number.MAX_SAFE_INTEGER;
+    const cust = job.customers?.name;
+    out.push({ label: cust ? `${job.name} · ${cust}` : job.name, tone: "job", sort: t });
+  }
+  for (const a of data.appts) {
+    const who = a.customers?.name || a.jobs?.name || a.title;
+    out.push({ label: `${pillTime(a.starts_at)} ${who}`, tone: a.status === "proposed" ? "apptProposed" : "appt", sort: new Date(a.starts_at).getTime() });
+  }
+  for (const t of data.tasks) out.push({ label: t.title, tone: "task", sort: Number.MAX_SAFE_INTEGER });
+  return out.sort((x, y) => x.sort - y.sort);
+}
+
+const MONTH_MAX_PILLS = 3;
+
 function MonthGrid({
   anchor,
   byDay,
@@ -547,69 +583,39 @@ function MonthGrid({
           const k = dayKey(d);
           const data = byDay.get(k);
           const inMonth = d.getMonth() === anchor.getMonth();
-          const jobN = data?.jobs.length ?? 0;
-          const apptN = data?.appts.length ?? 0;
-          const taskN = data?.tasks.length ?? 0;
-          // A hollow calendar ring means at least one appointment is still
-          // awaiting the customer's pick (○, matching the chip/legend symbol).
-          const anyProposed = (data?.appts ?? []).some((a) => a.status === "proposed");
-          const total = jobN + apptN + taskN;
+          const pills = monthPills(data);
           return (
             <button
               key={i}
               onClick={() => onPick(d)}
-              className={`flex min-h-[84px] flex-col items-start justify-start border-b border-r border-slate-100 p-1 text-left hover:bg-slate-50 ${
+              className={`flex min-h-[92px] flex-col items-stretch justify-start gap-1 overflow-hidden border-b border-r border-slate-100 p-1 text-left hover:bg-slate-50 ${
                 inMonth ? "" : "bg-slate-50/60"
               }`}
             >
               <div
-                className={`text-xs ${
+                className={`shrink-0 text-xs ${
                   k === todayK
-                    ? "inline-flex h-5 w-5 items-center justify-center rounded-full bg-[rgb(var(--glass-ink))] font-semibold text-white"
+                    ? "inline-flex h-5 w-5 items-center justify-center self-start rounded-full bg-[rgb(var(--glass-ink))] font-semibold text-white"
                     : inMonth ? "text-slate-500" : "text-slate-300"
                 }`}
               >
                 {d.getDate()}
               </div>
-              {total > 0 && (
-                <div className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 px-0.5">
-                  {total > 6 ? (
-                    // Too much to itemize without overflowing a 375px cell —
-                    // one neutral total; the day drill breaks it down.
-                    <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-slate-500">
-                      <CalendarDays className="h-3 w-3 shrink-0" />
-                      {total}
+              {/* Horizontal pills — the day's jobs/appointments/tasks with real labels (timed first),
+                  so the month reads at a glance. Capped per cell; the day drill shows the rest. */}
+              {pills.length > 0 && (
+                <div className="w-full space-y-0.5 overflow-hidden">
+                  {pills.slice(0, MONTH_MAX_PILLS).map((p, pi) => (
+                    <span
+                      key={pi}
+                      title={p.label}
+                      className={`block w-full truncate rounded px-1 py-[1px] text-[10px] font-medium leading-snug ${PILL_TONE[p.tone]}`}
+                    >
+                      {p.label}
                     </span>
-                  ) : (
-                    <>
-                      {jobN > 0 && (
-                        <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-blue-600" title={`${jobN} job${jobN > 1 ? "s" : ""}`}>
-                          <Briefcase className="h-3 w-3 shrink-0" />
-                          {jobN}
-                        </span>
-                      )}
-                      {apptN > 0 && (
-                        <span
-                          className={`inline-flex items-center gap-0.5 text-[10px] font-semibold ${anyProposed ? "text-violet-400" : "text-violet-600"}`}
-                          title={
-                            anyProposed
-                              ? `${apptN} appointment${apptN > 1 ? "s" : ""} — some awaiting pick`
-                              : `${apptN} appointment${apptN > 1 ? "s" : ""}`
-                          }
-                        >
-                          {/* Hollow calendar = something's still awaiting the
-                              customer's pick; filled = all booked. */}
-                          <CalendarDays className={`h-3 w-3 shrink-0 ${anyProposed ? "opacity-70" : ""}`} strokeWidth={anyProposed ? 1.5 : 2} />
-                          {apptN}
-                        </span>
-                      )}
-                      {taskN > 0 && (
-                        <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-slate-500" title={`${taskN} task${taskN > 1 ? "s" : ""}`}>
-                          <SquareCheck className="h-3 w-3 shrink-0" />
-                          {taskN}
-                        </span>
-                      )}
-                    </>
+                  ))}
+                  {pills.length > MONTH_MAX_PILLS && (
+                    <span className="block px-1 text-[10px] font-semibold text-slate-400">+{pills.length - MONTH_MAX_PILLS} more</span>
                   )}
                 </div>
               )}
