@@ -5,6 +5,7 @@ import { emptyToNull } from "@/lib/forms";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
+import { resolveSiteContext } from "@/lib/site-editor-guard";
 import { formatPhone, formatState, formatZip, titleCase } from "@/lib/utils";
 import { reportError } from "@/lib/observe";
 import { sendEmail } from "@/lib/email";
@@ -695,29 +696,40 @@ export async function setCustomDomain(
  *  or overwrite the inbound secret. */
 const PROTECTED_SETTINGS_KEYS = ["custom_domain", "public_handle", "lead_inbound_secret"];
 
-/** Merge a partial settings patch into organizations.settings (JSONB). Protected keys are
- *  stripped — they have dedicated guarded setters. */
+/** Merge a partial settings patch into organizations.settings (JSONB). STAFF get full access
+ *  (protected keys stripped — they have dedicated guarded setters). An external site collaborator
+ *  is routed through the update_site_content RPC, which merges ONLY the whitelisted marketing keys
+ *  server-side, so the same call safely edits the public-site copy without touching business config.
+ *  orgId disambiguates a collaborator who holds grants to several sites. */
 export async function updateOrgSettings(
   patch: Record<string, unknown>,
+  orgId?: string,
 ): Promise<Result> {
-  const supabase = await createClient();
-  const orgId = await myOrgId(supabase);
-  if (!orgId) return { ok: false, error: "No organization." };
+  const ctx = await resolveSiteContext(orgId);
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+
+  if (ctx.isCollaborator) {
+    const { error } = await ctx.supabase.rpc("update_site_content", { target_org: ctx.orgId, patch });
+    if (error) return { ok: false, error: error.message };
+    revalidatePath("/content");
+    revalidatePath("/", "layout");
+    return { ok: true };
+  }
 
   const safe = { ...patch };
   for (const k of PROTECTED_SETTINGS_KEYS) delete safe[k];
 
-  const { data: org } = await supabase
+  const { data: org } = await ctx.supabase
     .from("organizations")
     .select("settings")
-    .eq("id", orgId)
+    .eq("id", ctx.orgId)
     .single();
   const merged = { ...(org?.settings ?? {}), ...safe };
 
-  const { error } = await supabase
+  const { error } = await ctx.supabase
     .from("organizations")
     .update({ settings: merged })
-    .eq("id", orgId);
+    .eq("id", ctx.orgId);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/settings");
   revalidatePath("/", "layout");

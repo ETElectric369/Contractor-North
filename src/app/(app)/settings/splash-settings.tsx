@@ -7,7 +7,7 @@ import { Input, Label, Textarea } from "@/components/ui/input";
 import type { OrgSettings } from "@/lib/org-settings";
 import { updateOrgSettings } from "./actions";
 
-export function SplashSettings({ settings }: { settings: OrgSettings }) {
+export function SplashSettings({ settings, orgId }: { settings: OrgSettings; orgId?: string }) {
   const [headline, setHeadline] = useState(settings.splash_headline);
   const [tagline, setTagline] = useState(settings.splash_tagline);
   const [bg, setBg] = useState(settings.splash_bg_url);
@@ -19,7 +19,7 @@ export function SplashSettings({ settings }: { settings: OrgSettings }) {
   function save() {
     setDone(false);
     start(async () => {
-      await updateOrgSettings({ splash_headline: headline, splash_tagline: tagline, splash_bg_url: bg, splash_bullets: bullets, splash_credentials: credentials });
+      await updateOrgSettings({ splash_headline: headline, splash_tagline: tagline, splash_bg_url: bg, splash_bullets: bullets, splash_credentials: credentials }, orgId);
       setDone(true);
       setTimeout(() => setDone(false), 2500);
     });

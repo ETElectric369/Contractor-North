@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Phone, Mail, MapPin, ArrowRight, Check, ShieldCheck, Clock, Zap, Instagram, Star } from "lucide-react";
 import { accentHex, orgPublicBaseUrl, parseGeoFromMapUrl, type OrgSettings } from "@/lib/org-settings";
 import type { PublicOrg } from "@/lib/public-org";
+import { jsonLdSafe } from "@/lib/jsonld";
 import { PortfolioGallery } from "../estimate/[handle]/portfolio-gallery";
 import { SpecialtyShowcase } from "./specialty-showcase";
 import { ContactForm } from "./contact-form";
@@ -192,7 +193,9 @@ export function OrgSite({ org, articlesHref }: { org: PublicOrg; articlesHref?: 
 
   return (
     <div className="min-h-screen bg-white text-slate-900">
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
+      {/* jsonLdSafe escapes `<` so a collaborator-writable field (service_area, google_business_url,
+          social, hero URL) containing `</script>` can't break out and execute — stored-XSS guard. */}
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLdSafe(jsonLd) }} />
 
       {/* Header */}
       <header className="sticky top-0 z-40 border-b border-slate-200/70 bg-white/85 backdrop-blur">

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ArrowRight, ArrowLeft, Phone } from "lucide-react";
 import { accentHex, orgPublicBaseUrl } from "@/lib/org-settings";
 import { DEFAULT_TIMEZONE } from "@/lib/utils";
+import { jsonLdSafe } from "@/lib/jsonld";
 import type { PublicOrg } from "@/lib/public-org";
 import type { PublicPost } from "@/lib/public-posts";
 
@@ -163,12 +164,9 @@ export function ArticlePage({ org, post, base }: { org: PublicOrg; post: PublicP
   };
   return (
     <div className="min-h-screen bg-white text-slate-900">
-      {/* Escape `<` so a post title/description containing `</script>` can't break out of the
-          JSON-LD block (title/description aren't HTML-sanitized — they render as text elsewhere). */}
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd).replace(/</g, "\\u003c") }}
-      />
+      {/* jsonLdSafe escapes `<` so a title/description containing `</script>` can't break out of
+          the JSON-LD block (title/description aren't HTML-sanitized — they render as text elsewhere). */}
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLdSafe(jsonLd) }} />
       <ArticleHeader org={org} base={base} />
       <main className="mx-auto max-w-3xl px-4 py-12">
         <Link href={`${base}/blog`} className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-800">

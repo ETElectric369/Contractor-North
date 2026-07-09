@@ -23,7 +23,7 @@ export function PortfolioManager({ orgId, initial }: { orgId: string; initial: P
 
   async function persist(next: Photo[]) {
     setPhotos(next);
-    const res = await updateOrgSettings({ portfolio: next });
+    const res = await updateOrgSettings({ portfolio: next }, orgId);
     if (!res.ok) { setError(res.error ?? "Couldn't save order."); return; }
     setSavedTick(true);
     setTimeout(() => setSavedTick(false), 1800);

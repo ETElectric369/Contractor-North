@@ -10,7 +10,7 @@ type Review = { name: string; text: string; rating?: number };
 
 /** Edit the customer testimonials shown on the public site. Real quotes the org enters — no
  *  seeding/fabrication. Saved to settings.reviews (the exact shape OrgSite renders). */
-export function ReviewsManager({ initial }: { initial: Review[] }) {
+export function ReviewsManager({ initial, orgId }: { initial: Review[]; orgId?: string }) {
   const [reviews, setReviews] = useState<Review[]>(initial);
   const [pending, start] = useTransition();
   const [done, setDone] = useState(false);
@@ -27,7 +27,7 @@ export function ReviewsManager({ initial }: { initial: Review[] }) {
       .map((r) => ({ name: r.name.trim(), text: r.text.trim(), rating: Math.max(1, Math.min(5, Math.round(r.rating ?? 5))) }))
       .filter((r) => r.name && r.text);
     start(async () => {
-      const res = await updateOrgSettings({ reviews: clean });
+      const res = await updateOrgSettings({ reviews: clean }, orgId);
       if (!res.ok) { setError(res.error ?? "Couldn't save."); return; }
       setReviews(clean);
       setDone(true);

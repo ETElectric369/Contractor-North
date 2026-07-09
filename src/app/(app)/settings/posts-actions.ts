@@ -1,18 +1,24 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireStaff } from "@/lib/staff-guard";
+import { resolveSiteContext } from "@/lib/site-editor-guard";
 import { sanitizeHtml, textToHtml } from "@/lib/sanitize-html";
 import { CONTENT_ROOTS, isValidPostPath } from "@/lib/site-content-roots";
 
 /**
- * Site articles (site_posts) — the "SEO vendor publishes into North" door. Staff-only (RLS
- * enforces org scope); body HTML is sanitized at write so the public article page can render
- * it directly. `path` is the post's full public path on the org's domain ("blog/<slug>" for
- * new posts; a migrated post keeps its ORIGINAL path, e.g. "blog-1-1/redwood", so the already-
- * indexed URL keeps working).
+ * Site articles (site_posts) — the "SEO vendor publishes into North" door. Editable by org STAFF
+ * and by an invited EXTERNAL site collaborator (resolveSiteContext resolves which, and for which
+ * org); RLS independently enforces org scope on every row. Body HTML is sanitized at write so the
+ * public article page can render it directly. `path` is the post's full public path on the org's
+ * domain ("blog/<slug>" for new posts; a migrated post keeps its ORIGINAL path so the indexed URL
+ * keeps working).
  */
 export type Result = { ok: boolean; error?: string; id?: string };
+
+function revalidateSite() {
+  revalidatePath("/settings");
+  revalidatePath("/content");
+}
 
 function slugify(s: string): string {
   return s
@@ -33,8 +39,10 @@ export async function saveSitePost(input: {
   body: string;
   published?: boolean;
   cover_url?: string | null;
+  /** Which org's site — only needed to disambiguate a collaborator with grants to several. */
+  orgId?: string;
 }): Promise<Result> {
-  const ctx = await requireStaff();
+  const ctx = await resolveSiteContext(input.orgId);
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
 
@@ -85,13 +93,15 @@ export async function saveSitePost(input: {
       return { ok: false, error: /duplicate|unique/i.test(error.message) ? "An article already exists at that web address." : error.message };
     }
     if (!updated?.length) return { ok: false, error: "That article no longer exists." };
-    revalidatePath("/settings");
+    revalidateSite();
     return { ok: true, id: input.id };
   }
 
   const { data, error } = await supabase
     .from("site_posts")
-    .insert({ ...base, cover_url: input.cover_url || null, created_by: ctx.userId })
+    // Stamp org_id explicitly: a collaborator's auth_org_id() is null (they're not an org member),
+    // so the set_org_id trigger can't infer it — and RLS with-check confirms they hold the grant.
+    .insert({ ...base, org_id: ctx.orgId, cover_url: input.cover_url || null, created_by: ctx.userId })
     .select("id")
     .single();
   if (error) {
@@ -100,16 +110,16 @@ export async function saveSitePost(input: {
       error: /duplicate|unique/i.test(error.message) ? "An article already exists at that web address." : error.message,
     };
   }
-  revalidatePath("/settings");
+  revalidateSite();
   return { ok: true, id: data.id };
 }
 
-export async function deleteSitePost(id: string): Promise<Result> {
-  const ctx = await requireStaff();
+export async function deleteSitePost(id: string, orgId?: string): Promise<Result> {
+  const ctx = await resolveSiteContext(orgId);
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const { data, error } = await ctx.supabase.from("site_posts").delete().eq("id", id).select("id");
   if (error) return { ok: false, error: error.message };
   if (!data?.length) return { ok: false, error: "That article no longer exists." };
-  revalidatePath("/settings");
+  revalidateSite();
   return { ok: true };
 }

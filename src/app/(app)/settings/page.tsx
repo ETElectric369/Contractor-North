@@ -24,6 +24,7 @@ import { WebsiteSettings } from "./website-settings";
 import { PortfolioManager } from "./portfolio-manager";
 import { ReviewsManager } from "./reviews-manager";
 import { PostsManager } from "./posts-manager";
+import { CollaboratorsManager } from "./collaborators-manager";
 import { AiStatus } from "./ai-status";
 import { QuotePlaybookForm } from "./quote-playbook-form";
 import { AvatarUpload } from "./avatar-upload";
@@ -115,6 +116,14 @@ export default async function SettingsPage({
         .order("published_at", { ascending: false })
     : { data: null };
 
+  // External SEO/content collaborators invited to manage this org's articles (RLS: own org).
+  const { data: siteCollaborators } = isStaff
+    ? await supabase
+        .from("site_collaborators")
+        .select("id, invited_email, user_id, created_at")
+        .order("created_at", { ascending: false })
+    : { data: null };
+
   const { data: qboConn } = isAdmin
     ? await supabase.from("accounting_connections").select("realm_id, connected_at").maybeSingle()
     : { data: null };
@@ -198,6 +207,9 @@ export default async function SettingsPage({
                   initial={(sitePosts ?? []) as any}
                   siteUrl={settings.public_handle ? orgPublicBaseUrl(settings) : null}
                 />
+              </Section>
+              <Section title="SEO / content collaborators">
+                <CollaboratorsManager initial={(siteCollaborators ?? []) as any} />
               </Section>
               <Section title="Company details"><OrgSettingsForm org={org as Organization} /></Section>
               <Section title="Company logo">

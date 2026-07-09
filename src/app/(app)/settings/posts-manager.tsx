@@ -39,7 +39,17 @@ const EMPTY: Draft = { id: null, title: "", path: "", description: "", cover_url
  * this publishes). Each article lives at its web address on the org's domain; a migrated
  * article keeps its ORIGINAL address (e.g. blog-1-1/redwood) so Google's old index keeps landing.
  */
-export function PostsManager({ initial, siteUrl }: { initial: PostRow[]; siteUrl: string | null }) {
+export function PostsManager({
+  initial,
+  siteUrl,
+  orgId,
+}: {
+  initial: PostRow[];
+  siteUrl: string | null;
+  /** Set only on the external-collaborator surface (/content) to name which org's site — staff
+      leave it undefined and the action infers their own org. */
+  orgId?: string;
+}) {
   const router = useRouter();
   const toast = useToast();
   const [editing, setEditing] = useState<Draft | null>(null);
@@ -76,6 +86,7 @@ export function PostsManager({ initial, siteUrl }: { initial: PostRow[]; siteUrl
         cover_url: editing.cover_url.trim() || null,
         body: editing.body,
         published: editing.published,
+        orgId,
       });
       if (!res.ok) { setError(res.error ?? "Couldn't save the article."); return; }
       toast(editing.id ? "Article updated" : "Article published", "success");
@@ -89,7 +100,7 @@ export function PostsManager({ initial, siteUrl }: { initial: PostRow[]; siteUrl
     if (!p) return;
     setDeleting(null);
     start(async () => {
-      const res = await deleteSitePost(p.id);
+      const res = await deleteSitePost(p.id, orgId);
       if (!res.ok) { toast(res.error ?? "Couldn't delete.", "error"); return; }
       toast("Article deleted", "success");
       router.refresh();

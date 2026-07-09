@@ -28,6 +28,16 @@ export default async function OnboardingPage({
     .maybeSingle();
   if (profile?.org_id) redirect("/planner");
 
+  // An external site collaborator (no org, only a content grant) doesn't onboard as a company —
+  // claim any pending grant for their email and send them to their content workspace.
+  await supabase.rpc("claim_site_collaborations");
+  const { data: collabGrant } = await supabase
+    .from("site_collaborators")
+    .select("org_id")
+    .eq("user_id", user.id)
+    .limit(1);
+  if (collabGrant?.length) redirect("/content");
+
   // Was this user invited to an existing company?
   const { data: inviteRow } = await supabase
     .rpc("pending_invite")
