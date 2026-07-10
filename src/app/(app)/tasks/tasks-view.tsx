@@ -405,12 +405,18 @@ export function TaskRow({
           className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-brand focus:ring-brand"
         />
         <div className="min-w-0 flex-1">
-          <div className={t.status === "done" ? "text-slate-400 line-through" : "font-medium text-slate-900"}>
+          {/* The title IS the tap target — tapping the task opens edit (the "can't click on task" fix).
+              Kept separate from the meta row below so its job link isn't nested inside this button. */}
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className={`flex min-h-[44px] w-full items-center text-left ${t.status === "done" ? "text-slate-400 line-through" : "font-medium text-slate-900"}`}
+          >
             {t.priority > 0 && t.status !== "done" && (
-              <Flag className={`mr-1 inline h-3.5 w-3.5 ${t.priority >= 2 ? "text-red-600" : "text-amber-500"}`} />
+              <Flag className={`mr-1 inline h-3.5 w-3.5 shrink-0 ${t.priority >= 2 ? "text-red-600" : "text-amber-500"}`} />
             )}
             {t.title}
-          </div>
+          </button>
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
             {t.due_date && (
               <span className={overdue && t.status !== "done" ? "font-medium text-red-600" : undefined}>
@@ -442,16 +448,16 @@ export function TaskRow({
           <button
             onClick={togglePin}
             disabled={pending}
-            className={pinnedToday ? "text-brand" : "text-slate-300 hover:text-brand"}
+            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md hover:bg-slate-100 ${pinnedToday ? "text-brand" : "text-slate-300 hover:text-brand"}`}
             title={pinnedToday ? "Unpin from today" : "Do today"}
           >
             <Pin className="h-4 w-4" fill={pinnedToday ? "currentColor" : "none"} />
           </button>
         )}
-        <button onClick={() => setAdding((v) => !v)} className="text-slate-300 hover:text-brand" title="Add subtask">
+        <button onClick={() => setAdding((v) => !v)} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-slate-300 hover:bg-slate-100 hover:text-brand" title="Add subtask">
           <Plus className="h-4 w-4" />
         </button>
-        <button onClick={() => setEditing(true)} className="text-slate-300 hover:text-slate-600" title="Edit">
+        <button onClick={() => setEditing(true)} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-slate-300 hover:bg-slate-100 hover:text-slate-600" title="Edit">
           <Pencil className="h-4 w-4" />
         </button>
         <button
@@ -460,7 +466,7 @@ export function TaskRow({
             start(async () => { const res = await deleteTask(t.id, { category }); if (!res?.ok) { toast(res?.error ?? "Couldn't delete task — try again.", "error"); return; } toast("Task deleted", "success"); router.refresh(); });
           }}
           disabled={pending}
-          className="text-slate-300 hover:text-red-600"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-slate-300 hover:bg-red-50 hover:text-red-600"
           title="Delete"
         >
           <Trash2 className="h-4 w-4" />

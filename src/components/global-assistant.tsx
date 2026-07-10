@@ -12,32 +12,32 @@ import { useEstimator } from "@/lib/estimator-store";
 
 const PANEL_W = 384; // 24rem
 
-// Only ONE effect run may answer ?debrief=1 (the ?new=1 claim-guard pattern) — released
-// once the param is stripped, so the next deep-link tap works again.
-let debriefParamClaimed = false;
+// Only ONE effect run may answer each staff deep-link param (the ?new=1 claim-guard pattern) —
+// released once the param is stripped, so the next deep-link tap works again.
+const claimedParams = new Set<string>();
 
-/** Renders nothing — watches the URL for ?debrief=1 (the end-of-day push deep-links to
- *  /planner?debrief=1) and, for staff, launches the assistant with the debrief opener, then
- *  strips the param so a refresh or back-button doesn't re-run the interview. Lives in its
- *  own Suspense island because useSearchParams suspends at prerender (the Dock pattern). */
-function DebriefEntry({ onLaunch }: { onLaunch: () => void }) {
+/** Renders nothing — watches the URL for a staff deep-link param (?debrief=1 end-of-day, or
+ *  ?attention=1 "what needs my attention") and, for staff, launches the assistant with the matching
+ *  opener, then strips the param so a refresh / back-button doesn't re-run it. Lives in its own
+ *  Suspense island because useSearchParams suspends at prerender (the Dock pattern). */
+function DeepLinkOpener({ param, onLaunch }: { param: string; onLaunch: () => void }) {
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const router = useRouter();
   useEffect(() => {
-    if (searchParams.get("debrief") !== "1") {
-      debriefParamClaimed = false; // param gone → release for the next deep-link
+    if (searchParams.get(param) !== "1") {
+      claimedParams.delete(param); // param gone → release for the next deep-link
       return;
     }
-    if (debriefParamClaimed) return;
-    debriefParamClaimed = true;
+    if (claimedParams.has(param)) return;
+    claimedParams.add(param);
     // Strip FIRST so the slow role lookup below can't double-fire on a re-render.
     const params = new URLSearchParams(Array.from(searchParams.entries()));
-    params.delete("debrief");
+    params.delete(param);
     const qs = params.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-    // Staff only — the debrief interviews money + crew time; RLS/tool gating already
-    // protects the data, this just keeps the entry off a tech's screen entirely.
+    // Staff only — these openers surface money + crew data; RLS/tool gating already protects the
+    // data, this just keeps the entry off a tech's screen entirely.
     (async () => {
       try {
         const supabase = createClient();
@@ -47,10 +47,10 @@ function DebriefEntry({ onLaunch }: { onLaunch: () => void }) {
         const role = (prof as { role?: string } | null)?.role ?? "";
         if (isStaffRole(role)) onLaunch();
       } catch {
-        /* best-effort: no debrief beats a crash on open */
+        /* best-effort: no opener beats a crash on open */
       }
     })();
-  }, [searchParams, pathname, router, onLaunch]);
+  }, [searchParams, pathname, router, param, onLaunch]);
   return null;
 }
 
@@ -103,6 +103,16 @@ export function GlobalAssistant() {
   function launchDebrief() {
     setVoiceLaunch(false);
     setPendingQuery("Run my end-of-day debrief.");
+    setCollapsed(false);
+    setPos(centeredPos());
+    setOpen(true);
+  }
+
+  // ?attention=1 (a My Day button / morning push) → Nort as business analyst: it calls needs_attention
+  // and reads back the leaks (stale estimates, past-due jobs, unbilled work, overdue invoices) by name.
+  function launchAttention() {
+    setVoiceLaunch(false);
+    setPendingQuery("What needs my attention?");
     setCollapsed(false);
     setPos(centeredPos());
     setOpen(true);
@@ -178,7 +188,8 @@ export function GlobalAssistant() {
   return (
     <>
       <Suspense fallback={null}>
-        <DebriefEntry onLaunch={launchDebrief} />
+        <DeepLinkOpener param="debrief" onLaunch={launchDebrief} />
+        <DeepLinkOpener param="attention" onLaunch={launchAttention} />
       </Suspense>
       {active ? (
         <button

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { isStaffRole } from "@/lib/actions/perms";
 import { redirect } from "next/navigation";
-import { CalendarCheck, ChevronLeft, ChevronRight, UserPlus, Receipt, Navigation, FolderClosed, ListTodo } from "lucide-react";
+import { CalendarCheck, ChevronLeft, ChevronRight, UserPlus, Receipt, Navigation, FolderClosed, ListTodo, Sparkles } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { RefreshOnVisible } from "@/components/refresh-on-visible";
 import { WeatherWidget } from "@/components/weather-widget";
@@ -438,7 +438,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     : "";
 
   const navBtnCls =
-    "inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-brand/30 bg-brand-light/40 px-2.5 py-1.5 text-xs font-medium text-brand hover:bg-brand-light";
+    "inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center gap-1.5 rounded-lg border border-brand/30 bg-brand-light/40 px-3 text-xs font-medium text-brand hover:bg-brand-light";
   const agendaRows = (items: Agenda[]) =>
     items.map((i) => (
       <li key={i.key} className="flex items-center gap-3 px-5 py-3">
@@ -457,7 +457,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         <div className="flex shrink-0 items-center gap-1">
           {i.address && (
             <NavLink address={i.address} className={navBtnCls}>
-              <Navigation className="h-4 w-4 shrink-0" /> <span className="hidden sm:inline">Navigate</span>
+              <Navigation className="h-4 w-4 shrink-0" /> Navigate
             </NavLink>
           )}
           {/* Row verbs (staff): the edit pencil kills the old dead-end (appt row →
@@ -492,6 +492,17 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           source={getOrgSettings((org as any)?.settings).weather_source}
         />
       </div>
+
+      {/* One tap → Nort as business analyst: fires needs_attention and reads back the leaks (stale
+          estimates, past-due jobs, unbilled work, overdue invoices) by name. Staff only. */}
+      {isStaff && (
+        <Link
+          href="/planner?attention=1"
+          className="mb-4 flex min-h-[48px] items-center justify-center gap-2 rounded-xl bg-brand/10 px-4 text-sm font-semibold text-brand transition-colors hover:bg-brand/15"
+        >
+          <Sparkles className="h-4 w-4" /> What needs my attention?
+        </Link>
+      )}
       <p className="mb-4 text-sm italic text-slate-400">&ldquo;{dailyQuote}&rdquo;</p>
 
       {/* Live time clock — clock in/out is the app's #1 impulse verb, so it sits

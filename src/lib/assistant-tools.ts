@@ -480,6 +480,12 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
     input_schema: { type: "object", properties: {} },
   },
   {
+    name: "needs_attention",
+    description:
+      "THE business-analyst sweep — the ONE call that finds everything slipping through the cracks, as NAMED lists (not just counts). Returns six buckets, each with the specific items to act on: past_due_jobs (active jobs whose scheduled end is in the past — likely finished-but-not-marked or running over), unbilled_complete_jobs (completed work with no invoice — money on the table), overdue_invoices (sent/partial past due), stale_estimates (quotes still draft/sent 14+ days with no answer — chase or drop), leads_to_follow_up (inquiries not contacted, or past their follow-up date), and clocks_running (someone clocked in 12h+ — probably forgot to clock out). Use for ANY 'what needs my attention / what am I missing / what's slipping / what should I be on top of / anything overdue or unbilled or stale' — call this FIRST and read back the non-empty buckets by NAME, most-urgent first.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
     name: "payroll_summary",
     description:
       "Payroll for the CURRENT pay period (the same numbers as the Payroll page), in TWO SEPARATE BUCKETS per employee that are NEVER summed together: BASE pay — hours × pay rate → gross, with paid/unpaid/partly-paid status — and MILEAGE — business miles held vs settled. Held miles have NO dollar amount: mileage dollars exist ONLY after a human types a settlement amount on the Payroll page (settled_amount); never compute, estimate, or quote a mileage dollar figure from any rate. Use for 'what's payroll this period', 'how much do I owe the crew' — answer as base gross plus 'N business miles held (no amount set)'. Gross pay only — tax/withholding is the accountant's job.",
@@ -521,6 +527,7 @@ const VALID_TOOL_NAMES = new Set(DATA_TOOLS.map((t) => t.name));
  * STAFF_ONLY_READ set should union this in.
  */
 export const STAFF_ONLY_DATA_TOOLS = new Set<string>([
+  "needs_attention", // the business-analyst sweep — surfaces money/job/estimate/lead leaks (office-only)
   "money_pipeline", // to-invoice / drafts / outstanding / overdue — the owner's money board
   "payroll_summary", // per-employee gross pay + hours
   "get_job_financials", // one job's profit + budget burn (labor cost + margin)
@@ -1820,6 +1827,76 @@ export async function runDataTool(
               job: i.job,
             })),
           },
+        });
+      }
+
+      case "needs_attention": {
+        // The business-analyst sweep. Each bucket is wrapped so one failing query can't blank the
+        // whole answer; money buckets reuse getMoneyPipeline (the single source of truth).
+        const now = Date.now();
+        const iso = (ms: number) => new Date(ms).toISOString();
+        const daysSince = (t: string | null) => (t ? Math.max(0, Math.round((now - new Date(t).getTime()) / 864e5)) : null);
+        const todayStr = new Date(now).toISOString().slice(0, 10);
+        const safe = async <T,>(fn: () => Promise<T>, fallback: T): Promise<T> => { try { return await fn(); } catch { return fallback; } };
+
+        let unbilled: any[] = [], overdueInvoices: any[] = [];
+        try {
+          const p = await getMoneyPipeline(supabase);
+          unbilled = p.doneNotInvoiced.map((j: any) => ({ job: j.job_number, name: j.name, customer: j.customer, estimated_value: money(j.value) }));
+          overdueInvoices = p.unpaid.filter((i: any) => i.overdue).slice(0, 20).map((i: any) => ({ invoice: i.invoice_number, customer: i.customer, balance: money(i.balance), due_date: i.due_date }));
+        } catch { /* money board degrades to empty */ }
+
+        const past_due_jobs = await safe(async () => {
+          const { data } = await supabase.from("jobs").select("job_number, name, scheduled_end, customers(name)")
+            .in("status", ["scheduled", "in_progress"]).not("scheduled_end", "is", null).lt("scheduled_end", iso(now))
+            .order("scheduled_end", { ascending: true }).limit(20);
+          return (data ?? []).map((j: any) => ({ job: j.job_number, name: j.name, customer: j.customers?.name ?? null, days_overdue: daysSince(j.scheduled_end) }));
+        }, []);
+
+        // "Stale estimate" has TWO shapes: a formal quote row still sent/draft, OR a JOB stuck in the
+        // 'estimate' stage. Both are unanswered estimates going cold — surface both, 14+ days idle.
+        const staleQuotes = await safe(async () => {
+          const { data } = await supabase.from("quotes").select("quote_number, total, updated_at, valid_until, customers(name)")
+            .in("status", ["draft", "sent"]).lt("updated_at", iso(now - 14 * 864e5))
+            .order("updated_at", { ascending: true }).limit(15);
+          return (data ?? []).map((q: any) => ({ ref: q.quote_number, name: null, customer: q.customers?.name ?? null, total: money(q.total), days_since_touch: daysSince(q.updated_at), expired: !!(q.valid_until && q.valid_until < todayStr), kind: "quote" }));
+        }, [] as any[]);
+        const staleJobEstimates = await safe(async () => {
+          const { data } = await supabase.from("jobs").select("job_number, name, created_at, customers(name)")
+            .eq("status", "estimate").lt("created_at", iso(now - 14 * 864e5))
+            .order("created_at", { ascending: true }).limit(15);
+          return (data ?? []).map((j: any) => ({ ref: j.job_number, name: j.name, customer: j.customers?.name ?? null, days_since_touch: daysSince(j.created_at), kind: "job" }));
+        }, [] as any[]);
+        const stale_estimates = [...staleJobEstimates, ...staleQuotes];
+
+        const leads_to_follow_up = await safe(async () => {
+          const { data } = await supabase.from("inquiries").select("name, phone, status, next_follow_up_at, last_contacted_at, created_at")
+            .is("converted_at", null).order("created_at", { ascending: true }).limit(40);
+          return (data ?? [])
+            .filter((l: any) => !["lost", "archived", "declined", "spam"].includes(String(l.status ?? "")))
+            .filter((l: any) => !l.last_contacted_at || (l.next_follow_up_at && l.next_follow_up_at < iso(now)))
+            .slice(0, 20)
+            .map((l: any) => ({ name: l.name, phone: l.phone, status: l.status, days_since_contact: daysSince(l.last_contacted_at) ?? daysSince(l.created_at), never_contacted: !l.last_contacted_at }));
+        }, []);
+
+        const clocks_running = await safe(async () => {
+          const { data } = await supabase.from("time_entries").select("clock_in, profiles(full_name)")
+            .is("clock_out", null).lt("clock_in", iso(now - 12 * 36e5)).limit(20);
+          return (data ?? []).map((e: any) => ({ person: e.profiles?.full_name ?? null, hours_running: Math.round((now - new Date(e.clock_in).getTime()) / 36e5) }));
+        }, []);
+
+        const total = past_due_jobs.length + unbilled.length + overdueInvoices.length + stale_estimates.length + leads_to_follow_up.length + clocks_running.length;
+        return JSON.stringify({
+          total_items: total,
+          note: total === 0
+            ? "Nothing's slipping — billing, jobs, estimates and leads are all current."
+            : "Read back the NON-EMPTY buckets by name, most urgent first: past-due jobs + overdue invoices, then unbilled work, then stale estimates, then leads. One line each with the next action. In voice mode, top 2-3 only.",
+          past_due_jobs,
+          unbilled_complete_jobs: unbilled,
+          overdue_invoices: overdueInvoices,
+          stale_estimates,
+          leads_to_follow_up,
+          clocks_running,
         });
       }
 

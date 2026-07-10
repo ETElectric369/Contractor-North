@@ -115,7 +115,7 @@ export function DayClock({
                 <Select
                   value={jobId}
                   onChange={(e) => setJobId(e.target.value)}
-                  className="mt-1 h-8 max-w-[230px] text-xs"
+                  className="mt-1 h-11 w-full max-w-full text-sm"
                   aria-label="Job to clock into"
                 >
                   <option value="">No job</option>

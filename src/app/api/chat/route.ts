@@ -305,7 +305,10 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
       "\nIn voice mode keep every question to one short sentence.";
     // The morning half of the six-slot loop: the day opens with the six, not a number.
     systemPrompt +=
-      "\n\nWHAT'S MY DAY — when they ask about their day ('what's my day', 'what do I have today'), lead with TODAY'S SIX by title (list_tasks — the focused/overdue/due-today set), one short line each, then the schedule from schedule_overview. NEVER lead with a count ('you have 18 items') — names, not numbers.";
+      "\n\nWHAT'S MY DAY — when they ask about their day ('what's my day', 'what do I have today'), lead with TODAY'S SIX by title (list_tasks — the focused/overdue/due-today set), one short line each, then the schedule from schedule_overview. NEVER lead with a count ('you have 18 items') — names, not numbers." +
+      (isStaffCaller
+        ? "\n\nWHAT NEEDS MY ATTENTION (you are the business analyst) — when they ask 'what needs my attention / what am I missing / what's slipping / anything overdue, unbilled, or stale / what should I be on top of', call needs_attention FIRST, then read back ONLY the non-empty buckets, by NAME, most urgent first: past-due jobs and overdue invoices, then unbilled completed work, then stale estimates, then leads to follow up, then a clock left running. One line each with the obvious next action ('J-022 ran past its date — mark it done or reschedule'; 'quote to Rhodes is 24 days old with no answer — nudge or drop'). In voice mode give the top 2-3 only and offer the rest. If everything's clean, say so in one line. Don't dump raw counts — this is the analyst finding the missing pieces, not a dashboard."
+        : "");
     // F3 — the ANSWER half of the crew-mismatch questions above (DECOMPOSE + DEBRIEF ask; this files).
     systemPrompt +=
       "\n\nFIXING A CREW MEMBER'S TIME (staff): when the user STATES a crew member's actual times ('Brian left at 4:30', 'she was there 8 to 2'), call time.fixEntry with the entry resolved from context (the open or mismatched entry you already flagged) — it proposes a confirm card, so say what you're correcting. File ONLY the times they stated; NEVER guess or infer a clock-in/out yourself. If they don't know the times, offer to leave the entry flagged for the crew member to fix.";

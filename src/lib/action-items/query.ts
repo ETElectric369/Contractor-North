@@ -250,6 +250,7 @@ export async function getActionItems(ctx: {
 
   for (const j of (jobsR.data ?? []) as any[]) {
     if (wonUnscheduledJobIds.has(j.id)) continue; // shown as "Accepted — schedule it" instead
+    if (j.status === "on_hold") continue; // paused = "stop bugging me": stays in the schedule tray + /jobs, but off the Needs-action inbox
     items.push({
       id: j.id,
       kind: "job_to_schedule",

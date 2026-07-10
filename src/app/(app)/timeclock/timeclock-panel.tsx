@@ -806,7 +806,7 @@ export function TimeclockPanel({
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <Label htmlFor="job">{t("tc_job")}</Label>
-            <Select id="job" value={jobId} onChange={(e) => setJobId(e.target.value)}>
+            <Select id="job" value={jobId} onChange={(e) => setJobId(e.target.value)} className="h-11">
               <option value="">{t("tc_noJob")}</option>
               {jobs.map((j) => (
                 <option key={j.id} value={j.id}>
@@ -817,7 +817,7 @@ export function TimeclockPanel({
           </div>
           <div>
             <Label htmlFor="code">{t("tc_jobCode")}</Label>
-            <Select id="code" value={jobCode} onChange={(e) => setJobCode(e.target.value)}>
+            <Select id="code" value={jobCode} onChange={(e) => setJobCode(e.target.value)} className="h-11">
               <option value="">{t("tc_selectCode")}</option>
               {codesForJob(jobId).map((c) => (
                 <option key={c.id} value={c.code}>
