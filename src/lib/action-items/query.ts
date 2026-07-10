@@ -648,5 +648,55 @@ export async function getActionItems(ctx: {
     }
   }
 
+  // ON HOLD, TOO LONG — a paused job you'd otherwise forget, surfaced WITH its blocker so the
+  // briefing prepares the decision: resume it, or confirm WHY it's still waiting. "Logic prepared
+  // for success" — we look up the likely reason (an open task, or materials not ordered) instead of
+  // just saying "on hold". Threshold keeps it a bounded, decide-able set, not a permanent nag.
+  if (isStaff) {
+    const ON_HOLD_STALE_DAYS = 7;
+    const heldCutoff = new Date(Date.now() - ON_HOLD_STALE_DAYS * 864e5).toISOString();
+    const { data: heldJobs } = await supabase
+      .from("jobs")
+      .select("id, job_number, name, updated_at, customers(name)")
+      .eq("status", "on_hold")
+      .lt("updated_at", heldCutoff) // last touched (a proxy for "held since") over a week ago
+      .order("updated_at", { ascending: true })
+      .limit(20);
+    const held = (heldJobs ?? []) as any[];
+    if (held.length) {
+      const heldIds = held.map((j) => j.id);
+      // Infer the blocker from the material take-off: a list with unpurchased (non-tool) items = the
+      // job is waiting on a materials order. (A task-based reason is a later add — the inbox may not
+      // read the tasks table here, by the badge-economy guard.)
+      const { data: heldMat } = await supabase
+        .from("material_lists")
+        .select("job_id, material_list_items(purchased, is_tool)")
+        .in("job_id", heldIds)
+        .limit(100);
+      const unorderedMatJobs = new Set<string>();
+      for (const ml of (heldMat ?? []) as any[]) {
+        if (((ml.material_list_items ?? []) as any[]).some((it) => !it.purchased && !it.is_tool)) unorderedMatJobs.add(ml.job_id);
+      }
+      for (const j of held) {
+        const days = Math.max(1, Math.round((Date.now() - new Date(j.updated_at).getTime()) / 864e5));
+        const reason = unorderedMatJobs.has(j.id)
+          ? "Materials not ordered yet"
+          : `Paused ${days} days — still on hold?`;
+        items.push({
+          id: `onhold-${j.id}`,
+          kind: "job_on_hold",
+          title: `On hold: ${jobLabel(j)}`,
+          subtitle: reason,
+          who: null,
+          when: null,
+          urgency: 1,
+          done: false,
+          href: `/jobs/${j.id}`,
+          affordances: AFFORDANCES.job_on_hold,
+        });
+      }
+    }
+  }
+
   return items.map((it) => ({ ...it, stream: KIND_STREAM[it.kind] }));
 }

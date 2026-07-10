@@ -37,7 +37,8 @@ export type ActionKind =
   | "time_stray" // a time entry left running past its day, or closed with no job — hours nobody can bill
   | "job_unbilled_work" // a job worked recently with ZERO costs/materials recorded (the 30'-of-Romex leak)
   | "job_needs_return" // a job worked recently with nothing scheduled next (the forgotten return visit)
-  | "materials_needed"; // unpurchased take-off items on a job the crew is about to stand on (buy before the truck rolls)
+  | "materials_needed" // unpurchased take-off items on a job the crew is about to stand on (buy before the truck rolls)
+  | "job_on_hold"; // a job PAUSED too long — surfaced WITH its blocker (open task / materials not ordered) so it isn't forgotten
 
 /** The four urgency streams the inbox renders under. Order is the render order:
  *  money first (chase the dollars), then fresh leads, then today's work, then
@@ -75,6 +76,7 @@ export const KIND_STREAM: Record<ActionKind, Stream> = {
   job_unbilled_work: "money", // uncosted work = dollars leaking off the invoice
   job_needs_return: "today", // the return visit gets scheduled today or it gets forgotten
   materials_needed: "today", // the shopping run happens before the truck rolls — today's prep
+  job_on_hold: "waiting", // paused, waiting on something (material/task/customer) — the "did we forget this?" clock
 };
 
 /** The canonical verbs. Each maps to an existing server action in dispatch.ts. */
@@ -121,6 +123,7 @@ export const KIND_META: Record<ActionKind, { label: string; tone: "slate" | "blu
   // Deliberately NOT "No costs recorded" (job_unbilled_work = nothing captured yet);
   // this one means items ARE on the take-off and still need buying.
   materials_needed: { label: "Materials needed", tone: "blue" },
+  job_on_hold: { label: "On hold", tone: "amber" },
 };
 
 // The affordance matrix — which verbs each kind exposes. THE contract, consumed
@@ -156,6 +159,9 @@ export const AFFORDANCES: Record<ActionKind, Affordance[]> = {
   // The buy/check-off lives on the job's materials list (purchased toggles per item) —
   // a row-level "do" here couldn't say WHICH items got bought.
   materials_needed: ["open"],
+  // Open the job to resume it, change status, or clear the blocker (like the other derived
+  // job detectors — the decision happens on the job page, so it nags until actually acted on).
+  job_on_hold: ["open"],
 };
 
 /**

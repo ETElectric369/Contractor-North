@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { isStaffRole } from "@/lib/actions/perms";
 import { redirect } from "next/navigation";
-import { CalendarCheck, ChevronLeft, ChevronRight, UserPlus, Receipt, Navigation, FolderClosed, ListTodo, Sparkles } from "lucide-react";
+import { CalendarCheck, ChevronLeft, ChevronRight, UserPlus, Receipt, Navigation, FolderClosed, ListTodo } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { RefreshOnVisible } from "@/components/refresh-on-visible";
 import { WeatherWidget } from "@/components/weather-widget";
@@ -492,17 +492,6 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           source={getOrgSettings((org as any)?.settings).weather_source}
         />
       </div>
-
-      {/* One tap → Nort as business analyst: fires needs_attention and reads back the leaks (stale
-          estimates, past-due jobs, unbilled work, overdue invoices) by name. Staff only. */}
-      {isStaff && (
-        <Link
-          href="/planner?attention=1"
-          className="mb-4 flex min-h-[48px] items-center justify-center gap-2 rounded-xl bg-brand/10 px-4 text-sm font-semibold text-brand transition-colors hover:bg-brand/15"
-        >
-          <Sparkles className="h-4 w-4" /> What needs my attention?
-        </Link>
-      )}
       <p className="mb-4 text-sm italic text-slate-400">&ldquo;{dailyQuote}&rdquo;</p>
 
       {/* Live time clock — clock in/out is the app's #1 impulse verb, so it sits
