@@ -17,11 +17,33 @@ export type DupCustomer = {
 };
 export type DupGroup = { reason: string; members: DupCustomer[] };
 
-const normPhone = (p: string | null | undefined) => (p ?? "").replace(/\D/g, "").slice(-10);
-const normEmail = (e: string | null | undefined) => (e ?? "").trim().toLowerCase();
+export const normPhone = (p: string | null | undefined) => (p ?? "").replace(/\D/g, "").slice(-10);
+export const normEmail = (e: string | null | undefined) => (e ?? "").trim().toLowerCase();
 // Strip ALL non-alphanumerics (spaces + punctuation) so "O'Brien Plumbing", "obrien plumbing", and
 // "OBrien  Plumbing" all collapse to the same key — punctuation joins here, it doesn't split.
-const normName = (n: string | null | undefined) => (n ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+export const normName = (n: string | null | undefined) => (n ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/**
+ * The crosscheck used when a lead is about to become a customer (estimate accepted): does this
+ * incoming contact ALREADY exist in the book? Returns the id of the first existing customer that
+ * shares a STRONG signal — same phone (≥7 digits), same email, or same normalized name — using the
+ * exact same keys `findDuplicateGroups` groups on, so "accept an estimate" and "find duplicates"
+ * never disagree. null = genuinely new. Pure + unit-tested.
+ */
+export function findMatchingCustomerId(
+  candidate: { name?: string | null; email?: string | null; phone?: string | null },
+  existing: DupCustomer[],
+): string | null {
+  const p = normPhone(candidate.phone);
+  const e = normEmail(candidate.email);
+  const n = normName(candidate.name);
+  for (const c of existing) {
+    if (p.length >= 7 && normPhone(c.phone) === p) return c.id;
+    if (e && normEmail(c.email) === e) return c.id;
+    if (n && normName(c.name) === n) return c.id;
+  }
+  return null;
+}
 
 const phoneKey = (c: DupCustomer) => { const p = normPhone(c.phone); return p.length >= 7 ? p : ""; };
 const emailKey = (c: DupCustomer) => normEmail(c.email);

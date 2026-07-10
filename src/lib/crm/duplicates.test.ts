@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { findDuplicateGroups, type DupCustomer } from "@/lib/crm/duplicates";
+import { findDuplicateGroups, findMatchingCustomerId, type DupCustomer } from "@/lib/crm/duplicates";
 
 const c = (id: string, o: Partial<DupCustomer> = {}): DupCustomer => ({
   id, name: null, company_name: null, email: null, phone: null, created_at: `2026-01-${id.padStart(2, "0")}`, ...o,
@@ -53,5 +53,30 @@ describe("findDuplicateGroups", () => {
     ]);
     expect(g[0].members[0].id).toBe("old"); // oldest first within a group
     expect(g.length).toBe(2);
+  });
+});
+
+// The crosscheck run when a lead's estimate is ACCEPTED — link an existing customer, never duplicate.
+describe("findMatchingCustomerId", () => {
+  const book: DupCustomer[] = [
+    c("A", { name: "Jane Doe", phone: "(530) 555-1212", email: "jane@x.com" }),
+    c("B", { name: "Bob's Electric", phone: "5305559999" }),
+  ];
+
+  it("matches an existing customer by phone (ignoring formatting)", () => {
+    expect(findMatchingCustomerId({ name: "J. Doe", phone: "530.555.1212" }, book)).toBe("A");
+  });
+  it("matches by email (case-insensitive), even when name/phone differ", () => {
+    expect(findMatchingCustomerId({ name: "Totally Different", email: "JANE@X.COM" }, book)).toBe("A");
+  });
+  it("matches by normalized name when there's no phone/email", () => {
+    expect(findMatchingCustomerId({ name: "bobs   electric" }, book)).toBe("B");
+  });
+  it("returns null for a genuinely new person (so a fresh Contact is created)", () => {
+    expect(findMatchingCustomerId({ name: "New Person", phone: "5305550000", email: "new@x.com" }, book)).toBeNull();
+  });
+  it("does NOT match on a too-short (<7 digit) phone or blank signals", () => {
+    expect(findMatchingCustomerId({ name: "", phone: "1212", email: "" }, book)).toBeNull();
+    expect(findMatchingCustomerId({ name: null, phone: null, email: null }, book)).toBeNull();
   });
 });

@@ -22,6 +22,7 @@ type QuoteRow = {
   customer_id: string | null;
   job_id: string | null;
   customers?: { name?: string | null; company_name?: string | null } | null;
+  inquiry?: { name?: string | null } | null;
 };
 
 /** A cluster of 2+ DRAFT quotes for one customer at the same rounded total —
@@ -77,7 +78,9 @@ export function QuotesList({
               className: "text-sm text-slate-600",
               cell: (q) => (
                 <>
-                  {q.customers?.name ?? "—"}
+                  {q.customers?.name ?? (q.inquiry?.name ? (
+                    <span>{q.inquiry.name} <span className="text-xs text-slate-400">· lead</span></span>
+                  ) : "—")}
                   {q.title && <span className="block text-xs text-slate-400">{q.title}</span>}
                 </>
               ),

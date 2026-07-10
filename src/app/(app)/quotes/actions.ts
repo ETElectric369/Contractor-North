@@ -13,6 +13,7 @@ import { sendEmail, renderQuoteNoticeEmail, ownerBcc } from "@/lib/email";
 import { sendSms } from "@/lib/sms";
 import { createWorkOrderFromQuote } from "../work-orders/actions";
 import { createMaterialListFromQuote } from "../materials/actions";
+import { findMatchingCustomerId, type DupCustomer } from "@/lib/crm/duplicates";
 
 function publicQuoteLink(token: string) {
   return `${process.env.NEXT_PUBLIC_SITE_URL || ""}/q/${token}`;
@@ -528,6 +529,68 @@ export async function duplicateQuote(
   return { ok: true, id: res.id };
 }
 
+/**
+ * The moment a deferred-customer estimate is WON, materialize its Contact — Erik's flow: a lead
+ * becomes a saved customer only on approval. If the quote already has a customer, this is a no-op.
+ * Otherwise, from the linked inquiry we CROSSCHECK the existing book (same phone/email/name → link
+ * that customer, never duplicate — the "naturally Nort should pick that up" ask) and only create a
+ * fresh Contact when the person is genuinely new. Auto-filled from the inquiry. Returns the resolved
+ * customer id (or null if there's nothing to materialize from). RLS-scoped via the passed client.
+ */
+async function materializeQuoteCustomer(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  q: { id: string; customer_id: string | null; inquiry_id: string | null },
+  userId: string,
+): Promise<string | null> {
+  if (q.customer_id) return q.customer_id; // already has a contact
+  if (!q.inquiry_id) return null; // standalone estimate, nothing to materialize from
+
+  const { data: inq } = await supabase.from("inquiries").select("*").eq("id", q.inquiry_id).maybeSingle();
+  if (!inq) return null;
+
+  // Crosscheck the book first — link an existing customer if this lead is already one (same
+  // phone / email / normalized name), using the exact keys the CRM's duplicate finder uses.
+  const { data: book } = await supabase
+    .from("customers")
+    .select("id, name, company_name, email, phone");
+  let customerId = findMatchingCustomerId(
+    { name: inq.name, email: inq.email, phone: inq.phone },
+    (book ?? []) as DupCustomer[],
+  );
+
+  if (!customerId) {
+    // Genuinely new → auto-fill a Contact from the estimate's lead.
+    const { data: cust, error: cErr } = await supabase
+      .from("customers")
+      .insert({
+        name: inq.name,
+        company_name: inq.company_name,
+        type: inq.type ?? "residential",
+        status: "active", // a won estimate = a real, active customer
+        email: inq.email,
+        phone: inq.phone,
+        address: inq.address,
+        city: inq.city,
+        state: inq.state,
+        zip: inq.zip,
+        notes: inq.message ? `From inquiry: ${inq.message}` : inq.notes,
+        created_by: userId,
+      })
+      .select("id")
+      .single();
+    if (cErr || !cust) return null; // best-effort: the job still gets created customer-less
+    customerId = cust.id;
+  }
+
+  await supabase.from("quotes").update({ customer_id: customerId }).eq("id", q.id);
+  // Stamp the lead as won + attach the contact (idempotent — leaves the open leads list either way).
+  await supabase
+    .from("inquiries")
+    .update({ customer_id: customerId, status: "won", converted_at: inq.converted_at ?? new Date().toISOString(), updated_at: new Date().toISOString() })
+    .eq("id", q.inquiry_id);
+  return customerId;
+}
+
 export async function createJobFromQuote(
   quoteId: string,
 ): Promise<{ ok: boolean; error?: string; id?: string }> {
@@ -543,10 +606,13 @@ export async function createJobFromQuote(
   if (!q) return { ok: false, error: "Quote not found." };
   if (q.job_id) return { ok: true, id: q.job_id };
 
+  // Deferred-customer estimate won → create/link the Contact now, before the job (so the job gets it).
+  const resolvedCustomerId = await materializeQuoteCustomer(supabase, q, ctx.userId);
+
   const { data: job, error } = await supabase
     .from("jobs")
     .insert({
-      customer_id: q.customer_id,
+      customer_id: resolvedCustomerId ?? q.customer_id,
       inquiry_id: q.inquiry_id ?? null, // carry the lead provenance forward: lead → quote → job
       name: q.title || `Job from ${q.quote_number}`,
       status: "scheduled",

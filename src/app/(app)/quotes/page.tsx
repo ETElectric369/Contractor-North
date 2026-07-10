@@ -27,7 +27,9 @@ export default async function QuotesPage({
     : { data: null };
   const isStaff = !!me && isStaffRole((me as { role?: string }).role ?? "");
 
-  let query = supabase.from("quotes").select("*, customers(name, company_name)");
+  // inquiry:inquiry_id — so a deferred-customer estimate (customer_id null until accepted) still
+  // shows WHO it's for (the lead's name) instead of a blank dash.
+  let query = supabase.from("quotes").select("*, customers(name, company_name), inquiry:inquiry_id(name)");
   if (filter) query = query.eq("doc_type", filter);
   const { data } = await query.order("created_at", { ascending: false });
 
