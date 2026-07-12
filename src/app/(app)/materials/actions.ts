@@ -203,8 +203,11 @@ export async function deleteMaterialList(listId: string): Promise<Result> {
 }
 
 /** Build a material take-off list straight from a quote's line items, attached
- *  to the quote's job. Maps each line: description → description, qty → qty,
- *  unit → unit, unit_price → est_cost. Returns the new list id. */
+ *  to the quote's job. A material list is an ORDER sheet, so it: DROPS labor lines,
+ *  pulls each item's real BUY cost + catalog # + vendor from the price book (not the
+ *  marked-up estimate price), and reads the catalog # from a "…[CODE]" tag in the
+ *  description when present. Unmatched lines keep the estimate price as a fallback.
+ *  Returns the new list id. */
 export async function createMaterialListFromQuote(quoteId: string): Promise<Result> {
   const supabase = await createClient();
   const {
@@ -214,7 +217,7 @@ export async function createMaterialListFromQuote(quoteId: string): Promise<Resu
 
   const { data: quote, error: qErr } = await supabase
     .from("quotes")
-    .select("id, quote_number, job_id, title")
+    .select("id, quote_number, job_id, title, customer_id")
     .eq("id", quoteId)
     .maybeSingle();
   if (qErr) return { ok: false, error: qErr.message };
@@ -250,16 +253,69 @@ export async function createMaterialListFromQuote(quoteId: string): Promise<Resu
     .single();
   if (error) return { ok: false, error: error.message };
 
-  const rows = items.map((it: any, idx: number) => ({
-    list_id: list.id,
-    description: it.description,
-    part_number: null,
-    quantity: Number(it.quantity) || 1,
-    unit: it.unit || "ea",
-    vendor: null,
-    est_cost: it.unit_price != null ? Number(it.unit_price) : null,
-    sort_order: it.sort_order ?? idx,
-  }));
+  // The price book (RLS-scoped to this org) → resolve each material line to its REAL buy cost,
+  // catalog #, and vendor. Match on the "[CODE]" tag in the description first, then on the
+  // normalized description. Tools are archived, so they never land on an order sheet.
+  const { data: book } = await supabase
+    .from("price_list_items")
+    .select("code, description, supplier, buy_price, unit")
+    .eq("archived", false);
+  const normDesc = (s: string) => (s ?? "").toLowerCase().replace(/\[[^\]]*\]/g, "").replace(/[^a-z0-9]/g, "");
+  const byCode = new Map<string, any>();
+  const byDesc = new Map<string, any>();
+  for (const b of (book ?? []) as any[]) {
+    if (b.code) byCode.set(String(b.code).toUpperCase(), b);
+    const k = normDesc(b.description);
+    if (k && !byDesc.has(k)) byDesc.set(k, b);
+  }
+  // An order sheet is a BUY list. Lines that don't match the price book carry the estimate's SELL
+  // price, so back the markup out (the customer's pricing level, else the org default) to get cost.
+  const { data: orgS } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+  let markup = getOrgSettings((orgS as any)?.settings).material_markup_percent ?? 0;
+  if (quote.customer_id) {
+    const { data: cust } = await supabase
+      .from("customers")
+      .select("pricing_levels(markup_pct)")
+      .eq("id", quote.customer_id)
+      .maybeSingle();
+    const lvl = (cust as any)?.pricing_levels?.markup_pct;
+    if (lvl != null) markup = Number(lvl);
+  }
+  const costFromSell = (p: number) => Math.round((p / (1 + markup / 100)) * 100) / 100;
+
+  const CODE_RE = /\[([^\]]+)\]/;
+  const isLabor = (it: any) =>
+    String(it.unit ?? "").toLowerCase() === "hr" || /^\s*labor\b/i.test(String(it.description ?? ""));
+  // Match "[CODE]" exactly, then its last token ("[RACO 936]" → "936"), then the cleaned description.
+  const findPl = (code: string | null, cleanDesc: string): any => {
+    if (code) {
+      const up = code.toUpperCase();
+      if (byCode.has(up)) return byCode.get(up);
+      const last = up.split(/\s+/).pop();
+      if (last && byCode.has(last)) return byCode.get(last);
+    }
+    return byDesc.get(normDesc(cleanDesc)) ?? null;
+  };
+
+  const rows = (items as any[])
+    .filter((it) => !isLabor(it)) // an order sheet carries materials, never labor
+    .map((it, idx) => {
+      const m = String(it.description ?? "").match(CODE_RE);
+      const code = m ? m[1].trim() : null;
+      const cleanDesc = String(it.description ?? "").replace(CODE_RE, "").trim();
+      const pl = findPl(code, cleanDesc);
+      return {
+        list_id: list.id,
+        description: cleanDesc || it.description,
+        part_number: pl?.code ?? code ?? null,
+        quantity: Number(it.quantity) || 1,
+        unit: it.unit || pl?.unit || "ea",
+        vendor: pl?.supplier ?? null,
+        // matched → the book's real buy price; unmatched → estimate price with the markup removed
+        est_cost: pl ? Number(pl.buy_price) : it.unit_price != null ? costFromSell(Number(it.unit_price)) : null,
+        sort_order: it.sort_order ?? idx,
+      };
+    });
 
   // Catalog orgs (Tahoe Deck): the granular MATERIAL kits (Framing, Hardware, Decking…) are
   // the POST-ACCEPTANCE purchasing breakdown — deliberately kept OFF the estimate, seeded onto
@@ -291,8 +347,10 @@ export async function createMaterialListFromQuote(quoteId: string): Promise<Resu
     }
   }
 
-  const { error: itemsErr } = await supabase.from("material_list_items").insert(rows);
-  if (itemsErr) return { ok: false, error: itemsErr.message };
+  if (rows.length) {
+    const { error: itemsErr } = await supabase.from("material_list_items").insert(rows);
+    if (itemsErr) return { ok: false, error: itemsErr.message };
+  }
 
   revalidatePath("/materials");
   if (quote.job_id) revalidatePath(`/jobs/${quote.job_id}`);
