@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Sparkles, Loader2, ChevronDown, ChevronRight } from "lucide-react";
+import { Plus, Trash2, Sparkles, Loader2, ChevronDown, ChevronRight, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
@@ -148,6 +148,9 @@ export function QuoteBuilder({
   }
 
   const [scope, setScope] = useState("");
+  // Snapshot of the line items from BEFORE the last AI generate, so "Undo AI draft" can back the
+  // generated lines out without you having to delete them one by one (or save them by accident).
+  const [preGen, setPreGen] = useState<DraftLineItem[] | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [generating, startGenerate] = useTransition();
@@ -221,6 +224,8 @@ export function QuoteBuilder({
         setAiError(res.error);
         return;
       }
+      // Snapshot the current lines first so the draft can be backed out with one click.
+      setPreGen(items);
       // Replace empty rows; append to existing real rows.
       const real = items.filter((i) => i.description.trim());
       setItems([...real, ...res.items]);
@@ -274,17 +279,27 @@ export function QuoteBuilder({
               onChange={(e) => setScope(e.target.value)}
             />
             {aiError && <p className="text-sm text-red-600">{aiError}</p>}
-            <Button variant="primary" onClick={onGenerate} disabled={generating}>
-              {generating ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" /> Generating…
-                </>
-              ) : (
-                <>
-                  <Sparkles className="h-4 w-4" /> Generate Line Items
-                </>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="primary" onClick={onGenerate} disabled={generating}>
+                {generating ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" /> Generating…
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-4 w-4" /> Generate Line Items
+                  </>
+                )}
+              </Button>
+              {preGen != null && !generating && (
+                <Button variant="outline" onClick={() => { setItems(preGen); setPreGen(null); }}>
+                  <Undo2 className="h-4 w-4" /> Undo AI draft
+                </Button>
               )}
-            </Button>
+            </div>
+            {preGen != null && !generating && (
+              <p className="text-xs text-slate-500">Review the added lines below — keep them, edit them, or undo the draft.</p>
+            )}
           </CardContent>
         </Card>
 
