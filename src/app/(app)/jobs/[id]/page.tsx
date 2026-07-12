@@ -42,6 +42,7 @@ import { LienInsuranceCard } from "./lien-insurance-card";
 import { JobDescription } from "./job-description";
 import { contractTotalFromQuotes } from "@/lib/payment-schedule-math";
 import { ProgressInvoiceButton } from "./progress-invoice-button";
+import { NewInvoiceButton } from "./new-invoice-button";
 import { NewWorkOrderButton } from "../../work-orders/new-wo-button";
 import { NewChangeOrderButton } from "../../change-orders/new-co-button";
 import { CoStatusControl } from "../../change-orders/co-status-control";
@@ -755,9 +756,11 @@ export default async function JobDetailPage({
         <div className="space-y-3">
           {/* Lead with the INVOICES (this is the Invoices tab) — the contract / payment
               schedule / lien cards live below, since they're supporting deal-to-cash context. */}
-          {/* Plain "Create invoice" lives ONCE now — in the action dock's Manage ⋯ menu
-              (the header/tab duplicate pair collapsed to one bound action). */}
-          <div className="flex justify-end gap-2">
+          {/* Billing actions live HERE, on the Invoices tab, where you'd look to bill — a plain
+              "New invoice" (it used to hide in the Manage ⋯ menu, so a T&M job looked like it could
+              only do Progress payment) next to the progress/payment hub. */}
+          <div className="flex flex-wrap justify-end gap-2">
+            {viewerIsStaff && <NewInvoiceButton jobId={j.id} />}
             <ProgressInvoiceButton jobId={j.id} billingType={(j as any).billing_type ?? "fixed"} estimate={quoted} worked={workedToDate} invoiced={billedToDate} paid={collected} openInvoices={openInvoices} scheduleActive={((paymentMilestones as any) ?? []).length > 0} />
           </div>
           <Card className="overflow-hidden">

@@ -10,7 +10,7 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { tzLocalHourUtc, todayStrInTz } from "@/lib/tz";
 import { requireStaff } from "@/lib/staff-guard";
 import { computeJobLaborBilling, fetchJobLaborRows } from "@/lib/labor-billing";
-import { recalcTotals, resolveDrawCredit, shouldBlockStandardImport, invoiceBalance, DRAW_KINDS } from "@/lib/invoice-math";
+import { recalcTotals, resolveDrawCredit, shouldBlockStandardImport, invoiceBalance, DRAW_KINDS, isDrawKind } from "@/lib/invoice-math";
 import { standardBillingBlockerOnJob, standardBillingConflictError } from "@/lib/billing-guards";
 import { scheduleStatus, contractTotalFromQuotes, type Milestone } from "@/lib/payment-schedule-math";
 import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
@@ -448,6 +448,32 @@ async function blockStandardCreateOnDrawJob(supabase: any, jobId: string | null 
 /** Import labor from the job's closed time entries: one line per person,
  *  hours × their hourly rate (falls back to the org default labor rate). */
 
+/**
+ * GAP B — a job's labor (resp. materials) must live on exactly ONE non-draw invoice. Draws
+ * (deposit/progress/final) re-itemize actuals BY DESIGN and net them with a "Less previous billings"
+ * credit line, so they're exempt — only OTHER *standard* invoices count as a clash. Returns the
+ * clashing invoice number, or null. THIS is what stops "finish the job" (or a second Create Invoice)
+ * from re-billing hours already sitting on another invoice — the Tao chandelier double.
+ */
+async function billedOnAnotherStandardInvoice(
+  supabase: any,
+  jobId: string,
+  thisInvoiceId: string,
+  source: "labor" | "costs",
+): Promise<string | null> {
+  const { data } = await supabase
+    .from("invoices")
+    .select("invoice_number, invoice_items(import_source)")
+    .eq("job_id", jobId)
+    .eq("invoice_kind", "standard")
+    .neq("status", "void")
+    .neq("id", thisInvoiceId);
+  for (const inv of (data ?? []) as any[]) {
+    if (((inv.invoice_items ?? []) as any[]).some((it) => it.import_source === source)) return inv.invoice_number as string;
+  }
+  return null;
+}
+
 export async function importLaborIntoInvoice(invoiceId: string): Promise<Result & { empty?: boolean }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -467,6 +493,12 @@ export async function importLaborIntoInvoice(invoiceId: string): Promise<Result 
   // so this never blocks legitimate progress billing.
   const draftBlock = await requireDraftInvoice(supabase, invoiceId);
   if (draftBlock) return draftBlock;
+  // GAP B: don't bill this job's labor on a SECOND standard invoice. Importing into a DRAW is exempt
+  // (draws re-itemize + net via a credit line), so this only guards standard→standard.
+  if (!isDrawKind((inv as any).invoice_kind)) {
+    const clash = await billedOnAnotherStandardInvoice(supabase, inv.job_id, invoiceId, "labor");
+    if (clash) return { ok: false, error: `This job's labor is already billed on ${clash}. Edit that invoice, or bill extra work as a progress payment.` };
+  }
 
   // Bill the EXACT time on this job via the shared labor-billing helper (so the
   // billed lines reconcile to the penny with the progress-report "work to date").
@@ -512,6 +544,10 @@ export async function importCostsIntoInvoice(invoiceId: string, markupPercent = 
   if (conflict) return conflict;
   const draftBlock = await requireDraftInvoice(supabase, invoiceId);
   if (draftBlock) return draftBlock; // M1: never re-inflate a sent/paid invoice (see importLaborIntoInvoice)
+  if (!isDrawKind((inv as any).invoice_kind)) {
+    const clash = await billedOnAnotherStandardInvoice(supabase, inv.job_id, invoiceId, "costs");
+    if (clash) return { ok: false, error: `This job's materials are already billed on ${clash}. Edit that invoice, or bill extra on a progress payment.` }; // GAP B
+  }
 
   const [{ data: pos }, { data: bills }] = await Promise.all([
     supabase.from("purchase_orders").select("po_number, vendor, total").eq("job_id", inv.job_id),

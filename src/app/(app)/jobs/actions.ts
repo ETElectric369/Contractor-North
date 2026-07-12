@@ -43,19 +43,25 @@ export async function createInvoiceForJob(
   if (milestone)
     return { ok: false, error: "This job bills on a payment schedule — request the next draw from Billing instead." };
 
-  // M3: don't create a SECOND draft — "invoice the Jones job" twice should land on the
-  // existing open draft, not duplicate it (idempotent for the voice flow, which can't see
-  // the screen). Only an open STANDARD draft dedups; draws have their own unique index.
-  const { data: existingDraft } = await supabase
+  // M3 (extended): never spawn a SECOND standard invoice for a job that's already being invoiced —
+  // land on the existing one. A DRAFT is returned to edit; a SENT one is handed back with a note so
+  // "finish job" (or a second Create Invoice) can't silently create a duplicate that re-bills the
+  // same hours. That sent-invoice case is exactly what the old draft-only dedup missed — the Tao
+  // chandelier double. Extra work after an invoice went out is billed via a progress payment.
+  const { data: existingStd } = await supabase
     .from("invoices")
-    .select("id")
+    .select("id, invoice_number, status")
     .eq("job_id", jobId)
-    .eq("status", "draft")
     .eq("invoice_kind", "standard")
+    .neq("status", "void")
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (existingDraft) return { ok: true, id: existingDraft.id };
+  if (existingStd) {
+    return existingStd.status === "draft"
+      ? { ok: true, id: existingStd.id }
+      : { ok: true, id: existingStd.id, importWarning: `This job is already invoiced on ${existingStd.invoice_number} — opened it instead of creating a duplicate.` };
+  }
 
   const { data: quote } = await supabase
     .from("quotes")
