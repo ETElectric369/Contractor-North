@@ -253,6 +253,10 @@ export function QuoteBuilder({
     startUpload(async () => {
       const fd = new FormData();
       fd.set("file", file);
+      // The scope box rides along as a note that OVERRIDES the drawing — this is where you tell it
+      // "garage's already done, panel & 2in conduit in, 12 cans + 10 inserts + 2 gimbals" so it
+      // doesn't re-bill finished work the plan still shows.
+      if (scope.trim()) fd.set("scope", scope.trim());
       if (levelMarkup != null) fd.set("markupPct", String(levelMarkup));
       const res = await generateQuoteDraftFromPlan(fd);
       if (!res.ok) {
@@ -310,7 +314,7 @@ export function QuoteBuilder({
             </p>
             <Textarea
               rows={3}
-              placeholder="Describe the work, e.g. 'Upgrade 100A panel to 200A, add 4 new 20A circuits, install whole-home surge protector, residential.'"
+              placeholder="Describe the work — or, with a plan uploaded, what's already done / excluded. e.g. 'ADU upstairs only — garage & entryway done, panel & 2in conduit already in. 12 cans + 10 inserts + 2 gimbals.'"
               value={scope}
               onChange={(e) => setScope(e.target.value)}
             />
@@ -356,6 +360,9 @@ export function QuoteBuilder({
                   }}
                 />
               </label>
+              {scope.trim() && !uploading && (
+                <span className="text-xs text-slate-400">applies your note above to the plan</span>
+              )}
             </div>
             {preGen != null && !generating && (
               <p className="text-xs text-slate-500">Review the added lines below — keep them, edit them, or undo the draft.</p>

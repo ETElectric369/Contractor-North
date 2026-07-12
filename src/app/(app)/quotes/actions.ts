@@ -803,8 +803,10 @@ export async function generateQuoteDraft(
 /**
  * The estimator, from an uploaded PLAN. Claude reads the PDF natively (legend, schedules, general
  * notes, AND the drawing) and takes it off into the same price-book-priced line items + review
- * questions — a draft you correct, not an auto-bid. FormData carries `file` (the plan PDF) and
- * optional `markupPct` (the selected customer's pricing level).
+ * questions — a draft you correct, not an auto-bid. FormData carries `file` (the plan PDF), an
+ * optional `scope` note (what's already done / excluded / any correction the plan can't show —
+ * a plan never says the garage is finished or the panel's already in), and optional `markupPct`
+ * (the selected customer's pricing level).
  */
 export async function generateQuoteDraftFromPlan(
   formData: FormData,
@@ -817,13 +819,20 @@ export async function generateQuoteDraftFromPlan(
     if (file.size > 20 * 1024 * 1024) return { ok: false, error: "Plan is too large (max 20 MB)." };
     const mk = formData.get("markupPct");
     const markupPct = mk != null && String(mk) !== "" ? Number(mk) : undefined;
+    const note = String(formData.get("scope") ?? "").trim();
     const b64 = Buffer.from(await file.arrayBuffer()).toString("base64");
     const content = [
       { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } },
       {
         type: "text",
         text:
-          "Take off this electrical plan into estimate line items. Read the LEGEND, schedules, general notes, AND the drawing itself; count every device and calculate quantities per NEC (wire size, box/conduit fill, breaker/feeder, loads). Only exclude work the plan explicitly marks as existing/complete. Price per the rules, and in 'questions' list what to review — uncertain counts (say the drawing is dense), plan callouts that imply extra scope (e.g. data/TV outlets needing a home-run Cat6 to a central data box), and owner decisions.",
+          "Take off this electrical plan into estimate line items. Read the LEGEND, schedules, general notes, AND the drawing itself; count every device and calculate quantities per NEC (wire size, box/conduit fill, breaker/feeder, loads). Only exclude work the plan explicitly marks as existing/complete. Price per the rules, and in 'questions' list what to review — uncertain counts (say the drawing is dense), plan callouts that imply extra scope (e.g. data/TV outlets needing a home-run Cat6 to a central data box), and owner decisions." +
+          // The contractor's note OVERRIDES the drawing. A plan can't show what's already been done
+          // or a field decision — so honor exclusions like "garage is finished" or "panel & 2in
+          // conduit already in" and DON'T bill that work, even though the drawing still depicts it.
+          (note
+            ? `\n\nTHE CONTRACTOR ADDED THIS SCOPE NOTE — it OVERRIDES the drawing. Apply it strictly: exclude anything called out as already done/existing, honor stated counts and corrections, and DO NOT bill work the note says is complete even if the plan still shows it:\n"""${note}"""`
+            : ""),
       },
     ];
     return { ok: true, ...(await runEstimator(content, markupPct)) };
