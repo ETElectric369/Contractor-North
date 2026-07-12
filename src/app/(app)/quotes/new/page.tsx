@@ -60,8 +60,8 @@ export default async function NewQuotePage({
         <ArrowLeft className="h-4 w-4 shrink-0" /> Back to Estimates
       </Link>
       <PageHeader
-        title="New estimate"
-        description="Build line items by hand or let the AI draft them from a scope of work."
+        title="New Estimate"
+        description="Build line items by hand, or let the estimator draft them from a scope of work or an uploaded plan."
       />
       <QuoteBuilder
         customers={(customers ?? []).map((c: any) => ({

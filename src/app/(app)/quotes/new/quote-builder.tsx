@@ -342,7 +342,7 @@ export function QuoteBuilder({
                 {uploading ? (
                   <><Loader2 className="h-4 w-4 animate-spin" /> Reading plan…</>
                 ) : (
-                  <><FileUp className="h-4 w-4" /> Take off a plan PDF</>
+                  <><FileUp className="h-4 w-4" /> Upload Plans</>
                 )}
                 <input
                   type="file"
