@@ -219,7 +219,8 @@ export function QuoteBuilder({
   function onGenerate() {
     setAiError(null);
     startGenerate(async () => {
-      const res = await generateQuoteDraft(scope);
+      // Price against THIS customer's markup (their pricing level, else the org default on the server).
+      const res = await generateQuoteDraft(scope, levelMarkup ?? undefined);
       if (!res.ok) {
         setAiError(res.error);
         return;
@@ -269,9 +270,12 @@ export function QuoteBuilder({
             <div className="flex items-center gap-2">
               <Sparkles className="h-4 w-4 text-brand" />
               <h3 className="text-sm font-semibold text-slate-900">
-                Draft with AI
+                Draft with estimator
               </h3>
             </div>
+            <p className="text-xs text-slate-500">
+              Priced from your price book (your net cost + markup). Items not in the book come in at a Home Depot estimate, flagged to confirm.
+            </p>
             <Textarea
               rows={3}
               placeholder="Describe the work, e.g. 'Upgrade 100A panel to 200A, add 4 new 20A circuits, install whole-home surge protector, residential.'"
@@ -389,6 +393,11 @@ export function QuoteBuilder({
                           <div key={idx} className="grid grid-cols-12 items-start gap-2 rounded-lg border border-slate-100 p-2">
                             <div className="col-span-12 sm:col-span-5">
                               <Input placeholder="Description" value={it.description} onChange={(e) => updateItem(idx, { description: e.target.value })} />
+                              {it.flag && (
+                                <span className="mt-1 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-800">
+                                  {it.flag}
+                                </span>
+                              )}
                             </div>
                             <div className="col-span-3 sm:col-span-2">
                               <NumberInput placeholder="Qty" value={it.quantity} onValueChange={(n) => updateItem(idx, { quantity: n })} />
