@@ -164,7 +164,10 @@ export function QuoteBuilder({
     [customerId, title, notes, taxRate, taxChoice, validUntil, items, scope],
   );
   const draft = useDraft(
-    "quote-builder:" + (jobId ?? preselected ?? "new"),
+    // inquiryId is in the key because a lead-sourced estimate (cn-v477 defers the customer, so it
+    // arrives with NO ?customer=) would otherwise collapse to the shared "new" slot — two prospects'
+    // drafts bleeding into each other. Keyed per-lead keeps the "never share" promise above true.
+    "quote-builder:" + (jobId ?? preselected ?? inquiryId ?? "new"),
     draftState,
     (d) => {
       setCustomerId(d.customerId ?? preselected ?? "");

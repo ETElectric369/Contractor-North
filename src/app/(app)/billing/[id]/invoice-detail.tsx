@@ -459,7 +459,8 @@ export function InvoiceDetail({
           </div>
         </div>
 
-        {(invoice.job_id || (invoice as any).quote_id) &&
+        {isDraft &&
+          (invoice.job_id || (invoice as any).quote_id) &&
           !isDrawKind((invoice as any).invoice_kind) && (
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50/60 px-3 py-2.5">
             <span className="text-xs font-medium text-slate-500">Import:</span>

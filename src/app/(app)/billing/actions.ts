@@ -344,6 +344,8 @@ export async function importQuoteItemsIntoInvoice(invoiceId: string): Promise<Re
     .eq("id", invoiceId)
     .maybeSingle();
   if (!inv) return { ok: false, error: "Invoice not found." };
+  const draftBlock = await requireDraftInvoice(supabase, invoiceId);
+  if (draftBlock) return draftBlock; // M1: never re-inflate a sent/paid invoice (see importLaborIntoInvoice)
   if (inv.job_id) {
     const conflict = await standardInvoiceOnDrawJob(supabase, inv, invoiceId);
     if (conflict) return conflict; // H4: don't re-bill quoted scope onto a standard invoice on a draw job
@@ -458,6 +460,13 @@ export async function importLaborIntoInvoice(invoiceId: string): Promise<Result 
   if (!inv?.job_id) return { ok: false, error: "This invoice isn't linked to a job." };
   const conflict = await standardInvoiceOnDrawJob(supabase, inv, invoiceId);
   if (conflict) return conflict;
+  // M1: imports BUILD a draft invoice — refuse to re-inflate a sent/paid one. Every other line
+  // mutation (add/update/delete) is draft-locked; the importers were the outliers, which let
+  // labor+materials get piled onto Tao J-002's already-partial deposit invoice AFTER a progress
+  // draw had billed the same actuals — the double-charge. A draw imports into its own FRESH draft,
+  // so this never blocks legitimate progress billing.
+  const draftBlock = await requireDraftInvoice(supabase, invoiceId);
+  if (draftBlock) return draftBlock;
 
   // Bill the EXACT time on this job via the shared labor-billing helper (so the
   // billed lines reconcile to the penny with the progress-report "work to date").
@@ -501,6 +510,8 @@ export async function importCostsIntoInvoice(invoiceId: string, markupPercent = 
   if (!inv?.job_id) return { ok: false, error: "This invoice isn't linked to a job." };
   const conflict = await standardInvoiceOnDrawJob(supabase, inv, invoiceId);
   if (conflict) return conflict;
+  const draftBlock = await requireDraftInvoice(supabase, invoiceId);
+  if (draftBlock) return draftBlock; // M1: never re-inflate a sent/paid invoice (see importLaborIntoInvoice)
 
   const [{ data: pos }, { data: bills }] = await Promise.all([
     supabase.from("purchase_orders").select("po_number, vendor, total").eq("job_id", inv.job_id),

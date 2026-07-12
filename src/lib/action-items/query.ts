@@ -678,10 +678,11 @@ export async function getActionItems(ctx: {
         if (((ml.material_list_items ?? []) as any[]).some((it) => !it.purchased && !it.is_tool)) unorderedMatJobs.add(ml.job_id);
       }
       for (const j of held) {
-        const days = Math.max(1, Math.round((Date.now() - new Date(j.updated_at).getTime()) / 864e5));
+        // updated_at is only a PROXY for "held since" (any edit resets it), so we don't quote a
+        // precise day count that could be wrong — just that it's been paused past the stale window.
         const reason = unorderedMatJobs.has(j.id)
           ? "Materials not ordered yet"
-          : `Paused ${days} days — still on hold?`;
+          : "On hold a while — still blocked?";
         items.push({
           id: `onhold-${j.id}`,
           kind: "job_on_hold",
