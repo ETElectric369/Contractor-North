@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Sparkles, Loader2, ChevronDown, ChevronRight, Undo2 } from "lucide-react";
+import { Plus, Trash2, Sparkles, Loader2, ChevronDown, ChevronRight, Undo2, FileUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
@@ -13,6 +13,7 @@ import { useToast } from "@/components/toast";
 import {
   saveQuote,
   generateQuoteDraft,
+  generateQuoteDraftFromPlan,
   type DraftLineItem,
 } from "../actions";
 import { DeckGeneratorPanel } from "./deck-generator-panel";
@@ -158,6 +159,7 @@ export function QuoteBuilder({
   const [aiError, setAiError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [generating, startGenerate] = useTransition();
+  const [uploading, startUpload] = useTransition();
   const [saving, startSave] = useTransition();
   const toast = useToast();
 
@@ -221,6 +223,16 @@ export function QuoteBuilder({
     );
   }
 
+  // Both estimator entry points land here: snapshot the current lines, surface the review
+  // questions, and append the drafted lines (replacing empty rows). Shared so the text scope and
+  // the plan upload behave identically — including the one-click Undo.
+  function applyDraft(res: { items: DraftLineItem[]; questions: string[] }) {
+    setPreGen(items);
+    setQuestions(res.questions ?? []);
+    const real = items.filter((i) => i.description.trim());
+    setItems([...real, ...res.items]);
+  }
+
   function onGenerate() {
     setAiError(null);
     startGenerate(async () => {
@@ -230,12 +242,25 @@ export function QuoteBuilder({
         setAiError(res.error);
         return;
       }
-      // Snapshot the current lines first so the draft can be backed out with one click.
-      setPreGen(items);
-      setQuestions(res.questions ?? []);
-      // Replace empty rows; append to existing real rows.
-      const real = items.filter((i) => i.description.trim());
-      setItems([...real, ...res.items]);
+      applyDraft(res);
+    });
+  }
+
+  // Upload a plan PDF → Claude reads it natively (legend, schedules, notes, drawing) and takes it
+  // off into the same price-book-priced lines + review questions.
+  function onUploadPlan(file: File) {
+    setAiError(null);
+    startUpload(async () => {
+      const fd = new FormData();
+      fd.set("file", file);
+      if (levelMarkup != null) fd.set("markupPct", String(levelMarkup));
+      const res = await generateQuoteDraftFromPlan(fd);
+      if (!res.ok) {
+        setAiError(res.error);
+        return;
+      }
+      applyDraft(res);
+      toast(`Read ${file.name} — review the drafted lines`, "success");
     });
   }
 
@@ -291,7 +316,7 @@ export function QuoteBuilder({
             />
             {aiError && <p className="text-sm text-red-600">{aiError}</p>}
             <div className="flex flex-wrap items-center gap-2">
-              <Button variant="primary" onClick={onGenerate} disabled={generating}>
+              <Button variant="primary" onClick={onGenerate} disabled={generating || uploading}>
                 {generating ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" /> Generating…
@@ -302,11 +327,35 @@ export function QuoteBuilder({
                   </>
                 )}
               </Button>
-              {preGen != null && !generating && (
+              {preGen != null && !generating && !uploading && (
                 <Button variant="outline" onClick={() => { setItems(preGen); setPreGen(null); setQuestions([]); }}>
                   <Undo2 className="h-4 w-4" /> Undo AI draft
                 </Button>
               )}
+            </div>
+
+            {/* …or take off a plan. Claude reads the PDF natively (legend, schedules, notes, and
+                the drawing) into the same price-book-priced lines + review questions. */}
+            <div className="flex items-center gap-3 pt-1">
+              <span className="text-xs font-medium uppercase tracking-wide text-slate-400">or</span>
+              <label className={`inline-flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-brand/40 bg-white/60 px-3 py-2 text-sm font-medium text-brand hover:bg-brand-light/40 ${uploading ? "pointer-events-none opacity-60" : ""}`}>
+                {uploading ? (
+                  <><Loader2 className="h-4 w-4 animate-spin" /> Reading plan…</>
+                ) : (
+                  <><FileUp className="h-4 w-4" /> Take off a plan PDF</>
+                )}
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  className="hidden"
+                  disabled={uploading || generating}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) onUploadPlan(f);
+                    e.target.value = ""; // let the same file be re-picked after an undo
+                  }}
+                />
+              </label>
             </div>
             {preGen != null && !generating && (
               <p className="text-xs text-slate-500">Review the added lines below — keep them, edit them, or undo the draft.</p>

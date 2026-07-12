@@ -5,8 +5,9 @@ const nextConfig: NextConfig = {
   eslint: { ignoreDuringBuilds: true },
   experimental: {
     // Server Actions are stable in Next 15; keep body limit generous for
-    // photo / sketch / document uploads handled through actions.
-    serverActions: { bodySizeLimit: "10mb" },
+    // photo / sketch / document uploads handled through actions — incl. plan
+    // PDFs sent to the estimator (server validates the PDF itself at ≤20 MB).
+    serverActions: { bodySizeLimit: "22mb" },
   },
   images: {
     remotePatterns: [

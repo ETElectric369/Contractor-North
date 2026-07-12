@@ -697,101 +697,137 @@ export async function updateQuoteStatus(id: string, status: string) {
 }
 
 /**
- * The estimator: draft quote line items from a free-text scope, priced from the org's OWN price book
- * (their real net cost) as the single source of truth — NOT web-searched market prices. Materials
- * Claude can find in the book carry the book cost + a "[CODE]" catalog tag (so the downstream CED
- * order sheet resolves them); anything not in the book is included with a rough HOME DEPOT price and
- * flagged for you to confirm. `markupPct` (the customer's pricing level, else the org default) turns
- * cost into the sell price. Returns editable items.
+ * The estimator CORE. Takes the Anthropic user `content` — a free-text scope OR a PDF plan document
+ * (+ instruction) — and returns priced line items + review questions from the org's OWN price book
+ * (single source of truth, never web prices). Book items carry a "[CODE]" catalog tag (so the CED
+ * order sheet resolves them); anything not in the book is flagged with a Home Depot estimate.
+ * `markupPct` (customer pricing level, else org default) turns cost → sell price.
  */
+async function runEstimator(
+  content: any,
+  markupPct?: number,
+): Promise<{ items: DraftLineItem[]; questions: string[] }> {
+  const supabase = await createClient();
+  const [{ data: org }, { data: book }] = await Promise.all([
+    supabase.from("organizations").select("settings").limit(1).maybeSingle(),
+    supabase.from("price_list_items").select("code, description, buy_price, unit, category").eq("archived", false),
+  ]);
+  const orgS = getOrgSettings((org as any)?.settings);
+  const playbook = orgS.quote_playbook?.trim();
+  const markup = markupPct != null ? markupPct : orgS.material_markup_percent ?? 0;
+  const rate = orgS.default_labor_rate;
+
+  const rows = (book ?? []) as any[];
+  const catalog = rows
+    .map((b) => `${b.code ?? "-"} | ${b.description} | ${b.unit} | $${Number(b.buy_price).toFixed(2)}${b.category ? " | " + b.category : ""}`)
+    .join("\n");
+  const byCode = new Map(rows.filter((b) => b.code).map((b) => [String(b.code).toUpperCase(), b]));
+
+  const client = getAnthropic();
+  const msg = await client.messages.create({
+    model: DEFAULT_MODEL,
+    max_tokens: 8192, // headroom: a dense plan take-off can run long — don't truncate mid-JSON
+
+    system:
+      "You are an estimator for an electrical contractor. Draft quote line items for the scope, pricing materials from the contractor's OWN PRICE BOOK (their real net cost) — never invent market prices. " +
+      `LABOR: ${rate > 0 ? `$${rate}/hr` : "a realistic US electrical rate"}; estimate crew-hours realistically (one or more labor lines). ` +
+      "MATERIALS: pick items from the PRICE BOOK below where they fit — return the EXACT catalog code and the book cost. Calculate quantities per NEC (wire size, box/conduit fill, breaker/feeder, loads) — don't eyeball. " +
+      'If a needed material is NOT in the price book, still include it, estimate a typical HOME DEPOT retail price, and mark source "home_depot". ' +
+      'Respond with ONLY a JSON OBJECT: {"items": [ ... ], "questions": [ ... ]}. ' +
+      'Each entry in "items": {"description": string, "quantity": number, "unit": "ea|ft|hr|lot", "kind": "material"|"labor", "catalog": string|null, "unit_cost": number, "source": "book"|"home_depot"} (labor: kind="labor", source="book", unit_cost=hourly rate). ' +
+      '"questions" = a short list of plain-English things the contractor should REVIEW before sending: ambiguous counts, plan callouts that imply EXTRA scope (e.g. data/TV outlets often need a home-run Cat6 to a central data box — confirm the count and where it feeds), owner decisions (EV location, fixture selection), or anything low-confidence. Be specific. No prose outside the JSON.' +
+      (playbook ? `\n\nCompany notes (apply on top; the price book + calc'd quantities govern):\n${playbook}` : "") +
+      `\n\nPRICE BOOK (code | description | unit | cost${rows.some((b) => b.category) ? " | category" : ""}):\n${catalog || "(price book is empty — estimate Home Depot prices and flag every material)"}`,
+    messages: [{ role: "user", content }],
+  });
+
+  const text = msg.content
+    .filter((b) => b.type === "text")
+    .map((b) => (b as { text: string }).text)
+    .join("\n");
+
+  const objText = text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
+  const parsed = JSON.parse(objText) as { items?: any[]; questions?: any[] };
+  const raw = Array.isArray(parsed.items) ? parsed.items : [];
+  const questions = Array.isArray(parsed.questions)
+    ? parsed.questions.map((q) => String(q).trim()).filter(Boolean)
+    : [];
+  const sell = (cost: number) => Math.round(cost * (1 + markup / 100) * 100) / 100;
+  const items: DraftLineItem[] = raw.map((i) => {
+    const kind = i.kind === "labor" ? "labor" : "material";
+    if (kind === "labor") {
+      return {
+        description: String(i.description ?? "Labor"),
+        quantity: Number(i.quantity) || 1,
+        unit: "hr",
+        unit_price: Number(i.unit_cost) || rate || 0,
+      };
+    }
+    const cat = i.catalog ? String(i.catalog).trim() : null;
+    const pl = cat ? byCode.get(cat.toUpperCase()) : null;
+    const cost = pl ? Number(pl.buy_price) : Number(i.unit_cost) || 0;
+    const base = String(i.description ?? pl?.description ?? "");
+    return {
+      description: pl ? `${base} [${pl.code}]` : base, // book items carry [CODE] so the CED order sheet resolves them
+      quantity: Number(i.quantity) || 1,
+      unit: String(i.unit ?? pl?.unit ?? "ea"),
+      unit_price: sell(cost),
+      flag: pl ? undefined : "est · Home Depot — confirm",
+    };
+  });
+  return { items, questions };
+}
+
+function estimatorError(e: any) {
+  return {
+    ok: false as const,
+    error: e?.message?.includes("ANTHROPIC_API_KEY")
+      ? "Add your ANTHROPIC_API_KEY to enable AI drafting."
+      : `Estimator failed: ${e?.message ?? "unknown error"}`,
+  };
+}
+
+/** The estimator, from a free-text scope. */
 export async function generateQuoteDraft(
   scope: string,
   markupPct?: number,
 ): Promise<{ ok: true; items: DraftLineItem[]; questions: string[] } | { ok: false; error: string }> {
   if (!scope.trim()) return { ok: false, error: "Describe the work first." };
-
   try {
-    const supabase = await createClient();
-    const [{ data: org }, { data: book }] = await Promise.all([
-      supabase.from("organizations").select("settings").limit(1).maybeSingle(),
-      supabase.from("price_list_items").select("code, description, buy_price, unit, category").eq("archived", false),
-    ]);
-    const orgS = getOrgSettings((org as any)?.settings);
-    const playbook = orgS.quote_playbook?.trim();
-    const markup = markupPct != null ? markupPct : orgS.material_markup_percent ?? 0;
-    const rate = orgS.default_labor_rate;
-
-    const rows = (book ?? []) as any[];
-    const catalog = rows
-      .map((b) => `${b.code ?? "-"} | ${b.description} | ${b.unit} | $${Number(b.buy_price).toFixed(2)}${b.category ? " | " + b.category : ""}`)
-      .join("\n");
-    const byCode = new Map(rows.filter((b) => b.code).map((b) => [String(b.code).toUpperCase(), b]));
-
-    const client = getAnthropic();
-    const msg = await client.messages.create({
-      model: DEFAULT_MODEL,
-      max_tokens: 3500,
-      system:
-        "You are an estimator for an electrical contractor. Draft quote line items for the scope, pricing materials from the contractor's OWN PRICE BOOK (their real net cost) — never invent market prices. " +
-        `LABOR: ${rate > 0 ? `$${rate}/hr` : "a realistic US electrical rate"}; estimate crew-hours realistically (one or more labor lines). ` +
-        "MATERIALS: pick items from the PRICE BOOK below where they fit — return the EXACT catalog code and the book cost. Calculate quantities per NEC (wire size, box/conduit fill, breaker/feeder, loads) — don't eyeball. " +
-        'If a needed material is NOT in the price book, still include it, estimate a typical HOME DEPOT retail price, and mark source "home_depot". ' +
-        'Respond with ONLY a JSON OBJECT: {"items": [ ... ], "questions": [ ... ]}. ' +
-        'Each entry in "items": {"description": string, "quantity": number, "unit": "ea|ft|hr|lot", "kind": "material"|"labor", "catalog": string|null, "unit_cost": number, "source": "book"|"home_depot"} (labor: kind="labor", source="book", unit_cost=hourly rate). ' +
-        '"questions" = a short list of plain-English things the contractor should REVIEW before sending: ambiguous counts, plan callouts that imply EXTRA scope (e.g. data/TV outlets often need a home-run Cat6 to a central data box — confirm the count and where it feeds), owner decisions (EV location, fixture selection), or anything low-confidence. Be specific. No prose outside the JSON.' +
-        (playbook ? `\n\nCompany notes (apply on top; the price book + calc'd quantities govern):\n${playbook}` : "") +
-        `\n\nPRICE BOOK (code | description | unit | cost${rows.some((b) => b.category) ? " | category" : ""}):\n${catalog || "(price book is empty — estimate Home Depot prices and flag every material)"}`,
-      messages: [{ role: "user", content: scope }],
-    });
-
-    const text = msg.content
-      .filter((b) => b.type === "text")
-      .map((b) => (b as { text: string }).text)
-      .join("\n");
-
-    const objText = text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
-    const parsed = JSON.parse(objText) as { items?: any[]; questions?: any[] };
-    const raw = Array.isArray(parsed.items) ? parsed.items : [];
-    const questions = Array.isArray(parsed.questions)
-      ? parsed.questions.map((q) => String(q).trim()).filter(Boolean)
-      : [];
-    const sell = (cost: number) => Math.round(cost * (1 + markup / 100) * 100) / 100;
-    const items: DraftLineItem[] = raw.map((i) => {
-      const kind = i.kind === "labor" ? "labor" : "material";
-      if (kind === "labor") {
-        return {
-          description: String(i.description ?? "Labor"),
-          quantity: Number(i.quantity) || 1,
-          unit: "hr",
-          unit_price: Number(i.unit_cost) || rate || 0,
-        };
-      }
-      const cat = i.catalog ? String(i.catalog).trim() : null;
-      const pl = cat ? byCode.get(cat.toUpperCase()) : null;
-      const cost = pl ? Number(pl.buy_price) : Number(i.unit_cost) || 0;
-      const base = String(i.description ?? pl?.description ?? "");
-      return {
-        description: pl ? `${base} [${pl.code}]` : base, // book items carry [CODE] so the CED order sheet resolves them
-        quantity: Number(i.quantity) || 1,
-        unit: String(i.unit ?? pl?.unit ?? "ea"),
-        unit_price: sell(cost),
-        flag: pl ? undefined : "est · Home Depot — confirm",
-      };
-    });
-    return { ok: true, items, questions };
-  } catch (e: any) {
-    return {
-      ok: false,
-      error: e?.message?.includes("ANTHROPIC_API_KEY")
-        ? "Add your ANTHROPIC_API_KEY to enable AI drafting."
-        : `Estimator failed: ${e?.message ?? "unknown error"}`,
-    };
+    return { ok: true, ...(await runEstimator(scope, markupPct)) };
+  } catch (e) {
+    return estimatorError(e);
   }
 }
 
-function extractJsonArray(text: string) {
-  const start = text.indexOf("[");
-  const end = text.lastIndexOf("]");
-  if (start === -1 || end === -1) throw new Error("No JSON array in response.");
-  return text.slice(start, end + 1);
+/**
+ * The estimator, from an uploaded PLAN. Claude reads the PDF natively (legend, schedules, general
+ * notes, AND the drawing) and takes it off into the same price-book-priced line items + review
+ * questions — a draft you correct, not an auto-bid. FormData carries `file` (the plan PDF) and
+ * optional `markupPct` (the selected customer's pricing level).
+ */
+export async function generateQuoteDraftFromPlan(
+  formData: FormData,
+): Promise<{ ok: true; items: DraftLineItem[]; questions: string[] } | { ok: false; error: string }> {
+  try {
+    const file = formData.get("file");
+    if (!(file instanceof File) || file.size === 0) return { ok: false, error: "Choose a plan PDF to upload." };
+    if (file.type !== "application/pdf") return { ok: false, error: "Upload the plan as a PDF." };
+    // Cap at 20 MB: base64 inflates ~33%, and Anthropic's per-request ceiling is 32 MB.
+    if (file.size > 20 * 1024 * 1024) return { ok: false, error: "Plan is too large (max 20 MB)." };
+    const mk = formData.get("markupPct");
+    const markupPct = mk != null && String(mk) !== "" ? Number(mk) : undefined;
+    const b64 = Buffer.from(await file.arrayBuffer()).toString("base64");
+    const content = [
+      { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } },
+      {
+        type: "text",
+        text:
+          "Take off this electrical plan into estimate line items. Read the LEGEND, schedules, general notes, AND the drawing itself; count every device and calculate quantities per NEC (wire size, box/conduit fill, breaker/feeder, loads). Only exclude work the plan explicitly marks as existing/complete. Price per the rules, and in 'questions' list what to review — uncertain counts (say the drawing is dense), plan callouts that imply extra scope (e.g. data/TV outlets needing a home-run Cat6 to a central data box), and owner decisions.",
+      },
+    ];
+    return { ok: true, ...(await runEstimator(content, markupPct)) };
+  } catch (e) {
+    return estimatorError(e);
+  }
 }
