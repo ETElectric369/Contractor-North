@@ -7,6 +7,7 @@ import { Badge, statusTone } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { StatusControl } from "./status-control";
 import { QuoteItemsEditor } from "./quote-items-editor";
+import { CircuitScheduleCard } from "./circuit-schedule-card";
 import { CustomerSelect } from "./customer-select";
 import { DuplicateQuoteButton } from "./duplicate-quote-button";
 import { EmailButton } from "@/components/email-button";
@@ -143,6 +144,7 @@ export default async function QuoteDetailPage({
       </Card>
 
       <QuoteItemsEditor quote={q} items={lineItems} />
+      <CircuitScheduleCard quoteId={q.id} initial={(q.circuits ?? []) as any} />
     </div>
   );
 }

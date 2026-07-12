@@ -53,6 +53,7 @@ export default async function PublicQuotePage({
         validUntil={q.valid_until}
         title={q.title}
         description={q.description}
+        circuits={q.circuits}
         customer={c}
         items={items}
         subtotal={q.subtotal}

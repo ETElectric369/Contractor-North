@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { DocHeader, DocParty, DocTotals, DocNote, DocDescription, type DocPartyCustomer } from "@/components/doc-templates";
 import { lineItemParts } from "@/components/line-item-text";
+import type { QuoteCircuit } from "@/lib/types";
 
 /**
  * THE single quote/estimate document body. Every read-only surface — the office
@@ -45,6 +46,7 @@ export function QuoteDocument({
   notes,
   terms,
   documentFooter,
+  circuits,
   acceptSlot,
   showContact = false,
 }: {
@@ -66,14 +68,18 @@ export function QuoteDocument({
   notes?: string | null;
   terms?: string | null;
   documentFooter?: string | null;
+  /** Optional circuit schedule — prints as a second page when present. */
+  circuits?: QuoteCircuit[] | null;
   /** The customer-facing accept/decline widget — public surface only. */
   acceptSlot?: ReactNode;
   /** Show the closing "Questions? Contact …" row — public surface only. */
   showContact?: boolean;
 }) {
   const c = customer;
+  const circuitRows = (circuits ?? []).filter((r) => r && (r.description?.trim() || r.ckt || r.breaker || r.wire));
 
   return (
+    <>
     <div className="print-page mx-auto max-w-3xl bg-white p-10 shadow-sm">
       <DocHeader
         co={co}
@@ -161,5 +167,40 @@ export function QuoteDocument({
         {documentFooter || "Thank you for the opportunity to earn your business."}
       </div>
     </div>
+
+    {/* Circuit schedule — a second sheet (break-before:page in print) showing the panel layout
+        behind the price: which breaker feeds what, on which wire. Only when the estimate carries one. */}
+    {circuitRows.length > 0 && (
+      <div className="print-page mx-auto mt-6 max-w-3xl bg-white p-10 shadow-sm print:mt-0" style={{ breakBefore: "page" }}>
+        <div className="flex items-baseline justify-between border-b border-slate-300 pb-2">
+          <h2 className="text-base font-semibold text-slate-900">Circuit Schedule</h2>
+          <span className="text-[11px] uppercase tracking-wide text-slate-400">{docLabel} {number}</span>
+        </div>
+        <p className="mt-2 text-xs text-slate-500">The panel layout behind this estimate — {circuitRows.length} circuit{circuitRows.length === 1 ? "" : "s"}. Field-verify before rough-in.</p>
+        <table className="mt-4 w-full border-collapse text-[13px] leading-snug">
+          <thead>
+            <tr className="border-b border-slate-300 text-left text-[11px] uppercase tracking-wide text-slate-500">
+              <th className="w-12 py-1.5 font-semibold">Ckt</th>
+              <th className="py-1.5 font-semibold">Description</th>
+              <th className="w-20 py-1.5 font-semibold">Wire</th>
+              <th className="w-20 py-1.5 font-semibold">Breaker</th>
+              <th className="w-28 py-1.5 font-semibold">Load / notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {circuitRows.map((r, i) => (
+              <tr key={i} className="border-b border-slate-100 align-top [break-inside:avoid]">
+                <td className="py-1 pr-2 font-medium text-slate-700">{r.ckt ?? i + 1}</td>
+                <td className="py-1 pr-2 text-slate-800">{r.description}</td>
+                <td className="py-1 pr-2 text-slate-600">{r.wire ?? ""}</td>
+                <td className="py-1 pr-2 text-slate-600">{r.breaker ?? ""}</td>
+                <td className="py-1 text-slate-500">{r.load ?? ""}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+    </>
   );
 }

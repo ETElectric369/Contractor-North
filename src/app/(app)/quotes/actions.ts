@@ -14,6 +14,7 @@ import { sendSms } from "@/lib/sms";
 import { createWorkOrderFromQuote } from "../work-orders/actions";
 import { createMaterialListFromQuote } from "../materials/actions";
 import { findMatchingCustomerId, type DupCustomer } from "@/lib/crm/duplicates";
+import type { QuoteCircuit } from "@/lib/types";
 
 function publicQuoteLink(token: string) {
   return `${process.env.NEXT_PUBLIC_SITE_URL || ""}/q/${token}`;
@@ -844,4 +845,96 @@ export async function generateQuoteDraftFromPlan(
   } catch (e) {
     return estimatorError(e);
   }
+}
+
+/**
+ * Derive a CIRCUIT SCHEDULE from a saved estimate's line items — the panel layout behind the
+ * price (which breaker feeds what, on which wire). Reads the breaker + wire lines to size each
+ * circuit and groups loads the way an electrician wires them, then stores it on the quote so it
+ * prints as a second page. A draft you correct — the office can edit every row after.
+ */
+export async function generateCircuitSchedule(
+  quoteId: string,
+): Promise<{ ok: true; circuits: QuoteCircuit[] } | { ok: false; error: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error ?? "Not allowed." };
+  const supabase = ctx.supabase;
+
+  const { data: quote } = await supabase
+    .from("quotes")
+    .select("id, title, description")
+    .eq("id", quoteId)
+    .maybeSingle();
+  if (!quote) return { ok: false, error: "Estimate not found." };
+  const { data: items } = await supabase
+    .from("quote_line_items")
+    .select("description, quantity, unit")
+    .eq("quote_id", quoteId)
+    .order("sort_order");
+  const lines = (items ?? []).map((i: any) => `${i.quantity} ${i.unit ?? ""} · ${i.description}`).join("\n");
+  if (!lines.trim()) return { ok: false, error: "Add line items first." };
+
+  try {
+    const client = getAnthropic();
+    const msg = await client.messages.create({
+      model: DEFAULT_MODEL,
+      max_tokens: 3000,
+      system:
+        "You are a master electrician laying out a residential branch-circuit (panel) schedule from an estimate's line items. " +
+        "Use the BREAKER lines to determine how many circuits and their sizes, and the WIRE lines for conductor sizes. Group loads the way an electrician actually wires them: kitchen small-appliance (two 20A), dishwasher, disposal, refrigerator/freezer, general receptacles, lighting (15A on 14 AWG), bath, laundry/dryer, range, EACH mini-split on its own circuit, bath fan, smoke/CO. Low-voltage (data/Cat6/coax/thermostat/doorbell) is NOT a breaker — leave it out. " +
+        'Respond with ONLY a JSON ARRAY, one object per circuit: {"ckt": string, "description": string, "wire": string, "breaker": string, "load": string}. ' +
+        'ckt = circuit position ("1","2"…). wire = e.g. "12/2","14/2","10/3","6/3". breaker = e.g. "20A","2P 30A","2P 50A". load = a short note (room/appliance or estimated VA). Number circuits sequentially, matching the breaker counts in the line items. No prose outside the JSON array.',
+      messages: [{ role: "user", content: `Estimate: ${quote.title ?? ""}\n${(quote as any).description ?? ""}\n\nLine items:\n${lines}` }],
+    });
+    const text = msg.content
+      .filter((b) => b.type === "text")
+      .map((b) => (b as { text: string }).text)
+      .join("\n");
+    const arr = JSON.parse(text.slice(text.indexOf("["), text.lastIndexOf("]") + 1)) as any[];
+    const circuits: QuoteCircuit[] = arr
+      .map((r, i) => ({
+        ckt: r.ckt != null ? String(r.ckt).trim() : String(i + 1),
+        description: String(r.description ?? "").trim(),
+        wire: r.wire ? String(r.wire).trim() : null,
+        breaker: r.breaker ? String(r.breaker).trim() : null,
+        load: r.load ? String(r.load).trim() : null,
+      }))
+      .filter((r) => r.description);
+    const { error } = await supabase.from("quotes").update({ circuits }).eq("id", quoteId);
+    if (error) return { ok: false, error: error.message };
+    revalidatePath(`/quotes/${quoteId}`);
+    return { ok: true, circuits };
+  } catch (e: any) {
+    return {
+      ok: false,
+      error: e?.message?.includes("ANTHROPIC_API_KEY")
+        ? "Add your ANTHROPIC_API_KEY to enable this."
+        : `Circuit schedule failed: ${e?.message ?? "unknown error"}`,
+    };
+  }
+}
+
+/** Save a hand-edited circuit schedule (the office corrects the generated one). Empty → clears it. */
+export async function saveCircuitSchedule(
+  quoteId: string,
+  circuits: QuoteCircuit[],
+): Promise<{ ok: boolean; error?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const clean = (Array.isArray(circuits) ? circuits : [])
+    .map((r) => ({
+      ckt: r.ckt ? String(r.ckt).trim() : null,
+      description: String(r.description ?? "").trim(),
+      wire: r.wire ? String(r.wire).trim() : null,
+      breaker: r.breaker ? String(r.breaker).trim() : null,
+      load: r.load ? String(r.load).trim() : null,
+    }))
+    .filter((r) => r.description || r.ckt || r.breaker || r.wire);
+  const { error } = await ctx.supabase
+    .from("quotes")
+    .update({ circuits: clean.length ? clean : null })
+    .eq("id", quoteId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath(`/quotes/${quoteId}`);
+  return { ok: true };
 }

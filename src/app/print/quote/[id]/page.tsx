@@ -79,6 +79,7 @@ export default async function QuotePrintPage({
         validUntil={q.valid_until}
         title={q.title}
         description={(q as any).description}
+        circuits={(q as any).circuits}
         customer={q.customers}
         items={lineItems as any}
         subtotal={q.subtotal}

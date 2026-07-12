@@ -143,6 +143,15 @@ export interface JobCode {
   created_at: string;
 }
 
+/** One row of a quote's optional circuit schedule (the panel layout behind the price). */
+export interface QuoteCircuit {
+  ckt?: string | null;
+  description: string;
+  wire?: string | null;
+  breaker?: string | null;
+  load?: string | null;
+}
+
 export interface Quote {
   id: string;
   quote_number: string;
@@ -150,12 +159,14 @@ export interface Quote {
   job_id: string | null;
   status: QuoteStatus;
   title: string | null;
+  description: string | null;
   notes: string | null;
   tax_rate: number;
   subtotal: number;
   tax: number;
   total: number;
   valid_until: string | null;
+  circuits: QuoteCircuit[] | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
