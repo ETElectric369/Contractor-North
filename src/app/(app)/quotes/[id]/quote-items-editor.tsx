@@ -205,14 +205,23 @@ export function QuoteItemsEditor({ quote, items }: { quote: Quote; items: QuoteL
         </div>
       </Card>
 
-      {quote.notes && (
-        <Card className="mt-6">
-          <div className="px-5 py-5">
+      <Card className="mt-6">
+        <div className="flex items-start justify-between gap-3 px-5 py-5">
+          <div className="min-w-0">
             <h3 className="mb-1 text-sm font-semibold text-slate-900">Notes</h3>
-            <p className="whitespace-pre-wrap text-sm text-slate-600">{quote.notes}</p>
+            {quote.notes ? (
+              <p className="whitespace-pre-wrap text-sm text-slate-600">{quote.notes}</p>
+            ) : (
+              <p className="text-sm text-slate-400">No notes yet — add scope, exclusions, or terms.</p>
+            )}
           </div>
-        </Card>
-      )}
+          {/* Edit the notes right where they live (the "Edit Details" button up top opens the same
+              modal, but the notes weren't obviously editable from here). */}
+          <Button size="sm" variant="outline" className="shrink-0" onClick={() => setDetailsOpen(true)}>
+            <Pencil className="h-4 w-4" /> Edit
+          </Button>
+        </div>
+      </Card>
 
       <Modal
         open={detailsOpen}
@@ -240,7 +249,7 @@ export function QuoteItemsEditor({ quote, items }: { quote: Quote; items: QuoteL
           </div>
           <div>
             <Label htmlFor="qd-notes">Notes</Label>
-            <Textarea id="qd-notes" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
+            <Textarea id="qd-notes" rows={6} value={notes} onChange={(e) => setNotes(e.target.value)} />
           </div>
         </div>
       </Modal>
