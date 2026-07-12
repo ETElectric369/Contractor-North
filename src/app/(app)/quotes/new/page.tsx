@@ -17,7 +17,7 @@ export default async function NewQuotePage({
   const supabase = await createClient();
   const [{ data: customers }, { data: priceItems }, { data: taxRates }, { data: kits }, { data: org }] =
     await Promise.all([
-      supabase.from("customers").select("id, name, company_name, pricing_levels(markup_pct)").order("name"),
+      supabase.from("customers").select("id, name, company_name, pricing_levels(markup_pct, labor_rate)").order("name"),
       supabase
         .from("price_list_items")
         .select("id, code, description, category, unit, buy_price, markup_pct")
@@ -69,6 +69,7 @@ export default async function NewQuotePage({
           name: c.name,
           company_name: c.company_name,
           level_markup: c.pricing_levels?.markup_pct ?? null,
+          level_rate: c.pricing_levels?.labor_rate ?? null,
         }))}
         preselected={customer}
         jobId={job}

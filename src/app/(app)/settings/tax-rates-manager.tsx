@@ -23,6 +23,7 @@ interface PricingLevel {
   id: string;
   name: string;
   markup_pct: number;
+  labor_rate: number | null;
   is_default: boolean;
 }
 
@@ -50,25 +51,29 @@ export function TaxRatesManager({
 
   const [levelName, setLevelName] = useState("");
   const [levelMarkup, setLevelMarkup] = useState(0);
+  const [levelRate, setLevelRate] = useState<number | "">(""); // "" = blank = fall back to org default
   const [editingLevelId, setEditingLevelId] = useState<string | null>(null);
 
   function editLevel(l: PricingLevel) {
     setEditingLevelId(l.id);
     setLevelName(l.name);
     setLevelMarkup(Number(l.markup_pct));
+    setLevelRate(l.labor_rate != null ? Number(l.labor_rate) : "");
   }
   function cancelEditLevel() {
     setEditingLevelId(null);
     setLevelName("");
     setLevelMarkup(0);
+    setLevelRate("");
   }
 
   function addLevel() {
     if (!levelName.trim()) return;
+    const labor_rate = levelRate === "" ? null : Number(levelRate);
     start(async () => {
       const res = editingLevelId
-        ? await updatePricingLevel(editingLevelId, { name: levelName, markup_pct: levelMarkup })
-        : await createPricingLevel({ name: levelName, markup_pct: levelMarkup, is_default: pricingLevels.length === 0 });
+        ? await updatePricingLevel(editingLevelId, { name: levelName, markup_pct: levelMarkup, labor_rate })
+        : await createPricingLevel({ name: levelName, markup_pct: levelMarkup, labor_rate, is_default: pricingLevels.length === 0 });
       if (!res.ok) { setError(res.error ?? "Could not save."); return; }
       cancelEditLevel();
       router.refresh();
@@ -201,14 +206,14 @@ export function TaxRatesManager({
       <div className="border-t border-slate-100 pt-4">
         <h4 className="mb-2 text-sm font-semibold text-slate-900">Pricing levels</h4>
         <p className="mb-3 text-sm text-slate-500">
-          Customer tiers — each level's markup % sets price-list sell prices on quotes (e.g. Retail vs Trade/Builder). Assign a level on the customer's page.
+          Customer tiers — each level's markup % sets price-list sell prices on quotes (e.g. Retail vs Trade/Builder), and an optional labor rate sets the estimator's $/hr for customers on that level. Assign a level on the customer's page.
         </p>
         {pricingLevels.length > 0 && (
           <ul className="mb-3 divide-y divide-slate-100 rounded-lg border border-slate-200">
             {pricingLevels.map((l) => (
               <li key={l.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
                 <span className="flex-1 font-medium text-slate-900">{l.name}</span>
-                <span className="text-slate-700">{Number(l.markup_pct)}% markup</span>
+                <span className="text-slate-700">{Number(l.markup_pct)}% markup{l.labor_rate != null ? ` · $${Number(l.labor_rate)}/hr` : ""}</span>
                 {l.is_default ? (
                   <Badge tone="green">default</Badge>
                 ) : (
@@ -222,10 +227,12 @@ export function TaxRatesManager({
         )}
         <div className="flex items-end gap-2">
           <div className="flex-1"><Label htmlFor="pl-name">Name</Label><Input id="pl-name" value={levelName} onChange={(e) => setLevelName(e.target.value)} placeholder="e.g. Trade / Builder" /></div>
-          <div className="w-28"><Label htmlFor="pl-markup">Markup %</Label><NumberInput id="pl-markup" value={levelMarkup} onValueChange={setLevelMarkup} /></div>
+          <div className="w-24"><Label htmlFor="pl-markup">Markup %</Label><NumberInput id="pl-markup" value={levelMarkup} onValueChange={setLevelMarkup} /></div>
+          <div className="w-28"><Label htmlFor="pl-rate">Labor $/hr</Label><Input id="pl-rate" type="number" inputMode="decimal" value={levelRate} onChange={(e) => setLevelRate(e.target.value === "" ? "" : Number(e.target.value))} placeholder="default" /></div>
           <Button size="sm" onClick={addLevel} disabled={pending || !levelName.trim()}>{editingLevelId ? <><Check className="h-3.5 w-3.5" /> Save</> : <><Plus className="h-3.5 w-3.5" /> Add</>}</Button>
           {editingLevelId && <Button size="sm" variant="outline" onClick={cancelEditLevel} disabled={pending} title="Cancel edit"><X className="h-3.5 w-3.5" /></Button>}
         </div>
+        <p className="mt-1 text-xs text-slate-500">Leave labor $/hr blank to use the org default (${Number(settings.default_labor_rate)}/hr).</p>
       </div>
     </div>
   );

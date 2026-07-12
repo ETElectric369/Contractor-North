@@ -96,7 +96,7 @@ export default async function SettingsPage({
       ? supabase.from("organizations").select("*").eq("id", profile.org_id).maybeSingle()
       : Promise.resolve({ data: null }),
     supabase.from("tax_rates").select("id, name, rate, is_default").order("created_at"),
-    supabase.from("pricing_levels").select("id, name, markup_pct, is_default").order("created_at"),
+    supabase.from("pricing_levels").select("id, name, markup_pct, labor_rate, is_default").order("created_at"),
     supabase.from("job_code_templates").select("id, name, codes").order("name"),
     supabase.from("job_codes").select("id, code, description, billable, active").order("code"),
   ]);

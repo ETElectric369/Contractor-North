@@ -701,11 +701,13 @@ export async function updateQuoteStatus(id: string, status: string) {
  * (+ instruction) — and returns priced line items + review questions from the org's OWN price book
  * (single source of truth, never web prices). Book items carry a "[CODE]" catalog tag (so the CED
  * order sheet resolves them); anything not in the book is flagged with a Home Depot estimate.
- * `markupPct` (customer pricing level, else org default) turns cost → sell price.
+ * `markupPct` and `laborRate` come from the customer's pricing level (else the org defaults) and
+ * set the material sell price and the labor $/hr respectively.
  */
 async function runEstimator(
   content: any,
   markupPct?: number,
+  laborRate?: number,
 ): Promise<{ items: DraftLineItem[]; questions: string[] }> {
   const supabase = await createClient();
   const [{ data: org }, { data: book }] = await Promise.all([
@@ -715,7 +717,7 @@ async function runEstimator(
   const orgS = getOrgSettings((org as any)?.settings);
   const playbook = orgS.quote_playbook?.trim();
   const markup = markupPct != null ? markupPct : orgS.material_markup_percent ?? 0;
-  const rate = orgS.default_labor_rate;
+  const rate = laborRate != null && laborRate > 0 ? laborRate : orgS.default_labor_rate;
 
   const rows = (book ?? []) as any[];
   const catalog = rows
@@ -791,10 +793,11 @@ function estimatorError(e: any) {
 export async function generateQuoteDraft(
   scope: string,
   markupPct?: number,
+  laborRate?: number,
 ): Promise<{ ok: true; items: DraftLineItem[]; questions: string[] } | { ok: false; error: string }> {
   if (!scope.trim()) return { ok: false, error: "Describe the work first." };
   try {
-    return { ok: true, ...(await runEstimator(scope, markupPct)) };
+    return { ok: true, ...(await runEstimator(scope, markupPct, laborRate)) };
   } catch (e) {
     return estimatorError(e);
   }
@@ -805,8 +808,8 @@ export async function generateQuoteDraft(
  * notes, AND the drawing) and takes it off into the same price-book-priced line items + review
  * questions — a draft you correct, not an auto-bid. FormData carries `file` (the plan PDF), an
  * optional `scope` note (what's already done / excluded / any correction the plan can't show —
- * a plan never says the garage is finished or the panel's already in), and optional `markupPct`
- * (the selected customer's pricing level).
+ * a plan never says the garage is finished or the panel's already in), and optional `markupPct` +
+ * `laborRate` (the selected customer's pricing level — material markup and labor $/hr).
  */
 export async function generateQuoteDraftFromPlan(
   formData: FormData,
@@ -819,6 +822,8 @@ export async function generateQuoteDraftFromPlan(
     if (file.size > 20 * 1024 * 1024) return { ok: false, error: "Plan is too large (max 20 MB)." };
     const mk = formData.get("markupPct");
     const markupPct = mk != null && String(mk) !== "" ? Number(mk) : undefined;
+    const lr = formData.get("laborRate");
+    const laborRate = lr != null && String(lr) !== "" ? Number(lr) : undefined;
     const note = String(formData.get("scope") ?? "").trim();
     const b64 = Buffer.from(await file.arrayBuffer()).toString("base64");
     const content = [
@@ -835,7 +840,7 @@ export async function generateQuoteDraftFromPlan(
             : ""),
       },
     ];
-    return { ok: true, ...(await runEstimator(content, markupPct)) };
+    return { ok: true, ...(await runEstimator(content, markupPct, laborRate)) };
   } catch (e) {
     return estimatorError(e);
   }

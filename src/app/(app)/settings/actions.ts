@@ -859,9 +859,16 @@ export async function deleteTaxRate(id: string): Promise<Result> {
   return { ok: true };
 }
 
+// A pricing level's labor_rate is optional: a finite number sets the level's own $/hr; null means
+// "use the org default." Normalize anything non-finite (blank input) to null.
+function cleanLaborRate(v: number | null | undefined): number | null {
+  return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null;
+}
+
 export async function createPricingLevel(input: {
   name: string;
   markup_pct: number;
+  labor_rate?: number | null;
   is_default?: boolean;
 }): Promise<Result> {
   const supabase = await createClient();
@@ -874,6 +881,7 @@ export async function createPricingLevel(input: {
   const { error } = await supabase.from("pricing_levels").insert({
     name: input.name.trim(),
     markup_pct: Number.isFinite(input.markup_pct) ? input.markup_pct : 0,
+    labor_rate: cleanLaborRate(input.labor_rate),
     is_default: !!input.is_default,
   });
   if (error) return { ok: false, error: error.message };
@@ -883,7 +891,7 @@ export async function createPricingLevel(input: {
 
 export async function updatePricingLevel(
   id: string,
-  patch: { name: string; markup_pct: number },
+  patch: { name: string; markup_pct: number; labor_rate?: number | null },
 ): Promise<Result> {
   const supabase = await createClient();
   const orgId = await myOrgId(supabase);
@@ -894,6 +902,7 @@ export async function updatePricingLevel(
     .update({
       name: patch.name.trim(),
       markup_pct: Number.isFinite(patch.markup_pct) ? patch.markup_pct : 0,
+      labor_rate: cleanLaborRate(patch.labor_rate),
     })
     .eq("id", id)
     .eq("org_id", orgId);

@@ -23,6 +23,7 @@ interface CustomerOption {
   name: string;
   company_name: string | null;
   level_markup?: number | null;
+  level_rate?: number | null;
 }
 interface PriceItemLite {
   id: string;
@@ -101,6 +102,9 @@ export function QuoteBuilder({
   // overrides the item's own default markup.
   const selectedCust = customers.find((c) => c.id === customerId);
   const levelMarkup = selectedCust?.level_markup;
+  // The customer's pricing level can also carry its own labor rate (e.g. Local = $125/hr);
+  // when set, the estimator uses it instead of the org default.
+  const levelRate = selectedCust?.level_rate;
   const markupFor = (p: PriceItemLite) => (levelMarkup != null ? levelMarkup : p.markup_pct);
 
   const plMatches = plQuery.trim()
@@ -236,8 +240,8 @@ export function QuoteBuilder({
   function onGenerate() {
     setAiError(null);
     startGenerate(async () => {
-      // Price against THIS customer's markup (their pricing level, else the org default on the server).
-      const res = await generateQuoteDraft(scope, levelMarkup ?? undefined);
+      // Price against THIS customer's level — markup AND labor rate (else the org defaults on the server).
+      const res = await generateQuoteDraft(scope, levelMarkup ?? undefined, levelRate ?? undefined);
       if (!res.ok) {
         setAiError(res.error);
         return;
@@ -258,6 +262,7 @@ export function QuoteBuilder({
       // doesn't re-bill finished work the plan still shows.
       if (scope.trim()) fd.set("scope", scope.trim());
       if (levelMarkup != null) fd.set("markupPct", String(levelMarkup));
+      if (levelRate != null) fd.set("laborRate", String(levelRate));
       const res = await generateQuoteDraftFromPlan(fd);
       if (!res.ok) {
         setAiError(res.error);
