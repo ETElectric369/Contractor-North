@@ -144,7 +144,7 @@ export async function setPoStatus(id: string, status: string): Promise<Result> {
  *  touches its column (it used to reset the vendor to CED and unlink the job). */
 export async function updatePurchaseOrder(
   id: string,
-  patch: { vendor?: string; job_id?: string | null },
+  patch: { vendor?: string; description?: string | null; job_id?: string | null },
 ): Promise<Result> {
   const supabase = await createClient();
   const {
@@ -154,6 +154,7 @@ export async function updatePurchaseOrder(
 
   const clean: Record<string, unknown> = {};
   if (patch.vendor !== undefined) clean.vendor = patch.vendor.trim() || "CED";
+  if (patch.description !== undefined) clean.description = patch.description?.trim() || null;
   if (patch.job_id !== undefined) {
     // Only accept a job the caller can actually see (RLS-scoped); otherwise clear it.
     let jobId: string | null = null;

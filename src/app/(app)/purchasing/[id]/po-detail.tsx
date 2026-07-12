@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Plus, Trash2, Check, PackageCheck, Pencil, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
-import { Input, Label, Select } from "@/components/ui/input";
+import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Badge } from "@/components/ui/badge";
 import { formatCurrency } from "@/lib/utils";
@@ -40,6 +40,15 @@ export function PoDetail({
   const [cost, setCost] = useState(0);
   const [plQuery, setPlQuery] = useState("");
   const [plOpen, setPlOpen] = useState(false);
+  const [poDesc, setPoDesc] = useState((po as any).description ?? "");
+
+  function savePoDesc() {
+    if (poDesc === ((po as any).description ?? "")) return;
+    start(async () => {
+      await updatePurchaseOrder(po.id, { description: poDesc });
+      refresh();
+    });
+  }
 
   const plMatches = plQuery.trim()
     ? priceItems.filter((p) => [p.code, p.description].some((v) => (v ?? "").toLowerCase().includes(plQuery.trim().toLowerCase()))).slice(0, 6)
@@ -110,6 +119,18 @@ export function PoDetail({
             Use “Receive” on each line as material arrives.
           </span>
         )}
+      </div>
+
+      <div>
+        <Label htmlFor="po-desc">Description <span className="font-normal text-slate-400">(shows above the items)</span></Label>
+        <Textarea
+          id="po-desc"
+          rows={2}
+          value={poDesc}
+          onChange={(e) => setPoDesc(e.target.value)}
+          onBlur={savePoDesc}
+          placeholder="What this order is for…"
+        />
       </div>
 
       {priceItems.length > 0 && (
