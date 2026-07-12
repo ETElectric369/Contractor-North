@@ -704,7 +704,7 @@ export async function updateQuoteStatus(id: string, status: string) {
 export async function generateQuoteDraft(
   scope: string,
   markupPct?: number,
-): Promise<{ ok: true; items: DraftLineItem[] } | { ok: false; error: string }> {
+): Promise<{ ok: true; items: DraftLineItem[]; questions: string[] } | { ok: false; error: string }> {
   if (!scope.trim()) return { ok: false, error: "Describe the work first." };
 
   try {
@@ -733,7 +733,9 @@ export async function generateQuoteDraft(
         `LABOR: ${rate > 0 ? `$${rate}/hr` : "a realistic US electrical rate"}; estimate crew-hours realistically (one or more labor lines). ` +
         "MATERIALS: pick items from the PRICE BOOK below where they fit — return the EXACT catalog code and the book cost. Calculate quantities per NEC (wire size, box/conduit fill, breaker/feeder, loads) — don't eyeball. " +
         'If a needed material is NOT in the price book, still include it, estimate a typical HOME DEPOT retail price, and mark source "home_depot". ' +
-        'Respond with ONLY a JSON array; each item {"description": string, "quantity": number, "unit": "ea|ft|hr|lot", "kind": "material"|"labor", "catalog": string|null, "unit_cost": number, "source": "book"|"home_depot"}. Labor: kind="labor", source="book", unit_cost=hourly rate. No prose.' +
+        'Respond with ONLY a JSON OBJECT: {"items": [ ... ], "questions": [ ... ]}. ' +
+        'Each entry in "items": {"description": string, "quantity": number, "unit": "ea|ft|hr|lot", "kind": "material"|"labor", "catalog": string|null, "unit_cost": number, "source": "book"|"home_depot"} (labor: kind="labor", source="book", unit_cost=hourly rate). ' +
+        '"questions" = a short list of plain-English things the contractor should REVIEW before sending: ambiguous counts, plan callouts that imply EXTRA scope (e.g. data/TV outlets often need a home-run Cat6 to a central data box — confirm the count and where it feeds), owner decisions (EV location, fixture selection), or anything low-confidence. Be specific. No prose outside the JSON.' +
         (playbook ? `\n\nCompany notes (apply on top; the price book + calc'd quantities govern):\n${playbook}` : "") +
         `\n\nPRICE BOOK (code | description | unit | cost${rows.some((b) => b.category) ? " | category" : ""}):\n${catalog || "(price book is empty — estimate Home Depot prices and flag every material)"}`,
       messages: [{ role: "user", content: scope }],
@@ -744,7 +746,12 @@ export async function generateQuoteDraft(
       .map((b) => (b as { text: string }).text)
       .join("\n");
 
-    const raw = JSON.parse(extractJsonArray(text)) as any[];
+    const objText = text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
+    const parsed = JSON.parse(objText) as { items?: any[]; questions?: any[] };
+    const raw = Array.isArray(parsed.items) ? parsed.items : [];
+    const questions = Array.isArray(parsed.questions)
+      ? parsed.questions.map((q) => String(q).trim()).filter(Boolean)
+      : [];
     const sell = (cost: number) => Math.round(cost * (1 + markup / 100) * 100) / 100;
     const items: DraftLineItem[] = raw.map((i) => {
       const kind = i.kind === "labor" ? "labor" : "material";
@@ -768,7 +775,7 @@ export async function generateQuoteDraft(
         flag: pl ? undefined : "est · Home Depot — confirm",
       };
     });
-    return { ok: true, items };
+    return { ok: true, items, questions };
   } catch (e: any) {
     return {
       ok: false,

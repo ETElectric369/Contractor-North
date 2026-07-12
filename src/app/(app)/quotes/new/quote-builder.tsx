@@ -151,6 +151,9 @@ export function QuoteBuilder({
   // Snapshot of the line items from BEFORE the last AI generate, so "Undo AI draft" can back the
   // generated lines out without you having to delete them one by one (or save them by accident).
   const [preGen, setPreGen] = useState<DraftLineItem[] | null>(null);
+  // Things the estimator wants you to review before sending (ambiguous counts, implied scope like
+  // "data outlets may need a home-run Cat6 to a central data box", owner decisions).
+  const [questions, setQuestions] = useState<string[]>([]);
   const [aiError, setAiError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [generating, startGenerate] = useTransition();
@@ -227,6 +230,7 @@ export function QuoteBuilder({
       }
       // Snapshot the current lines first so the draft can be backed out with one click.
       setPreGen(items);
+      setQuestions(res.questions ?? []);
       // Replace empty rows; append to existing real rows.
       const real = items.filter((i) => i.description.trim());
       setItems([...real, ...res.items]);
@@ -296,7 +300,7 @@ export function QuoteBuilder({
                 )}
               </Button>
               {preGen != null && !generating && (
-                <Button variant="outline" onClick={() => { setItems(preGen); setPreGen(null); }}>
+                <Button variant="outline" onClick={() => { setItems(preGen); setPreGen(null); setQuestions([]); }}>
                   <Undo2 className="h-4 w-4" /> Undo AI draft
                 </Button>
               )}
@@ -306,6 +310,24 @@ export function QuoteBuilder({
             )}
           </CardContent>
         </Card>
+
+        {/* Review these — the estimator's flagged questions/uncertainties, so you catch the things
+            that are easy to miss (implied scope, ambiguous counts, owner decisions) before sending. */}
+        {questions.length > 0 && !generating && (
+          <Card className="border-amber-300 bg-amber-50/60">
+            <CardContent className="py-4">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold text-amber-900">Review these before sending</h3>
+                <button onClick={() => setQuestions([])} className="text-xs text-amber-700 hover:underline">Dismiss</button>
+              </div>
+              <ul className="list-disc space-y-1.5 pl-5 text-sm text-amber-900">
+                {questions.map((q, i) => (
+                  <li key={i}>{q}</li>
+                ))}
+              </ul>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Deck generator (catalog orgs) — dimensions in, priced deck lines dropped in. */}
         {showDeckGenerator && deckRates && (
