@@ -252,6 +252,16 @@ export function DocTotals({
 
 /** A titled document section (Notes, Terms): eyebrow + pre-wrapped text over a top rule.
  *  `breakAvoid` keeps it from splitting across printed pages (the quote surface passes it). */
+/** The DESCRIPTION block — a scope/summary that reads ABOVE the line items (below the header),
+ *  on every document. Distinct from DocNote (terms/notes at the bottom). */
+export function DocDescription({ text }: { text: string }) {
+  return (
+    <div className="mt-4 rounded-lg bg-slate-50 px-4 py-3 [break-inside:avoid]">
+      <p className="whitespace-pre-wrap text-sm text-slate-700">{text}</p>
+    </div>
+  );
+}
+
 export function DocNote({ label, text, breakAvoid = false }: { label: string; text: string; breakAvoid?: boolean }) {
   return (
     <div className={`mt-6 border-t border-slate-200 pt-4${breakAvoid ? " [break-inside:avoid]" : ""}`}>

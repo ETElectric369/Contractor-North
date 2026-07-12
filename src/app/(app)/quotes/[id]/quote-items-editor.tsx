@@ -35,6 +35,7 @@ export function QuoteItemsEditor({ quote, items }: { quote: Quote; items: QuoteL
   // details modal state
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [title, setTitle] = useState(quote.title ?? "");
+  const [description, setDescription] = useState((quote as any).description ?? "");
   const [notes, setNotes] = useState(quote.notes ?? "");
   const [taxPct, setTaxPct] = useState(Number(quote.tax_rate) * 100);
   const [validUntil, setValidUntil] = useState(quote.valid_until?.slice(0, 10) ?? "");
@@ -78,6 +79,7 @@ export function QuoteItemsEditor({ quote, items }: { quote: Quote; items: QuoteL
     start(async () => {
       const res = await updateQuoteMeta(quote.id, {
         title,
+        description,
         notes,
         tax_rate: (taxPct || 0) / 100,
         valid_until: validUntil || null,
@@ -236,6 +238,10 @@ export function QuoteItemsEditor({ quote, items }: { quote: Quote; items: QuoteL
           <div>
             <Label htmlFor="qd-title">Title</Label>
             <Input id="qd-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Panel upgrade — 200A" />
+          </div>
+          <div>
+            <Label htmlFor="qd-description">Description <span className="font-normal text-slate-400">(shows above the line items)</span></Label>
+            <Textarea id="qd-description" rows={4} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Scope summary the customer reads before the line items." />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>

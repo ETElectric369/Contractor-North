@@ -83,6 +83,7 @@ export function QuoteBuilder({
   const defaultRate = taxRates.find((t) => t.is_default);
   const [customerId, setCustomerId] = useState(preselected ?? "");
   const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
   const [notes, setNotes] = useState("");
   const [taxRate, setTaxRate] = useState(defaultRate ? Number(defaultRate.rate) / 100 : 0);
   const [taxChoice, setTaxChoice] = useState(defaultRate ? defaultRate.id : "");
@@ -166,8 +167,8 @@ export function QuoteBuilder({
   // orphan the draft) so quotes started from different jobs/customers never
   // share.
   const draftState = useMemo(
-    () => ({ customerId, title, notes, taxRate, taxChoice, validUntil, items, scope }),
-    [customerId, title, notes, taxRate, taxChoice, validUntil, items, scope],
+    () => ({ customerId, title, description, notes, taxRate, taxChoice, validUntil, items, scope }),
+    [customerId, title, description, notes, taxRate, taxChoice, validUntil, items, scope],
   );
   const draft = useDraft(
     // inquiryId is in the key because a lead-sourced estimate (cn-v477 defers the customer, so it
@@ -178,6 +179,7 @@ export function QuoteBuilder({
     (d) => {
       setCustomerId(d.customerId ?? preselected ?? "");
       setTitle(d.title ?? "");
+      setDescription(d.description ?? "");
       setNotes(d.notes ?? "");
       if (typeof d.taxRate === "number") setTaxRate(d.taxRate);
       setTaxChoice(d.taxChoice ?? "");
@@ -250,6 +252,7 @@ export function QuoteBuilder({
         job_id: jobId || null,
         inquiry_id: inquiryId || null,
         title,
+        description,
         notes,
         tax_rate: taxRate,
         valid_until: validUntil || null,
@@ -274,7 +277,7 @@ export function QuoteBuilder({
             <div className="flex items-center gap-2">
               <Sparkles className="h-4 w-4 text-brand" />
               <h3 className="text-sm font-semibold text-slate-900">
-                Draft with estimator
+                Draft with Estimator
               </h3>
             </div>
             <p className="text-xs text-slate-500">
@@ -479,6 +482,16 @@ export function QuoteBuilder({
                 placeholder="e.g. Panel upgrade"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label htmlFor="q-description">Description <span className="font-normal text-slate-400">(shows above the line items)</span></Label>
+              <Textarea
+                id="q-description"
+                rows={3}
+                placeholder="Scope summary the customer reads before the line items."
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
               />
             </div>
             <div className="grid grid-cols-2 gap-3">

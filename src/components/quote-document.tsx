@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { formatCurrency, formatDate } from "@/lib/utils";
-import { DocHeader, DocParty, DocTotals, DocNote, type DocPartyCustomer } from "@/components/doc-templates";
+import { DocHeader, DocParty, DocTotals, DocNote, DocDescription, type DocPartyCustomer } from "@/components/doc-templates";
 import { lineItemParts } from "@/components/line-item-text";
 
 /**
@@ -35,6 +35,7 @@ export function QuoteDocument({
   createdAt,
   validUntil,
   title,
+  description,
   customer,
   items,
   subtotal,
@@ -55,6 +56,7 @@ export function QuoteDocument({
   createdAt: string | Date;
   validUntil?: string | Date | null;
   title?: string | null;
+  description?: string | null;
   customer: DocPartyCustomer;
   items: QuoteDocItem[];
   subtotal: number;
@@ -93,6 +95,7 @@ export function QuoteDocument({
       </div>
 
       {title && <div className="mt-5 text-base font-semibold text-slate-900">{title}</div>}
+      {description && <DocDescription text={description} />}
 
       {/* Line items — a multi-line/comma-list description renders extra lines as
           indented sub-items (e.g. the materials that make up a service line),

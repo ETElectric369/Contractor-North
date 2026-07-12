@@ -52,6 +52,7 @@ export default async function PublicQuotePage({
         createdAt={q.created_at}
         validUntil={q.valid_until}
         title={q.title}
+        description={q.description}
         customer={c}
         items={items}
         subtotal={q.subtotal}

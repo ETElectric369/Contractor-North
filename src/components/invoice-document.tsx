@@ -1,5 +1,5 @@
 import { formatCurrency, formatDate } from "@/lib/utils";
-import { DocHeader, DocParty, DocTotals, DocNote, type DocPartyCustomer } from "@/components/doc-templates";
+import { DocHeader, DocParty, DocTotals, DocNote, DocDescription, type DocPartyCustomer } from "@/components/doc-templates";
 import { LineItemText } from "@/components/line-item-text";
 import { CostBreakdown } from "@/components/cost-breakdown";
 import { ProgressReportCard } from "@/components/progress-report-card";
@@ -105,9 +105,7 @@ export function InvoiceDocument({
       {title && <div className={`${billingLabel ? "mt-3" : "mt-5"} text-base font-semibold text-slate-900`}>{title}</div>}
 
       {/* Scope / description — above the line items. */}
-      {description && (
-        <p className={`${title ? "mt-1.5" : "mt-5"} whitespace-pre-wrap text-sm text-slate-600`}>{description}</p>
-      )}
+      {description && <DocDescription text={description} />}
 
       {/* Line items */}
       <div className="mt-4 overflow-x-auto">

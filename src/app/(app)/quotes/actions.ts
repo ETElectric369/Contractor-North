@@ -142,6 +142,7 @@ export interface SaveQuoteInput {
       converted to a quote; null for quotes started from scratch. */
   inquiry_id?: string | null;
   title: string;
+  description?: string | null;
   notes: string;
   tax_rate: number;
   valid_until: string | null;
@@ -249,13 +250,14 @@ export async function deleteQuoteItem(
  *  an omitted field never touches its column. An explicit "" / null clears. */
 export async function updateQuoteMeta(
   quoteId: string,
-  meta: { title?: string; notes?: string; tax_rate?: number; valid_until?: string | null },
+  meta: { title?: string; description?: string; notes?: string; tax_rate?: number; valid_until?: string | null },
 ): Promise<{ ok: boolean; error?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
   const clean: Record<string, unknown> = {};
   if (meta.title !== undefined) clean.title = meta.title.trim() || null;
+  if (meta.description !== undefined) clean.description = meta.description.trim() || null;
   if (meta.notes !== undefined) clean.notes = meta.notes.trim() || null;
   if (meta.tax_rate !== undefined) clean.tax_rate = meta.tax_rate || 0;
   if (meta.valid_until !== undefined) clean.valid_until = meta.valid_until;
@@ -447,6 +449,7 @@ export async function saveQuote(input: SaveQuoteInput) {
       job_id: input.job_id || null,
       inquiry_id: inquiryId,
       title: input.title || null,
+      description: input.description || null,
       notes: input.notes || null,
       tax_rate: input.tax_rate || 0,
       subtotal,
