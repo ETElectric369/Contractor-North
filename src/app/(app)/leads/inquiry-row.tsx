@@ -90,14 +90,16 @@ export function InquiryRow({
           {inquiry.company_name && <span className="text-xs text-slate-400">{inquiry.company_name}</span>}
           <Badge tone={statusTone[inquiry.status] ?? "slate"}>{inquiry.status}</Badge>
           {/* Triage — the A/B/C readiness bucket and the big-job site-visit gate come from
-              /api/inbound/lead (Tahoe Deck). Legacy/manual leads have neither and show nothing. */}
+              /api/inbound/lead (Tahoe Deck); the site-visit flag ALSO lights when a customer
+              taps "Request a site visit" on a public surface (publicScheduleInspection).
+              Legacy/manual leads have neither and show nothing. */}
           {inquiry.lead_bucket && (
             <Badge tone={BUCKET_TONE[inquiry.lead_bucket]} title={LEAD_BUCKETS[inquiry.lead_bucket].blurb}>
               {BUCKET_DOT[inquiry.lead_bucket]} {inquiry.lead_bucket} · {LEAD_BUCKETS[inquiry.lead_bucket].label}
             </Badge>
           )}
           {inquiry.site_inspection_required && (
-            <Badge tone="red" title="Estimated over the site-inspection threshold — needs a human site visit before a firm price.">
+            <Badge tone="red" title="Needs a human site visit — triaged over the threshold, or the customer requested one (send them times via Convert → Let them pick).">
               🚩 Site visit
             </Badge>
           )}

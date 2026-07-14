@@ -370,11 +370,12 @@ interface ScheduleContact {
 }
 
 /** The big-job hand-off: don't leave "we'll reach out" hanging — let the customer
- *  put the site visit on the calendar themselves. Calendly when the org set one,
- *  else the built-in flow: a 'proposed' inspection + 3 auto slots → /pick/<token>. */
+ *  raise their hand now. Calendly when the org set one, else the built-in request
+ *  flow: flag the lead + ping the office to text a few time options (the office
+ *  picks which times to offer — no auto-proposed slots). */
 function ScheduleVisitCta({ handle, calendlyUrl, contact, brand }: { handle: string; calendlyUrl: string; contact: ScheduleContact; brand: string }) {
   const [busy, setBusy] = useState(false);
-  const [already, setAlready] = useState(false);
+  const [done, setDone] = useState<string | null>(null); // confirmation copy once the request lands
   const [error, setError] = useState<string | null>(null);
 
   if (calendlyUrl) {
@@ -391,10 +392,10 @@ function ScheduleVisitCta({ handle, calendlyUrl, contact, brand }: { handle: str
     );
   }
 
-  if (already) {
+  if (done) {
     return (
       <p className="mt-5 rounded-lg bg-slate-100 px-4 py-2.5 text-sm text-slate-600">
-        You&apos;re on the schedule — we&apos;ll confirm your time shortly.
+        {done}
       </p>
     );
   }
@@ -405,8 +406,11 @@ function ScheduleVisitCta({ handle, calendlyUrl, contact, brand }: { handle: str
     try {
       const res = await publicScheduleInspection({ handle, ...contact });
       if (!res.ok) { setError(res.error ?? "Something went wrong — please call us instead."); return; }
-      if (res.token) { window.location.assign(`/pick/${res.token}`); return; }
-      setAlready(true); // office booking already exists (or bot-trap fake success)
+      setDone(
+        res.already
+          ? "You're on the schedule — we'll confirm your time shortly."
+          : "Request received — we'll text you a few time options shortly.",
+      );
     } catch {
       setError("Something went wrong — please call us instead.");
     } finally {
@@ -424,7 +428,7 @@ function ScheduleVisitCta({ handle, calendlyUrl, contact, brand }: { handle: str
         style={{ backgroundColor: brand }}
       >
         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarClock className="h-4 w-4" />}
-        {busy ? "One moment…" : "Schedule your site visit"}
+        {busy ? "One moment…" : "Request a site visit"}
       </button>
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
     </>
@@ -455,7 +459,7 @@ function ResultView({ result, orgName, brand, est, handle, calendlyUrl, contact 
       ) : result.siteInspectionRequired ? (
         <>
           <h1 className="mt-4 text-2xl font-extrabold text-slate-900">Thanks — you're on the list</h1>
-          <p className="mt-2 text-slate-600">A project this size gets a free on-site visit for an exact price — pick a time now, or {orgName} will reach out.</p>
+          <p className="mt-2 text-slate-600">A project this size gets a free on-site visit for an exact price.</p>
           <ScheduleVisitCta handle={handle} calendlyUrl={calendlyUrl} contact={contact} brand={brand} />
         </>
       ) : (

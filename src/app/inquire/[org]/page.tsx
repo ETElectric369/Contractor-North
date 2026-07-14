@@ -17,8 +17,9 @@ export default async function InquirePage({ params, searchParams }: { params: Pr
   const o = (data ?? null) as any;
   if (!o || !o.name) notFound();
 
-  // The post-submit "schedule your site visit" hand-off: Calendly when the org
-  // configured one, else North's built-in 3-slot /pick flow. The public_org RPC
+  // The post-submit "request a site visit" hand-off: Calendly when the org
+  // configured one, else North's built-in request flow (the office is pinged to
+  // text a few time options — no auto-offered slots). The public_org RPC
   // doesn't carry settings, so read them with the service client (org id was
   // just validated above). https-only — anything else is treated as unset.
   const { data: orgRow } = await createServiceClient()

@@ -16,7 +16,8 @@ export function InquiryForm({
   org: string;
   brandColor: string;
   refId?: string | null;
-  /** Org's external scheduling link (https-validated server-side). Empty = built-in /pick flow. */
+  /** Org's external scheduling link (https-validated server-side). Empty = built-in
+   *  request flow: flag the lead + ping the office to text a few time options. */
   calendlyUrl?: string;
 }) {
   const [name, setName] = useState("");
@@ -31,9 +32,10 @@ export function InquiryForm({
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Post-submit "schedule your site visit" (the built-in /pick flow).
+  // Post-submit "request a site visit" (the built-in office-in-the-loop flow:
+  // no auto-offered slots — the office texts time options).
   const [scheduling, setScheduling] = useState(false);
-  const [schedDone, setSchedDone] = useState(false);
+  const [schedDone, setSchedDone] = useState<string | null>(null); // confirmation copy once the request lands
   const [schedError, setSchedError] = useState<string | null>(null);
 
   async function scheduleVisit() {
@@ -45,9 +47,11 @@ export function InquiryForm({
         name, phone, email, address, city, state: stateName, zip, message, hp,
       });
       if (!res.ok) { setSchedError(res.error ?? "Something went wrong — please call us instead."); return; }
-      if (res.token) { window.location.assign(`/pick/${res.token}`); return; }
-      // Bot-trap fake success or an office-made booking already exists — just confirm.
-      setSchedDone(true);
+      setSchedDone(
+        res.already
+          ? "You're on the schedule — we'll confirm your time shortly."
+          : "Request received — we'll text you a few time options shortly.",
+      );
     } catch {
       setSchedError("Something went wrong — please call us instead.");
     } finally {
@@ -93,10 +97,10 @@ export function InquiryForm({
         <h2 className="mt-3 text-xl font-bold text-slate-900">Thank you!</h2>
         <p className="mt-1 text-slate-600">We got your request and will reach out shortly.</p>
 
-        {/* Don't make them wait for the phone tag — schedule the site visit now. */}
+        {/* Don't make them wait for the phone tag — request the site visit now. */}
         {schedDone ? (
           <p className="mt-5 rounded-lg bg-slate-50 px-3 py-2.5 text-sm text-slate-600">
-            You&apos;re on the schedule — we&apos;ll confirm your time shortly.
+            {schedDone}
           </p>
         ) : calendlyUrl ? (
           <a
@@ -117,12 +121,12 @@ export function InquiryForm({
             style={{ backgroundColor: brandColor }}
           >
             {scheduling ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarClock className="h-4 w-4" />}
-            {scheduling ? "One moment…" : "Schedule your site visit"}
+            {scheduling ? "One moment…" : "Request a site visit"}
           </button>
         )}
         {schedError && <p className="mt-2 text-sm text-red-600">{schedError}</p>}
         {!schedDone && !calendlyUrl && (
-          <p className="mt-2 text-xs text-slate-400">Pick a time that works — we&apos;ll lock it in.</p>
+          <p className="mt-2 text-xs text-slate-400">We&apos;ll text you a few time options to pick from.</p>
         )}
       </div>
     );
