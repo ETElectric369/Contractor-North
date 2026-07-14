@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
+import { workDayWindowHm } from "@/lib/org-settings";
 import { getSchedulePickerOptions } from "@/lib/schedule-options";
 import {
   CalendarView,
@@ -22,7 +23,7 @@ export async function CalendarPanel() {
   const jobFrom = new Date(now - 120 * 86400_000).toISOString();
   const jobTo = new Date(now + 400 * 86400_000).toISOString();
 
-  const [{ data: jobs }, { data: segments }, { data: appointments }, { data: tasks }, { data: unschedRows }, picker] =
+  const [{ data: jobs }, { data: segments }, { data: appointments }, { data: tasks }, { data: unschedRows }, picker, { data: org }] =
     await Promise.all([
       // Overlap test, not a point test on scheduled_start: a job shows if it
       // STARTS before the window end AND (ends after the window start, or is an
@@ -73,6 +74,9 @@ export async function CalendarPanel() {
       // Jobs/customers/staff option lists for the appointment modal; the staff
       // rows double as the roster (assignee dropdowns, initials, person filter).
       getSchedulePickerOptions(supabase),
+      // Org settings: the configured work-day start is the "all-day job" time
+      // sentinel the week agenda uses to decide whether to render a start time.
+      supabase.from("organizations").select("settings").limit(1).maybeSingle(),
     ]);
 
   const unscheduled = (unschedRows ?? []).map((j: any) => ({
@@ -93,6 +97,7 @@ export async function CalendarPanel() {
         members={picker.staff}
         picker={{ jobs: picker.jobOpts, customers: picker.custOpts, staff: picker.staffOpts }}
         now={new Date().toISOString()}
+        workDayStart={workDayWindowHm((org as any)?.settings).start}
       />
     </div>
   );

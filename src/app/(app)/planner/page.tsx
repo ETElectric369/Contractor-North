@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { isStaffRole } from "@/lib/actions/perms";
 import { redirect } from "next/navigation";
-import { CalendarCheck, ChevronLeft, ChevronRight, UserPlus, Receipt, Navigation, FolderClosed, ListTodo } from "lucide-react";
+import { CalendarCheck, ChevronLeft, ChevronRight, ClipboardList, UserPlus, Receipt, Navigation, FolderClosed, ListTodo } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { RefreshOnVisible } from "@/components/refresh-on-visible";
 import { WeatherWidget } from "@/components/weather-widget";
@@ -113,7 +113,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   // their OWN open time entry, so the "Now" hero is their site, not a coworker's),
   // the staff-only money pipeline, the six-slot pool, and the door/progress
   // head-counts — run together in one final round.
-  const [curJobRes, pipeline, poolR, elseCountR, officeCountR, officeDueR, doneTodayR] = await Promise.all([
+  const [curJobRes, pipeline, poolR, elseCountR, officeCountR, officeDueR, doneTodayR, dailyReportsR] = await Promise.all([
     openEntry?.job_id
       ? supabase.from("jobs").select("id, job_number, name, status, address, customers(name)").eq("id", openEntry.job_id).maybeSingle()
       : Promise.resolve({ data: null }),
@@ -156,9 +156,26 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         .gte("completed_at", dayStart.toISOString())
         .lt("completed_at", dayEnd.toISOString()),
     ),
+    // TODAY's crew-lead daily reports (staff only) — the debriefs Nort filed at
+    // clock-out. Fails soft (empty) until migration 0128 lands.
+    isStaff
+      ? supabase
+          .from("daily_reports")
+          .select("id, profile_id, did_today, materials_tomorrow, created_at, profiles:profile_id(full_name)")
+          .eq("report_date", todayStr)
+          .order("created_at", { ascending: false })
+      : Promise.resolve({ data: [] as any[] }),
   ]);
   // The boss's live crew board (staff only) — every member's on/off-clock + job + hours today.
   const crew = isStaff ? await getCrewStatus(supabase) : [];
+  const dailyReports = (((dailyReportsR as any)?.data ?? []) as {
+    id: string;
+    profile_id: string;
+    did_today: string | null;
+    materials_tomorrow: string | null;
+    created_at: string;
+    profiles: { full_name: string | null } | null;
+  }[]);
   const currentJob = ((curJobRes as any)?.data as any) ?? undefined;
   const sixPool = ((poolR as any)?.data ?? []) as any[];
   // THE shared rank (lib/six-rank — the same function behind the morning digest,
@@ -474,6 +491,47 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           Erik: "boss needs to see what everyone is doing all the time." Hours moved to payroll
           (/timecards) — the crew-hours table isn't needed anywhere else. */}
       {isStaff && crew.length > 0 && <CrewBoard crew={crew} />}
+
+      {/* Crew-lead daily reports (staff only) — the clock-out debriefs Nort filed today:
+          what got done + what materials they need tomorrow. Lightweight by design; the
+          full report (with the GPS day summary) is reviewed from the timecards side. */}
+      {isStaff && dailyReports.length > 0 && (
+        <Card className="mb-4 overflow-hidden">
+          <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
+            <div className="flex items-center gap-2">
+              <ClipboardList className="h-4 w-4 text-slate-400" />
+              <span className="text-sm font-semibold text-slate-800">Daily reports</span>
+            </div>
+            <span className="text-xs font-medium text-slate-500">{dailyReports.length} today</span>
+          </div>
+          <div className="divide-y divide-slate-50">
+            {dailyReports.map((r) => (
+              <div key={r.id} className="px-5 py-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-sm font-medium text-slate-800">
+                    {r.profiles?.full_name ?? "Crew member"}
+                  </span>
+                  {r.materials_tomorrow && <Badge tone="amber">materials</Badge>}
+                </div>
+                {r.did_today && (
+                  <p className="mt-0.5 truncate text-xs text-slate-500">{r.did_today.split("\n")[0]}</p>
+                )}
+                {r.materials_tomorrow && (
+                  <p className="mt-0.5 truncate text-xs text-amber-700">
+                    Needs: {r.materials_tomorrow.split("\n")[0]}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+          <Link
+            href="/timecards"
+            className="block border-t border-slate-100 px-5 py-2 text-center text-xs font-medium text-brand hover:bg-slate-50"
+          >
+            Review in timecards
+          </Link>
+        </Card>
+      )}
 
       {/* TODAY — the execution feed in slot 2, so the 3-second glance (clock
           status + what's happening when) fits in one viewport, zero scroll. */}

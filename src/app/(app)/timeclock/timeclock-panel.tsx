@@ -26,6 +26,7 @@ import type { GeoPoint, JobCode, TimeEntry } from "@/lib/types";
 import { useToast } from "@/components/toast";
 import { clockIn, clockOut, switchJob, saveEntryNotes } from "./actions";
 import { ClockStartPicker } from "./clock-start-picker";
+import { DailyReportDebrief } from "./daily-report-debrief";
 
 interface AllocRow {
   job_id: string;
@@ -101,6 +102,7 @@ export function TimeclockPanel({
   autoLunch = false,
   homeAddress = "",
   isStaff = true,
+  crewLead = false,
 }: {
   openEntry: TimeEntry | null;
   openAllocations?: OpenAlloc[];
@@ -110,17 +112,22 @@ export function TimeclockPanel({
   autoLunch?: boolean;
   homeAddress?: string;
   isStaff?: boolean;
+  /** Crew leads (any role) get the Nort end-of-day debrief after clocking out. */
+  crewLead?: boolean;
 }) {
   const t = translator(lang);
   const toast = useToast();
   const [error, setError] = useState<string | null>(null);
   const [gpsNote, setGpsNote] = useState<string | null>(null); // "punch wasn't GPS-stamped" — surfaced, not silent
   const [pending, start] = useTransition();
-  // Clock-out is now a two-step "clock, then wrap up": the running view stays CLEAN (timer + Switch +
-  // Clock Out), and the day-breakdown questionnaire (jobs/hours, lunch/breaks, mileage, notes) only
-  // appears when they tap Clock Out. Erik: "the clock is just clock in/out; the questionnaire breaks
-  // down the day when they clock out." Nothing about the clock-out DATA changed — just when it's asked.
+  // STAFF clock-out is a two-step "clock, then wrap up": the running view stays CLEAN, and the
+  // day-breakdown questionnaire (jobs/hours, lunch/breaks, mileage, notes) only appears when they
+  // tap Clock Out. A TECH never sees it (Erik's two-button rework): their Clock Out is ONE tap —
+  // the server auto-deducts lunch and the job was already resolved at clock-in.
   const [clockingOut, setClockingOut] = useState(false);
+  // Crew-lead debrief — opens AFTER a successful clock-out (the entry is closed, so this
+  // state must live here, above the openEntry branch, to survive the panel's re-render).
+  const [debriefOpen, setDebriefOpen] = useState(false);
 
   // clock-in form
   const [jobId, setJobId] = useState("");
@@ -433,6 +440,8 @@ export function TimeclockPanel({
           })),
         });
         if (!res.ok) setError(res.error ?? "Could not clock out.");
+        // Crew leads owe the office the end-of-day debrief — Nort asks right here.
+        else if (crewLead) setDebriefOpen(true);
       } catch {
         // Dead spot — the entry stays open and every field on this form is kept;
         // tapping again with signal completes the same clock-out.
@@ -461,17 +470,26 @@ export function TimeclockPanel({
           allocations: [],
         });
         if (!res.ok) setError(res.error ?? "Could not clock out.");
+        else if (crewLead) setDebriefOpen(true);
       } catch {
         setError(OFFLINE_MSG);
       }
     });
   }
 
+  // The Nort debrief lives OUTSIDE the openEntry branch: a successful clock-out
+  // refreshes the page data and re-renders this panel into the not-clocked-in view,
+  // and the modal must survive that swap.
+  const debrief = crewLead ? (
+    <DailyReportDebrief open={debriefOpen} onClose={() => setDebriefOpen(false)} />
+  ) : null;
+
   if (openEntry) {
     const elapsed = hoursBetween(openEntry.clock_in, new Date(now), lunchToUse);
     const jobLabel =
       jobs.find((j) => j.id === openEntry.job_id)?.name ?? "No job selected";
     return (
+      <>
       <Card className="border-green-200">
         <CardContent className="space-y-5 py-6">
           <div className="flex items-center gap-3">
@@ -505,8 +523,9 @@ export function TimeclockPanel({
 
           {/* Mid-shift job switch — a DURING-shift action, so it lives in the clean running view;
               captures the split AS IT HAPPENS (outgoing job's hours recorded server-side + a notes
-              breadcrumb) instead of reconstructing the day from memory at 4pm. */}
-          {!clockingOut && (switching ? (
+              breadcrumb) instead of reconstructing the day from memory at 4pm. STAFF ONLY now —
+              a tech's clock is two buttons; the office moves their job assignment instead. */}
+          {isStaff && !clockingOut && (switching ? (
             <div className="space-y-2 rounded-xl border border-brand/30 bg-brand/5 p-3">
               <Label className="mb-0 flex items-center gap-1.5 text-slate-900">
                 <ArrowLeftRight className="h-4 w-4 text-brand" /> Switch job
@@ -560,12 +579,29 @@ export function TimeclockPanel({
             </Button>
           ))}
 
-          {/* The big Clock Out — this OPENS the wrap-up questionnaire; it doesn't clock out yet. */}
+          {/* The big Clock Out. STAFF: opens the wrap-up questionnaire (doesn't clock out yet).
+              TECH: ONE tap clocks out right here — no questionnaire, no lunch checkboxes, no
+              mileage; the server auto-deducts lunch (>5h ⇒ 30 min) and any mid-shift split
+              already recorded on the entry rides along via the seeded allocation rows. */}
           {!clockingOut && (
             <>
               {error && <p className="text-sm text-red-600">{error}</p>}
-              <Button variant="destructive" size="lg" className="w-full" onClick={() => setClockingOut(true)} disabled={pending || switchPending}>
-                <Square className="h-5 w-5" /> {t("tc_clockOut")}
+              <Button
+                variant="destructive"
+                size="lg"
+                className="w-full"
+                onClick={isStaff ? () => setClockingOut(true) : doClockOut}
+                disabled={pending || switchPending}
+              >
+                {!isStaff && pending ? (
+                  <>
+                    <Loader2 className="h-5 w-5 animate-spin" /> {t("tc_clockingOut")}
+                  </>
+                ) : (
+                  <>
+                    <Square className="h-5 w-5" /> {t("tc_clockOut")}
+                  </>
+                )}
               </Button>
             </>
           )}
@@ -792,17 +828,24 @@ export function TimeclockPanel({
           )}
         </CardContent>
       </Card>
+      {debrief}
+      </>
     );
   }
 
   // Not clocked in
   return (
+    <>
     <Card>
       <CardContent className="space-y-5 py-6">
         <div className="text-center">
           <p className="text-sm text-slate-500">{t("tc_notClockedIn")}</p>
         </div>
 
+        {/* Job + code pickers are STAFF-only now (Erik's two-button rework): a tech just
+            taps Clock In and the server resolves the job — today's assignment, else the
+            org's only in-progress job, else none (the office attaches it later). */}
+        {isStaff && (
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <Label htmlFor="job">{t("tc_job")}</Label>
@@ -827,6 +870,7 @@ export function TimeclockPanel({
             </Select>
           </div>
         </div>
+        )}
 
         <div>
           <Label>Start time</Label>
@@ -852,5 +896,7 @@ export function TimeclockPanel({
         </p>
       </CardContent>
     </Card>
+    {debrief}
+    </>
   );
 }

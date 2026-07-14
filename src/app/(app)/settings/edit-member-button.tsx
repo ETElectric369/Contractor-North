@@ -17,6 +17,7 @@ interface Member {
   active: boolean;
   home_address?: string | null;
   commute_baseline_miles?: number | null;
+  crew_lead?: boolean;
 }
 
 /** Owner/admin edit for a team member: name/role/active + login email/password.
@@ -47,6 +48,7 @@ export function EditMemberButton({
   const [commuteBaseline, setCommuteBaseline] = useState(Number(member.commute_baseline_miles ?? 0));
   const [role, setRole] = useState(member.role);
   const [active, setActive] = useState(member.active);
+  const [crewLead, setCrewLead] = useState(!!member.crew_lead);
   const [email, setEmail] = useState(member.email ?? "");
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
@@ -62,6 +64,7 @@ export function EditMemberButton({
         commute_baseline_miles: commuteBaseline,
         role: isSelf ? undefined : role,
         active: isSelf ? undefined : active,
+        crew_lead: crewLead,
       });
       if (!res.ok) return setError(res.error ?? "Could not save.");
 
@@ -155,6 +158,22 @@ export function EditMemberButton({
               </div>
             </div>
           )}
+          {/* Crew lead (any role): Nort asks them the end-of-day debrief — "what did you
+              do today?" + "what materials tomorrow?" — right after they clock out. */}
+          <label className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2.5 text-sm">
+            <input
+              type="checkbox"
+              checked={crewLead}
+              onChange={(e) => setCrewLead(e.target.checked)}
+              className="h-4 w-4 rounded border-slate-300 text-brand"
+            />
+            <span className="text-slate-700">
+              Crew leader
+              <span className="block text-xs text-slate-400">
+                Files a daily report at clock-out (what got done + materials for tomorrow).
+              </span>
+            </span>
+          </label>
 
           <div className="border-t border-slate-100 pt-4">
             <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Login</div>

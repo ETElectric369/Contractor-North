@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { JOB_STATUSES } from "@/lib/job-status";
 import { DRAW_KINDS } from "@/lib/invoice-math";
 import { emptyToNull } from "@/lib/forms";
+import { notifyJobCrewAdded } from "@/lib/crew-notify";
 import { visibleJobIdOrNull, visibleTemplateIdOrNull } from "@/lib/job-visibility";
 import { requireStaff } from "@/lib/staff-guard";
 import { getOrgSettings } from "@/lib/org-settings";
@@ -246,6 +247,14 @@ export async function updateJob(
     ? { code_template_id: await visibleTemplateIdOrNull(supabase, emptyToNull(formData.get("code_template_id")) as string | null) }
     : {};
 
+  // Old crew first — this writer also changes assigned_to, so newly ADDED members
+  // get the same bell + "assigned" push as setJobCrew (the shared diff helper).
+  const { data: prevJob } = await supabase
+    .from("jobs")
+    .select("assigned_to, org_id, job_number")
+    .eq("id", id)
+    .maybeSingle();
+
   const { error } = await supabase
     .from("jobs")
     .update({
@@ -265,6 +274,11 @@ export async function updateJob(
     })
     .eq("id", id);
   if (error) return { ok: false, error: error.message };
+
+  if (prevJob) {
+    const p = prevJob as { assigned_to: string[] | null; org_id: string | null; job_number: string | null };
+    void notifyJobCrewAdded({ id, org_id: p.org_id, job_number: p.job_number, name }, p.assigned_to, assigned, ctx.userId);
+  }
 
   revalidatePath(`/jobs/${id}`);
   revalidatePath("/jobs");

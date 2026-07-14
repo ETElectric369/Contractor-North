@@ -219,6 +219,19 @@ export function parseGeoFromMapUrl(url: string | null | undefined): { lat: numbe
   return { lat, lng };
 }
 
+/** The scheduler's all-day work window as "HH:MM" strings, read from the RAW
+ *  stored settings (not the merged defaults): the Settings form displays
+ *  08:00–17:00 as its defaults, but an org that never SAVED a window keeps the
+ *  scheduler's original 8 AM–4 PM block — so wiring the setting changed nothing
+ *  for orgs that never touched it. One resolver, shared by the schedule writers
+ *  (all-day scheduled_start/end mirror) and the calendar's "hide the time on an
+ *  all-day job" sentinel, so the two can't drift. */
+export function workDayWindowHm(raw: unknown): { start: string; end: string } {
+  const stored = (raw && typeof raw === "object" ? raw : {}) as Partial<OrgSettings>;
+  const hm = (v: unknown): string | null => (typeof v === "string" && /^\d{2}:\d{2}$/.test(v) ? v : null);
+  return { start: hm(stored.work_day_start) ?? "08:00", end: hm(stored.work_day_end) ?? "16:00" };
+}
+
 /** Merge stored settings over defaults so every key is always present. */
 export function getOrgSettings(raw: unknown): OrgSettings {
   const stored = (raw && typeof raw === "object" ? raw : {}) as Partial<OrgSettings>;

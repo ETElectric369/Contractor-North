@@ -8,10 +8,67 @@ import { requireStaff } from "@/lib/staff-guard";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { hoursBetween } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
-import { tzDateTimeUtc } from "@/lib/tz";
+import { tzDateTimeUtc, todayBoundsInTz } from "@/lib/tz";
+import { createNotifications } from "@/lib/notifications";
+import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
+import { setJobCrew } from "../schedule/actions";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type { GeoPoint } from "@/lib/types";
 
 export type ClockResult = { ok: boolean; error?: string };
+
+/**
+ * The two-button tech flow's server-side job resolution: a tech's clock-in carries no
+ * job picker anymore (Erik: "the clock is two buttons"), so the job is derived here —
+ *   1. the job the tech is ASSIGNED to that's scheduled TODAY (scheduled_start today,
+ *      or a job_schedule_segments row covering the org-local day),
+ *   2. else the org's ONLY in_progress job (unambiguous),
+ *   3. else null — the entry lands job-less and the office attaches it later.
+ * Never guesses between candidates beyond "earliest scheduled first"; RLS scopes every
+ * read to the caller's org. Best-effort: any failure resolves to null, never blocks the punch.
+ */
+async function resolveTechJobToday(supabase: SupabaseClient, uid: string): Promise<string | null> {
+  try {
+    const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+    const tz = getOrgSettings((org as { settings?: unknown } | null)?.settings).timezone;
+    const { dayStart, dayEnd, todayStr } = todayBoundsInTz(tz);
+
+    const { data: mine } = await supabase
+      .from("jobs")
+      .select("id, scheduled_start")
+      .contains("assigned_to", [uid])
+      .in("status", ACTIVE_JOB_STATUSES);
+    const myJobs = (mine ?? []) as { id: string; scheduled_start: string | null }[];
+    if (myJobs.length) {
+      // Scheduled today via the segments table (multi-range jobs) …
+      const { data: segs } = await supabase
+        .from("job_schedule_segments")
+        .select("job_id")
+        .in("job_id", myJobs.map((j) => j.id))
+        .lte("start_date", todayStr)
+        .gte("end_date", todayStr);
+      const segToday = new Set(((segs ?? []) as { job_id: string }[]).map((s) => s.job_id));
+      // … or via the scheduled_start mirror (single-day jobs).
+      const today = myJobs
+        .filter((j) => {
+          if (segToday.has(j.id)) return true;
+          if (!j.scheduled_start) return false;
+          const t = new Date(j.scheduled_start).getTime();
+          return t >= dayStart.getTime() && t < dayEnd.getTime();
+        })
+        .sort((a, b) => (a.scheduled_start ?? "9999").localeCompare(b.scheduled_start ?? "9999"));
+      if (today.length) return today[0].id;
+    }
+
+    // No scheduled assignment — if the org has exactly ONE job in progress, that's the site.
+    const { data: prog } = await supabase.from("jobs").select("id").eq("status", "in_progress").limit(2);
+    const inProg = (prog ?? []) as { id: string }[];
+    if (inProg.length === 1) return inProg[0].id;
+    return null;
+  } catch {
+    return null; // the punch must never wait on / fail over job resolution
+  }
+}
 
 export async function clockIn(input: {
   job_id: string | null;
@@ -34,7 +91,13 @@ export async function clockIn(input: {
   // Only attach a job the caller can actually see (RLS-scoped) — a stray/foreign
   // job_id (e.g. from a hand-built action call) would otherwise persist as a
   // dangling reference. Drops it to a no-job entry instead.
-  const jobId = await visibleJobIdOrNull(supabase, input.job_id);
+  let jobId = await visibleJobIdOrNull(supabase, input.job_id);
+
+  // Two-button tech flow: the tech UI sends no job at all, so resolve it server-side
+  // (today's assignment → the only in_progress job → none; the office attaches later).
+  if (!jobId && !isStaff) {
+    jobId = await resolveTechJobToday(supabase, user.id);
+  }
 
   // Start time — never into the future (small skew), floored 31 days back so a
   // fat-fingered year can't create a monstrous open shift. For a tech the value is
@@ -253,19 +316,22 @@ export async function clockOut(input: {
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
 
-  // The codes+hours requirement (the wrong-hours-on-wrong-jobs fix) must hold on EVERY
-  // surface, not just the UI button — voice ("clock me out"), the action registry, and
-  // crafted calls all reach clockOut directly. A field tech can't close a shift with no
-  // code breakdown; staff reconcile later, and the geofence auto-close (input.auto)
-  // legitimately defers the codes to completeAutoClockOut.
-  if (!input.auto) {
-    const { data: me } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
-    const isStaff = isStaffRole((me as { role?: string } | null)?.role ?? "");
-    const allocOk = (input.allocations ?? []).some((a) => a.job_code && a.hours > 0);
-    if (!isStaff && !allocOk) {
-      return { ok: false, error: "Add the job code(s) you worked and the hours before clocking out." };
-    }
-  }
+  // The codes+hours requirement is GONE (Erik's two-button rework): a tech's clock-out
+  // is ONE tap — no questionnaire — so allocations are optional for everyone. The job
+  // was already resolved at clock-in; a job-less/split day is the office's reconcile.
+  // Role still decides the auto-lunch below.
+  const { data: me } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
+  const isStaff = isStaffRole((me as { role?: string } | null)?.role ?? "");
+
+  // One self-scoped read of the entry's clock_in — feeds the `at` clamp, the
+  // auto-lunch, and the allocation clamp below.
+  const { data: entRow } = await supabase
+    .from("time_entries")
+    .select("clock_in")
+    .eq("id", input.entry_id)
+    .eq("profile_id", user.id)
+    .maybeSingle();
+  const entClockIn = (entRow as { clock_in?: string } | null)?.clock_in ?? null;
 
   // Clock-out time defaults to now; `at` (the geofence "time they left") is honored
   // only if it's not in the future and not before clock-in (never negative hours).
@@ -273,17 +339,27 @@ export async function clockOut(input: {
   if (input.at) {
     const atMs = Date.parse(input.at);
     if (!isNaN(atMs) && atMs <= Date.now() + 60_000) {
-      const { data: e } = await supabase.from("time_entries").select("clock_in").eq("id", input.entry_id).maybeSingle();
-      const ciMs = e?.clock_in ? Date.parse(e.clock_in) : 0;
+      const ciMs = entClockIn ? Date.parse(entClockIn) : 0;
       clockOutIso = new Date(Math.max(atMs, ciMs + 60_000)).toISOString();
     }
+  }
+
+  // Auto-lunch (Erik: "automatically deduct lunch"): a tech's one-tap clock-out asks no
+  // lunch question, so a shift over 5 GROSS hours deducts the 30-minute meal here. An
+  // explicit larger figure (voice: "I took an hour") is honored; the geofence auto-close
+  // (input.auto) keeps its after-the-fact flow — completeAutoClockOut still asks, and
+  // lunch there can only reduce hours. Staff answer the questionnaire as before.
+  let lunchMinutes = input.lunch_minutes || 0;
+  if (!isStaff && !input.auto && entClockIn) {
+    const gross = hoursBetween(entClockIn, clockOutIso, 0);
+    if (gross > 5) lunchMinutes = Math.max(lunchMinutes, 30);
   }
 
   const { error } = await supabase
     .from("time_entries")
     .update({
       clock_out: clockOutIso,
-      lunch_minutes: input.lunch_minutes || 0,
+      lunch_minutes: lunchMinutes,
       notes: input.notes || null,
       gps_out: input.gps,
       status: "closed",
@@ -305,19 +381,11 @@ export async function clockOut(input: {
   );
   // C7: clamp the caller-supplied split to the entry's worked hours BEFORE persisting,
   // so a voice/registry/crafted call can't bill/cost more hours than payroll pays.
-  // Re-read clock_in (so we don't trust the caller for the shift bounds) and use the
-  // final clock_out + lunch we're about to write — the same gross-minus-lunch payroll uses.
-  if (allocations.length) {
-    const { data: ent } = await supabase
-      .from("time_entries")
-      .select("clock_in")
-      .eq("id", input.entry_id)
-      .eq("profile_id", user.id)
-      .maybeSingle();
-    if (ent?.clock_in) {
-      const workedHrs = hoursBetween(ent.clock_in, clockOutIso, input.lunch_minutes || 0);
-      allocations = clampAllocationHours(allocations, workedHrs);
-    }
+  // clock_in came from the self-scoped read above (never the caller) and the clamp uses
+  // the final clock_out + lunch we just wrote — the same gross-minus-lunch payroll uses.
+  if (allocations.length && entClockIn) {
+    const workedHrs = hoursBetween(entClockIn, clockOutIso, lunchMinutes);
+    allocations = clampAllocationHours(allocations, workedHrs);
   }
   const { data: oldAllocs } = await supabase
     .from("time_allocations")
@@ -354,8 +422,9 @@ export async function clockOutCurrent(input: {
   miles?: number;
   notes?: string;
   lunch_minutes?: number;
-  /** The job-code/hours split — required for a TECH to close a shift (the codes-and-hours
-   *  rule), so voice ("clock me out, 6 hours on rough-in") can finally complete a clock-out. */
+  /** Optional job-code/hours split (voice: "clock me out, 6 hours on rough-in").
+   *  Optional for everyone since the two-button rework — with no split the entry
+   *  bills gross to its own job. */
   allocations?: JobAllocationInput[];
 }): Promise<ClockResult> {
   const supabase = await createClient();
@@ -838,5 +907,221 @@ export async function saveEntryNotes(
   if (error) return { ok: false, error: error.message };
   revalidatePath("/timeclock");
   revalidatePath("/planner"); // notes/job changes surface on My Day
+  return { ok: true };
+}
+
+/**
+ * Office crew assignment (the /timeclock admin list): put a member on ONE active job
+ * for today — or none. Removes them from every OTHER active job's crew and adds them
+ * to the chosen one, routing every write through the canonical setJobCrew (which
+ * diffs the crew and notifies the added member — bell + "assigned" push). Staff-only.
+ */
+export async function assignMemberToJob(memberId: string, jobId: string | null): Promise<ClockResult> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+
+  // The member must be visible to the caller (RLS keeps this org-scoped).
+  const { data: member } = await supabase.from("profiles").select("id").eq("id", memberId).maybeSingle();
+  if (!member) return { ok: false, error: "Member not found." };
+
+  // Every ACTIVE job currently carrying this member (the set to clear).
+  const { data: mine } = await supabase
+    .from("jobs")
+    .select("id, assigned_to")
+    .contains("assigned_to", [memberId])
+    .in("status", ACTIVE_JOB_STATUSES);
+  const carrying = (mine ?? []) as { id: string; assigned_to: string[] | null }[];
+
+  // ADD to the chosen job first — a mid-way failure must never leave them unassigned.
+  if (jobId) {
+    const { data: target } = await supabase.from("jobs").select("id, assigned_to").eq("id", jobId).maybeSingle();
+    if (!target) return { ok: false, error: "Job not found." };
+    const ids = ((target as { assigned_to?: string[] | null }).assigned_to ?? []) as string[];
+    if (!ids.includes(memberId)) {
+      const res = await setJobCrew(jobId, [...ids, memberId]);
+      if (!res.ok) return { ok: false, error: res.error };
+    }
+  }
+  // …then take them off every other active job (removals are silent by design).
+  for (const j of carrying) {
+    if (j.id === jobId) continue;
+    const res = await setJobCrew(j.id, (j.assigned_to ?? []).filter((x) => x !== memberId));
+    if (!res.ok) return { ok: false, error: res.error };
+  }
+
+  revalidatePath("/timeclock"); // setJobCrew already refreshed /schedule, /planner, the job pages
+  return { ok: true };
+}
+
+export type DailyReportSummary = {
+  total_hours: number;
+  miles: number;
+  first_in: string | null;
+  last_out: string | null;
+  jobs: { job_id: string | null; label: string; hours: number }[];
+};
+export type DailyReportResult = ClockResult & { summary?: DailyReportSummary };
+
+/**
+ * The crew-lead debrief: file (upsert) today's daily report — "what did you do today?"
+ * + "what materials do you need tomorrow?" — for the CALLER, stamped with a GPS-derived
+ * day summary built from their own time_entries + allocations ("GPS tells the story:
+ * drive time, miles, arrive at job, time on job"). One report per person per org-local
+ * day (re-filing revises it). Confirmed by Nort and filed for office editing; org staff
+ * get the bell + a "daily_report" push (the quote-accept dual-channel pattern), never
+ * the filer themselves.
+ */
+export async function fileDailyReport(input: {
+  did_today: string;
+  materials_tomorrow: string;
+}): Promise<DailyReportResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  const did = (input.did_today ?? "").trim();
+  const mats = (input.materials_tomorrow ?? "").trim();
+  if (!did && !mats) return { ok: false, error: "Say what you did today (or dictate it) before filing." };
+
+  const { data: meRow } = await supabase
+    .from("profiles")
+    .select("org_id, full_name")
+    .eq("id", user.id)
+    .maybeSingle();
+  const me = meRow as { org_id: string | null; full_name: string | null } | null;
+  if (!me?.org_id) return { ok: false, error: "No organization on your profile." };
+
+  // "Today" is the ORG's local day — the same boundary the clock pages use.
+  const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+  const tz = getOrgSettings((org as { settings?: unknown } | null)?.settings).timezone;
+  const { dayStart, dayEnd, todayStr } = todayBoundsInTz(tz);
+
+  // GPS summary — the caller's own day: entries that STARTED today, their split rows,
+  // total net hours, miles, first arrival / last departure, and hours per job.
+  const { data: entries } = await supabase
+    .from("time_entries")
+    .select("id, clock_in, clock_out, lunch_minutes, miles, job_id, status, time_allocations(job_id, hours)")
+    .eq("profile_id", user.id)
+    .gte("clock_in", dayStart.toISOString())
+    .lt("clock_in", dayEnd.toISOString());
+  const rows = (entries ?? []) as {
+    id: string;
+    clock_in: string;
+    clock_out: string | null;
+    lunch_minutes: number | null;
+    miles: number | null;
+    job_id: string | null;
+    status: string;
+    time_allocations?: { job_id: string | null; hours: number | null }[] | null;
+  }[];
+
+  let totalHours = 0;
+  let miles = 0;
+  let firstIn: string | null = null;
+  let lastOut: string | null = null;
+  const perJob = new Map<string, number>(); // job_id (or "") → hours
+  for (const e of rows) {
+    const end = e.clock_out ?? new Date().toISOString(); // an open entry counts to "now"
+    const h = hoursBetween(e.clock_in, end, e.lunch_minutes ?? 0);
+    totalHours += h;
+    miles += Number(e.miles) || 0;
+    if (!firstIn || e.clock_in < firstIn) firstIn = e.clock_in;
+    if (e.clock_out && (!lastOut || e.clock_out > lastOut)) lastOut = e.clock_out;
+    const allocs = (e.time_allocations ?? []).filter((a) => (Number(a.hours) || 0) > 0);
+    if (allocs.length) {
+      for (const a of allocs) {
+        const key = a.job_id ?? "";
+        perJob.set(key, (perJob.get(key) ?? 0) + (Number(a.hours) || 0));
+      }
+    } else {
+      const key = e.job_id ?? "";
+      perJob.set(key, (perJob.get(key) ?? 0) + h);
+    }
+  }
+  // Labels for the jobs touched today (one RLS-scoped lookup).
+  const jobIds = [...perJob.keys()].filter(Boolean);
+  const labelMap = new Map<string, string>();
+  if (jobIds.length) {
+    const { data: jobRows } = await supabase.from("jobs").select("id, job_number, name").in("id", jobIds);
+    for (const j of (jobRows ?? []) as { id: string; job_number: string | null; name: string | null }[]) {
+      labelMap.set(j.id, [j.job_number, j.name].filter(Boolean).join(" · ") || j.id);
+    }
+  }
+  const summary: DailyReportSummary = {
+    total_hours: Math.round(totalHours * 100) / 100,
+    miles: Math.round(miles * 10) / 10,
+    first_in: firstIn,
+    last_out: lastOut,
+    jobs: [...perJob.entries()].map(([jobId, hours]) => ({
+      job_id: jobId || null,
+      label: jobId ? labelMap.get(jobId) ?? "a job" : "No job set",
+      hours: Math.round(hours * 100) / 100,
+    })),
+  };
+
+  // One row per (org, person, day) — re-filing revises. org_id passed explicitly
+  // (belt) on top of the set_org_id stamp trigger (suspenders).
+  const { error } = await supabase.from("daily_reports").upsert(
+    {
+      org_id: me.org_id,
+      profile_id: user.id,
+      report_date: todayStr,
+      did_today: did || null,
+      materials_tomorrow: mats || null,
+      gps_summary: summary,
+      status: "filed",
+    },
+    { onConflict: "org_id,profile_id,report_date" },
+  );
+  if (error) return { ok: false, error: error.message };
+
+  // Tell the office — bell (always works) + push, suppressing the filer.
+  const staff = (await orgStaffIds(me.org_id)).filter((id) => id !== user.id);
+  const name = me.full_name ?? "the crew";
+  const payload = {
+    title: `Daily report from ${name}`,
+    body: (did || mats).split("\n")[0].slice(0, 140),
+    url: "/timecards",
+  };
+  await createNotifications(me.org_id, staff, { type: "daily_report", ...payload });
+  await sendPushToProfiles(staff, "daily_report", payload);
+
+  revalidatePath("/planner"); // the boss's Daily reports card
+  revalidatePath("/timecards");
+  return { ok: true, summary };
+}
+
+/**
+ * Geofence site-leave push — TECHS ONLY (Erik: "push at geofence for clock out only
+ * for techs"). The GeofenceMonitor's leave-site detection is client-side, so it calls
+ * this tiny hook when the prompt sheet opens; the push complements the sheet (which
+ * only renders while the app is foregrounded) and never replaces the existing
+ * auto-clockout behavior. Self-targeted by construction — the recipient is always the
+ * CALLER — and inert unless they're actually clocked in, so a stray call can't spam.
+ */
+export async function notifyGeofenceExit(jobLabel?: string): Promise<ClockResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+  const { data: me } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
+  if (isStaffRole((me as { role?: string } | null)?.role ?? "")) return { ok: true }; // techs only
+  const { data: open } = await supabase
+    .from("time_entries")
+    .select("id")
+    .eq("profile_id", user.id)
+    .eq("status", "open")
+    .maybeSingle();
+  if (!open) return { ok: true }; // not on the clock — nothing to remind
+  const label = (jobLabel ?? "").trim().slice(0, 80) || "the job site";
+  await sendPushToProfiles([user.id], "clock_out", {
+    title: "Clock out?",
+    body: `Looks like you left ${label} — you're still on the clock.`,
+    url: "/timeclock",
+  });
   return { ok: true };
 }

@@ -101,10 +101,11 @@ export default async function TeamPage() {
                   </div>
                   {isAdmin && <MemberRate id={m.id} rate={m.hourly_rate} billRate={(m as any).bill_rate ?? null} />}
                   {!m.active && <Badge tone="red">inactive</Badge>}
+                  {!!(m as any).crew_lead && <Badge tone="green">crew lead</Badge>}
                   <Badge tone={roleTone[m.role]}>{m.role}</Badge>
                   {isAdmin && (
                     <TeamMemberMenu
-                      member={{ id: m.id, full_name: m.full_name, email: m.email, phone: (m as any).phone ?? null, role: m.role, active: m.active, home_address: m.home_address, commute_baseline_miles: (m as any).commute_baseline_miles ?? 0 }}
+                      member={{ id: m.id, full_name: m.full_name, email: m.email, phone: (m as any).phone ?? null, role: m.role, active: m.active, home_address: m.home_address, commute_baseline_miles: (m as any).commute_baseline_miles ?? 0, crew_lead: !!(m as any).crew_lead }}
                       isSelf={m.id === profile.id}
                       isOwnerRow={m.role === "owner"}
                       authConfigured={adminConfigured()}

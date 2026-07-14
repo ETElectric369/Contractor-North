@@ -149,6 +149,7 @@ export function CalendarView({
   members = [],
   picker,
   now,
+  workDayStart = "08:00",
 }: {
   jobs: CalJob[];
   segments?: CalSegment[];
@@ -159,6 +160,9 @@ export function CalendarView({
   picker: SchedulePicker;
   /** Server's "now" (ISO) — keeps SSR and first client render in sync. */
   now: string;
+  /** The org's work_day_start ("HH:MM") — the all-day job time sentinel the
+   *  week agenda hides. Defaults to the scheduler's original 8 AM. */
+  workDayStart?: string;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -490,7 +494,7 @@ export function CalendarView({
 
       {view === "month" && <MonthGrid anchor={anchor} byDay={byDay} todayK={todayK} onPick={handleDayTap} />}
       {view === "week" && (
-        <WeekAgenda days={weekDays} byDay={byDay} todayK={todayK} members={members} onDayTap={handleDayTap} />
+        <WeekAgenda days={weekDays} byDay={byDay} todayK={todayK} members={members} onDayTap={handleDayTap} workDayStart={workDayStart} />
       )}
       {view === "day" && <DayDetail dayK={anchorK} data={byDay.get(anchorK)} members={members} picker={picker} />}
 

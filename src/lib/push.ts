@@ -44,7 +44,8 @@ export type PushKind =
   | "quote_accepted"
   | "invoice_paid"
   | "day_ahead"
-  | "clock_out";
+  | "clock_out"
+  | "daily_report";
 
 // What each trigger defaults to when a user hasn't set an explicit toggle.
 const DEFAULTS: Record<PushKind, boolean> = {
@@ -53,7 +54,12 @@ const DEFAULTS: Record<PushKind, boolean> = {
   quote_accepted: true,
   invoice_paid: true,
   day_ahead: false,
-  clock_out: false,
+  // Defaults ON now that a sender exists (notifyGeofenceExit): it only fires for a
+  // NON-STAFF user who left the geofence while clocked in — Erik: "push at geofence
+  // for clock out only for techs". Opt out per-user in Settings → Notifications.
+  clock_out: true,
+  // A crew lead's end-of-day debrief was filed — staff-facing, like quote_accepted.
+  daily_report: true,
 };
 
 /**

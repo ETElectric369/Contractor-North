@@ -2,18 +2,19 @@
 
 import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
+import { notifyJobCrewAdded } from "@/lib/crew-notify";
 import { requireStaff } from "@/lib/staff-guard";
 import { JOB_STATUSES } from "@/lib/job-status";
-import { getOrgSettings } from "@/lib/org-settings";
-import { todayStrInTz, tzLocalHourUtc, tzDateTimeUtc } from "@/lib/tz";
+import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
+import { todayStrInTz, tzDateTimeUtc } from "@/lib/tz";
 import { addDaySegment, shiftSegmentCovering } from "@/lib/schedule-math";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type Result = { ok: boolean; error?: string; id?: string };
 
-// Work-day window the scheduler blocks off for a dated (all-day) job.
-const DAY_START_HOUR = 8; // 8 AM local
-const DAY_END_HOUR = 16; // 4 PM local
+// Work-day window the scheduler blocks off for a dated (all-day) job: the org's
+// work_day_start/work_day_end (Settings → Scheduling), via workDayWindowHm —
+// which keeps the original 8 AM–4 PM block for an org that never saved a window.
 
 /** The org's IANA timezone (default America/Los_Angeles). Server actions run in
  *  UTC, so any "8 AM local" instant must be built against this — never via a
@@ -23,12 +24,24 @@ async function orgTimezone(supabase: SupabaseClient): Promise<string> {
   return getOrgSettings((data as any)?.settings).timezone;
 }
 
+/** Timezone + the all-day work window ("HH:MM" start/end), ONE settings query —
+ *  the schedule-writer bundle. */
+async function orgSchedulePrefs(
+  supabase: SupabaseClient,
+): Promise<{ tz: string; dayStartHm: string; dayEndHm: string }> {
+  const { data } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+  const raw = (data as any)?.settings;
+  const win = workDayWindowHm(raw);
+  return { tz: getOrgSettings(raw).timezone, dayStartHm: win.start, dayEndHm: win.end };
+}
+
 /** The stored scheduled_start's wall-clock "HH:MM" in the org timezone, or null.
  *  Lets a day-move preserve an explicit start time instead of snapping back to
- *  the 8 AM default. A time that reads exactly as the all-day default window
- *  start (08:00) is treated as "no explicit time" — the same convention the
- *  calendar uses to decide whether to render a time at all. */
-function localHmInTz(iso: string | null, tz: string): string | null {
+ *  the all-day default. A time that reads exactly as the all-day window start
+ *  (allDayHm — the org's work_day_start, default 08:00) is treated as "no
+ *  explicit time" — the same convention the calendar uses to decide whether to
+ *  render a time at all. */
+function localHmInTz(iso: string | null, tz: string, allDayHm: string): string | null {
   if (!iso) return null;
   const hm = new Intl.DateTimeFormat("en-GB", {
     timeZone: tz,
@@ -36,7 +49,7 @@ function localHmInTz(iso: string | null, tz: string): string | null {
     minute: "2-digit",
     hourCycle: "h23",
   }).format(new Date(iso));
-  return hm === `${String(DAY_START_HOUR).padStart(2, "0")}:00` ? null : hm;
+  return hm === allDayHm ? null : hm;
 }
 
 /** Advance an early-stage job to "scheduled" once it has a date — without ever
@@ -140,11 +153,23 @@ export async function setJobAssignee(
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  const ids = employeeId ? [employeeId] : [];
+  // Read the OLD crew first so the write can be diffed — a newly ADDED member gets
+  // the bell + "assigned" push (never the caller, never on removal).
+  const { data: prev } = await supabase
+    .from("jobs")
+    .select("assigned_to, org_id, job_number, name")
+    .eq("id", id)
+    .maybeSingle();
   const { error } = await supabase
     .from("jobs")
-    .update({ assigned_to: employeeId ? [employeeId] : [] })
+    .update({ assigned_to: ids })
     .eq("id", id);
   if (error) return { ok: false, error: error.message };
+  if (prev) {
+    const p = prev as { assigned_to: string[] | null; org_id: string | null; job_number: string | null; name: string | null };
+    void notifyJobCrewAdded({ id, org_id: p.org_id, job_number: p.job_number, name: p.name }, p.assigned_to, ids, ctx.userId);
+  }
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day reads today's scheduled jobs — keep it in sync
   revalidatePath(`/jobs/${id}`);
@@ -154,14 +179,26 @@ export async function setJobAssignee(
 /** Set a job's FULL crew (multi-assign). The picker sends the complete desired set, so ticking a
  *  SECOND person ADDS them instead of replacing — the "put both me and Brian on it" fix. This is the
  *  #1 item from both the audit and Nort's self-review: the old single-Select silently overwrote the
- *  crew to one person. De-duped; empty = unassigned. Same guards/revalidation as setJobAssignee. */
+ *  crew to one person. De-duped; empty = unassigned. Same guards/revalidation as setJobAssignee.
+ *  Newly ADDED members are notified (bell + push) via the shared diff helper — every caller
+ *  (crew picker, /timeclock assignment list, registry verb) gets it for free. */
 export async function setJobCrew(id: string, employeeIds: string[]): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
   const ids = Array.from(new Set((employeeIds ?? []).map(String).filter(Boolean)));
+  // Old crew first (diff base) — also proves the job is visible to the caller.
+  const { data: prev } = await supabase
+    .from("jobs")
+    .select("assigned_to, org_id, job_number, name")
+    .eq("id", id)
+    .maybeSingle();
   const { error } = await supabase.from("jobs").update({ assigned_to: ids }).eq("id", id);
   if (error) return { ok: false, error: error.message };
+  if (prev) {
+    const p = prev as { assigned_to: string[] | null; org_id: string | null; job_number: string | null; name: string | null };
+    void notifyJobCrewAdded({ id, org_id: p.org_id, job_number: p.job_number, name: p.name }, p.assigned_to, ids, ctx.userId);
+  }
   revalidatePath("/schedule");
   revalidatePath("/planner");
   revalidatePath(`/jobs/${id}`);
@@ -217,7 +254,8 @@ export type DateRange = { start: string; end: string }; // yyyy-mm-dd each
 
 /** Canonical writer for a job's schedule as one or more date ranges. Replaces
  *  all segments, and mirrors the overall min start / max end onto
- *  jobs.scheduled_start/end (8am–4pm local) so every legacy reader still works.
+ *  jobs.scheduled_start/end (the org's work-day window, default 8am–4pm local)
+ *  so every legacy reader still works.
  *
  *  `startTime` ("HH:MM", optional) refines ONLY the single primary
  *  scheduled_start mirror — a real time-of-day the calendar renders instead of
@@ -242,10 +280,11 @@ export async function setJobScheduleRanges(
 
   // Mirror the overall window onto the job FIRST — this is what every legacy
   // reader uses, and it must succeed even if the segments table isn't there.
-  // Build the 8am–4pm window in the ORG timezone (this runs server-side in UTC,
-  // so a bare `new Date("…T08:00")` would store 8am UTC = ~midnight Pacific and
-  // disagree with the client-side writers — the root of the "wrong time" bug).
-  const tz = await orgTimezone(supabase);
+  // Build the org's work-day window (default 8am–4pm) in the ORG timezone (this
+  // runs server-side in UTC, so a bare `new Date("…T08:00")` would store 8am
+  // UTC = ~midnight Pacific and disagree with the client-side writers — the
+  // root of the "wrong time" bug).
+  const { tz, dayStartHm, dayEndHm } = await orgSchedulePrefs(supabase);
   const minStart = clean.length ? clean[0].start : null;
   const maxEnd = clean.length ? clean.reduce((m, r) => (r.end > m ? r.end : m), clean[0].end) : null;
 
@@ -259,19 +298,15 @@ export async function setJobScheduleRanges(
     clock = (startTime as string).slice(0, 5);
   } else if (startTime === undefined && minStart) {
     const { data: prior } = await supabase.from("jobs").select("scheduled_start").eq("id", jobId).maybeSingle();
-    clock = localHmInTz((prior as any)?.scheduled_start ?? null, tz);
+    clock = localHmInTz((prior as any)?.scheduled_start ?? null, tz, dayStartHm);
   } else {
-    clock = null; // explicit clear (null/"") or no start → 8 AM default window
+    clock = null; // explicit clear (null/"") or no start → the all-day default window
   }
-  const startIso = minStart
-    ? clock
-      ? tzDateTimeUtc(minStart, clock, tz) ?? tzLocalHourUtc(minStart, DAY_START_HOUR, tz).toISOString()
-      : tzLocalHourUtc(minStart, DAY_START_HOUR, tz).toISOString()
-    : null;
+  const startIso = minStart ? tzDateTimeUtc(minStart, clock ?? dayStartHm, tz) : null;
 
   const patch: Record<string, unknown> = {
     scheduled_start: startIso,
-    scheduled_end: maxEnd ? tzLocalHourUtc(maxEnd, DAY_END_HOUR, tz).toISOString() : null,
+    scheduled_end: maxEnd ? tzDateTimeUtc(maxEnd, dayEndHm, tz) : null,
     updated_at: new Date().toISOString(),
   };
   // The mirror update must PROVE it touched a row: an RLS-invisible or nonexistent

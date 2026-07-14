@@ -81,6 +81,7 @@ export default async function PayrollPage({
         period={period}
         offset={offset}
         settledMileage={settledMileage}
+        taxNumber={settings.tax_number}
       />
     </div>
   );

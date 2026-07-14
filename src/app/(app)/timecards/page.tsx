@@ -23,12 +23,15 @@ import type { JobCode } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-// Mon→Sun week window as UTC instants, anchored on the org's LOCAL day — not the
+// The pay-week window as UTC instants, anchored on the org's LOCAL day — not the
 // (UTC-on-Vercel) server day — so a Pacific evening shift buckets into the right
-// week. `start`/`end` are the UTC instants of local midnight, end exclusive.
-function weekRange(offset: number, tz: string) {
+// week. Starts Monday unless Settings → Scheduling says the week starts Sunday
+// (org settings week_start). `start`/`end` are the UTC instants of local
+// midnight, end exclusive.
+function weekRange(offset: number, tz: string, weekStart: "sunday" | "monday") {
   const todayStr = todayStrInTz(tz);
-  const dow = (new Date(`${todayStr}T00:00:00Z`).getUTCDay() + 6) % 7; // Monday = 0
+  const utcDow = new Date(`${todayStr}T00:00:00Z`).getUTCDay(); // Sunday = 0
+  const dow = weekStart === "sunday" ? utcDow : (utcDow + 6) % 7; // days since the week started
   const startDate = new Date(`${todayStr}T00:00:00Z`);
   startDate.setUTCDate(startDate.getUTCDate() - dow - offset * 7);
   const start = tzDayStartUtc(startDate.toISOString().slice(0, 10), tz);
@@ -74,9 +77,10 @@ export default async function TimecardsPage({
   ]);
   // Render times in the BUSINESS timezone, not the UTC server's, so the list
   // matches the (browser-local) edit modal instead of being hours off.
-  const tz = getOrgSettings((org as any)?.settings).timezone;
+  const orgSettings = getOrgSettings((org as any)?.settings);
+  const tz = orgSettings.timezone;
 
-  const { start, end } = weekRange(offset, tz);
+  const { start, end } = weekRange(offset, tz, orgSettings.week_start);
 
   // rate_override MUST be selected here: the edit modal round-trips it on save, so
   // omitting the column made every unrelated week-list edit send undefined→null and

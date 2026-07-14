@@ -42,6 +42,7 @@ export function PayrollView({
   period,
   offset,
   settledMileage,
+  taxNumber = "",
 }: {
   rows: Row[];
   period: { start: string; end: string };
@@ -49,6 +50,9 @@ export function PayrollView({
   /** Settled mileage $ per profileId — SUMMED kind='mileage' runs for this period
    *  (human-stated amounts; a key exists only after a settlement act). */
   settledMileage: Record<string, number>;
+  /** The org's EIN / tax # (Settings → Company) — stamped on the CSV export's
+   *  company header so the accountant file says which employer it belongs to. */
+  taxNumber?: string;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -134,6 +138,9 @@ export function PayrollView({
     });
     const csv = [
       [`Payroll — ${label}`],
+      // Company identity for the accountant: the org's EIN (Settings → Company).
+      // Only when set — an org without one keeps the exact old file shape.
+      ...(taxNumber ? [["Company EIN", taxNumber]] : []),
       header,
       ...lines.map((l) => l),
       ["TOTAL (unpaid base)", totals.hours.toFixed(2), "", totals.gross.toFixed(2), "", "", "", ""],

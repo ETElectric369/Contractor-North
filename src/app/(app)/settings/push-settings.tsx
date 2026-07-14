@@ -12,9 +12,12 @@ const TRIGGERS: { key: string; label: string; soon?: boolean }[] = [
   { key: "quote_accepted", label: "Quotes accepted by a customer" },
   { key: "invoice_paid", label: "Invoices paid" },
   // day_ahead's sender is LIVE (sendDayAheadDigests via /api/automations/daily) — the toggle
-  // was still marked "soon" after the backend shipped. clock_out stays "soon": no sender exists.
+  // was still marked "soon" after the backend shipped.
   { key: "day_ahead", label: "My day ahead (morning summary)" },
-  { key: "clock_out", label: "Clock-out reminder", soon: true },
+  // clock_out's sender is LIVE too (notifyGeofenceExit — fires for techs who leave the
+  // job site while clocked in), so the toggle is real now.
+  { key: "clock_out", label: "Clock-out reminder (left the job site)" },
+  { key: "daily_report", label: "Daily reports from crew leads" },
 ];
 const DEFAULTS: Record<string, boolean> = {
   assigned: true,
@@ -22,7 +25,8 @@ const DEFAULTS: Record<string, boolean> = {
   quote_accepted: true,
   invoice_paid: true,
   day_ahead: false,
-  clock_out: false,
+  clock_out: true,
+  daily_report: true,
 };
 
 function urlB64ToUint8(base64String: string) {

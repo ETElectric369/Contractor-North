@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Loader2, MapPin } from "lucide-react";
-import { adoptGeofenceAnchor, geoClockOut } from "@/app/(app)/timeclock/actions";
+import { adoptGeofenceAnchor, geoClockOut, notifyGeofenceExit } from "@/app/(app)/timeclock/actions";
 import { ClockStartPicker } from "@/app/(app)/timeclock/clock-start-picker";
 import { Button } from "@/components/ui/button";
 import { speakSmart } from "@/lib/tts";
@@ -111,6 +111,13 @@ export function GeofenceMonitor({
   const promptShownAtRef = useRef(0);
   const promptSourceRef = useRef<"live" | "wake">("wake");
   const lastWakeCheckRef = useRef(0);
+  // The complementary "Clock out?" push (techs only; server checks role) — sent at most
+  // once per entry per page-life so GPS drift retract/re-prompt cycles can't spam.
+  // Context rides in a ref so openPrompt keeps touching ONLY refs + stable setters
+  // (the property both detection effects rely on to omit it from their deps).
+  const exitPushSentRef = useRef<string | null>(null);
+  const exitPushCtxRef = useRef({ entryId, jobLabel });
+  exitPushCtxRef.current = { entryId, jobLabel };
 
   const [phase, setPhase] = useState<Phase>("idle");
   const phaseRef = useRef(phase);
@@ -153,6 +160,15 @@ export function GeofenceMonitor({
     setPickedIso(null);
     setError(null);
     setPhase("prompt");
+    // Site-leave PUSH (Erik: "push at geofence for clock out only for techs") — the sheet
+    // only renders while the app is foregrounded; the push also lands on the lock screen.
+    // Fire-and-forget (never delays the sheet); the server no-ops for staff and for anyone
+    // no longer clocked in. Detection behavior itself is untouched.
+    const pushCtx = exitPushCtxRef.current;
+    if (exitPushSentRef.current !== pushCtx.entryId) {
+      exitPushSentRef.current = pushCtx.entryId;
+      notifyGeofenceExit(pushCtx.jobLabel).catch(() => {});
+    }
     try {
       navigator.vibrate?.(40);
     } catch {}

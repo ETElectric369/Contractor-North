@@ -7,6 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { TimeclockPanel } from "./timeclock-panel";
 import { AutoClockoutPrompt } from "./auto-clockout-prompt";
+import { CrewAssignments } from "./crew-assignments";
 import { getOrgSettings } from "@/lib/org-settings";
 import { AddEntryButton } from "./add-entry-button";
 import { hoursBetween, formatDuration } from "@/lib/utils";
@@ -43,7 +44,7 @@ export default async function TimeclockPage() {
         .order("full_name")
     : { data: [] as { id: string; full_name: string | null }[] };
 
-  const [openRes, codesRes, jobsRes, weekRes, orgRes] = await Promise.all([
+  const [openRes, codesRes, jobsRes, weekRes, orgRes, crewJobsRes, leadRes] = await Promise.all([
     supabase
       .from("time_entries")
       // Include any mid-shift switch segments already recorded on the open entry,
@@ -66,8 +67,29 @@ export default async function TimeclockPage() {
       .gte("clock_in", weekAgo)
       .order("clock_in", { ascending: false }),
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),
+    // Staff crew-assignment board: which active job carries each member. Fetched
+    // ONLY here (staff) so crew rosters never serialize into a tech's page props.
+    isStaff
+      ? supabase.from("jobs").select("id, assigned_to").in("status", ACTIVE_JOB_STATUSES)
+      : Promise.resolve({ data: [] as { id: string; assigned_to: string[] | null }[] }),
+    // crew_lead is selected SEPARATELY (not in the profile select above) so this page
+    // keeps working even if migration 0128 hasn't landed yet — an unknown column
+    // would fail the whole profile read and de-staff the page.
+    supabase.from("profiles").select("crew_lead").eq("id", user?.id ?? "").maybeSingle(),
   ]);
   const orgSettings = getOrgSettings((orgRes.data as any)?.settings);
+  const crewLead = !!(leadRes.data as any)?.crew_lead;
+
+  // Each member's current assignment (first active job carrying them) for the
+  // staff crew-assignment board.
+  const crewJobs = ((crewJobsRes.data ?? []) as { id: string; assigned_to: string[] | null }[]);
+  const currentAssignment: Record<string, string> = {};
+  if (isStaff) {
+    for (const m of members ?? []) {
+      const j = crewJobs.find((cj) => (cj.assigned_to ?? []).includes(m.id));
+      if (j) currentAssignment[m.id] = j.id;
+    }
+  }
 
   // Attach each job's template codes so the code picker can narrow to the right codes.
   const { data: tmplData } = await supabase.from("job_code_templates").select("id, codes");
@@ -165,10 +187,20 @@ export default async function TimeclockPage() {
             autoLunch={orgSettings.auto_lunch_30}
             homeAddress={(prof as any)?.home_address ?? ""}
             isStaff={isStaff}
+            crewLead={crewLead}
           />
         </div>
 
         <div className="space-y-6 lg:col-span-2">
+          {/* The office's who's-on-which-job board — what a tech's job-less Clock In
+              resolves against. Staff only. */}
+          {isStaff && (
+            <CrewAssignments
+              members={(members ?? []).map((m: any) => ({ id: m.id, full_name: m.full_name }))}
+              jobs={jobOptions.map((j: any) => ({ id: j.id, job_number: j.job_number, name: j.name }))}
+              current={currentAssignment}
+            />
+          )}
           <Card>
             <CardContent className="py-5">
               <h3 className="mb-3 text-sm font-semibold text-slate-900">

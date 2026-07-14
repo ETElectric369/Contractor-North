@@ -21,6 +21,7 @@ interface Member {
   active: boolean;
   home_address?: string | null;
   commute_baseline_miles?: number | null;
+  crew_lead?: boolean;
 }
 
 /**

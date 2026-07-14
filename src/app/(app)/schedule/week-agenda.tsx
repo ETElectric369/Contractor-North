@@ -50,6 +50,7 @@ export function WeekAgenda({
   todayK,
   members,
   onDayTap,
+  workDayStart = "08:00",
 }: {
   /** The 7 dates of the visible week (Sun–Sat). */
   days: Date[];
@@ -58,6 +59,8 @@ export function WeekAgenda({
   members: CalMember[];
   /** Open the day drill for a day (the row's main tap — never a move). */
   onDayTap: (d: Date) => void;
+  /** The org's work_day_start ("HH:MM") — the all-day sentinel time to hide. */
+  workDayStart?: string;
 }) {
   const router = useRouter();
 
@@ -71,13 +74,15 @@ export function WeekAgenda({
     return found.length > 2 ? `${shown} +${found.length - 2}` : shown;
   };
 
-  // A job's start time, unless it's the all-day sentinel (8 AM local = "no explicit
-  // time" — see setJobScheduleRanges). Lets a job with a real start time show it,
-  // like appointments do, while all-day jobs stay time-less.
+  // A job's start time, unless it's the all-day sentinel (the org's configured
+  // work_day_start, default 8 AM local = "no explicit time" — see
+  // setJobScheduleRanges). Lets a job with a real start time show it, like
+  // appointments do, while all-day jobs stay time-less.
+  const [wdHour, wdMin] = workDayStart.split(":").map(Number);
   const jobStartLabel = (iso: string | null): string | null => {
     if (!iso) return null;
     const d = new Date(iso);
-    if (d.getHours() === 8 && d.getMinutes() === 0) return null;
+    if (d.getHours() === wdHour && d.getMinutes() === wdMin) return null;
     return fmtTime(iso);
   };
 

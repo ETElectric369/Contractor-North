@@ -28,6 +28,8 @@ export interface Profile {
   active: boolean;
   language: string;
   home_address: string | null;
+  /** Crew lead (any role) — owes the Nort end-of-day debrief at clock-out (migration 0128). */
+  crew_lead?: boolean;
   created_at: string;
   updated_at: string;
 }
