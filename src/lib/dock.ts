@@ -39,7 +39,6 @@ import {
   CheckCircle2,
   Umbrella,
   ClipboardCheck,
-  ScanLine,
   type LucideIcon,
 } from "lucide-react";
 import { JOB_STATUSES, jobStatusLabel, type JobStatus } from "./job-status";
@@ -131,9 +130,8 @@ export const DOCK: DockSection[] = [
       // jobs" cluster (Work Orders / Materials / Change Orders) left the nav with it — those
       // records are HUB-ONLY now, reached through the job's own tabs (Erik: "GO AWAY").
       { id: "j-permits", label: "Permits", icon: Stamp, href: "/permits", staffOnly: true },
-      // Plans & LiDAR (plan markup / scans → take-off → work order) — was an orphan route with
-      // zero inbound links; given a home under Jobs where take-offs feed the rest of the lifecycle.
-      { id: "j-plans", label: "Plans & LiDAR", icon: ScanLine, href: "/plans", staffOnly: true },
+      // Plans & LiDAR left the nav (Erik 2026-07-14): "plans live with the estimator" — the
+      // Upload Plans take-off on /quotes/new IS the plans feature; LiDAR ships with the native app.
     ],
   },
   {
@@ -259,8 +257,9 @@ export const basePath = (href: string) => href.split("?")[0];
  *
  * A section owns a pathname when the pathname is the section href, sits under it, is one
  * of the section's child pages, sits under one of them (the detail routes: /quotes/[id],
- * /work-orders/[id], /forms/[id]…), or matches a child's `owns` alias prefixes
- * (/purchasing/[id] belongs to Money's Bills & POs).
+ * /forms/[id]…), or matches a child's `owns` alias prefixes (/purchasing/[id] belongs to
+ * Money's Bills & POs). /work-orders/[id] is NOT owned anymore — work orders left the
+ * dock (hub-only), so those routes light nothing by design.
  *
  * Returns undefined when nothing owns the route — light NOTHING rather than lie. (The old
  * dock.tsx `?? sections[0]` fallback lit "Today" on every orphan route: an actively wrong

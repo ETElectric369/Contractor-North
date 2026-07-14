@@ -550,7 +550,12 @@ export async function importJobs(
       }
     }
 
-    const status = (JOB_STATUSES as readonly string[]).includes((r.status || "").trim()) ? (r.status as string).trim() : "in_progress";
+    // Legacy CSV statuses from the old lifecycle: an "estimate" row is a job waiting to be
+    // scheduled; an "invoiced" row is finished work (money owed lives in AR, not job status).
+    // Anything else off-spine imports as in_progress.
+    const rawStatus = (r.status || "").trim();
+    const mapped = rawStatus === "estimate" ? "to_be_scheduled" : rawStatus === "invoiced" ? "complete" : rawStatus;
+    const status = (JOB_STATUSES as readonly string[]).includes(mapped) ? mapped : "in_progress";
     const { data: job, error: je } = await supabase
       .from("jobs")
       .insert({

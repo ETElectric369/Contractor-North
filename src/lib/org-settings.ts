@@ -48,7 +48,6 @@ export interface OrgSettings {
   work_day_end: string; // "17:00"
   week_start: "sunday" | "monday";
   time_tracking_method: "start_end" | "duration";
-  labor_law_breaks: boolean; // require break confirmation at clock-out (CA)
   auto_lunch_30: boolean; // auto-apply 30-min unpaid lunch on shifts > 5h
   timecard_supervisor_id: string; // who approves timecards ("" = org owner)
   /** Geofence auto clock-out: when a clocked-in employee leaves the spot they clocked
@@ -170,7 +169,6 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   work_day_end: "17:00",
   week_start: "monday",
   time_tracking_method: "start_end",
-  labor_law_breaks: false,
   auto_lunch_30: false,
   timecard_supervisor_id: "",
   geofence_logout: true,

@@ -28,8 +28,6 @@ export interface Profile {
   active: boolean;
   language: string;
   home_address: string | null;
-  home_lat: number | null;
-  home_lng: number | null;
   created_at: string;
   updated_at: string;
 }

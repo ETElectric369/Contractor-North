@@ -14,6 +14,7 @@ import { sendSms } from "@/lib/sms";
 import { createWorkOrderFromQuote } from "../work-orders/actions";
 import { createMaterialListFromQuote } from "../materials/actions";
 import { findMatchingCustomerId, type DupCustomer } from "@/lib/crm/duplicates";
+import { visibleCustomerIdOrNull } from "@/lib/job-visibility";
 import type { QuoteCircuit } from "@/lib/types";
 
 function publicQuoteLink(token: string) {
@@ -289,13 +290,8 @@ export async function setQuoteCustomer(
 
   let safeCustomerId: string | null = null;
   if (customerId) {
-    const { data } = await supabase
-      .from("customers")
-      .select("id")
-      .eq("id", customerId)
-      .maybeSingle();
-    if (!data) return { ok: false, error: "That customer isn't available." };
-    safeCustomerId = customerId;
+    safeCustomerId = await visibleCustomerIdOrNull(supabase, customerId);
+    if (!safeCustomerId) return { ok: false, error: "That customer isn't available." };
   }
 
   const { error } = await supabase

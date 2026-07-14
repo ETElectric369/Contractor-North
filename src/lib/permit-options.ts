@@ -49,8 +49,3 @@ export function permitResultTone(s: string): PermitTone {
   if (s === "partial") return "amber";
   return "slate";
 }
-
-/** Human label for a status value (falls back to the raw value prettified). */
-export function permitStatusLabel(s: string): string {
-  return PERMIT_STATUSES.find(([v]) => v === s)?.[1] ?? s.replace(/_/g, " ");
-}

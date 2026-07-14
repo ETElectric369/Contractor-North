@@ -11,11 +11,6 @@ export const DOC_TEMPLATES: { id: DocTemplate; name: string; desc: string }[] = 
   { id: "minimal", name: "Minimal", desc: "Monochrome, understated, lots of whitespace." },
 ];
 
-/** Accent color for a template — brand color, except Minimal which is neutral. */
-export function docAccent(co: CompanyInfo, template: string): string {
-  return template === "minimal" ? "#334155" : co.brand;
-}
-
 /** Option C letterhead: address block, then phone/email behind a brand accent rule,
  *  with the license emphasized. `onColor` adapts the palette for the modern band. */
 function ContactBlock({ co, accent, onColor = false }: { co: CompanyInfo; accent: string; onColor?: boolean }) {

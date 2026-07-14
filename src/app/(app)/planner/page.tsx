@@ -10,6 +10,7 @@ import { getCrewStatus } from "@/lib/crew-status";
 import { CrewBoard } from "./crew-board";
 import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
+import { jobStatusLabel } from "@/lib/job-status";
 import { formatCurrency, formatTime, formatCityStateZip } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
 import { NavLink } from "@/components/nav-link";
@@ -419,7 +420,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
             {i.kind === "appt" ? (
               <Badge tone={i.apptType === "inspection" ? "amber" : "blue"}>{i.apptType}</Badge>
             ) : i.status ? (
-              <Badge tone={statusTone(i.status)}>{i.status.replace("_", " ")}</Badge>
+              <Badge tone={statusTone(i.status)}>{jobStatusLabel(i.status)}</Badge>
             ) : null}
             <span className="truncate text-sm font-medium text-slate-900">{i.title}</span>
           </div>

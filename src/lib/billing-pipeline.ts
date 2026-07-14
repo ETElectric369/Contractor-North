@@ -30,9 +30,10 @@ export async function getMoneyPipeline(supabase: SupabaseClient): Promise<MoneyP
   const today = new Date().toISOString().slice(0, 10);
   const [invRes, jobRes, quoteRes, msRes] = await Promise.all([
     supabase.from("invoices").select("id, invoice_number, total, amount_paid, status, due_date, job_id, customers(name), jobs(name)"),
-    // 'invoiced' is a hand-settable status — a job flipped to it with no actual invoice
-    // would otherwise escape the board, so it's a stage-1 candidate too (jobs with a real
-    // invoice are removed by the invoicedJobIds filter below).
+    // 'invoiced' is a RETIRED job status (the lifecycle rework moved every row off it), but
+    // a stray legacy row could still carry it — keep it in the filter as stage-1 safety so
+    // such a job can't escape the board (jobs with a real invoice are removed by the
+    // invoicedJobIds filter below).
     supabase.from("jobs").select("id, name, job_number, customers(name)").in("status", ["complete", "invoiced"]).limit(500),
     supabase.from("quotes").select("job_id, total, status").not("job_id", "is", null).limit(1000),
     // Un-drawn payment-schedule milestones. "Unbilled" = no linked invoice — the same rule

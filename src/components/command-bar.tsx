@@ -27,13 +27,15 @@ const NAV_ALIASES: Record<string, string[]> = {
   "/timeclock": ["clock in", "punch", "clock"],
   "/timecards": ["hours", "timesheet"],
   "/schedule": ["calendar", "dispatch", "appointments"],
-  "/jobs": ["projects", "work"],
+  "/jobs?status=in_progress": ["projects", "work"],
   "/inventory": ["stock", "warehouse", "parts"],
   "/compliance": ["osha", "liability", "regulations"],
   "/insurance": ["workers comp", "coverage", "liability"],
   "/safety": ["osha", "incident", "hazard"],
   "/tools": ["calculator", "calculators", "nec", "wire size"],
-  "/plans": ["lidar", "scan", "blueprint", "drawing", "take-off", "takeoff", "markup"],
+  // Plans live with the estimator now (Erik 2026-07-14) — typing plan/blueprint/take-off
+  // lands on New Estimate, where the Upload Plans take-off actually is.
+  "/quotes/new": ["plan", "plans", "blueprint", "drawing", "take-off", "takeoff", "upload plans"],
 };
 
 // ONE source of truth: the command bar's "go to" list is derived from the SAME dock that
@@ -52,7 +54,17 @@ function navLeaves(nodes: DockLeaf[], sub: string, sectionStaff?: boolean): Item
         : [],
   );
 }
-const NAV_ITEMS: Item[] = DOCK.flatMap((s) => navLeaves(s.children, s.label, s.staffOnly));
+// "All Jobs" left the dock (the status pills ARE the list), so no dock leaf carries a plain
+// /jobs href anymore — which orphaned the "projects"/"work" aliases. One hand-written entry
+// points typing "jobs"/"work" at the default working view; the GENERATED ?status= children
+// stay out of the palette (see the collision note above).
+const NAV_ITEMS: Item[] = [
+  ...DOCK.flatMap((s) => navLeaves(s.children, s.label, s.staffOnly)),
+  { kind: "Go to", label: "Jobs", sub: "Jobs", href: "/jobs?status=in_progress", aliases: NAV_ALIASES["/jobs?status=in_progress"] },
+  // New Estimate isn't a dock leaf, but it's where plan take-offs live now (Upload Plans) —
+  // give plan/blueprint/take-off searches somewhere real to land.
+  { kind: "Go to", label: "New Estimate", sub: "Sales", href: "/quotes/new", staffOnly: true, aliases: NAV_ALIASES["/quotes/new"] },
+];
 
 function LeadIcon({ kind }: { kind: string }) {
   if (kind === "Assistant") return <Sparkles className="h-4 w-4 text-brand" />;

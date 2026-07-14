@@ -12,6 +12,7 @@ import { createClient } from "@/lib/supabase/server";
 import { invoiceBalance, isDrawKind } from "@/lib/invoice-math";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
+import { jobStatusLabel } from "@/lib/job-status";
 import { Tabs, type TabDef } from "@/components/tabs";
 import {
   formatCurrency,
@@ -854,7 +855,7 @@ export default async function JobDetailPage({
               <li key={w.id}>
                 <Link href={`/work-orders/${w.id}`} className="flex items-center justify-between px-5 py-3 text-sm hover:bg-slate-50">
                   <span><span className="font-medium text-slate-900">{w.wo_number}</span> <span className="text-slate-500">{w.title}</span></span>
-                  <Badge tone={statusTone(w.status)}>{w.status.replace("_", " ")}</Badge>
+                  <Badge tone={statusTone(w.status)}>{jobStatusLabel(w.status)}</Badge>
                 </Link>
               </li>
             ))}
@@ -880,7 +881,7 @@ export default async function JobDetailPage({
         <h1 className="text-2xl font-bold text-slate-900">{j.name}</h1>
         <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-400">
           <span>{j.job_number}</span>
-          <Badge tone={statusTone(j.status)}>{j.status.replace("_", " ")}</Badge>
+          <Badge tone={statusTone(j.status)}>{jobStatusLabel(j.status)}</Badge>
           {/* Provenance backlink — where this job came from (the lead it was converted from). */}
           {(j as any).inquiry && (
             <Link href={`/leads?focus=${(j as any).inquiry.id}`} className="text-brand hover:underline">

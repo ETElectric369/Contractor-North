@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, Calendar } from "lucide-react";
 import { Badge, statusTone } from "@/components/ui/badge";
+import { jobStatusLabel } from "@/lib/job-status";
 
 export type CrewJob = { id: string; label: string; status: string; customer: string | null; assigned: string[] };
 export type CrewAppt = { id: string; title: string; type: string; time: string; jobId: string | null; who: string | null; assigned: string | null };
@@ -81,7 +82,7 @@ export function CrewBoard({
                   >
                     <div className="flex items-start justify-between gap-1">
                       <span className="min-w-0 flex-1 truncate font-medium text-slate-900">{j.label}</span>
-                      <Badge tone={statusTone(j.status)}>{j.status.replace("_", " ")}</Badge>
+                      <Badge tone={statusTone(j.status)}>{jobStatusLabel(j.status)}</Badge>
                     </div>
                     {j.customer && <div className="mt-0.5 truncate text-slate-400">{j.customer}</div>}
                   </Link>

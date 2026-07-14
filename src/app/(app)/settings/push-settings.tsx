@@ -11,7 +11,9 @@ const TRIGGERS: { key: string; label: string; soon?: boolean }[] = [
   { key: "inquiry", label: "New inquiries / leads" },
   { key: "quote_accepted", label: "Quotes accepted by a customer" },
   { key: "invoice_paid", label: "Invoices paid" },
-  { key: "day_ahead", label: "My day ahead (morning summary)", soon: true },
+  // day_ahead's sender is LIVE (sendDayAheadDigests via /api/automations/daily) — the toggle
+  // was still marked "soon" after the backend shipped. clock_out stays "soon": no sender exists.
+  { key: "day_ahead", label: "My day ahead (morning summary)" },
   { key: "clock_out", label: "Clock-out reminder", soon: true },
 ];
 const DEFAULTS: Record<string, boolean> = {

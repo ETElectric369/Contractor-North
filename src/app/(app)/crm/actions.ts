@@ -8,6 +8,7 @@ import { requireStaff } from "@/lib/staff-guard";
 import { sendEmail, renderReminderEmail, ownerBcc } from "@/lib/email";
 import { getOrgSettings, accentHex } from "@/lib/org-settings";
 import { findDuplicateGroups, type DupCustomer, type DupGroup } from "@/lib/crm/duplicates";
+import { visibleCustomerIdOrNull } from "@/lib/job-visibility";
 
 export type ActionResult = { ok: boolean; error?: string; id?: string };
 
@@ -270,16 +271,12 @@ export async function mergeCustomers(
   if (!sourceId || !targetId) return { ok: false, error: "Pick a customer to merge into." };
   if (sourceId === targetId) return { ok: false, error: "Can't merge a customer into itself." };
 
-  // Confirm BOTH belong to the caller's org (the .select is RLS-scoped, so a row from
-  // another org is invisible → treated as not found).
-  const { data: pair } = await supabase
-    .from("customers")
-    .select("id, name")
-    .in("id", [sourceId, targetId]);
-  const source = (pair ?? []).find((c: any) => c.id === sourceId);
-  const target = (pair ?? []).find((c: any) => c.id === targetId);
-  if (!source) return { ok: false, error: "Source customer not found." };
-  if (!target) return { ok: false, error: "Target customer not found." };
+  // Confirm BOTH belong to the caller's org (visibleCustomerIdOrNull is RLS-scoped, so a
+  // row from another org resolves to nothing → treated as not found).
+  if (!(await visibleCustomerIdOrNull(supabase, sourceId)))
+    return { ok: false, error: "Source customer not found." };
+  if (!(await visibleCustomerIdOrNull(supabase, targetId)))
+    return { ok: false, error: "Target customer not found." };
 
   // job_contacts has a unique (job_id, customer_id, role) — re-pointing source→target
   // would collide where the target is already linked to the same job/role. Drop those
@@ -335,24 +332,6 @@ export async function mergeCustomers(
   revalidatePath("/leads");
   return { ok: true, id: targetId };
 }
-
-export async function updateCustomerStatus(
-  id: string,
-  status: string,
-): Promise<ActionResult> {
-  const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
-  if ("error" in ctx) return { ok: false, error: ctx.error };
-  const supabase = ctx.supabase;
-  const { error } = await supabase
-    .from("customers")
-    .update({ status })
-    .eq("id", id);
-  if (error) return { ok: false, error: error.message };
-  revalidatePath("/crm");
-  revalidatePath(`/crm/${id}`);
-  return { ok: true };
-}
-
 
 function orNull(s: string): string | null {
   const t = s.trim();

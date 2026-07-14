@@ -54,7 +54,7 @@ export const jobActions: Record<string, ActionDef> = {
     group: "job",
     label: "Open a job",
     description:
-      "Open a new JOB — e.g. 'start a job for the Miller deck'. Resolve the customer first with list_customers and pass customer_id (or pass new_customer_name to create one). Optional description, address, status (default estimate), and billing_type (fixed or draw). Returns the job id — then you can schedule it, assign it, add costs, or quote it.",
+      "Open a new JOB — e.g. 'start a job for the Miller deck'. Resolve the customer first with list_customers and pass customer_id (or pass new_customer_name to create one). Optional description, address, status (to_be_scheduled, scheduled, in_progress, on_hold, complete, cancelled; default in_progress), and billing_type (fixed or draw). Returns the job id — then you can schedule it, assign it, add costs, or quote it.",
     input: z.object({
       name: z.string().min(1),
       customer_id: z.string().nullable().optional(),
@@ -90,7 +90,7 @@ export const jobActions: Record<string, ActionDef> = {
     group: "job",
     label: "Set job status",
     description:
-      "Change a job's status — 'mark the Miller job on hold / in progress / scheduled'. Resolve the job with list_jobs first. Status: estimate, scheduled, in_progress, on_hold, complete, invoiced, cancelled.",
+      "Change a job's status — 'mark the Miller job on hold / in progress / scheduled'. Resolve the job with list_jobs first. Status: to_be_scheduled, scheduled, in_progress, on_hold, complete, cancelled.",
     input: z.object({ id: z.string(), status: z.string() }),
     auth: "staff",
     effect: "write",

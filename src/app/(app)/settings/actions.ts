@@ -148,21 +148,6 @@ export async function setDocTemplateFor(
   return { ok: true };
 }
 
-export async function setDocTemplate(template: string): Promise<Result> {
-  const supabase = await createClient();
-  const orgId = await myOrgId(supabase);
-  if (!orgId) return { ok: false, error: "No organization." };
-  const allowed = ["classic", "modern", "minimal"];
-  const t = allowed.includes(template) ? template : "classic";
-  const { error } = await supabase
-    .from("organizations")
-    .update({ doc_template: t })
-    .eq("id", orgId);
-  if (error) return { ok: false, error: error.message };
-  revalidatePath("/settings");
-  return { ok: true };
-}
-
 export async function createInvitation(formData: FormData): Promise<Result & { link?: string }> {
   const supabase = await createClient();
   const {

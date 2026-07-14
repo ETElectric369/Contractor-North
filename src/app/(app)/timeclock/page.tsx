@@ -192,12 +192,16 @@ export default async function TimeclockPage() {
                 )}
               </div>
               {/* The Recent-entries table left this page (it duplicated /timecards) — keep the
-                  door to the ledger: your own card for everyone, the crew map for staff. */}
-              <div className="mt-4 border-t border-slate-100 pt-3">
-                <Link href="/timecards" className="text-sm font-medium text-brand hover:underline">
-                  {isStaff ? "Crew Hours →" : "My timecard →"}
-                </Link>
-              </div>
+                  door to the ledger for STAFF only: /timecards bounces non-staff right back
+                  here, so a tech's "My timecard →" link was a dead loop. Techs see their
+                  week's numbers above; no link. */}
+              {isStaff && (
+                <div className="mt-4 border-t border-slate-100 pt-3">
+                  <Link href="/timecards" className="text-sm font-medium text-brand hover:underline">
+                    Crew Hours →
+                  </Link>
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>

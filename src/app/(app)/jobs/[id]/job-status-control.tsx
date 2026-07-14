@@ -7,7 +7,7 @@ import { Select } from "@/components/ui/input";
 // There used to be an identically-named UNGUARDED copy in schedule/actions that this imported — a
 // name-collision footgun that silently bypassed the staff guard. That copy is now deleted.
 import { setJobStatus } from "../actions";
-import { JOB_STATUSES } from "@/lib/job-status";
+import { JOB_STATUSES, jobStatusLabel } from "@/lib/job-status";
 
 const STATUSES = JOB_STATUSES;
 
@@ -28,7 +28,7 @@ export function JobStatusControl({ id, status }: { id: string; status: string })
     >
       {STATUSES.map((s) => (
         <option key={s} value={s}>
-          {s.replace("_", " ").replace(/^\w/, (c) => c.toUpperCase())}
+          {jobStatusLabel(s).replace(/^\w/, (c) => c.toUpperCase())}
         </option>
       ))}
     </Select>

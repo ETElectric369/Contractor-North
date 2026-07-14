@@ -5,6 +5,7 @@ import { invoiceBalance } from "@/lib/invoice-math";
 import { accentHex } from "@/lib/org-settings";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { statusTone, toneClasses } from "@/components/ui/badge";
+import { jobStatusLabel } from "@/lib/job-status";
 
 export const dynamic = "force-dynamic";
 
@@ -115,7 +116,7 @@ export default async function CustomerPortalPage({ params }: { params: Promise<{
               <div key={idx} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
                 <span className="min-w-0 truncate text-slate-800">{j.name}</span>
                 <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium capitalize ${statusColor(j.status)}`}>
-                  {String(j.status).replace("_", " ")}
+                  {jobStatusLabel(String(j.status))}
                 </span>
               </div>
             ))}

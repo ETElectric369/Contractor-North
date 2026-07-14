@@ -3,6 +3,7 @@
 import { useTransition } from "react";
 import { Select } from "@/components/ui/input";
 import { setWorkOrderStatus } from "../actions";
+import { jobStatusLabel } from "@/lib/job-status";
 
 const STATUSES = ["draft", "assigned", "in_progress", "complete", "cancelled"];
 
@@ -21,7 +22,7 @@ export function WoStatusControl({ id, status }: { id: string; status: string }) 
     >
       {STATUSES.map((s) => (
         <option key={s} value={s}>
-          {s.replace("_", " ").replace(/^\w/, (c) => c.toUpperCase())}
+          {jobStatusLabel(s).replace(/^\w/, (c) => c.toUpperCase())}
         </option>
       ))}
     </Select>

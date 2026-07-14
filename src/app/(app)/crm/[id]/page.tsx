@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { NavLink } from "@/components/nav-link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
+import { jobStatusLabel } from "@/lib/job-status";
 import { RowList } from "@/components/ui/row-list";
 import { Button } from "@/components/ui/button";
 import { Tabs } from "@/components/tabs";
@@ -164,7 +165,7 @@ export default async function CustomerDetailPage({
               key: j.id,
               label: j.name,
               sub: j.job_number,
-              badge: { tone: statusTone(j.status), text: j.status.replace("_", " ") },
+              badge: { tone: statusTone(j.status), text: jobStatusLabel(j.status) },
               href: `/jobs/${j.id}`,
             }))}
             empty={(!jobs || jobs.length === 0) && linkedJobs.length === 0 ? empty("jobs") : null}
@@ -179,7 +180,7 @@ export default async function CustomerDetailPage({
                   key: j.linkId,
                   label: j.name,
                   sub: `${j.job_number} · ${j.role}`,
-                  badge: { tone: statusTone(j.status), text: String(j.status).replace("_", " ") },
+                  badge: { tone: statusTone(j.status), text: jobStatusLabel(String(j.status)) },
                   href: `/jobs/${j.id}`,
                 }))}
               />

@@ -14,14 +14,6 @@ function twilioAuth(): { sid: string; user: string; pass: string } | null {
   return null;
 }
 
-/** True when Twilio is configured (a credential pair + a Messaging Service OR a from-number). */
-export function smsConfigured(): boolean {
-  return Boolean(
-    twilioAuth() &&
-      (process.env.TWILIO_MESSAGING_SERVICE_SID || process.env.TWILIO_FROM_NUMBER),
-  );
-}
-
 /**
  * Send an SMS via Twilio. Returns false (not sent) when Twilio isn't configured
  * or the number is missing, so callers stay safe before setup.

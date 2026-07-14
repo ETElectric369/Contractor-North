@@ -58,10 +58,3 @@ const SERVER_SNAPSHOT: EstimatorState = { draft: null, card: null, speaking: fal
 export function useEstimator(): EstimatorState {
   return useSyncExternalStore(estimatorStore.subscribe, estimatorStore.snapshot, () => SERVER_SNAPSHOT);
 }
-
-/** The running total of a draft (sum of lines + tax), for the compact pill. */
-export function draftTotal(d: AgentDraft | null): number {
-  if (!d) return 0;
-  const sub = (d.items ?? []).reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0);
-  return sub * (1 + (Number(d.tax_rate) || 0));
-}

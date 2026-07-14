@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
+import { jobStatusLabel } from "@/lib/job-status";
 import { DataTable } from "@/components/ui/data-table";
 import { formatDateTime } from "@/lib/utils";
 import { listActiveTechs } from "@/lib/schedule-options";
@@ -66,7 +67,7 @@ export default async function WorkOrdersPage({
               { header: "Title", span: 4, className: "text-sm text-slate-700", cell: (w) => w.title },
               { header: "Job / Customer", span: 3, className: "text-sm text-slate-500", cell: (w) => w.jobs?.name ?? w.customers?.name ?? "—" },
               { header: "Scheduled", span: 2, className: "text-sm text-slate-500", cell: (w) => (w.scheduled_for ? formatDateTime(w.scheduled_for) : "—") },
-              { header: "Status", span: 1, align: "right", cell: (w) => <Badge tone={statusTone(w.status)}>{w.status.replace("_", " ")}</Badge> },
+              { header: "Status", span: 1, align: "right", cell: (w) => <Badge tone={statusTone(w.status)}>{jobStatusLabel(w.status)}</Badge> },
             ]}
           />
         </Card>

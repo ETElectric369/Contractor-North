@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
+import { jobStatusLabel } from "@/lib/job-status";
 import { formatCurrency } from "@/lib/utils";
 import { computeJobProfitRows } from "@/lib/analytics/job-profitability";
 import { computeArAging, computeRevenueTrend, computeQuoteStats } from "@/lib/analytics/money-metrics";
@@ -182,7 +183,7 @@ export default async function AnalyticsPage() {
               <Link href={`/jobs/${j.id}`} className="flex flex-wrap items-center gap-3 px-5 py-3 text-sm hover:bg-slate-50">
                 <div className="min-w-0 flex-1">
                   <span className="font-medium text-slate-900">{j.job_number} — {j.name}</span>
-                  <Badge tone={statusTone(j.status)} className="ml-2">{j.status.replace("_", " ")}</Badge>
+                  <Badge tone={statusTone(j.status)} className="ml-2">{jobStatusLabel(j.status)}</Badge>
                 </div>
                 <span className="text-slate-500">in {formatCurrency(j.rev)}</span>
                 <span className="text-slate-500">out {formatCurrency(j.cost)}</span>

@@ -5,6 +5,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { User, CalendarSync, Check, ChevronDown } from "lucide-react";
 import { Badge, statusTone } from "@/components/ui/badge";
+import { jobStatusLabel } from "@/lib/job-status";
 import { MoveToDay } from "@/components/move-to-day";
 import { setJobCrew, moveJobDay } from "./actions";
 
@@ -61,7 +62,7 @@ export function JobScheduleCard({
           <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-blue-500" />
           {job.name}
         </Link>
-        <Badge tone={statusTone(job.status)}>{job.status.replace("_", " ")}</Badge>
+        <Badge tone={statusTone(job.status)}>{jobStatusLabel(job.status)}</Badge>
       </div>
       <div className="mt-0.5 text-slate-400">
         {time && <span>{time} · </span>}

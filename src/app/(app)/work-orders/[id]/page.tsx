@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Briefcase, User, Calendar, Printer } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
+import { ACTIVE_JOB_STATUSES, jobStatusLabel } from "@/lib/job-status";
 import { listActiveTechs } from "@/lib/schedule-options";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
@@ -59,7 +59,7 @@ export default async function WorkOrderDetailPage({
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold text-slate-900">{w.wo_number}</h1>
             <Badge tone={statusTone(w.status)}>
-              {w.status.replace("_", " ")}
+              {jobStatusLabel(w.status)}
             </Badge>
           </div>
           <p className="mt-1 text-lg text-slate-700">{w.title}</p>

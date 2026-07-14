@@ -34,7 +34,8 @@ export function SectionSubnav({ isStaff }: { isStaff?: boolean }) {
   // The Jobs strip IS the mobile status filter on /jobs itself (the page's own pill copy is
   // gone) — but on a job's page (/jobs/[id]) it must NOT stack a second look-alike pill row
   // above the hub's own tabs, where tapping "In progress" silently ejected you off the job.
-  // Scoped to the jobs group only so /billing/[id], /work-orders/[id] etc. keep their strips.
+  // Scoped to the jobs group only so /billing/[id], /quotes/[id] etc. keep their strips.
+  // (/work-orders/[id] has no strip at all now — work orders left the dock, hub-only.)
   if (group.key === "jobs" && pathname.startsWith("/jobs/")) return null;
   const tabs = group.children.filter((c) => c.href && (isStaff || !c.staffOnly));
   if (tabs.length < 2) return null;

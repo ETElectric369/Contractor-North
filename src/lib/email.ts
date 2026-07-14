@@ -1,10 +1,5 @@
 import "server-only";
 
-/** True when an email provider (Resend) is configured. */
-export function emailConfigured(): boolean {
-  return Boolean(process.env.RESEND_API_KEY);
-}
-
 /**
  * Send a transactional email via Resend. Returns { ok, error }.
  * No-ops (logs) until RESEND_API_KEY is set, so the feature is safe pre-setup.

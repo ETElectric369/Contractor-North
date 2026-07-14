@@ -63,21 +63,6 @@ main {
   overscroll-behavior-y: contain;
 }
 
-/* ── Mind-map navigator: nodes bloom out from the center when a hub expands ── */
-@keyframes mm-bloom {
-  from {
-    opacity: 0;
-    transform: translate(-50%, -50%) scale(0.7);
-  }
-  to {
-    opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
-  }
-}
-.mm-bloom {
-  animation: mm-bloom 0.22s ease-out both;
-}
-
 /* ── Liquid-glass skin (sea-glass teal) ─────────────────────────────────────
    Frosted, translucent chrome with a glossy front face. The tint follows
    --glass-tint (chrome only — quotes/invoices keep the brand color). The app
@@ -189,14 +174,6 @@ body.modal-open .app-bottom-nav {
   );
   pointer-events: none;
 }
-/* The bloom: a branch grows in from the dock icon, then the node pops. */
-@keyframes cn-pop {
-  from { opacity: 0; transform: translateY(-50%) scale(0.86); }
-  to { opacity: 1; transform: translateY(-50%) scale(1); }
-}
-.cn-bloom-node {
-  animation: cn-pop 0.2s ease-out both;
-}
 /* Entrance for directly-positioned bloom elements (no translate — they set top/left). */
 @keyframes cn-fade {
   from { opacity: 0; transform: scale(0.96); }
@@ -212,14 +189,6 @@ body.modal-open .app-bottom-nav {
     calc(100% - 6px) 100%, 6px 100%, 0% calc(100% - 6px), 0% 6px
   );
 }
-/* Larger chamfer for the bloom's backing panel. */
-.cn-cut-lg {
-  clip-path: polygon(
-    12px 0%, calc(100% - 12px) 0%, 100% 12px, 100% calc(100% - 12px),
-    calc(100% - 12px) 100%, 12px 100%, 0% calc(100% - 12px), 0% 12px
-  );
-}
-
 /* ── Print: hide UI chrome, give the document clean margins ─────────────── */
 @media print {
   .no-print {

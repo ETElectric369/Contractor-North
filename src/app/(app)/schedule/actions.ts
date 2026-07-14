@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
 import { requireStaff } from "@/lib/staff-guard";
+import { JOB_STATUSES } from "@/lib/job-status";
 import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz, tzLocalHourUtc, tzDateTimeUtc } from "@/lib/tz";
 import { addDaySegment, shiftSegmentCovering } from "@/lib/schedule-math";
@@ -97,15 +98,20 @@ export async function createJob(formData: FormData): Promise<Result> {
     name = `New job — ${day}`;
   }
 
+  // In Progress is the default (Erik 2026-07): when he creates a job by hand he's usually
+  // already working it — "estimate" as a default just parked real work in a dead bucket.
+  // Validate against the job-status spine so a caller can't write a retired enum value
+  // ("estimate"/"invoiced") or garbage — anything off-spine lands as in_progress.
+  const rawStatus = String(formData.get("status") ?? "").trim();
+  const status = (JOB_STATUSES as readonly string[]).includes(rawStatus) ? rawStatus : "in_progress";
+
   const { data, error } = await supabase
     .from("jobs")
     .insert({
       name,
       customer_id: customerId,
       description: emptyToNull(formData.get("description")),
-      // In Progress is the default (Erik 2026-07): when he creates a job by hand he's usually
-      // already working it — "estimate" as a default just parked real work in a dead bucket.
-      status: String(formData.get("status") || "in_progress"),
+      status,
       billing_type: String(formData.get("billing_type") ?? "tm"), // T&M is the default now (Estimate); switch to fixed per job
       address,
       scheduled_start: start ? new Date(start).toISOString() : null,

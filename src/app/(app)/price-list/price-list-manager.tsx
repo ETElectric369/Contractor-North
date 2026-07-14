@@ -12,6 +12,7 @@ import { DataTable } from "@/components/ui/data-table";
 import { formatCurrency } from "@/lib/utils";
 import { createPriceItem, deletePriceItem, bulkImportPriceItems, type PriceItemInput } from "./actions";
 import { EditPriceItemButton } from "./edit-price-item-button";
+import { parseCSV } from "@/lib/csv";
 
 interface PriceItem {
   id: string;
@@ -25,27 +26,6 @@ interface PriceItem {
 }
 
 const sell = (buy: number, markup: number) => buy * (1 + (markup || 0) / 100);
-
-// ── Minimal CSV parser (handles quoted fields & commas) ──
-function parseCSV(text: string): string[][] {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let cur = "";
-  let inQ = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (inQ) {
-      if (c === '"') {
-        if (text[i + 1] === '"') { cur += '"'; i++; } else inQ = false;
-      } else cur += c;
-    } else if (c === '"') inQ = true;
-    else if (c === ",") { row.push(cur); cur = ""; }
-    else if (c === "\n") { row.push(cur); rows.push(row); row = []; cur = ""; }
-    else if (c !== "\r") cur += c;
-  }
-  if (cur.length || row.length) { row.push(cur); rows.push(row); }
-  return rows.filter((r) => r.some((x) => x.trim() !== ""));
-}
 
 const FIELDS: { key: keyof PriceItemInput; label: string; match: RegExp }[] = [
   { key: "code", label: "Item code", match: /code|item|part|sku|catalog|number|#/i },
