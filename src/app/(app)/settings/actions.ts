@@ -224,6 +224,14 @@ export async function deleteInvitation(id: string): Promise<Result> {
  * service-role key (SUPABASE_SERVICE_ROLE_KEY) on the server. The owner
  * hands the email + password to the employee; they can log in immediately.
  */
+/** INVITE-ONLY gate compliance (migration 0125): a BEFORE INSERT trigger on auth.users
+ *  refuses any email that isn't invited — INCLUDING service-role admin.createUser. An
+ *  org adding its own employee IS an invite, so pre-approve the email right before
+ *  creating the login. Upsert = idempotent; a retry after a failed create is fine. */
+async function preApproveSignup(admin: any, email: string, note: string) {
+  await admin.from("signup_allowlist").upsert({ email: email.toLowerCase(), note }, { onConflict: "email" });
+}
+
 export async function createEmployee(input: {
   full_name: string;
   email: string;
@@ -261,6 +269,7 @@ export async function createEmployee(input: {
   }
 
   const admin = createAdminClient();
+  await preApproveSignup(admin as any, email, `team-invite: ${name} (org ${me.org_id})`);
   const { data: created, error: authErr } = await admin.auth.admin.createUser({
     email,
     password: input.password,
@@ -322,6 +331,7 @@ export async function importCrew(rows: CrewImportRow[], requireReset = true): Pr
     // a public address); it's shown once on the import screen for the office to hand out.
     const password = digits.length >= 8 ? digits : "deck-" + crypto.randomUUID().slice(0, 8);
     const role = ["admin", "office", "tech"].includes(r.role || "") ? (r.role as string) : "tech";
+    await preApproveSignup(admin as any, email, `crew-import: ${name} (org ${me.org_id})`);
     const { data: created, error: authErr } = await admin.auth.admin.createUser({
       email,
       password,

@@ -24,6 +24,18 @@ export async function signup(formData: FormData) {
   const password = String(formData.get("password") ?? "");
   const full_name = String(formData.get("full_name") ?? "");
 
+  // INVITE-ONLY (migration 0125): the real gate is a BEFORE INSERT trigger on auth.users
+  // (it also stops bots POSTing straight to GoTrue with the anon key). This pre-check just
+  // turns the refusal into a clean message instead of a raw database error.
+  const { data: allowed } = await supabase.rpc("signup_allowed", { p_email: email });
+  if (allowed === false) {
+    redirect(
+      `/login?mode=signup&error=${encodeURIComponent(
+        "Contractor North is invite-only right now. Ask for an invite and we'll open the door.",
+      )}`,
+    );
+  }
+
   const { error } = await supabase.auth.signUp({
     email,
     password,
