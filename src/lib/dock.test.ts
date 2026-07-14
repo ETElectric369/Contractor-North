@@ -11,9 +11,10 @@ describe("DOCK jobs section ← JOB_STATUSES", () => {
   const children = jobs?.children ?? [];
   const statusChildren = children.filter((c) => c.href?.startsWith("/jobs?status="));
 
-  it("exists, with 'All Jobs' first", () => {
+  it("exists, statuses first — the 'All Jobs' firehose is gone (Erik 2026-07: brain clutter)", () => {
     expect(jobs).toBeDefined();
-    expect(children[0]).toMatchObject({ label: "All Jobs", href: "/jobs" });
+    expect(children[0]?.href).toBe(`/jobs?status=${JOB_STATUSES[0]}`);
+    expect(children.some((c) => c.href === "/jobs")).toBe(false);
   });
 
   it("hrefs cover every job status, in lifecycle order (cancelled last)", () => {
@@ -26,17 +27,20 @@ describe("DOCK jobs section ← JOB_STATUSES", () => {
     );
   });
 
-  it("statuses sit directly after 'All jobs'; the staff cross-job links follow under a header", () => {
-    expect(children.slice(1, 1 + JOB_STATUSES.length).map((c) => c.id)).toEqual(
+  it("statuses lead; only Permits + Plans follow (WO/Materials/CO are hub-only — Erik: 'Across all jobs GO AWAY')", () => {
+    expect(children.slice(0, JOB_STATUSES.length).map((c) => c.id)).toEqual(
       JOB_STATUSES.map((s) => `j-${s}`),
     );
     // Statuses are for everyone (techs filter their own job list) — never staff-gated.
     expect(statusChildren.every((c) => !c.staffOnly)).toBe(true);
-    // The "Across all jobs" cluster: a staffOnly header node, then only staffOnly links,
-    // so a tech never sees a dangling header or an office-only cross-job page.
-    const rest = children.slice(1 + JOB_STATUSES.length);
-    expect(rest[0]?.header).toBe(true);
-    expect(rest.every((c) => c.staffOnly)).toBe(true);
+    // After the statuses: exactly Permits + Plans & LiDAR, staff-only, no header, and NO
+    // resurrected cross-job list links (those records are reached through the job's tabs).
+    const rest = children.slice(JOB_STATUSES.length);
+    expect(rest.map((c) => c.id)).toEqual(["j-permits", "j-plans"]);
+    expect(rest.every((c) => c.staffOnly && !c.header)).toBe(true);
+    for (const gone of ["/work-orders", "/materials", "/change-orders"]) {
+      expect(children.some((c) => c.href && basePath(c.href) === gone)).toBe(false);
+    }
   });
 });
 
@@ -129,10 +133,12 @@ describe("activeSection — child detail routes light the right section", () => 
     expect(key("/quotes/new")).toBe("sales");
   });
 
-  it("cross-job details belong to Jobs", () => {
-    expect(key("/work-orders/abc123")).toBe("jobs");
-    expect(key("/materials/abc123")).toBe("jobs");
+  it("job details belong to Jobs; hub-only records (WO/Materials) light nothing — reached via the job, never lie", () => {
     expect(key("/jobs/abc123")).toBe("jobs");
+    // Work orders / materials left the nav (hub-only, Erik 2026-07). Their detail pages are
+    // reached through a job's tabs and carry their own backlinks — no dock section owns them.
+    expect(key("/work-orders/abc123")).toBeUndefined();
+    expect(key("/materials/abc123")).toBeUndefined();
   });
 
   it("purchasing (PO details) belongs to Money via the Bills & POs owns-alias", () => {

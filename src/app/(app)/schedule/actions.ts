@@ -100,7 +100,9 @@ export async function createJob(formData: FormData): Promise<Result> {
       name,
       customer_id: customerId,
       description: emptyToNull(formData.get("description")),
-      status: String(formData.get("status") ?? "estimate"),
+      // In Progress is the default (Erik 2026-07): when he creates a job by hand he's usually
+      // already working it — "estimate" as a default just parked real work in a dead bucket.
+      status: String(formData.get("status") || "in_progress"),
       billing_type: String(formData.get("billing_type") ?? "tm"), // T&M is the default now (Estimate); switch to fixed per job
       address,
       scheduled_start: start ? new Date(start).toISOString() : null,

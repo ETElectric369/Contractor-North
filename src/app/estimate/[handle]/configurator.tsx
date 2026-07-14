@@ -31,7 +31,8 @@ type Form = {
   shape: DeckShape;
   wrapAround: boolean;
   stairFlights: number;
-  stairRailingLf: number;
+  stairSteps: number;
+  stairRailing: "yes" | "no" | "";
   manDoors: number;
   sliderDoors: number;
   trpa: boolean;
@@ -61,7 +62,7 @@ export function Configurator({
   const [f, setF] = useState<Form>({
     projectType: "new_deck", plans: "", approved: "", noPlansPath: "",
     lengthFt: 0, widthFt: 0, heightBand: "under10", material: "wood", shape: "rectangle", wrapAround: false,
-    stairFlights: 0, stairRailingLf: 0, manDoors: 0, sliderDoors: 0, trpa: false,
+    stairFlights: 0, stairSteps: 0, stairRailing: "", manDoors: 0, sliderDoors: 0, trpa: false,
     name: "", phone: "", email: "", address: "", city: "", state: "", zip: "", hp: "",
   });
   const [step, setStep] = useState(0);
@@ -79,7 +80,9 @@ export function Configurator({
     heightFt: HEIGHT_BANDS.find((b) => b.value === f.heightBand)?.ft ?? 8,
     railingLf: null,
     stairFlights: f.stairFlights,
-    stairRailingLf: f.stairRailingLf,
+    stairSteps: f.stairSteps,
+    stairRailing: f.stairRailing === "yes",
+    stairRailingLf: 0, // public UI asks yes/no; the LF is derived from the step count
     shape: f.shape,
     wrapAround: f.wrapAround,
     manDoors: f.manDoors,
@@ -220,8 +223,11 @@ export function Configurator({
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <L label="Sets of stairs"><Num v={f.stairFlights} on={(n) => set("stairFlights", n)} field={field} ring={ring} /></L>
-              <L label="Stair railing (ft)"><Num v={f.stairRailingLf} on={(n) => set("stairRailingLf", n)} field={field} ring={ring} /></L>
+              <L label="How many steps total?"><Num v={f.stairSteps} on={(n) => set("stairSteps", n)} field={field} ring={ring} /></L>
             </div>
+            <L label="Stair railing?">
+              <Seg brand={brand} value={f.stairRailing} onChange={(v) => set("stairRailing", v as Form["stairRailing"])} options={[{ v: "yes", l: "Yes" }, { v: "no", l: "No" }]} />
+            </L>
             <div className="grid grid-cols-2 gap-3">
               <L label="Doors onto the deck"><Num v={f.manDoors} on={(n) => set("manDoors", n)} field={field} ring={ring} /></L>
               <L label="Sliding doors onto the deck"><Num v={f.sliderDoors} on={(n) => set("sliderDoors", n)} field={field} ring={ring} /></L>

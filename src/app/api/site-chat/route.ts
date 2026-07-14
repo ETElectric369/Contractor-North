@@ -64,14 +64,16 @@ const DECK_TOOL = {
   input_schema: {
     type: "object",
     properties: {
-      projectType: { type: "string", enum: ["new_deck", "full_replacement", "resurface", "railing", "stairs", "extension", "repair", "staining"] },
+      projectType: { type: "string", enum: ["new_deck", "full_replacement", "resurface", "railing", "stairs", "extension", "repair", "staining", "unsure"] },
       material: { type: "string", enum: ["wood", "composite"] },
       lengthFt: { type: "number", description: "deck length in feet" },
       widthFt: { type: "number", description: "deck width/depth in feet" },
       heightFt: { type: "number", description: "height at the tallest point, in feet" },
       railingLf: { type: "number", description: "linear feet of railing; omit to estimate from the footprint" },
-      stairFlights: { type: "number", description: "number of stair sets" },
-      stairRailingLf: { type: "number" },
+      stairFlights: { type: "number", description: "number of stair sets (a second set implies a landing)" },
+      stairSteps: { type: "number", description: "total individual steps across all stair sets" },
+      stairRailing: { type: "boolean", description: "whether the stairs get railing; footage is estimated from the step count" },
+      stairRailingLf: { type: "number", description: "measured stair-railing linear feet, if the customer knows it" },
       shape: { type: "string", enum: ["rectangle", "irregular"] },
       wrapAround: { type: "boolean" },
       manDoors: { type: "number", description: "man-doors opening onto the deck" },
@@ -120,7 +122,9 @@ function deckEstimate(input: unknown, deckRates: Record<string, number>): { summ
     widthFt: clampNum(a.widthFt, 0, 500),
     heightFt: clampNum(a.heightFt, 0, 200),
     railingLf: a.railingLf == null ? null : clampNum(a.railingLf, 0, 5000),
-    stairFlights: Math.round(clampNum(a.stairFlights, 0, 20)),
+    stairFlights: Math.round(clampNum(a.stairFlights, 0, 10)),
+    stairSteps: Math.round(clampNum(a.stairSteps, 0, 100)),
+    stairRailing: !!a.stairRailing,
     stairRailingLf: clampNum(a.stairRailingLf, 0, 1000),
     shape: a.shape === "irregular" ? "irregular" : "rectangle",
     wrapAround: !!a.wrapAround,
@@ -163,7 +167,7 @@ ${pricingHow}
 - If the customer attaches a PHOTO, look at it: identify what you can (e.g. panel brand & amperage, wiring/condition, access, deck size/shape) and use it to sharpen your questions and the estimate. Mention what you noticed so they know you saw it.
 - ALWAYS call it a preliminary estimate, subject to confirmation once ${org.name} reviews the details.${
       isDeck
-        ? `\n- THIS IS A DECK COMPANY: for any deck job, gather the measurements (length, width, tallest-point height, wood or composite, railing feet, stairs, doors onto the deck, and whether it's in the Tahoe/TRPA basin), then call deck_estimate for an EXACT preliminary number — prefer it over doing the math yourself.`
+        ? `\n- THIS IS A DECK COMPANY: for any deck job, gather the measurements (length, width, tallest-point height, wood or composite, railing feet, sets of stairs plus the total step count, whether the stairs get railing, doors onto the deck, and whether it's in the Tahoe/TRPA basin), then call deck_estimate for an EXACT preliminary number — prefer it over doing the math yourself.`
         : ""
     }
 - For a large or complex job (roughly over $${Math.round(threshold).toLocaleString()}), or anything you can't price with confidence, do NOT give a firm number — explain it needs a quick on-site visit for an exact price, and offer to have ${org.name} reach out.

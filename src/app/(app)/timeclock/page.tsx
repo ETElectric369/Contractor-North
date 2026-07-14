@@ -9,9 +9,7 @@ import { TimeclockPanel } from "./timeclock-panel";
 import { AutoClockoutPrompt } from "./auto-clockout-prompt";
 import { getOrgSettings } from "@/lib/org-settings";
 import { AddEntryButton } from "./add-entry-button";
-import { EditEntryButton } from "../timecards/edit-entry-button";
 import { hoursBetween, formatDuration } from "@/lib/utils";
-import { formatDateTimeTz } from "@/lib/tz";
 import { translator } from "@/lib/i18n";
 import type { JobCode, TimeEntry } from "@/lib/types";
 
@@ -128,16 +126,8 @@ export default async function TimeclockPage() {
     }
   }
 
-  // Recent entries table: personal for EVERYONE — /timecards is the one crew-wide
-  // map (staff get a link under the table). Editable inline.
-  const { data: recentData } = await supabase
-    .from("time_entries")
-    .select("*, job:job_id(job_number, name)")
-    .eq("profile_id", user?.id ?? "")
-    .gte("clock_in", weekAgo)
-    .order("clock_in", { ascending: false })
-    .limit(60);
-  const recent = (recentData ?? []) as any[];
+  // The old "Recent entries" table lived here — removed by Erik's call (2026-07 notes):
+  // entries already live on /timecards, so the clock page stays a clock, not a ledger.
 
   // Aggregate hours per job code for the week (closed entries only).
   const perCode = new Map<string, number>();
@@ -201,70 +191,17 @@ export default async function TimeclockPage() {
                   <p className="text-sm text-slate-400">No closed entries yet.</p>
                 )}
               </div>
+              {/* The Recent-entries table left this page (it duplicated /timecards) — keep the
+                  door to the ledger: your own card for everyone, the crew map for staff. */}
+              <div className="mt-4 border-t border-slate-100 pt-3">
+                <Link href="/timecards" className="text-sm font-medium text-brand hover:underline">
+                  {isStaff ? "Crew Hours →" : "My timecard →"}
+                </Link>
+              </div>
             </CardContent>
           </Card>
         </div>
       </div>
-
-      <Card className="mt-6 overflow-hidden">
-        <div className="border-b border-slate-100 px-5 py-3">
-          <h3 className="text-sm font-semibold text-slate-900">{t("tc_recent")}</h3>
-        </div>
-        <div className="overflow-x-auto">
-        <table className="w-full min-w-[520px] text-sm">
-          <thead className="border-b border-slate-100 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-400">
-            <tr>
-              <th className="px-5 py-2.5 font-semibold">Clock in</th>
-              <th className="px-3 py-2.5 font-semibold">Clock out</th>
-              <th className="px-3 py-2.5 font-semibold">Code</th>
-              <th className="px-3 py-2.5 text-right font-semibold">Lunch</th>
-              <th className="px-3 py-2.5 text-right font-semibold">Hours</th>
-              <th className="px-5 py-2.5 text-right font-semibold">Edit</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {recent.map((e) => (
-              <tr key={e.id}>
-                <td className="px-5 py-2.5 text-slate-700">{formatDateTimeTz(e.clock_in, orgSettings.timezone)}</td>
-                <td className="px-3 py-2.5 text-slate-500">
-                  {e.clock_out ? formatDateTimeTz(e.clock_out, orgSettings.timezone) : <Badge tone="green">{t("tc_open")}</Badge>}
-                </td>
-                <td className="px-3 py-2.5">
-                  {e.job && (
-                    <Link href={`/jobs/${e.job_id}`} className="mr-1 font-medium text-brand hover:underline">
-                      {e.job.job_number}
-                    </Link>
-                  )}
-                  {e.job_code ? <Badge tone="slate">{e.job_code}</Badge> : e.job ? null : "—"}
-                  {e.source === "manual" && <Badge tone="amber" className="ml-1">manual</Badge>}
-                </td>
-                <td className="px-3 py-2.5 text-right text-slate-500">{e.lunch_minutes}m</td>
-                <td className="px-3 py-2.5 text-right font-medium text-slate-800">
-                  {e.clock_out ? formatDuration(hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes)) : "—"}
-                </td>
-                <td className="px-5 py-2.5 text-right">
-                  <EditEntryButton entry={e} jobCodes={(codesRes.data ?? []) as JobCode[]} jobs={jobsRes.data ?? []} members={members ?? []} isStaff={isStaff} />
-                </td>
-              </tr>
-            ))}
-            {recent.length === 0 && (
-              <tr>
-                <td colSpan={6} className="px-5 py-6 text-center text-slate-400">
-                  {t("tc_noEntries")}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-        </div>
-        {isStaff && (
-          <div className="border-t border-slate-100 px-5 py-3">
-            <Link href="/timecards" className="text-sm font-medium text-brand hover:underline">
-              Crew Hours →
-            </Link>
-          </div>
-        )}
-      </Card>
     </div>
   );
 }

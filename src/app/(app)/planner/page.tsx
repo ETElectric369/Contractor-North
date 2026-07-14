@@ -10,12 +10,11 @@ import { getCrewStatus } from "@/lib/crew-status";
 import { CrewBoard } from "./crew-board";
 import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
-import { hoursBetween, formatCurrency, formatTime, formatCityStateZip } from "@/lib/utils";
+import { formatCurrency, formatTime, formatCityStateZip } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
 import { NavLink } from "@/components/nav-link";
 import { toJobOptions, toCustomerOptions, toStaffOptions, listActiveTechs, listCustomerOptions } from "@/lib/schedule-options";
 import { todayBoundsInTz, prettyDay, tzDayStartUtc } from "@/lib/tz";
-import { DayClock } from "./day-clock";
 import { YourList } from "./your-list";
 import { rankSix, SIX_SLOTS } from "@/lib/six-rank";
 import { getActionItems } from "@/lib/action-items/query";
@@ -50,33 +49,21 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   const tz = getOrgSettings((orgRow as any)?.settings).timezone || "America/Los_Angeles";
   const { dayStart, dayEnd, todayStr } = todayBoundsInTz(tz);
 
-  // Pay-week boundary (MONDAY-start, org tz) computed upfront so the week-hours
-  // query can ride the single parallel batch below. Monday matches Timecards/
-  // payroll — the old Sunday-start figure made the DayClock "this week" mean a
-  // different week than a timecard. Display-only: nothing here writes clock time.
-  const dow = new Date(`${todayStr}T00:00:00Z`).getUTCDay(); // 0 = Sunday
-  const payWeekStartDate = new Date(`${todayStr}T00:00:00Z`);
-  payWeekStartDate.setUTCDate(payWeekStartDate.getUTCDate() - ((dow + 6) % 7)); // back to Monday
-  const payWeekStartUtc = tzDayStartUtc(payWeekStartDate.toISOString().slice(0, 10), tz);
-
   // ONE parallel batch for everything that only needs the tz + the user id — was three sequential
   // rounds (day data → current job + week total → form/snapshot options). Latency audit 2026-06-27.
+  // (The DayClock's today/pay-week hour queries left with it — /timeclock owns those now.)
   const [
-    { data: jobs }, { data: segJobs }, { data: appts }, { data: entries }, { data: openRows },
-    { data: weekEntries },
+    { data: jobs }, { data: segJobs }, { data: appts }, { data: openRows },
     { data: customers }, { data: staff }, { data: jobOptRows }, { data: me }, leadsCount,
   ] = await Promise.all([
     supabase.from("jobs").select("id, job_number, name, status, address, scheduled_start, customers(name)").gte("scheduled_start", dayStart.toISOString()).lt("scheduled_start", dayEnd.toISOString()).order("scheduled_start"),
     // Multi-range jobs whose segment covers today.
     supabase.from("job_schedule_segments").select("job_id, jobs(id, job_number, name, status, address, customers(name))").lte("start_date", todayStr).gte("end_date", todayStr),
     supabase.from("appointments").select("id, type, title, starts_at, ends_at, location, notes, status, job_id, customer_id, assigned_to, jobs(address)").gte("starts_at", dayStart.toISOString()).lt("starts_at", dayEnd.toISOString()).neq("status", "cancelled").order("starts_at"),
-    supabase.from("time_entries").select("id, job_id, clock_in, clock_out, lunch_minutes, status").eq("profile_id", user?.id ?? "").gte("clock_in", dayStart.toISOString()).lt("clock_in", dayEnd.toISOString()),
     // The open entry, regardless of when it started (overnight shift, etc.). The job
     // on THIS entry is the "Now" hero — scoped to the caller, not the org's latest
     // in_progress job (which could be a coworker's site across town).
     supabase.from("time_entries").select("id, job_id, clock_in, clock_out, lunch_minutes, status").eq("profile_id", user?.id ?? "").eq("status", "open").order("clock_in", { ascending: false }).limit(1),
-    // This pay week's logged hours (Monday-start — the same week a timecard means).
-    supabase.from("time_entries").select("clock_in, clock_out, lunch_minutes, status").eq("profile_id", user?.id ?? "").gte("clock_in", payWeekStartUtc.toISOString()).lt("clock_in", dayEnd.toISOString()),
     // Options for the inline add/edit controls + the owner snapshot.
     listCustomerOptions(supabase),
     listActiveTechs(supabase),
@@ -217,23 +204,6 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   // number matches the page; techs get their own assigned list (audit cn-v328).
   const elseHref = isStaff ? "/tasks?else=1" : "/tasks?mine=1";
 
-  const hoursToday = (entries ?? []).reduce(
-    (sum: number, e: any) =>
-      e.status === "closed" && e.clock_out ? sum + hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes) : sum,
-    0,
-  );
-  const hoursWeek = (weekEntries ?? []).reduce(
-    (sum: number, e: any) =>
-      e.status === "closed" && e.clock_out ? sum + hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes) : sum,
-    0,
-  );
-  const findJob = (id: string) => jobMap.get(id) ?? (currentJob?.id === id ? currentJob : null);
-  const openJobLabel =
-    openEntry?.job_id && findJob(openEntry.job_id)
-      ? `${findJob(openEntry.job_id).job_number} — ${findJob(openEntry.job_id).name}`
-      : null;
-  const clockJobs = todayJobs.map((j: any) => ({ id: j.id, label: `${j.job_number} — ${j.name}` }));
-
   const org = orgRow;
   const orgLocation = formatCityStateZip((org as any)?.city, (org as any)?.state, (org as any)?.zip) || null;
   const QUOTES = [
@@ -334,6 +304,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   // week; the pay-week hours above are Monday-start on purpose.
   const weekDayGroups: { dayStr: string; label: string; items: Agenda[] }[] = [];
   if (view === "week") {
+    const dow = new Date(`${todayStr}T00:00:00Z`).getUTCDay(); // 0 = Sunday (display week start)
     const viewWeekStart = new Date(`${todayStr}T00:00:00Z`);
     viewWeekStart.setUTCDate(viewWeekStart.getUTCDate() - dow + weekOffset * 7);
     // The 7 day strings (Sun–Sat) of the viewed week, in the org tz.
@@ -494,16 +465,9 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       </div>
       <p className="mb-4 text-sm italic text-slate-400">&ldquo;{dailyQuote}&rdquo;</p>
 
-      {/* Live time clock — clock in/out is the app's #1 impulse verb, so it sits
-          first, at scroll position zero, doubling as the on-the-clock status line. */}
-      <DayClock
-        open={openEntry ? { id: openEntry.id, clock_in: openEntry.clock_in, jobLabel: openJobLabel } : null}
-        closedHoursToday={hoursToday}
-        closedHoursWeek={hoursWeek}
-        currentJobId={currentJob?.id ?? ""}
-        jobs={clockJobs}
-        isStaff={isStaff}
-      />
+      {/* The "On the clock" DayClock box left this page (Erik's 2026-07 notes: it duplicated
+          the timeclock — "already on timecards"). Clocking lives at /timeclock, one tap on the
+          dock's Clock door; the open entry still drives the "Now" hero below. */}
 
       {/* The boss's live crew presence board (staff only) — who's on the clock and on what.
           Erik: "boss needs to see what everyone is doing all the time." Hours moved to payroll

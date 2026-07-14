@@ -59,7 +59,7 @@ export function NewJobButton({
     new_customer_name: "",
     new_customer_phone: "",
     new_customer_email: "",
-    status: "estimate",
+    status: "in_progress", // a hand-created job is usually already underway (Erik 2026-07)
     billing_type: "tm",
     address: "",
     scheduled_date: today,

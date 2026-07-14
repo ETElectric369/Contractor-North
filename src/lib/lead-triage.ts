@@ -17,7 +17,7 @@ export type ProjectType =
   | "extension"        // add-on / enlarge
   | "repair"           // rot / damage / loose boards
   | "staining"         // refinish only
-  | "unsure";          // "not sure / combination — I need help"
+  | "unsure";          // "not sure — I need help"
 
 export const PROJECT_TYPES: { value: ProjectType; label: string }[] = [
   { value: "new_deck", label: "New deck" },
@@ -27,8 +27,8 @@ export const PROJECT_TYPES: { value: ProjectType; label: string }[] = [
   { value: "stairs", label: "Stairs only" },
   { value: "extension", label: "Add-on / extension" },
   { value: "repair", label: "Repair (rot, damage, loose boards)" },
-  { value: "staining", label: "Staining / refinishing only" },
-  { value: "unsure", label: "Not sure / combination — I need help" },
+  { value: "staining", label: "Staining / refinishing" },
+  { value: "unsure", label: "Not sure — I need help" },
 ];
 
 export type LeadIntake = {

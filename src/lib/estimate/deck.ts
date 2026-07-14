@@ -35,8 +35,10 @@ export type DeckAnswers = {
   widthFt: number;
   heightFt: number; // height at the tallest point
   railingLf: number | null;
-  stairFlights: number; // sets of stairs (each > 3 steps)
-  stairRailingLf: number;
+  stairFlights: number; // SETS of stairs — a second set implies a landing + extra engineering
+  stairSteps?: number; // total individual steps across all sets — D4 bills per step (default 0)
+  stairRailing?: boolean; // homeowner's yes/no — when true (and no measured LF) derive LF from steps
+  stairRailingLf: number; // explicit measured LF (office path) — wins over the derivation
   shape: DeckShape;
   wrapAround: boolean;
   manDoors: number;
@@ -147,11 +149,26 @@ export function computeDeckEstimate(a: DeckAnswers, rate: Rate): DeckEstimate {
   }
   add("D2", "Deck railing", railingLf, "LF");
 
-  // Stairs. D4 = Chris's "Stairs >3 steps" rate. OPEN: his GiddyUp bills this per-EA at a
-  // quantity that looks like step-count (a bid had qty 15) — confirm whether stairFlights should
-  // carry sets or individual steps; the code→rate mapping is right either way.
-  add("D4", "Stairs (>3 steps)", n(a.stairFlights), "EA");
-  add("D5", "Stair railing", n(a.stairRailingLf), "LF");
+  // Stairs. D4 = Chris's "Stairs >3 steps" rate, billed PER STEP — his real GiddyUp bid
+  // carried qty 15 (a step count), which settled the old sets-vs-steps question. stairFlights
+  // carries the SETS count separately: a second set implies a landing + extra engineering,
+  // so we flag it rather than price it blind.
+  const steps = n(a.stairSteps);
+  const sets = steps > 0 ? Math.max(1, n(a.stairFlights)) : n(a.stairFlights);
+  add("D4", "Stairs (>3 steps)", steps, "EA");
+  if (steps > 0 && sets > 1) {
+    assumptions.push("Multiple stair sets — landings and extra engineering are verified on-site.");
+  }
+
+  // Stair railing: an explicit measured LF (office path) wins; otherwise a homeowner "yes"
+  // derives LF from the step count — both sides of the run, ~1.12 LF per step of going.
+  const measuredStairRail = n(a.stairRailingLf);
+  let stairRailLf = measuredStairRail;
+  if (measuredStairRail <= 0 && a.stairRailing && steps > 0) {
+    stairRailLf = Math.ceil(steps * 1.12 * 2);
+    assumptions.push("Stair railing estimated both sides; final footage measured on-site.");
+  }
+  add("D5", "Stair railing", stairRailLf, "LF");
 
   // Door waterproofing where a deck meets the house.
   add("DS1B", "Man-door waterproofing", n(a.manDoors), "EA");

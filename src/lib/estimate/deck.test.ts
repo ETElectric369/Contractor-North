@@ -14,8 +14,8 @@ const rate = (c: string) => RATES[c] ?? 0;
 
 const base = (o: Partial<DeckAnswers> = {}): DeckAnswers => ({
   projectType: "new_deck", material: "wood", lengthFt: 0, widthFt: 0, heightFt: 0,
-  railingLf: null, stairFlights: 0, stairRailingLf: 0, shape: "rectangle",
-  wrapAround: false, manDoors: 0, sliderDoors: 0, trpa: false, ...o,
+  railingLf: null, stairFlights: 0, stairSteps: 0, stairRailing: false, stairRailingLf: 0,
+  shape: "rectangle", wrapAround: false, manDoors: 0, sliderDoors: 0, trpa: false, ...o,
 });
 
 describe("computeDeckEstimate — a plain new deck", () => {
@@ -62,6 +62,42 @@ describe("computeDeckEstimate — partial jobs compose", () => {
     const e = computeDeckEstimate(base({ projectType: "resurface", lengthFt: 10, widthFt: 10 }), rate);
     expect(e.lines).toHaveLength(1);
     expect(e.total).toBe(100 * 40); // DS8, not D1; no derived railing; no footings
+  });
+});
+
+describe("computeDeckEstimate — stairs bill per STEP, sets flag the engineering", () => {
+  it("15 steps in one set bills D4 at qty 15 (matches Chris's real GiddyUp bid)", () => {
+    const e = computeDeckEstimate(base({ projectType: "stairs", stairFlights: 1, stairSteps: 15 }), rate);
+    const d4 = e.lines.find((l) => l.description.startsWith("Stairs"));
+    expect(d4?.quantity).toBe(15);
+    expect(e.total).toBe(15 * 750);
+    expect(e.assumptions.some((a) => a.includes("Multiple stair sets"))).toBe(false);
+  });
+  it("steps with sets left at 0 are treated as one set — no landings flag", () => {
+    const e = computeDeckEstimate(base({ stairSteps: 8 }), rate);
+    expect(e.lines.find((l) => l.description.startsWith("Stairs"))?.quantity).toBe(8);
+    expect(e.assumptions.some((a) => a.includes("Multiple stair sets"))).toBe(false);
+  });
+  it("two sets adds the landings / extra-engineering assumption", () => {
+    const e = computeDeckEstimate(base({ stairFlights: 2, stairSteps: 12 }), rate);
+    expect(e.lines.find((l) => l.description.startsWith("Stairs"))?.quantity).toBe(12);
+    expect(e.assumptions.some((a) => a.includes("Multiple stair sets"))).toBe(true);
+  });
+  it("stairRailing yes derives LF from the step count (both sides), flagged", () => {
+    const e = computeDeckEstimate(base({ stairFlights: 1, stairSteps: 15, stairRailing: true }), rate);
+    const d5 = e.lines.find((l) => l.description === "Stair railing");
+    expect(d5?.quantity).toBe(Math.ceil(15 * 1.12 * 2)); // 34 LF
+    expect(e.assumptions.some((a) => a.includes("Stair railing estimated"))).toBe(true);
+  });
+  it("an explicit measured stair-railing LF wins over the derivation (office path)", () => {
+    const e = computeDeckEstimate(base({ stairSteps: 15, stairRailing: true, stairRailingLf: 20 }), rate);
+    expect(e.lines.find((l) => l.description === "Stair railing")?.quantity).toBe(20);
+    expect(e.assumptions.some((a) => a.includes("Stair railing estimated"))).toBe(false);
+  });
+  it("stairRailing yes with zero steps prices nothing and flags nothing", () => {
+    const e = computeDeckEstimate(base({ stairRailing: true }), rate);
+    expect(e.lines).toHaveLength(0);
+    expect(e.assumptions.some((a) => a.includes("Stair railing"))).toBe(false);
   });
 });
 

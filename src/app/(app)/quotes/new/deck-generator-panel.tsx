@@ -30,6 +30,7 @@ type Form = {
   wrapAround: boolean;
   railingLf: number;
   stairFlights: number;
+  stairSteps: number;
   stairRailingLf: number;
   manDoors: number;
   sliderDoors: number;
@@ -61,6 +62,7 @@ export function DeckGeneratorPanel({
     wrapAround: false,
     railingLf: 0,
     stairFlights: 0,
+    stairSteps: 0,
     stairRailingLf: 0,
     manDoors: 0,
     sliderDoors: 0,
@@ -77,6 +79,7 @@ export function DeckGeneratorPanel({
       heightFt: HEIGHT_BANDS.find((b) => b.value === f.heightBand)?.ft ?? 8,
       railingLf: f.railingLf > 0 ? f.railingLf : null,
       stairFlights: f.stairFlights,
+      stairSteps: f.stairSteps,
       stairRailingLf: f.stairRailingLf,
       shape: f.shape,
       wrapAround: f.wrapAround,
@@ -161,8 +164,12 @@ export function DeckGeneratorPanel({
               <NumberInput value={f.railingLf} onValueChange={(n) => set("railingLf", n)} placeholder="auto" />
             </div>
             <div>
-              <Label>Stairs (steps)</Label>
+              <Label>Sets of stairs</Label>
               <NumberInput value={f.stairFlights} onValueChange={(n) => set("stairFlights", n)} />
+            </div>
+            <div>
+              <Label>Stairs (total steps)</Label>
+              <NumberInput value={f.stairSteps} onValueChange={(n) => set("stairSteps", n)} />
             </div>
             <div>
               <Label>Stair railing (LF)</Label>

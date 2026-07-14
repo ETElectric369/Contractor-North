@@ -4,7 +4,6 @@ import {
   Wand2,
   Ban,
   Briefcase,
-  Layers,
   Play,
   CalendarDays,
   CalendarClock,
@@ -118,23 +117,21 @@ export const DOCK: DockSection[] = [
     icon: Briefcase,
     href: "/jobs",
     children: [
-      { id: "j-all", label: "All Jobs", icon: Briefcase, href: "/jobs" },
       // The job lifecycle, GENERATED from the canonical JOB_STATUSES spine (its order IS the
       // lifecycle) so this list can't drift from the enum again — it had: missing invoiced +
       // cancelled, and a hand-written "Completed" vs canonical "complete". Guarded by dock.test.ts.
+      // "All Jobs" is gone by Erik's call (2026-07 notes): the status pills ARE the list — the
+      // unfiltered firehose was brain clutter (the section tile itself still lands on /jobs).
       ...JOB_STATUSES.map((s) => ({
         id: `j-${s}`,
         label: capFirst(jobStatusLabel(s)),
         icon: JOB_STATUS_ICONS[s],
         href: `/jobs?status=${s}`,
       })),
-      // Cross-job views (office/dispatch) — the same records live on each job's tabs too.
-      // Permits live under active jobs now (moved out of Office per Alexa).
-      { id: "j-across-h", label: "Across all jobs", icon: Layers, header: true, staffOnly: true },
+      // Permits live under active jobs (moved out of Office per Alexa). The old "Across all
+      // jobs" cluster (Work Orders / Materials / Change Orders) left the nav with it — those
+      // records are HUB-ONLY now, reached through the job's own tabs (Erik: "GO AWAY").
       { id: "j-permits", label: "Permits", icon: Stamp, href: "/permits", staffOnly: true },
-      { id: "j-wo", label: "Work Orders", icon: Wrench, href: "/work-orders", staffOnly: true },
-      { id: "j-mat", label: "Materials", icon: Boxes, href: "/materials", staffOnly: true },
-      { id: "j-co", label: "Change Orders", icon: FileText, href: "/change-orders", staffOnly: true },
       // Plans & LiDAR (plan markup / scans → take-off → work order) — was an orphan route with
       // zero inbound links; given a home under Jobs where take-offs feed the rest of the lifecycle.
       { id: "j-plans", label: "Plans & LiDAR", icon: ScanLine, href: "/plans", staffOnly: true },
