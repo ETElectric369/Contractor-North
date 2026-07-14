@@ -8,6 +8,7 @@ import { formatCurrency, formatDate } from "@/lib/utils";
 import { NewChangeOrderButton } from "./new-co-button";
 import { CoStatusControl } from "./co-status-control";
 import { CoRowActions } from "./co-row-actions";
+import { jobLabel } from "@/lib/schedule-options";
 
 export const dynamic = "force-dynamic";
 
@@ -69,7 +70,7 @@ export default async function ChangeOrdersPage() {
                       </span>
                       {c.jobs?.name && (
                         <span className="text-xs text-slate-400">
-                          {c.jobs.job_number} · {c.jobs.name}
+                          {jobLabel(c.jobs)}
                         </span>
                       )}
                       <span className="text-xs text-slate-400">

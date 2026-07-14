@@ -23,7 +23,7 @@ export async function jobProgressFinancials(supabase: any, jobId: string): Promi
 
   // Labor: the exact helper importLaborIntoInvoice uses (per-person, quarter-hour,
   // default-rate fallback) — so the panel can't diverge from the billed lines.
-  const defaultRate = Number(((org as any)?.settings ?? {}).default_labor_rate ?? 0);
+  const defaultRate = getOrgSettings((org as any)?.settings).default_labor_rate; // via the settings SSOT
   const { total: billableLabor } = computeJobLaborBilling(labor.jobEntries, labor.jobAllocs, defaultRate);
 
   return computeJobProgress({

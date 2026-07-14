@@ -21,6 +21,7 @@ export function SchedulingSettings({
   const [weekStart, setWeekStart] = useState(settings.week_start);
   const [method, setMethod] = useState(settings.time_tracking_method);
   const [autoLunch, setAutoLunch] = useState(settings.auto_lunch_30);
+  const [remindClock, setRemindClock] = useState(settings.remind_timeclock);
   const [geofence, setGeofence] = useState(settings.geofence_logout);
   const [radius, setRadius] = useState(settings.geofence_radius_m);
   const [supervisor, setSupervisor] = useState(settings.timecard_supervisor_id);
@@ -40,6 +41,7 @@ export function SchedulingSettings({
         week_start: weekStart,
         time_tracking_method: method,
         auto_lunch_30: autoLunch,
+        remind_timeclock: remindClock,
         geofence_logout: geofence,
         geofence_radius_m: Math.max(50, Math.round(Number(radius) || 300)),
         timecard_supervisor_id: supervisor,
@@ -92,6 +94,10 @@ export function SchedulingSettings({
         <label className="flex items-start gap-2 text-sm text-slate-600">
           <input type="checkbox" checked={autoLunch} onChange={(e) => setAutoLunch(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand" />
           <span>Pre-check the 30-min unpaid lunch on shifts over 5 hours (crew still confirms).</span>
+        </label>
+        <label className="flex items-start gap-2 text-sm text-slate-600">
+          <input type="checkbox" checked={remindClock} onChange={(e) => setRemindClock(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand" />
+          <span>Text timeclock reminders to techs — a morning nudge if they haven&apos;t clocked in, and an end-of-day reminder to clock out / fill in the day&apos;s details.</span>
         </label>
       </div>
 

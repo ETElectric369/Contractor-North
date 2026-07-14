@@ -6,7 +6,9 @@
  * pair the exact same way:
  *   • the appointment modal's "Propose Times" (staff, FormData wrapper)
  *   • a lead's "Schedule inspection → Let them pick" (staff, plain args)
- *   • the PUBLIC "schedule your site visit" button (service client, org_id explicit)
+ * (A third, PUBLIC service-client caller existed in v498; cn-v499 removed it —
+ * the public button now only flags the lead + pings the office. Both remaining
+ * callers run under a staff session, so the set_org_id trigger stamps org_id.)
  *
  * Dedup doctrine (from the original action): re-proposing the same context must
  * WITHDRAW the still-pending prior link (cancel proposal + its tentative
@@ -50,19 +52,15 @@ export interface ProposalInput {
   location?: string | null;
   notes?: string | null;
   assignedTo?: string | null;
-  /** Null for the public (service-client) caller — appointments.created_by is nullable. */
+  /** The staff caller's user id — stored on appointments/schedule_proposals.created_by. */
   createdBy?: string | null;
-  /** REQUIRED with the service client: the set_org_id trigger has no auth context
-   *  there, and get_schedule_proposal inner-joins organizations via org_id — an
-   *  unstamped row renders a dead link. Staff-session callers omit it (trigger stamps). */
-  orgId?: string | null;
   /** The tentative first-slot instant, already resolved to UTC by the caller
    *  (browser ISO or tz-helper) — this module stays timezone-agnostic. */
   startsAtIso?: string | null;
 }
 
 export type ProposalResult =
-  | { ok: true; token: string; appointmentId: string }
+  | { ok: true; token: string }
   | { ok: false; error: string };
 
 export async function createProposalCore(
@@ -129,7 +127,6 @@ export async function createProposalCore(
       assigned_to: input.assignedTo ?? null,
       status: "proposed",
       created_by: input.createdBy ?? null,
-      ...(input.orgId ? { org_id: input.orgId } : {}),
     })
     .select("id")
     .single();
@@ -143,11 +140,10 @@ export async function createProposalCore(
       dates: slots,
       time_note: timeNote,
       created_by: input.createdBy ?? null,
-      ...(input.orgId ? { org_id: input.orgId } : {}),
     })
     .select("token")
     .single();
   if (pErr || !prop) return { ok: false, error: pErr?.message ?? "Could not create the pick-a-time link." };
 
-  return { ok: true, token: prop.token as string, appointmentId: appt.id as string };
+  return { ok: true, token: prop.token as string };
 }

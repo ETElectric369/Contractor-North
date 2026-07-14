@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { getOrgSettings } from "@/lib/org-settings";
-import { getSchedulePickerOptions } from "@/lib/schedule-options";
+import { getSchedulePickerOptions, jobLabel } from "@/lib/schedule-options";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { tzDayStartUtc, todayStrInTz, prettyDay } from "@/lib/tz";
 import { CrewBoard, type Lane, type CrewJob, type CrewAppt } from "./crew-board";
@@ -77,7 +77,7 @@ export async function CrewBoardPanel({ date }: { date?: string }) {
   }
   const jobs: CrewJob[] = [...byId.values()].map((j: any) => ({
     id: j.id,
-    label: `${j.job_number} · ${j.name}`,
+    label: jobLabel(j),
     status: j.status,
     customer: j.customers?.name ?? null,
     assigned: (j.assigned_to ?? []).filter(Boolean),

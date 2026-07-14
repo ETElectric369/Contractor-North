@@ -10,6 +10,8 @@
  * office Leads row and the one-click convert→draft-quote path both read what they need.
  */
 import { classifyLead, type LeadIntake, type LeadTriage } from "@/lib/lead-triage";
+import { getOrgSettings } from "@/lib/org-settings";
+import { todayStrInTz, tzDayStartUtc, tzLocalHourUtc } from "@/lib/tz";
 import { createNotifications } from "@/lib/notifications";
 import { sendPushToProfiles } from "@/lib/push";
 import { sendEmail } from "@/lib/email";
@@ -75,9 +77,14 @@ export async function createTriagedInquiry(
   // session for the set_org_id trigger). Best-effort: a booking failure must not stop the lead.
   if (triage.siteInspectionRequired) {
     try {
-      const when = new Date();
-      when.setDate(when.getDate() + 2);
-      when.setHours(9, 0, 0, 0);
+      // 9 AM in the ORG's timezone, two days out — NOT server-local setHours(9), which on
+      // Vercel (UTC) stored 9 AM UTC = 1-2 AM Pacific (the exact class cn-v498 fixed in
+      // leads/actions.ts). Same tz idiom as recurring/actions' defaultDueDateIso.
+      const { data: orgTz } = await supabase.from("organizations").select("settings").eq("id", orgId).maybeSingle();
+      const tz = getOrgSettings((orgTz as { settings?: unknown } | null)?.settings).timezone;
+      const todayStart = tzDayStartUtc(todayStrInTz(tz), tz);
+      const dayStr = todayStrInTz(tz, new Date(todayStart.getTime() + 2 * 86_400_000));
+      const when = tzLocalHourUtc(dayStr, 9, tz);
       await supabase.from("appointments").insert({
         org_id: orgId,
         type: "inspection",

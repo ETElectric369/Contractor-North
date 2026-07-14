@@ -6,6 +6,7 @@ import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { submitForm, type FormField } from "../actions";
+import { jobLabel } from "@/lib/schedule-options";
 
 interface JobOption {
   id: string;
@@ -60,7 +61,7 @@ export function FillForm({
           <option value="">— None —</option>
           {jobs.map((j) => (
             <option key={j.id} value={j.id}>
-              {j.job_number} · {j.name}
+              {jobLabel(j)}
             </option>
           ))}
         </Select>

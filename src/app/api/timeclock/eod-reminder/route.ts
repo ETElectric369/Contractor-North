@@ -26,7 +26,7 @@ export async function GET(request: Request) {
   let reminded = 0;
 
   for (const org of orgs ?? []) {
-    if ((org.settings ?? {}).remind_timeclock === false) continue; // per-org opt-out
+    if (!getOrgSettings(org.settings).remind_timeclock) continue; // per-org opt-out (Settings → Scheduling)
     // "Today" is the org's LOCAL day, not the (UTC-on-Vercel) server day, so a
     // Pacific evening shift counts toward today rather than tomorrow.
     const { dayStart } = todayBoundsInTz(getOrgSettings(org.settings).timezone);

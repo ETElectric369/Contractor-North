@@ -12,6 +12,7 @@ import { MoveToDay } from "@/components/move-to-day";
 import { useToast } from "@/components/toast";
 import { formatDate } from "@/lib/utils";
 import { createTask, toggleTask, deleteTask, updateTask, type TaskCategory, type ToggleTaskResult } from "./actions";
+import { jobLabel } from "@/lib/schedule-options";
 
 export interface ViewTask {
   id: string;
@@ -184,7 +185,7 @@ export function NewTaskBox({
             <Select value={jobId} onChange={(e) => setJobId(e.target.value)} className="w-48 text-xs" aria-label="Job">
               <option value="">No job</option>
               {jobs.map((j) => (
-                <option key={j.id} value={j.id}>{j.job_number} · {j.name}</option>
+                <option key={j.id} value={j.id}>{jobLabel(j)}</option>
               ))}
             </Select>
             {people.length > 0 && (
@@ -276,7 +277,7 @@ function TaskEditModal({
           <Select id="te-job" value={jobId} onChange={(e) => setJobId(e.target.value)}>
             <option value="">— No job —</option>
             {jobs.map((j) => (
-              <option key={j.id} value={j.id}>{j.job_number} · {j.name}</option>
+              <option key={j.id} value={j.id}>{jobLabel(j)}</option>
             ))}
           </Select>
         </div>

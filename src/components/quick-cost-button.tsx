@@ -10,6 +10,7 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { todayStrInTz } from "@/lib/tz";
 import { getOrgSettings } from "@/lib/org-settings";
 import { createBill, addDocument } from "@/app/(app)/jobs/actions";
+import { jobLabel } from "@/lib/schedule-options";
 
 const CATEGORIES = ["Materials", "Fuel", "Shop supplies", "Tools", "Subcontractor", "Permit", "Equipment rental", "Office", "Other"];
 const MAX_PHOTO = 15 * 1024 * 1024;
@@ -115,7 +116,7 @@ export function QuickCostButton({
         .select("id, job_number, name")
         .order("created_at", { ascending: false })
         .limit(200);
-      if (data) setAutoJobs((data as any[]).map((j) => ({ id: j.id, label: `${j.job_number} · ${j.name}` })));
+      if (data) setAutoJobs((data as any[]).map((j) => ({ id: j.id, label: jobLabel(j) })));
     }
   }
 

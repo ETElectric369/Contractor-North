@@ -13,6 +13,7 @@ import { AddEntryButton } from "./add-entry-button";
 import { hoursBetween, formatDuration } from "@/lib/utils";
 import { translator } from "@/lib/i18n";
 import type { JobCode, TimeEntry } from "@/lib/types";
+import { jobLabel } from "@/lib/schedule-options";
 
 export const dynamic = "force-dynamic";
 
@@ -142,7 +143,7 @@ export default async function TimeclockPage() {
           clock_out: (autoEntry as any).clock_out,
           lunch_minutes: (autoEntry as any).lunch_minutes ?? 0,
           jobId: (autoEntry as any).job_id ?? null,
-          jobLabel: j ? `${j.job_number} · ${j.name}` : "the jobsite",
+          jobLabel: j ? jobLabel(j) : "the jobsite",
         };
       }
     }

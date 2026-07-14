@@ -19,6 +19,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { hoursBetween, formatDuration, formatFullAddress } from "@/lib/utils";
+import { jobLabel } from "@/lib/schedule-options";
 import { translator } from "@/lib/i18n";
 import { drivingDistanceMiles } from "@/lib/google-maps";
 import { getPosition } from "@/lib/geo";
@@ -178,9 +179,8 @@ export function TimeclockPanel({
     (s, a) => s + (a.hours || 0) + (a.minutes || 0) / 60,
     0,
   );
-  // The crew MUST say which code(s) they worked + hours before clocking out — this is the
-  // mis-billing fix (wrong hours on wrong jobs). At least one row needs a code AND hours.
-  const allocOk = allocations.some((a) => a.job_code && (a.hours || 0) + (a.minutes || 0) / 60 > 0);
+  // (The old mandatory-allocation gate lived here — removed with the v497 two-button
+  // tech flow: only STAFF reach this questionnaire now, and staff were never gated.)
 
   // Narrow the code picker to a job's template codes (so people pick the right code for
   // the job type). No template / unknown job → all org codes.
@@ -404,7 +404,7 @@ export function TimeclockPanel({
         setSwitchJobId("");
         setSwitchJobCode("");
         const j = jobs.find((x) => x.id === switchJobId);
-        toast(`Switched to ${j ? `${j.job_number} · ${j.name}` : "the new job"}`, "success");
+        toast(`Switched to ${j ? jobLabel(j) : "the new job"}`, "success");
       } catch {
         setError(OFFLINE_MSG);
       }
@@ -486,7 +486,9 @@ export function TimeclockPanel({
 
   if (openEntry) {
     const elapsed = hoursBetween(openEntry.clock_in, new Date(now), lunchToUse);
-    const jobLabel =
+    // Name only (not the shared number·name jobLabel helper) — the running banner
+    // reads better without the job number; renamed so the helper isn't shadowed.
+    const currentJobName =
       jobs.find((j) => j.id === openEntry.job_id)?.name ?? "No job selected";
     return (
       <>
@@ -498,7 +500,7 @@ export function TimeclockPanel({
               <span className="relative inline-flex h-3 w-3 rounded-full bg-green-500" />
             </span>
             <span className="text-sm font-medium text-green-700">
-              {t("tc_clockedIn")} — {jobLabel}
+              {t("tc_clockedIn")} — {currentJobName}
               {openEntry.job_code ? ` · ${openEntry.job_code}` : ""}
             </span>
           </div>
@@ -531,7 +533,7 @@ export function TimeclockPanel({
                 <ArrowLeftRight className="h-4 w-4 text-brand" /> Switch job
               </Label>
               <p className="text-xs text-slate-500">
-                Your time on {jobLabel} so far is recorded; the clock keeps running on the new job.
+                Your time on {currentJobName} so far is recorded; the clock keeps running on the new job.
               </p>
               <Select
                 value={switchJobId}
@@ -547,7 +549,7 @@ export function TimeclockPanel({
                   .filter((j) => j.id !== openEntry.job_id)
                   .map((j) => (
                     <option key={j.id} value={j.id}>
-                      {j.job_number} · {j.name}
+                      {jobLabel(j)}
                     </option>
                   ))}
               </Select>
@@ -628,7 +630,7 @@ export function TimeclockPanel({
 
           {/* Jobs worked today — the PRIMARY clock-out question: which code(s) + hours.
               This is the wrong-hours-on-wrong-jobs fix; required for the field crew. */}
-          <div className={`rounded-xl border p-3 ${!isStaff && !allocOk ? "border-amber-300 bg-amber-50/60" : "border-brand/30 bg-brand/5"}`}>
+          <div className="rounded-xl border border-brand/30 bg-brand/5 p-3">
             <div className="mb-1 flex items-center justify-between">
               <Label className="mb-0 flex items-center gap-1.5 text-slate-900">
                 <Briefcase className="h-4 w-4 text-brand" /> {t("tc_jobsToday")}
@@ -661,7 +663,7 @@ export function TimeclockPanel({
                         <option value="">— Job —</option>
                         {jobs.map((j) => (
                           <option key={j.id} value={j.id}>
-                            {j.job_number} · {j.name}
+                            {jobLabel(j)}
                           </option>
                         ))}
                       </Select>
@@ -778,11 +780,6 @@ export function TimeclockPanel({
           </div>
 
               {error && <p className="text-sm text-red-600">{error}</p>}
-              {!isStaff && !allocOk && (
-                <p className="text-center text-xs font-medium text-amber-600">
-                  Add the job code(s) you worked and the hours before clocking out.
-                </p>
-              )}
               {/* Say WHY the button is disabled — it used to just sit grey. */}
               {!breaksOk && (
                 <p className="text-center text-xs font-medium text-amber-600">
@@ -799,7 +796,7 @@ export function TimeclockPanel({
                   size="lg"
                   className="flex-1"
                   onClick={doClockOut}
-                  disabled={pending || !breaksOk || (!isStaff && !allocOk)}
+                  disabled={pending || !breaksOk}
                 >
                   {pending ? (
                     <>
@@ -853,7 +850,7 @@ export function TimeclockPanel({
               <option value="">{t("tc_noJob")}</option>
               {jobs.map((j) => (
                 <option key={j.id} value={j.id}>
-                  {j.job_number} · {j.name}
+                  {jobLabel(j)}
                 </option>
               ))}
             </Select>

@@ -19,6 +19,7 @@ import { MoveToDay } from "@/components/move-to-day";
 import { useToast } from "@/components/toast";
 import { formatDate } from "@/lib/utils";
 import { toggleTask, updateTask, type ToggleTaskResult } from "../tasks/actions";
+import { jobLabel } from "@/lib/schedule-options";
 
 /** A ranked slot (lib/six-rank picks it; planner/page.tsx decorates it). */
 export interface SixSlot {
@@ -215,7 +216,7 @@ export function YourList({
                           )}
                           {t.jobs && (
                             <span className="truncate">
-                              {t.jobs.job_number} · {t.jobs.name}
+                              {jobLabel(t.jobs)}
                             </span>
                           )}
                         </span>

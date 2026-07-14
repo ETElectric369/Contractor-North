@@ -212,7 +212,11 @@ export async function deleteInvitation(id: string): Promise<Result> {
 /** INVITE-ONLY gate compliance (migration 0125): a BEFORE INSERT trigger on auth.users
  *  refuses any email that isn't invited — INCLUDING service-role admin.createUser. An
  *  org adding its own employee IS an invite, so pre-approve the email right before
- *  creating the login. Upsert = idempotent; a retry after a failed create is fine. */
+ *  creating the login. Upsert = idempotent; a retry after a failed create is fine.
+ *  KNOWN TRADE-OFF: allowlist rows are never consumed/deleted after signup, so an
+ *  invited (even later deactivated) email stays signup-eligible; the `note` column is
+ *  write-only (no admin UI lists the allowlist). Acceptable while invites are staff-
+ *  initiated; revisit if the allowlist should expire per-use. */
 async function preApproveSignup(admin: any, email: string, note: string) {
   await admin.from("signup_allowlist").upsert({ email: email.toLowerCase(), note }, { onConflict: "email" });
 }

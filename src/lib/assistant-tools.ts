@@ -4,7 +4,7 @@ import { tzDayStartUtc, todayStrInTz, payPeriodForOffset } from "@/lib/tz";
 import { escapeLike, hoursBetween, formatFullAddress } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
-import { getMoneyPipeline } from "@/lib/billing-pipeline";
+import { getMoneyPipeline, orgTodayStr } from "@/lib/billing-pipeline";
 import { invoiceBalance } from "@/lib/invoice-math";
 import { aggregatePayrollEntries, payRateForEntry } from "@/lib/payroll-math";
 import { summarizeMileage } from "@/lib/mileage-math";
@@ -676,10 +676,9 @@ export async function runDataTool(
 
       case "list_invoices": {
         const lim = clampLimit(input.limit, 15);
-        // Org-local "today" for the overdue rule — a UTC midnight would mis-flag afternoon
-        // due-today invoices for non-UTC orgs. Mirrors billing-pipeline's overdue definition.
-        const { data: orgInv } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
-        const today = todayStrInTz(getOrgSettings((orgInv as any)?.settings).timezone);
+        // Org-local "today" for the overdue rule — the SAME helper getMoneyPipeline uses,
+        // so this list and the Billing board can't disagree on what "overdue" means.
+        const today = await orgTodayStr(supabase);
         let q = supabase
           .from("invoices")
           .select("id, invoice_number, status, total, amount_paid, due_date, created_at, customers(name)")
@@ -1061,13 +1060,21 @@ export async function runDataTool(
 
       case "list_petty_cash": {
         const lim = clampLimit(input.limit, 20);
-        const { data, error } = await supabase
-          .from("petty_cash")
-          .select("id, tx_date, kind, amount, category, description")
-          .order("tx_date", { ascending: false })
-          .limit(lim);
+        // The transaction list is a page, but the BALANCE must cover every row — a
+        // balance reduced over the LIMITed page under-reports the cash box the moment
+        // there are more transactions than the limit. Fetch kinds/amounts unlimited
+        // (tiny rows) for the aggregate; page only the display list.
+        const [{ data, error }, { data: allTx, error: allErr }] = await Promise.all([
+          supabase
+            .from("petty_cash")
+            .select("id, tx_date, kind, amount, category, description")
+            .order("tx_date", { ascending: false })
+            .limit(lim),
+          supabase.from("petty_cash").select("kind, amount"),
+        ]);
         if (error) throw error;
-        const balance = (data ?? []).reduce(
+        if (allErr) throw allErr;
+        const balance = (allTx ?? []).reduce(
           (s: number, t: any) => s + (t.kind === "replenish" ? money(t.amount) : -money(t.amount)),
           0,
         );
@@ -1412,9 +1419,8 @@ export async function runDataTool(
         const total = money(inv.total);
         const paid = money(inv.amount_paid);
         const balance = invoiceBalance(inv.total, inv.amount_paid); // SSOT balance
-        // Org-local "today" for overdue — mirrors getMoneyPipeline / list_invoices.
-        const { data: orgInv } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
-        const today = todayStrInTz(getOrgSettings((orgInv as any)?.settings).timezone);
+        // Org-local "today" for overdue — the same helper getMoneyPipeline / list_invoices use.
+        const today = await orgTodayStr(supabase);
         return JSON.stringify({
           found: true,
           invoice_id: inv.id, // pass to invoice.addItem / payment.record

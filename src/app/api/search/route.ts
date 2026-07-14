@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { formatDate, DEFAULT_TIMEZONE } from "@/lib/utils";
 import { todayStrInTz } from "@/lib/tz";
+import { jobLabel } from "@/lib/schedule-options";
 
 export const runtime = "nodejs";
 
@@ -55,7 +56,7 @@ export async function GET(req: Request) {
   const results = [
     ...(jobs.data ?? []).map((j: any) => ({
       type: "Job",
-      label: `${j.job_number} · ${j.name}`,
+      label: jobLabel(j),
       sub: j.status,
       href: `/jobs/${j.id}`,
     })),

@@ -10,6 +10,7 @@ import { NumberInput } from "@/components/ui/number-input";
 import { createManualEntry } from "./actions";
 import { todayStrInTz } from "@/lib/tz";
 import type { JobCode } from "@/lib/types";
+import { jobLabel } from "@/lib/schedule-options";
 
 interface JobOption {
   id: string;
@@ -225,7 +226,7 @@ export function AddEntryButton({
               <option value="">— No job —</option>
               {jobs.map((j) => (
                 <option key={j.id} value={j.id}>
-                  {j.job_number} · {j.name}
+                  {jobLabel(j)}
                 </option>
               ))}
             </Select>

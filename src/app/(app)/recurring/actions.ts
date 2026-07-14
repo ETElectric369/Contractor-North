@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
 import { requireStaff } from "@/lib/staff-guard";
 import { drawAmount, DRAW_KINDS } from "@/lib/invoice-math";
+import { contractTotalFromQuotes } from "@/lib/payment-schedule-math";
 import { getOrgSettings } from "@/lib/org-settings";
 import { tzLocalHourUtc, todayStrInTz } from "@/lib/tz";
 import { standardBillingBlockerOnJob, standardBillingConflictError } from "@/lib/billing-guards";
@@ -128,11 +129,14 @@ export async function generateOne(id: string): Promise<Result> {
   const supabase = ctx.supabase;
   const { data: t } = await supabase.from("recurring_templates").select("*").eq("id", id).maybeSingle();
   if (!t) return { ok: false, error: "Template not found." };
-  const today = new Date().toISOString().slice(0, 10);
+  // Org-local today + settings (tz / work-day window) for the generated occurrence.
+  const { data: orgRow } = await supabase.from("organizations").select("settings").maybeSingle();
+  const raw = (orgRow as { settings?: unknown } | null)?.settings;
+  const today = todayStrInTz(getOrgSettings(raw).timezone);
   const ok =
     t.kind === "invoice"
       ? await runInvoiceTemplate(supabase, t, ctx.userId, today)
-      : await runTemplate(supabase, t, ctx.userId);
+      : await runTemplate(supabase, t, ctx.userId, raw);
   if (!ok) return { ok: false, error: t.kind === "invoice" ? "Already generated for this period." : "Could not generate." };
   revalidatePath("/recurring");
   revalidatePath(t.kind === "job" ? "/jobs" : t.kind === "invoice" ? "/billing" : "/bills");
@@ -188,14 +192,17 @@ export async function createProgressInvoice(
   const stdBlocker = await standardBillingBlockerOnJob(supabase, jobId);
   if (stdBlocker) return standardBillingConflictError(stdBlocker);
 
-  // Estimate = quoted total; billed-to-date = the job's SENT invoices (non-void,
-  // non-draft — a draft draw isn't a real bill; matches the job page + modal so
-  // the "% of remaining" base can't diverge by an outstanding draft).
+  // Estimate = the ACCEPTED contract via the one shared rule (accepted quote[s] only;
+  // falls back to all quotes when none accepted yet) — contractTotalFromQuotes, the same
+  // helper the job page / billing / contracts / pipeline use, so a superseded or rejected
+  // quote revision can't inflate the "% of remaining estimate" draw base. Billed-to-date =
+  // the job's SENT invoices (non-void, non-draft — a draft draw isn't a real bill; matches
+  // the job page + modal so the "% of remaining" base can't diverge by an outstanding draft).
   const [{ data: quotes }, { data: invoices }] = await Promise.all([
-    supabase.from("quotes").select("total").eq("job_id", jobId),
+    supabase.from("quotes").select("total, status").eq("job_id", jobId),
     supabase.from("invoices").select("total, status").eq("job_id", jobId),
   ]);
-  const estimate = (quotes ?? []).reduce((s: number, q: any) => s + Number(q.total ?? 0), 0);
+  const estimate = contractTotalFromQuotes((quotes ?? []) as any);
   const billed = (invoices ?? []).reduce((s: number, i: any) => (i.status !== "void" && i.status !== "draft" ? s + Number(i.total ?? 0) : s), 0);
   const remaining = Math.max(0, estimate - billed);
 

@@ -2,6 +2,9 @@ import "server-only";
 import { reportError } from "@/lib/observe";
 import { advance } from "@/lib/automations-math";
 import { deliverInvoiceEmail } from "@/lib/invoice-email";
+import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
+import { subtotalTaxTotal } from "@/lib/invoice-math";
+import { todayStrInTz, tzDateTimeUtc } from "@/lib/tz";
 
 /** The recurring jobs/expenses/invoices generation engine, extracted so BOTH the
  *  in-app "Generate" buttons (user client, RLS-scoped to one org) and the daily cron
@@ -13,16 +16,25 @@ import { deliverInvoiceEmail } from "@/lib/invoice-email";
  *  explicit org_id keeps cron-generated rows in the right org (a no-op for the user path,
  *  which sets the same id). Returns false on insert error. (Invoices go through
  *  runInvoiceTemplate instead — they need claim-first idempotency.) */
-export async function runTemplate(supabase: any, t: any, userId: string | null): Promise<boolean> {
+export async function runTemplate(supabase: any, t: any, userId: string | null, orgSettingsRaw?: unknown): Promise<boolean> {
   if (t.kind === "job") {
+    // The org's work-day window in the ORG's timezone — not a bare `T08:00` parse (which
+    // reads in the SERVER's tz: on Vercel/UTC that lands recurring jobs at midnight-1 AM
+    // Pacific) and not a hardcoded 8-4 (the window is a setting, workDayWindowHm).
+    const raw =
+      orgSettingsRaw !== undefined
+        ? orgSettingsRaw
+        : (await supabase.from("organizations").select("settings").eq("id", t.org_id).maybeSingle()).data?.settings;
+    const tz = getOrgSettings(raw).timezone;
+    const win = workDayWindowHm(raw);
     const { error } = await supabase.from("jobs").insert({
       org_id: t.org_id,
       name: t.title,
       customer_id: t.customer_id,
       description: t.description,
       status: "scheduled",
-      scheduled_start: new Date(`${t.next_date}T08:00:00`).toISOString(),
-      scheduled_end: new Date(`${t.next_date}T16:00:00`).toISOString(),
+      scheduled_start: tzDateTimeUtc(t.next_date, win.start, tz),
+      scheduled_end: tzDateTimeUtc(t.next_date, win.end, tz),
       created_by: userId,
     });
     if (error) { reportError("recurring-template", error, { templateId: t.id, kind: t.kind }); return false; }
@@ -52,9 +64,10 @@ export async function runTemplate(supabase: any, t: any, userId: string | null):
 }
 
 /** Create one customer invoice from a recurring template — a flat line for `amount` at
- *  the template's tax rate. Totals set inline (single known line; no recalc dependency).
- *  org_id explicit for the cron path. Auto-sends best-effort when the template opts in.
- *  Does NOT advance next_date — the caller claims the period first (runInvoiceTemplate). */
+ *  the template's tax rate. Totals via the shared subtotalTaxTotal (pure — no recalc
+ *  round-trip). org_id explicit for the cron path. Auto-sends best-effort when the
+ *  template opts in. Does NOT advance next_date — the caller claims the period first
+ *  (runInvoiceTemplate). */
 async function createRecurringInvoice(supabase: any, t: any, userId: string | null): Promise<boolean> {
   const taxRate = Number(t.tax_rate) || 0;
   // Itemized when the template carries line_items; otherwise a single line from
@@ -66,9 +79,9 @@ async function createRecurringInvoice(supabase: any, t: any, userId: string | nu
     unit: x.unit || "ea",
     unit_price: Math.round((Number(x.unit_price) || 0) * 100) / 100,
   }));
-  const amount = Math.round(li.reduce((s: number, x: any) => s + x.quantity * x.unit_price, 0) * 100) / 100;
-  const tax = Math.round(amount * taxRate * 100) / 100;
-  const total = Math.round((amount + tax) * 100) / 100;
+  // Rollup via the shared subtotalTaxTotal — the SAME rounding as every other invoice
+  // writer, so the one unattended (cron) invoice path can't drift a cent from the rest.
+  const { subtotal, tax, total } = subtotalTaxTotal(li.map((x: any) => x.quantity * x.unit_price), taxRate);
   const { data: inv, error } = await supabase
     .from("invoices")
     .insert({
@@ -77,7 +90,7 @@ async function createRecurringInvoice(supabase: any, t: any, userId: string | nu
       status: "draft",
       title: t.title,
       tax_rate: taxRate,
-      subtotal: amount,
+      subtotal,
       tax,
       total,
       created_by: userId,
@@ -137,17 +150,31 @@ export async function runInvoiceTemplate(
  *  Works with ANY client: a user client (RLS scopes to one org) or the service client
  *  (all orgs — the cron). Returns how many occurrences were created. */
 export async function generateDueTemplates(supabase: any, userId: string | null): Promise<number> {
-  const today = new Date().toISOString().slice(0, 10);
+  // "Due" is judged against each ORG's local today — a UTC today rolls over at ~5 PM
+  // Pacific, generating tomorrow's occurrences tonight. Fetch every reachable org's
+  // settings once (service client = all orgs; user client = RLS-scoped to one), query
+  // up to the LATEST local today among them, then gate each template on its own org's.
+  const { data: orgs } = await supabase.from("organizations").select("id, settings");
+  const todayByOrg: Record<string, string> = {};
+  const settingsByOrg: Record<string, unknown> = {};
+  for (const o of orgs ?? []) {
+    settingsByOrg[o.id] = o.settings;
+    todayByOrg[o.id] = todayStrInTz(getOrgSettings(o.settings).timezone);
+  }
+  const fallbackToday = new Date().toISOString().slice(0, 10); // template whose org row is unreadable
+  const latestToday = Object.values(todayByOrg).reduce((a, b) => (b > a ? b : a), fallbackToday);
   const { data: due } = await supabase
     .from("recurring_templates")
     .select("*")
     .eq("active", true)
-    .lte("next_date", today);
+    .lte("next_date", latestToday);
   let count = 0;
   for (const t of due ?? []) {
     // Isolate each template: one malformed row (e.g. a bad next_date that makes new Date(...)
     // throw) must NOT abort the whole run OR re-crash the cron every night. Name it, skip it.
     try {
+      const today = todayByOrg[t.org_id] ?? fallbackToday;
+      if (t.next_date > today) continue; // due in another org's tz, not this org's yet
       if (t.kind === "invoice") {
         const ok = await runInvoiceTemplate(supabase, t, userId ?? t.created_by ?? null, today);
         if (ok) count++;
@@ -156,7 +183,7 @@ export async function generateDueTemplates(supabase: any, userId: string | null)
       let guard = 0;
       let cur = { ...t };
       while (cur.next_date <= today && guard++ < 24) {
-        const ok = await runTemplate(supabase, cur, userId ?? t.created_by ?? null);
+        const ok = await runTemplate(supabase, cur, userId ?? t.created_by ?? null, settingsByOrg[t.org_id]);
         if (!ok) break;
         cur = { ...cur, next_date: advance(cur.next_date, cur.frequency) };
         count++;

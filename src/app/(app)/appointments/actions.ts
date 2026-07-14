@@ -7,6 +7,7 @@ import { sendPushToProfiles } from "@/lib/push";
 import { getOrgSettings } from "@/lib/org-settings";
 import { tzDateTimeUtc } from "@/lib/tz";
 import { createProposalCore, cleanSlots } from "@/lib/appointments/proposal";
+import { APPOINTMENT_STATUSES } from "@/lib/statuses";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 /** The browser-computed ISO if present; otherwise build the instant in the ORG
@@ -139,7 +140,9 @@ export async function createAppointmentProposal(
   const startIso = await resolveIso(supabase, emptyToNull(formData.get("starts_at_iso")), slots[0].date, slots[0].time);
 
   // The shared core does the rest (dedup-withdraw of a pending prior link,
-  // tentative appointment, proposal row) — same writer as the lead + public paths.
+  // tentative appointment, proposal row) — same writer as the lead "Let them pick"
+  // path. (The public path stopped writing proposals in cn-v499 — it now only
+  // flags site_inspection_required and pings the office.)
   const res = await createProposalCore(supabase, {
     type: String(formData.get("type") ?? "quote"),
     title,
@@ -175,6 +178,9 @@ export async function saveAppointmentCapture(
   id: string,
   capture: AppointmentCapture,
 ): Promise<Result> {
+  // TODO(contested): requireStaff here vs the capture PAGE rendering for any org member —
+  // a tech doing the walk-through can upload photos but every Save fails; decide whether
+  // capture is member-writable or the page should be staff-gated before touching either.
   const ctx = await requireStaff(); // defense-in-depth (RLS also scopes the write)
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -243,6 +249,10 @@ export async function updateAppointment(id: string, formData: FormData): Promise
 }
 
 export async function setAppointmentStatus(id: string, status: string): Promise<Result> {
+  // Spine guard (mirrors the 0052 check constraint) so a bad value reads as a clean
+  // message instead of a raw Postgres constraint error.
+  if (!(APPOINTMENT_STATUSES as readonly string[]).includes(status))
+    return { ok: false, error: `Status must be one of: ${APPOINTMENT_STATUSES.join(", ")}.` };
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;

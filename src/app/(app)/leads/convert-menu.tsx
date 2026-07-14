@@ -161,7 +161,9 @@ export function ConvertMenu({
                 {copied ? "Copied" : "Copy Link"}
               </Button>
               <a
-                href={`sms:${link.phone ?? ""}?body=${encodeURIComponent(smsBody)}`}
+                // iOS convention (matches propose-dates-button): with a number the body
+                // separator is `&` — `sms:<number>?body=` opens Messages without the text.
+                href={`sms:${link.phone ?? ""}${link.phone ? "&" : "?"}body=${encodeURIComponent(smsBody)}`}
                 className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-dark"
               >
                 <MessageSquare className="h-4 w-4 shrink-0" /> Text It

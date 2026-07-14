@@ -14,15 +14,16 @@ function toLocalDate(iso: string | null): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
-/** ISO → "HH:MM" in local time for a time input. The 8 AM all-day default reads
+/** ISO → "HH:MM" in local time for a time input. The org's work-day-start all-day
+ *  default (workDayWindowHm — 8 AM unless Settings → Scheduling changed it) reads
  *  as blank (no explicit time) — the same convention the calendar uses to decide
  *  whether to show a time at all. */
-function toLocalTime(iso: string | null): string {
+function toLocalTime(iso: string | null, allDaySentinel: string): string {
   if (!iso) return "";
   const d = new Date(iso);
   const p = (n: number) => String(n).padStart(2, "0");
   const hm = `${p(d.getHours())}:${p(d.getMinutes())}`;
-  return hm === "08:00" ? "" : hm;
+  return hm === allDaySentinel ? "" : hm;
 }
 
 export interface ScheduleSegment {
@@ -37,11 +38,15 @@ export function JobScheduleControl({
   start,
   end,
   segments,
+  workDayStart = "08:00",
 }: {
   id: string;
   start: string | null;
   end: string | null;
   segments?: ScheduleSegment[];
+  /** The org's work-day start "HH:MM" (workDayWindowHm, server-fetched) — the
+   *  all-day sentinel: a stored start AT this time shows as "no explicit time". */
+  workDayStart?: string;
 }) {
   const router = useRouter();
 
@@ -55,7 +60,7 @@ export function JobScheduleControl({
   const [ranges, setRanges] = useState<DateRange[]>(initial);
   // Optional time-of-day for the job's PRIMARY start (the first range). Blank =
   // all-day; a time refines only jobs.scheduled_start, not per-segment.
-  const [startTime, setStartTime] = useState<string>(toLocalTime(start));
+  const [startTime, setStartTime] = useState<string>(toLocalTime(start, workDayStart));
   const [pending, startT] = useTransition();
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);

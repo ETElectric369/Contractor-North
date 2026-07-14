@@ -20,6 +20,7 @@ import { AppointmentButton, type ApptValue } from "../appointments/appointment-b
 import { ApptQuickActions } from "../appointments/appointment-status";
 import { JobScheduleCard } from "../schedule/job-schedule-card";
 import { WeekAgenda } from "../schedule/week-agenda";
+import { jobLabel } from "@/lib/schedule-options";
 
 // THE one forward-looking time map. WHEN-DID (clocked hours) lives on
 // /timeclock + /timecards only — the old "Clocked time" layer, day-view
@@ -796,7 +797,7 @@ function ApptRow({ a, picker }: { a: CalAppt; picker: SchedulePicker }) {
  *  (due_date only; the /tasks workbench owns everything else). */
 function TaskRow({ t }: { t: CalTask }) {
   const router = useRouter();
-  const sub = [t.assignee?.full_name ?? null, t.jobs ? `${t.jobs.job_number} · ${t.jobs.name}` : null]
+  const sub = [t.assignee?.full_name ?? null, t.jobs ? jobLabel(t.jobs) : null]
     .filter(Boolean)
     .join(" · ");
   return (

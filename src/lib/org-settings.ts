@@ -55,6 +55,10 @@ export interface OrgSettings {
    *  they left, so a forgotten clock-out can't over-bill. Default on. */
   geofence_logout: boolean;
   geofence_radius_m: number; // meters from the clock-in point before auto clock-out
+  /** Timeclock SMS reminders (the two crons: morning "no clock-in yet" nudge + the
+   *  end-of-day clock-out/EOD-form reminder). Default ON; the crons skip an org that
+   *  turns this off. Settings → Scheduling owns the toggle. */
+  remind_timeclock: boolean;
   /** Weather widget location: "device" = each user's GPS (the crew is mobile); "business" = the org's
    *  configured address, always. EXPLICIT choice — no silent fallback between them (that masking, where
    *  a GPS miss quietly showed the shop's city as if it were yours, was the root weather bug). */
@@ -144,7 +148,8 @@ export interface OrgSettings {
   sms_from_number: string;
   /** External scheduling link (Calendly or similar). When set, the PUBLIC
    *  "schedule your site visit" buttons (inquiry splash + estimate configurator)
-   *  open it instead of North's built-in 3-slot /pick flow. Empty = built-in flow. */
+   *  open it instead of North's built-in request flow (cn-v499: flag the lead +
+   *  ping the office to text time options). Empty = built-in request flow. */
   calendly_url: string;
 }
 
@@ -177,6 +182,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   timecard_supervisor_id: "",
   geofence_logout: true,
   geofence_radius_m: 300,
+  remind_timeclock: true, // matches the crons' historical "absent = on" behavior
   weather_source: "device", // default: each user's own location (the crew is mobile)
   pay_schedule: "biweekly",
   pay_anchor: "2026-01-05", // a Monday; biweekly cycles cascade from here

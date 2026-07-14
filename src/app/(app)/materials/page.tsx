@@ -5,6 +5,7 @@ import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { formatDate } from "@/lib/utils";
 import { NewListButton } from "./new-list-button";
+import { jobLabel } from "@/lib/schedule-options";
 
 export const dynamic = "force-dynamic";
 
@@ -61,7 +62,7 @@ export default async function MaterialsPage() {
                     </div>
                     {l.jobs?.name && (
                       <div className="mt-1 truncate text-xs text-slate-500">
-                        {l.jobs.job_number} · {l.jobs.name}
+                        {jobLabel(l.jobs)}
                       </div>
                     )}
                   </div>

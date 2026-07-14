@@ -9,6 +9,8 @@ import { Select } from "@/components/ui/input";
 import { setJobStatus } from "../actions";
 import { JOB_STATUSES, jobStatusLabel } from "@/lib/job-status";
 
+// Reference implementation for spine-driven status controls: options derive from the
+// spine + labels via jobStatusLabel (wo-status-control / quotes status-control copy this).
 const STATUSES = JOB_STATUSES;
 
 export function JobStatusControl({ id, status }: { id: string; status: string }) {

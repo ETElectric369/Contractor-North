@@ -1,5 +1,6 @@
 import "server-only";
 import { todayStrInTz } from "@/lib/tz";
+import { getOrgSettings } from "@/lib/org-settings";
 import { orgStaffIds, pushConfigured, sendPushToProfiles } from "@/lib/push";
 import { rankSix } from "@/lib/six-rank";
 import { daysAgoStr } from "./leak-detectors";
@@ -33,7 +34,7 @@ export async function sendDayAheadDigests(supabase: any): Promise<{ orgs: number
 
   for (const org of orgs ?? []) {
     counts.orgs++;
-    const tz = org.settings?.timezone || "America/Los_Angeles";
+    const tz = getOrgSettings(org.settings).timezone; // via the settings SSOT — no inline default
     const today = todayStrInTz(tz);
     const tomorrow = daysAgoStr(today, -1); // negative offset walks forward
 

@@ -9,7 +9,18 @@ import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { useDraft } from "@/lib/use-draft";
 import { useToast } from "@/components/toast";
+import { ACTIVE_JOB_STATUSES, jobStatusLabel } from "@/lib/job-status";
 import { createJob } from "./actions";
+
+// The new-job form offers the spine's non-terminal statuses (a brand-new job is never
+// complete/cancelled), in this form's "most likely first" order. Derived from
+// ACTIVE_JOB_STATUSES so a spine change reaches this dropdown automatically.
+const NEW_JOB_STATUS_ORDER = ["in_progress", "to_be_scheduled", "scheduled", "on_hold"];
+const NEW_JOB_STATUSES = [...ACTIVE_JOB_STATUSES].sort((a, b) => {
+  const ia = NEW_JOB_STATUS_ORDER.indexOf(a);
+  const ib = NEW_JOB_STATUS_ORDER.indexOf(b);
+  return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+});
 
 interface CustomerOption {
   id: string;
@@ -230,10 +241,11 @@ export function NewJobButton({
                 value={form.status}
                 onChange={(e) => patch({ status: e.target.value })}
               >
-                <option value="in_progress">In progress</option>
-                <option value="to_be_scheduled">To be scheduled</option>
-                <option value="scheduled">Scheduled</option>
-                <option value="on_hold">On hold</option>
+                {NEW_JOB_STATUSES.map((s) => (
+                  <option key={s} value={s}>
+                    {jobStatusLabel(s).replace(/^\w/, (c) => c.toUpperCase())}
+                  </option>
+                ))}
               </Select>
             </div>
           </div>

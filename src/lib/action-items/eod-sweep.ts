@@ -1,5 +1,6 @@
 import "server-only";
 import { todayStrInTz } from "@/lib/tz";
+import { getOrgSettings } from "@/lib/org-settings";
 import { orgStaffIds, pushConfigured, sendPushToProfiles } from "@/lib/push";
 import {
   NEEDS_RETURN_DAYS,
@@ -37,7 +38,7 @@ export async function sendCloseOutNudges(supabase: any): Promise<{ orgs: number;
 
   for (const org of orgs ?? []) {
     counts.orgs++;
-    const tz = org.settings?.timezone || "America/Los_Angeles";
+    const tz = getOrgSettings(org.settings).timezone; // via the settings SSOT — no inline default
     const today = todayStrInTz(tz);
 
     const [openR, recentR] = await Promise.all([

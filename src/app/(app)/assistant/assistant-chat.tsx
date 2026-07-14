@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
 import { speakSmart, unlockAudio, stopSpeaking, splitSentences, SpeakQueue, startBargeInMonitor } from "@/lib/tts";
 import { classifyConfirmReply } from "@/lib/confirm-parse";
+import { subtotalTaxTotal } from "@/lib/invoice-math";
 import * as speech from "@/lib/voice";
 import {
   CONFIRM_MARKER, OPEN_MARKER, PICK_MARKER, STATUS_OPEN, STATUS_CLOSE, DRAFT_OPEN, DRAFT_CLOSE, HUD_OPEN, HUD_CLOSE,
@@ -62,9 +63,12 @@ function LiveQuote({ draft, onSave, onDismiss, saving }: { draft: AgentDraft; on
   // Defensive: a streaming/partial draft can briefly arrive with items as a non-array or with
   // a null entry — never let that crash the Estimator render (it would blank the whole page).
   const items = (Array.isArray(draft.items) ? draft.items : []).filter((i) => i && typeof i === "object");
-  const subtotal = items.reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0);
-  const tax = subtotal * (Number(draft.tax_rate) || 0);
-  const total = subtotal + tax;
+  // Totals via the shared subtotalTaxTotal (pure, client-safe) — the SAME rounding the
+  // save path uses, so the preview matches the saved quote to the cent.
+  const { subtotal, tax, total } = subtotalTaxTotal(
+    items.map((i) => (Number(i.quantity) || 0) * (Number(i.unit_price) || 0)),
+    Number(draft.tax_rate) || 0,
+  );
   const ready = draft.status === "ready";
   return (
     <div className="mx-2 mb-2 overflow-hidden rounded-xl border border-white/40 bg-white/70 shadow-sm backdrop-blur">
@@ -251,8 +255,12 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         // and links to the quote (the permanent log in /quotes) — instead of wiping it and yanking
         // you out to the quote page. You keep talking; the estimate is logged + one tap away.
         const items = (Array.isArray(draft.items) ? draft.items : []).filter((i) => i && typeof i === "object");
-        const sub = items.reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0);
-        const total = Math.round(sub * (1 + (Number(draft.tax_rate) || 0)) * 100) / 100;
+        // Same rollup as the save path (subtotalTaxTotal — subtotal/tax rounded separately),
+        // so the "saved" line's total equals the quote actually persisted, to the cent.
+        const { total } = subtotalTaxTotal(
+          items.map((i) => (Number(i.quantity) || 0) * (Number(i.unit_price) || 0)),
+          Number(draft.tax_rate) || 0,
+        );
         setSaved((sv) => [...sv, { id: res.id!, title: draft.title || "Estimate", total, customer: draft.customer_name ?? undefined }]);
         setDraft(null);
       } else {

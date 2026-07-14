@@ -23,7 +23,7 @@ export async function GET(request: Request) {
   let texted = 0;
 
   for (const org of orgs ?? []) {
-    if ((org.settings ?? {}).remind_timeclock === false) continue; // per-org opt-out
+    if (!getOrgSettings(org.settings).remind_timeclock) continue; // per-org opt-out (Settings → Scheduling)
     const { data: techs } = await supabase
       .from("profiles")
       .select("id, full_name, phone")

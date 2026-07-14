@@ -1,6 +1,18 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { invoiceBalance } from "@/lib/invoice-math";
 import { contractTotalFromQuotes, milestoneAmount, type Milestone } from "@/lib/payment-schedule-math";
+import { getOrgSettings } from "@/lib/org-settings";
+import { todayStrInTz } from "@/lib/tz";
+
+/** Org-local "today" (YYYY-MM-DD) — THE date the overdue rule compares due_date against.
+ *  A UTC "today" flags a due-today invoice overdue after ~5 PM Pacific, so every overdue
+ *  surface (this pipeline, Nort's list_invoices/get_invoice, reminder emails) must derive
+ *  today from the ORG's timezone. Exported so the mirrors call this instead of re-fixing
+ *  the timezone locally. */
+export async function orgTodayStr(supabase: SupabaseClient): Promise<string> {
+  const { data } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+  return todayStrInTz(getOrgSettings((data as { settings?: unknown } | null)?.settings).timezone);
+}
 
 /**
  * THE money pipeline: every job/invoice that needs a money action, in exactly one stage, so nothing
@@ -27,8 +39,8 @@ export type MoneyPipeline = {
 };
 
 export async function getMoneyPipeline(supabase: SupabaseClient): Promise<MoneyPipeline> {
-  const today = new Date().toISOString().slice(0, 10);
-  const [invRes, jobRes, quoteRes, msRes] = await Promise.all([
+  const [today, invRes, jobRes, quoteRes, msRes] = await Promise.all([
+    orgTodayStr(supabase),
     supabase.from("invoices").select("id, invoice_number, total, amount_paid, status, due_date, job_id, customers(name), jobs(name)"),
     // 'invoiced' is a RETIRED job status (the lifecycle rework moved every row off it), but
     // a stray legacy row could still carry it — keep it in the filter as stage-1 safety so

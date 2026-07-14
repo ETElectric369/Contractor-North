@@ -4,8 +4,7 @@ import { useTransition } from "react";
 import { Select } from "@/components/ui/input";
 import { setWorkOrderStatus } from "../actions";
 import { jobStatusLabel } from "@/lib/job-status";
-
-const STATUSES = ["draft", "assigned", "in_progress", "complete", "cancelled"];
+import { WORK_ORDER_STATUSES } from "@/lib/statuses";
 
 export function WoStatusControl({ id, status }: { id: string; status: string }) {
   const [pending, start] = useTransition();
@@ -20,7 +19,8 @@ export function WoStatusControl({ id, status }: { id: string; status: string }) 
         })
       }
     >
-      {STATUSES.map((s) => (
+      {/* Options come from the spine (same set setWorkOrderStatus validates against). */}
+      {WORK_ORDER_STATUSES.map((s) => (
         <option key={s} value={s}>
           {jobStatusLabel(s).replace(/^\w/, (c) => c.toUpperCase())}
         </option>

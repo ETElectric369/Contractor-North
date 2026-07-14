@@ -9,6 +9,7 @@ import { EditFormButton } from "./edit-form-button";
 import { DeleteFormButton } from "./delete-form-button";
 import { DeleteSubmissionButton } from "./delete-submission-button";
 import type { FormField } from "../actions";
+import { jobLabel } from "@/lib/schedule-options";
 
 export const dynamic = "force-dynamic";
 
@@ -109,7 +110,7 @@ export default async function FormDetailPage({
                   </div>
                   {s.jobs?.name && (
                     <Link href={`/jobs/${s.job_id}`} className="mb-1 block text-xs font-medium text-slate-600 hover:text-brand">
-                      {s.jobs.job_number} · {s.jobs.name}
+                      {jobLabel(s.jobs)}
                     </Link>
                   )}
                   <dl className="space-y-0.5">

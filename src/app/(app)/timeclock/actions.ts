@@ -14,6 +14,7 @@ import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
 import { setJobCrew } from "../schedule/actions";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { GeoPoint } from "@/lib/types";
+import { jobLabel } from "@/lib/schedule-options";
 
 export type ClockResult = { ok: boolean; error?: string };
 
@@ -239,7 +240,7 @@ export async function switchJob(input: {
     .select("job_number, name")
     .eq("id", jobId)
     .maybeSingle();
-  const label = j ? `${(j as any).job_number} · ${(j as any).name}` : "another job";
+  const label = j ? jobLabel((j as any)) : "another job";
   const base = (input.notes ?? entry.notes ?? "").trim();
   const crumb = `[switched to ${label} at ${new Date().toISOString()}]`;
   const notes = base ? `${base}\n${crumb}` : crumb;
@@ -1047,6 +1048,8 @@ export async function fileDailyReport(input: {
   if (jobIds.length) {
     const { data: jobRows } = await supabase.from("jobs").select("id, job_number, name").in("id", jobIds);
     for (const j of (jobRows ?? []) as { id: string; job_number: string | null; name: string | null }[]) {
+      // Deliberately NOT schedule-options' jobLabel: this drops empty halves and falls
+      // back to the id (the shared shape would print "undefined · x" on a partial row).
       labelMap.set(j.id, [j.job_number, j.name].filter(Boolean).join(" · ") || j.id);
     }
   }
@@ -1092,6 +1095,22 @@ export async function fileDailyReport(input: {
   revalidatePath("/planner"); // the boss's Daily reports card
   revalidatePath("/timecards");
   return { ok: true, summary };
+}
+
+/**
+ * Office review: flip a daily report filed → reviewed (the second half of 0128's
+ * `status` design — "filed for office editing"). Staff-only; RLS (daily_reports_update:
+ * own-or-staff, org-scoped) backstops the guard. Reviewed rows stay visible on the
+ * /timecards review list, just checked off.
+ */
+export async function markDailyReportReviewed(id: string): Promise<ClockResult> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { error } = await ctx.supabase.from("daily_reports").update({ status: "reviewed" }).eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/timecards");
+  revalidatePath("/planner");
+  return { ok: true };
 }
 
 /**

@@ -18,6 +18,7 @@ import { formatCurrency, formatDate } from "@/lib/utils";
 import { createBill, setBillStatus, deleteBill, addDocument, deleteDocument } from "../jobs/actions";
 import { executeAction } from "@/lib/actions/execute";
 import { NewPoButton } from "../purchasing/new-po-button";
+import { jobLabel } from "@/lib/schedule-options";
 
 const OVERHEAD_CATEGORIES = ["Fuel", "Shop supplies", "Tools", "Office", "Insurance", "Vehicle", "Other"];
 
@@ -236,7 +237,7 @@ export function BillsReceipts({
                   <option value="">— Pick a job —</option>
                   <option value="__overhead">Overhead (no job)</option>
                   {jobs.map((j) => (
-                    <option key={j.id} value={j.id}>{j.job_number} · {j.name}</option>
+                    <option key={j.id} value={j.id}>{jobLabel(j)}</option>
                   ))}
                 </Select>
               </div>
@@ -370,7 +371,7 @@ export function BillsReceipts({
               <Select id="d-job" value={docJob} onChange={(e) => setDocJob(e.target.value)}>
                 <option value="">— Pick a job —</option>
                 {jobs.map((j) => (
-                  <option key={j.id} value={j.id}>{j.job_number} · {j.name}</option>
+                  <option key={j.id} value={j.id}>{jobLabel(j)}</option>
                 ))}
               </Select>
             </div>
@@ -496,7 +497,7 @@ function BillEditModal({
             <Select id="be-job" value={billJob} onChange={(e) => setBillJob(e.target.value)}>
               <option value="__overhead">Overhead (no job)</option>
               {jobs.map((j) => (
-                <option key={j.id} value={j.id}>{j.job_number} · {j.name}</option>
+                <option key={j.id} value={j.id}>{jobLabel(j)}</option>
               ))}
             </Select>
           </div>

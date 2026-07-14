@@ -1,16 +1,10 @@
-/** Shared form-data helpers for server actions — one source of truth. */
+/** Shared form-data helpers for server actions — one source of truth.
+ *  (A `toIso(date, time)` helper used to live here — deleted: zero callers, and it
+ *  was the exact server-local `new Date(`${date}T${time}`)` trap tzDateTimeUtc in
+ *  lib/tz.ts exists to replace. Use tzDateTimeUtc with the org timezone instead.) */
 
 /** A blank/whitespace FormData value -> null; otherwise the trimmed string. */
 export function emptyToNull(v: FormDataEntryValue | null): string | null {
   const s = String(v ?? "").trim();
   return s.length ? s : null;
-}
-
-/** ISO timestamp from a yyyy-mm-dd date + HH:MM time (default 08:00); null if
- *  the date is malformed. */
-export function toIso(date: string, time: string): string | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
-  const t = /^\d{2}:\d{2}/.test(time) ? time : "08:00";
-  const d = new Date(`${date}T${t}:00`);
-  return isNaN(d.getTime()) ? null : d.toISOString();
 }

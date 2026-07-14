@@ -9,6 +9,7 @@ import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { updateTimeEntry, deleteTimeEntry } from "../timeclock/actions";
 import type { JobCode } from "@/lib/types";
+import { jobLabel } from "@/lib/schedule-options";
 
 interface Entry {
   id: string;
@@ -261,12 +262,12 @@ export function EditEntryButton({
                   the recent-jobs list, so saving never silently clears it. */}
               {entry.job_id && !jobs.some((j) => j.id === entry.job_id) && (
                 <option value={entry.job_id}>
-                  {entry.job ? `${entry.job.job_number} · ${entry.job.name}` : "Current job"}
+                  {entry.job ? jobLabel(entry.job) : "Current job"}
                 </option>
               )}
               {jobs.map((j) => (
                 <option key={j.id} value={j.id}>
-                  {j.job_number} · {j.name}
+                  {jobLabel(j)}
                 </option>
               ))}
             </Select>
@@ -295,10 +296,10 @@ export function EditEntryButton({
                     <Select value={s.job_id} onChange={(e) => setSplit(i, { job_id: e.target.value })} className="min-w-0 flex-1">
                       <option value="">— Job —</option>
                       {entry.job_id && !jobs.some((j) => j.id === entry.job_id) && (
-                        <option value={entry.job_id}>{entry.job ? `${entry.job.job_number} · ${entry.job.name}` : "Current job"}</option>
+                        <option value={entry.job_id}>{entry.job ? jobLabel(entry.job) : "Current job"}</option>
                       )}
                       {jobs.map((j) => (
-                        <option key={j.id} value={j.id}>{j.job_number} · {j.name}</option>
+                        <option key={j.id} value={j.id}>{jobLabel(j)}</option>
                       ))}
                     </Select>
                     <div className="w-24 shrink-0">

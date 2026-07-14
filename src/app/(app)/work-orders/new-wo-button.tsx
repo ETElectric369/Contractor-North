@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { createWorkOrder } from "./actions";
+import { jobLabel } from "@/lib/schedule-options";
 
 interface JobOption {
   id: string;
@@ -84,7 +85,7 @@ export function NewWorkOrderButton({
                 <option value="">— None —</option>
                 {jobs.map((j) => (
                   <option key={j.id} value={j.id}>
-                    {j.job_number} · {j.name}
+                    {jobLabel(j)}
                   </option>
                 ))}
               </Select>

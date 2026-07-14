@@ -116,7 +116,8 @@ export function WebsiteSettings({
         <Input id="ws-calendly" value={calendly} onChange={(e) => setCalendly(e.target.value)} placeholder="https://calendly.com/yourcompany/site-visit" />
         <p className="mt-1 text-xs text-slate-400">
           Optional. If you use Calendly (or similar), the public &quot;schedule your site visit&quot; buttons open it.
-          Leave blank to use the built-in pick-a-time flow — customers choose from three offered slots.
+          Leave blank to use the built-in request flow — the customer asks for a visit, your office is
+          pinged, and you text them a few time options.
         </p>
       </div>
 

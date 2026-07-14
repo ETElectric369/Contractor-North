@@ -6,6 +6,7 @@ import { Loader2, Users } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select } from "@/components/ui/input";
 import { assignMemberToJob } from "./actions";
+import { jobLabel } from "@/lib/schedule-options";
 
 interface MemberRow {
   id: string;
@@ -86,7 +87,7 @@ export function CrewAssignments({
                 <option value="">— No job —</option>
                 {jobs.map((j) => (
                   <option key={j.id} value={j.id}>
-                    {j.job_number} · {j.name}
+                    {jobLabel(j)}
                   </option>
                 ))}
               </Select>

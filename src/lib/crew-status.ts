@@ -36,6 +36,8 @@ export async function getCrewStatus(supabase: any): Promise<CrewMember[]> {
       id: m.id,
       name: m.full_name ?? "—",
       clockedIn: !!o,
+      // Deliberately NOT schedule-options' jobLabel: this omits the " · " when a job
+      // has no name (the shared shape would print "J-0012 · undefined" on the board).
       jobLabel: job ? `${job.job_number}${job.name ? ` · ${job.name}` : ""}` : null,
     };
   });

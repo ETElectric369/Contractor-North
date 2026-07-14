@@ -168,7 +168,10 @@ export async function setJobAssignee(
   if (error) return { ok: false, error: error.message };
   if (prev) {
     const p = prev as { assigned_to: string[] | null; org_id: string | null; job_number: string | null; name: string | null };
-    void notifyJobCrewAdded({ id, org_id: p.org_id, job_number: p.job_number, name: p.name }, p.assigned_to, ids, ctx.userId);
+    // Awaited: an un-awaited promise in a serverless action can be dropped when the
+    // function freezes after returning — the bell/push would silently vanish. The helper
+    // try/catches internally, so awaiting can never fail the assignment itself.
+    await notifyJobCrewAdded({ id, org_id: p.org_id, job_number: p.job_number, name: p.name }, p.assigned_to, ids, ctx.userId);
   }
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day reads today's scheduled jobs — keep it in sync
@@ -197,7 +200,9 @@ export async function setJobCrew(id: string, employeeIds: string[]): Promise<Res
   if (error) return { ok: false, error: error.message };
   if (prev) {
     const p = prev as { assigned_to: string[] | null; org_id: string | null; job_number: string | null; name: string | null };
-    void notifyJobCrewAdded({ id, org_id: p.org_id, job_number: p.job_number, name: p.name }, p.assigned_to, ids, ctx.userId);
+    // Awaited (not `void`): serverless can drop an un-awaited promise after the action
+    // returns. The helper never throws, so this can't break the crew write.
+    await notifyJobCrewAdded({ id, org_id: p.org_id, job_number: p.job_number, name: p.name }, p.assigned_to, ids, ctx.userId);
   }
   revalidatePath("/schedule");
   revalidatePath("/planner");

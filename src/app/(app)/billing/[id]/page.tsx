@@ -167,6 +167,9 @@ export default async function InvoicePage({
             <CreditButton
               menuItem
               invoiceId={inv.id}
+              // Deliberately the INVERSE of invoiceBalance: paid − total = the OVERPAYMENT
+              // (the refund default). invoiceBalance floors at 0, so it can't express this —
+              // not a bypass of the balance SSOT.
               defaultAmount={Math.max(0, Number(inv.amount_paid) - Number(inv.total))}
             />
             {qboConfigured() && <QboInvoiceButton menuItem id={inv.id} />}

@@ -43,6 +43,7 @@ export function JobActionDock({
   isDrawBilled,
   customers,
   templates,
+  workDay,
 }: {
   job: any;
   viewerIsStaff: boolean;
@@ -58,6 +59,8 @@ export function JobActionDock({
   isDrawBilled: boolean;
   customers: { id: string; name: string }[];
   templates: { id: string; name: string }[];
+  /** Org work-day window (workDayWindowHm) for the Edit Job modal's time defaults. */
+  workDay?: { start: string; end: string };
 }) {
   // Same lifecycle gate the old header row used for Propose dates / Finish job.
   const schedulable = job.status !== "complete" && job.status !== "invoiced" && job.status !== "cancelled";
@@ -103,7 +106,7 @@ export function JobActionDock({
           >
             {viewerIsStaff && (
               <>
-                <JobEditButton menuItem job={job as Job} customers={customers} techs={techs} templates={templates} />
+                <JobEditButton menuItem job={job as Job} customers={customers} techs={techs} templates={templates} workDay={workDay} />
                 {schedulable && (
                   <>
                     <ProposeDatesButton menuItem jobId={job.id} customerPhone={customerPhone} pending={pendingProposal} />

@@ -16,6 +16,7 @@ import { SectionSubnav } from "@/components/section-subnav";
 import { ToastProvider } from "@/components/toast";
 import { Suspense } from "react";
 import type { Profile, GeoPoint } from "@/lib/types";
+import { jobLabel } from "@/lib/schedule-options";
 
 /** "#1b9488" → "27 148 136" (the space-separated rgb our --glass-tint expects). */
 function hexToRgbTriplet(hex: string): string {
@@ -179,7 +180,7 @@ export default async function AppLayout({
           gpsIn={openEntry.gps_in}
           clockInIso={openEntry.clock_in}
           radiusM={settings.geofence_radius_m}
-          jobLabel={openEntry.job ? `${openEntry.job.job_number} · ${openEntry.job.name}` : "the job site"}
+          jobLabel={openEntry.job ? jobLabel(openEntry.job) : "the job site"}
         />
       )}
     </div>

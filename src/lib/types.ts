@@ -9,6 +9,7 @@ export type CustomerStatus = "lead" | "active" | "inactive";
 // use in the interfaces below AND re-exported so `@/lib/types` stays the one import site.
 import type { JobStatus } from "./job-status";
 import type { QuoteStatus, WorkOrderStatus } from "./statuses";
+import { INQUIRY_STATUSES } from "./statuses";
 import type { LeadBucket } from "./lead-triage";
 export type { JobStatus, QuoteStatus, WorkOrderStatus, LeadBucket };
 export type ChangeOrderStatus = "pending" | "approved" | "rejected";
@@ -60,7 +61,7 @@ export interface Organization {
   updated_at: string;
 }
 
-export type InquiryStatus = "new" | "contacted" | "quoted" | "won" | "lost";
+export type InquiryStatus = (typeof INQUIRY_STATUSES)[number]; // from the statuses.ts spine
 
 export interface Inquiry {
   id: string;

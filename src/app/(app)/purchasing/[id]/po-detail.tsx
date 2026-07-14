@@ -18,6 +18,7 @@ import {
   setPoStatus,
   receiveItem,
 } from "../actions";
+import { jobLabel } from "@/lib/schedule-options";
 
 interface PriceItemLite { id: string; code: string | null; description: string; unit: string; buy_price: number; }
 
@@ -441,7 +442,7 @@ export function EditPoButton({
                 <option value="">— None —</option>
                 {jobs.map((j) => (
                   <option key={j.id} value={j.id}>
-                    {j.job_number} · {j.name}
+                    {jobLabel(j)}
                   </option>
                 ))}
               </Select>

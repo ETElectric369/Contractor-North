@@ -11,6 +11,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useDraft } from "@/lib/use-draft";
 import { useToast } from "@/components/toast";
 import { createInvoiceFromQuote, createBlankInvoice } from "./actions";
+import { jobLabel } from "@/lib/schedule-options";
 
 // The billing page mounts this button TWICE (header + empty state); only the
 // FIRST mounted instance may answer ?new=1 or two modals would stack.
@@ -267,7 +268,7 @@ export function NewInvoiceButton({
                     <option value="">— None (not tied to a job) —</option>
                     {jobChoices.map((j) => (
                       <option key={j.id} value={j.id}>
-                        {j.job_number} · {j.name}
+                        {jobLabel(j)}
                       </option>
                     ))}
                   </Select>

@@ -6,8 +6,14 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type PickerOption = { id: string; label: string; address?: string | null };
 
+/** THE job display label — "J-0012 · Panel swap". The one shape every job dropdown,
+ *  chip and toast uses (toJobOptions builds its option labels with it too), so the
+ *  label can't drift per surface. Client-safe (pure). */
+export const jobLabel = (j: { job_number?: string | null; name?: string | null }): string =>
+  `${j.job_number} · ${j.name}`;
+
 export const toJobOptions = (rows: any[] | null | undefined): PickerOption[] =>
-  (rows ?? []).map((j) => ({ id: j.id, label: `${j.job_number} · ${j.name}`, address: j.address ?? null }));
+  (rows ?? []).map((j) => ({ id: j.id, label: jobLabel(j), address: j.address ?? null }));
 export const toCustomerOptions = (rows: any[] | null | undefined): PickerOption[] =>
   (rows ?? []).map((c) => ({ id: c.id, label: c.name }));
 export const toStaffOptions = (rows: any[] | null | undefined): PickerOption[] =>

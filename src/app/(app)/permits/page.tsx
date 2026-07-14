@@ -9,6 +9,7 @@ import { formatDate } from "@/lib/utils";
 import { AddPermitButton } from "./add-permit-button";
 import { EditPermitButton } from "./edit-permit-button";
 import { permitStatusTone as statusTone, permitResultTone } from "@/lib/permit-options";
+import { jobLabel } from "@/lib/schedule-options";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +28,7 @@ export default async function PermitsPage() {
     .select("id, job_number, name")
     .order("created_at", { ascending: false })
     .limit(200);
-  const jobOpts = (jobsData ?? []).map((j: any) => ({ id: j.id, label: `${j.job_number} · ${j.name}` }));
+  const jobOpts = (jobsData ?? []).map((j: any) => ({ id: j.id, label: jobLabel(j) }));
 
   return (
     <div>
@@ -82,6 +83,8 @@ export default async function PermitsPage() {
                 cell: (p) => (
                   <>
                     <Badge tone={permitResultTone(p.inspection_result)}>{p.inspection_result}</Badge>
+                    {/* NOTE: first-underscore-only label — fine while every PERMIT_STATUSES value
+                        has ≤1 underscore; switch to the spine's [value,label] pairs if that changes. */}
                     <Badge tone={statusTone(p.status)}>{p.status.replace("_", " ")}</Badge>
                     <EditPermitButton permit={p} jobId={p.job_id} />
                   </>

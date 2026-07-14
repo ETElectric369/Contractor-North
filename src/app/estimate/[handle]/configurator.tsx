@@ -59,7 +59,8 @@ export function Configurator({
 }: {
   handle: string; orgName: string; brand: string; rates: Record<string, number>;
   threshold: number; headline: string; tagline: string;
-  /** Org's external scheduling link (https-validated server-side). Empty = built-in /pick flow. */
+  /** Org's external scheduling link (https-validated server-side). Empty = built-in
+   *  request flow: flag the lead + ping the office to text a few time options. */
   calendlyUrl?: string;
 }) {
   const [f, setF] = useState<Form>({

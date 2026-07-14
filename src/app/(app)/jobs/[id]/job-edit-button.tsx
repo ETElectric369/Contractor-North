@@ -34,6 +34,7 @@ export function JobEditButton({
   techs,
   templates = [],
   menuItem = false,
+  workDay = { start: "08:00", end: "16:00" },
 }: {
   job: Job;
   customers: { id: string; name: string }[];
@@ -41,6 +42,10 @@ export function JobEditButton({
   templates?: { id: string; name: string }[];
   /** Render the trigger as a Manage-menu row instead of a standalone button. */
   menuItem?: boolean;
+  /** The org's work-day window "HH:MM" (workDayWindowHm, server-fetched) — the
+   *  blank-time defaults, so re-saving an all-day job keeps the org's window
+   *  instead of forcing it back to a fixed 8-4. */
+  workDay?: { start: string; end: string };
 }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,16 +56,16 @@ export function JobEditButton({
   const [zip, setZip] = useState(job.zip ?? "");
   const [startDate, setStartDate] = useState(toLocalDate(job.scheduled_start));
   const [endDate, setEndDate] = useState(toLocalDate(job.scheduled_end));
-  const [startTime, setStartTime] = useState(toLocalTime(job.scheduled_start, "08:00"));
-  const [endTime, setEndTime] = useState(toLocalTime(job.scheduled_end, "16:00"));
+  const [startTime, setStartTime] = useState(toLocalTime(job.scheduled_start, workDay.start));
+  const [endTime, setEndTime] = useState(toLocalTime(job.scheduled_end, workDay.end));
   const router = useRouter();
 
   function onSubmit(formData: FormData) {
     setError(null);
     // Convert local date + time-of-day to ISO here so the server never guesses the
     // timezone. The time-of-day is what the planner/Agenda lays the day out by.
-    formData.set("scheduled_start", startDate ? new Date(`${startDate}T${startTime || "08:00"}:00`).toISOString() : "");
-    formData.set("scheduled_end", endDate ? new Date(`${endDate}T${endTime || "16:00"}:00`).toISOString() : "");
+    formData.set("scheduled_start", startDate ? new Date(`${startDate}T${startTime || workDay.start}:00`).toISOString() : "");
+    formData.set("scheduled_end", endDate ? new Date(`${endDate}T${endTime || workDay.end}:00`).toISOString() : "");
     start(async () => {
       const res = await updateJob(job.id, formData);
       if (!res.ok) {

@@ -11,9 +11,12 @@ import { markInquiryContacted, setInquiryStatus } from "./actions";
 import { useToast } from "@/components/toast";
 import { formatDate } from "@/lib/utils";
 import type { Inquiry, LeadBucket } from "@/lib/types";
+import { INQUIRY_STATUSES } from "@/lib/statuses";
 import { LEAD_BUCKETS } from "@/lib/lead-triage";
 
-const statusTone: Record<string, "blue" | "amber" | "indigo" | "green" | "slate"> = {
+// Named INQUIRY_STATUS_TONE (not `statusTone`) so it can't shadow the shared badge
+// statusTone helper. Values cover every INQUIRY_STATUSES entry.
+const INQUIRY_STATUS_TONE: Record<string, "blue" | "amber" | "indigo" | "green" | "slate"> = {
   new: "blue",
   contacted: "amber",
   quoted: "indigo",
@@ -25,7 +28,6 @@ const statusTone: Record<string, "blue" | "amber" | "indigo" | "green" | "slate"
 const BUCKET_TONE: Record<LeadBucket, "green" | "amber" | "blue"> = { A: "green", B: "amber", C: "blue" };
 const BUCKET_DOT: Record<LeadBucket, string> = { A: "🟢", B: "🟡", C: "🔵" };
 
-const STATUSES = ["new", "contacted", "quoted", "won", "lost"];
 
 export function InquiryRow({
   inquiry,
@@ -88,7 +90,7 @@ export function InquiryRow({
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-medium text-slate-900">{inquiry.name}</span>
           {inquiry.company_name && <span className="text-xs text-slate-400">{inquiry.company_name}</span>}
-          <Badge tone={statusTone[inquiry.status] ?? "slate"}>{inquiry.status}</Badge>
+          <Badge tone={INQUIRY_STATUS_TONE[inquiry.status] ?? "slate"}>{inquiry.status}</Badge>
           {/* Triage — the A/B/C readiness bucket and the big-job site-visit gate come from
               /api/inbound/lead (Tahoe Deck); the site-visit flag ALSO lights when a customer
               taps "Request a site visit" on a public surface (publicScheduleInspection).
@@ -148,7 +150,7 @@ export function InquiryRow({
             className="h-8 w-32 text-xs"
             onChange={(e) => changeStatus(e.target.value)}
           >
-            {STATUSES.map((s) => (
+            {INQUIRY_STATUSES.map((s) => (
               <option key={s} value={s}>
                 {s.replace(/^\w/, (c) => c.toUpperCase())}
               </option>

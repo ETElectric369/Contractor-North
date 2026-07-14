@@ -25,19 +25,19 @@ export async function sendDueReminders(supabase: any): Promise<Counts> {
     .select("id, name, phone, email, settings");
 
   for (const org of orgs ?? []) {
-    const s = org.settings ?? {};
+    const s = getOrgSettings(org.settings);
     if (!s.remind_invoice_due && !s.remind_quote_followup && !s.remind_appointments) continue;
-    const tz = s.timezone || "America/Los_Angeles";
+    const tz = s.timezone; // via the settings SSOT — same default the pipeline's orgTodayStr resolves
     const today = todayStrInTz(tz);
     const brand = {
       name: org.name || "Contractor North",
-      brand: accentHex(getOrgSettings(org.settings).glass_tint),
+      brand: accentHex(s.glass_tint),
       phone: org.phone,
       email: org.email,
     };
     // Links land on THIS org's own domain (custom domain → their subdomain → fallback), so a
     // customer's invoice/quote button points at the brand they hired, not a generic app URL.
-    const site = orgPublicBaseUrl(getOrgSettings(org.settings));
+    const site = orgPublicBaseUrl(s);
 
     // Has a reminder of (kind, entity) already gone out within `withinDays`, or hit `cap`?
     // Fail CLOSED: if the dedup read errors, suppress — never risk re-spamming a customer.

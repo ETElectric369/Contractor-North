@@ -41,7 +41,8 @@ import { PaymentScheduleCard } from "./payment-schedule-card";
 import { ContractCard } from "./contract-card";
 import { LienInsuranceCard } from "./lien-insurance-card";
 import { JobDescription } from "./job-description";
-import { contractTotalFromQuotes } from "@/lib/payment-schedule-math";
+import { computeJobProgress } from "@/lib/job-progress-math";
+import { jobLabel } from "@/lib/schedule-options";
 import { ProgressInvoiceButton } from "./progress-invoice-button";
 import { NewInvoiceButton } from "./new-invoice-button";
 import { NewWorkOrderButton } from "../../work-orders/new-wo-button";
@@ -52,7 +53,7 @@ import { NewListButton } from "../../materials/new-list-button";
 import { AppointmentButton, type ApptValue } from "../../appointments/appointment-button";
 import { NewPoButton } from "../../purchasing/new-po-button";
 import { EditCustomerButton } from "../../crm/[id]/edit-customer-button";
-import { getOrgSettings } from "@/lib/org-settings";
+import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { computeJobLaborBilling, fetchJobLaborRows, laborCostForJob } from "@/lib/labor-billing";
 import { formatDateTz } from "@/lib/tz";
 import { NavLink } from "@/components/nav-link";
@@ -242,7 +243,7 @@ export default async function JobDetailPage({
         id: oe.id as string,
         clock_in: oe.clock_in as string,
         job_id: (oe.job_id ?? null) as string | null,
-        jobLabel: oe.job ? `${oe.job.job_number} · ${oe.job.name}` : null,
+        jobLabel: oe.job ? jobLabel(oe.job) : null,
         allocatedHours: (oe.time_allocations ?? []).reduce((s: number, a: any) => s + (Number(a.hours) || 0), 0),
       }
     : null;
@@ -263,12 +264,16 @@ export default async function JobDetailPage({
   const contactOptions = (allCustomers ?? []).map((c: any) => ({ id: c.id, name: c.name, type: c.type ?? null }));
   const thisJobOpt = [{ id: j.id, job_number: j.job_number, name: j.name }];
   // Appointment button takes {id,label} option lists.
-  const apptJobOpts = [{ id: j.id, label: `${j.job_number} · ${j.name}`, address: formatFullAddress(j.address, j.city, j.state, j.zip) || null }];
+  const apptJobOpts = [{ id: j.id, label: jobLabel(j), address: formatFullAddress(j.address, j.city, j.state, j.zip) || null }];
   const apptCustOpts = (allCustomers ?? []).map((c: any) => ({ id: c.id, label: c.name }));
   const apptStaffOpts = (techs ?? []).map((t: any) => ({ id: t.id, label: t.full_name ?? "Unnamed" }));
   const companyAddress = formatFullAddress(org?.address_line1, org?.city, org?.state, org?.zip);
   const jobAddress = formatFullAddress(j.address, j.city, j.state, j.zip);
   const tz = getOrgSettings((org as any)?.settings).timezone; // business tz for time-entry dates
+  // The org's all-day work window (Settings → Scheduling) — the same resolver the
+  // schedule writers use, threaded into the schedule/edit controls so their "blank
+  // time = all-day" sentinel and default times track the org's window, not a fixed 8-4.
+  const workDay = workDayWindowHm((org as any)?.settings);
 
   // Costing. laborCost = what we PAY (pay rate); billableLabor = what we CHARGE
   // (bill rate) — the latter feeds the estimate-vs-actual draw tracking.
@@ -280,42 +285,41 @@ export default async function JobDetailPage({
   // the PO or the bill (not both) keeps the number honest. Fix is a po_id on bills.
   const materialCost = (pos ?? []).reduce((s: number, p: any) => s + Number(p.total ?? 0), 0);
   const billsCost = (bills ?? []).reduce((s: number, b: any) => s + Number(b.amount ?? 0), 0);
-  // Billable work to date — computed with the SAME shared helpers importLabor/
-  // importCosts bill with, so the "are we on track" panel reconciles with the
-  // invoice. fetchJobLaborRows also captures cross-job hours allocated here.
+  // Billable work to date + the progress rollups — via the extracted computeJobProgress
+  // SSOT (the exact rollup the draw modal / print report use: estimate = accepted contract
+  // via contractTotalFromQuotes, invoiced = non-void non-draft, collected = non-void
+  // amount_paid, materials marked up per row like importCosts). One rule change there
+  // reaches this hub automatically. fetchJobLaborRows also captures cross-job allocations.
   const materialMarkup = getOrgSettings((org as any)?.settings).material_markup_percent;
-  const defaultLaborRate = Number(((org as any)?.settings ?? {}).default_labor_rate ?? 0);
+  const defaultLaborRate = getOrgSettings((org as any)?.settings).default_labor_rate;
   const laborRows = await fetchJobLaborRows(supabase, id);
   const billableLabor = computeJobLaborBilling(laborRows.jobEntries, laborRows.jobAllocs, defaultLaborRate).total;
-  const mk = (cost: number) => Math.round(cost * (1 + materialMarkup / 100) * 100) / 100;
-  const billableMaterials =
-    (pos ?? []).reduce((s: number, p: any) => (Number(p.total ?? 0) > 0 ? s + mk(Number(p.total)) : s), 0) +
-    (bills ?? []).reduce((s: number, b: any) => (Number(b.amount ?? 0) > 0 ? s + mk(Number(b.amount)) : s), 0);
-  const workedToDate = Math.round((billableLabor + billableMaterials) * 100) / 100;
+  const progress = computeJobProgress({
+    billingTypeRaw: (j as any).billing_type,
+    quotes: (quotes ?? []) as any,
+    invoices: (invoices ?? []) as any,
+    billableLabor,
+    pos: (pos ?? []) as any,
+    bills: (bills ?? []) as any,
+    markupPercent: materialMarkup,
+  });
+  const workedToDate = progress.workToDate;
   const totalMiles = (entries ?? []).reduce((s: number, e: any) => s + Number(e.miles ?? 0), 0);
   // Revenue = CASH COLLECTED on this job (Erik's rule): the amount actually paid
   // on the job's non-void invoices, net of refunds — NOT the sum of invoice/quote
   // totals (which double-counts a progress invoice + the final). invoiced/quoted
-  // stay for context only.
+  // stay for context only. `invoiced` is deliberately the RAW all-invoices sum
+  // (drafts included) — it only picks the "Invoiced vs Estimated" label below,
+  // not a money figure; the billed money figure is progress.invoiced.
   const invoiced = (invoices ?? []).reduce((s: number, i: any) => s + Number(i.total ?? 0), 0);
-  // Estimate base = the ACCEPTED contract via the one shared rule (accepted quote[s]
-  // only; falls back to all quotes when none accepted yet) — so a superseded quote
-  // revision can't inflate the "estimate" the progress-invoice draw tracks against.
-  // Same value as contractTotal below; kept as a named alias for the draw UI.
-  const quoted = contractTotalFromQuotes((quotes ?? []) as any);
-  // Contract base for the payment schedule (shared rule with billing + contracts).
-  const contractTotal = contractTotalFromQuotes((quotes ?? []) as any);
+  // Estimate base = the ACCEPTED contract (progress.estimate). Same value under two
+  // names: `quoted` feeds the draw UI, `contractTotal` the payment schedule.
+  const quoted = progress.estimate;
+  const contractTotal = progress.estimate;
   // Billed-to-date for progress payments = invoices actually SENT to the customer
-  // (non-void, non-draft). A draft is a work-in-progress draw, not a real bill, so
-  // it doesn't count toward "invoiced" or the deposit credit on a progress report.
-  const billedToDate = (invoices ?? []).reduce(
-    (s: number, i: any) => (i.status !== "void" && i.status !== "draft" ? s + Number(i.total ?? 0) : s),
-    0,
-  );
-  const collected = (invoices ?? []).reduce(
-    (s: number, i: any) => (i.status !== "void" ? s + Number(i.amount_paid ?? 0) : s),
-    0,
-  );
+  // (non-void, non-draft — a draft draw isn't a real bill): progress.invoiced.
+  const billedToDate = progress.invoiced;
+  const collected = progress.collected;
   // Open invoices (non-void, balance still owed) — targets for "record a payment".
   const openInvoices = (invoices ?? [])
     .filter((i: any) => i.status !== "void" && invoiceBalance(i.total, i.amount_paid) > 0.005)
@@ -448,7 +452,7 @@ export default async function JobDetailPage({
                 <div className="sm:col-span-2">
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Scheduled</div>
                   <div className="mt-1">
-                    <JobScheduleControl id={j.id} start={j.scheduled_start} end={j.scheduled_end} segments={(scheduleSegments ?? []) as any} />
+                    <JobScheduleControl id={j.id} start={j.scheduled_start} end={j.scheduled_end} segments={(scheduleSegments ?? []) as any} workDayStart={workDay.start} />
                   </div>
                 </div>
               </div>
@@ -910,6 +914,7 @@ export default async function JobDetailPage({
         )}
         customers={allCustomers ?? []}
         templates={(codeTemplates ?? []) as { id: string; name: string }[]}
+        workDay={workDay}
       />
 
       <Tabs tabs={arrangeJobTabs(tabs)} viewerIsStaff={viewerIsStaff} urlSync />

@@ -277,7 +277,9 @@ export async function updateJob(
 
   if (prevJob) {
     const p = prevJob as { assigned_to: string[] | null; org_id: string | null; job_number: string | null };
-    void notifyJobCrewAdded({ id, org_id: p.org_id, job_number: p.job_number, name }, p.assigned_to, assigned, ctx.userId);
+    // Awaited (not `void`): serverless can drop an un-awaited promise after the action
+    // returns. The helper never throws, so this can't break the job update.
+    await notifyJobCrewAdded({ id, org_id: p.org_id, job_number: p.job_number, name }, p.assigned_to, assigned, ctx.userId);
   }
 
   revalidatePath(`/jobs/${id}`);

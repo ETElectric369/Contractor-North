@@ -10,6 +10,7 @@ import { NumberInput } from "@/components/ui/number-input";
 import { hoursBetween, formatDuration } from "@/lib/utils";
 import type { JobCode } from "@/lib/types";
 import { completeAutoClockOut } from "./actions";
+import { jobLabel } from "@/lib/schedule-options";
 
 type JobOpt = { id: string; job_number: string; name: string; codes?: string[] };
 type Entry = { id: string; clock_in: string; clock_out: string; lunch_minutes: number; jobId: string | null; jobLabel: string };
@@ -91,7 +92,7 @@ export function AutoClockoutPrompt({ entry, jobCodes, jobs }: { entry: Entry; jo
                 <Select value={a.job_id} onChange={(e) => update(i, { job_id: e.target.value })} className="h-9 flex-1">
                   <option value="">— Job —</option>
                   {jobs.map((j) => (
-                    <option key={j.id} value={j.id}>{j.job_number} · {j.name}</option>
+                    <option key={j.id} value={j.id}>{jobLabel(j)}</option>
                   ))}
                 </Select>
                 <Select value={a.job_code} onChange={(e) => update(i, { job_code: e.target.value })} className="h-9 w-28">

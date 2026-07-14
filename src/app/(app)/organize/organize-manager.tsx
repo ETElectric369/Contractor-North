@@ -44,6 +44,7 @@ import {
   aiReviewItem,
 } from "./actions";
 import { OVERHEAD_CATEGORIES } from "./constants";
+import { jobLabel } from "@/lib/schedule-options";
 
 // The categories Claude assigns during extraction — offered so the owner can
 // correct a mis-classified item to any valid kind. Mirrors analyzeAndFile.
@@ -250,7 +251,7 @@ export function OrganizeManager({
 
   function filedBadge(item: OrganizedItemRow) {
     if (item.status === "archived") return <Badge tone="slate">Archived</Badge>;
-    if (item.job_id && item.jobs) return <Badge tone="blue">{item.jobs.job_number} · {item.jobs.name}</Badge>;
+    if (item.job_id && item.jobs) return <Badge tone="blue">{jobLabel(item.jobs)}</Badge>;
     if (item.bill_id) return <Badge tone="purple">Overhead · {item.category ?? "Other"}</Badge>;
     if (item.category === "Petty cash") return <Badge tone="indigo">Petty cash</Badge>;
     if (item.category === "Task") return <Badge tone="green">Task</Badge>;

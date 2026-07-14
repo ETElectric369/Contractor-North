@@ -506,7 +506,7 @@ export async function importLaborIntoInvoice(invoiceId: string): Promise<Result 
     fetchJobLaborRows(supabase, inv.job_id),
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),
   ]);
-  const defaultRate = Number(((org as any)?.settings ?? {}).default_labor_rate ?? 0);
+  const defaultRate = getOrgSettings((org as any)?.settings).default_labor_rate; // via the settings SSOT
   const { lines } = computeJobLaborBilling(labor.jobEntries, labor.jobAllocs, defaultRate);
   if (lines.length === 0) return { ok: false, error: "No billable hours on this job yet.", empty: true };
 

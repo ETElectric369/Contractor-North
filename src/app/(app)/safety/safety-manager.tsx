@@ -12,6 +12,7 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { Tabs } from "@/components/tabs";
 import { formatDate } from "@/lib/utils";
 import { addSafetyRecord, updateSafetyRecord, deleteSafetyRecord } from "./actions";
+import { jobLabel } from "@/lib/schedule-options";
 
 interface Person { id: string; full_name: string | null; }
 interface JobOpt { id: string; job_number: string; name: string; }
@@ -128,7 +129,7 @@ function SafetyPanel({
           {isIncident ? (
             <>
               <div><Label htmlFor="s-emp">Employee</Label><Select id="s-emp" value={profileId} onChange={(e) => setProfileId(e.target.value)}><option value="">—</option>{employees.map((e) => <option key={e.id} value={e.id}>{e.full_name ?? "Unnamed"}</option>)}</Select></div>
-              <div><Label htmlFor="s-job">Job</Label><Select id="s-job" value={jobId} onChange={(e) => setJobId(e.target.value)}><option value="">—</option>{jobs.map((j) => <option key={j.id} value={j.id}>{j.job_number} · {j.name}</option>)}</Select></div>
+              <div><Label htmlFor="s-job">Job</Label><Select id="s-job" value={jobId} onChange={(e) => setJobId(e.target.value)}><option value="">—</option>{jobs.map((j) => <option key={j.id} value={j.id}>{jobLabel(j)}</option>)}</Select></div>
               <div><Label htmlFor="s-sev">Severity</Label><Select id="s-sev" value={severity} onChange={(e) => setSeverity(e.target.value)}><option value="first_aid">First aid only</option><option value="recordable">OSHA recordable</option><option value="lost_time">Lost time</option></Select></div>
               <label className="flex items-end gap-2 pb-2 text-sm text-slate-600"><input type="checkbox" checked={recordable} onChange={(e) => setRecordable(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand" /> OSHA 300 recordable</label>
             </>
@@ -251,7 +252,7 @@ function EditSafetyButton({
             {isIncident ? (
               <>
                 <div><Label htmlFor="e-emp">Employee</Label><Select id="e-emp" value={profileId} onChange={(e) => setProfileId(e.target.value)}><option value="">—</option>{employees.map((e) => <option key={e.id} value={e.id}>{e.full_name ?? "Unnamed"}</option>)}</Select></div>
-                <div><Label htmlFor="e-job">Job</Label><Select id="e-job" value={jobId} onChange={(e) => setJobId(e.target.value)}><option value="">—</option>{jobs.map((j) => <option key={j.id} value={j.id}>{j.job_number} · {j.name}</option>)}</Select></div>
+                <div><Label htmlFor="e-job">Job</Label><Select id="e-job" value={jobId} onChange={(e) => setJobId(e.target.value)}><option value="">—</option>{jobs.map((j) => <option key={j.id} value={j.id}>{jobLabel(j)}</option>)}</Select></div>
                 <div><Label htmlFor="e-sev">Severity</Label><Select id="e-sev" value={severity} onChange={(e) => setSeverity(e.target.value)}><option value="first_aid">First aid only</option><option value="recordable">OSHA recordable</option><option value="lost_time">Lost time</option></Select></div>
                 <label className="flex items-end gap-2 pb-2 text-sm text-slate-600"><input type="checkbox" checked={recordable} onChange={(e) => setRecordable(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand" /> OSHA 300 recordable</label>
               </>

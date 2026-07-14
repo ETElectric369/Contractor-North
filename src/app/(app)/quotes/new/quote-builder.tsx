@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { formatCurrency } from "@/lib/utils";
+import { subtotalTaxTotal } from "@/lib/invoice-math";
 import { useDraft } from "@/lib/use-draft";
 import { useToast } from "@/components/toast";
 import {
@@ -206,9 +207,13 @@ export function QuoteBuilder({
     if (draft.restored) toast("Draft restored — pick up where you left off", "info");
   }, [draft.restored, toast]);
 
-  const subtotal = items.reduce((s, i) => s + i.quantity * i.unit_price, 0);
-  const tax = subtotal * (taxRate || 0);
-  const total = subtotal + tax;
+  // Live totals via the shared subtotalTaxTotal (pure, client-safe) — the SAME rounding
+  // the server save (quotes/actions → quote.create) uses, so the preview can never show
+  // a cent off from the quote that actually persists.
+  const { subtotal, tax, total } = subtotalTaxTotal(
+    items.map((i) => i.quantity * i.unit_price),
+    taxRate || 0,
+  );
 
   // Group the lines by their `group` tag (from a kit) so the estimate reads as collapsible groups —
   // Chris sees "Stairs ▸" with its sub-items nested. Each entry keeps its FLAT index so the existing
@@ -463,7 +468,7 @@ export function QuoteBuilder({
 
             <div className="space-y-2">
               {grouped.map(({ group, entries }) => {
-                const gSub = entries.reduce((s, { it }) => s + it.quantity * it.unit_price, 0);
+                const gSub = subtotalTaxTotal(entries.map(({ it }) => it.quantity * it.unit_price), 0).subtotal;
                 const isCollapsed = collapsed.has(group);
                 return (
                   <div key={group || "__ungrouped"} className={group ? "overflow-hidden rounded-lg border border-slate-200" : ""}>

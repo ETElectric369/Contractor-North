@@ -8,6 +8,7 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { PROJECT_TYPES, estimateLinesFromIntake } from "@/lib/lead-triage";
 import { tzDateTimeUtc, todayStrInTz } from "@/lib/tz";
 import { createProposalCore, cleanSlots, type ProposalSlot } from "@/lib/appointments/proposal";
+import { INQUIRY_STATUSES } from "@/lib/statuses";
 import { saveQuote } from "../quotes/actions";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -132,6 +133,11 @@ export async function markInquiryContacted(id: string, nextFollowUp?: string | n
 }
 
 export async function setInquiryStatus(id: string, status: string): Promise<Result> {
+  // inquiries.status is free text in the DB, so the spine is the only guard — an
+  // unlisted value would vanish from every filtered leads view (same idiom as
+  // setJobStatus / updateQuoteStatus).
+  if (!(INQUIRY_STATUSES as readonly string[]).includes(status))
+    return { ok: false, error: `Status must be one of: ${INQUIRY_STATUSES.join(", ")}.` };
   const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;

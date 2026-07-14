@@ -146,6 +146,8 @@ export function JobPermits({ jobId, permits }: { jobId: string; permits: Permit[
                     {STATUSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                   </Select>
                   <div className="flex items-center gap-2">
+                    {/* NOTE: first-underscore-only label — fine while every PERMIT_STATUSES value
+                        has ≤1 underscore; switch to the spine's [value,label] pairs if that changes. */}
                     <Badge tone={statusTone(p.status)}>{p.status.replace("_", " ")}</Badge>
                     <Badge tone={resultTone(p.inspection_result)}>{p.inspection_result}</Badge>
                     <EditPermitButton permit={p as any} jobId={jobId} />
