@@ -5,7 +5,7 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { createClient } from "@/lib/supabase/server";
 import { visibleJobIdOrNull } from "@/lib/job-visibility";
 import { requireStaff } from "@/lib/staff-guard";
-import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
+import { ACTIVE_JOB_STATUSES, pickJobScheduledToday } from "@/lib/job-status";
 import { hoursBetween } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
 import { tzDateTimeUtc, todayBoundsInTz } from "@/lib/tz";
@@ -19,8 +19,9 @@ import { jobLabel } from "@/lib/schedule-options";
 export type ClockResult = { ok: boolean; error?: string };
 
 /**
- * The two-button tech flow's server-side job resolution: a tech's clock-in carries no
- * job picker anymore (Erik: "the clock is two buttons"), so the job is derived here —
+ * The simple clock-in flow's server-side job resolution: the DEFAULT punch carries no
+ * job picker for ANY role now (Erik: "the clock is two buttons"; staff pick a job only
+ * via the More-options disclosure), so the job is derived here —
  *   1. the job the tech is ASSIGNED to that's scheduled TODAY (scheduled_start today,
  *      or a job_schedule_segments row covering the org-local day),
  *   2. else the org's ONLY in_progress job (unambiguous),
@@ -49,16 +50,11 @@ async function resolveTechJobToday(supabase: SupabaseClient, uid: string): Promi
         .lte("start_date", todayStr)
         .gte("end_date", todayStr);
       const segToday = new Set(((segs ?? []) as { job_id: string }[]).map((s) => s.job_id));
-      // … or via the scheduled_start mirror (single-day jobs).
-      const today = myJobs
-        .filter((j) => {
-          if (segToday.has(j.id)) return true;
-          if (!j.scheduled_start) return false;
-          const t = new Date(j.scheduled_start).getTime();
-          return t >= dayStart.getTime() && t < dayEnd.getTime();
-        })
-        .sort((a, b) => (a.scheduled_start ?? "9999").localeCompare(b.scheduled_start ?? "9999"));
-      if (today.length) return today[0].id;
+      // … or via the scheduled_start mirror (single-day jobs) — the SHARED tier-1 pick
+      // (lib/job-status.pickJobScheduledToday), the same one the /timeclock crew board
+      // points members with, so the punch and the board can't drift.
+      const today = pickJobScheduledToday(myJobs, segToday, dayStart, dayEnd);
+      if (today) return today.id;
     }
 
     // No scheduled assignment — if the org has exactly ONE job in progress, that's the site.
@@ -94,9 +90,11 @@ export async function clockIn(input: {
   // dangling reference. Drops it to a no-job entry instead.
   let jobId = await visibleJobIdOrNull(supabase, input.job_id);
 
-  // Two-button tech flow: the tech UI sends no job at all, so resolve it server-side
-  // (today's assignment → the only in_progress job → none; the office attaches later).
-  if (!jobId && !isStaff) {
+  // Simple-by-default flow: a job-less punch resolves its job server-side for EVERY
+  // role now (techs never see a picker; staff only pick via "More options" — and Erik's
+  // own one-tap punch must resolve the same way): today's assignment → the only
+  // in_progress job → none (the office attaches it later).
+  if (!jobId) {
     jobId = await resolveTechJobToday(supabase, user.id);
   }
 
@@ -303,11 +301,18 @@ function clampAllocationHours<T extends { hours: number }>(
 
 export async function clockOut(input: {
   entry_id: string;
-  lunch_minutes: number;
+  /** Unpaid lunch in minutes. null/undefined = "wasn't asked" (the one-tap flows) —
+   *  the server's auto-lunch below decides. An explicit number (the details
+   *  questionnaire, voice "I took an hour") is an ANSWER and is honored. */
+  lunch_minutes: number | null;
   notes: string;
   gps: GeoPoint | null;
   auto?: boolean;
   miles?: number;
+  /** undefined = leave the entry's recorded allocation rows alone (a one-tap close must
+   *  never wipe mid-shift switchJob segments); an ARRAY replaces the whole set ([]
+   *  clears it — the "break it down later" / geofence paths rely on that so the
+   *  AutoClockoutPrompt re-asks the breakdown). */
   allocations?: JobAllocationInput[];
   at?: string; // explicit clock-out time (ISO) — used by the geofence auto clock-out
 }): Promise<ClockResult> {
@@ -345,15 +350,20 @@ export async function clockOut(input: {
     }
   }
 
-  // Auto-lunch (Erik: "automatically deduct lunch"): a tech's one-tap clock-out asks no
-  // lunch question, so a shift over 5 GROSS hours deducts the 30-minute meal here. An
-  // explicit larger figure (voice: "I took an hour") is honored; the geofence auto-close
-  // (input.auto) keeps its after-the-fact flow — completeAutoClockOut still asks, and
-  // lunch there can only reduce hours. Staff answer the questionnaire as before.
-  let lunchMinutes = input.lunch_minutes || 0;
-  if (!isStaff && !input.auto && entClockIn) {
+  // Auto-lunch (Erik: "automatically deduct lunch"): the one-tap clock-out asks no lunch
+  // question — and that's now EVERY role's default, not just a tech's (Erik clocks
+  // himself and wants the same automation) — so a shift over 5 GROSS hours deducts the
+  // 30-minute meal when the caller sent no explicit lunch figure. An explicit answer
+  // (the "Clock out with details" questionnaire, voice "I took an hour") is honored —
+  // though a tech's is still floored at the 30-minute legal meal, unchanged. The
+  // geofence auto-close (input.auto) keeps its after-the-fact flow exactly as-is —
+  // completeAutoClockOut owns lunch there, and it can only reduce hours.
+  // NaN (a garbage crafted value) counts as NOT asked — the old `|| 0` coercion, kept.
+  const lunchAsked = input.lunch_minutes != null && Number.isFinite(input.lunch_minutes);
+  let lunchMinutes = lunchAsked ? (input.lunch_minutes as number) : 0;
+  if (!input.auto && entClockIn) {
     const gross = hoursBetween(entClockIn, clockOutIso, 0);
-    if (gross > 5) lunchMinutes = Math.max(lunchMinutes, 30);
+    if (gross > 5 && (!lunchAsked || !isStaff)) lunchMinutes = Math.max(lunchMinutes, 30);
   }
 
   const { error } = await supabase
@@ -374,42 +384,47 @@ export async function clockOut(input: {
 
   if (error) return { ok: false, error: error.message };
 
-  // Replace any existing allocations with the submitted set. INSERT the new rows
-  // BEFORE deleting the old ones, so a failed insert can't wipe the entry's
+  // Replace any existing allocations with the submitted set — ONLY when the caller
+  // actually sent one (undefined = leave the recorded rows alone, so a one-tap close
+  // from My Day / voice can't silently wipe a mid-shift switchJob split; the panel's
+  // one-tap round-trips them as seeded rows and lands here with an array). INSERT the
+  // new rows BEFORE deleting the old ones, so a failed insert can't wipe the entry's
   // allocations (the JS client has no multi-statement transaction).
-  let allocations = (input.allocations ?? []).filter(
-    (a) => a.hours > 0 || a.description.trim() || a.job_id || a.job_code,
-  );
-  // C7: clamp the caller-supplied split to the entry's worked hours BEFORE persisting,
-  // so a voice/registry/crafted call can't bill/cost more hours than payroll pays.
-  // clock_in came from the self-scoped read above (never the caller) and the clamp uses
-  // the final clock_out + lunch we just wrote — the same gross-minus-lunch payroll uses.
-  if (allocations.length && entClockIn) {
-    const workedHrs = hoursBetween(entClockIn, clockOutIso, lunchMinutes);
-    allocations = clampAllocationHours(allocations, workedHrs);
-  }
-  const { data: oldAllocs } = await supabase
-    .from("time_allocations")
-    .select("id")
-    .eq("time_entry_id", input.entry_id);
-  const oldIds = (oldAllocs ?? []).map((a: { id: string }) => a.id);
-  if (allocations.length) {
-    // Drop any job_id the caller can't actually see (crafted/registry call) — never
-    // persist a cross-org job reference on an allocation.
-    const rows = await Promise.all(
-      allocations.map(async (a, idx) => ({
-        time_entry_id: input.entry_id,
-        job_id: await visibleJobIdOrNull(supabase, a.job_id),
-        job_code: a.job_code,
-        hours: a.hours || 0,
-        description: a.description || null,
-        sort_order: idx,
-      })),
+  if (input.allocations !== undefined) {
+    let allocations = input.allocations.filter(
+      (a) => a.hours > 0 || a.description.trim() || a.job_id || a.job_code,
     );
-    const { error: allocErr } = await supabase.from("time_allocations").insert(rows);
-    if (allocErr) return { ok: false, error: allocErr.message };
+    // C7: clamp the caller-supplied split to the entry's worked hours BEFORE persisting,
+    // so a voice/registry/crafted call can't bill/cost more hours than payroll pays.
+    // clock_in came from the self-scoped read above (never the caller) and the clamp uses
+    // the final clock_out + lunch we just wrote — the same gross-minus-lunch payroll uses.
+    if (allocations.length && entClockIn) {
+      const workedHrs = hoursBetween(entClockIn, clockOutIso, lunchMinutes);
+      allocations = clampAllocationHours(allocations, workedHrs);
+    }
+    const { data: oldAllocs } = await supabase
+      .from("time_allocations")
+      .select("id")
+      .eq("time_entry_id", input.entry_id);
+    const oldIds = (oldAllocs ?? []).map((a: { id: string }) => a.id);
+    if (allocations.length) {
+      // Drop any job_id the caller can't actually see (crafted/registry call) — never
+      // persist a cross-org job reference on an allocation.
+      const rows = await Promise.all(
+        allocations.map(async (a, idx) => ({
+          time_entry_id: input.entry_id,
+          job_id: await visibleJobIdOrNull(supabase, a.job_id),
+          job_code: a.job_code,
+          hours: a.hours || 0,
+          description: a.description || null,
+          sort_order: idx,
+        })),
+      );
+      const { error: allocErr } = await supabase.from("time_allocations").insert(rows);
+      if (allocErr) return { ok: false, error: allocErr.message };
+    }
+    if (oldIds.length) await supabase.from("time_allocations").delete().in("id", oldIds);
   }
-  if (oldIds.length) await supabase.from("time_allocations").delete().in("id", oldIds);
 
   revalidatePath("/timeclock");
   revalidatePath("/planner"); // clock-in/out status shows on My Day
@@ -442,7 +457,10 @@ export async function clockOutCurrent(input: {
   if (!open) return { ok: false, error: "You're not clocked in." };
   return clockOut({
     entry_id: (open as any).id,
-    lunch_minutes: input.lunch_minutes ?? 0,
+    // null when the caller didn't mention lunch → clockOut's auto-lunch decides
+    // (>5h ⇒ 30 min, every role). Omitted allocations leave any recorded
+    // mid-shift switch segments on the entry untouched.
+    lunch_minutes: input.lunch_minutes ?? null,
     notes: input.notes ?? "",
     gps: null,
     miles: input.miles,
@@ -534,6 +552,10 @@ export async function geoClockOut(gps: GeoPoint | null, atIso: string): Promise<
     gps,
     auto: true,
     at: atIso,
+    // Explicit clear — the geofence flow's PRE-EXISTING behavior, kept exactly: the
+    // breakdown is answered after the fact via completeAutoClockOut, and the
+    // AutoClockoutPrompt only re-asks while the entry has no allocation rows.
+    allocations: [],
   });
 }
 

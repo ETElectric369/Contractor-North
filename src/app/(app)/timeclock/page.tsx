@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { isStaffRole } from "@/lib/actions/perms";
-import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
+import { ACTIVE_JOB_STATUSES, pickMemberCurrentJob } from "@/lib/job-status";
+import { todayBoundsInTz } from "@/lib/tz";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
@@ -70,8 +71,9 @@ export default async function TimeclockPage() {
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),
     // Staff crew-assignment board: which active job carries each member. Fetched
     // ONLY here (staff) so crew rosters never serialize into a tech's page props.
+    // status/scheduled_start/created_at feed the board's priority pick below.
     isStaff
-      ? supabase.from("jobs").select("id, assigned_to").in("status", ACTIVE_JOB_STATUSES)
+      ? supabase.from("jobs").select("id, assigned_to, status, scheduled_start, created_at").in("status", ACTIVE_JOB_STATUSES)
       : Promise.resolve({ data: [] as { id: string; assigned_to: string[] | null }[] }),
     // crew_lead is selected SEPARATELY (not in the profile select above) so this page
     // keeps working even if migration 0128 hasn't landed yet — an unknown column
@@ -81,14 +83,33 @@ export default async function TimeclockPage() {
   const orgSettings = getOrgSettings((orgRes.data as any)?.settings);
   const crewLead = !!(leadRes.data as any)?.crew_lead;
 
-  // Each member's current assignment (first active job carrying them) for the
-  // staff crew-assignment board.
-  const crewJobs = ((crewJobsRes.data ?? []) as { id: string; assigned_to: string[] | null }[]);
+  // Each member's current assignment for the staff crew-assignment board — the SAME
+  // priority the clock-in job resolution uses (the shared tier-1 pick in
+  // lib/job-status): scheduled TODAY (segment covering the org-local day, or
+  // scheduled_start inside it) → in_progress → newest other active job. The old
+  // `.find()` over an UNORDERED query pointed a member on several jobs at an
+  // arbitrary one (e.g. a stale on_hold job). One batched segments read — no N+1.
+  const crewJobs = ((crewJobsRes.data ?? []) as {
+    id: string;
+    assigned_to: string[] | null;
+    status?: string | null;
+    scheduled_start?: string | null;
+    created_at?: string | null;
+  }[]);
   const currentAssignment: Record<string, string> = {};
-  if (isStaff) {
+  if (isStaff && crewJobs.length) {
+    const { dayStart, dayEnd, todayStr } = todayBoundsInTz(orgSettings.timezone);
+    const { data: segRows } = await supabase
+      .from("job_schedule_segments")
+      .select("job_id")
+      .in("job_id", crewJobs.map((j) => j.id))
+      .lte("start_date", todayStr)
+      .gte("end_date", todayStr);
+    const segToday = new Set(((segRows ?? []) as { job_id: string }[]).map((s) => s.job_id));
     for (const m of members ?? []) {
-      const j = crewJobs.find((cj) => (cj.assigned_to ?? []).includes(m.id));
-      if (j) currentAssignment[m.id] = j.id;
+      const mine = crewJobs.filter((cj) => (cj.assigned_to ?? []).includes(m.id));
+      const pick = pickMemberCurrentJob(mine, segToday, dayStart, dayEnd);
+      if (pick) currentAssignment[m.id] = pick.id;
     }
   }
 

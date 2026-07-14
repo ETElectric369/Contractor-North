@@ -13,6 +13,7 @@ import {
   Trash2,
   Briefcase,
   ArrowLeftRight,
+  ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -121,11 +122,15 @@ export function TimeclockPanel({
   const [error, setError] = useState<string | null>(null);
   const [gpsNote, setGpsNote] = useState<string | null>(null); // "punch wasn't GPS-stamped" — surfaced, not silent
   const [pending, start] = useTransition();
-  // STAFF clock-out is a two-step "clock, then wrap up": the running view stays CLEAN, and the
-  // day-breakdown questionnaire (jobs/hours, lunch/breaks, mileage, notes) only appears when they
-  // tap Clock Out. A TECH never sees it (Erik's two-button rework): their Clock Out is ONE tap —
-  // the server auto-deducts lunch and the job was already resolved at clock-in.
+  // SIMPLE BY DEFAULT FOR EVERYONE (Erik, cn-v502): Clock Out is ONE tap for every role —
+  // the server auto-deducts lunch and the job was resolved at clock-in. The day-breakdown
+  // questionnaire (jobs/hours, lunch/breaks, mileage, notes) still exists IN FULL, but
+  // only behind the staff "More options → Clock out with details…" door; this flag opens it.
   const [clockingOut, setClockingOut] = useState(false);
+  // The ONE quiet staff disclosure ("More options") — collapsed by default on both the
+  // clock-in view (job + code pickers) and the running view (Switch Job + the details
+  // door). Techs never render it; their flow has no tools to disclose.
+  const [showTools, setShowTools] = useState(false);
   // Crew-lead debrief — opens AFTER a successful clock-out (the entry is closed, so this
   // state must live here, above the openEntry branch, to survive the panel's re-render).
   const [debriefOpen, setDebriefOpen] = useState(false);
@@ -286,10 +291,13 @@ export function TimeclockPanel({
           clock_in_at: startAt || null,
         });
         if (!res.ok) setError(res.error ?? "Could not clock in.");
-        // GPS is optional, but don't pretend it was captured — if it's off/denied/slow, say the
-        // punch isn't location-stamped (this used to fall through to gps:null silently). The note
-        // now renders in the clocked-in view too, so the crew actually sees it post-punch.
-        else if (!gps) setGpsNote("Clocked in — location wasn't ready, so this punch isn't GPS-stamped.");
+        else {
+          setShowTools(false); // fresh punch → the running view's disclosure starts closed
+          // GPS is optional, but don't pretend it was captured — if it's off/denied/slow, say the
+          // punch isn't location-stamped (this used to fall through to gps:null silently). The note
+          // now renders in the clocked-in view too, so the crew actually sees it post-punch.
+          if (!gps) setGpsNote("Clocked in — location wasn't ready, so this punch isn't GPS-stamped.");
+        }
       } catch {
         // Dead spot / airplane mode — don't throw to the error boundary; the form
         // is intact, so the punch just needs another tap when there's signal.
@@ -411,24 +419,37 @@ export function TimeclockPanel({
     });
   }
 
-  function doClockOut() {
+  // ONE clock-out for both doors. withDetails=false is the big one-tap button (every
+  // role): lunch is sent as null — "wasn't asked" — so the server's auto-lunch (>5h ⇒
+  // 30 min) decides, exactly like a tech's punch. withDetails=true is the questionnaire's
+  // "Confirm & clock out": its lunch answer is explicit and honored. Either way the
+  // seeded allocation rows ride along, so a mid-shift switchJob split round-trips.
+  function doClockOut(withDetails: boolean) {
     if (!openEntry) return;
     setError(null);
     start(async () => {
       // Same short GPS cap as clock-in — the button used to sit disabled and
       // silent for up to the full 8s highAccuracy round-trip.
       const gps = await getGps(3000);
+      // The lunch the server will deduct: the questionnaire's answer when asked, else
+      // the same >5h ⇒ 30 min rule clockOut auto-applies to an unasked punch — so the
+      // live row below nets out to the exact paid hours either way.
+      const punchLunch = withDetails
+        ? lunchToUse
+        : hoursBetween(openEntry.clock_in, new Date(), 0) > 5
+          ? 30
+          : 0;
       // Recompute the live row's hours AT THE PUNCH (net of lunch, exact) — the
       // displayed h/m round to the minute, and the old mount-time seed went stale.
       let rows = allocations;
       if (!allocsDirty && rows.length) {
-        const seg = hoursBetween(segmentStartIso ?? openEntry.clock_in, new Date(), lunchToUse);
+        const seg = hoursBetween(segmentStartIso ?? openEntry.clock_in, new Date(), punchLunch);
         rows = [...rows.slice(0, -1), { ...rows[rows.length - 1], hours: seg, minutes: 0 }];
       }
       try {
         const res = await clockOut({
           entry_id: openEntry.id,
-          lunch_minutes: lunchToUse,
+          lunch_minutes: withDetails ? lunchToUse : null,
           notes,
           gps,
           miles,
@@ -440,8 +461,15 @@ export function TimeclockPanel({
           })),
         });
         if (!res.ok) setError(res.error ?? "Could not clock out.");
-        // Crew leads owe the office the end-of-day debrief — Nort asks right here.
-        else if (crewLead) setDebriefOpen(true);
+        else {
+          // Reset the view flags so the NEXT punch starts on the simple flow (leaving
+          // clockingOut true used to reopen the questionnaire on a later clock-in).
+          setClockingOut(false);
+          setShowTools(false);
+          setSwitching(false);
+          // Crew leads owe the office the end-of-day debrief — Nort asks right here.
+          if (crewLead) setDebriefOpen(true);
+        }
       } catch {
         // Dead spot — the entry stays open and every field on this form is kept;
         // tapping again with signal completes the same clock-out.
@@ -470,7 +498,12 @@ export function TimeclockPanel({
           allocations: [],
         });
         if (!res.ok) setError(res.error ?? "Could not clock out.");
-        else if (crewLead) setDebriefOpen(true);
+        else {
+          setClockingOut(false);
+          setShowTools(false);
+          setSwitching(false);
+          if (crewLead) setDebriefOpen(true);
+        }
       } catch {
         setError(OFFLINE_MSG);
       }
@@ -523,68 +556,11 @@ export function TimeclockPanel({
             </p>
           )}
 
-          {/* Mid-shift job switch — a DURING-shift action, so it lives in the clean running view;
-              captures the split AS IT HAPPENS (outgoing job's hours recorded server-side + a notes
-              breadcrumb) instead of reconstructing the day from memory at 4pm. STAFF ONLY now —
-              a tech's clock is two buttons; the office moves their job assignment instead. */}
-          {isStaff && !clockingOut && (switching ? (
-            <div className="space-y-2 rounded-xl border border-brand/30 bg-brand/5 p-3">
-              <Label className="mb-0 flex items-center gap-1.5 text-slate-900">
-                <ArrowLeftRight className="h-4 w-4 text-brand" /> Switch job
-              </Label>
-              <p className="text-xs text-slate-500">
-                Your time on {currentJobName} so far is recorded; the clock keeps running on the new job.
-              </p>
-              <Select
-                value={switchJobId}
-                onChange={(e) => {
-                  setSwitchJobId(e.target.value);
-                  setSwitchJobCode("");
-                }}
-                className="h-11 w-full"
-                aria-label="New job"
-              >
-                <option value="">— New job —</option>
-                {jobs
-                  .filter((j) => j.id !== openEntry.job_id)
-                  .map((j) => (
-                    <option key={j.id} value={j.id}>
-                      {jobLabel(j)}
-                    </option>
-                  ))}
-              </Select>
-              <Select
-                value={switchJobCode}
-                onChange={(e) => setSwitchJobCode(e.target.value)}
-                className="h-11 w-full"
-                aria-label="New job code"
-              >
-                <option value="">Code (optional)</option>
-                {codesForJob(switchJobId).map((c) => (
-                  <option key={c.id} value={c.code}>
-                    {c.code}{c.description ? ` · ${c.description}` : ""}
-                  </option>
-                ))}
-              </Select>
-              <div className="flex gap-2">
-                <Button className="flex-1" onClick={doSwitchJob} disabled={switchPending || !switchJobId}>
-                  {switchPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowLeftRight className="h-4 w-4" />} Switch
-                </Button>
-                <Button variant="outline" onClick={() => setSwitching(false)} disabled={switchPending}>
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <Button type="button" variant="outline" className="w-full" onClick={() => setSwitching(true)}>
-              <ArrowLeftRight className="h-4 w-4" /> Switch Job
-            </Button>
-          ))}
-
-          {/* The big Clock Out. STAFF: opens the wrap-up questionnaire (doesn't clock out yet).
-              TECH: ONE tap clocks out right here — no questionnaire, no lunch checkboxes, no
-              mileage; the server auto-deducts lunch (>5h ⇒ 30 min) and any mid-shift split
-              already recorded on the entry rides along via the seeded allocation rows. */}
+          {/* The big Clock Out — ONE tap for EVERY role now (Erik, cn-v502: "simple by
+              default for everyone"): no questionnaire, no lunch checkboxes, no mileage;
+              the server auto-deducts lunch (>5h ⇒ 30 min) and any mid-shift split
+              already recorded on the entry rides along via the seeded allocation rows.
+              The full wrap-up still exists behind More options → "Clock out with details…". */}
           {!clockingOut && (
             <>
               {error && <p className="text-sm text-red-600">{error}</p>}
@@ -592,10 +568,10 @@ export function TimeclockPanel({
                 variant="destructive"
                 size="lg"
                 className="w-full"
-                onClick={isStaff ? () => setClockingOut(true) : doClockOut}
+                onClick={() => doClockOut(false)}
                 disabled={pending || switchPending}
               >
-                {!isStaff && pending ? (
+                {pending ? (
                   <>
                     <Loader2 className="h-5 w-5 animate-spin" /> {t("tc_clockingOut")}
                   </>
@@ -605,6 +581,91 @@ export function TimeclockPanel({
                   </>
                 )}
               </Button>
+
+              {/* STAFF power tools, re-homed (nothing deleted) behind the ONE quiet
+                  disclosure: the mid-shift Switch Job flow (captures the split AS IT
+                  HAPPENS — outgoing hours recorded server-side + a notes breadcrumb)
+                  and the door to the full clock-out questionnaire. A tech renders no
+                  disclosure at all — their clock stays two buttons. */}
+              {isStaff && (
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setShowTools((v) => !v)}
+                    aria-expanded={showTools}
+                    className="flex w-full items-center justify-center gap-1 py-1 text-xs font-medium text-slate-400 hover:text-slate-600"
+                  >
+                    More options
+                    <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showTools ? "rotate-180" : ""}`} />
+                  </button>
+                  {showTools && (
+                    <div className="mt-1 space-y-3">
+                      {switching ? (
+                        <div className="space-y-2 rounded-xl border border-brand/30 bg-brand/5 p-3">
+                          <Label className="mb-0 flex items-center gap-1.5 text-slate-900">
+                            <ArrowLeftRight className="h-4 w-4 text-brand" /> Switch job
+                          </Label>
+                          <p className="text-xs text-slate-500">
+                            Your time on {currentJobName} so far is recorded; the clock keeps running on the new job.
+                          </p>
+                          <Select
+                            value={switchJobId}
+                            onChange={(e) => {
+                              setSwitchJobId(e.target.value);
+                              setSwitchJobCode("");
+                            }}
+                            className="h-11 w-full"
+                            aria-label="New job"
+                          >
+                            <option value="">— New job —</option>
+                            {jobs
+                              .filter((j) => j.id !== openEntry.job_id)
+                              .map((j) => (
+                                <option key={j.id} value={j.id}>
+                                  {jobLabel(j)}
+                                </option>
+                              ))}
+                          </Select>
+                          <Select
+                            value={switchJobCode}
+                            onChange={(e) => setSwitchJobCode(e.target.value)}
+                            className="h-11 w-full"
+                            aria-label="New job code"
+                          >
+                            <option value="">Code (optional)</option>
+                            {codesForJob(switchJobId).map((c) => (
+                              <option key={c.id} value={c.code}>
+                                {c.code}{c.description ? ` · ${c.description}` : ""}
+                              </option>
+                            ))}
+                          </Select>
+                          <div className="flex gap-2">
+                            <Button className="flex-1" onClick={doSwitchJob} disabled={switchPending || !switchJobId}>
+                              {switchPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowLeftRight className="h-4 w-4" />} Switch
+                            </Button>
+                            <Button variant="outline" onClick={() => setSwitching(false)} disabled={switchPending}>
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <Button type="button" variant="outline" className="w-full" onClick={() => setSwitching(true)}>
+                          <ArrowLeftRight className="h-4 w-4" /> Switch Job
+                        </Button>
+                      )}
+                      {/* The EXISTING wrap-up questionnaire (lunch/breaks/split/miles/notes),
+                          exactly as it was — just no longer the default path. */}
+                      <button
+                        type="button"
+                        onClick={() => setClockingOut(true)}
+                        className="w-full text-center text-xs font-medium text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
+                      >
+                        Clock out with details…
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </>
           )}
 
@@ -795,7 +856,7 @@ export function TimeclockPanel({
                   variant="destructive"
                   size="lg"
                   className="flex-1"
-                  onClick={doClockOut}
+                  onClick={() => doClockOut(true)}
                   disabled={pending || !breaksOk}
                 >
                   {pending ? (
@@ -839,40 +900,55 @@ export function TimeclockPanel({
           <p className="text-sm text-slate-500">{t("tc_notClockedIn")}</p>
         </div>
 
-        {/* Job + code pickers are STAFF-only now (Erik's two-button rework): a tech just
-            taps Clock In and the server resolves the job — today's assignment, else the
-            org's only in-progress job, else none (the office attaches it later). */}
-        {isStaff && (
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <Label htmlFor="job">{t("tc_job")}</Label>
-            <Select id="job" value={jobId} onChange={(e) => setJobId(e.target.value)} className="h-11">
-              <option value="">{t("tc_noJob")}</option>
-              {jobs.map((j) => (
-                <option key={j.id} value={j.id}>
-                  {jobLabel(j)}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="code">{t("tc_jobCode")}</Label>
-            <Select id="code" value={jobCode} onChange={(e) => setJobCode(e.target.value)} className="h-11">
-              <option value="">{t("tc_selectCode")}</option>
-              {codesForJob(jobId).map((c) => (
-                <option key={c.id} value={c.code}>
-                  {c.code} — {c.description}
-                </option>
-              ))}
-            </Select>
-          </div>
-        </div>
-        )}
-
         <div>
           <Label>Start time</Label>
           <ClockStartPicker onChange={(iso) => setStartAt(iso ?? "")} staff={isStaff} />
         </div>
+
+        {/* Job + code pickers — STAFF only, and tucked behind the ONE quiet "More
+            options" disclosure now (Erik, cn-v502: "simple by default for EVERYONE").
+            The default punch is job-less; the server resolves the job — today's
+            assignment, else the org's only in-progress job, else none (the office
+            attaches it later). Techs render no disclosure at all. */}
+        {isStaff && (
+          <div>
+            <button
+              type="button"
+              onClick={() => setShowTools((v) => !v)}
+              aria-expanded={showTools}
+              className="flex w-full items-center justify-center gap-1 py-1 text-xs font-medium text-slate-400 hover:text-slate-600"
+            >
+              More options
+              <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showTools ? "rotate-180" : ""}`} />
+            </button>
+            {showTools && (
+              <div className="mt-2 grid gap-4 sm:grid-cols-2">
+                <div>
+                  <Label htmlFor="job">{t("tc_job")}</Label>
+                  <Select id="job" value={jobId} onChange={(e) => setJobId(e.target.value)} className="h-11">
+                    <option value="">{t("tc_noJob")}</option>
+                    {jobs.map((j) => (
+                      <option key={j.id} value={j.id}>
+                        {jobLabel(j)}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="code">{t("tc_jobCode")}</Label>
+                  <Select id="code" value={jobCode} onChange={(e) => setJobCode(e.target.value)} className="h-11">
+                    <option value="">{t("tc_selectCode")}</option>
+                    {codesForJob(jobId).map((c) => (
+                      <option key={c.id} value={c.code}>
+                        {c.code} — {c.description}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {error && <p className="text-sm text-red-600">{error}</p>}
         {gpsNote && <p className="text-sm text-amber-600">{gpsNote}</p>}

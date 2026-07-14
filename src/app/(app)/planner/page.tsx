@@ -8,6 +8,7 @@ import { WeatherWidget } from "@/components/weather-widget";
 import { getMoneyPipeline } from "@/lib/billing-pipeline";
 import { getCrewStatus } from "@/lib/crew-status";
 import { CrewBoard } from "./crew-board";
+import { MyDayClock } from "./my-day-clock";
 import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { jobStatusLabel } from "@/lib/job-status";
@@ -64,7 +65,8 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     // The open entry, regardless of when it started (overnight shift, etc.). The job
     // on THIS entry is the "Now" hero — scoped to the caller, not the org's latest
     // in_progress job (which could be a coworker's site across town).
-    supabase.from("time_entries").select("id, job_id, clock_in, clock_out, lunch_minutes, status").eq("profile_id", user?.id ?? "").eq("status", "open").order("clock_in", { ascending: false }).limit(1),
+    // notes rides along so the My Day one-tap clock-out can round-trip a mid-shift note.
+    supabase.from("time_entries").select("id, job_id, clock_in, clock_out, lunch_minutes, status, notes").eq("profile_id", user?.id ?? "").eq("status", "open").order("clock_in", { ascending: false }).limit(1),
     // Options for the inline add/edit controls + the owner snapshot.
     listCustomerOptions(supabase),
     listActiveTechs(supabase),
@@ -483,9 +485,16 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       </div>
       <p className="mb-4 text-sm italic text-slate-400">&ldquo;{dailyQuote}&rdquo;</p>
 
-      {/* The "On the clock" DayClock box left this page (Erik's 2026-07 notes: it duplicated
-          the timeclock — "already on timecards"). Clocking lives at /timeclock, one tap on the
-          dock's Clock door; the open entry still drives the "Now" hero below. */}
+      {/* The MINIMAL clock is back (Erik, cn-v502) — not the old stats-and-pickers DayClock
+          (that duplication stays gone): one big Clock In / ticking timer + one-tap Clock Out,
+          and a "Timeclock →" door for anything more. Reuses the open entry already fetched
+          for the "Now" hero. */}
+      <MyDayClock
+        open={openEntry ? { id: openEntry.id, clock_in: openEntry.clock_in, notes: openEntry.notes ?? null } : null}
+        jobLabel={currentJob ? `${currentJob.job_number} — ${currentJob.name}` : null}
+      />
+
+
 
       {/* The boss's live crew presence board (staff only) — who's on the clock and on what.
           Erik: "boss needs to see what everyone is doing all the time." Hours moved to payroll

@@ -44,3 +44,59 @@ export const JOB_STATUS_PRIORITY: Record<string, number> = {
  *  the prod sentry_events sink caught exactly that crash class (null.replace) on a
  *  job page 2026-07-13; one bad row must never take down an RSC tree. */
 export const jobStatusLabel = (s: string | null | undefined): string => String(s ?? "").replace(/_/g, " ");
+
+/** The row shape the "which job is this person on today" picks need. */
+export interface TodayJobPick {
+  id: string;
+  status?: string | null;
+  scheduled_start?: string | null;
+  created_at?: string | null;
+}
+
+/**
+ * Tier 1 of "which job is <person> on today": among their ASSIGNED active jobs, the one
+ * scheduled TODAY — a job_schedule_segments row covering the org-local day (multi-range
+ * jobs; pass those job ids as `segTodayJobIds`) or a scheduled_start inside the day's
+ * bounds (the single-day mirror) — earliest scheduled_start first. SHARED by the
+ * clock-in job resolution (timeclock/actions resolveTechJobToday) and the /timeclock
+ * crew-assignment board, so the punch and the office's board can't drift (SSOT).
+ */
+export function pickJobScheduledToday<T extends TodayJobPick>(
+  jobs: T[],
+  segTodayJobIds: ReadonlySet<string>,
+  dayStart: Date,
+  dayEnd: Date,
+): T | null {
+  const today = jobs
+    .filter((j) => {
+      if (segTodayJobIds.has(j.id)) return true;
+      if (!j.scheduled_start) return false;
+      const t = new Date(j.scheduled_start).getTime();
+      return t >= dayStart.getTime() && t < dayEnd.getTime();
+    })
+    .sort((a, b) => (a.scheduled_start ?? "9999").localeCompare(b.scheduled_start ?? "9999"));
+  return today[0] ?? null;
+}
+
+/**
+ * The crew board's full pick — where the office sees a member "at" right now:
+ *   1. an assigned job scheduled TODAY (pickJobScheduledToday — the shared tier),
+ *   2. else an assigned job already in_progress,
+ *   3. else any other active assigned job,
+ * deterministic inside a tier (earliest scheduled today; otherwise most recently
+ * created). The clock-in resolution deliberately does NOT take tiers 2–3 per member —
+ * a punch never guesses beyond today's schedule or the org's one unambiguous
+ * in_progress job — but the board must always point somewhere if the member is
+ * assigned anywhere, which is why the fallbacks live here.
+ */
+export function pickMemberCurrentJob<T extends TodayJobPick>(
+  jobs: T[],
+  segTodayJobIds: ReadonlySet<string>,
+  dayStart: Date,
+  dayEnd: Date,
+): T | null {
+  const today = pickJobScheduledToday(jobs, segTodayJobIds, dayStart, dayEnd);
+  if (today) return today;
+  const byNewest = [...jobs].sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""));
+  return byNewest.find((j) => j.status === "in_progress") ?? byNewest[0] ?? null;
+}
