@@ -142,6 +142,10 @@ export interface OrgSettings {
    *  so each org sends under its OWN registered number/brand. Empty = fall back to the platform
    *  default (TWILIO_FROM_NUMBER). Critical for multi-tenant A2P compliance. */
   sms_from_number: string;
+  /** External scheduling link (Calendly or similar). When set, the PUBLIC
+   *  "schedule your site visit" buttons (inquiry splash + estimate configurator)
+   *  open it instead of North's built-in 3-slot /pick flow. Empty = built-in flow. */
+  calendly_url: string;
 }
 
 export const DEFAULT_SETTINGS: OrgSettings = {
@@ -203,6 +207,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   google_business_url: "",
   reviews: [],
   sms_from_number: "",
+  calendly_url: "",
 };
 
 /** Pull a { lat, lng } from a pasted Google Maps URL if one is present. Prefers the place

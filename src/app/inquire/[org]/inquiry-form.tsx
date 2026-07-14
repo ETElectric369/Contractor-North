@@ -1,12 +1,24 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle2, Loader2 } from "lucide-react";
+import { CalendarClock, CheckCircle2, ExternalLink, Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
+import { publicScheduleInspection } from "@/lib/actions/public-schedule";
 import { notifyNewInquiry } from "./actions";
 
-export function InquiryForm({ org, brandColor, refId = null }: { org: string; brandColor: string; refId?: string | null }) {
+export function InquiryForm({
+  org,
+  brandColor,
+  refId = null,
+  calendlyUrl = "",
+}: {
+  org: string;
+  brandColor: string;
+  refId?: string | null;
+  /** Org's external scheduling link (https-validated server-side). Empty = built-in /pick flow. */
+  calendlyUrl?: string;
+}) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
@@ -19,6 +31,29 @@ export function InquiryForm({ org, brandColor, refId = null }: { org: string; br
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Post-submit "schedule your site visit" (the built-in /pick flow).
+  const [scheduling, setScheduling] = useState(false);
+  const [schedDone, setSchedDone] = useState(false);
+  const [schedError, setSchedError] = useState<string | null>(null);
+
+  async function scheduleVisit() {
+    setSchedError(null);
+    setScheduling(true);
+    try {
+      const res = await publicScheduleInspection({
+        orgId: org,
+        name, phone, email, address, city, state: stateName, zip, message, hp,
+      });
+      if (!res.ok) { setSchedError(res.error ?? "Something went wrong — please call us instead."); return; }
+      if (res.token) { window.location.assign(`/pick/${res.token}`); return; }
+      // Bot-trap fake success or an office-made booking already exists — just confirm.
+      setSchedDone(true);
+    } catch {
+      setSchedError("Something went wrong — please call us instead.");
+    } finally {
+      setScheduling(false);
+    }
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -57,6 +92,38 @@ export function InquiryForm({ org, brandColor, refId = null }: { org: string; br
         <CheckCircle2 className="mx-auto h-12 w-12" style={{ color: brandColor }} />
         <h2 className="mt-3 text-xl font-bold text-slate-900">Thank you!</h2>
         <p className="mt-1 text-slate-600">We got your request and will reach out shortly.</p>
+
+        {/* Don't make them wait for the phone tag — schedule the site visit now. */}
+        {schedDone ? (
+          <p className="mt-5 rounded-lg bg-slate-50 px-3 py-2.5 text-sm text-slate-600">
+            You&apos;re on the schedule — we&apos;ll confirm your time shortly.
+          </p>
+        ) : calendlyUrl ? (
+          <a
+            href={calendlyUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm font-semibold text-white"
+            style={{ backgroundColor: brandColor }}
+          >
+            <CalendarClock className="h-4 w-4" /> Schedule your site visit <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+        ) : (
+          <button
+            type="button"
+            onClick={scheduleVisit}
+            disabled={scheduling}
+            className="mt-5 flex w-full items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
+            style={{ backgroundColor: brandColor }}
+          >
+            {scheduling ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarClock className="h-4 w-4" />}
+            {scheduling ? "One moment…" : "Schedule your site visit"}
+          </button>
+        )}
+        {schedError && <p className="mt-2 text-sm text-red-600">{schedError}</p>}
+        {!schedDone && !calendlyUrl && (
+          <p className="mt-2 text-xs text-slate-400">Pick a time that works — we&apos;ll lock it in.</p>
+        )}
       </div>
     );
   }

@@ -86,6 +86,10 @@ export async function createTriagedInquiry(
         location: input.address ?? null,
         notes: input.message ?? null,
         status: "scheduled",
+        // Provenance (0129): lets the customer's "schedule your site visit" tap
+        // REUSE this tentative hold (flip to proposed + pick link) instead of
+        // double-booking a second inspection onto the calendar.
+        inquiry_id: id,
       });
     } catch {
       /* auto-booking is best-effort — the lead still lands even if it fails */

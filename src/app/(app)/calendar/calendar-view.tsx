@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CalendarClock, CalendarSync, Briefcase, ListTodo, MapPin, Users, Columns3 } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CalendarClock, CalendarSync, Briefcase, ClipboardList, ListTodo, MapPin, Users, Columns3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented";
 import { Card } from "@/components/ui/card";
@@ -762,6 +762,17 @@ function ApptRow({ a, picker }: { a: CalAppt; picker: SchedulePicker }) {
         {a.notes && <p className="mt-1 line-clamp-2 whitespace-pre-wrap text-xs text-slate-500">{a.notes}</p>}
       </div>
       <div className="flex items-center gap-1">
+        {/* Inspections get a capture surface: field notes/measurements/materials/photos
+            that "Start estimate" carries into the estimator scope. */}
+        {a.type === "inspection" && (
+          <Link
+            href={`/appointments/${a.id}`}
+            className="rounded-md p-1 text-slate-400 hover:bg-teal-50 hover:text-teal-700"
+            title="Inspection capture — notes, measurements, photos"
+          >
+            <ClipboardList className="h-4 w-4" />
+          </Link>
+        )}
         <ApptQuickActions id={a.id} status={a.status} title={a.title} />
         <AppointmentButton jobs={picker.jobs} customers={picker.customers} staff={picker.staff} appointment={appt} />
         <MoveToDay

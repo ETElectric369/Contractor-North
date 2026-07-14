@@ -29,6 +29,7 @@ export function WebsiteSettings({
   const [ig, setIg] = useState(settings.social_instagram ?? "");
   const [domain, setDomain] = useState(settings.custom_domain ?? "");
   const [gbp, setGbp] = useState(settings.google_business_url ?? "");
+  const [calendly, setCalendly] = useState(settings.calendly_url ?? "");
   const [theme, setTheme] = useState<OrgSettings["site_theme"]>(settings.site_theme ?? "classic");
   const [pending, start] = useTransition();
   const [done, setDone] = useState(false);
@@ -40,6 +41,11 @@ export function WebsiteSettings({
   function save() {
     setError(null);
     setDone(false);
+    const cal = calendly.trim();
+    if (cal && !/^https:\/\//i.test(cal)) {
+      setError("The scheduling link needs to be a full https:// URL.");
+      return;
+    }
     start(async () => {
       const h = await setPublicHandle(handle);
       if (!h.ok) { setError(h.error ?? "Couldn't save the address."); return; }
@@ -48,7 +54,7 @@ export function WebsiteSettings({
       const cd = await setCustomDomain(domain);
       if (!cd.ok) { setError(cd.error ?? "Couldn't save the domain."); return; }
       setDomain(cd.domain ?? "");
-      const res = await updateOrgSettings({ service_area: area.trim(), social_instagram: ig.replace(/^@/, "").trim(), site_theme: theme, google_business_url: gbp.trim() });
+      const res = await updateOrgSettings({ service_area: area.trim(), social_instagram: ig.replace(/^@/, "").trim(), site_theme: theme, google_business_url: gbp.trim(), calendly_url: cal });
       if (!res.ok) { setError(res.error ?? "Couldn't save."); return; }
       setDone(true);
       setTimeout(() => setDone(false), 2500);
@@ -102,6 +108,15 @@ export function WebsiteSettings({
         <p className="mt-1 text-xs text-slate-400">
           Paste your Google Maps listing link. This ties your website to your Google listing for local
           search — the biggest lever for showing up in the map results when someone nearby searches for you.
+        </p>
+      </div>
+
+      <div>
+        <Label htmlFor="ws-calendly">Scheduling link (Calendly)</Label>
+        <Input id="ws-calendly" value={calendly} onChange={(e) => setCalendly(e.target.value)} placeholder="https://calendly.com/yourcompany/site-visit" />
+        <p className="mt-1 text-xs text-slate-400">
+          Optional. If you use Calendly (or similar), the public &quot;schedule your site visit&quot; buttons open it.
+          Leave blank to use the built-in pick-a-time flow — customers choose from three offered slots.
         </p>
       </div>
 

@@ -45,6 +45,7 @@ export default async function EstimatePage({ params }: { params: Promise<{ handl
         threshold={settings.site_inspection_threshold}
         headline={settings.splash_headline || `${orgName} — Deck Estimate`}
         tagline={settings.splash_tagline || "Answer a few quick questions for an instant ballpark."}
+        calendlyUrl={/^https:\/\//i.test(settings.calendly_url) ? settings.calendly_url : ""}
       />
       <PortfolioGallery photos={photos} brand={brand} />
       {/* Same read-only lead-capturing assistant as the marketing site — so a visitor mid-configurator

@@ -11,10 +11,38 @@ export const dynamic = "force-dynamic";
 export default async function NewQuotePage({
   searchParams,
 }: {
-  searchParams: Promise<{ customer?: string; job?: string; inquiry?: string }>;
+  searchParams: Promise<{ customer?: string; job?: string; inquiry?: string; capture?: string }>;
 }) {
-  const { customer, job, inquiry } = await searchParams;
+  const { customer, job, inquiry, capture } = await searchParams;
   const supabase = await createClient();
+
+  // ?capture=<appointment id> — an inspection's field capture prefills the
+  // estimator scope (like importing labor into an invoice). RLS scopes the read;
+  // a bad/cross-org id just yields no prefill. Also recovers the lead backlink
+  // from the appointment when the URL didn't carry ?inquiry=.
+  let initialScope: string | undefined;
+  let captureInquiryId: string | undefined;
+  if (capture) {
+    const { data: appt } = await supabase
+      .from("appointments")
+      .select("id, title, location, inquiry_id, capture")
+      .eq("id", capture)
+      .maybeSingle();
+    const cap = (appt as any)?.capture as
+      | { notes?: string; measurements?: string; materials?: string }
+      | null
+      | undefined;
+    if (appt) {
+      const parts = [
+        `From site inspection — ${(appt as any).title}${(appt as any).location ? ` (${(appt as any).location})` : ""}`,
+        cap?.notes?.trim() ? `Notes:\n${cap.notes.trim()}` : "",
+        cap?.measurements?.trim() ? `Measurements:\n${cap.measurements.trim()}` : "",
+        cap?.materials?.trim() ? `Materials needed:\n${cap.materials.trim()}` : "",
+      ].filter(Boolean);
+      if (parts.length > 1) initialScope = parts.join("\n\n");
+      captureInquiryId = (appt as any).inquiry_id ?? undefined;
+    }
+  }
   const [{ data: customers }, { data: priceItems }, { data: taxRates }, { data: kits }, { data: org }] =
     await Promise.all([
       supabase.from("customers").select("id, name, company_name, pricing_levels(markup_pct, labor_rate)").order("name"),
@@ -73,7 +101,8 @@ export default async function NewQuotePage({
         }))}
         preselected={customer}
         jobId={job}
-        inquiryId={inquiry}
+        inquiryId={inquiry ?? captureInquiryId}
+        initialScope={initialScope}
         priceItems={(priceItems ?? []) as any}
         taxRates={(taxRates ?? []) as any}
         kits={estimateKits as any}

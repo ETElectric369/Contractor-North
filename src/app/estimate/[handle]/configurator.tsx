@@ -1,10 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { CheckCircle2, Loader2, ChevronRight, ChevronLeft, Ruler, ClipboardList, Home, User } from "lucide-react";
+import { CalendarClock, CheckCircle2, ExternalLink, Loader2, ChevronRight, ChevronLeft, Ruler, ClipboardList, Home, User } from "lucide-react";
 import { computeDeckEstimate, type DeckAnswers, type DeckMaterial, type DeckShape } from "@/lib/estimate/deck";
 import { classifyLead, PROJECT_TYPES, type LeadIntake, type ProjectType } from "@/lib/lead-triage";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
+import { publicScheduleInspection } from "@/lib/actions/public-schedule";
 import { submitEstimateLead } from "./actions";
 import type { EstimateResult, Qualifying } from "./types";
 
@@ -54,10 +55,12 @@ const STEPS = [
 ];
 
 export function Configurator({
-  handle, orgName, brand, rates, threshold, headline, tagline,
+  handle, orgName, brand, rates, threshold, headline, tagline, calendlyUrl = "",
 }: {
   handle: string; orgName: string; brand: string; rates: Record<string, number>;
   threshold: number; headline: string; tagline: string;
+  /** Org's external scheduling link (https-validated server-side). Empty = built-in /pick flow. */
+  calendlyUrl?: string;
 }) {
   const [f, setF] = useState<Form>({
     projectType: "new_deck", plans: "", approved: "", noPlansPath: "",
@@ -131,7 +134,18 @@ export function Configurator({
   const field = "w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2";
   const ring = { ["--tw-ring-color" as string]: brand } as React.CSSProperties;
 
-  if (result) return <ResultView result={result} orgName={orgName} brand={brand} est={est} />;
+  if (result)
+    return (
+      <ResultView
+        result={result}
+        orgName={orgName}
+        brand={brand}
+        est={est}
+        handle={handle}
+        calendlyUrl={calendlyUrl}
+        contact={{ name: f.name, phone: f.phone, email: f.email, address: f.address, city: f.city, state: f.state, zip: f.zip, hp: f.hp }}
+      />
+    );
 
   return (
     <div className="mx-auto min-h-screen max-w-3xl px-4 pb-24 pt-8" style={{ background: `linear-gradient(160deg, ${brand}14, transparent 60%)` }}>
@@ -350,7 +364,74 @@ function EstimatePanel({ est, preview, brand, orgName }: { est: ReturnType<typeo
   );
 }
 
-function ResultView({ result, orgName, brand, est }: { result: EstimateResult; orgName: string; brand: string; est: ReturnType<typeof computeDeckEstimate> }) {
+interface ScheduleContact {
+  name: string; phone: string; email: string;
+  address: string; city: string; state: string; zip: string; hp: string;
+}
+
+/** The big-job hand-off: don't leave "we'll reach out" hanging — let the customer
+ *  put the site visit on the calendar themselves. Calendly when the org set one,
+ *  else the built-in flow: a 'proposed' inspection + 3 auto slots → /pick/<token>. */
+function ScheduleVisitCta({ handle, calendlyUrl, contact, brand }: { handle: string; calendlyUrl: string; contact: ScheduleContact; brand: string }) {
+  const [busy, setBusy] = useState(false);
+  const [already, setAlready] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (calendlyUrl) {
+    return (
+      <a
+        href={calendlyUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="mt-5 inline-flex items-center justify-center gap-2 rounded-lg px-5 py-3 text-sm font-semibold text-white"
+        style={{ backgroundColor: brand }}
+      >
+        <CalendarClock className="h-4 w-4" /> Schedule your site visit <ExternalLink className="h-3.5 w-3.5" />
+      </a>
+    );
+  }
+
+  if (already) {
+    return (
+      <p className="mt-5 rounded-lg bg-slate-100 px-4 py-2.5 text-sm text-slate-600">
+        You&apos;re on the schedule — we&apos;ll confirm your time shortly.
+      </p>
+    );
+  }
+
+  async function schedule() {
+    setError(null);
+    setBusy(true);
+    try {
+      const res = await publicScheduleInspection({ handle, ...contact });
+      if (!res.ok) { setError(res.error ?? "Something went wrong — please call us instead."); return; }
+      if (res.token) { window.location.assign(`/pick/${res.token}`); return; }
+      setAlready(true); // office booking already exists (or bot-trap fake success)
+    } catch {
+      setError("Something went wrong — please call us instead.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={schedule}
+        disabled={busy}
+        className="mt-5 flex items-center justify-center gap-2 rounded-lg px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
+        style={{ backgroundColor: brand }}
+      >
+        {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarClock className="h-4 w-4" />}
+        {busy ? "One moment…" : "Schedule your site visit"}
+      </button>
+      {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+    </>
+  );
+}
+
+function ResultView({ result, orgName, brand, est, handle, calendlyUrl, contact }: { result: EstimateResult; orgName: string; brand: string; est: ReturnType<typeof computeDeckEstimate>; handle: string; calendlyUrl: string; contact: ScheduleContact }) {
   return (
     <div className="mx-auto flex min-h-screen max-w-lg flex-col items-center justify-center px-4 py-16 text-center">
       <CheckCircle2 className="h-14 w-14" style={{ color: brand }} />
@@ -374,7 +455,8 @@ function ResultView({ result, orgName, brand, est }: { result: EstimateResult; o
       ) : result.siteInspectionRequired ? (
         <>
           <h1 className="mt-4 text-2xl font-extrabold text-slate-900">Thanks — you're on the list</h1>
-          <p className="mt-2 text-slate-600">A project this size gets a free on-site visit for an exact price. {orgName} will reach out to schedule.</p>
+          <p className="mt-2 text-slate-600">A project this size gets a free on-site visit for an exact price — pick a time now, or {orgName} will reach out.</p>
+          <ScheduleVisitCta handle={handle} calendlyUrl={calendlyUrl} contact={contact} brand={brand} />
         </>
       ) : (
         <>

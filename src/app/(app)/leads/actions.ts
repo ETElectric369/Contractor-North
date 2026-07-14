@@ -6,13 +6,36 @@ import { requireStaff } from "@/lib/staff-guard";
 import { formatPhone, formatState, formatZip, titleCase } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
 import { PROJECT_TYPES, estimateLinesFromIntake } from "@/lib/lead-triage";
+import { tzDateTimeUtc, todayStrInTz } from "@/lib/tz";
+import { createProposalCore, cleanSlots, type ProposalSlot } from "@/lib/appointments/proposal";
 import { saveQuote } from "../quotes/actions";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
-export type Result = { ok: boolean; error?: string; id?: string; redirect?: string };
+export type Result = {
+  ok: boolean;
+  error?: string;
+  id?: string;
+  redirect?: string;
+  /** "Let them pick" inspection proposal: the /pick/<token> link… */
+  token?: string;
+  /** …and the lead's phone, so the UI can prefill the sms: handoff. */
+  phone?: string | null;
+};
 
 function orNull(s: string): string | null {
   const t = s.trim();
   return t.length ? t : null;
+}
+
+/** "YYYY-MM-DD" + n calendar days (tz-stable — noon UTC anchor). */
+function ymdAddDays(ymd: string, n: number): string {
+  return new Date(new Date(`${ymd}T12:00:00Z`).getTime() + n * 86_400_000).toISOString().slice(0, 10);
+}
+
+/** The org timezone, for building "9 AM local" instants server-side. */
+async function orgTimezone(supabase: SupabaseClient): Promise<string> {
+  const { data } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+  return getOrgSettings((data as { settings?: unknown } | null)?.settings).timezone;
 }
 
 /** Fields shared by create + update, read from a FormData. */
@@ -51,16 +74,18 @@ export async function createInquiry(formData: FormData): Promise<Result> {
   if (error) return { ok: false, error: error.message };
 
   // A new lead auto-books a follow-up / site-visit appointment (tomorrow 9am) so
-  // it lands on the calendar instead of slipping through the cracks.
-  const followUp = new Date();
-  followUp.setDate(followUp.getDate() + 1);
-  followUp.setHours(9, 0, 0, 0);
+  // it lands on the calendar instead of slipping through the cracks. 9 AM is
+  // built in the ORG timezone — the old server-local `setHours(9)` stored 9 AM
+  // UTC, which rendered as 2 AM Pacific on the calendar.
+  const tz = await orgTimezone(supabase);
+  const followUpIso = tzDateTimeUtc(ymdAddDays(todayStrInTz(tz), 1), "09:00", tz);
   await supabase.from("appointments").insert({
     type: "appointment",
     title: `Follow up: ${name}`,
-    starts_at: followUp.toISOString(),
+    starts_at: followUpIso,
     location: fields.address,
     notes: fields.message ?? fields.notes,
+    inquiry_id: data.id, // provenance: this follow-up traces back to the lead
     created_by: ctx.userId,
   });
 
@@ -139,7 +164,15 @@ export async function deleteInquiry(id: string): Promise<Result> {
 export async function convertInquiry(
   id: string,
   target: "inspection" | "customer" | "quote" | "estimate" | "job",
-  opts: { customerId?: string | null; startDate?: string } = {},
+  opts: {
+    customerId?: string | null;
+    startDate?: string;
+    /** Inspection "Let them pick": up to 3 date+time options → a proposed
+     *  appointment + a public /pick link instead of a firm booking. */
+    slots?: ProposalSlot[];
+    /** Optional arrival-window note shown on the pick page ("8–10 AM"). */
+    timeNote?: string | null;
+  } = {},
 ): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -160,21 +193,59 @@ export async function convertInquiry(
   // INSPECTION — the pre-sale nerve, parallel to estimate. Books a site inspection onto the
   // Schedule and leaves the lead OPEN (converted_at stays null) so it can still become an
   // estimate afterward. No customer is forced — an inspection happens before the deal is won.
+  // Two modes: "Book it" (a firm date, the original flow) and "Let them pick" (opts.slots →
+  // a proposed appointment + a public /pick link the office texts to the lead).
   if (target === "inspection") {
-    const startDate = opts.startDate || (() => {
-      const d = new Date();
-      d.setDate(d.getDate() + 2);
-      return d.toISOString().slice(0, 10);
-    })();
-    const startsAt = new Date(`${startDate}T00:00:00`);
-    startsAt.setHours(9, 0, 0, 0); // 9am (matches the follow-up auto-book; movable on the calendar)
+    const tz = await orgTimezone(supabase);
+
+    // "Let them pick": tentative appointment + pick-a-time link (shared core —
+    // it also withdraws any earlier still-pending link for this same lead).
+    const slots = cleanSlots(opts.slots, "09:00");
+    if (slots.length) {
+      const res = await createProposalCore(supabase, {
+        type: "inspection",
+        title: `Site inspection: ${inq.name}`,
+        slots,
+        timeNote: opts.timeNote ?? null,
+        inquiryId: id,
+        customerId: null, // deferred-customer doctrine: no contact row before the win
+        location: inq.address,
+        notes: inq.message ?? inq.notes ?? null,
+        createdBy: ctx.userId,
+        // 9 AM org-local tentative instant from the first offered slot.
+        startsAtIso: tzDateTimeUtc(slots[0].date, slots[0].time, tz),
+      });
+      if (!res.ok) return { ok: false, error: res.error };
+      const earliest = slots.map((s) => s.date).sort()[0];
+      await supabase
+        .from("inquiries")
+        .update({
+          status: "contacted",
+          last_contacted_at: new Date().toISOString(),
+          next_follow_up_at: earliest,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", id);
+      revalidatePath("/leads");
+      revalidatePath("/schedule");
+      revalidatePath("/planner");
+      return { ok: true, token: res.token, phone: inq.phone ?? null };
+    }
+
+    // "Book it": a firm 9 AM slot — built in the ORG timezone (the old
+    // `new Date(date+"T00:00:00"); setHours(9)` parsed as SERVER-local UTC,
+    // landing the inspection at 2 AM Pacific).
+    const startDate = opts.startDate || ymdAddDays(todayStrInTz(tz), 2);
+    const startsAtIso = tzDateTimeUtc(startDate, "09:00", tz);
+    if (!startsAtIso) return { ok: false, error: "Pick a valid inspection date." };
     const { error: aErr } = await supabase.from("appointments").insert({
       type: "inspection",
       title: `Site inspection: ${inq.name}`,
-      starts_at: startsAt.toISOString(),
+      starts_at: startsAtIso,
       location: inq.address,
       notes: inq.message ?? inq.notes ?? null,
       customer_id: opts.customerId || inq.customer_id || null,
+      inquiry_id: id, // provenance: the calendar entry knows its lead
       created_by: ctx.userId,
     });
     if (aErr) return { ok: false, error: aErr.message };

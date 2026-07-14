@@ -6,6 +6,7 @@ import { requireStaff } from "@/lib/staff-guard";
 import { sendPushToProfiles } from "@/lib/push";
 import { getOrgSettings } from "@/lib/org-settings";
 import { tzDateTimeUtc } from "@/lib/tz";
+import { createProposalCore, cleanSlots } from "@/lib/appointments/proposal";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 /** The browser-computed ISO if present; otherwise build the instant in the ORG
@@ -122,80 +123,81 @@ export async function createAppointmentProposal(
   const title = String(formData.get("title") ?? "").trim();
   if (!title) return { ok: false, error: "Title is required." };
 
-  let slots: { date: string; time: string }[] = [];
+  let slotsRaw: unknown = [];
   try {
-    const raw = JSON.parse(String(formData.get("slots_json") ?? "[]"));
-    if (Array.isArray(raw)) slots = raw;
+    slotsRaw = JSON.parse(String(formData.get("slots_json") ?? "[]"));
   } catch {
     /* ignore */
   }
-  slots = slots
-    .filter((s) => /^\d{4}-\d{2}-\d{2}$/.test(s?.date ?? ""))
-    .map((s) => ({ date: s.date, time: /^\d{2}:\d{2}/.test(s.time ?? "") ? s.time : "08:00" }))
-    .slice(0, 3);
+  const slots = cleanSlots(slotsRaw);
   if (!slots.length) return { ok: false, error: "Add at least one date option." };
 
   const cust = await resolveCustomer(supabase, formData, ctx.userId);
   if (cust.error) return { ok: false, error: cust.error };
 
-  const apptType = String(formData.get("type") ?? "quote");
-  const jobId = emptyToNull(formData.get("job_id"));
-
-  // De-dupe: re-proposing the same appointment used to spawn a fresh tentative
-  // row + live link every time, orphaning the old ones. Cancel any still-pending
-  // proposal (and its 'proposed' appointment) for the same context first.
-  const dedupKey = jobId
-    ? { col: "job_id" as const, val: jobId }
-    : cust.customerId
-      ? { col: "customer_id" as const, val: cust.customerId }
-      : null;
-  if (dedupKey) {
-    const { data: prior } = await supabase
-      .from("appointments")
-      .select("id")
-      .eq("status", "proposed")
-      .eq("type", apptType)
-      .eq("title", title)
-      .eq(dedupKey.col, dedupKey.val);
-    const priorIds = (prior ?? []).map((a: any) => a.id);
-    if (priorIds.length) {
-      await supabase.from("schedule_proposals").update({ status: "cancelled" }).in("appointment_id", priorIds).eq("status", "pending");
-      await supabase.from("appointments").update({ status: "cancelled", updated_at: new Date().toISOString() }).in("id", priorIds);
-    }
-  }
-
   // First slot is the tentative time (browser-computed ISO honors the user's tz).
   const startIso = await resolveIso(supabase, emptyToNull(formData.get("starts_at_iso")), slots[0].date, slots[0].time);
 
-  const { data: appt, error: aErr } = await supabase
-    .from("appointments")
-    .insert({
-      type: apptType,
-      title,
-      starts_at: startIso,
-      ends_at: null,
-      job_id: jobId,
-      customer_id: cust.customerId,
-      location: emptyToNull(formData.get("location")),
-      notes: emptyToNull(formData.get("notes")),
-      assigned_to: emptyToNull(formData.get("assigned_to")),
-      status: "proposed",
-      created_by: ctx.userId,
-    })
-    .select("id")
-    .single();
-  if (aErr || !appt) return { ok: false, error: aErr?.message ?? "Could not create the appointment." };
-
-  const { data: prop, error: pErr } = await supabase
-    .from("schedule_proposals")
-    .insert({ appointment_id: appt.id, dates: slots, created_by: ctx.userId })
-    .select("token")
-    .single();
-  if (pErr || !prop) return { ok: false, error: pErr?.message ?? "Could not create the pick-a-time link." };
+  // The shared core does the rest (dedup-withdraw of a pending prior link,
+  // tentative appointment, proposal row) — same writer as the lead + public paths.
+  const res = await createProposalCore(supabase, {
+    type: String(formData.get("type") ?? "quote"),
+    title,
+    slots,
+    jobId: emptyToNull(formData.get("job_id")),
+    customerId: cust.customerId,
+    location: emptyToNull(formData.get("location")),
+    notes: emptyToNull(formData.get("notes")),
+    assignedTo: emptyToNull(formData.get("assigned_to")),
+    createdBy: ctx.userId,
+    startsAtIso: startIso,
+  });
+  if (!res.ok) return { ok: false, error: res.error };
 
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
-  return { ok: true, token: prop.token };
+  return { ok: true, token: res.token };
+}
+
+/** The on-site inspection field capture (notes / measurements / materials +
+ *  photo storage paths) saved onto appointments.capture — read back by the
+ *  capture page and by /quotes/new?capture= to prefill the estimator scope.
+ *  Photos are PATHS in the private documents bucket (org-scoped, signed URLs
+ *  on read), never raw URLs, so nothing here is publicly addressable. */
+export interface AppointmentCapture {
+  notes?: string;
+  measurements?: string;
+  materials?: string;
+  photos?: string[];
+}
+
+export async function saveAppointmentCapture(
+  id: string,
+  capture: AppointmentCapture,
+): Promise<Result> {
+  const ctx = await requireStaff(); // defense-in-depth (RLS also scopes the write)
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+
+  const clean = {
+    notes: String(capture?.notes ?? "").trim().slice(0, 8000),
+    measurements: String(capture?.measurements ?? "").trim().slice(0, 8000),
+    materials: String(capture?.materials ?? "").trim().slice(0, 8000),
+    photos: (Array.isArray(capture?.photos) ? capture.photos : [])
+      .filter((p): p is string => typeof p === "string" && p.length > 0 && p.length < 2000)
+      .slice(0, 60),
+  };
+
+  const { data, error } = await supabase
+    .from("appointments")
+    .update({ capture: clean, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .select("id");
+  if (error) return { ok: false, error: error.message };
+  if (!data?.length) return { ok: false, error: "Appointment not found." };
+  revalidatePath("/schedule");
+  revalidatePath(`/appointments/${id}`);
+  return { ok: true, id };
 }
 
 export async function updateAppointment(id: string, formData: FormData): Promise<Result> {

@@ -60,6 +60,7 @@ export function QuoteBuilder({
   preselected,
   jobId,
   inquiryId,
+  initialScope,
   priceItems = [],
   taxRates = [],
   kits = [],
@@ -73,6 +74,9 @@ export function QuoteBuilder({
   jobId?: string;
   /** When launched from a lead conversion, the quote keeps the provenance backlink. */
   inquiryId?: string;
+  /** Prefill for the estimator scope box — e.g. an inspection's field capture
+   *  (notes/measurements/materials) threaded in via /quotes/new?capture=. */
+  initialScope?: string;
   priceItems?: PriceItemLite[];
   taxRates?: TaxRateLite[];
   kits?: KitLite[];
@@ -153,7 +157,7 @@ export function QuoteBuilder({
     setItems([...real, ...lines]);
   }
 
-  const [scope, setScope] = useState("");
+  const [scope, setScope] = useState(initialScope ?? "");
   // Snapshot of the line items from BEFORE the last AI generate, so "Undo AI draft" can back the
   // generated lines out without you having to delete them one by one (or save them by accident).
   const [preGen, setPreGen] = useState<DraftLineItem[] | null>(null);
@@ -191,7 +195,9 @@ export function QuoteBuilder({
       setTaxChoice(d.taxChoice ?? "");
       if (d.validUntil) setValidUntil(d.validUntil);
       if (Array.isArray(d.items) && d.items.length) setItems(d.items);
-      setScope(d.scope ?? "");
+      // A restored draft wins, but an EMPTY drafted scope must not blank a fresh
+      // inspection-capture prefill (?capture=) — that's the whole point of the link.
+      setScope(d.scope ? d.scope : (initialScope ?? ""));
     },
   );
   // The builder is a full page (not a modal), so say it out loud when a draft

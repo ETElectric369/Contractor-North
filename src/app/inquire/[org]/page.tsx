@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { Phone, Mail, MapPin, Zap } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
-import { accentHex } from "@/lib/org-settings";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { accentHex, getOrgSettings } from "@/lib/org-settings";
 import { InquiryForm } from "./inquiry-form";
 
 export const dynamic = "force-dynamic";
@@ -16,6 +16,18 @@ export default async function InquirePage({ params, searchParams }: { params: Pr
   const { data } = await supabase.rpc("public_org", { p_org: org });
   const o = (data ?? null) as any;
   if (!o || !o.name) notFound();
+
+  // The post-submit "schedule your site visit" hand-off: Calendly when the org
+  // configured one, else North's built-in 3-slot /pick flow. The public_org RPC
+  // doesn't carry settings, so read them with the service client (org id was
+  // just validated above). https-only — anything else is treated as unset.
+  const { data: orgRow } = await createServiceClient()
+    .from("organizations")
+    .select("settings")
+    .eq("id", org)
+    .maybeSingle();
+  const rawCalendly = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).calendly_url;
+  const calendlyUrl = /^https:\/\//i.test(rawCalendly) ? rawCalendly : "";
 
   const brand = accentHex((o as { glass_tint?: string } | null)?.glass_tint);
   const bg = o.splash_bg_url || "";
@@ -107,7 +119,7 @@ export default async function InquirePage({ params, searchParams }: { params: Pr
         </div>
 
         <div className="w-full md:max-w-sm md:justify-self-end md:translate-x-4 lg:translate-x-10">
-          <InquiryForm org={org} brandColor={brand} refId={ref} />
+          <InquiryForm org={org} brandColor={brand} refId={ref} calendlyUrl={calendlyUrl} />
         </div>
       </div>
 
