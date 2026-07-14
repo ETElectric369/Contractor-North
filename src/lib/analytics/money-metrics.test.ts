@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeArAging, computeRevenueTrend, computeQuoteStats, computeCustomerValue } from "@/lib/analytics/money-metrics";
+import { computeArAging, computeArByCustomer, computeRevenueTrend, computeQuoteStats, computeCustomerValue } from "@/lib/analytics/money-metrics";
 
 describe("computeArAging — A/R buckets (reconciles /analytics)", () => {
   const NOW = Date.UTC(2026, 6, 5); // 2026-07-05
@@ -104,5 +104,38 @@ describe("computeCustomerValue — lifetime collected per customer", () => {
       { customer: "Bob", collected: 2000, jobs: 1, lastPaid: "2026-05-01" },
       { customer: "Alice", collected: 1500, jobs: 3, lastPaid: "2026-07-01" },
     ]);
+  });
+});
+
+describe("computeArByCustomer — the AR ledger rollup", () => {
+  const NOW = Date.UTC(2026, 6, 5);
+  it("groups open balances per customer, worst lateness first, totals rounded", () => {
+    const aging = computeArAging(
+      [
+        { id: "i1", customer_id: "c1", invoice_number: "INV-1", status: "sent", total: 1000, amount_paid: 0, due_date: new Date(NOW - 40 * 86400_000).toISOString(), customers: { name: "Alice" } },
+        { id: "i2", customer_id: "c1", invoice_number: "INV-2", status: "partial", total: 500, amount_paid: 100, due_date: new Date(NOW + 5 * 86400_000).toISOString(), customers: { name: "Alice" } },
+        { id: "i3", customer_id: "c2", invoice_number: "INV-3", status: "sent", total: 200, amount_paid: 0, due_date: new Date(NOW - 5 * 86400_000).toISOString(), customers: { name: "Bob" } },
+        { id: "i4", customer_id: "c2", invoice_number: "INV-4", status: "paid", total: 999, amount_paid: 999, due_date: null, created_at: new Date(NOW).toISOString(), customers: { name: "Bob" } },
+      ],
+      NOW,
+    );
+    const out = computeArByCustomer(aging);
+    expect(out.map((c) => c.customer)).toEqual(["Alice", "Bob"]); // 40d late beats 5d
+    expect(out[0].balance).toBe(1400); // 1000 + 400 open
+    expect(out[0].worstDaysLate).toBe(40);
+    expect(out[0].invoices).toHaveLength(2);
+    expect(out[1].balance).toBe(200); // the paid invoice never enters
+    expect(out[1].invoices).toHaveLength(1);
+  });
+
+  it("falls back to the name (then a dash) when customer_id is missing", () => {
+    const aging = computeArAging(
+      [{ invoice_number: "INV-9", status: "sent", total: 50, amount_paid: 0, created_at: new Date(NOW).toISOString(), customers: null }],
+      NOW,
+    );
+    const out = computeArByCustomer(aging);
+    expect(out).toHaveLength(1);
+    expect(out[0].customer).toBe("No customer");
+    expect(out[0].balance).toBe(50);
   });
 });

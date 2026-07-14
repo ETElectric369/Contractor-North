@@ -180,7 +180,8 @@ export function detectNeedsReturn(opts: {
     const status = j.status ?? "";
     if (status === "complete" || status === "invoiced" || status === "cancelled") continue;
     // Already surfaced as a job_to_schedule inbox item — same ask, don't say it twice.
-    if (!j.scheduled_start && (status === "estimate" || status === "scheduled")) continue;
+    // (to_be_scheduled replaced "estimate" as the waiting-room status, lifecycle rework.)
+    if (!j.scheduled_start && (status === "estimate" || status === "to_be_scheduled" || status === "scheduled")) continue;
     const hasFutureStart = !!j.scheduled_start && j.scheduled_start.slice(0, 10) >= opts.todayStr;
     if (hasFutureStart || opts.futureApptJobIds.has(j.id) || opts.futureSegmentJobIds.has(j.id)) continue;
     out.push({ job: j, lastWorked: w.lastWorked });

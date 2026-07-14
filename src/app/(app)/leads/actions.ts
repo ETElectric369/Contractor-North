@@ -285,7 +285,9 @@ export async function convertInquiry(
         inquiry_id: id, // provenance: this estimate/job traces back to the lead
         name: `Job — ${inq.name}`,
         description: inq.message ?? null,
-        status: target === "estimate" ? "estimate" : "scheduled",
+        // Lifecycle rework (2026-07): "estimate" is a QUOTE stage, not a job status — a job
+        // born from a lead starts in the to_be_scheduled waiting room either way.
+        status: "to_be_scheduled",
 
         address: inq.address,
         city: inq.city,

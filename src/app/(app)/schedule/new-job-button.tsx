@@ -230,9 +230,9 @@ export function NewJobButton({
                 value={form.status}
                 onChange={(e) => patch({ status: e.target.value })}
               >
-                <option value="estimate">Estimate</option>
-                <option value="scheduled">Scheduled</option>
                 <option value="in_progress">In progress</option>
+                <option value="to_be_scheduled">To be scheduled</option>
+                <option value="scheduled">Scheduled</option>
                 <option value="on_hold">On hold</option>
               </Select>
             </div>

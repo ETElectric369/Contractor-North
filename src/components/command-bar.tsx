@@ -11,7 +11,8 @@ type Item = { kind: string; label: string; sub?: string; href: string; staffOnly
 // page's href (the stable id) so it survives label/section renames. Lowercase; matched as
 // substrings, same as the label. Extend freely — this is the one place aliases live.
 const NAV_ALIASES: Record<string, string[]> = {
-  "/billing": ["ar", "owed", "receivables", "accounts receivable", "money", "billing"],
+  "/billing": ["money", "billing", "invoice"],
+  "/billing/ar": ["ar", "owed", "receivables", "accounts receivable", "who owes", "aging"],
   "/payments": ["paid", "received", "deposit", "collections"],
   "/bills": ["ap", "accounts payable", "purchase order", "po", "vendor", "expense"],
   "/payroll": ["wages", "pay", "salary", "paycheck", "hours pay"],

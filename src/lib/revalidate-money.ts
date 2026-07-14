@@ -10,6 +10,7 @@ import { revalidatePath } from "next/cache";
  */
 export function revalidateMoney(invoiceId?: string | null) {
   revalidatePath("/billing");
+  revalidatePath("/billing/ar"); // the AR ledger reads the same open balances
   if (invoiceId) revalidatePath(`/billing/${invoiceId}`);
   revalidatePath("/planner"); // My Day money line
   revalidatePath("/analytics");

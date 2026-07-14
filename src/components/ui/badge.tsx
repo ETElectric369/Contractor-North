@@ -57,6 +57,7 @@ export function statusTone(status: string): Tone {
     case "lead":
     case "draft":
     case "estimate":
+    case "to_be_scheduled": // won work waiting for dates — attention-amber, not settled-slate
     case "pending":
     case "open":
     case "unpaid":

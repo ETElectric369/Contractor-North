@@ -33,15 +33,14 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
         status: {
           type: "string",
           enum: [
-            "estimate",
+            "to_be_scheduled",
             "scheduled",
             "in_progress",
             "on_hold",
             "complete",
-            "invoiced",
             "cancelled",
           ],
-          description: "Optional job-status filter.",
+          description: "Optional job-status filter. (to_be_scheduled = won work awaiting dates.)",
         },
         search: {
           type: "string",
@@ -1862,8 +1861,10 @@ export async function runDataTool(
           return (data ?? []).map((q: any) => ({ ref: q.quote_number, name: null, customer: q.customers?.name ?? null, total: money(q.total), days_since_touch: daysSince(q.updated_at), expired: !!(q.valid_until && q.valid_until < todayStr), kind: "quote" }));
         }, [] as any[]);
         const staleJobEstimates = await safe(async () => {
+          // Lifecycle rework: the waiting room is to_be_scheduled now — a won job sitting
+          // unscheduled for 2+ weeks is exactly the "falling through the cracks" signal.
           const { data } = await supabase.from("jobs").select("job_number, name, created_at, customers(name)")
-            .eq("status", "estimate").lt("created_at", iso(now - 14 * 864e5))
+            .eq("status", "to_be_scheduled").lt("created_at", iso(now - 14 * 864e5))
             .order("created_at", { ascending: true }).limit(15);
           return (data ?? []).map((j: any) => ({ ref: j.job_number, name: j.name, customer: j.customers?.name ?? null, days_since_touch: daysSince(j.created_at), kind: "job" }));
         }, [] as any[]);

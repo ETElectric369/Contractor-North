@@ -80,12 +80,11 @@ const capFirst = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /** Icon per job status — the one presentation-only bit the job-status spine doesn't carry. */
 const JOB_STATUS_ICONS: Record<JobStatus, LucideIcon> = {
-  estimate: FileText,
+  to_be_scheduled: CalendarClock, // the waiting room: won work with no dates yet
   scheduled: CalendarDays,
   in_progress: Play,
   on_hold: Pause,
   complete: CheckCircle2,
-  invoiced: Receipt,
   cancelled: Ban,
 };
 
@@ -174,6 +173,9 @@ export const DOCK: DockSection[] = [
       // Day-to-day billing.
       { id: "m-billing-h", label: "Billing", icon: Receipt, header: true },
       { id: "m-inv", label: "Invoices", icon: Receipt, href: "/billing" },
+      // The AR ledger (lifecycle rework): "invoiced/partial payment" left the job lifecycle —
+      // who-owes-what lives here, fed by invoices, one line per customer.
+      { id: "m-ar", label: "Accounts Receivable", icon: Banknote, href: "/billing/ar" },
       { id: "m-pay", label: "Payments", icon: CreditCard, href: "/payments" },
       { id: "m-bills", label: "Bills & POs", icon: Wallet, href: "/bills", owns: ["/purchasing"] },
       { id: "m-price", label: "Price List", icon: Tags, href: "/price-list" },

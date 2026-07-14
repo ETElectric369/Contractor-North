@@ -9,7 +9,7 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 
 // ── A/R aging ───────────────────────────────────────────────────────────────
 export type ArBuckets = { current: number; d30: number; d60: number; d90: number };
-export type ArInvoice = { invoice_number: string | null; customer: string | null; balance: number; daysLate: number; bucket: keyof ArBuckets };
+export type ArInvoice = { id?: string | null; customer_id?: string | null; invoice_number: string | null; customer: string | null; balance: number; daysLate: number; bucket: keyof ArBuckets };
 export type ArAging = { buckets: ArBuckets; outstanding: number; openCount: number; invoices: ArInvoice[] };
 
 const OPEN_EXCLUDED = ["paid", "void", "draft"];
@@ -26,7 +26,7 @@ export function computeArAging(invoices: any[], nowMs: number): ArAging {
     const days = (nowMs - ref) / 86_400_000;
     const bucket = bucketOf(days);
     buckets[bucket] += balance;
-    rows.push({ invoice_number: i.invoice_number ?? null, customer: i.customers?.name ?? null, balance: round2(balance), daysLate: Math.max(0, Math.floor(days)), bucket });
+    rows.push({ id: i.id ?? null, customer_id: i.customer_id ?? null, invoice_number: i.invoice_number ?? null, customer: i.customers?.name ?? null, balance: round2(balance), daysLate: Math.max(0, Math.floor(days)), bucket });
   }
   const outstanding = buckets.current + buckets.d30 + buckets.d60 + buckets.d90;
   rows.sort((a, b) => b.daysLate - a.daysLate);
@@ -36,6 +36,25 @@ export function computeArAging(invoices: any[], nowMs: number): ArAging {
     openCount: open.length,
     invoices: rows,
   };
+}
+
+// ── A/R by customer (WHO owes, rolled up) ────────────────────────────────────
+export type ArCustomer = { customer: string; balance: number; worstDaysLate: number; invoices: ArInvoice[] };
+
+/** Group the aging rows by customer — the "Accounts Receivable" ledger view: one line per
+ *  customer with their total open balance, worst lateness first. Pure transform over
+ *  computeArAging's output so the two can never disagree. */
+export function computeArByCustomer(aging: ArAging): ArCustomer[] {
+  const byKey = new Map<string, ArCustomer>();
+  for (const r of aging.invoices) {
+    const key = r.customer_id ?? r.customer ?? "—";
+    const entry = byKey.get(key) ?? { customer: r.customer ?? "No customer", balance: 0, worstDaysLate: 0, invoices: [] };
+    entry.balance = round2(entry.balance + r.balance);
+    entry.worstDaysLate = Math.max(entry.worstDaysLate, r.daysLate);
+    entry.invoices.push(r);
+    byKey.set(key, entry);
+  }
+  return [...byKey.values()].sort((a, b) => b.worstDaysLate - a.worstDaysLate || b.balance - a.balance);
 }
 
 // ── Revenue trend (collected by month, last 12) ──────────────────────────────
@@ -107,7 +126,7 @@ export function computeQuoteStats(quotes: any[]): QuoteStats {
 export async function getArAging(supabase: any): Promise<ArAging> {
   const { data } = await supabase
     .from("invoices")
-    .select("invoice_number, status, total, amount_paid, due_date, created_at, customers(name)");
+    .select("id, customer_id, invoice_number, status, total, amount_paid, due_date, created_at, customers(name)");
   return computeArAging(data ?? [], Date.now());
 }
 

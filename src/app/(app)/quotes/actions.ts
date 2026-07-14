@@ -622,7 +622,10 @@ export async function createJobFromQuote(
       customer_id: resolvedCustomerId ?? q.customer_id,
       inquiry_id: q.inquiry_id ?? null, // carry the lead provenance forward: lead → quote → job
       name: q.title || `Job from ${q.quote_number}`,
-      status: "scheduled",
+      // Born to_be_scheduled (lifecycle rework): the estimate is won but no dates exist yet —
+      // the schedule promotion (advanceToScheduled) flips it to scheduled when a date lands.
+      // The public accept path (accept_public_quote, migration 0127) does the same.
+      status: "to_be_scheduled",
       created_by: ctx.userId,
     })
     .select("id")

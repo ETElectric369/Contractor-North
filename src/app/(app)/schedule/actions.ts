@@ -42,11 +42,14 @@ function localHmInTz(iso: string | null, tz: string): string | null {
  *  downgrading a job that's already further along (in_progress, complete, …).
  *  The conditional `.in()` means non-early jobs are simply left untouched. */
 async function advanceToScheduled(supabase: SupabaseClient, id: string): Promise<void> {
+  // BUG FIX (lifecycle rework): this used to filter on ["lead","quoted","estimate"] — the
+  // first two were never job_status enum values, so the promotion could error out silently
+  // (the call is fire-and-forget). The waiting room is to_be_scheduled; a date promotes it.
   await supabase
     .from("jobs")
     .update({ status: "scheduled" })
     .eq("id", id)
-    .in("status", ["lead", "quoted", "estimate"]);
+    .in("status", ["to_be_scheduled", "estimate"]);
 }
 
 export async function createJob(formData: FormData): Promise<Result> {
