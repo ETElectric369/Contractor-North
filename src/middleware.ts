@@ -58,6 +58,14 @@ function isAppHost(host: string): boolean {
 export async function middleware(request: NextRequest) {
   const host = (request.headers.get("host") || "").toLowerCase().split(":")[0];
 
+  // LOCKDOWN (cn-v493): contractornorth.com itself is off the public web for now — the app
+  // lives on the vercel.app URL, and each org's public site lives on its own subdomain/custom
+  // domain. The apex/www attachments were detached from the Vercel project, but the
+  // *.contractornorth.com wildcard still catches "www", so refuse it here too.
+  if (host === SITES_DOMAIN || host === `www.${SITES_DOMAIN}`) {
+    return new NextResponse("Not found", { status: 404 });
+  }
+
   const onOrgSite = host && !isAppHost(host);
 
   // Articles engine: on an org host, /blog* paths rewrite into the site content catch-all —
