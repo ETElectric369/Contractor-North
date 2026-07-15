@@ -1,24 +1,24 @@
 import Link from "next/link";
+import { isInspectionType, appointmentTypeLabel } from "@/lib/statuses";
 import { isStaffRole } from "@/lib/actions/perms";
 import { redirect } from "next/navigation";
-import { CalendarCheck, ChevronLeft, ChevronRight, ClipboardList, UserPlus, Receipt, Navigation, FolderClosed, ListTodo } from "lucide-react";
+import { CalendarCheck, ChevronLeft, ChevronRight, ClipboardList, UserPlus, Navigation } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { RefreshOnVisible } from "@/components/refresh-on-visible";
 import { WeatherWidget } from "@/components/weather-widget";
-import { getMoneyPipeline } from "@/lib/billing-pipeline";
 import { getCrewStatus } from "@/lib/crew-status";
 import { CrewBoard } from "./crew-board";
 import { MyDayClock } from "./my-day-clock";
 import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { jobStatusLabel } from "@/lib/job-status";
-import { formatCurrency, formatTime, formatCityStateZip } from "@/lib/utils";
+import { formatTime, formatCityStateZip } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
 import { NavLink } from "@/components/nav-link";
 import { toJobOptions, toCustomerOptions, toStaffOptions, listActiveTechs, listCustomerOptions } from "@/lib/schedule-options";
 import { todayBoundsInTz, prettyDay, tzDayStartUtc } from "@/lib/tz";
 import { YourList } from "./your-list";
-import { rankSix, SIX_SLOTS } from "@/lib/six-rank";
+import { rankSix } from "@/lib/six-rank";
 import { getActionItems } from "@/lib/action-items/query";
 import { ActionList } from "@/components/action-items/action-list";
 import { AppointmentButton, type ApptValue } from "../appointments/appointment-button";
@@ -113,14 +113,14 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
 
   // The reads that depend on a result above — the caller's current job (the job on
   // their OWN open time entry, so the "Now" hero is their site, not a coworker's),
-  // the staff-only money pipeline, the six-slot pool, and the door/progress
-  // head-counts — run together in one final round.
-  const [curJobRes, pipeline, poolR, elseCountR, officeCountR, officeDueR, doneTodayR, dailyReportsR] = await Promise.all([
+  // the six-slot pool, and the head-counts that feed Today's 6 — run together in
+  // one final round. (The money-pipeline fetch left with the Money line — the AR
+  // page owns that view now; the office/else DOOR links left too, so the only
+  // count consumers below are the Today's-6 card's Grab-One gate + its "2/6".)
+  const [curJobRes, poolR, elseCountR, officeCountR, doneTodayR, dailyReportsR] = await Promise.all([
     openEntry?.job_id
       ? supabase.from("jobs").select("id, job_number, name, status, address, customers(name)").eq("id", openEntry.job_id).maybeSingle()
       : Promise.resolve({ data: null }),
-    // Money pipeline (staff only) — the daily "nothing got missed" nudge.
-    isStaff ? getMoneyPipeline(supabase) : Promise.resolve(null),
     // TODAY'S 6 pool — my open TOP-LEVEL tasks a rank can claim (subtasks nest
     // under their parent and never count; children fetch below).
     mineCut(
@@ -137,18 +137,16 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       .order("due_date", { ascending: false, nullsFirst: true })
       .order("priority", { ascending: false })
       .limit(60),
-    // "EVERYTHING ELSE" door count — the open top-level backlog. Staff: org-wide
-    // minus office (the Office door counts that inventory). Techs: THEIR tasks,
-    // because their door carries ?mine=1 so the number matches the page it opens.
+    // "Everything else" backlog count — the open top-level backlog. Staff: org-wide
+    // minus office. Techs: THEIR tasks (their grab link carries ?mine=1 so the gate
+    // matches the page it opens). Feeds ONLY the Grab-One gate now — the door links
+    // this used to number are gone (office tasks live at /tasks).
     isStaff
       ? headCount().eq("status", "open").is("parent_id", null).neq("category", "office")
       : headCount().eq("status", "open").is("parent_id", null).eq("assigned_to", uid),
-    // "OFFICE" door counts (staff only) — batch inventory + its due-now slice.
+    // Office inventory count (staff only) — the other half of the Grab-One gate.
     isStaff
       ? headCount().eq("status", "open").is("parent_id", null).eq("category", "office")
-      : Promise.resolve({ count: 0 } as { count: number | null }),
-    isStaff
-      ? headCount().eq("status", "open").is("parent_id", null).eq("category", "office").lte("due_date", todayStr)
       : Promise.resolve({ count: 0 } as { count: number | null }),
     // My tasks completed today — the durable half of the card's "2/6".
     mineCut(
@@ -190,8 +188,8 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     pinned: t.focus_date === todayStr,
     onSite: !!t.job_id && scheduledJobSet.has(t.job_id),
   }));
-  // Pins beyond six wait behind the door — its label says so ("+N pinned").
-  const pinnedOverflow = Math.max(0, sixPool.filter((t: any) => t.focus_date === todayStr).length - SIX_SLOTS);
+  // (Pins beyond six used to badge the door line; the doors are gone — overflow
+  // pins still surface at /tasks like everything else past the six.)
 
   // The current job's materials (needs its id), the "Needs action" inbox (needs
   // the role), and the six's subtasks (need the chosen six) — one final round.
@@ -212,16 +210,15 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   const sixKids = ((kidsRes as any)?.data ?? []) as any[];
 
   // ── derived (no awaits) ──
-  // DOOR NUMBERS — honest by subtraction: whatever the six show doesn't count as
-  // "everything else"; office tasks IN the six stay in the office inventory count
-  // (that door mirrors /tasks/office, which still lists them).
+  // Backlog-behind-the-six, honest by subtraction: whatever the six show doesn't
+  // count as "everything else". These gate ONLY the Today's-6 Grab-One link now
+  // (the door links they used to number were removed — office tasks live at /tasks).
   const sixNonOffice = six.filter((t) => t.category !== "office").length;
   const elseCount = Math.max(0, (((elseCountR as any)?.count as number | null) ?? 0) - (isStaff ? sixNonOffice : six.length));
   const officeCount = (((officeCountR as any)?.count as number | null) ?? 0);
-  const officeDue = (((officeDueR as any)?.count as number | null) ?? 0);
   const doneToday = (((doneTodayR as any)?.count as number | null) ?? 0);
-  // Staff door counts NON-office tasks → open an office-free list (?else=1) so the
-  // number matches the page; techs get their own assigned list (audit cn-v328).
+  // Staff grab from an office-free list (?else=1) so the link matches the page;
+  // techs get their own assigned list (audit cn-v328).
   const elseHref = isStaff ? "/tasks?else=1" : "/tasks?mine=1";
 
   const org = orgRow;
@@ -437,7 +434,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         <Link href={i.href} className="min-w-0 flex-1 hover:opacity-80">
           <div className="flex items-center gap-2">
             {i.kind === "appt" ? (
-              <Badge tone={i.apptType === "inspection" ? "amber" : "blue"}>{i.apptType}</Badge>
+              <Badge tone={isInspectionType(i.apptType) ? "amber" : "blue"}>{appointmentTypeLabel(i.apptType)}</Badge>
             ) : i.status ? (
               <Badge tone={statusTone(i.status)}>{jobStatusLabel(i.status)}</Badge>
             ) : null}
@@ -688,42 +685,10 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         grabHref={elseCount + officeCount > 0 ? elseHref : null}
       />
 
-      {/* DOOR LINES — #7+ never vanishes, it just doesn't scream. Grey inventory
-          numbers are allowed on a door (a browse affordance), never on chrome. */}
-      {(officeCount > 0 || elseCount > 0 || pinnedOverflow > 0) && (
-        <div className="mb-4 space-y-2">
-          {isStaff && officeCount > 0 && (
-            <Link
-              href="/tasks/office"
-              className="flex min-h-[44px] items-center gap-x-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm hover:bg-slate-50"
-            >
-              <span className="flex items-center gap-1.5 font-semibold text-slate-900">
-                <FolderClosed className="h-4 w-4 shrink-0 text-slate-400" /> Office
-              </span>
-              <span className="text-slate-600">
-                <strong>{officeCount}</strong>
-                {officeDue > 0 ? ` (${officeDue} due)` : ""}
-              </span>
-              <span className="ml-auto text-xs font-medium text-brand">→</span>
-            </Link>
-          )}
-          {(elseCount > 0 || pinnedOverflow > 0) && (
-            <Link
-              href={elseHref}
-              className="flex min-h-[44px] items-center gap-x-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm hover:bg-slate-50"
-            >
-              <span className="flex items-center gap-1.5 font-semibold text-slate-900">
-                <ListTodo className="h-4 w-4 shrink-0 text-slate-400" /> Everything Else
-              </span>
-              <span className="text-slate-600">
-                <strong>{elseCount}</strong>
-                {pinnedOverflow > 0 ? ` · +${pinnedOverflow} pinned` : ""}
-              </span>
-              <span className="ml-auto text-xs font-medium text-brand">→</span>
-            </Link>
-          )}
-        </div>
-      )}
+      {/* The office/else DOOR LINES that sat here were removed (Erik's declutter):
+          office tasks live at /tasks, and flagged items already surface via
+          Needs-attention below. The backlog stays reachable through the Today's-6
+          Grab-One link + the dock. */}
 
       {/* Needs action — the pure DECISION inbox (money, leads, waiting, leak
           detectors), right under the day so pull-work follows the plan. Tasks
@@ -754,29 +719,11 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           landed (today's six / Office / Everything else) so capture stays honest. */}
       <NewTaskBox jobs={(jobOptRows ?? []) as any} people={people} todayStr={todayStr} />
 
-      {/* MONEY LINE — the daily "nothing slipped" nudge. ONE money map on My Day:
-          this line carries the pipeline totals (to invoice + unpaid/outstanding);
-          draft/overdue invoices are NOT re-counted here — they surface as actionable
-          rows in the Needs-action inbox above. Two maps of /billing on one page
-          already disagreed once (the old parallel Outstanding sum). */}
-      {pipeline && (pipeline.doneNotInvoiced.length > 0 || pipeline.unpaid.length > 0) && (
-        <Link
-          href="/billing"
-          className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm hover:bg-slate-50"
-        >
-          <span className="flex items-center gap-1.5 font-semibold text-slate-900"><Receipt className="h-4 w-4 shrink-0 text-brand" /> Money</span>
-          {pipeline.doneNotInvoiced.length > 0 && (
-            <span className="text-rose-700"><strong>{pipeline.doneNotInvoiced.length}</strong> to invoice{pipeline.toInvoiceTotal > 0 ? ` · ${formatCurrency(pipeline.toInvoiceTotal)}` : ""}</span>
-          )}
-          {pipeline.unpaid.length > 0 && (
-            <span className="text-slate-600"><strong>{pipeline.unpaid.length}</strong> unpaid · {formatCurrency(pipeline.outstandingTotal)}</span>
-          )}
-          <span className="ml-auto text-xs font-medium text-brand">Open Billing →</span>
-        </Link>
-      )}
+      {/* The MONEY LINE (getMoneyPipeline totals) left this page — the AR page owns
+          that view now, and overdue/draft invoices already surface as actionable
+          rows in the Needs-action inbox above. My Day carries no money map. */}
 
-      {/* Owner snapshot — what "Overview" used to surface, folded into My Day.
-          No Outstanding card here: the money line above is the ONE money map. */}
+      {/* Owner snapshot — what "Overview" used to surface, folded into My Day. */}
       {isStaff && (
         <div className="mb-4 grid grid-cols-2 gap-3">
           <Link href="/leads" className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 hover:bg-slate-50">

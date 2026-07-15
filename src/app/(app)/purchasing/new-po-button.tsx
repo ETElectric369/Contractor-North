@@ -22,14 +22,23 @@ interface ListOption {
 export function NewPoButton({
   jobs,
   lists,
+  defaultJobId,
+  defaultListId,
 }: {
   jobs: JobOption[];
   lists: ListOption[];
+  /** Preselect these when the button lives on a page whose context implies them
+   *  (a material-list page seeds ITS list; a job page links THIS job). Without a
+   *  preselect the list dropdown sat on "— Start empty —" and the PO Erik created
+   *  from a materials list in the field imported zero items (7/14). Same
+   *  convention as NewListButton.defaultJobId. */
+  defaultJobId?: string;
+  defaultListId?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [vendor, setVendor] = useState("CED");
-  const [jobId, setJobId] = useState("");
-  const [listId, setListId] = useState("");
+  const [jobId, setJobId] = useState(defaultJobId ?? "");
+  const [listId, setListId] = useState(defaultListId ?? "");
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const router = useRouter();

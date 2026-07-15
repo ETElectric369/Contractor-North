@@ -11,7 +11,7 @@ import { AutoClockoutPrompt } from "./auto-clockout-prompt";
 import { CrewAssignments } from "./crew-assignments";
 import { getOrgSettings } from "@/lib/org-settings";
 import { AddEntryButton } from "./add-entry-button";
-import { hoursBetween, formatDuration } from "@/lib/utils";
+import { hoursBetween, formatDuration, formatTime } from "@/lib/utils";
 import { translator } from "@/lib/i18n";
 import type { JobCode, TimeEntry } from "@/lib/types";
 import { jobLabel } from "@/lib/schedule-options";
@@ -64,7 +64,10 @@ export default async function TimeclockPage() {
       .limit(50),
     supabase
       .from("time_entries")
-      .select("*")
+      // job_number rides along for the tech's read-only "My timecard" card below —
+      // entries can point at finished jobs, so the ACTIVE-jobs options list can't
+      // resolve the label.
+      .select("*, job:job_id(job_number)")
       .eq("profile_id", user?.id ?? "")
       .gte("clock_in", weekAgo)
       .order("clock_in", { ascending: false }),
@@ -184,6 +187,55 @@ export default async function TimeclockPage() {
     perCode.set(key, (perCode.get(key) ?? 0) + h);
   }
 
+  // MY TIMECARD (techs only) — the same week of the caller's entries, grouped by
+  // org-local day for the read-only card below the clock panel. Techs can't reach
+  // /timecards (office-only), so this is their view of their own hours; edits stay
+  // office work on purpose (no edit affordances here). Staff skip it — they have
+  // the full crew ledger at /timecards.
+  type MyTimecardRow = {
+    id: string;
+    in: string;
+    out: string | null; // null = still on the clock
+    lunch: number;
+    hours: number | null; // closed entries only; open shows "on the clock"
+    jobNumber: string | null;
+  };
+  const myTimecard: { day: string; label: string; rows: MyTimecardRow[]; total: number }[] = [];
+  if (!isStaff) {
+    const tz = orgSettings.timezone;
+    const byDay = new Map<string, { label: string; rows: MyTimecardRow[]; total: number }>();
+    for (const e of week) {
+      const day = new Date(e.clock_in).toLocaleDateString("en-CA", { timeZone: tz });
+      if (!byDay.has(day)) {
+        byDay.set(day, {
+          label: new Date(e.clock_in).toLocaleDateString("en-US", {
+            timeZone: tz,
+            weekday: "short",
+            month: "short",
+            day: "numeric",
+          }),
+          rows: [],
+          total: 0,
+        });
+      }
+      const g = byDay.get(day)!;
+      const closed = e.status === "closed" && !!e.clock_out;
+      const h = closed ? hoursBetween(e.clock_in, e.clock_out as string, e.lunch_minutes) : null;
+      // The query is newest-first; unshift so each day's punches read in clock order.
+      g.rows.unshift({
+        id: e.id,
+        in: formatTime(e.clock_in, tz),
+        out: e.clock_out ? formatTime(e.clock_out, tz) : null,
+        lunch: Math.max(0, Number(e.lunch_minutes) || 0),
+        hours: h,
+        jobNumber: ((e as any).job?.job_number as string | undefined) ?? null,
+      });
+      if (h != null) g.total += h;
+    }
+    // Map insertion order = newest day first (the query order), which is what the card wants.
+    for (const [day, g] of byDay) myTimecard.push({ day, ...g });
+  }
+
   return (
     <div className="mx-auto max-w-4xl">
       <PageHeader title={t("tc_title")} description={t("tc_desc")}>
@@ -211,6 +263,46 @@ export default async function TimeclockPage() {
             isStaff={isStaff}
             crewLead={crewLead}
           />
+
+          {/* MY TIMECARD (techs only) — the week's punches, grouped by day, read-only:
+              date, in–out, lunch, hours, job number, + the week total. Edits are office
+              work (/timecards), which techs can't reach — so no edit buttons here. */}
+          {!isStaff && myTimecard.length > 0 && (
+            <Card className="mt-6">
+              <CardContent className="py-5">
+                <div className="mb-1 flex items-baseline justify-between">
+                  <h3 className="text-sm font-semibold text-slate-900">My timecard</h3>
+                  <span className="text-xs text-slate-400">Last 7 days</span>
+                </div>
+                <div className="divide-y divide-slate-100">
+                  {myTimecard.map((d) => (
+                    <div key={d.day} className="py-2.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-semibold uppercase tracking-wide text-slate-500">{d.label}</span>
+                        {d.total > 0 && <span className="font-medium text-slate-500">{formatDuration(d.total)}</span>}
+                      </div>
+                      {d.rows.map((r) => (
+                        <div key={r.id} className="mt-1 flex items-center justify-between gap-3 text-sm">
+                          <span className="min-w-0 truncate text-slate-700">
+                            {r.in}–{r.out ?? "now"}
+                            {r.lunch > 0 ? ` · ${r.lunch}m lunch` : ""}
+                            {r.jobNumber ? ` · ${r.jobNumber}` : ""}
+                          </span>
+                          <span className="shrink-0 text-slate-600">
+                            {r.hours != null ? formatDuration(r.hours) : "on the clock"}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-2 flex items-center justify-between border-t border-slate-200 pt-3 text-sm">
+                  <span className="font-semibold text-slate-900">Week total</span>
+                  <span className="font-bold text-slate-900">{formatDuration(weekTotal)}</span>
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </div>
 
         <div className="space-y-6 lg:col-span-2">

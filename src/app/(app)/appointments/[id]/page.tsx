@@ -6,7 +6,9 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz, formatDateTimeTz } from "@/lib/tz";
 import { Badge } from "@/components/ui/badge";
 import { NavLink } from "@/components/nav-link";
+import { appointmentTypeLabel, isInspectionType } from "@/lib/statuses";
 import { InspectionCapture, type CapturePhoto } from "./inspection-capture";
+import { MarkCompleteButton } from "./mark-complete-button";
 
 export const dynamic = "force-dynamic";
 
@@ -72,11 +74,19 @@ export default async function AppointmentCapturePage({
 
       <div className="mb-5">
         <div className="flex flex-wrap items-center gap-2">
-          <Badge tone="blue" className={a.type === "inspection" ? "bg-teal-100 text-teal-800" : undefined}>
-            {a.type}
+          <Badge tone="blue" className={isInspectionType(a.type) ? "bg-teal-100 text-teal-800" : undefined}>
+            {appointmentTypeLabel(a.type)}
           </Badge>
           {a.status === "proposed" && <Badge tone="amber">pending pick</Badge>}
           {a.status === "completed" && <Badge tone="green">done</Badge>}
+          {/* Status affordance: flips scheduled/proposed → completed so the Inspections
+              tab's buckets work (a captured walk-through stops reading as "upcoming"). */}
+          {(a.status === "scheduled" || a.status === "proposed") && (
+            <MarkCompleteButton
+              id={a.id}
+              label={isInspectionType(a.type) ? "Mark inspection complete" : "Mark complete"}
+            />
+          )}
         </div>
         <h1 className="mt-2 text-xl font-bold text-slate-900">{a.title}</h1>
         <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-sm text-slate-500">

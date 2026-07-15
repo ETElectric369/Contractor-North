@@ -2,7 +2,7 @@
 
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Wallet, Camera, Check } from "lucide-react";
+import { Wallet, DollarSign, Camera, Check } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
@@ -38,6 +38,7 @@ export function QuickCostButton({
   jobId,
   jobs,
   label = "Add Cost",
+  icon = "wallet",
   className,
   onOpen,
   onClose,
@@ -46,6 +47,11 @@ export function QuickCostButton({
   jobId?: string;
   jobs?: { id: string; label: string }[];
   label?: string;
+  /** Trigger glyph. A STRING (not a LucideIcon reference) so server components can
+   *  pick it across the RSC boundary. The job action dock passes "dollar": at icon
+   *  size a wallet and the Materials tab's Package box share the same rounded-rect
+   *  silhouette — $ is unmistakable at a glance (Erik's 60mph feedback, 7/14). */
+  icon?: "wallet" | "dollar";
   className?: string;
   /** Fired when the modal OPENS. Do NOT unmount this component here (it would kill
    *  the modal) — use it for side effects only. */
@@ -195,7 +201,7 @@ export function QuickCostButton({
   return (
     <>
       <button type="button" className={className ?? DEFAULT_TRIGGER} onClick={openModal}>
-        <Wallet className="h-4 w-4 shrink-0" /> {label}
+        {icon === "dollar" ? <DollarSign className="h-4 w-4 shrink-0" /> : <Wallet className="h-4 w-4 shrink-0" />} {label}
       </button>
       <Modal
         open={open}

@@ -131,6 +131,9 @@ export function JobManageMenu({
         }
       >
         <MoreHorizontal className="h-5 w-5" />
+        {/* Tiny visible caption at phone width (the dock's ICON_BTN stacks it under
+            the ⋯ — 60mph glanceability); sm+ keeps the classic icon-only ⋯ trigger. */}
+        <span className="sm:sr-only">Manage</span>
       </button>
       {open && (
         // position set inline because .glass-gloss forces position:relative, which

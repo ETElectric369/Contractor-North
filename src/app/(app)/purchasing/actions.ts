@@ -6,7 +6,11 @@ import { subtotalTaxTotal } from "@/lib/invoice-math";
 
 export type Result = { ok: boolean; error?: string; id?: string };
 
-/** Create a PO. If sourceListId is given, seed its items from a material list. */
+/** Create a PO. If sourceListId is given, seed its items from a material list.
+ *  Seeding failures are LOUD: Erik's 7/14 field test produced a "seeded" PO with
+ *  zero items — an empty PO that claims it imported a list is worse than an error,
+ *  so every step here either works or returns why it didn't (and never strands a
+ *  misleading empty PO). */
 export async function createPurchaseOrder(input: {
   vendor: string;
   job_id: string | null;
@@ -18,6 +22,27 @@ export async function createPurchaseOrder(input: {
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
 
+  // Resolve the seed list FIRST (RLS-scoped, same pattern as updatePurchaseOrder's
+  // job check) so an invisible list or a read error fails before a PO exists.
+  let seedItems: any[] | null = null;
+  if (input.source_list_id) {
+    const { data: list, error: listError } = await supabase
+      .from("material_lists")
+      .select("id")
+      .eq("id", input.source_list_id)
+      .maybeSingle();
+    if (listError) return { ok: false, error: listError.message };
+    if (!list) return { ok: false, error: "That material list isn't visible to you." };
+
+    const { data: items, error: itemsError } = await supabase
+      .from("material_list_items")
+      .select("description, part_number, quantity, unit, est_cost")
+      .eq("list_id", input.source_list_id)
+      .order("sort_order");
+    if (itemsError) return { ok: false, error: itemsError.message };
+    seedItems = items ?? [];
+  }
+
   const { data: po, error } = await supabase
     .from("purchase_orders")
     .insert({
@@ -25,31 +50,35 @@ export async function createPurchaseOrder(input: {
       job_id: input.job_id,
       status: "draft",
       created_by: user.id,
+      // Provenance backlink (migration 0049) — validated as visible above.
+      source_list_id: input.source_list_id,
     })
     .select("id")
     .single();
   if (error) return { ok: false, error: error.message };
 
-  if (input.source_list_id) {
-    const { data: items } = await supabase
-      .from("material_list_items")
-      .select("description, part_number, quantity, unit, est_cost")
-      .eq("list_id", input.source_list_id)
-      .order("sort_order");
-
-    if (items?.length) {
-      const rows = items.map((it: any, idx: number) => ({
-        po_id: po.id,
-        description: it.description,
-        part_number: it.part_number,
-        quantity: it.quantity,
-        unit: it.unit ?? "ea",
-        unit_cost: Number(it.est_cost) || 0,
-        sort_order: idx,
-      }));
-      await supabase.from("purchase_order_items").insert(rows);
-      await recalcPoTotals(supabase, po.id);
+  if (seedItems?.length) {
+    const rows = seedItems.map((it: any, idx: number) => ({
+      po_id: po.id,
+      description: it.description,
+      part_number: it.part_number,
+      quantity: it.quantity,
+      unit: it.unit ?? "ea",
+      unit_cost: Number(it.est_cost) || 0,
+      sort_order: idx,
+    }));
+    const { error: seedError } = await supabase
+      .from("purchase_order_items")
+      .insert(rows);
+    if (seedError) {
+      // Roll the empty shell back and surface the real failure.
+      await supabase.from("purchase_orders").delete().eq("id", po.id);
+      return {
+        ok: false,
+        error: `Couldn't copy the list items onto the PO: ${seedError.message}`,
+      };
     }
+    await recalcPoTotals(supabase, po.id);
   }
 
   revalidatePath("/purchasing");

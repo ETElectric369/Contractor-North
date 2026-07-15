@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { isInspectionType } from "@/lib/statuses";
 import { useRouter } from "next/navigation";
 import { CalendarSync } from "lucide-react";
 import { MoveToDay } from "@/components/move-to-day";
@@ -139,7 +140,7 @@ export function WeekAgenda({
   };
 
   const apptChip = (k: string, a: CalAppt) => {
-    const insp = a.type === "inspection";
+    const insp = isInspectionType(a.type); // final_inspection renders as inspection too (spine helper)
     const ini = initials(a.assigned_to ? [a.assigned_to] : null);
     return (
       <div

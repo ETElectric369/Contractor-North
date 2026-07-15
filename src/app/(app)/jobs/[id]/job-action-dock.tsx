@@ -10,15 +10,12 @@ import { ProposeDatesButton } from "./propose-dates-button";
 import { FinishJobButton } from "./finish-job-button";
 import type { Job } from "@/lib/types";
 
-/** 44px secondary slot — icon-only on a phone (sr-only keeps the name for screen
- *  readers), icon+label at sm+. Shared by Photo / Call / Navigate / Manage. */
+/** 44px secondary slot. On a phone the label is VISIBLE — a tiny 9px caption under
+ *  the icon (60mph rule: an unlabeled glyph is a guess); at sm+ it's the familiar
+ *  icon+label row. Shared by Add cost / Photo / Call / Navigate / Manage — their
+ *  label spans render plain text and inherit the size from here. */
 const ICON_BTN =
-  "inline-flex h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50 sm:px-3";
-
-/** QuickCostButton renders `<Wallet/> {label}` itself, so the icon-only-on-phone
- *  trick is font-size 0 (the label stays in the DOM for screen readers). */
-const COST_BTN =
-  "inline-flex h-11 min-w-11 shrink-0 items-center justify-center gap-0 rounded-lg border border-slate-300 bg-white px-2.5 text-[0px] font-medium text-slate-600 hover:bg-slate-50 sm:gap-1.5 sm:px-3 sm:text-sm";
+  "inline-flex h-11 min-w-11 shrink-0 flex-col items-center justify-center gap-0.5 whitespace-nowrap rounded-lg border border-slate-300 bg-white px-1.5 text-[9px] font-medium leading-none text-slate-600 hover:bg-slate-50 sm:flex-row sm:gap-1.5 sm:px-3 sm:text-sm sm:leading-normal";
 
 /**
  * The job action dock — ONE sticky glass bar replacing the old 7-control header
@@ -81,18 +78,22 @@ export function JobActionDock({
           techs={techs}
           defaultProfileId={defaultProfileId}
         />
-        {viewerIsStaff && <QuickCostButton jobId={job.id} className={COST_BTN} />}
+        {/* "dollar": at glance size a Wallet reads like the Materials Package box — $ doesn't. */}
+        {viewerIsStaff && <QuickCostButton jobId={job.id} icon="dollar" label="Add Cost" className={ICON_BTN} />}
         <JobPhotoQuick orgId={job.org_id} jobId={job.id} className={ICON_BTN} />
         {customerPhone && (
           <a href={`tel:${customerPhone}`} title="Call customer" className={ICON_BTN}>
             <Phone className="h-4 w-4 shrink-0" />
-            <span className="sr-only sm:not-sr-only">Call</span>
+            <span>Call</span>
           </a>
         )}
         {jobAddress && (
           <NavLink address={jobAddress} className={ICON_BTN}>
             <Navigation className="h-4 w-4 shrink-0" />
-            <span className="sr-only sm:not-sr-only">Navigate</span>
+            {/* "Map" at phone width — "Navigate" is the one caption wide enough to
+                overflow the six-slot 375px budget; full word returns at sm+. */}
+            <span className="sm:hidden">Map</span>
+            <span className="hidden sm:inline">Navigate</span>
           </NavLink>
         )}
         <div className="ml-auto shrink-0">

@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
-import { JOB_STATUS_PRIORITY, jobStatusLabel } from "@/lib/job-status";
+import { ACTIVE_JOB_STATUSES, JOB_STATUS_PRIORITY, jobStatusLabel } from "@/lib/job-status";
 import { listCustomerOptions } from "@/lib/schedule-options";
 import { formatDate } from "@/lib/utils";
 import { NewJobButton } from "../schedule/new-job-button";
@@ -37,11 +37,20 @@ export default async function JobsPage({
     user ? supabase.from("profiles").select("role").eq("id", user.id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
   const isStaff = isStaffRole((me as { role?: string } | null)?.role ?? "");
-  const jobs = (jobsData ?? []) as (Job & { customers: { name: string } | null })[];
+  const allJobs = (jobsData ?? []) as (Job & { customers: { name: string } | null })[];
 
-  // Default (unfiltered) view: active jobs up top, completed/invoiced sink to the
-  // bottom. Within a group the query's newest-first order is preserved (stable sort).
+  // Default (unfiltered) view: ACTIVE jobs only — finished/cancelled hide behind a
+  // quiet footer count that links to their ?status= filters (the pills still show
+  // everything when chosen). Within the active set: priority sort (in_progress up
+  // top), newest-first inside a status (stable sort).
+  let jobs = allJobs;
+  let completedCount = 0;
+  let cancelledCount = 0;
   if (!status) {
+    const active = new Set<string>(ACTIVE_JOB_STATUSES);
+    completedCount = allJobs.filter((j) => j.status === "complete").length;
+    cancelledCount = allJobs.filter((j) => j.status === "cancelled").length;
+    jobs = allJobs.filter((j) => active.has(j.status));
     jobs.sort((a, b) => (JOB_STATUS_PRIORITY[a.status] ?? 9) - (JOB_STATUS_PRIORITY[b.status] ?? 9));
   }
 
@@ -71,7 +80,11 @@ export default async function JobsPage({
       )}
 
       {jobs.length === 0 ? (
-        <EmptyState icon={Briefcase} title="No jobs" description="Create a job to get started.">
+        <EmptyState
+          icon={Briefcase}
+          title={!status && allJobs.length > 0 ? "No active jobs" : "No jobs"}
+          description="Create a job to get started."
+        >
           <NewJobButton customers={customers ?? []} />
         </EmptyState>
       ) : (
@@ -99,6 +112,31 @@ export default async function JobsPage({
             ))}
           </ul>
         </Card>
+      )}
+
+      {/* Finished jobs don't clutter the working list — a quiet count line keeps
+          them one tap away (the status pills/rail still show everything when chosen). */}
+      {!status && (completedCount > 0 || cancelledCount > 0) && (
+        <p className="mt-3 text-center text-xs text-slate-400">
+          {completedCount > 0 && (
+            <Link href="/jobs?status=complete" className="hover:text-brand hover:underline">
+              {completedCount} completed
+            </Link>
+          )}
+          {completedCount > 0 && cancelledCount > 0 && " · "}
+          {cancelledCount > 0 && (
+            <Link href="/jobs?status=cancelled" className="hover:text-brand hover:underline">
+              {cancelledCount} cancelled
+            </Link>
+          )}
+          {" — "}
+          <Link
+            href={completedCount > 0 ? "/jobs?status=complete" : "/jobs?status=cancelled"}
+            className="font-medium text-brand hover:underline"
+          >
+            view
+          </Link>
+        </p>
       )}
     </div>
   );

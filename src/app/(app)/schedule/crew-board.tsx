@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { isInspectionType, appointmentTypeLabel } from "@/lib/statuses";
 import { ChevronLeft, ChevronRight, Calendar } from "lucide-react";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { jobStatusLabel } from "@/lib/job-status";
@@ -94,7 +95,7 @@ export function CrewBoard({
                     className="rounded-lg border border-slate-200 bg-white p-2 text-xs shadow-sm hover:border-brand"
                   >
                     <div className="flex items-center gap-1.5">
-                      <Badge tone={a.type === "inspection" ? "amber" : "blue"}>{a.type}</Badge>
+                      <Badge tone={isInspectionType(a.type) ? "amber" : "blue"}>{appointmentTypeLabel(a.type)}</Badge>
                       <span className="text-slate-500">{a.time}</span>
                     </div>
                     <div className="mt-0.5 truncate font-medium text-slate-900">{a.title}</div>

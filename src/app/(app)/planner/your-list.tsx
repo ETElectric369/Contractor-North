@@ -7,7 +7,7 @@
 // rows with subtasks indented
 // under their parent. Subtasks are NEVER counted anywhere — checking a parent
 // with open children confirm-cascades (the toggleTask needsCascade contract).
-// #7+ never vanishes: the door lines under this card carry the numbers.
+// #7+ never vanishes: it lives at /tasks (the Grab One link when the six run dry).
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
@@ -69,7 +69,7 @@ export function YourList({
   todayStr: string;
   /** My tasks completed today (server head-count) — the durable half of "2/6". */
   doneToday: number;
-  /** Where "Grab one →" points when the six run dry (null = nothing behind the doors). */
+  /** Where "Grab one →" points when the six run dry (null = no open backlog to grab). */
   grabHref: string | null;
 }) {
   const router = useRouter();

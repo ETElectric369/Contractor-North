@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { getOrgSettings } from "@/lib/org-settings";
 import { buildDeckRates, DECK_ESTIMATE_CODES } from "@/lib/estimate/deck";
+import { NewInspectionButton } from "../../appointments/new-inspection-button";
 import { QuoteBuilder } from "./quote-builder";
 
 export const dynamic = "force-dynamic";
@@ -90,7 +91,12 @@ export default async function NewQuotePage({
       <PageHeader
         title="New Estimate"
         description="Build line items by hand, or let the estimator draft them from a scope of work or an uploaded plan."
-      />
+      >
+        {/* Onsite with no capture yet? Start the inspection from where you'll end up — one
+            tap creates it (threaded to the lead when this builder came from one) and lands
+            on the capture page; Start estimate there routes back here prefilled. */}
+        {!capture && <NewInspectionButton inquiryId={inquiry} size="sm" variant="outline" />}
+      </PageHeader>
       <QuoteBuilder
         customers={(customers ?? []).map((c: any) => ({
           id: c.id,

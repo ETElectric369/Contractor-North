@@ -15,7 +15,10 @@ export {
   CalendarDays,
   ClipboardCheck,
   FileText,
-  Wallet,
+  // Costs is DollarSign, NOT Wallet — at chip size a wallet and a box (Package/
+  // Materials) read as the same rounded-rect silhouette at 60mph. $ vs box is
+  // unmistakable (Erik's field feedback, 2026-07-14).
+  DollarSign,
   Receipt,
   StickyNote,
   Stamp,

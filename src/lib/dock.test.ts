@@ -109,6 +109,34 @@ describe("DOCK office — Team present, Settings link absent (settings doctrine)
   });
 });
 
+/** Drift guard #2c: the Sales pipeline order — Leads · Inspections · Estimates (Erik
+ *  2026-07-14: appointments and inspections are ONE platform; the Inspections tab is the
+ *  site-walk-through step between a lead and its estimate). Pins presence, order and the
+ *  zero-duplication law so a future wave can't drop the tab or double-home /inspections. */
+describe("DOCK sales — Leads · Inspections · Estimates", () => {
+  const sales = DOCK.find((s) => s.key === "sales");
+  const children = sales?.children ?? [];
+
+  it("children are exactly Leads · Inspections · Estimates, in pipeline order", () => {
+    expect(children.map((c) => c.href)).toEqual(["/leads", "/inspections", "/quotes"]);
+    expect(children.find((c) => c.id === "sl-inspections")).toMatchObject({
+      label: "Inspections",
+      href: "/inspections",
+    });
+  });
+
+  it("zero duplication: /inspections has exactly one dock home", () => {
+    const homes = DOCK.flatMap((s) => s.children).filter(
+      (c) => c.href && basePath(c.href) === "/inspections",
+    );
+    expect(homes.map((c) => c.id)).toEqual(["sl-inspections"]);
+  });
+
+  it("/inspections (and its completed view path) lights Sales", () => {
+    expect(activeSection("/inspections")?.key).toBe("sales");
+  });
+});
+
 /** Drift guard #3: activeSection is THE one matcher behind the desktop rail, the phone
  *  bottom tiles and the SectionSubnav strip. The original disease was three drifting
  *  copies, none of which prefix-matched child routes — /quotes/abc lit "Today" on desktop

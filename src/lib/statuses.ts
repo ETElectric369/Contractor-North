@@ -20,6 +20,42 @@ export const INQUIRY_STATUSES = ["new", "contacted", "quoted", "won", "lost"] as
  *  spine-style message instead of a raw Postgres constraint error. */
 export const APPOINTMENT_STATUSES = ["scheduled", "proposed", "completed", "cancelled"] as const;
 
+/** Appointment TYPES — mirrors the 0051 check constraint + 0131 (final_inspection).
+ *  Erik's design (2026-07-14): an inspection IS an appointment type — appointments and
+ *  inspections are ONE platform. His "client_meeting" converges onto the pre-existing
+ *  `meeting` value (label-only change — no data rewrite), and `final_inspection` is the
+ *  one genuinely new value (the code-inspection at job end, distinct from the pre-sale
+ *  site walk-through). The create/edit dropdown and the write-guards both read this list. */
+export const APPOINTMENT_TYPES = [
+  "inspection",
+  "final_inspection",
+  "quote",
+  "meeting",
+  "appointment",
+  "other",
+] as const;
+export type AppointmentType = (typeof APPOINTMENT_TYPES)[number];
+
+/** The inspection-shaped subset — what the Sales → Inspections tab shows. */
+export const INSPECTION_TYPES = ["inspection", "final_inspection"] as const;
+export const isInspectionType = (t: string | null | undefined): boolean =>
+  (INSPECTION_TYPES as readonly string[]).includes(t ?? "");
+
+const APPOINTMENT_TYPE_LABELS: Record<AppointmentType, string> = {
+  inspection: "Inspection",
+  final_inspection: "Final inspection",
+  quote: "Quote / estimate",
+  meeting: "Client meeting",
+  appointment: "Appointment",
+  other: "Other",
+};
+
+/** Human label for an appointment type — unknown/legacy values render as themselves
+ *  rather than crashing or lying. */
+export function appointmentTypeLabel(t: string | null | undefined): string {
+  return APPOINTMENT_TYPE_LABELS[(t ?? "") as AppointmentType] ?? (t || "appointment");
+}
+
 /** Sort weights for the /quotes default view (mirrors JOB_STATUS_PRIORITY): the LIVE pipeline
  *  (awaiting-answer, in-the-works) floats up; settled paperwork — an accepted estimate that
  *  already became a job, a declined/expired one — files away to the bottom. Erik: "accepted

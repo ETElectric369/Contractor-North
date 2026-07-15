@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label } from "@/components/ui/input";
+import { NewInspectionButton } from "../appointments/new-inspection-button";
 import { convertInquiry } from "./actions";
 
 /** A sensible default inspection date: 2 days out. */
@@ -121,6 +122,10 @@ export function ConvertMenu({
   return (
     <>
       <div className="flex flex-wrap gap-2">
+        {/* Already onsite? One tap creates the inspection (linked to this lead) and lands
+            straight on its capture page — no booking ceremony (nowOnly: the schedule
+            options live right here in the modal alongside). */}
+        <NewInspectionButton nowOnly inquiryId={inquiryId} size="sm" variant="outline" />
         <Button size="sm" variant="outline" onClick={openInspect} disabled={busy !== null}>
           <CalendarPlus className="h-4 w-4" /> Schedule inspection
         </Button>

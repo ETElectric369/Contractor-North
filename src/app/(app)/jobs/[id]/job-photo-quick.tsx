@@ -53,7 +53,9 @@ export function JobPhotoQuick({
         className={className}
       >
         {busy ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <Camera className="h-4 w-4 shrink-0" />}
-        <span className="sr-only sm:not-sr-only">Photo</span>
+        {/* Always visible — the dock's ICON_BTN renders it as a tiny caption under
+            the icon on a phone (60mph glanceability), inline at sm+. */}
+        <span>Photo</span>
       </button>
     </>
   );

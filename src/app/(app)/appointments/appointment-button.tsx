@@ -9,6 +9,7 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/toast";
 import { useDraft } from "@/lib/use-draft";
+import { APPOINTMENT_TYPES, appointmentTypeLabel } from "@/lib/statuses";
 import {
   createAppointment,
   updateAppointment,
@@ -110,6 +111,8 @@ export function AppointmentButton({
   defaultCustomerId,
   defaultJobId,
   fromLead = false,
+  defaultType,
+  buttonLabel,
   dayStarts,
   compact = false,
 }: {
@@ -125,6 +128,11 @@ export function AppointmentButton({
   defaultJobId?: string;
   /** Mounted from a lead → default the TYPE to a quote/estimate instead of a plain appointment. */
   fromLead?: boolean;
+  /** Preselect a TYPE in create mode (e.g. "inspection" on the Inspections tab) — must be an
+   *  APPOINTMENT_TYPES value; overrides the fromLead default. */
+  defaultType?: string;
+  /** Create-button copy override ("Schedule inspection" on the Inspections tab). */
+  buttonLabel?: string;
   /** ISO starts of appointments already on the viewed day — lets the create form suggest a
    *  time AFTER the last one instead of a blind 08:00. Optional; empty → 08:00. */
   dayStarts?: string[];
@@ -163,9 +171,10 @@ export function AppointmentButton({
     const st = appointment ? toLocal(appointment.starts_at) : { date, time: suggestedTime(date, dayStarts ?? []) };
     const en = appointment ? toLocal(appointment.ends_at) : { date: "", time: "" };
     return {
-      // Default TYPE: a lead → quote/estimate; anywhere else → a plain appointment (NOT the old
-      // blind "quote" default that mislabeled every hand-added entry as an estimate).
-      type: appointment?.type ?? (fromLead ? "quote" : "appointment"),
+      // Default TYPE: caller's explicit defaultType first (the Inspections tab passes
+      // "inspection"), then a lead → quote/estimate, anywhere else → a plain appointment (NOT
+      // the old blind "quote" default that mislabeled every hand-added entry as an estimate).
+      type: appointment?.type ?? defaultType ?? (fromLead ? "quote" : "appointment"),
       assigned_to: appointment?.assigned_to ?? "",
       title: appointment?.title ?? suggestedTitle,
       date,
@@ -336,7 +345,7 @@ export function AppointmentButton({
         </button>
       ) : (
         <Button onClick={openModal} size={compact ? "sm" : undefined} className="shrink-0 whitespace-nowrap">
-          <Plus className="h-4 w-4" /> New Appointment
+          <Plus className="h-4 w-4" /> {buttonLabel ?? "New Appointment"}
         </Button>
       )}
 
@@ -399,12 +408,12 @@ export function AppointmentButton({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label htmlFor="ap-type">Type</Label>
+              {/* Options driven by the APPOINTMENT_TYPES spine (statuses.ts) — the dropdown,
+                  the write-guard and the DB check constraint can't drift apart. */}
               <Select id="ap-type" name="type" value={form.type} onChange={(e) => patch({ type: e.target.value })}>
-                <option value="quote">Quote / estimate a job</option>
-                <option value="meeting">Meet with customer</option>
-                <option value="inspection">Inspection</option>
-                <option value="appointment">Appointment</option>
-                <option value="other">Other</option>
+                {APPOINTMENT_TYPES.map((t) => (
+                  <option key={t} value={t}>{appointmentTypeLabel(t)}</option>
+                ))}
               </Select>
             </div>
             <div>

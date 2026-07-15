@@ -5,9 +5,9 @@ import { emptyToNull } from "@/lib/forms";
 import { requireStaff } from "@/lib/staff-guard";
 import { sendPushToProfiles } from "@/lib/push";
 import { getOrgSettings } from "@/lib/org-settings";
-import { tzDateTimeUtc } from "@/lib/tz";
+import { tzDateTimeUtc, todayStrInTz } from "@/lib/tz";
 import { createProposalCore, cleanSlots } from "@/lib/appointments/proposal";
-import { APPOINTMENT_STATUSES } from "@/lib/statuses";
+import { APPOINTMENT_STATUSES, APPOINTMENT_TYPES } from "@/lib/statuses";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 /** The browser-computed ISO if present; otherwise build the instant in the ORG
@@ -27,6 +27,15 @@ async function resolveIso(
 }
 
 export type Result = { ok: boolean; error?: string; id?: string };
+
+/** Spine guard for appointments.type (mirrors the 0051/0131 check constraint) — a bad
+ *  value reads as a clean message instead of a raw Postgres constraint error. */
+function resolveType(formData: FormData, fallback: string): { type?: string; error?: string } {
+  const type = String(formData.get("type") ?? fallback);
+  if (!(APPOINTMENT_TYPES as readonly string[]).includes(type))
+    return { error: `Type must be one of: ${APPOINTMENT_TYPES.join(", ")}.` };
+  return { type };
+}
 
 
 /** Resolve the customer for an appointment form: an existing id, or create a new
@@ -76,10 +85,13 @@ export async function createAppointment(formData: FormData): Promise<Result> {
   if (cust.error) return { ok: false, error: cust.error };
   const customerId = cust.customerId;
 
+  const typed = resolveType(formData, "appointment");
+  if (typed.error) return { ok: false, error: typed.error };
+
   const { data, error } = await supabase
     .from("appointments")
     .insert({
-      type: String(formData.get("type") ?? "appointment"),
+      type: typed.type,
       title,
       starts_at: startIso,
       ends_at: endIso,
@@ -109,7 +121,84 @@ export async function createAppointment(formData: FormData): Promise<Result> {
 
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
+  revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too
   return { ok: true, id: data.id };
+}
+
+/** "Inspect now" — the already-onsite path (Erik: "sometimes we're onsite already — too
+ *  many steps today"). Creates a type='inspection' appointment starting NOW (status
+ *  'scheduled'; filling in the capture is what makes it *done*), linked to the lead when
+ *  launched from one, so the caller can route STRAIGHT to /appointments/<id> and start
+ *  collecting field data. One tap from lead → capturing. */
+export async function createInspectionNow(
+  opts: { inquiryId?: string | null } = {},
+): Promise<Result> {
+  const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+
+  // Lead context (optional): inherit name/address/notes and keep the provenance backlink.
+  // RLS scopes the read — a cross-org id reads as "not found", never a silent unlinked row.
+  type LeadCtx = {
+    id: string;
+    name: string;
+    address: string | null;
+    message: string | null;
+    notes: string | null;
+    customer_id: string | null;
+  };
+  let inq: LeadCtx | null = null;
+  if (opts.inquiryId) {
+    const { data } = await supabase
+      .from("inquiries")
+      .select("id, name, address, message, notes, customer_id")
+      .eq("id", opts.inquiryId)
+      .maybeSingle();
+    if (!data) return { ok: false, error: "Lead not found." };
+    inq = data as LeadCtx;
+  }
+
+  const { data: appt, error } = await supabase
+    .from("appointments")
+    .insert({
+      type: "inspection",
+      title: inq ? `Site inspection: ${inq.name}` : "Site inspection",
+      starts_at: new Date().toISOString(), // now — an instant is an instant in any tz
+      status: "scheduled", // NOT completed: the capture (or "Mark inspection complete") finishes it
+      location: inq?.address ?? null,
+      notes: inq?.message ?? inq?.notes ?? null,
+      customer_id: inq?.customer_id ?? null, // deferred-customer doctrine: no contact row before the win
+      inquiry_id: inq?.id ?? null,
+      assigned_to: ctx.userId, // whoever tapped is the one standing onsite
+      created_by: ctx.userId,
+    })
+    .select("id")
+    .single();
+  if (error) return { ok: false, error: error.message };
+
+  // Same engaged-not-closed stamp as the booked-inspection path: the lead stays OPEN
+  // (converted_at untouched) and resurfaces today for the write-up.
+  if (inq) {
+    const tz = await (async () => {
+      const { data } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+      return getOrgSettings((data as { settings?: unknown } | null)?.settings).timezone;
+    })();
+    await supabase
+      .from("inquiries")
+      .update({
+        status: "contacted",
+        last_contacted_at: new Date().toISOString(),
+        next_follow_up_at: todayStrInTz(tz),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", inq.id);
+    revalidatePath("/leads");
+  }
+
+  revalidatePath("/schedule");
+  revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
+  revalidatePath("/inspections");
+  return { ok: true, id: appt.id };
 }
 
 /** Create a TENTATIVE appointment + a customer pick-a-time link (up to 3 date+
@@ -136,6 +225,9 @@ export async function createAppointmentProposal(
   const cust = await resolveCustomer(supabase, formData, ctx.userId);
   if (cust.error) return { ok: false, error: cust.error };
 
+  const typed = resolveType(formData, "quote");
+  if (typed.error) return { ok: false, error: typed.error };
+
   // First slot is the tentative time (browser-computed ISO honors the user's tz).
   const startIso = await resolveIso(supabase, emptyToNull(formData.get("starts_at_iso")), slots[0].date, slots[0].time);
 
@@ -144,7 +236,7 @@ export async function createAppointmentProposal(
   // path. (The public path stopped writing proposals in cn-v499 — it now only
   // flags site_inspection_required and pings the office.)
   const res = await createProposalCore(supabase, {
-    type: String(formData.get("type") ?? "quote"),
+    type: typed.type!,
     title,
     slots,
     jobId: emptyToNull(formData.get("job_id")),
@@ -159,6 +251,7 @@ export async function createAppointmentProposal(
 
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
+  revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too
   return { ok: true, token: res.token };
 }
 
@@ -226,10 +319,13 @@ export async function updateAppointment(id: string, formData: FormData): Promise
     emptyToNull(formData.get("ends_at_iso")) ??
     (endTime ? await resolveIso(supabase, null, apptDate, endTime) : null);
 
+  const typed = resolveType(formData, "appointment");
+  if (typed.error) return { ok: false, error: typed.error };
+
   const { error } = await supabase
     .from("appointments")
     .update({
-      type: String(formData.get("type") ?? "appointment"),
+      type: typed.type,
       title,
       starts_at: startIso,
       ends_at: endIso,
@@ -245,6 +341,7 @@ export async function updateAppointment(id: string, formData: FormData): Promise
 
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
+  revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too
   return { ok: true };
 }
 
@@ -272,6 +369,7 @@ export async function setAppointmentStatus(id: string, status: string): Promise<
   }
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
+  revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too
   return { ok: true };
 }
 
@@ -312,6 +410,7 @@ export async function rescheduleAppointment(
     .select("id");
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
+  revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too
   return {
     ok: true,
     ...(withdrawn?.length
@@ -353,6 +452,7 @@ export async function createJobFromAppointment(appointmentId: string): Promise<R
   await supabase.from("appointments").update({ job_id: job.id }).eq("id", appointmentId);
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
+  revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too
   return { ok: true, id: job.id };
 }
 
@@ -364,5 +464,6 @@ export async function deleteAppointment(id: string): Promise<Result> {
   if (error) return { ok: false, error: error.message };
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
+  revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too
   return { ok: true };
 }

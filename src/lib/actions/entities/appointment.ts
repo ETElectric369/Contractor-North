@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { APPOINTMENT_TYPES } from "@/lib/statuses";
 import { createAppointment, setAppointmentStatus, rescheduleAppointment } from "@/app/(app)/appointments/actions";
 import { createClient } from "@/lib/supabase/server";
 import { resolveCustomerId, resolveJobId } from "../resolve-id";
@@ -36,7 +37,7 @@ export const appointmentActions: Record<string, ActionDef> = {
     // Only starts_at stays required (an appointment without a time isn't schedulable).
     input: z.object({
       title: z.string().trim().min(1),
-      type: z.enum(["appointment", "inspection"]).default("appointment"),
+      type: z.enum(APPOINTMENT_TYPES as unknown as [string, ...string[]]).default("appointment"), // spine-derived (statuses.ts) — was a hand-rolled 2-value list that dropped meeting/final_inspection
       starts_at: z.string().min(1),
       ends_at: z.string().nullable().optional(),
       job_id: z.string().nullable().optional(),

@@ -6,7 +6,7 @@ import { Home, ChevronRight, MapPin, Receipt, Plus, Printer, Phone, type LucideI
 // component REFERENCES survive the server→client serialization into <Tabs>.
 import {
   LayoutDashboard, Clock, Package, Camera, ListChecks, CalendarDays,
-  ClipboardCheck, FileText, Wallet, Receipt as ReceiptTab, StickyNote, Stamp, FileDiff,
+  ClipboardCheck, FileText, DollarSign, Receipt as ReceiptTab, StickyNote, Stamp, FileDiff,
 } from "./job-tab-icons";
 import { createClient } from "@/lib/supabase/server";
 import { invoiceBalance, isDrawKind } from "@/lib/invoice-math";
@@ -84,7 +84,9 @@ const JOB_TAB_META: Record<string, { group?: string; icon?: LucideIcon }> = {
   appointments: { group: "Work", icon: CalendarDays },
   wos: { group: "Work", icon: ClipboardCheck },
   quotes: { group: "Money", icon: FileText },
-  costs: { group: "Money", icon: Wallet },
+  // DollarSign, not Wallet: a wallet and a box (Materials' Package) share the same
+  // rounded-rect silhouette at glance size — $ vs box can't be confused.
+  costs: { group: "Money", icon: DollarSign },
   invoices: { group: "Money", icon: ReceiptTab },
   "change-orders": { group: "Money", icon: FileDiff },
   notes: { group: "Docs", icon: StickyNote },
@@ -644,7 +646,7 @@ export default async function JobDetailPage({
           <Card className="overflow-hidden">
             <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
               <span className="text-sm font-semibold text-slate-900">Material purchase orders</span>
-              <NewPoButton jobs={thisJobOpt} lists={lists ?? []} />
+              <NewPoButton jobs={thisJobOpt} lists={lists ?? []} defaultJobId={j.id} />
             </div>
             <ul className="divide-y divide-slate-100">
               {(pos ?? []).map((p: any) => (

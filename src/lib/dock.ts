@@ -152,8 +152,11 @@ export const DOCK: DockSection[] = [
     icon: TrendingUp,
     href: "/leads", // Customers moved to Contacts; Sales is the prospect pipeline now
     staffOnly: true,
+    // The pipeline in order: Leads → Inspections (the site walk-through between a lead and
+    // its estimate — an inspection IS an appointment type, Erik 2026-07-14) → Estimates.
     children: [
       { id: "sl-leads", label: "Leads", icon: UserPlus, href: "/leads" },
+      { id: "sl-inspections", label: "Inspections", icon: ClipboardCheck, href: "/inspections" },
       { id: "sl-quotes", label: "Estimates", icon: FileText, href: "/quotes" },
     ],
   },

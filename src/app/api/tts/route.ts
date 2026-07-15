@@ -23,7 +23,8 @@ export async function GET(req: Request) {
   };
   try {
     if (elKey) {
-      const voice = process.env.ELEVENLABS_VOICE_ID || "21m00Tcm4TlvDq8ikWAM";
+      // Keep this default in lockstep with POST below (TEMPORARY British-male swap — George).
+      const voice = process.env.ELEVENLABS_VOICE_ID || "JBFqnCBsd6RMkjVDRZzb";
       const r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voice}?output_format=mp3_44100_64`, {
         method: "POST",
         headers: { "xi-api-key": elKey, "content-type": "application/json", accept: "audio/mpeg" },
@@ -42,7 +43,8 @@ export async function GET(req: Request) {
       const r = await fetch("https://api.openai.com/v1/audio/speech", {
         method: "POST",
         headers: { authorization: `Bearer ${oaKey}`, "content-type": "application/json" },
-        body: JSON.stringify({ model: process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts", voice: process.env.OPENAI_TTS_VOICE || "nova", input: "Test." }),
+        // Keep the default in lockstep with POST below (TEMPORARY British-male swap — fable).
+        body: JSON.stringify({ model: process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts", voice: process.env.OPENAI_TTS_VOICE || "fable", input: "Test." }),
       });
       out.testCall = { ok: r.ok, status: r.status, error: r.ok ? null : (await r.text().catch(() => "")).slice(0, 400) };
       out.verdict = r.ok ? "✅ KEY WORKS — device-side audio is the issue." : `❌ OpenAI rejected (HTTP ${r.status}).`;
@@ -66,11 +68,15 @@ export async function POST(req: Request) {
   text = text.trim().slice(0, 800); // bound cost/latency
   if (!text) return new Response("No text", { status: 400 });
 
-  // ElevenLabs — just set ELEVENLABS_API_KEY (the voice defaults to Rachel; override with
-  // ELEVENLABS_VOICE_ID for a library pick or a cloned 'hero' voice you have rights to).
+  // ElevenLabs — just set ELEVENLABS_API_KEY (the voice defaults to George, see below; override
+  // with ELEVENLABS_VOICE_ID for a library pick or a cloned 'hero' voice you have rights to).
   const elKey = process.env.ELEVENLABS_API_KEY;
   if (elKey) {
-    const elVoice = process.env.ELEVENLABS_VOICE_ID || "21m00Tcm4TlvDq8ikWAM"; // Rachel
+    // TEMPORARY voice swap (Erik, 2026-07-14): he wants Nort to sound "like Claude" for now —
+    // a calm, refined BRITISH MALE. George is ElevenLabs' premade warm/mature British male
+    // (calmer than Daniel's news-presenter read). REVERT: restore Rachel "21m00Tcm4TlvDq8ikWAM"
+    // here AND in the GET diag above — or just set ELEVENLABS_VOICE_ID, which always wins.
+    const elVoice = process.env.ELEVENLABS_VOICE_ID || "JBFqnCBsd6RMkjVDRZzb"; // George (was Rachel 21m00Tcm4TlvDq8ikWAM)
     // Flash = ~75ms (ElevenLabs' real-time model); output_format is a QUERY param; the
     // smaller 64kbps mp3 halves the payload with no audible loss on a voice read-back.
     const url = `https://api.elevenlabs.io/v1/text-to-speech/${elVoice}?output_format=mp3_44100_64`;
@@ -99,10 +105,13 @@ export async function POST(req: Request) {
       headers: { authorization: `Bearer ${oaKey}`, "content-type": "application/json" },
       body: JSON.stringify({
         model: process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts",
-        voice: process.env.OPENAI_TTS_VOICE || "nova",
+        // TEMPORARY (2026-07-14, matches the ElevenLabs British-male swap above): "fable" is
+        // OpenAI's British-accented premade voice — closest they have to a refined British male.
+        // REVERT: restore "nova" and drop the accent line from instructions below.
+        voice: process.env.OPENAI_TTS_VOICE || "fable",
         input: text,
         // Steers tone — only honored by gpt-4o-mini-tts (ignored by tts-1).
-        instructions: "Speak in a warm, calm, confident, natural conversational tone, like a helpful colleague. Relaxed pacing, clear enunciation; never robotic or rushed.",
+        instructions: "Speak as a calm, refined British English male — a warm, confident, natural conversational tone, like a helpful colleague. Relaxed pacing, clear enunciation; never robotic or rushed.",
         response_format: "mp3",
       }),
     });

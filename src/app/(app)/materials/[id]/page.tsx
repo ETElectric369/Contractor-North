@@ -85,6 +85,8 @@ export default async function MaterialListPage({
           <NewPoButton
             jobs={l.jobs ? [{ id: l.jobs.id, job_number: l.jobs.job_number, name: l.jobs.name }] : []}
             lists={[{ id: l.id, name: l.name }]}
+            defaultJobId={l.jobs?.id}
+            defaultListId={l.id}
           />
           <SectionActionsMenu
             tree={materialListSectionTree(
