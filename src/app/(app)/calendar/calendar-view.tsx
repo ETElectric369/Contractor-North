@@ -22,6 +22,7 @@ import { ApptQuickActions } from "../appointments/appointment-status";
 import { JobScheduleCard } from "../schedule/job-schedule-card";
 import { WeekAgenda } from "../schedule/week-agenda";
 import { jobLabel } from "@/lib/schedule-options";
+import { allDayEventDays } from "@/lib/gcal-map";
 
 // THE one forward-looking time map. WHEN-DID (clocked hours) lives on
 // /timeclock + /timecards only — the old "Clocked time" layer, day-view
@@ -89,6 +90,19 @@ export interface CalTask {
   jobs?: { job_number: string; name: string } | null;
 }
 
+/** A mirrored Google event (external_events, 0132) — READ-ONLY display: it
+ *  renders as a neutral zinc pill so "Erik's dentist" blocks the time without
+ *  pretending to be CN work. Never editable/movable in CN (Google owns it).
+ *  For all_day rows starts_at/ends_at carry Google's DATES as <date>T00:00:00Z
+ *  — the day comes from the string's date part, never a local parse. */
+export interface CalExternal {
+  id: string;
+  title: string;
+  starts_at: string;
+  ends_at: string | null;
+  all_day: boolean;
+}
+
 /** A job with no date yet — shown in the "To schedule" tray. */
 export interface CalUnscheduled {
   id: string;
@@ -107,6 +121,7 @@ export interface DayData {
   jobs: JobOnDay[];
   appts: CalAppt[];
   tasks: CalTask[];
+  externals: CalExternal[];
 }
 
 interface PickerOpt {
@@ -154,6 +169,9 @@ const APPT_GRID_TONE: Record<string, string> = {
 const APPT_GRID_DEFAULT = "border-cyan-300 bg-cyan-100 text-cyan-900";
 const JOB_GRID_TONE = "border-slate-300 bg-slate-200/80 text-slate-800";
 const TASK_TRAY_TONE = "border-slate-300 bg-slate-100 text-slate-700";
+// Mirrored Google events: deliberately the flattest tone on the grid — real CN
+// work stays visually louder than "Erik's dentist".
+const EXTERNAL_GRID_TONE = "border-zinc-300 bg-zinc-100 text-zinc-600";
 
 const apptGridColor = (a: CalAppt) =>
   `${APPT_GRID_TONE[a.type] ?? APPT_GRID_DEFAULT}${a.status === "proposed" ? " border-dashed opacity-75" : ""}${
@@ -165,6 +183,7 @@ export function CalendarView({
   segments = [],
   appointments = [],
   tasks = [],
+  external = [],
   unscheduled = [],
   members = [],
   picker,
@@ -176,6 +195,8 @@ export function CalendarView({
   segments?: CalSegment[];
   appointments?: CalAppt[];
   tasks?: CalTask[];
+  /** Mirrored Google events — read-only zinc pills (0132 two-way sync). */
+  external?: CalExternal[];
   unscheduled?: CalUnscheduled[];
   members?: CalMember[];
   picker: SchedulePicker;
@@ -244,9 +265,10 @@ export function CalendarView({
     return (
       jobs.filter((j) => (j.scheduled_start || segJobIds.has(j.id)) && !(j.assigned_to ?? []).length).length +
       appointments.filter((a) => !a.assigned_to).length +
-      tasks.filter((t) => !t.assigned_to && isYmd(t.due_date)).length
+      tasks.filter((t) => !t.assigned_to && isYmd(t.due_date)).length +
+      external.length // Google events carry no CN assignee — a person filter hides them all
     );
-  }, [personFilter, jobs, segments, appointments, tasks]);
+  }, [personFilter, jobs, segments, appointments, tasks, external]);
 
   // Undo for a tray placement — snapshot taken client-side BEFORE the write, so
   // "Schedule" a backlog job is one deliberate pick with a safety net. (Chip
@@ -261,7 +283,7 @@ export function CalendarView({
   const byDay = useMemo(() => {
     const m = new Map<string, DayData>();
     const get = (k: string) => {
-      if (!m.has(k)) m.set(k, { jobs: [], appts: [], tasks: [] });
+      if (!m.has(k)) m.set(k, { jobs: [], appts: [], tasks: [], externals: [] });
       return m.get(k)!;
     };
     const pf = personFilter;
@@ -273,6 +295,21 @@ export function CalendarView({
     for (const t of tasks) {
       if (pf && t.assigned_to !== pf) continue;
       if (isYmd(t.due_date)) get(t.due_date).tasks.push(t);
+    }
+    // Mirrored Google events (read-only). All-day rows carry DATE strings as
+    // <date>T00:00:00Z — slice the date out (a local parse would shift a
+    // west-of-UTC viewer to the previous day); timed rows place like appts.
+    // Google events have no CN assignee, so any person filter hides them.
+    if (!pf) {
+      for (const x of external) {
+        if (x.all_day) {
+          for (const day of allDayEventDays(x.starts_at.slice(0, 10), x.ends_at ? x.ends_at.slice(0, 10) : null)) {
+            get(day).externals.push(x);
+          }
+        } else {
+          get(dayKey(new Date(x.starts_at))).externals.push(x);
+        }
+      }
     }
 
     // Segments-first day expansion: a job with segments is placed only on the
@@ -307,9 +344,12 @@ export function CalendarView({
       }
     }
 
-    for (const v of m.values()) v.appts.sort((a, b) => a.starts_at.localeCompare(b.starts_at));
+    for (const v of m.values()) {
+      v.appts.sort((a, b) => a.starts_at.localeCompare(b.starts_at));
+      v.externals.sort((a, b) => a.starts_at.localeCompare(b.starts_at));
+    }
     return m;
-  }, [jobs, segments, appointments, tasks, personFilter]);
+  }, [jobs, segments, appointments, tasks, external, personFilter]);
 
   /** The job's current ranges as seen by this render — the tray-place undo
    *  snapshot. An empty result means "was unscheduled", which undo restores by
@@ -437,6 +477,31 @@ export function CalendarView({
         label: t.title,
         color: TASK_TRAY_TONE,
         href: t.job_id ? `/jobs/${t.job_id}?tab=tasks` : `/tasks/${t.category}`,
+      });
+    }
+    // Mirrored Google events: zinc, NO href — read-only display, Google owns
+    // them. All-day ones ride the tray; timed ones sit in their slot.
+    for (const x of data.externals) {
+      if (x.all_day) {
+        tray.push({ id: `x-${x.id}-${k}`, dayStr: k, label: x.title, color: EXTERNAL_GRID_TONE });
+        continue;
+      }
+      const s = new Date(x.starts_at);
+      const startMin = s.getHours() * 60 + s.getMinutes();
+      let endMin = startMin + 60;
+      if (x.ends_at) {
+        const e = new Date(x.ends_at);
+        if (dayKey(e) === k && e.getTime() > s.getTime())
+          endMin = Math.max(startMin + 15, e.getHours() * 60 + e.getMinutes());
+      }
+      events.push({
+        id: `x-${x.id}`,
+        dayStr: k,
+        startMin,
+        endMin,
+        label: x.title,
+        sub: "Google",
+        color: EXTERNAL_GRID_TONE,
       });
     }
     return { events, allDay: tray };
@@ -684,11 +749,12 @@ function pillTime(iso: string): string {
   return m ? `${h}:${String(m).padStart(2, "0")}${ap}` : `${h}${ap}`;
 }
 
-const PILL_TONE: Record<"job" | "appt" | "apptProposed" | "task", string> = {
+const PILL_TONE: Record<"job" | "appt" | "apptProposed" | "task" | "external", string> = {
   job: "bg-blue-50 text-blue-700",
   appt: "bg-violet-50 text-violet-700",
   apptProposed: "bg-violet-50 text-violet-400",
   task: "bg-slate-100 text-slate-600",
+  external: "bg-zinc-100 text-zinc-500", // mirrored Google events — read-only
 };
 
 /** Order a day's jobs/appts/tasks into labelled pills (timed first), for the month grid. */
@@ -705,6 +771,13 @@ function monthPills(data: DayData | undefined): { label: string; tone: keyof typ
     out.push({ label: `${pillTime(a.starts_at)} ${who}`, tone: a.status === "proposed" ? "apptProposed" : "appt", sort: new Date(a.starts_at).getTime() });
   }
   for (const t of data.tasks) out.push({ label: t.title, tone: "task", sort: Number.MAX_SAFE_INTEGER });
+  for (const x of data.externals) {
+    out.push(
+      x.all_day
+        ? { label: x.title, tone: "external", sort: Number.MAX_SAFE_INTEGER - 1 }
+        : { label: `${pillTime(x.starts_at)} ${x.title}`, tone: "external", sort: new Date(x.starts_at).getTime() },
+    );
+  }
   return out.sort((x, y) => x.sort - y.sort);
 }
 

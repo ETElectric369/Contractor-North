@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { pushCalendarItem, deleteCalendarItem } from "@/lib/calendar-sync";
 import { JOB_STATUSES } from "@/lib/job-status";
 import { DRAW_KINDS } from "@/lib/invoice-math";
 import { emptyToNull } from "@/lib/forms";
@@ -131,6 +132,9 @@ export async function setJobStatus(id: string, status: string): Promise<{ ok: bo
   const { data, error } = await supabase.from("jobs").update({ status }).eq("id", id).select("id");
   if (error) return { ok: false, error: error.message };
   if (!data || !data.length) return { ok: false, error: "Job not found." };
+  // Google reconcile (fire-safe): leaving the active set deletes the event,
+  // re-activating a scheduled job re-pushes it.
+  await pushCalendarItem("job", id);
   revalidatePath(`/jobs/${id}`);
   revalidatePath("/jobs");
   revalidatePath("/planner"); // a status/finish change moves a job on/off today's My Day
@@ -160,6 +164,7 @@ export async function finishJob(
   if (draws && draws.length) {
     const { error } = await supabase.from("jobs").update({ status: "complete" }).eq("id", jobId);
     if (error) return { ok: false, error: error.message };
+    await pushCalendarItem("job", jobId); // finished job leaves Google (fire-safe)
     revalidatePath(`/jobs/${jobId}`);
     revalidatePath("/jobs");
   revalidatePath("/planner"); // a status/finish change moves a job on/off today's My Day
@@ -175,6 +180,7 @@ export async function finishJob(
 
   const { error } = await supabase.from("jobs").update({ status: "complete" }).eq("id", jobId);
   if (error) return { ok: false, error: error.message };
+  await pushCalendarItem("job", jobId); // finished job leaves Google (fire-safe)
 
   // Auto-invoice: when asked, email the draft to the customer now. Best-effort —
   // if they have no email (emailInvoice returns an error), the invoice simply stays
@@ -198,6 +204,8 @@ export async function deleteJob(id: string): Promise<{ ok: boolean; error?: stri
   const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  // BEFORE the row goes (it reads google_event_id off the row). Fire-safe.
+  await deleteCalendarItem("job", id);
   const { error } = await supabase.from("jobs").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/jobs");
@@ -281,6 +289,9 @@ export async function updateJob(
     // returns. The helper never throws, so this can't break the job update.
     await notifyJobCrewAdded({ id, org_id: p.org_id, job_number: p.job_number, name }, p.assigned_to, assigned, ctx.userId);
   }
+
+  // This writer touches name/address/schedule — keep Google current (fire-safe).
+  await pushCalendarItem("job", id);
 
   revalidatePath(`/jobs/${id}`);
   revalidatePath("/jobs");

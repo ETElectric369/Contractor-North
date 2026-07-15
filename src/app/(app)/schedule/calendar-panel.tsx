@@ -8,6 +8,7 @@ import {
   type CalSegment,
   type CalAppt,
   type CalTask,
+  type CalExternal,
 } from "../calendar/calendar-view";
 
 /** Data layer for the /schedule calendar. Forward-looking records only —
@@ -23,7 +24,7 @@ export async function CalendarPanel() {
   const jobFrom = new Date(now - 120 * 86400_000).toISOString();
   const jobTo = new Date(now + 400 * 86400_000).toISOString();
 
-  const [{ data: jobs }, { data: segments }, { data: appointments }, { data: tasks }, { data: unschedRows }, picker, { data: org }] =
+  const [{ data: jobs }, { data: segments }, { data: appointments }, { data: tasks }, { data: unschedRows }, { data: externalRows }, picker, { data: org }] =
     await Promise.all([
       // Overlap test, not a point test on scheduled_start: a job shows if it
       // STARTS before the window end AND (ends after the window start, or is an
@@ -71,6 +72,16 @@ export async function CalendarPanel() {
         .in("status", ACTIVE_JOB_STATUSES)
         .order("created_at", { ascending: false })
         .limit(50),
+      // Mirrored Google events (0132 two-way sync) — read-only zinc pills.
+      // Fail-soft by construction: a missing table / RLS miss / fetch error
+      // returns data:null and the calendar simply renders zero Google pills.
+      supabase
+        .from("external_events")
+        .select("id, title, starts_at, ends_at, all_day")
+        .gte("starts_at", jobFrom)
+        .lte("starts_at", jobTo)
+        .order("starts_at")
+        .limit(1000),
       // Jobs/customers/staff option lists for the appointment modal; the staff
       // rows double as the roster (assignee dropdowns, initials, person filter).
       getSchedulePickerOptions(supabase),
@@ -93,6 +104,7 @@ export async function CalendarPanel() {
         segments={(segments ?? []) as unknown as CalSegment[]}
         appointments={(appointments ?? []) as unknown as CalAppt[]}
         tasks={(tasks ?? []) as unknown as CalTask[]}
+        external={(externalRows ?? []) as unknown as CalExternal[]}
         unscheduled={unscheduled}
         members={picker.staff}
         picker={{ jobs: picker.jobOpts, customers: picker.custOpts, staff: picker.staffOpts }}

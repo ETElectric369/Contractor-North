@@ -148,6 +148,15 @@ export default async function SettingsPage({
   const { data: gcalConn } = isAdmin
     ? await supabase.from("calendar_connections").select("id").eq("provider", "google").maybeSingle()
     : { data: null };
+  // Two-way sync columns (0132) — a SEPARATE best-effort read so a not-yet-migrated
+  // DB degrades to defaults instead of hiding the whole connection.
+  const { data: gcalSync } = gcalConn
+    ? await supabase
+        .from("calendar_connections")
+        .select("selected_calendars, last_synced_at")
+        .eq("provider", "google")
+        .maybeSingle()
+    : { data: null };
 
   // QR + lead link for the public inquiry page (trucks, signs, business cards). Point at the org's
   // REAL public address (custom domain, else the free subdomain) — never the app's vercel.app URL,
@@ -423,7 +432,19 @@ export default async function SettingsPage({
                 />
               </Section>
               <Section title="Google Calendar">
-                <GcalCard configured={gcalConfigured()} connected={!!gcalConn} flash={gcal} />
+                <GcalCard
+                  configured={gcalConfigured()}
+                  connected={!!gcalConn}
+                  flash={gcal}
+                  selectedCalendars={
+                    Array.isArray((gcalSync as { selected_calendars?: unknown } | null)?.selected_calendars)
+                      ? ((gcalSync as { selected_calendars: unknown[] }).selected_calendars.filter(
+                          (c): c is string => typeof c === "string",
+                        ))
+                      : []
+                  }
+                  lastSyncedAt={(gcalSync as { last_synced_at?: string | null } | null)?.last_synced_at ?? null}
+                />
               </Section>
             </div>
           ),

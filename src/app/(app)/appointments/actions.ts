@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
+import { pushCalendarItem, deleteCalendarItem } from "@/lib/calendar-sync";
 import { requireStaff } from "@/lib/staff-guard";
 import { sendPushToProfiles } from "@/lib/push";
 import { getOrgSettings } from "@/lib/org-settings";
@@ -106,6 +107,9 @@ export async function createAppointment(formData: FormData): Promise<Result> {
     .single();
   if (error) return { ok: false, error: error.message };
 
+  // Live Google push (fire-safe: never throws, no-op when not connected).
+  await pushCalendarItem("appointment", data.id);
+
   const assignedTo = emptyToNull(formData.get("assigned_to"));
   if (assignedTo && assignedTo !== ctx.userId) {
     void sendPushToProfiles([assignedTo], "assigned", {
@@ -175,6 +179,8 @@ export async function createInspectionNow(
     .select("id")
     .single();
   if (error) return { ok: false, error: error.message };
+
+  await pushCalendarItem("appointment", appt.id); // live Google push (fire-safe)
 
   // Same engaged-not-closed stamp as the booked-inspection path: the lead stays OPEN
   // (converted_at untouched) and resurfaces today for the write-up.
@@ -339,6 +345,8 @@ export async function updateAppointment(id: string, formData: FormData): Promise
     .eq("id", id);
   if (error) return { ok: false, error: error.message };
 
+  await pushCalendarItem("appointment", id); // live Google push (fire-safe)
+
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too
@@ -367,6 +375,8 @@ export async function setAppointmentStatus(id: string, status: string): Promise<
       .eq("appointment_id", id)
       .eq("status", "pending");
   }
+  // Google reconcile (fire-safe): cancel deletes the event; other statuses re-push.
+  await pushCalendarItem("appointment", id);
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too
@@ -408,6 +418,7 @@ export async function rescheduleAppointment(
     .eq("appointment_id", id)
     .eq("status", "pending")
     .select("id");
+  await pushCalendarItem("appointment", id); // live Google push (fire-safe)
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too
@@ -450,6 +461,7 @@ export async function createJobFromAppointment(appointmentId: string): Promise<R
   if (error) return { ok: false, error: error.message };
 
   await supabase.from("appointments").update({ job_id: job.id }).eq("id", appointmentId);
+  await pushCalendarItem("job", job.id); // the new job is scheduled — push it (fire-safe)
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too
@@ -460,6 +472,8 @@ export async function deleteAppointment(id: string): Promise<Result> {
   const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  // BEFORE the row goes (it reads google_event_id off the row). Fire-safe.
+  await deleteCalendarItem("appointment", id);
   const { error } = await supabase.from("appointments").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/schedule");

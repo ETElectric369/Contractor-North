@@ -404,6 +404,86 @@ export async function disconnectGoogleCalendar(): Promise<Result> {
   return { ok: true };
 }
 
+/** The connected Google account's calendar list — feeds the settings picker of
+ *  which calendars to MIRROR into the schedule (read-only external events).
+ *  Needs the calendar.readonly scope, so a pre-two-way connection surfaces a
+ *  clear "reconnect" message instead of a raw 403. */
+export async function listGoogleCalendars(): Promise<
+  Result & { calendars?: { id: string; summary: string; primary?: boolean }[] }
+> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { gcalConnection, gcalTokenForConnection, gcalListCalendars } = await import("@/lib/google-calendar");
+  try {
+    const conn = await gcalConnection(ctx.supabase);
+    if (!conn) return { ok: false, error: "Google Calendar isn't connected yet." };
+    const token = await gcalTokenForConnection(ctx.supabase, conn);
+    if (!token) return { ok: false, error: "Google session expired — reconnect Google Calendar." };
+    return { ok: true, calendars: await gcalListCalendars(token) };
+  } catch (e: any) {
+    reportError("gcal-list-calendars", e);
+    return {
+      ok: false,
+      error:
+        "Couldn't load your calendars. If this connection predates two-way sync, disconnect and reconnect to grant calendar-list access.",
+    };
+  }
+}
+
+/** Save which Google calendars to mirror (external_events pull). Dropping a
+ *  calendar also drops its sync token so a re-add starts a fresh window; the
+ *  next sync sweep prunes its mirrored rows (service-only writes). */
+export async function saveSelectedCalendars(calendarIds: string[]): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const clean = Array.from(
+    new Set((calendarIds ?? []).map((s) => String(s).trim()).filter((s) => s.length > 0 && s.length < 300)),
+  ).slice(0, 25);
+  const { gcalConnection } = await import("@/lib/google-calendar");
+  const conn = await gcalConnection(ctx.supabase);
+  if (!conn) return { ok: false, error: "Google Calendar isn't connected yet." };
+  const tokens: Record<string, unknown> =
+    conn.sync_tokens && typeof conn.sync_tokens === "object" ? { ...conn.sync_tokens } : {};
+  for (const key of Object.keys(tokens)) if (!clean.includes(key)) delete tokens[key];
+  const { error } = await ctx.supabase
+    .from("calendar_connections")
+    .update({ selected_calendars: clean, sync_tokens: tokens })
+    .eq("id", conn.id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/settings");
+  return { ok: true };
+}
+
+/** "Sync now" — the same core the 15-min cron runs, scoped to the caller's
+ *  org. Staff auth first; then the SERVICE client does the work, because
+ *  external_events is deliberately service-write-only. */
+export async function syncGoogleNow(): Promise<Result & { pulled?: number; swept?: number }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { data: me } = await ctx.supabase
+    .from("profiles")
+    .select("org_id")
+    .eq("id", ctx.userId)
+    .maybeSingle();
+  if (!me?.org_id) return { ok: false, error: "No organization." };
+  try {
+    const service = createServiceClient();
+    const { gcalConnection } = await import("@/lib/google-calendar");
+    const { syncOrgCalendars } = await import("@/lib/calendar-sync");
+    const conn = await gcalConnection(service, me.org_id);
+    if (!conn) return { ok: false, error: "Google Calendar isn't connected yet." };
+    const res = await syncOrgCalendars(service, conn);
+    revalidatePath("/settings");
+    revalidatePath("/schedule");
+    revalidatePath("/planner");
+    if (res.errors.length) return { ok: false, error: res.errors[0], pulled: res.pulled, swept: res.swept };
+    return { ok: true, pulled: res.pulled, swept: res.swept };
+  } catch (e: any) {
+    reportError("gcal-sync-now", e);
+    return { ok: false, error: e?.message ?? "Sync failed." };
+  }
+}
+
 /** Set (or clear) the signed-in user's avatar. */
 export async function setAvatarUrl(url: string | null): Promise<Result> {
   const supabase = await createClient();

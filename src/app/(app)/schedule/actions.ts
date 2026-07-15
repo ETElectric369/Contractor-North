@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
+import { pushCalendarItem } from "@/lib/calendar-sync";
 import { notifyJobCrewAdded } from "@/lib/crew-notify";
 import { requireStaff } from "@/lib/staff-guard";
 import { JOB_STATUSES } from "@/lib/job-status";
@@ -134,6 +135,9 @@ export async function createJob(formData: FormData): Promise<Result> {
     .single();
 
   if (error) return { ok: false, error: error.message };
+
+  // Live Google push (fire-safe: never throws, no-op when not connected).
+  if (start) await pushCalendarItem("job", data.id);
 
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day reads today's scheduled jobs — keep it in sync
@@ -337,6 +341,12 @@ export async function setJobScheduleRanges(
     const { error: insErr } = await supabase.from("job_schedule_segments").insert(rows);
     segOk = !insErr;
   }
+
+  // Live Google push — THE choke point covers every schedule writer (movers,
+  // tray place, undo, registry verb, schedule control). Fire-safe: a Google
+  // failure reports to sentry_events and never fails the schedule write.
+  // Awaited (not `void`) — serverless can drop an un-awaited promise.
+  await pushCalendarItem("job", jobId);
 
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day reads today's scheduled jobs — keep it in sync

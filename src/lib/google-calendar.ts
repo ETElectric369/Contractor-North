@@ -1,11 +1,25 @@
 /**
- * Google Calendar sync (server only). OAuth code flow + pushing scheduled
- * jobs as calendar events. Tokens live in calendar_connections (RLS: staff).
+ * Google Calendar sync (server only). OAuth code flow + the raw Calendar API
+ * calls the two-way sync is built on. Tokens live in calendar_connections
+ * (RLS: staff). All raw fetch — no SDK dependency.
+ *
+ * Two-way model (0132): CN pushes jobs/appointments as events tagged
+ * extendedProperties.private.cn="1" (CN-owned; re-pushed over Google edits);
+ * the pull cron mirrors the org's selected calendars into external_events
+ * read-only, skipping cn-tagged echoes. See src/lib/calendar-sync.ts.
  */
+
+import { jobEventBody, type JobForEvent } from "@/lib/gcal-map";
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
-const SCOPE = "https://www.googleapis.com/auth/calendar.events";
+// calendar.events: read/write events (the push + the per-calendar pull).
+// calendar.readonly: calendarList.list — the settings picker of which of the
+// user's calendars to mirror. A connection granted before this scope was added
+// must RECONNECT once for the picker/pull to work.
+const SCOPE =
+  "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly";
+const CAL_BASE = "https://www.googleapis.com/calendar/v3";
 
 const site = () => process.env.NEXT_PUBLIC_SITE_URL || "https://contractor-north.vercel.app";
 const redirectUri = () => `${site()}/api/google/callback`;
@@ -64,22 +78,22 @@ export async function gcalRefresh(refreshToken: string): Promise<GoogleTokens> {
   return r.json();
 }
 
-/** A valid access token for the org's connection, refreshing (and persisting)
- *  when it's within 2 minutes of expiry. `supabase` is the caller's client. */
-export async function gcalAccessToken(supabase: any): Promise<{ token: string; calendarId: string } | null> {
-  const { data: conn } = await supabase
-    .from("calendar_connections")
-    .select("*")
-    .eq("provider", "google")
-    .maybeSingle();
-  if (!conn) return null;
+/** The org's calendar_connections row (RLS-scoped for a user client; pass
+ *  orgId to scope a SERVICE client, which sees every org's row). */
+export async function gcalConnection(supabase: any, orgId?: string): Promise<any | null> {
+  let q = supabase.from("calendar_connections").select("*").eq("provider", "google");
+  if (orgId) q = q.eq("org_id", orgId);
+  const { data } = await q.maybeSingle();
+  return data ?? null;
+}
 
+/** A valid access token for a fetched connection row, refreshing (and
+ *  persisting) when it's within 2 minutes of expiry. Throws on refresh
+ *  failure — callers treat that as "reconnect needed". */
+export async function gcalTokenForConnection(supabase: any, conn: any): Promise<string | null> {
   const expiresAt = conn.expires_at ? new Date(conn.expires_at).getTime() : 0;
-  if (expiresAt > Date.now() + 120_000) {
-    return { token: conn.access_token, calendarId: conn.calendar_id || "primary" };
-  }
+  if (expiresAt > Date.now() + 120_000) return conn.access_token as string;
   if (!conn.refresh_token) return null;
-
   const t = await gcalRefresh(conn.refresh_token);
   await supabase
     .from("calendar_connections")
@@ -88,50 +102,141 @@ export async function gcalAccessToken(supabase: any): Promise<{ token: string; c
       expires_at: new Date(Date.now() + (t.expires_in ?? 3600) * 1000).toISOString(),
     })
     .eq("id", conn.id);
-  return { token: t.access_token, calendarId: conn.calendar_id || "primary" };
+  return t.access_token;
 }
 
-interface JobForSync {
-  id: string;
-  job_number: string;
-  name: string;
-  address: string | null;
-  description: string | null;
-  scheduled_start: string;
-  scheduled_end: string | null;
-  google_event_id: string | null;
+/** A valid access token for the org's connection (legacy shape kept for the
+ *  settings push action). `supabase` is the caller's client. */
+export async function gcalAccessToken(supabase: any): Promise<{ token: string; calendarId: string } | null> {
+  const conn = await gcalConnection(supabase);
+  if (!conn) return null;
+  const token = await gcalTokenForConnection(supabase, conn);
+  if (!token) return null;
+  return { token, calendarId: conn.calendar_id || "primary" };
 }
 
-/** Create or update one calendar event for a job. Returns the event id. */
-export async function gcalUpsertJobEvent(
+const jsonHeaders = (token: string) => ({
+  Authorization: `Bearer ${token}`,
+  "Content-Type": "application/json",
+});
+
+/** Create or update one event (PATCH the existing id, falling back to a
+ *  create when Google deleted it). Returns the event id. */
+export async function gcalUpsertEvent(
   token: string,
   calendarId: string,
-  job: JobForSync,
+  existingEventId: string | null,
+  body: Record<string, unknown>,
 ): Promise<string> {
-  const start = new Date(job.scheduled_start);
-  const end = job.scheduled_end ? new Date(job.scheduled_end) : new Date(start.getTime() + 8 * 3600_000);
-  const body = {
-    summary: `${job.job_number} — ${job.name}`,
-    location: job.address ?? undefined,
-    description: job.description ?? undefined,
-    start: { dateTime: start.toISOString() },
-    end: { dateTime: (end > start ? end : new Date(start.getTime() + 8 * 3600_000)).toISOString() },
-  };
-  const base = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`;
-  const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
-
-  if (job.google_event_id) {
-    const r = await fetch(`${base}/${encodeURIComponent(job.google_event_id)}`, {
+  const base = `${CAL_BASE}/calendars/${encodeURIComponent(calendarId)}/events`;
+  if (existingEventId) {
+    const r = await fetch(`${base}/${encodeURIComponent(existingEventId)}`, {
       method: "PATCH",
-      headers,
+      headers: jsonHeaders(token),
       body: JSON.stringify(body),
     });
-    if (r.ok) return job.google_event_id;
+    if (r.ok) return existingEventId;
     if (r.status !== 404 && r.status !== 410) throw new Error(`Calendar update failed (${r.status})`);
     // Event was deleted in Google — fall through and recreate.
   }
-  const r = await fetch(base, { method: "POST", headers, body: JSON.stringify(body) });
+  const r = await fetch(base, { method: "POST", headers: jsonHeaders(token), body: JSON.stringify(body) });
   if (!r.ok) throw new Error(`Calendar create failed (${r.status})`);
   const ev = await r.json();
   return ev.id as string;
+}
+
+/** Delete one event. Already-gone (404/410) counts as success. */
+export async function gcalDeleteEvent(token: string, calendarId: string, eventId: string): Promise<void> {
+  const r = await fetch(
+    `${CAL_BASE}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
+    { method: "DELETE", headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (!r.ok && r.status !== 404 && r.status !== 410) throw new Error(`Calendar delete failed (${r.status})`);
+}
+
+/** Create or update one calendar event for a job (the settings "Push Schedule
+ *  to Google" action). Body now carries the cn="1" ownership tag, so re-running
+ *  the push re-tags pre-two-way events too. Returns the event id. */
+export async function gcalUpsertJobEvent(
+  token: string,
+  calendarId: string,
+  job: JobForEvent & { google_event_id: string | null },
+): Promise<string> {
+  return gcalUpsertEvent(token, calendarId, job.google_event_id, jobEventBody(job));
+}
+
+export interface GcalCalendarEntry {
+  id: string;
+  summary: string;
+  primary?: boolean;
+}
+
+/** The user's calendar list (settings picker). Needs the calendar.readonly
+ *  scope — a pre-0132 connection throws a 403 here until reconnected. */
+export async function gcalListCalendars(token: string): Promise<GcalCalendarEntry[]> {
+  const out: GcalCalendarEntry[] = [];
+  let pageToken: string | null = null;
+  let guard = 0;
+  do {
+    const p = new URLSearchParams({ maxResults: "250", minAccessRole: "reader" });
+    if (pageToken) p.set("pageToken", pageToken);
+    const r = await fetch(`${CAL_BASE}/users/me/calendarList?${p}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!r.ok) throw new Error(`Calendar list failed (${r.status})`);
+    const j = await r.json();
+    for (const it of j.items ?? []) {
+      if (it?.id) out.push({ id: it.id, summary: it.summary ?? it.id, primary: !!it.primary });
+    }
+    pageToken = j.nextPageToken ?? null;
+  } while (pageToken && guard++ < 10);
+  return out;
+}
+
+/** One incremental (or initial) events.list sweep of a calendar. */
+export interface GcalEventsPage {
+  events: any[];
+  nextSyncToken: string | null;
+  /** True when the provided syncToken was rejected (410 GONE) — the caller
+   *  must clear it and run a fresh full-window sync. */
+  syncTokenExpired: boolean;
+}
+
+/**
+ * events.list with incremental sync. With a syncToken Google returns only the
+ * delta since the last sweep (including cancelled events); without one this is
+ * the INITIAL full-window sync (now-60d → now+400d, singleEvents so recurring
+ * series arrive as concrete instances — the window params are baked into the
+ * returned sync token, which is why the caller re-baselines periodically:
+ * a token minted with an absolute timeMax stops seeing events past it).
+ * Handles pagination; a 410 GONE reports syncTokenExpired instead of throwing.
+ */
+export async function gcalListEvents(
+  token: string,
+  calendarId: string,
+  syncToken: string | null,
+): Promise<GcalEventsPage> {
+  const events: any[] = [];
+  let pageToken: string | null = null;
+  let nextSyncToken: string | null = null;
+  let guard = 0;
+  do {
+    const p = new URLSearchParams({ maxResults: "250", singleEvents: "true" });
+    if (pageToken) p.set("pageToken", pageToken);
+    else if (syncToken) p.set("syncToken", syncToken);
+    else {
+      p.set("timeMin", new Date(Date.now() - 60 * 86400_000).toISOString());
+      p.set("timeMax", new Date(Date.now() + 400 * 86400_000).toISOString());
+    }
+    const r = await fetch(`${CAL_BASE}/calendars/${encodeURIComponent(calendarId)}/events?${p}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (r.status === 410) return { events: [], nextSyncToken: null, syncTokenExpired: true };
+    if (!r.ok) throw new Error(`Calendar events list failed (${r.status})`);
+    const j = await r.json();
+    events.push(...(j.items ?? []));
+    pageToken = j.nextPageToken ?? null;
+    if (j.nextSyncToken) nextSyncToken = j.nextSyncToken;
+  } while (pageToken && guard++ < 40);
+  return { events, nextSyncToken, syncTokenExpired: false };
 }
