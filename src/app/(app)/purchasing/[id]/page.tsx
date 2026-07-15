@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Briefcase } from "lucide-react";
+import { Briefcase } from "lucide-react";
+import { BackLink } from "@/components/back-link";
 import { createClient } from "@/lib/supabase/server";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
@@ -52,12 +53,7 @@ export default async function PurchaseOrderPage({
 
   return (
     <div className="mx-auto max-w-4xl">
-      <Link
-        href="/bills"
-        className="mb-4 inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800"
-      >
-        <ArrowLeft className="h-4 w-4" /> Back to Bills &amp; Purchasing
-      </Link>
+      <BackLink fallback="/bills" fallbackLabel="Back to Bills & Purchasing" />
 
       <div className="mb-6 flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-3">

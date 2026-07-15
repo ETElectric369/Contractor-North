@@ -98,6 +98,7 @@ export async function CalendarPanel() {
         picker={{ jobs: picker.jobOpts, customers: picker.custOpts, staff: picker.staffOpts }}
         now={new Date().toISOString()}
         workDayStart={workDayWindowHm((org as any)?.settings).start}
+        workDayEnd={workDayWindowHm((org as any)?.settings).end}
       />
     </div>
   );

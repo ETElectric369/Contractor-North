@@ -14,9 +14,12 @@ import {
   hoursBetween,
   initials,
 } from "@/lib/utils";
-import { getOrgSettings } from "@/lib/org-settings";
-import { formatDateTimeTz, payPeriodBounds, tzDayStartUtc, todayStrInTz } from "@/lib/tz";
+import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
+import { formatDateTimeTz, payPeriodBounds, tzDayStartUtc, tzMinutesOfDay, todayStrInTz } from "@/lib/tz";
 import { summarizeMileage } from "@/lib/mileage-math";
+import { getCrewStatus } from "@/lib/crew-status";
+import { firstNameOf, pillColorForPerson } from "@/lib/employee-color";
+import { TimeGrid, hmToMin } from "@/components/time-grid";
 import { AddEntryButton } from "../timeclock/add-entry-button";
 import { EditEntryButton } from "./edit-entry-button";
 import { DuplicateEntryButton } from "./duplicate-entry-button";
@@ -42,7 +45,14 @@ function weekRange(offset: number, tz: string, weekStart: "sunday" | "monday") {
   const endDate = new Date(startDate);
   endDate.setUTCDate(endDate.getUTCDate() + 7);
   const end = tzDayStartUtc(endDate.toISOString().slice(0, 10), tz);
-  return { start, end };
+  // The 7 local day-strings of the week — the time grid's columns.
+  const days: string[] = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(startDate);
+    d.setUTCDate(d.getUTCDate() + i);
+    days.push(d.toISOString().slice(0, 10));
+  }
+  return { start, end, days };
 }
 
 export default async function TimecardsPage({
@@ -66,7 +76,7 @@ export default async function TimecardsPage({
     redirect("/timeclock");
   }
 
-  const [{ data: members }, { data: jobCodes }, { data: jobs }, { data: org }] = await Promise.all([
+  const [{ data: members }, { data: jobCodes }, { data: jobs }, { data: org }, crew] = await Promise.all([
     // hourly_rate + bill_rate feed the edit/add modals' pay-rate anchor + the
     // bill-rate tripwire. Safe to select flat here — the page redirects non-staff
     // above, so the rates never serialize into a tech's props.
@@ -78,13 +88,16 @@ export default async function TimecardsPage({
       .order("created_at", { ascending: false })
       .limit(50),
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),
+    // The live crew pulse (who's on the clock now) — moved here from My Day's
+    // CrewBoard so presence lives next to the hours it becomes.
+    getCrewStatus(supabase),
   ]);
   // Render times in the BUSINESS timezone, not the UTC server's, so the list
   // matches the (browser-local) edit modal instead of being hours off.
   const orgSettings = getOrgSettings((org as any)?.settings);
   const tz = orgSettings.timezone;
 
-  const { start, end } = weekRange(offset, tz, orgSettings.week_start);
+  const { start, end, days: weekDayStrs } = weekRange(offset, tz, orgSettings.week_start);
 
   // Crew-lead daily reports — the office review surface the daily_report bell/push
   // (url "/timecards") and the planner card's "Review in timecards" land on. Last 14
@@ -173,6 +186,48 @@ export default async function TimecardsPage({
     end.getTime() - 1,
   ).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric" })}`;
 
+  // ── THE week grid (Erik: "I work a lot better seeing the blocks located in
+  // their time allotment") — every entry is a pill positioned by clock-in →
+  // clock-out, ONE COLOR PER PERSON (stable hash of profile id), open entries
+  // running to the live now line. A heavier column divider marks the day a new
+  // PAY PERIOD starts, so the payroll week reads against the pay cycle.
+  const todayStr = todayStrInTz(tz);
+  const workWin = workDayWindowHm((org as any)?.settings);
+  const gridDays = weekDayStrs.map((ds) => ({
+    dayStr: ds,
+    label: new Date(`${ds}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "short", day: "numeric", timeZone: "UTC" }),
+    isToday: ds === todayStr,
+    heavyStart: payPeriodBounds(orgSettings.pay_schedule, orgSettings.pay_anchor, ds).start === ds,
+  }));
+  const gridEvents = (entries ?? []).map((e: any) => {
+    const dayStr = todayStrInTz(tz, new Date(e.clock_in));
+    const startMin = tzMinutesOfDay(e.clock_in, tz);
+    let endMin: number | null = null; // null = open → runs to "now" on the grid
+    if (e.clock_out) {
+      endMin =
+        todayStrInTz(tz, new Date(e.clock_out)) === dayStr
+          ? Math.max(startMin + 1, tzMinutesOfDay(e.clock_out, tz))
+          : 1440; // overnight shift: clamp at the day edge (display v1 — no midnight split)
+    }
+    return {
+      id: e.id as string,
+      dayStr,
+      startMin,
+      endMin,
+      label: `${firstNameOf(e.profiles?.full_name)}${e.job?.job_number ? ` · ${e.job.job_number}` : ""}`,
+      sub: `${formatTime(e.clock_in, tz)}–${e.clock_out ? formatTime(e.clock_out, tz) : "now"}`,
+      color: pillColorForPerson(e.profile_id).pill,
+      href: e.job_id ? `/jobs/${e.job_id}` : undefined,
+    };
+  });
+  const gridLegend = [...byTech.entries()].map(([pid, rec]) => ({
+    id: pid,
+    name: rec.name,
+    dot: pillColorForPerson(pid).dot,
+  }));
+  const gridNow = { dayStr: todayStr, min: tzMinutesOfDay(new Date(), tz) };
+  const onClock = crew.filter((c) => c.clockedIn);
+
   const supId = getOrgSettings((org as any)?.settings).timecard_supervisor_id;
   const approver = supId
     ? (members?.find((m: any) => m.id === supId)?.full_name ?? "—")
@@ -245,6 +300,59 @@ export default async function TimecardsPage({
           </Link>
         </div>
       </PageHeader>
+
+      {/* Live presence — the crew pulse that used to be My Day's CrewBoard: who's on
+          the clock RIGHT NOW, living next to the hours it becomes (Erik, cn-v503). */}
+      {crew.length > 0 && (
+        <Card className="mb-4">
+          <CardContent className="py-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">On the clock</span>
+              {onClock.length === 0 && <span className="text-sm text-slate-400">Nobody right now</span>}
+              {onClock.map((c) => (
+                <span
+                  key={c.id}
+                  className="flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-900"
+                >
+                  <span className="h-2 w-2 shrink-0 rounded-full bg-green-500" aria-hidden />
+                  {c.name}
+                  {c.jobLabel && <span className="font-normal text-emerald-700">· {c.jobLabel}</span>}
+                </span>
+              ))}
+              <span className="ml-auto text-xs text-slate-500">
+                {onClock.length} of {crew.length}
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* THE PRIMARY VIEW — the week as a Google-Calendar-style time grid: each
+          entry a pill in its time allotment, one color per person (legend above),
+          the heavier divider = a pay-period boundary day. The editable per-person
+          table stays below — this grid is display; edits keep their tools. */}
+      <Card className="mb-4 overflow-hidden">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-slate-100 px-4 py-2.5">
+          <span className="text-sm font-semibold text-slate-900">Week grid</span>
+          {gridLegend.map((p) => (
+            <span key={p.id} className="flex items-center gap-1 text-xs text-slate-600">
+              <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${p.dot}`} aria-hidden /> {p.name}
+            </span>
+          ))}
+        </div>
+        {gridEvents.length === 0 ? (
+          <p className="px-5 py-6 text-center text-sm text-slate-400">No time entries this week.</p>
+        ) : (
+          <TimeGrid
+            days={gridDays}
+            events={gridEvents}
+            workStartMin={hmToMin(workWin.start)}
+            workEndMin={hmToMin(workWin.end)}
+            tz={tz}
+            initialNow={gridNow}
+          />
+        )}
+      </Card>
 
       {/* Forgotten clock-outs inflate hours until someone closes them — surface
           them HERE, where payroll reviews, instead of waiting to be stumbled on. */}

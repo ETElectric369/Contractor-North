@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/toast";
 import { MoveToDay } from "@/components/move-to-day";
 import { NavLink } from "@/components/nav-link";
+import { TimeGrid, hmToMin, type TimeGridAllDay, type TimeGridEvent } from "@/components/time-grid";
 import { firstNameOf } from "@/lib/employee-color";
 import { shiftApptToDay } from "@/lib/appt-time";
 import { placeJobOnDay, setJobScheduleRanges } from "../schedule/actions";
@@ -141,6 +142,24 @@ function startOfWeek(d: Date) {
 const PROPOSED_CONFIRM =
   "A pick-a-time link is out to the customer for this — moving it withdraws that link. Move it anyway?";
 
+// ── Time-grid pill colors (Erik wants blocks IN their time allotment) ──
+// Appointments color by TYPE; jobs stay slate so the crew's work blocks read
+// as one family and the appointment types pop against them.
+const APPT_GRID_TONE: Record<string, string> = {
+  inspection: "border-amber-300 bg-amber-100 text-amber-900",
+  final_inspection: "border-violet-300 bg-violet-100 text-violet-900",
+  meeting: "border-blue-300 bg-blue-100 text-blue-900",
+  quote: "border-teal-300 bg-teal-100 text-teal-900",
+};
+const APPT_GRID_DEFAULT = "border-cyan-300 bg-cyan-100 text-cyan-900";
+const JOB_GRID_TONE = "border-slate-300 bg-slate-200/80 text-slate-800";
+const TASK_TRAY_TONE = "border-slate-300 bg-slate-100 text-slate-700";
+
+const apptGridColor = (a: CalAppt) =>
+  `${APPT_GRID_TONE[a.type] ?? APPT_GRID_DEFAULT}${a.status === "proposed" ? " border-dashed opacity-75" : ""}${
+    a.status === "completed" ? " opacity-60" : ""
+  }`;
+
 export function CalendarView({
   jobs,
   segments = [],
@@ -151,6 +170,7 @@ export function CalendarView({
   picker,
   now,
   workDayStart = "08:00",
+  workDayEnd = "16:00",
 }: {
   jobs: CalJob[];
   segments?: CalSegment[];
@@ -164,6 +184,9 @@ export function CalendarView({
   /** The org's work_day_start ("HH:MM") — the all-day job time sentinel the
    *  week agenda hides. Defaults to the scheduler's original 8 AM. */
   workDayStart?: string;
+  /** The org's work_day_end ("HH:MM") — an all-day job's block on the time
+   *  grid spans start→end (the org's real work window, not a faked time). */
+  workDayEnd?: string;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -343,6 +366,97 @@ export function CalendarView({
     });
   }, [anchor]);
 
+  // ── Time-grid data: week + day render through the shared TimeGrid, so a
+  // morning inspection SITS at 9 AM instead of reading like any other chip
+  // (Erik: "I can't differentiate a morning appointment from anything").
+  const wdStartMin = hmToMin(workDayStart);
+  const wdEndMin = Math.max(wdStartMin + 60, hmToMin(workDayEnd));
+
+  /** One day's grid pills + all-day tray items. Jobs take their scheduled
+   *  window — an explicit (non-sentinel) start time on their start day — or
+   *  the org work-day window when all-day; appointments run starts_at →
+   *  ends_at (or +1h); tasks have no time of day, so they ride the tray
+   *  (never faked into a slot). */
+  function gridDataFor(k: string): { events: TimeGridEvent[]; allDay: TimeGridAllDay[] } {
+    const data = byDay.get(k);
+    const events: TimeGridEvent[] = [];
+    const tray: TimeGridAllDay[] = [];
+    if (!data) return { events, allDay: tray };
+    for (const { job, pos } of data.jobs) {
+      let startMin = wdStartMin;
+      let endMin = wdEndMin;
+      if (job.scheduled_start) {
+        const s = new Date(job.scheduled_start);
+        const explicit = s.getHours() * 60 + s.getMinutes() !== wdStartMin; // ≠ the all-day sentinel
+        if (explicit && dayKey(s) === k) {
+          startMin = s.getHours() * 60 + s.getMinutes();
+          endMin = wdEndMin;
+          if (job.scheduled_end) {
+            const e = new Date(job.scheduled_end);
+            if (dayKey(e) === k) endMin = e.getHours() * 60 + e.getMinutes();
+          }
+          if (endMin <= startMin) endMin = startMin + 60;
+        }
+      }
+      events.push({
+        id: `j-${job.id}-${k}`,
+        dayStr: k,
+        startMin,
+        endMin,
+        label: job.name,
+        sub: [job.customers?.name, pos].filter(Boolean).join(" · ") || null,
+        color: JOB_GRID_TONE,
+        href: `/jobs/${job.id}`,
+      });
+    }
+    for (const a of data.appts) {
+      const s = new Date(a.starts_at);
+      const startMin = s.getHours() * 60 + s.getMinutes();
+      let endMin = startMin + 60;
+      if (a.ends_at) {
+        const e = new Date(a.ends_at);
+        if (dayKey(e) === k && e.getTime() > s.getTime())
+          endMin = Math.max(startMin + 15, e.getHours() * 60 + e.getMinutes());
+      }
+      events.push({
+        id: `a-${a.id}`,
+        dayStr: k,
+        startMin,
+        endMin,
+        label: a.title,
+        sub: a.customers?.name ?? a.jobs?.name ?? null,
+        color: apptGridColor(a),
+        // The day drill hosts the appointment's edit pencil + quick actions.
+        href: `/schedule?view=day&date=${k}`,
+      });
+    }
+    for (const t of data.tasks) {
+      tray.push({
+        id: `t-${t.id}`,
+        dayStr: k,
+        label: t.title,
+        color: TASK_TRAY_TONE,
+        href: t.job_id ? `/jobs/${t.job_id}?tab=tasks` : `/tasks/${t.category}`,
+      });
+    }
+    return { events, allDay: tray };
+  }
+
+  const weekGridDays = weekDays.map((d) => {
+    const k = dayKey(d);
+    return { dayStr: k, label: d.toLocaleDateString(undefined, { weekday: "short", day: "numeric" }), isToday: k === todayK };
+  });
+  const weekGridEvents: TimeGridEvent[] = [];
+  const weekGridTray: TimeGridAllDay[] = [];
+  if (view === "week") {
+    for (const d of weekGridDays) {
+      const g = gridDataFor(d.dayStr);
+      weekGridEvents.push(...g.events);
+      weekGridTray.push(...g.allDay);
+    }
+  }
+  const dayGrid = view === "day" ? gridDataFor(anchorK) : { events: [], allDay: [] };
+
   const title =
     view === "month"
       ? anchor.toLocaleDateString(undefined, { month: "long", year: "numeric" })
@@ -495,9 +609,49 @@ export function CalendarView({
 
       {view === "month" && <MonthGrid anchor={anchor} byDay={byDay} todayK={todayK} onPick={handleDayTap} />}
       {view === "week" && (
-        <WeekAgenda days={weekDays} byDay={byDay} todayK={todayK} members={members} onDayTap={handleDayTap} workDayStart={workDayStart} />
+        <>
+          {/* THE week view: blocks in their time allotment (a day-header tap
+              drills; a pill tap opens its record — never a move). */}
+          {(weekGridEvents.length > 0 || weekGridTray.length > 0) && (
+            <Card className="overflow-hidden">
+              <TimeGrid
+                days={weekGridDays}
+                events={weekGridEvents}
+                allDay={weekGridTray}
+                workStartMin={wdStartMin}
+                workEndMin={wdEndMin}
+                onDayClick={(ds) => nav("day", ds, { push: true })}
+              />
+            </Card>
+          )}
+          {/* The agenda list stays below the grid — it carries the move handles
+              (the ONE reschedule grammar) and the tap-to-drill day rows. */}
+          <WeekAgenda days={weekDays} byDay={byDay} todayK={todayK} members={members} onDayTap={handleDayTap} workDayStart={workDayStart} />
+        </>
       )}
-      {view === "day" && <DayDetail dayK={anchorK} data={byDay.get(anchorK)} members={members} picker={picker} />}
+      {view === "day" && (
+        <>
+          {(dayGrid.events.length > 0 || dayGrid.allDay.length > 0) && (
+            <Card className="overflow-hidden">
+              <TimeGrid
+                days={[
+                  {
+                    dayStr: anchorK,
+                    label: anchor.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }),
+                    isToday: anchorK === todayK,
+                  },
+                ]}
+                events={dayGrid.events}
+                allDay={dayGrid.allDay}
+                workStartMin={wdStartMin}
+                workEndMin={wdEndMin}
+              />
+            </Card>
+          )}
+          {/* The drill cards below keep every create/edit/move affordance. */}
+          <DayDetail dayK={anchorK} data={byDay.get(anchorK)} members={members} picker={picker} />
+        </>
+      )}
 
       {/* Undo — the safety net under a tray placement. */}
       {undo && (

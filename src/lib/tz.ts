@@ -39,6 +39,14 @@ export function tzDayStartUtc(ymd: string, tz: string): Date {
   return new Date(guess.getTime() - tzOffsetMs(tz, guess));
 }
 
+/** Minutes past local midnight for an instant in the given timezone — the
+ *  time-grid's vertical position (a 3:30 PM Pacific clock-out = 930). */
+export function tzMinutesOfDay(at: string | Date, tz: string): number {
+  const d = typeof at === "string" ? new Date(at) : at;
+  const local = new Date(d.getTime() + tzOffsetMs(tz, d));
+  return local.getUTCHours() * 60 + local.getUTCMinutes();
+}
+
 /** UTC instant for "YYYY-MM-DD" at local clock `hour` (0–23, may be fractional)
  *  in the given timezone. Lets server actions store "8 AM local" without the
  *  bare-string `new Date("…T08:00")` trap (which parses as the server's UTC). */

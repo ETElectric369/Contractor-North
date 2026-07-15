@@ -1,5 +1,5 @@
-import Link from "next/link";
-import { ArrowLeft, Phone, Mail, Globe } from "lucide-react";
+import { Phone, Mail, Globe } from "lucide-react";
+import { BackLink } from "@/components/back-link";
 import QRCode from "qrcode";
 import { createClient } from "@/lib/supabase/server";
 import { PrintButton } from "@/components/print-button";
@@ -75,9 +75,7 @@ export default async function BusinessCardPage() {
   return (
     <div className="mx-auto max-w-4xl p-6">
       <div className="no-print mb-6 flex items-center justify-between">
-        <Link href="/settings" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800">
-          <ArrowLeft className="h-4 w-4" /> Back to settings
-        </Link>
+        <BackLink fallback="/settings" fallbackLabel="Back to settings" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800" />
         <PrintButton />
       </div>
       <p className="no-print mb-4 text-sm text-slate-500">

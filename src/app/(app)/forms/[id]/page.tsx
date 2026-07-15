@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { BackLink } from "@/components/back-link";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatDateTime } from "@/lib/utils";
 import { FillForm } from "./fill-form";
@@ -54,12 +54,7 @@ export default async function FormDetailPage({
 
   return (
     <div className="mx-auto max-w-4xl">
-      <Link
-        href="/forms"
-        className="mb-4 inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800"
-      >
-        <ArrowLeft className="h-4 w-4" /> Back to Forms
-      </Link>
+      <BackLink fallback="/forms" fallbackLabel="Back to Forms" />
 
       <div className="mb-6 flex items-start justify-between gap-4">
         <div>

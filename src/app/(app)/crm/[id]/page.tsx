@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { isStaffRole } from "@/lib/actions/perms";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Mail, Phone, MapPin, Plus } from "lucide-react";
+import { Mail, Phone, MapPin, Plus } from "lucide-react";
+import { BackLink } from "@/components/back-link";
 import { createClient } from "@/lib/supabase/server";
 import { NavLink } from "@/components/nav-link";
 import { Card, CardContent } from "@/components/ui/card";
@@ -231,9 +232,7 @@ export default async function CustomerDetailPage({
 
   return (
     <div className="mx-auto max-w-4xl">
-      <Link href="/crm" className="mb-4 inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800">
-        <ArrowLeft className="h-4 w-4 shrink-0" /> Back to Customers
-      </Link>
+      <BackLink fallback="/crm" fallbackLabel="Back to Customers" />
 
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>

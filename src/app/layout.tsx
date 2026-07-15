@@ -3,6 +3,7 @@ import { Geist } from "next/font/google";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 import { PwaRegister } from "@/components/pwa-register";
+import { BackLinkTracker } from "@/components/back-link";
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-geist-sans" });
 
@@ -43,6 +44,9 @@ export default function RootLayout({
       <body className="font-sans antialiased">
         {children}
         <PwaRegister />
+        {/* Watches client-side route changes so <BackLink> knows real in-app
+            history exists (root layout = never unmounts, covers /print too). */}
+        <BackLinkTracker />
         {/* Core Web Vitals (LCP/CLS/INP) — Pro Speed Insights. Ranks the public marketing
             sites for local SEO and surfaces slow routes now that Sentry perf tracing is gone. */}
         <SpeedInsights />

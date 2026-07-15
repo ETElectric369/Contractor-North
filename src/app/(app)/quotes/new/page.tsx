@@ -1,6 +1,5 @@
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { BackLink } from "@/components/back-link";
 import { PageHeader } from "@/components/page-header";
 import { getOrgSettings } from "@/lib/org-settings";
 import { buildDeckRates, DECK_ESTIMATE_CODES } from "@/lib/estimate/deck";
@@ -82,12 +81,7 @@ export default async function NewQuotePage({
 
   return (
     <div>
-      <Link
-        href="/quotes"
-        className="mb-4 inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800"
-      >
-        <ArrowLeft className="h-4 w-4 shrink-0" /> Back to Estimates
-      </Link>
+      <BackLink fallback="/quotes" fallbackLabel="Back to Estimates" />
       <PageHeader
         title="New Estimate"
         description="Build line items by hand, or let the estimator draft them from a scope of work or an uploaded plan."

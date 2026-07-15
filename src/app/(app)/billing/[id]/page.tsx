@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, User, FileText, Printer, CreditCard, Banknote } from "lucide-react";
+import { User, FileText, Printer, CreditCard, Banknote } from "lucide-react";
+import { BackLink } from "@/components/back-link";
 import { billingEnabled } from "@/lib/stripe";
 import { qboConfigured } from "@/lib/quickbooks";
 import { QboInvoiceButton } from "./qbo-button";
@@ -78,12 +79,7 @@ export default async function InvoicePage({
 
   return (
     <div className="mx-auto max-w-4xl">
-      <Link
-        href="/billing"
-        className="mb-4 inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800"
-      >
-        <ArrowLeft className="h-4 w-4" /> Back to Billing
-      </Link>
+      <BackLink fallback="/billing" fallbackLabel="Back to Billing" />
 
       <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex flex-col gap-2">

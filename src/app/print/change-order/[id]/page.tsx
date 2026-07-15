@@ -1,6 +1,5 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { BackLink } from "@/components/back-link";
 import { createClient } from "@/lib/supabase/server";
 import { PrintButton } from "@/components/print-button";
 import { companyFromOrg } from "@/components/doc-letterhead";
@@ -44,12 +43,11 @@ export default async function ChangeOrderPrintPage({
       <div className="no-print mx-auto mb-4 flex max-w-3xl items-center justify-between px-4">
         {/* Back to where the CO lives — its job's Change Orders tab (like the sibling print
             pages return to their record); /change-orders only for a stray job-less CO. */}
-        <Link
-          href={(co as any).job_id ? `/jobs/${(co as any).job_id}?tab=change-orders` : "/change-orders"}
+        <BackLink
+          fallback={(co as any).job_id ? `/jobs/${(co as any).job_id}?tab=change-orders` : "/change-orders"}
+          fallbackLabel="Back"
           className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800"
-        >
-          <ArrowLeft className="h-4 w-4" /> Back
-        </Link>
+        />
         <PrintButton />
       </div>
 

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { BackLink } from "@/components/back-link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
@@ -97,12 +97,7 @@ export default async function QuoteDetailPage({
 
   return (
     <div className="mx-auto max-w-3xl">
-      <Link
-        href="/quotes"
-        className="mb-4 inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800"
-      >
-        <ArrowLeft className="h-4 w-4 shrink-0" /> Back to Quotes
-      </Link>
+      <BackLink fallback="/quotes" fallbackLabel="Back to Quotes" />
 
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>

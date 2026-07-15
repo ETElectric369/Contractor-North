@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Briefcase, User, Calendar, Printer } from "lucide-react";
+import { Briefcase, User, Calendar, Printer } from "lucide-react";
+import { BackLink } from "@/components/back-link";
 import { createClient } from "@/lib/supabase/server";
 import { ACTIVE_JOB_STATUSES, jobStatusLabel } from "@/lib/job-status";
 import { listActiveTechs } from "@/lib/schedule-options";
@@ -47,12 +48,7 @@ export default async function WorkOrderDetailPage({
 
   return (
     <div className="mx-auto max-w-3xl">
-      <Link
-        href="/work-orders"
-        className="mb-4 inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800"
-      >
-        <ArrowLeft className="h-4 w-4" /> Back to Work Orders
-      </Link>
+      <BackLink fallback="/work-orders" fallbackLabel="Back to Work Orders" />
 
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>

@@ -6,8 +6,6 @@ import { CalendarCheck, ChevronLeft, ChevronRight, ClipboardList, UserPlus, Navi
 import { createClient } from "@/lib/supabase/server";
 import { RefreshOnVisible } from "@/components/refresh-on-visible";
 import { WeatherWidget } from "@/components/weather-widget";
-import { getCrewStatus } from "@/lib/crew-status";
-import { CrewBoard } from "./crew-board";
 import { MyDayClock } from "./my-day-clock";
 import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
@@ -166,8 +164,6 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           .order("created_at", { ascending: false })
       : Promise.resolve({ data: [] as any[] }),
   ]);
-  // The boss's live crew board (staff only) — every member's on/off-clock + job + hours today.
-  const crew = isStaff ? await getCrewStatus(supabase) : [];
   const dailyReports = (((dailyReportsR as any)?.data ?? []) as {
     id: string;
     profile_id: string;
@@ -493,10 +489,9 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
 
 
 
-      {/* The boss's live crew presence board (staff only) — who's on the clock and on what.
-          Erik: "boss needs to see what everyone is doing all the time." Hours moved to payroll
-          (/timecards) — the crew-hours table isn't needed anywhere else. */}
-      {isStaff && crew.length > 0 && <CrewBoard crew={crew} />}
+      {/* The CrewBoard that sat here is GONE (Erik changed his mind, cn-v503):
+          crew presence + hours live together on /timecards now — the "on the
+          clock" strip above its week grid. My Day keeps the clock + reports. */}
 
       {/* Crew-lead daily reports (staff only) — the clock-out debriefs Nort filed today:
           what got done + what materials they need tomorrow. Lightweight by design; the

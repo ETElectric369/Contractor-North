@@ -1,6 +1,6 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, MapPin } from "lucide-react";
+import { MapPin } from "lucide-react";
+import { BackLink } from "@/components/back-link";
 import { createClient } from "@/lib/supabase/server";
 import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz, formatDateTimeTz } from "@/lib/tz";
@@ -65,12 +65,7 @@ export default async function AppointmentCapturePage({
 
   return (
     <div className="mx-auto max-w-2xl">
-      <Link
-        href={dayStr ? `/schedule?view=day&date=${dayStr}` : "/schedule"}
-        className="mb-4 inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800"
-      >
-        <ArrowLeft className="h-4 w-4 shrink-0" /> Back to Schedule
-      </Link>
+      <BackLink fallback={dayStr ? `/schedule?view=day&date=${dayStr}` : "/schedule"} fallbackLabel="Back to Schedule" />
 
       <div className="mb-5">
         <div className="flex flex-wrap items-center gap-2">

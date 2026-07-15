@@ -7,6 +7,7 @@ import { GlobalAssistant } from "@/components/global-assistant";
 import { GlobalQuickAdd } from "@/components/global-quick-add";
 import { NotificationBell } from "@/components/app-shell/notification-bell";
 import { AccountMenu } from "@/components/account-menu";
+import { hasInAppHistory } from "@/components/back-link";
 import type { Profile } from "@/lib/types";
 
 /**
@@ -41,8 +42,10 @@ export function Topbar({
         className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100"
         onClick={() => {
           // router.back() does nothing (looks "frozen") when there's no app
-          // history — e.g. you opened a link straight into a page. Fall back home.
-          if (typeof window !== "undefined" && window.history.length > 1) router.back();
+          // history — e.g. you opened a link straight into a page — and EXITS
+          // the app when the previous entry is another site (history.length
+          // can't tell the difference). Same detector as <BackLink>.
+          if (hasInAppHistory()) router.back();
           else router.push("/planner");
         }}
         aria-label="Go back"

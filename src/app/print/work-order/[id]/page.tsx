@@ -1,6 +1,5 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { BackLink } from "@/components/back-link";
 import { createClient } from "@/lib/supabase/server";
 import { PrintButton } from "@/components/print-button";
 import { companyFromOrg } from "@/components/doc-letterhead";
@@ -45,9 +44,7 @@ export default async function WorkOrderPrintPage({
   return (
     <div className="min-h-screen bg-slate-100 py-8 print:bg-white print:py-0">
       <div className="no-print mx-auto mb-4 flex max-w-3xl items-center justify-between px-4">
-        <Link href={`/work-orders/${id}`} className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800">
-          <ArrowLeft className="h-4 w-4" /> Back
-        </Link>
+        <BackLink fallback={`/work-orders/${id}`} fallbackLabel="Back" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800" />
         <PrintButton />
       </div>
 
