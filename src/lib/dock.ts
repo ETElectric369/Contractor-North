@@ -110,31 +110,6 @@ export const DOCK: DockSection[] = [
     ],
   },
   {
-    key: "jobs",
-    label: "Jobs",
-    icon: Briefcase,
-    href: "/jobs",
-    children: [
-      // The job lifecycle, GENERATED from the canonical JOB_STATUSES spine (its order IS the
-      // lifecycle) so this list can't drift from the enum again — it had: missing invoiced +
-      // cancelled, and a hand-written "Completed" vs canonical "complete". Guarded by dock.test.ts.
-      // "All Jobs" is gone by Erik's call (2026-07 notes): the status pills ARE the list — the
-      // unfiltered firehose was brain clutter (the section tile itself still lands on /jobs).
-      ...JOB_STATUSES.map((s) => ({
-        id: `j-${s}`,
-        label: capFirst(jobStatusLabel(s)),
-        icon: JOB_STATUS_ICONS[s],
-        href: `/jobs?status=${s}`,
-      })),
-      // Permits live under active jobs (moved out of Office per Alexa). The old "Across all
-      // jobs" cluster (Work Orders / Materials / Change Orders) left the nav with it — those
-      // records are HUB-ONLY now, reached through the job's own tabs (Erik: "GO AWAY").
-      { id: "j-permits", label: "Permits", icon: Stamp, href: "/permits", staffOnly: true },
-      // Plans & LiDAR left the nav (Erik 2026-07-14): "plans live with the estimator" — the
-      // Upload Plans take-off on /quotes/new IS the plans feature; LiDAR ships with the native app.
-    ],
-  },
-  {
     key: "clock",
     label: "Clock",
     icon: Clock,
@@ -158,6 +133,31 @@ export const DOCK: DockSection[] = [
       { id: "sl-leads", label: "Leads", icon: UserPlus, href: "/leads" },
       { id: "sl-inspections", label: "Inspections", icon: ClipboardCheck, href: "/inspections" },
       { id: "sl-quotes", label: "Estimates", icon: FileText, href: "/quotes" },
+    ],
+  },
+  {
+    key: "jobs",
+    label: "Jobs",
+    icon: Briefcase,
+    href: "/jobs",
+    children: [
+      // The job lifecycle, GENERATED from the canonical JOB_STATUSES spine (its order IS the
+      // lifecycle) so this list can't drift from the enum again — it had: missing invoiced +
+      // cancelled, and a hand-written "Completed" vs canonical "complete". Guarded by dock.test.ts.
+      // "All Jobs" is gone by Erik's call (2026-07 notes): the status pills ARE the list — the
+      // unfiltered firehose was brain clutter (the section tile itself still lands on /jobs).
+      ...JOB_STATUSES.map((s) => ({
+        id: `j-${s}`,
+        label: capFirst(jobStatusLabel(s)),
+        icon: JOB_STATUS_ICONS[s],
+        href: `/jobs?status=${s}`,
+      })),
+      // Permits live under active jobs (moved out of Office per Alexa). The old "Across all
+      // jobs" cluster (Work Orders / Materials / Change Orders) left the nav with it — those
+      // records are HUB-ONLY now, reached through the job's own tabs (Erik: "GO AWAY").
+      { id: "j-permits", label: "Permits", icon: Stamp, href: "/permits", staffOnly: true },
+      // Plans & LiDAR left the nav (Erik 2026-07-14): "plans live with the estimator" — the
+      // Upload Plans take-off on /quotes/new IS the plans feature; LiDAR ships with the native app.
     ],
   },
   {
