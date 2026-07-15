@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { FactsGrid, StatTile } from "@/components/ui/stat-tile";
 import { Badge } from "@/components/ui/badge";
 import {
+  formatCurrency,
   formatDuration,
   formatDate,
   formatTime,
@@ -15,14 +16,16 @@ import {
   initials,
 } from "@/lib/utils";
 import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
-import { formatDateTimeTz, payPeriodBounds, tzDayStartUtc, tzMinutesOfDay, todayStrInTz } from "@/lib/tz";
+import { formatDateTimeTz, payPeriodBounds, timeEntryGridSpan, tzDayStartUtc, tzMinutesOfDay, todayStrInTz } from "@/lib/tz";
 import { summarizeMileage } from "@/lib/mileage-math";
+import { aggregatePayrollEntries } from "@/lib/payroll-math";
 import { getCrewStatus } from "@/lib/crew-status";
 import { firstNameOf, pillColorForPerson } from "@/lib/employee-color";
 import { TimeGrid } from "@/components/time-grid";
 import { hmToMin } from "@/lib/tz";
 import { AddEntryButton } from "../timeclock/add-entry-button";
 import { EditEntryButton } from "./edit-entry-button";
+import { OpenEntryEditor } from "./open-entry-editor";
 import { DuplicateEntryButton } from "./duplicate-entry-button";
 import { MarkReportReviewedButton } from "./mark-report-reviewed-button";
 import type { DailyReportSummary } from "../timeclock/actions";
@@ -59,9 +62,9 @@ function weekRange(offset: number, tz: string, weekStart: "sunday" | "monday") {
 export default async function TimecardsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ week?: string }>;
+  searchParams: Promise<{ week?: string; entry?: string }>;
 }) {
-  const { week } = await searchParams;
+  const { week, entry: entryParam } = await searchParams;
   const offset = Math.max(0, parseInt(week ?? "0", 10) || 0);
   const supabase = await createClient();
 
@@ -151,9 +154,9 @@ export default async function TimecardsPage({
     return inMs < todayStartMs || Date.now() - inMs > 12 * 3_600_000;
   });
 
-  // Group by tech.
+  // Group by tech. (The hours-per-job-code tally that lived here is gone —
+  // Erik: analytics territory, clutter on a payroll review page.)
   const byTech = new Map<string, { name: string; entries: any[]; hours: number; miles: number }>();
-  const perCode = new Map<string, number>();
   let crewTotal = 0;
   let crewMiles = 0;
 
@@ -168,8 +171,6 @@ export default async function TimecardsPage({
       const h = hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes);
       rec.hours += h;
       crewTotal += h;
-      const code = e.job_code ?? "—";
-      perCode.set(code, (perCode.get(code) ?? 0) + h);
     }
     byTech.set(e.profile_id, rec);
   }
@@ -201,15 +202,10 @@ export default async function TimecardsPage({
     heavyStart: payPeriodBounds(orgSettings.pay_schedule, orgSettings.pay_anchor, ds).start === ds,
   }));
   const gridEvents = (entries ?? []).map((e: any) => {
-    const dayStr = todayStrInTz(tz, new Date(e.clock_in));
-    const startMin = tzMinutesOfDay(e.clock_in, tz);
-    let endMin: number | null = null; // null = open → runs to "now" on the grid
-    if (e.clock_out) {
-      endMin =
-        todayStrInTz(tz, new Date(e.clock_out)) === dayStr
-          ? Math.max(startMin + 1, tzMinutesOfDay(e.clock_out, tz))
-          : 1440; // overnight shift: clamp at the day edge (display v1 — no midnight split)
-    }
+    // ONE org-tz mapping (lib/tz timeEntryGridSpan, unit-tested): day column +
+    // minutes both derive from the ORG day — a 7 PM Pacific clock-in can never
+    // bucket onto the UTC next-day column.
+    const { dayStr, startMin, endMin } = timeEntryGridSpan(e.clock_in, e.clock_out, tz);
     return {
       id: e.id as string,
       dayStr,
@@ -218,7 +214,10 @@ export default async function TimecardsPage({
       label: `${firstNameOf(e.profiles?.full_name)}${e.job?.job_number ? ` · ${e.job.job_number}` : ""}`,
       sub: `${formatTime(e.clock_in, tz)}–${e.clock_out ? formatTime(e.clock_out, tz) : "now"}`,
       color: pillColorForPerson(e.profile_id).pill,
-      href: e.job_id ? `/jobs/${e.job_id}` : undefined,
+      // A pill tap opens THAT entry's editor (?entry= auto-opens the modal
+      // below) — Erik: the grid is where a wrong time gets spotted, so the
+      // fix should be one tap away, not a hunt through the per-person lists.
+      href: `/timecards?week=${offset}&entry=${e.id}`,
     };
   });
   const gridLegend = [...byTech.entries()].map(([pid, rec]) => ({
@@ -234,40 +233,35 @@ export default async function TimecardsPage({
     ? (members?.find((m: any) => m.id === supId)?.full_name ?? "—")
     : "Owner";
 
-  // Each employee's TOTAL accumulated hours, all time (not just this week).
-  const { data: allClosed } = await supabase
+  // ── PAY-PERIOD BREAKDOWN (Erik 7/15 — replaces the all-time-hours and
+  // hours-per-job-code clutter): the pay period CONTAINING the viewed week,
+  // one row per employee — total hours, base pay, and the paid state. Pay
+  // mirrors /payroll EXACTLY (the same aggregatePayrollEntries: per-entry
+  // rate_override honored, lunch deducted, paid/unpaid split by the paid_at
+  // lock that /payroll's Mark-paid stamps). Mileage dollars are deliberately
+  // absent — mileage settles as a human-stated amount on /payroll, never an
+  // app-computed figure (payroll-two-buckets doctrine).
+  const period = payPeriodBounds(orgSettings.pay_schedule, orgSettings.pay_anchor, weekDayStrs[0]);
+  const { data: periodEntries } = await supabase
     .from("time_entries")
-    .select("profile_id, clock_in, clock_out, lunch_minutes")
+    .select("profile_id, clock_in, clock_out, lunch_minutes, miles, paid_at, mileage_paid_at, rate_override, profiles(full_name, hourly_rate, commute_baseline_miles)")
     .eq("status", "closed")
-    .not("clock_out", "is", null);
-  const accumByProfile = new Map<string, number>();
-  for (const e of allClosed ?? []) {
-    accumByProfile.set(
-      e.profile_id,
-      (accumByProfile.get(e.profile_id) ?? 0) + hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes),
-    );
-  }
-  const accumList = (members ?? [])
-    .map((m: any) => ({ name: m.full_name ?? "—", hours: accumByProfile.get(m.id) ?? 0 }))
-    .filter((x: any) => x.hours > 0)
-    .sort((a: any, b: any) => b.hours - a.hours);
+    .not("clock_out", "is", null)
+    .gte("clock_in", tzDayStartUtc(period.start, tz).toISOString())
+    .lt("clock_in", tzDayStartUtc(period.end, tz).toISOString());
+  const periodRows = aggregatePayrollEntries((periodEntries ?? []) as any[], tz);
+  // Inclusive last day as a date STRING so formatDate renders it literally
+  // (formatting the UTC-midnight instant in the business tz shifts a day back).
+  const periodEndIncl = new Date(new Date(`${period.end}T00:00:00Z`).getTime() - 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+  const periodLabel = `${formatDate(period.start)} – ${formatDate(periodEndIncl)}`;
 
-  // Hours in the CURRENT pay period (payroll view), per employee.
-  const settings = getOrgSettings((org as any)?.settings);
-  const period = payPeriodBounds(settings.pay_schedule, settings.pay_anchor, todayStrInTz(tz));
-  const periodStartMs = tzDayStartUtc(period.start, tz).getTime();
-  const periodEndMs = tzDayStartUtc(period.end, tz).getTime();
-  const periodByProfile = new Map<string, number>();
-  for (const e of allClosed ?? []) {
-    const t = new Date(e.clock_in).getTime();
-    if (t >= periodStartMs && t < periodEndMs)
-      periodByProfile.set(e.profile_id, (periodByProfile.get(e.profile_id) ?? 0) + hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes));
-  }
-  const periodList = (members ?? [])
-    .map((m: any) => ({ name: m.full_name ?? "—", hours: periodByProfile.get(m.id) ?? 0 }))
-    .filter((x: any) => x.hours > 0)
-    .sort((a: any, b: any) => b.hours - a.hours);
-  const periodLabel = `${formatDate(period.start)} – ${formatDate(new Date(new Date(`${period.end}T00:00:00Z`).getTime() - 86_400_000))}`;
+  // The ?entry= deep link (a week-grid pill tap) — find the entry among this
+  // week's rows or the org-wide open set, and auto-open its editor below.
+  const focusEntry = entryParam
+    ? (([...(entries ?? []), ...(openNow ?? [])] as any[]).find((e) => e.id === entryParam) ?? null)
+    : null;
 
   return (
     <div>
@@ -353,6 +347,63 @@ export default async function TimecardsPage({
             initialNow={gridNow}
           />
         )}
+      </Card>
+
+      {/* A grid pill tap lands here: mount THAT entry's editor already open.
+          Keyed by id so tapping a different pill remounts fresh state. */}
+      {focusEntry && (
+        <OpenEntryEditor
+          key={focusEntry.id}
+          entry={focusEntry}
+          jobCodes={(jobCodes ?? []) as JobCode[]}
+          jobs={jobs ?? []}
+          members={members ?? []}
+        />
+      )}
+
+      {/* PAY PERIOD — the money view of the period containing this week (the
+          heavier grid divider above marks where it starts). Same math as
+          /payroll; the badge is the paid_at state /payroll's Mark-paid stamps. */}
+      <Card className="mb-4">
+        <CardContent className="py-4">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Pay period
+            </span>
+            <span className="text-xs text-slate-500">
+              {periodLabel} ·{" "}
+              <Link href="/payroll" className="font-medium text-brand hover:underline">
+                Payroll →
+              </Link>
+            </span>
+          </div>
+          {periodRows.length === 0 ? (
+            <p className="text-sm text-slate-400">No hours logged this pay period yet.</p>
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {periodRows.map((r) => {
+                const hours = r.paidHours + r.unpaidHours;
+                const gross = Math.round((r.paidGross + r.unpaidGross) * 100) / 100;
+                return (
+                  <li key={r.profileId} className="flex items-center justify-between gap-2 py-1.5 text-sm">
+                    <span className="min-w-0 truncate text-slate-700">{r.name}</span>
+                    <span className="flex shrink-0 items-center gap-2">
+                      <span className="tabular-nums text-slate-500">{formatDuration(hours)}</span>
+                      <span className="font-semibold tabular-nums text-slate-900">{formatCurrency(gross)}</span>
+                      {r.unpaidHours === 0 ? (
+                        <Badge tone="green">paid</Badge>
+                      ) : r.paidHours > 0 ? (
+                        <Badge tone="amber">partly paid</Badge>
+                      ) : (
+                        <Badge tone="slate">unpaid</Badge>
+                      )}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </CardContent>
       </Card>
 
       {/* Forgotten clock-outs inflate hours until someone closes them — surface
@@ -458,64 +509,10 @@ export default async function TimecardsPage({
         />
       </FactsGrid>
 
-      {perCode.size > 0 && (
-        <Card className="mb-6">
-          <CardContent className="py-4">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-              Hours by job code
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {[...perCode.entries()].map(([code, h]) => (
-                <span key={code} className="flex items-center gap-1.5 rounded-lg bg-slate-100 px-2.5 py-1 text-xs">
-                  <Badge tone="slate">{code}</Badge>
-                  <span className="font-medium text-slate-700">{formatDuration(h)}</span>
-                </span>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      <Card className="mb-6">
-        <CardContent className="py-4">
-          <div className="mb-2 flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-              Hours this pay period
-            </span>
-            <span className="text-xs text-slate-500">{periodLabel}</span>
-          </div>
-          {periodList.length === 0 ? (
-            <p className="text-sm text-slate-400">No hours logged this pay period yet.</p>
-          ) : (
-            <ul className="divide-y divide-slate-100">
-              {periodList.map((a: any) => (
-                <li key={a.name} className="flex items-center justify-between py-1.5 text-sm">
-                  <span className="text-slate-700">{a.name}</span>
-                  <span className="font-semibold tabular-nums text-slate-900">{formatDuration(a.hours)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
-
-      {accumList.length > 0 && (
-        <Card className="mb-6">
-          <CardContent className="py-4">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-              Accumulated hours · all time
-            </div>
-            <ul className="divide-y divide-slate-100">
-              {accumList.map((a: any) => (
-                <li key={a.name} className="flex items-center justify-between py-1.5 text-sm">
-                  <span className="text-slate-700">{a.name}</span>
-                  <span className="font-semibold tabular-nums text-slate-900">{formatDuration(a.hours)}</span>
-                </li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
-      )}
+      {/* The "Hours by job code", "Hours this pay period" (hours-only) and
+          "Accumulated hours · all time" cards left this page (Erik 7/15 —
+          analytics territory / clutter). The Pay-period card under the week
+          grid is the one money summary now. */}
 
       {techs.length === 0 ? (
         <EmptyState

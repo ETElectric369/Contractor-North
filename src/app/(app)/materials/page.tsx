@@ -9,14 +9,24 @@ import { jobLabel } from "@/lib/schedule-options";
 
 export const dynamic = "force-dynamic";
 
-export default async function MaterialsPage() {
+export default async function MaterialsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ job?: string }>;
+}) {
   const supabase = await createClient();
+  // ?job= — the job hub's quiet "other lists (N)" link lands here scoped to
+  // that job's lists (the hub itself only ever shows the ONE canonical list).
+  const { job: jobFilter } = await searchParams;
+
+  let listQuery = supabase
+    .from("material_lists")
+    .select("*, jobs(job_number, name), material_list_items(id)")
+    .order("created_at", { ascending: false });
+  if (jobFilter) listQuery = listQuery.eq("job_id", jobFilter);
 
   const [{ data: lists }, { data: jobs }] = await Promise.all([
-    supabase
-      .from("material_lists")
-      .select("*, jobs(job_number, name), material_list_items(id)")
-      .order("created_at", { ascending: false }),
+    listQuery,
     supabase
       .from("jobs")
       .select("id, job_number, name")
@@ -34,6 +44,15 @@ export default async function MaterialsPage() {
       >
         <NewListButton jobs={jobs ?? []} />
       </PageHeader>
+
+      {jobFilter && (
+        <div className="-mt-3 mb-4 text-sm text-slate-500">
+          Showing this job&rsquo;s lists only ·{" "}
+          <Link href="/materials" className="font-medium text-brand hover:underline">
+            show all
+          </Link>
+        </div>
+      )}
 
       {materialLists.length === 0 ? (
         <EmptyState

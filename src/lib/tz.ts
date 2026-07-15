@@ -47,6 +47,29 @@ export function tzMinutesOfDay(at: string | Date, tz: string): number {
   return local.getUTCHours() * 60 + local.getUTCMinutes();
 }
 
+/** A time entry's place on the org-tz time grid: the ORG-LOCAL day column it
+ *  belongs to + minutes-of-day for its top/bottom edge. An entry clocked
+ *  7:00 AM Pacific lands at minute 420 on the PACIFIC day — never bucketed by
+ *  the server's UTC day (`toISOString().slice`) or the browser's zone. endMin
+ *  is null while the entry is open (the grid runs it to the live now line);
+ *  an overnight shift clamps at the day edge, 1440 (display v1 — no midnight
+ *  split). The SSOT mapping for /timecards; /schedule maps appointments with
+ *  the same two primitives (todayStrInTz + tzMinutesOfDay). */
+export function timeEntryGridSpan(
+  clockIn: string | Date,
+  clockOut: string | Date | null | undefined,
+  tz: string,
+): { dayStr: string; startMin: number; endMin: number | null } {
+  const inD = typeof clockIn === "string" ? new Date(clockIn) : clockIn;
+  const dayStr = todayStrInTz(tz, inD);
+  const startMin = tzMinutesOfDay(inD, tz);
+  if (!clockOut) return { dayStr, startMin, endMin: null };
+  const outD = typeof clockOut === "string" ? new Date(clockOut) : clockOut;
+  const endMin =
+    todayStrInTz(tz, outD) === dayStr ? Math.max(startMin + 1, tzMinutesOfDay(outD, tz)) : 1440;
+  return { dayStr, startMin, endMin };
+}
+
 /** UTC instant for "YYYY-MM-DD" at local clock `hour` (0–23, may be fractional)
  *  in the given timezone. Lets server actions store "8 AM local" without the
  *  bare-string `new Date("…T08:00")` trap (which parses as the server's UTC). */

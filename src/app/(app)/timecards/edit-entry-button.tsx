@@ -64,18 +64,33 @@ export function EditEntryButton({
   jobs = [],
   members = [],
   isStaff = false,
+  initialOpen = false,
+  hideTrigger = false,
+  onClosed,
 }: {
   entry: Entry;
   jobCodes: JobCode[];
   jobs?: JobOption[];
   members?: Member[];
   isStaff?: boolean;
+  /** Mount with the modal already open — the /timecards?entry=<id> deep link
+   *  (a week-grid pill tap). Pair with hideTrigger + onClosed. */
+  initialOpen?: boolean;
+  /** Skip the pencil trigger (the deep-link wrapper provides no anchor row). */
+  hideTrigger?: boolean;
+  /** Fires whenever the modal closes (cancel, save, delete) — the deep-link
+   *  wrapper strips ?entry= here so a refresh doesn't re-open the modal. */
+  onClosed?: () => void;
 }) {
   const router = useRouter();
   const inP = parts(entry.clock_in);
   const outP = parts(entry.clock_out);
 
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(initialOpen);
+  const close = () => {
+    setOpen(false);
+    onClosed?.();
+  };
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const [profileId, setProfileId] = useState(entry.profile_id ?? "");
@@ -162,7 +177,7 @@ export function EditEntryButton({
         allocations,
       });
       if (!res.ok) return setError(res.error ?? "Could not save.");
-      setOpen(false);
+      close();
       router.refresh();
     });
   }
@@ -172,7 +187,7 @@ export function EditEntryButton({
     start(async () => {
       const res = await deleteTimeEntry(entry.id);
       if (!res.ok) return setError(res.error ?? "Could not delete.");
-      setOpen(false);
+      close();
       router.refresh();
     });
   }
@@ -181,21 +196,23 @@ export function EditEntryButton({
 
   return (
     <>
-      <button
-        onClick={() => setOpen(true)}
-        className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-        title="Edit entry"
-      >
-        <Pencil className="h-3.5 w-3.5" />
-      </button>
+      {!hideTrigger && (
+        <button
+          onClick={() => setOpen(true)}
+          className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+          title="Edit entry"
+        >
+          <Pencil className="h-3.5 w-3.5" />
+        </button>
+      )}
 
       <Modal
         open={open}
-        onClose={() => setOpen(false)}
+        onClose={close}
         title="Edit time entry"
         footer={
           <ModalActions
-            onCancel={() => setOpen(false)}
+            onCancel={close}
             onSave={save}
             saving={pending}
             saveLabel="Save Changes"

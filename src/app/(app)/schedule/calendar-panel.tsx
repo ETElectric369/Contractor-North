@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
-import { workDayWindowHm } from "@/lib/org-settings";
+import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { getSchedulePickerOptions } from "@/lib/schedule-options";
 import {
   CalendarView,
@@ -109,6 +109,10 @@ export async function CalendarPanel() {
         members={picker.staff}
         picker={{ jobs: picker.jobOpts, customers: picker.custOpts, staff: picker.staffOpts }}
         now={new Date().toISOString()}
+        // The org tz drives EVERY instant→day/minutes mapping in the view —
+        // without it the client fell back to Date methods (server UTC on SSR,
+        // browser zone after), the "UTC problem in the new calendars".
+        tz={getOrgSettings((org as any)?.settings).timezone}
         workDayStart={workDayWindowHm((org as any)?.settings).start}
         workDayEnd={workDayWindowHm((org as any)?.settings).end}
       />

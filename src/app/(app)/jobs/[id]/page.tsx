@@ -49,7 +49,7 @@ import { NewWorkOrderButton } from "../../work-orders/new-wo-button";
 import { NewChangeOrderButton } from "../../change-orders/new-co-button";
 import { CoStatusControl } from "../../change-orders/co-status-control";
 import { CoRowActions } from "../../change-orders/co-row-actions";
-import { NewListButton } from "../../materials/new-list-button";
+import { ItemEditor } from "../../materials/[id]/item-editor";
 import { AppointmentButton, type ApptValue } from "../../appointments/appointment-button";
 import { NewPoButton } from "../../purchasing/new-po-button";
 import { EditCustomerButton } from "../../crm/[id]/edit-customer-button";
@@ -200,6 +200,20 @@ export default async function JobDetailPage({
     .select("id, name, created_at, material_list_items(count)")
     .eq("job_id", id)
     .order("created_at", { ascending: false });
+
+  // THE job's materials list — Erik's rule: the Materials tab IS the list, not a
+  // list-of-lists. Newest wins, which makes the estimate's take-off (created on
+  // "Build material list") canonical when one exists. No list yet → the tab still
+  // renders the editor; the first added item lazily creates it server-side
+  // (ensureJobMaterialList), so viewing a job never writes data.
+  const canonicalList = ((jobLists ?? [])[0] ?? null) as { id: string; name: string } | null;
+  const { data: canonicalItems } = canonicalList
+    ? await supabase
+        .from("material_list_items")
+        .select("*")
+        .eq("list_id", canonicalList.id)
+        .order("sort_order")
+    : { data: null };
 
   // Full ApptValue fields so each row can open the edit modal in place.
   const { data: jobAppts } = await supabase
@@ -689,37 +703,39 @@ export default async function JobDetailPage({
     {
       id: "materials",
       label: "Materials",
-      count: jobLists?.length ?? 0,
+      count: canonicalItems?.length ?? 0,
       content: (
         <div className="space-y-3">
-          <div className="flex justify-end">
-            <NewListButton jobs={thisJobOpt} defaultJobId={j.id} />
-          </div>
-          {(jobLists ?? []).length === 0 ? (
-            <Card>
-              <CardContent className="py-8 text-center">
-                <p className="text-sm text-slate-500">No material lists yet.</p>
-                <p className="mt-1 text-xs text-slate-400">
-                  Open an estimate and tap <span className="font-medium">Build material list</span> to generate a take-off from its line items.
-                </p>
-              </CardContent>
-            </Card>
-          ) : (
-            <Card className="overflow-hidden">
-              <ul className="divide-y divide-slate-100">
-                {(jobLists ?? []).map((ml: any) => {
-                  const count = ml.material_list_items?.[0]?.count ?? 0;
-                  return (
-                    <li key={ml.id}>
-                      <Link href={`/materials/${ml.id}`} className="flex items-center justify-between px-5 py-3 text-sm hover:bg-slate-50">
-                        <span className="font-medium text-slate-900">{ml.name}</span>
-                        <span className="text-slate-500">{count} {count === 1 ? "item" : "items"}</span>
-                      </Link>
-                    </li>
-                  );
-                })}
-              </ul>
-            </Card>
+          {/* Hit Materials and THE list is right there (Erik, 7/14) — no
+              list-of-lists, nothing to create or open. Checked items sink to the
+              bottom inside the editor; the pick-list print and PO seed ride on
+              top of the SAME list. */}
+          {canonicalList && (
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Link
+                href={`/print/material-list/${canonicalList.id}`}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                <ListChecks className="h-4 w-4 shrink-0" /> Print Pick List
+              </Link>
+              <NewPoButton
+                jobs={thisJobOpt}
+                lists={[{ id: canonicalList.id, name: canonicalList.name }]}
+                defaultJobId={j.id}
+                defaultListId={canonicalList.id}
+              />
+            </div>
+          )}
+          <ItemEditor listId={canonicalList?.id ?? null} jobId={j.id} items={(canonicalItems ?? []) as any} />
+          {(jobLists ?? []).length > 1 && (
+            <div className="text-right">
+              <Link
+                href={`/materials?job=${j.id}`}
+                className="text-xs text-slate-400 hover:text-slate-600"
+              >
+                other lists ({(jobLists ?? []).length - 1})
+              </Link>
+            </div>
           )}
         </div>
       ),

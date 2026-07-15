@@ -10,7 +10,7 @@ import { MyDayClock } from "./my-day-clock";
 import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { jobStatusLabel } from "@/lib/job-status";
-import { formatTime, formatCityStateZip } from "@/lib/utils";
+import { formatTime, formatCityStateZip, formatDateShort } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
 import { NavLink } from "@/components/nav-link";
 import { toJobOptions, toCustomerOptions, toStaffOptions, listActiveTechs, listCustomerOptions } from "@/lib/schedule-options";
@@ -54,7 +54,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   // (The DayClock's today/pay-week hour queries left with it — /timeclock owns those now.)
   const [
     { data: jobs }, { data: segJobs }, { data: appts }, { data: openRows },
-    { data: customers }, { data: staff }, { data: jobOptRows }, { data: me }, leadsCount,
+    { data: customers }, { data: staff }, { data: jobOptRows }, { data: me }, leadsRes,
   ] = await Promise.all([
     supabase.from("jobs").select("id, job_number, name, status, address, scheduled_start, customers(name)").gte("scheduled_start", dayStart.toISOString()).lt("scheduled_start", dayEnd.toISOString()).order("scheduled_start"),
     // Multi-range jobs whose segment covers today.
@@ -70,7 +70,16 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     listActiveTechs(supabase),
     supabase.from("jobs").select("id, job_number, name, address").order("created_at", { ascending: false }).limit(200),
     supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle(),
-    supabase.from("inquiries").select("id", { count: "exact", head: true }).is("converted_at", null).neq("status", "lost"),
+    // Open-leads snapshot for the staff top row: the count + the few newest
+    // open inquiries (name + next follow-up). Same open-lead definition as
+    // /leads; RLS keeps inquiries staff-only, so a tech simply gets zero rows.
+    supabase
+      .from("inquiries")
+      .select("id, name, next_follow_up_at", { count: "exact" })
+      .is("converted_at", null)
+      .neq("status", "lost")
+      .order("created_at", { ascending: false })
+      .limit(3),
   ]);
 
   const openEntry = (openRows ?? [])[0] as any | undefined;
@@ -233,7 +242,8 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   const custOpts = toCustomerOptions(customers);
   const staffOpts = toStaffOptions(staff);
   const people = (staff ?? []).map((s: any) => ({ id: s.id, full_name: s.full_name }));
-  const openInquiries = leadsCount.count ?? 0;
+  const openInquiries = leadsRes.count ?? 0;
+  const recentLeads = ((leadsRes.data ?? []) as { id: string; name: string | null; next_follow_up_at: string | null }[]);
 
   const niceDay = prettyDay(todayStr);
   const empty = (label: string) => <p className="px-5 py-6 text-center text-sm text-slate-400">{label}</p>;
@@ -478,14 +488,50 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       </div>
       <p className="mb-4 text-sm italic text-slate-400">&ldquo;{dailyQuote}&rdquo;</p>
 
-      {/* The MINIMAL clock is back (Erik, cn-v502) — not the old stats-and-pickers DayClock
-          (that duplication stays gone): one big Clock In / ticking timer + one-tap Clock Out,
-          and a "Timeclock →" door for anything more. Reuses the open entry already fetched
-          for the "Now" hero. */}
-      <MyDayClock
-        open={openEntry ? { id: openEntry.id, clock_in: openEntry.clock_in, notes: openEntry.notes ?? null } : null}
-        jobLabel={currentJob ? `${currentJob.job_number} — ${currentJob.name}` : null}
-      />
+      {/* TOP ROW (Erik 7/15) — staff get a 2-col split (stacked on the phone):
+          the MINIMAL clock (cn-v502) LEFT, the open-leads snapshot RIGHT — the
+          old bottom-of-page "Owner snapshot" tile MOVED up here (count + the
+          few newest open leads + follow-ups), not duplicated. Techs keep the
+          full-width clock; /leads is staff territory. */}
+      {isStaff ? (
+        <div className="mb-4 grid gap-3 sm:grid-cols-2">
+          <MyDayClock
+            className="h-full"
+            open={openEntry ? { id: openEntry.id, clock_in: openEntry.clock_in, notes: openEntry.notes ?? null } : null}
+            jobLabel={currentJob ? `${currentJob.job_number} — ${currentJob.name}` : null}
+          />
+          <Link
+            href="/leads"
+            className="block h-full rounded-xl border border-slate-200 bg-white px-4 py-3 hover:bg-slate-50"
+          >
+            <div className="flex items-center gap-2.5">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
+                <UserPlus className="h-4 w-4" />
+              </span>
+              <span className="text-lg font-bold leading-none text-slate-900">{openInquiries}</span>
+              <span className="text-xs text-slate-500">Open leads</span>
+              <span className="ml-auto text-xs font-medium text-brand">/leads →</span>
+            </div>
+            {recentLeads.length > 0 && (
+              <ul className="mt-2 space-y-1">
+                {recentLeads.map((l) => (
+                  <li key={l.id} className="flex items-center justify-between gap-2 text-xs">
+                    <span className="min-w-0 truncate font-medium text-slate-700">{l.name ?? "—"}</span>
+                    <span className="shrink-0 text-slate-400">
+                      {l.next_follow_up_at ? `follow up ${formatDateShort(l.next_follow_up_at)}` : "no follow-up set"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Link>
+        </div>
+      ) : (
+        <MyDayClock
+          open={openEntry ? { id: openEntry.id, clock_in: openEntry.clock_in, notes: openEntry.notes ?? null } : null}
+          jobLabel={currentJob ? `${currentJob.job_number} — ${currentJob.name}` : null}
+        />
+      )}
 
 
 
@@ -718,22 +764,8 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           that view now, and overdue/draft invoices already surface as actionable
           rows in the Needs-action inbox above. My Day carries no money map. */}
 
-      {/* Owner snapshot — what "Overview" used to surface, folded into My Day. */}
-      {isStaff && (
-        <div className="mb-4 grid grid-cols-2 gap-3">
-          <Link href="/leads" className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 hover:bg-slate-50">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
-              <UserPlus className="h-4 w-4" />
-            </span>
-            <div>
-              <div className="text-lg font-bold text-slate-900">{openInquiries}</div>
-              <div className="text-xs text-slate-500">Open leads</div>
-            </div>
-          </Link>
-        </div>
-      )}
-
-
+      {/* The "Owner snapshot" open-leads tile that closed the page MOVED to the
+          top row beside the clock (Erik 7/15) — one leads snapshot, better slot. */}
     </div>
   );
 }

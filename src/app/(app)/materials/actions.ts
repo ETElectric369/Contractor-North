@@ -63,6 +63,48 @@ export async function createMaterialList(input: {
   return { ok: true, id: list.id };
 }
 
+/** The job's ONE canonical materials list — Erik's rule: the job's Materials tab
+ *  IS the list, never a list-of-lists. Returns the NEWEST list on the job (so the
+ *  estimator's quote take-off, created on acceptance, is canonical when it exists);
+ *  if the job has none, lazily creates an empty one named "Materials — {job_number}".
+ *  Called on the first add-item from the job tab — merely VIEWING a job never
+ *  creates data. Job lookup rides RLS, so a foreign job id can't be seeded. */
+export async function ensureJobMaterialList(jobId: string): Promise<Result> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  const { data: existing } = await supabase
+    .from("material_lists")
+    .select("id")
+    .eq("job_id", jobId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (existing) return { ok: true, id: (existing as any).id };
+
+  const { data: job, error: jErr } = await supabase
+    .from("jobs")
+    .select("id, job_number")
+    .eq("id", jobId)
+    .maybeSingle();
+  if (jErr) return { ok: false, error: jErr.message };
+  if (!job) return { ok: false, error: "Job not found." };
+
+  const { data: list, error } = await supabase
+    .from("material_lists")
+    .insert({ name: `Materials — ${(job as any).job_number}`, job_id: jobId, created_by: user.id })
+    .select("id")
+    .single();
+  if (error) return { ok: false, error: error.message };
+
+  revalidatePath("/materials");
+  revalidatePath(`/jobs/${jobId}`);
+  return { ok: true, id: list.id };
+}
+
 export async function addMaterialItem(
   listId: string,
   item: DraftMaterial,

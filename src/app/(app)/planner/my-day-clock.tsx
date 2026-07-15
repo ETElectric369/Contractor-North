@@ -34,9 +34,13 @@ const OFFLINE_MSG = "No connection — try again when you have bars.";
 export function MyDayClock({
   open,
   jobLabel,
+  className = "mb-4",
 }: {
   open: { id: string; clock_in: string; notes: string | null } | null;
   jobLabel: string | null;
+  /** Layout hook: the staff top row grids the clock beside the leads card
+   *  (pass "h-full"); the default keeps the tech full-width spacing. */
+  className?: string;
 }) {
   const [now, setNow] = useState(() => Date.now());
   const [err, setErr] = useState<string | null>(null);
@@ -91,8 +95,8 @@ export function MyDayClock({
   }
 
   return (
-    <Card className="mb-4 overflow-hidden">
-      <div className="flex items-center gap-4 px-5 py-4">
+    <Card className={`overflow-hidden ${className}`}>
+      <div className="flex h-full items-center gap-4 px-5 py-4">
         <span
           className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${
             open ? "bg-green-100 text-green-600" : "bg-slate-100 text-slate-400"

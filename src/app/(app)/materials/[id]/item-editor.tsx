@@ -13,6 +13,7 @@ import {
   updateMaterialItem,
   setMaterialItemPurchased,
   setMaterialItemTool,
+  ensureJobMaterialList,
 } from "../actions";
 
 interface Item {
@@ -27,7 +28,21 @@ interface Item {
   is_tool?: boolean;
 }
 
-export function ItemEditor({ listId, items }: { listId: string; items: Item[] }) {
+/** The one materials item editor — the /materials/[id] page AND the job hub's
+ *  Materials tab both render THIS (no forked row logic). The job tab passes
+ *  listId: null when the job has no list yet: the editor still shows the add row,
+ *  and the FIRST added item lazily ensures the job's canonical list
+ *  (ensureJobMaterialList) — so viewing never creates data, adding does. */
+export function ItemEditor({
+  listId,
+  items,
+  jobId,
+}: {
+  listId: string | null;
+  items: Item[];
+  /** Enables the lazy list-ensure when listId is null (job Materials tab). */
+  jobId?: string;
+}) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -54,7 +69,15 @@ export function ItemEditor({ listId, items }: { listId: string; items: Item[] })
     if (!desc.trim()) return;
     setError(null);
     start(async () => {
-      const res = await addMaterialItem(listId, {
+      let lid = listId;
+      if (!lid) {
+        if (!jobId) return setError("No list to add to.");
+        const ensured = await ensureJobMaterialList(jobId);
+        if (!ensured.ok || !ensured.id)
+          return setError(ensured.error ?? "Could not start the job's materials list.");
+        lid = ensured.id;
+      }
+      const res = await addMaterialItem(lid, {
         description: desc,
         part_number: part || null,
         quantity: qty || 1,
@@ -73,28 +96,37 @@ export function ItemEditor({ listId, items }: { listId: string; items: Item[] })
     });
   }
 
+  // Toggle/edit/delete only ever fire on an existing row, so listId is real by
+  // then — the lid guards below are for the type system, not a reachable path
+  // (const capture so the narrowing survives into the transition closure).
   function remove(id: string) {
+    const lid = listId;
+    if (!lid) return;
     setError(null);
     start(async () => {
-      const res = await deleteMaterialItem(id, listId);
+      const res = await deleteMaterialItem(id, lid);
       if (!res.ok) return setError(res.error ?? "Could not remove the item.");
       router.refresh();
     });
   }
 
   function togglePurchased(it: Item) {
+    const lid = listId;
+    if (!lid) return;
     setError(null);
     start(async () => {
-      const res = await setMaterialItemPurchased(it.id, listId, !it.purchased);
+      const res = await setMaterialItemPurchased(it.id, lid, !it.purchased);
       if (!res.ok) return setError(res.error ?? "Could not update.");
       router.refresh();
     });
   }
 
   function toggleTool(it: Item) {
+    const lid = listId;
+    if (!lid) return;
     setError(null);
     start(async () => {
-      const res = await setMaterialItemTool(it.id, listId, !it.is_tool);
+      const res = await setMaterialItemTool(it.id, lid, !it.is_tool);
       if (!res.ok) return setError(res.error ?? "Could not update.");
       router.refresh();
     });
@@ -102,8 +134,15 @@ export function ItemEditor({ listId, items }: { listId: string; items: Item[] })
 
   // Tools float to the top (grab from the shop first), materials below — both keep
   // their own sort_order. Done client-side so a missing column never errors the load.
-  const tools = items.filter((i) => i.is_tool);
-  const materials = items.filter((i) => !i.is_tool);
+  // Within each group, CHECKED (purchased) items sink to the bottom — Erik's field
+  // rule: what's left to buy stays on top as the live pick list; bought stuff drops
+  // out of the way. filter() is stable, so order inside each half is untouched.
+  const sinkPurchased = (arr: Item[]) => [
+    ...arr.filter((i) => !i.purchased),
+    ...arr.filter((i) => i.purchased),
+  ];
+  const tools = sinkPurchased(items.filter((i) => i.is_tool));
+  const materials = sinkPurchased(items.filter((i) => !i.is_tool));
 
   const renderRow = (it: Item) =>
     editId === it.id ? (
@@ -175,10 +214,11 @@ export function ItemEditor({ listId, items }: { listId: string; items: Item[] })
   }
 
   function saveEdit() {
-    if (!editId || !eDesc.trim()) return;
+    const lid = listId;
+    if (!lid || !editId || !eDesc.trim()) return;
     setError(null);
     start(async () => {
-      const res = await updateMaterialItem(editId, listId, {
+      const res = await updateMaterialItem(editId, lid, {
         description: eDesc,
         part_number: ePart || null,
         quantity: eQty || 1,

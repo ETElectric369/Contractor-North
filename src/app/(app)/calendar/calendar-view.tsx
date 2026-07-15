@@ -12,7 +12,8 @@ import { useToast } from "@/components/toast";
 import { MoveToDay } from "@/components/move-to-day";
 import { NavLink } from "@/components/nav-link";
 import { TimeGrid, type TimeGridAllDay, type TimeGridEvent } from "@/components/time-grid";
-import { hmToMin } from "@/lib/tz";
+import { hmToMin, todayStrInTz, tzMinutesOfDay } from "@/lib/tz";
+import { formatTime } from "@/lib/utils";
 import { firstNameOf } from "@/lib/employee-color";
 import { shiftApptToDay } from "@/lib/appt-time";
 import { placeJobOnDay, setJobScheduleRanges } from "../schedule/actions";
@@ -137,13 +138,17 @@ export interface SchedulePicker {
 
 type View = "month" | "week" | "day";
 
+// PURE calendar-day math only: dayKey round-trips a local-midnight Date built
+// from a "YYYY-MM-DD" back to the same string in ANY runtime zone. It must
+// NEVER be fed an INSTANT (a DB timestamp / `new Date()`), because the local
+// getters then answer in the server's UTC (SSR) or the browser's zone — the
+// "UTC timezone problem" Erik kept hitting. Instants map through the org-tz
+// helpers below (todayStrInTz / tzMinutesOfDay), same as /timecards.
 const dayKey = (d: Date) => {
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 };
 const isYmd = (s: string | null | undefined): s is string => /^\d{4}-\d{2}-\d{2}$/.test(s ?? "");
-const fmtTime = (iso: string) =>
-  new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 const prettyYmd = (ymd: string) =>
   new Date(`${ymd}T12:00:00`).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 
@@ -188,6 +193,7 @@ export function CalendarView({
   members = [],
   picker,
   now,
+  tz,
   workDayStart = "08:00",
   workDayEnd = "16:00",
 }: {
@@ -202,6 +208,10 @@ export function CalendarView({
   picker: SchedulePicker;
   /** Server's "now" (ISO) — keeps SSR and first client render in sync. */
   now: string;
+  /** The org's IANA timezone — EVERY instant→day/minutes mapping goes through
+   *  it (the /timecards discipline), so the SSR (UTC server) and the browser
+   *  place a 9 AM Pacific appointment at 9 AM on the Pacific day, always. */
+  tz: string;
   /** The org's work_day_start ("HH:MM") — the all-day job time sentinel the
    *  week agenda hides. Defaults to the scheduler's original 8 AM. */
   workDayStart?: string;
@@ -215,10 +225,16 @@ export function CalendarView({
   const [pending, start] = useTransition();
 
   // Seed "today" from the SERVER clock so SSR and hydration agree, then correct
-  // to the user's actual local day on mount (the existing calendar pattern).
+  // to the actual now on mount (the existing calendar pattern). The DAY is
+  // always derived in the ORG tz — not the server's UTC day, not the browser's.
   const [today, setToday] = useState(() => new Date(now));
   useEffect(() => setToday(new Date()), []);
-  const todayK = dayKey(today);
+  const todayK = todayStrInTz(tz, today);
+
+  // Instant → org-tz day / minutes-of-day. The ONLY lawful way to place a DB
+  // timestamp on the calendar (dayKey is for pure "YYYY-MM-DD" math only).
+  const dayOf = (iso: string) => todayStrInTz(tz, new Date(iso));
+  const minOf = (iso: string) => tzMinutesOfDay(iso, tz);
 
   // View + anchor are DERIVED from the URL (single source of truth) so the
   // browser back button walks the day-drill history; nav() below writes the
@@ -227,8 +243,8 @@ export function CalendarView({
   const view: View = rawView === "day" || rawView === "month" ? rawView : "week";
   const dateParam = searchParams.get("date");
   const anchor = useMemo(
-    () => (isYmd(dateParam) ? new Date(`${dateParam}T00:00:00`) : today),
-    [dateParam, today],
+    () => new Date(`${isYmd(dateParam) ? dateParam : todayK}T00:00:00`),
+    [dateParam, todayK],
   );
   const anchorK = dayKey(anchor);
 
@@ -290,7 +306,7 @@ export function CalendarView({
 
     for (const a of appointments) {
       if (pf && a.assigned_to !== pf) continue;
-      get(dayKey(new Date(a.starts_at))).appts.push(a);
+      get(dayOf(a.starts_at)).appts.push(a);
     }
     for (const t of tasks) {
       if (pf && t.assigned_to !== pf) continue;
@@ -307,7 +323,7 @@ export function CalendarView({
             get(day).externals.push(x);
           }
         } else {
-          get(dayKey(new Date(x.starts_at))).externals.push(x);
+          get(dayOf(x.starts_at)).externals.push(x);
         }
       }
     }
@@ -340,7 +356,13 @@ export function CalendarView({
       if (segs?.length) {
         for (const s of segs) pushSpan(j, new Date(`${s.start_date}T00:00:00`), new Date(`${s.end_date}T00:00:00`));
       } else if (j.scheduled_start) {
-        pushSpan(j, new Date(j.scheduled_start), new Date(j.scheduled_end ?? j.scheduled_start));
+        // scheduled_start/_end are INSTANTS: resolve each to its ORG-TZ day
+        // first, then hand pushSpan pure local-midnight day anchors. Feeding
+        // the raw timestamps in put an evening-scheduled Pacific job on the
+        // UTC (next) day when server-rendered.
+        const startYmd = dayOf(j.scheduled_start);
+        const endYmd = j.scheduled_end ? dayOf(j.scheduled_end) : startYmd;
+        pushSpan(j, new Date(`${startYmd}T00:00:00`), new Date(`${endYmd < startYmd ? startYmd : endYmd}T00:00:00`));
       }
     }
 
@@ -349,7 +371,8 @@ export function CalendarView({
       v.externals.sort((a, b) => a.starts_at.localeCompare(b.starts_at));
     }
     return m;
-  }, [jobs, segments, appointments, tasks, external, personFilter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobs, segments, appointments, tasks, external, personFilter, tz]);
 
   /** The job's current ranges as seen by this render — the tray-place undo
    *  snapshot. An empty result means "was unscheduled", which undo restores by
@@ -359,8 +382,8 @@ export function CalendarView({
     if (segs.length) return segs;
     const j = jobs.find((x) => x.id === jobId);
     if (j?.scheduled_start) {
-      const startYmd = dayKey(new Date(j.scheduled_start));
-      const endYmd = j.scheduled_end ? dayKey(new Date(j.scheduled_end)) : startYmd;
+      const startYmd = dayOf(j.scheduled_start); // org-tz day, matching the grid placement
+      const endYmd = j.scheduled_end ? dayOf(j.scheduled_end) : startYmd;
       return [{ start: startYmd, end: endYmd < startYmd ? startYmd : endYmd }];
     }
     return [];
@@ -426,14 +449,15 @@ export function CalendarView({
       let startMin = wdStartMin;
       let endMin = wdEndMin;
       if (job.scheduled_start) {
-        const s = new Date(job.scheduled_start);
-        const explicit = s.getHours() * 60 + s.getMinutes() !== wdStartMin; // ≠ the all-day sentinel
-        if (explicit && dayKey(s) === k) {
-          startMin = s.getHours() * 60 + s.getMinutes();
+        // Org-tz minutes: the all-day sentinel is STORED as the org's local
+        // work-day start (tzLocalHourUtc), so only an org-tz read can spot it.
+        const sMin = minOf(job.scheduled_start);
+        const explicit = sMin !== wdStartMin; // ≠ the all-day sentinel
+        if (explicit && dayOf(job.scheduled_start) === k) {
+          startMin = sMin;
           endMin = wdEndMin;
-          if (job.scheduled_end) {
-            const e = new Date(job.scheduled_end);
-            if (dayKey(e) === k) endMin = e.getHours() * 60 + e.getMinutes();
+          if (job.scheduled_end && dayOf(job.scheduled_end) === k) {
+            endMin = minOf(job.scheduled_end);
           }
           if (endMin <= startMin) endMin = startMin + 60;
         }
@@ -450,13 +474,15 @@ export function CalendarView({
       });
     }
     for (const a of data.appts) {
-      const s = new Date(a.starts_at);
-      const startMin = s.getHours() * 60 + s.getMinutes();
+      // Org-tz placement: a 9 AM Pacific inspection sits at minute 540 on the
+      // Pacific day — Date#getHours here answered in the server's UTC on SSR
+      // (and React doesn't re-verify style attrs on hydration, so the pills
+      // STAYED at UTC positions — the "UTC problem in the new calendars").
+      const startMin = minOf(a.starts_at);
       let endMin = startMin + 60;
       if (a.ends_at) {
-        const e = new Date(a.ends_at);
-        if (dayKey(e) === k && e.getTime() > s.getTime())
-          endMin = Math.max(startMin + 15, e.getHours() * 60 + e.getMinutes());
+        if (dayOf(a.ends_at) === k && new Date(a.ends_at).getTime() > new Date(a.starts_at).getTime())
+          endMin = Math.max(startMin + 15, minOf(a.ends_at));
       }
       events.push({
         id: `a-${a.id}`,
@@ -486,13 +512,11 @@ export function CalendarView({
         tray.push({ id: `x-${x.id}-${k}`, dayStr: k, label: x.title, color: EXTERNAL_GRID_TONE });
         continue;
       }
-      const s = new Date(x.starts_at);
-      const startMin = s.getHours() * 60 + s.getMinutes();
+      const startMin = minOf(x.starts_at);
       let endMin = startMin + 60;
       if (x.ends_at) {
-        const e = new Date(x.ends_at);
-        if (dayKey(e) === k && e.getTime() > s.getTime())
-          endMin = Math.max(startMin + 15, e.getHours() * 60 + e.getMinutes());
+        if (dayOf(x.ends_at) === k && new Date(x.ends_at).getTime() > new Date(x.starts_at).getTime())
+          endMin = Math.max(startMin + 15, minOf(x.ends_at));
       }
       events.push({
         id: `x-${x.id}`,
@@ -511,6 +535,9 @@ export function CalendarView({
     const k = dayKey(d);
     return { dayStr: k, label: d.toLocaleDateString(undefined, { weekday: "short", day: "numeric" }), isToday: k === todayK };
   });
+  // Server-computed now in the ORG tz, so SSR and hydration agree on the now
+  // line; TimeGrid's own minute ticker (also org-tz via the tz prop) takes over.
+  const gridNow = { dayStr: todayStrInTz(tz, new Date(now)), min: tzMinutesOfDay(new Date(now), tz) };
   const weekGridEvents: TimeGridEvent[] = [];
   const weekGridTray: TimeGridAllDay[] = [];
   if (view === "week") {
@@ -672,7 +699,7 @@ export function CalendarView({
           </button>
         ))}
 
-      {view === "month" && <MonthGrid anchor={anchor} byDay={byDay} todayK={todayK} onPick={handleDayTap} />}
+      {view === "month" && <MonthGrid anchor={anchor} byDay={byDay} todayK={todayK} tz={tz} onPick={handleDayTap} />}
       {view === "week" && (
         /* THE week view: blocks in their time allotment, and ONLY that (Erik
            7/15: "get rid of list view below, redundant" — the old WeekAgenda
@@ -687,6 +714,8 @@ export function CalendarView({
             allDay={weekGridTray}
             workStartMin={wdStartMin}
             workEndMin={wdEndMin}
+            tz={tz}
+            initialNow={gridNow}
             onDayClick={(ds) => nav("day", ds, { push: true })}
           />
         </Card>
@@ -707,11 +736,13 @@ export function CalendarView({
                 allDay={dayGrid.allDay}
                 workStartMin={wdStartMin}
                 workEndMin={wdEndMin}
+                tz={tz}
+                initialNow={gridNow}
               />
             </Card>
           )}
           {/* The drill cards below keep every create/edit/move affordance. */}
-          <DayDetail dayK={anchorK} data={byDay.get(anchorK)} members={members} picker={picker} />
+          <DayDetail dayK={anchorK} data={byDay.get(anchorK)} members={members} picker={picker} tz={tz} />
         </>
       )}
 
@@ -736,11 +767,12 @@ export function CalendarView({
  *  ONLY when it's > 0; if the three together would crowd the cell (total > 6),
  *  it collapses to a single neutral total badge so 375px never overflows.
  *  Names live one tap down in the day drill — 10px truncated chips were noise. */
-/** Compact time like "8a" / "2:30p" for a month-cell pill. */
-function pillTime(iso: string): string {
-  const d = new Date(iso);
-  let h = d.getHours();
-  const m = d.getMinutes();
+/** Compact time like "8a" / "2:30p" for a month-cell pill — ORG-tz, so the
+ *  server render and every browser print the same clock time. */
+function pillTime(iso: string, tz: string): string {
+  const min = tzMinutesOfDay(iso, tz);
+  let h = Math.floor(min / 60);
+  const m = min % 60;
   const ap = h >= 12 ? "p" : "a";
   h = h % 12 || 12;
   return m ? `${h}:${String(m).padStart(2, "0")}${ap}` : `${h}${ap}`;
@@ -755,7 +787,7 @@ const PILL_TONE: Record<"job" | "appt" | "apptProposed" | "task" | "external", s
 };
 
 /** Order a day's jobs/appts/tasks into labelled pills (timed first), for the month grid. */
-function monthPills(data: DayData | undefined): { label: string; tone: keyof typeof PILL_TONE; sort: number }[] {
+function monthPills(data: DayData | undefined, tz: string): { label: string; tone: keyof typeof PILL_TONE; sort: number }[] {
   if (!data) return [];
   const out: { label: string; tone: keyof typeof PILL_TONE; sort: number }[] = [];
   for (const { job } of data.jobs) {
@@ -765,14 +797,14 @@ function monthPills(data: DayData | undefined): { label: string; tone: keyof typ
   }
   for (const a of data.appts) {
     const who = a.customers?.name || a.jobs?.name || a.title;
-    out.push({ label: `${pillTime(a.starts_at)} ${who}`, tone: a.status === "proposed" ? "apptProposed" : "appt", sort: new Date(a.starts_at).getTime() });
+    out.push({ label: `${pillTime(a.starts_at, tz)} ${who}`, tone: a.status === "proposed" ? "apptProposed" : "appt", sort: new Date(a.starts_at).getTime() });
   }
   for (const t of data.tasks) out.push({ label: t.title, tone: "task", sort: Number.MAX_SAFE_INTEGER });
   for (const x of data.externals) {
     out.push(
       x.all_day
         ? { label: x.title, tone: "external", sort: Number.MAX_SAFE_INTEGER - 1 }
-        : { label: `${pillTime(x.starts_at)} ${x.title}`, tone: "external", sort: new Date(x.starts_at).getTime() },
+        : { label: `${pillTime(x.starts_at, tz)} ${x.title}`, tone: "external", sort: new Date(x.starts_at).getTime() },
     );
   }
   return out.sort((x, y) => x.sort - y.sort);
@@ -784,11 +816,13 @@ function MonthGrid({
   anchor,
   byDay,
   todayK,
+  tz,
   onPick,
 }: {
   anchor: Date;
   byDay: Map<string, DayData>;
   todayK: string;
+  tz: string;
   onPick: (d: Date) => void;
 }) {
   const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
@@ -812,7 +846,7 @@ function MonthGrid({
           const k = dayKey(d);
           const data = byDay.get(k);
           const inMonth = d.getMonth() === anchor.getMonth();
-          const pills = monthPills(data);
+          const pills = monthPills(data, tz);
           return (
             <button
               key={i}
@@ -863,11 +897,13 @@ function DayDetail({
   data,
   members = [],
   picker,
+  tz,
 }: {
   dayK: string;
   data?: DayData;
   members?: CalMember[];
   picker: SchedulePicker;
+  tz: string;
 }) {
   const appts = data?.appts ?? [];
   const jobsOn = data?.jobs ?? [];
@@ -887,7 +923,7 @@ function DayDetail({
         </div>
         <ul className="divide-y divide-slate-100">
           {appts.map((a) => (
-            <ApptRow key={a.id} a={a} picker={picker} />
+            <ApptRow key={a.id} a={a} picker={picker} tz={tz} />
           ))}
           {!appts.length && (
             <li className="px-5 py-5 text-center text-sm text-slate-400">Nothing booked this day.</li>
@@ -942,7 +978,7 @@ function DayDetail({
 
 /** One appointment on the day drill — the old appointments-tab row, relocated:
  *  quick done/cancel + edit pencil + the Move-to-day glyph. */
-function ApptRow({ a, picker }: { a: CalAppt; picker: SchedulePicker }) {
+function ApptRow({ a, picker, tz }: { a: CalAppt; picker: SchedulePicker; tz: string }) {
   const router = useRouter();
   const appt: ApptValue = {
     id: a.id,
@@ -959,8 +995,8 @@ function ApptRow({ a, picker }: { a: CalAppt; picker: SchedulePicker }) {
   return (
     <li className="flex flex-wrap items-start gap-3 px-4 py-3">
       <div className="w-16 shrink-0 text-sm font-medium text-slate-700">
-        {fmtTime(a.starts_at)}
-        {a.ends_at ? <span className="block text-[11px] font-normal text-slate-400">{fmtTime(a.ends_at)}</span> : null}
+        {formatTime(a.starts_at, tz)}
+        {a.ends_at ? <span className="block text-[11px] font-normal text-slate-400">{formatTime(a.ends_at, tz)}</span> : null}
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">

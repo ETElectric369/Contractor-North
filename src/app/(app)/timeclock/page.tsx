@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { isStaffRole } from "@/lib/actions/perms";
 import { ACTIVE_JOB_STATUSES, pickMemberCurrentJob } from "@/lib/job-status";
-import { todayBoundsInTz } from "@/lib/tz";
+import { payPeriodBounds, todayBoundsInTz, todayStrInTz, tzDayStartUtc } from "@/lib/tz";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
@@ -11,7 +11,8 @@ import { AutoClockoutPrompt } from "./auto-clockout-prompt";
 import { CrewAssignments } from "./crew-assignments";
 import { getOrgSettings } from "@/lib/org-settings";
 import { AddEntryButton } from "./add-entry-button";
-import { hoursBetween, formatDuration, formatTime } from "@/lib/utils";
+import { aggregatePayrollEntries } from "@/lib/payroll-math";
+import { hoursBetween, formatCurrency, formatDate, formatDuration, formatTime } from "@/lib/utils";
 import { translator } from "@/lib/i18n";
 import type { JobCode, TimeEntry } from "@/lib/types";
 import { jobLabel } from "@/lib/schedule-options";
@@ -26,9 +27,11 @@ export default async function TimeclockPage() {
 
   const weekAgo = new Date(Date.now() - 7 * 86400_000).toISOString();
 
+  // hourly_rate = the caller's OWN pay rate (self-row read), feeding the tech's
+  // "My pay period" summary below — no one else's rate ever loads here.
   const { data: prof } = await supabase
     .from("profiles")
-    .select("language, role, home_address")
+    .select("language, role, home_address, hourly_rate")
     .eq("id", user?.id ?? "")
     .maybeSingle();
   const lang = prof?.language ?? "en";
@@ -236,6 +239,45 @@ export default async function TimeclockPage() {
     for (const [day, g] of byDay) myTimecard.push({ day, ...g });
   }
 
+  // MY PAY PERIOD (techs only) — the same period summary the office reads on
+  // /timecards, for THIS tech alone: total hours + base pay via the EXACT
+  // /payroll math (aggregatePayrollEntries — per-entry rate_override honored,
+  // lunch deducted) + the paid/unpaid state /payroll's Mark-paid stamps
+  // (paid_at). Mileage dollars never appear — mileage is a human-stated
+  // settlement on /payroll (payroll-two-buckets doctrine), never app-computed.
+  let myPeriod:
+    | { label: string; hours: number; gross: number; state: "paid" | "partly" | "unpaid" }
+    | null = null;
+  if (!isStaff && user) {
+    const tz = orgSettings.timezone;
+    const period = payPeriodBounds(orgSettings.pay_schedule, orgSettings.pay_anchor, todayStrInTz(tz));
+    const { data: periodEntries } = await supabase
+      .from("time_entries")
+      .select("profile_id, clock_in, clock_out, lunch_minutes, rate_override, paid_at, mileage_paid_at")
+      .eq("profile_id", user.id)
+      .eq("status", "closed")
+      .not("clock_out", "is", null)
+      .gte("clock_in", tzDayStartUtc(period.start, tz).toISOString())
+      .lt("clock_in", tzDayStartUtc(period.end, tz).toISOString());
+    const [row] = aggregatePayrollEntries(
+      (periodEntries ?? []) as any[],
+      tz,
+      Number((prof as any)?.hourly_rate ?? 0),
+    );
+    if (row) {
+      // Inclusive last day as a date STRING so formatDate prints it literally.
+      const endIncl = new Date(new Date(`${period.end}T00:00:00Z`).getTime() - 86_400_000)
+        .toISOString()
+        .slice(0, 10);
+      myPeriod = {
+        label: `${formatDate(period.start)} – ${formatDate(endIncl)}`,
+        hours: row.paidHours + row.unpaidHours,
+        gross: Math.round((row.paidGross + row.unpaidGross) * 100) / 100,
+        state: row.unpaidHours === 0 ? "paid" : row.paidHours > 0 ? "partly" : "unpaid",
+      };
+    }
+  }
+
   return (
     <div className="mx-auto max-w-4xl">
       <PageHeader title={t("tc_title")} description={t("tc_desc")}>
@@ -300,6 +342,36 @@ export default async function TimeclockPage() {
                   <span className="font-semibold text-slate-900">Week total</span>
                   <span className="font-bold text-slate-900">{formatDuration(weekTotal)}</span>
                 </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* MY PAY PERIOD (techs only) — hours + base pay + paid state for the
+              current period, mirroring what the office sees on /timecards.
+              Mileage $ is deliberately absent (settled by a human on /payroll). */}
+          {!isStaff && myPeriod && (
+            <Card className="mt-4">
+              <CardContent className="py-4">
+                <div className="mb-1 flex items-baseline justify-between">
+                  <h3 className="text-sm font-semibold text-slate-900">My pay period</h3>
+                  <span className="text-xs text-slate-400">{myPeriod.label}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-slate-600">{formatDuration(myPeriod.hours)}</span>
+                  <span className="flex items-center gap-2">
+                    <span className="font-bold text-slate-900">{formatCurrency(myPeriod.gross)}</span>
+                    {myPeriod.state === "paid" ? (
+                      <Badge tone="green">paid</Badge>
+                    ) : myPeriod.state === "partly" ? (
+                      <Badge tone="amber">partly paid</Badge>
+                    ) : (
+                      <Badge tone="slate">unpaid</Badge>
+                    )}
+                  </span>
+                </div>
+                <p className="mt-1.5 text-xs text-slate-400">
+                  Base pay only — mileage is tracked in miles and settled separately by the office.
+                </p>
               </CardContent>
             </Card>
           )}
