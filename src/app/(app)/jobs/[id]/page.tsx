@@ -347,6 +347,10 @@ export default async function JobDetailPage({
 
   const docs = await Promise.all(
     (docRows ?? []).map(async (d: any) => {
+      // Organize notes filed to a job are documents rows with NO file (file_url null).
+      // createSignedUrl(null) throws a TypeError that storage-js rethrows (it only
+      // swallows StorageErrors), crashing the whole RSC render — guard like /organize.
+      if (!d.file_url) return { ...d, signedUrl: null };
       const { data } = await supabase.storage.from("documents").createSignedUrl(d.file_url, 3600);
       return { ...d, signedUrl: data?.signedUrl ?? null };
     }),

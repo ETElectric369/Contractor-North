@@ -149,3 +149,10 @@ export function prettyDay(ymd: string): string {
     timeZone: "UTC",
   });
 }
+
+/** "HH:MM" → minutes since midnight. Server-safe (lives here, NOT in the "use client"
+ *  time-grid — importing a client export from a server page was the /timecards RSC crash). */
+export function hmToMin(hm: string): number {
+  const [h, m] = String(hm ?? "0:0").split(":").map((n) => parseInt(n, 10) || 0);
+  return h * 60 + m;
+}

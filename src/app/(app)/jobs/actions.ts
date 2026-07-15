@@ -499,12 +499,13 @@ export async function updateDocument(
 
 export async function deleteDocument(
   id: string,
-  path: string,
+  path: string | null,
   jobId: string,
 ): Promise<Result> {
   const supabase = await createClient();
-  // Remove the file then the row (best-effort on the file).
-  await supabase.storage.from("documents").remove([path]);
+  // Remove the file then the row (best-effort on the file). Organize notes filed
+  // to a job have NO file (file_url null) — skip storage for those, like /organize does.
+  if (path) await supabase.storage.from("documents").remove([path]);
   const { error } = await supabase.from("documents").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath(`/jobs/${jobId}`);

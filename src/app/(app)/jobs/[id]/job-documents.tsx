@@ -23,7 +23,7 @@ interface Doc {
   id: string;
   name: string;
   category: string | null;
-  file_url: string;
+  file_url: string | null; // null = Organize note filed to the job (no file)
   size_bytes: number | null;
   created_at: string;
   signedUrl: string | null;

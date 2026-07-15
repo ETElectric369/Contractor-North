@@ -40,9 +40,12 @@ export default async function BillsPage() {
     line_items: [...(b.bill_line_items ?? [])].sort((a: any, c: any) => (a.sort_order ?? 0) - (c.sort_order ?? 0)),
   }));
 
-  // Sign the receipt/bill document URLs.
+  // Sign the receipt/bill document URLs. documents.file_url is nullable (Organize
+  // notes have no file) — createSignedUrl(null) throws a TypeError that storage-js
+  // rethrows, crashing the RSC render, so skip signing fileless rows.
   const docs = await Promise.all(
     (docRows ?? []).map(async (d: any) => {
+      if (!d.file_url) return { ...d, signedUrl: null };
       const { data } = await supabase.storage.from("documents").createSignedUrl(d.file_url, 3600);
       return { ...d, signedUrl: data?.signedUrl ?? null };
     }),

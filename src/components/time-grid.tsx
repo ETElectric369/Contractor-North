@@ -1,5 +1,7 @@
 "use client";
 
+import { hmToMin } from "@/lib/tz";
+
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 
@@ -51,11 +53,6 @@ export interface TimeGridAllDay {
   href?: string;
 }
 
-/** "HH:MM" → minutes-of-day (the org work_day_window comes as HH:MM). */
-export function hmToMin(hm: string): number {
-  const [h, m] = hm.split(":").map(Number);
-  return (Number.isFinite(h) ? h : 8) * 60 + (Number.isFinite(m) ? m : 0);
-}
 
 const HOUR_PX = 48;
 const PX_PER_MIN = HOUR_PX / 60;

@@ -19,7 +19,8 @@ import { formatDateTimeTz, payPeriodBounds, tzDayStartUtc, tzMinutesOfDay, today
 import { summarizeMileage } from "@/lib/mileage-math";
 import { getCrewStatus } from "@/lib/crew-status";
 import { firstNameOf, pillColorForPerson } from "@/lib/employee-color";
-import { TimeGrid, hmToMin } from "@/components/time-grid";
+import { TimeGrid } from "@/components/time-grid";
+import { hmToMin } from "@/lib/tz";
 import { AddEntryButton } from "../timeclock/add-entry-button";
 import { EditEntryButton } from "./edit-entry-button";
 import { DuplicateEntryButton } from "./duplicate-entry-button";
