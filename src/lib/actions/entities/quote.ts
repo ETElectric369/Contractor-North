@@ -163,7 +163,7 @@ export const quoteActions: Record<string, ActionDef> = {
     group: "quote",
     label: "Create quote / estimate",
     description:
-      "Create a DRAFT quote (estimate) for a customer, with line items. Before calling this you MUST read the whole quote back to the user — every line item with its quantity, unit, and price, plus the total — and get an explicit yes. Never create a quote they haven't confirmed out loud. Resolve the customer first with list_customers and pass its id as customer_id (or null if there's no matching customer yet — you can offer to add one). Prices you propose are STARTING estimates; tell the user to check them against real supplier/labor costs. tax_rate is a FRACTION, not a percent (8.25% = 0.0825; 0 = no tax). It saves as a draft they can review, edit, and send.",
+      "Create a DRAFT quote (estimate) for a customer, with line items. Before calling this you MUST read the whole quote back to the user — every line item with its quantity, unit, and price, plus the total — and get an explicit yes. Never create a quote they haven't confirmed out loud. Resolve the customer first with list_customers and pass its id as customer_id (or null if there's no matching customer yet — you can offer to add one). Prices you propose are STARTING estimates; tell the user to check them against real supplier/labor costs. tax_rate is a FRACTION, not a percent (8.25% = 0.0825; 0 = no tax). It saves as a draft they can review, edit, and send. The result returns the SAVED subtotal/tax/total (computed server-side from the line items) and the quote number — state the returned total VERBATIM as the saved amount; never announce a total from your own mental math.",
     input: z.object({
       customer_id: z.string().nullable().default(null),
       job_id: z.string().nullable().optional(),
@@ -219,7 +219,22 @@ export const quoteActions: Record<string, ActionDef> = {
         items: i.items ?? [],
       });
       if (!r.ok) return { ok: false, error: r.error };
-      return { ok: true, data: { id: r.id }, speak: "Quote saved as a draft." };
+      // Hand back the SAVED totals (the exact subtotalTaxTotal rollup that was written)
+      // so the model reads the persisted number, not its own arithmetic — the fix for
+      // "announced ~$2,560, saved E-014 at $2,620".
+      const fmt = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      return {
+        ok: true,
+        data: {
+          id: r.id,
+          quote_number: r.quote_number,
+          subtotal: r.subtotal,
+          tax: r.tax,
+          total: r.total,
+          note: "These are the SAVED figures — state this total verbatim; do not recompute it.",
+        },
+        speak: `Saved as ${r.quote_number ?? "a draft"} — total $${fmt(r.total)}.`,
+      };
     },
   },
 };

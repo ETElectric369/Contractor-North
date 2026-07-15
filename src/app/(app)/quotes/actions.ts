@@ -456,7 +456,9 @@ export async function saveQuote(input: SaveQuoteInput) {
       doc_type: "estimate", // everything is an Estimate (T&M) by default; toggle to a fixed-price Quote
       created_by: ctx.userId,
     })
-    .select("id")
+    // quote_number is stamped by the BEFORE-INSERT trigger (0004 next_doc_number),
+    // so insert-returning carries the real document number.
+    .select("id, quote_number")
     .single();
 
   if (error) return { ok: false as const, error: error.message };
@@ -484,7 +486,19 @@ export async function saveQuote(input: SaveQuoteInput) {
   // one surface (the old per-quote task factory just piled up orphans).
 
   revalidatePath("/quotes");
-  return { ok: true as const, id: quote.id };
+  // Return the SAVED money figures (the subtotalTaxTotal rollup that was written) +
+  // the trigger-assigned number, so every caller — Nort's quote.create especially —
+  // reads the real total back instead of re-deriving it. The announce-vs-save drift:
+  // Nort told Erik "~$2,560" then saved E-014 at $2,620, because the announced figure
+  // was mental math over the lines while THIS function computed the persisted total.
+  return {
+    ok: true as const,
+    id: quote.id,
+    quote_number: (quote as { quote_number?: string }).quote_number ?? null,
+    subtotal,
+    tax,
+    total,
+  };
 }
 
 /**

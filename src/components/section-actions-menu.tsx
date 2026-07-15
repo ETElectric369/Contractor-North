@@ -65,7 +65,22 @@ export function SectionActionsMenu({
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // Which side the panel hangs from. Right-anchored by default (the ⋯ is the
+  // rightmost header control on desktop) — but on a phone the header actions row
+  // WRAPS and the ⋯ can land at the far LEFT, where a right-anchored 224px panel
+  // extends off-screen (Erik 7/15, /crm/[id]: "Can't see drop down menu").
+  // Measured per-open so it follows rotations/resizes.
+  const [alignLeft, setAlignLeft] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+
+  const PANEL_W = 224; // w-56 below — keep in sync
+  function toggle() {
+    if (!open) {
+      const r = ref.current?.getBoundingClientRect();
+      setAlignLeft(!!r && r.right - PANEL_W < 8 && r.left + PANEL_W <= window.innerWidth - 8);
+    }
+    setOpen((v) => !v);
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -161,7 +176,7 @@ export function SectionActionsMenu({
   return (
     <div ref={ref} className="relative">
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggle}
         aria-label={label}
         aria-haspopup="menu"
         aria-expanded={open}
@@ -172,10 +187,11 @@ export function SectionActionsMenu({
       </button>
       {open && (
         // position set inline because .glass-gloss forces position:relative, which
-        // would override a Tailwind `absolute`. Right-anchored: the ⋯ is standardized
-        // as the LAST (rightmost) control of every detail header's actions row.
+        // would override a Tailwind `absolute`. Right-anchored normally (the ⋯ is
+        // standardized as the LAST control of the header actions row); left-anchored
+        // when a wrapped mobile header would push the panel off-screen (see toggle()).
         <div
-          style={{ position: "absolute", right: 0, top: "calc(100% + 0.25rem)" }}
+          style={{ position: "absolute", top: "calc(100% + 0.25rem)", ...(alignLeft ? { left: 0 } : { right: 0 }) }}
           className={`${GLASS_MENU_CLASS} w-56`}
         >
           {children}

@@ -115,6 +115,8 @@ export function AppointmentButton({
   buttonLabel,
   dayStarts,
   compact = false,
+  editLabel,
+  afterDeleteHref,
 }: {
   jobs: Opt[];
   customers: Opt[];
@@ -138,6 +140,13 @@ export function AppointmentButton({
   dayStarts?: string[];
   /** Tight card-header variant: small button that stays on one line. */
   compact?: boolean;
+  /** Edit-mode trigger as a LABELED outline button ("Edit Details") instead of the
+   *  bare pencil — for a record's own detail page, where a lone glyph is too quiet. */
+  editLabel?: string;
+  /** Where to go after a successful delete. Set this when the button is mounted on
+   *  the appointment's OWN page — the default router.refresh() would re-render a
+   *  just-deleted record into a 404. */
+  afterDeleteHref?: string;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -333,16 +342,23 @@ export function AppointmentButton({
       draft.clear();
       toast("Appointment deleted", "success");
       setOpen(false);
-      router.refresh();
+      if (afterDeleteHref) router.push(afterDeleteHref);
+      else router.refresh();
     });
   }
 
   return (
     <>
       {editing ? (
-        <button onClick={openModal} className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Edit">
-          <Pencil className="h-4 w-4" />
-        </button>
+        editLabel ? (
+          <Button size="sm" variant="outline" onClick={openModal}>
+            <Pencil className="h-4 w-4" /> {editLabel}
+          </Button>
+        ) : (
+          <button onClick={openModal} className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Edit">
+            <Pencil className="h-4 w-4" />
+          </button>
+        )
       ) : (
         <Button onClick={openModal} size={compact ? "sm" : undefined} className="shrink-0 whitespace-nowrap">
           <Plus className="h-4 w-4" /> {buttonLabel ?? "New Appointment"}

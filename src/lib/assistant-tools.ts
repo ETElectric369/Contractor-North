@@ -173,7 +173,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "search_price_list",
     description:
-      "Search the company's PRICE LIST — their real priced catalog of materials and services (their own buy price + markup → sell price). When drafting or pricing a quote line, ALWAYS search here first and use the catalog's sell_price when there's a match; only fall back to an estimate when there's no catalog match, and say which lines are estimates. Search by description, part code, or category.",
+      "Search the company's PRICE LIST — their real priced catalog of materials and services (their own buy price + markup → sell price). HARD RULE for estimates: search here FIRST for EVERY material line, BEFORE any web pricing — a book match is their REAL price (use it verbatim and keep the [CODE] tag on the quote line); web prices are only for items the book doesn't have, and those lines get flagged as estimates. The search is fuzzy on its own (exact code → partial code → whole phrase → word-by-word), so ONE call with the plain item name or part code is enough — if it returns nothing, the item isn't in the book; don't re-phrase and retry.",
     input_schema: {
       type: "object",
       properties: {
@@ -185,7 +185,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "lookup_my_price",
     description:
-      "Look up what THIS company has ACTUALLY PAID for a material or part — learned live from the line items on the bills they've entered (their real net cost from their own suppliers). Returns the most recent price, the average, the low/high range, how many times they've bought it, and the last date/supplier. Use this FIRST when you need a material's cost: it's the company's true cost basis. Only fall back to the price list catalog or web_search when there's no purchase history for the item. Search by part description (e.g. '200a panel', 'romex 12-2', 'EV charger').",
+      "Look up what THIS company has ACTUALLY PAID for a material or part — learned live from the line items on the bills they've entered (their real net cost from their own suppliers). Returns the most recent price, the average, the low/high range, how many times they've bought it, and the last date/supplier. Use it for cost/margin questions ('what do I pay for romex?'), and as the FIRST FALLBACK when the price book (search_price_list) has no match. For estimate/quote lines the order is: search_price_list → this tool → web (flagged as an estimate). Search by part description (e.g. '200a panel', 'romex 12-2', 'EV charger').",
     input_schema: {
       type: "object",
       properties: {
@@ -1652,27 +1652,91 @@ export async function runDataTool(
 
       case "search_price_list": {
         const lim = clampLimit(input.limit, 15);
-        const s = sanitize(input.search ?? "");
-        let q = supabase
-          .from("price_list_items")
-          .select("code, description, category, unit, buy_price, markup_pct, supplier")
-          .eq("archived", false)
-          .order("description")
-          .limit(lim);
-        if (s) q = q.or(`description.ilike.%${s}%,code.ilike.%${s}%,category.ilike.%${s}%`);
-        const { data, error } = await q;
-        if (error) throw error;
-        return JSON.stringify({
-          count: data?.length ?? 0,
-          items: (data ?? []).map((r: any) => ({
+        const raw = String(input.search ?? "").trim().slice(0, 80);
+        const baseQuery = () =>
+          supabase
+            .from("price_list_items")
+            .select("code, description, category, unit, buy_price, markup_pct, supplier")
+            .eq("archived", false)
+            .order("description")
+            .limit(lim);
+        const shape = (rows: any[]) =>
+          rows.map((r: any) => ({
             code: r.code,
             description: r.description,
             category: r.category,
             unit: r.unit,
+            buy_price: money(r.buy_price), // the company's REAL net cost — what the estimator prices from
             // sell = buy × (1 + markup%) — the same math the quote builder uses.
             sell_price: money(Number(r.buy_price) * (1 + Number(r.markup_pct) / 100)),
             supplier: r.supplier,
-          })),
+          }));
+
+        if (!raw) {
+          const { data, error } = await baseQuery();
+          if (error) throw error;
+          return JSON.stringify({ count: data?.length ?? 0, items: shape(data ?? []) });
+        }
+
+        // FUZZY LADDER — one call must find the part however it was phrased. The $331.86
+        // panel (PN4060L1200C) Nort web-guessed at $200 WAS in the book; the single
+        // whole-phrase ilike just missed it, so Nort gave up and searched the web. Try
+        // progressively looser strategies and stop at the first hit — mirrors the
+        // exact-code → last-token → normalized-description ladder of findPl in
+        // materials/actions.ts. Word queries go through sanitize() (strips the ,()%*
+        // that break a PostgREST .or()); the book is small, so a few queries are cheap.
+        const s = sanitize(raw);
+        const words = raw
+          .split(/\s+/)
+          .map((w) => sanitize(w))
+          .filter((w) => w.length >= 2);
+        const lastToken = words.length > 1 ? words[words.length - 1] : null;
+        const strategies: { how: string; run: () => any }[] = [
+          // 1. the exact catalog code ("PN4060L1200C"), case-insensitive
+          { how: "exact code", run: () => baseQuery().ilike("code", escapeLike(raw)) },
+          // 2. the query somewhere inside a code (partial/prefixed part numbers)
+          { how: "code contains", run: () => baseQuery().ilike("code", `%${escapeLike(raw)}%`) },
+          // 3. the whole phrase anywhere in description / code / category (the old behavior)
+          {
+            how: "phrase",
+            run: () => (s ? baseQuery().or(`description.ilike.%${s}%,code.ilike.%${s}%,category.ilike.%${s}%`) : null),
+          },
+          // 4. EVERY significant word in the description, any order ("outdoor 200a panel"
+          //    hits "Panel, 200A main breaker, outdoor")
+          {
+            how: "all words in description",
+            run: () =>
+              words.length > 1 ? words.reduce((q: any, w: string) => q.ilike("description", `%${w}%`), baseQuery()) : null,
+          },
+          // 5. the LAST token against code — the findPl idiom ("RACO 936" → code 936)
+          { how: "last token as code", run: () => (lastToken ? baseQuery().ilike("code", `%${lastToken}%`) : null) },
+          // 6. ANY significant word in description or code — the widest net before giving up
+          {
+            how: "any word",
+            run: () => {
+              const parts = words.flatMap((w) => [`description.ilike.%${w}%`, `code.ilike.%${w}%`]);
+              return parts.length ? baseQuery().or(parts.join(",")) : null;
+            },
+          },
+        ];
+        for (const st of strategies) {
+          const q = st.run();
+          if (!q) continue;
+          const { data, error } = await q;
+          if (error) throw error;
+          if (data?.length) {
+            return JSON.stringify({
+              count: data.length,
+              matched_by: st.how,
+              items: shape(data),
+              note: "Book matches are this company's REAL prices — use them over any web figure, and keep the [CODE] tag on the quote line.",
+            });
+          }
+        }
+        return JSON.stringify({
+          count: 0,
+          items: [],
+          note: "No price-book match (tried exact code, partial code, the whole phrase, and word-by-word) — the item genuinely isn't in the book. Only now fall back to lookup_my_price or web pricing, and FLAG that line as an estimate to confirm.",
         });
       }
 

@@ -21,7 +21,6 @@ import { updateTask, type TaskCategory } from "../tasks/actions";
 import { AppointmentButton, type ApptValue } from "../appointments/appointment-button";
 import { ApptQuickActions } from "../appointments/appointment-status";
 import { JobScheduleCard } from "../schedule/job-schedule-card";
-import { WeekAgenda } from "../schedule/week-agenda";
 import { jobLabel } from "@/lib/schedule-options";
 import { allDayEventDays } from "@/lib/gcal-map";
 
@@ -675,25 +674,22 @@ export function CalendarView({
 
       {view === "month" && <MonthGrid anchor={anchor} byDay={byDay} todayK={todayK} onPick={handleDayTap} />}
       {view === "week" && (
-        <>
-          {/* THE week view: blocks in their time allotment (a day-header tap
-              drills; a pill tap opens its record — never a move). */}
-          {(weekGridEvents.length > 0 || weekGridTray.length > 0) && (
-            <Card className="overflow-hidden">
-              <TimeGrid
-                days={weekGridDays}
-                events={weekGridEvents}
-                allDay={weekGridTray}
-                workStartMin={wdStartMin}
-                workEndMin={wdEndMin}
-                onDayClick={(ds) => nav("day", ds, { push: true })}
-              />
-            </Card>
-          )}
-          {/* The agenda list stays below the grid — it carries the move handles
-              (the ONE reschedule grammar) and the tap-to-drill day rows. */}
-          <WeekAgenda days={weekDays} byDay={byDay} todayK={todayK} members={members} onDayTap={handleDayTap} workDayStart={workDayStart} />
-        </>
+        /* THE week view: blocks in their time allotment, and ONLY that (Erik
+           7/15: "get rid of list view below, redundant" — the old WeekAgenda
+           list under the grid is gone). A day-header tap drills into the day
+           view, which keeps the full detail list with every edit/move handle;
+           a pill tap opens its record — never a move. Rendered even on an
+           empty week so the headers stay tappable. */
+        <Card className="overflow-hidden">
+          <TimeGrid
+            days={weekGridDays}
+            events={weekGridEvents}
+            allDay={weekGridTray}
+            workStartMin={wdStartMin}
+            workEndMin={wdEndMin}
+            onDayClick={(ds) => nav("day", ds, { push: true })}
+          />
+        </Card>
       )}
       {view === "day" && (
         <>

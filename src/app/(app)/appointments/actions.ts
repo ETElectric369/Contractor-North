@@ -350,6 +350,7 @@ export async function updateAppointment(id: string, formData: FormData): Promise
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too
+  revalidatePath(`/appointments/${id}`); // the capture page hosts Edit Details — show the save
   return { ok: true };
 }
 

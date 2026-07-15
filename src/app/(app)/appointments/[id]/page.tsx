@@ -7,6 +7,8 @@ import { todayStrInTz, formatDateTimeTz } from "@/lib/tz";
 import { Badge } from "@/components/ui/badge";
 import { NavLink } from "@/components/nav-link";
 import { appointmentTypeLabel, isInspectionType } from "@/lib/statuses";
+import { getSchedulePickerOptions } from "@/lib/schedule-options";
+import { AppointmentButton, type ApptValue } from "../appointment-button";
 import { InspectionCapture, type CapturePhoto } from "./inspection-capture";
 import { MarkCompleteButton } from "./mark-complete-button";
 
@@ -28,15 +30,18 @@ export default async function AppointmentCapturePage({
   const { id } = await params;
   const supabase = await createClient();
 
-  const [{ data: appt }, { data: org }] = await Promise.all([
+  const [{ data: appt }, { data: org }, picker] = await Promise.all([
     supabase
       .from("appointments")
       .select(
-        "id, org_id, type, title, status, starts_at, location, notes, customer_id, inquiry_id, capture, customers(name), inquiries(name, phone)",
+        "id, org_id, type, title, status, starts_at, ends_at, job_id, assigned_to, location, notes, customer_id, inquiry_id, capture, customers(name), inquiries(name, phone)",
       )
       .eq("id", id)
       .maybeSingle(),
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),
+    // Jobs/customers/staff option lists for the Edit-details modal (the same
+    // SSOT helper the schedule's picker uses).
+    getSchedulePickerOptions(supabase),
   ]);
   if (!appt) notFound();
 
@@ -63,6 +68,21 @@ export default async function AppointmentCapturePage({
   const dayStr = a.starts_at ? todayStrInTz(tz, new Date(a.starts_at)) : "";
   const who = a.customers?.name ?? a.inquiries?.name ?? null;
 
+  // The full edit modal (same one the schedule day view opens via the pencil) —
+  // title/time/type/assignee/location are editable HERE too, not just capture fields.
+  const apptValue: ApptValue = {
+    id: a.id,
+    type: a.type,
+    title: a.title,
+    starts_at: a.starts_at,
+    ends_at: a.ends_at ?? null,
+    job_id: a.job_id ?? null,
+    customer_id: a.customer_id ?? null,
+    location: a.location ?? null,
+    notes: a.notes ?? null,
+    assigned_to: a.assigned_to ?? null,
+  };
+
   return (
     <div className="mx-auto max-w-2xl">
       <BackLink fallback={dayStr ? `/schedule?view=day&date=${dayStr}` : "/schedule"} fallbackLabel="Back to Schedule" />
@@ -82,6 +102,16 @@ export default async function AppointmentCapturePage({
               label={isInspectionType(a.type) ? "Mark inspection complete" : "Mark complete"}
             />
           )}
+          {/* Edit details — the shared appointment modal, prefilled (Erik 7/15:
+              "need a way to edit inspection/appointment details"). */}
+          <AppointmentButton
+            jobs={picker.jobOpts}
+            customers={picker.custOpts}
+            staff={picker.staffOpts}
+            appointment={apptValue}
+            editLabel="Edit Details"
+            afterDeleteHref={dayStr ? `/schedule?view=day&date=${dayStr}` : "/schedule"}
+          />
         </div>
         <h1 className="mt-2 text-xl font-bold text-slate-900">{a.title}</h1>
         <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-sm text-slate-500">
