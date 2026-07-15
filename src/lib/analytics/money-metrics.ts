@@ -1,11 +1,35 @@
 import { invoiceBalance } from "@/lib/invoice-math";
+import { getOrgSettings } from "@/lib/org-settings";
+import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
 
 /**
  * Money metrics shared by /analytics AND Nort's ar_aging / revenue_trend / quote_win_rate tools —
  * ONE implementation each, lifted verbatim from the /analytics page so the dashboard and what Nort
  * says can never diverge. Pure compute + a thin org-scoped fetch wrapper per metric.
+ *
+ * CLOCK DISCIPLINE: every "which day/month is it" question here runs on the ORG's timezone
+ * (todayYmd/tz params), never the server's UTC Date methods — the same rule as /payments'
+ * month tile and billing-pipeline's overdue check. A server-local boundary called a due-today
+ * invoice "late" from 5 PM Pacific the night before, and put a June-30-evening payment in July.
  */
 const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** "YYYY-MM-DD" out of a DATE column or ISO timestamp (null passes through). */
+const ymdOf = (v: string | null | undefined): string | null => {
+  const s = String(v ?? "").slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+};
+
+/** Whole days from `fromYmd` to `toYmd` (positive when `toYmd` is later). */
+const daysBetweenYmd = (fromYmd: string, toYmd: string): number =>
+  Math.round((new Date(`${toYmd}T00:00:00Z`).getTime() - new Date(`${fromYmd}T00:00:00Z`).getTime()) / 86_400_000);
+
+/** The org's timezone + org-local today — the fetch wrappers' shared clock. */
+async function orgClock(supabase: any): Promise<{ tz: string; todayYmd: string }> {
+  const { data } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+  const tz = getOrgSettings((data as { settings?: unknown } | null)?.settings).timezone;
+  return { tz, todayYmd: todayStrInTz(tz) };
+}
 
 // ── A/R aging ───────────────────────────────────────────────────────────────
 export type ArBuckets = { current: number; d30: number; d60: number; d90: number };
@@ -15,18 +39,26 @@ export type ArAging = { buckets: ArBuckets; outstanding: number; openCount: numb
 const OPEN_EXCLUDED = ["paid", "void", "draft"];
 const bucketOf = (days: number): keyof ArBuckets => (days <= 0 ? "current" : days <= 30 ? "d30" : days <= 60 ? "d60" : "d90");
 
-export function computeArAging(invoices: any[], nowMs: number): ArAging {
+/**
+ * `todayYmd` is the ORG-local today ("YYYY-MM-DD"). Lateness follows THE app-wide overdue rule
+ * (billing-pipeline / Nort's list_invoices): an invoice is late iff it HAS a due date and that
+ * date is before the org-local today — whole days, so a due-today invoice is NOT late until
+ * tomorrow. An invoice with NO due date is never "late" (it sits in Not-yet-due but still counts
+ * as outstanding). The old version fell back to created_at and compared UTC instants, so
+ * /analytics called a dateless sent invoice "1–30 days late" while /billing's Overdue tile said $0.
+ */
+export function computeArAging(invoices: any[], todayYmd: string): ArAging {
   const open = (invoices ?? []).filter((i) => !OPEN_EXCLUDED.includes(i.status));
   const buckets: ArBuckets = { current: 0, d30: 0, d60: 0, d90: 0 };
   const rows: ArInvoice[] = [];
   for (const i of open) {
     const balance = invoiceBalance(i.total, i.amount_paid);
     if (balance <= 0) continue;
-    const ref = i.due_date ? new Date(i.due_date).getTime() : new Date(i.created_at).getTime();
-    const days = (nowMs - ref) / 86_400_000;
-    const bucket = bucketOf(days);
+    const dueYmd = ymdOf(i.due_date);
+    const daysLate = dueYmd ? Math.max(0, daysBetweenYmd(dueYmd, todayYmd)) : 0;
+    const bucket = bucketOf(daysLate);
     buckets[bucket] += balance;
-    rows.push({ id: i.id ?? null, customer_id: i.customer_id ?? null, invoice_number: i.invoice_number ?? null, customer: i.customers?.name ?? null, balance: round2(balance), daysLate: Math.max(0, Math.floor(days)), bucket });
+    rows.push({ id: i.id ?? null, customer_id: i.customer_id ?? null, invoice_number: i.invoice_number ?? null, customer: i.customers?.name ?? null, balance: round2(balance), daysLate, bucket });
   }
   const outstanding = buckets.current + buckets.d30 + buckets.d60 + buckets.d90;
   rows.sort((a, b) => b.daysLate - a.daysLate);
@@ -61,29 +93,32 @@ export function computeArByCustomer(aging: ArAging): ArCustomer[] {
 export type RevPoint = { month: string; collected: number };
 export type RevenueTrend = { series: RevPoint[]; maxRev: number; collected12: number; best: RevPoint | null; worst: RevPoint | null };
 
-const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+/** The month ("YYYY-MM") an instant falls in, in the ORG's timezone — the /payments-page rule
+ *  (cn-v508 class): a payment recorded 6 PM Pacific on June 30 is a JUNE payment, even though
+ *  its UTC timestamp already says July 1. */
+export const monthKeyInTz = (at: string | Date, tz: string): string => todayStrInTz(tz, typeof at === "string" ? new Date(at) : at).slice(0, 7);
 
-/** The 12 wall-month keys ending in `now`'s month (oldest first) — shared so the fetch window and
- *  the buckets always agree. */
-export function trailing12Months(now: Date): string[] {
-  const start = new Date(now);
-  start.setMonth(start.getMonth() - 11);
-  start.setDate(1);
+/** The 12 wall-month keys ending in `todayYmd`'s month (oldest first) — shared so the fetch
+ *  window and the buckets always agree. Month arithmetic is day-1-pinned (Date.UTC), so calling
+ *  this on the 31st can never overflow into the wrong month (May 31 − 11 months is JUNE 1, not
+ *  the July 1 that `setMonth` overflow produced). */
+export function trailing12Months(todayYmd: string): string[] {
+  const [y, m] = todayYmd.split("-").map(Number);
   const out: string[] = [];
-  for (let i = 0; i < 12; i++) {
-    const d = new Date(start);
-    d.setMonth(d.getMonth() + i);
-    out.push(monthKey(d));
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(Date.UTC(y, m - 1 - i, 1));
+    out.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`);
   }
   return out;
 }
 
-export function computeRevenueTrend(payments: any[], refunds: any[], now: Date): RevenueTrend {
-  const months = trailing12Months(now);
+/** `todayYmd` = org-local today; `tz` = the org's IANA timezone (payments bucket by ORG month). */
+export function computeRevenueTrend(payments: any[], refunds: any[], todayYmd: string, tz: string): RevenueTrend {
+  const months = trailing12Months(todayYmd);
   const byMonth = new Map<string, number>(months.map((m) => [m, 0]));
   for (const p of payments ?? []) {
     if (p.invoices?.status === "void") continue; // voided invoice → money reversed, don't count
-    const k = monthKey(new Date(p.paid_at));
+    const k = monthKeyInTz(p.paid_at, tz);
     if (byMonth.has(k)) byMonth.set(k, byMonth.get(k)! + Number(p.amount));
   }
   const refunds12 = (refunds ?? []).reduce((s, r) => s + Number(r.amount ?? 0), 0);
@@ -124,21 +159,26 @@ export function computeQuoteStats(quotes: any[]): QuoteStats {
 
 // ── Org-scoped fetch wrappers (for Nort's tools; the caller's RLS scopes the org) ────
 export async function getArAging(supabase: any): Promise<ArAging> {
-  const { data } = await supabase
-    .from("invoices")
-    .select("id, customer_id, invoice_number, status, total, amount_paid, due_date, created_at, customers(name)");
-  return computeArAging(data ?? [], Date.now());
+  const [{ data }, { todayYmd }] = await Promise.all([
+    supabase
+      .from("invoices")
+      .select("id, customer_id, invoice_number, status, total, amount_paid, due_date, created_at, customers(name)"),
+    orgClock(supabase),
+  ]);
+  return computeArAging(data ?? [], todayYmd);
 }
 
 export async function getRevenueTrend(supabase: any, now: Date = new Date()): Promise<RevenueTrend> {
-  const start = new Date(now);
-  start.setMonth(start.getMonth() - 11);
-  start.setDate(1);
+  const { tz } = await orgClock(supabase);
+  const todayYmd = todayStrInTz(tz, now);
+  // Fetch from org-local midnight on the 1st of the window's OLDEST month, so the
+  // window and the buckets agree to the instant.
+  const start = tzDayStartUtc(`${trailing12Months(todayYmd)[0]}-01`, tz);
   const [{ data: payments }, { data: refunds }] = await Promise.all([
     supabase.from("payments").select("amount, paid_at, invoices(status)").gte("paid_at", start.toISOString()),
     supabase.from("customer_credits").select("amount").eq("disposition", "refund").gte("created_at", start.toISOString()),
   ]);
-  return computeRevenueTrend(payments ?? [], refunds ?? [], now);
+  return computeRevenueTrend(payments ?? [], refunds ?? [], todayYmd, tz);
 }
 
 export async function getQuoteStats(supabase: any): Promise<QuoteStats> {

@@ -91,7 +91,9 @@ export function CrewBoard({
                 {lane.appts.map((a) => (
                   <Link
                     key={a.id}
-                    href={a.jobId ? `/jobs/${a.jobId}` : "/schedule"}
+                    // The appointment ITSELF (view + Edit Details) — like a job card
+                    // opens its job. Its job stays one tap away on the capture page.
+                    href={`/appointments/${a.id}`}
                     className="rounded-lg border border-slate-200 bg-white p-2 text-xs shadow-sm hover:border-brand"
                   >
                     <div className="flex items-center gap-1.5">

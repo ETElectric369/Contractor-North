@@ -439,12 +439,15 @@ export async function saveSelectedCalendars(calendarIds: string[]): Promise<Resu
   const clean = Array.from(
     new Set((calendarIds ?? []).map((s) => String(s).trim()).filter((s) => s.length > 0 && s.length < 300)),
   ).slice(0, 25);
-  const { gcalConnection } = await import("@/lib/google-calendar");
+  const { gcalConnection, connectionNeedsReauth } = await import("@/lib/google-calendar");
   const conn = await gcalConnection(ctx.supabase);
   if (!conn) return { ok: false, error: "Google Calendar isn't connected yet." };
   const tokens: Record<string, unknown> =
     conn.sync_tokens && typeof conn.sync_tokens === "object" ? { ...conn.sync_tokens } : {};
   for (const key of Object.keys(tokens)) if (!clean.includes(key)) delete tokens[key];
+  // A dead-grant connection stays marked broken — only a real reconnect
+  // (the OAuth callback) clears the reauth marker.
+  if (connectionNeedsReauth(conn)) tokens.error = "reauth";
   const { error } = await ctx.supabase
     .from("calendar_connections")
     .update({ selected_calendars: clean, sync_tokens: tokens })

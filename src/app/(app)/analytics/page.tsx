@@ -9,7 +9,9 @@ import { Badge, statusTone } from "@/components/ui/badge";
 import { jobStatusLabel } from "@/lib/job-status";
 import { formatCurrency } from "@/lib/utils";
 import { computeJobProfitRows } from "@/lib/analytics/job-profitability";
-import { computeArAging, computeRevenueTrend, computeQuoteStats } from "@/lib/analytics/money-metrics";
+import { computeArAging, computeRevenueTrend, computeQuoteStats, trailing12Months } from "@/lib/analytics/money-metrics";
+import { getOrgSettings } from "@/lib/org-settings";
+import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
 
 export const dynamic = "force-dynamic";
 
@@ -25,13 +27,18 @@ export default async function AnalyticsPage() {
   const { data: me } = await supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle();
   if (!me || !isStaffRole(me.role)) redirect("/planner");
 
-  const yearAgo = new Date();
-  yearAgo.setMonth(yearAgo.getMonth() - 11);
-  yearAgo.setDate(1);
+  // The ORG's clock, not the server's UTC: month buckets, the 12-month fetch window,
+  // and the overdue rule all derive from the org timezone (the /payments-page + billing-
+  // pipeline discipline) — a UTC boundary put a June-30-evening Pacific payment in July
+  // and called a due-today invoice late the night before.
+  const { data: orgRow } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+  const tz = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone;
+  const todayYmd = todayStrInTz(tz);
+  const windowStart = tzDayStartUtc(`${trailing12Months(todayYmd)[0]}-01`, tz).toISOString();
 
   const [{ data: payments }, { data: invoices }, { data: quotes }, { data: jobs }, { data: entries }, { data: pos }, { data: bills }, { data: refunds }, { data: jobRefunds }] =
     await Promise.all([
-      supabase.from("payments").select("amount, paid_at, invoices(status)").gte("paid_at", yearAgo.toISOString()),
+      supabase.from("payments").select("amount, paid_at, invoices(status)").gte("paid_at", windowStart),
       supabase.from("invoices").select("id, invoice_number, job_id, status, total, amount_paid, due_date, created_at, customers(name)"),
       supabase.from("quotes").select("status, total"),
       // No .limit() — job profitability must rank over ALL jobs, not just the 100 newest
@@ -44,7 +51,7 @@ export default async function AnalyticsPage() {
         .not("job_id", "is", null),
       supabase.from("purchase_orders").select("job_id, total"),
       supabase.from("bills").select("job_id, amount, category"),
-      supabase.from("customer_credits").select("amount, created_at").eq("disposition", "refund").gte("created_at", yearAgo.toISOString()),
+      supabase.from("customer_credits").select("amount, created_at").eq("disposition", "refund").gte("created_at", windowStart),
       // Per-job refunds (all-time, with the invoice they reversed) so job profitability
       // nets refunds the SAME way the job hub does — keyed to a job via its invoice.
       supabase.from("customer_credits").select("amount, invoices(job_id)").eq("disposition", "refund"),
@@ -52,8 +59,8 @@ export default async function AnalyticsPage() {
 
   // ── Money metrics — the SAME computations Nort's revenue_trend / ar_aging / quote_win_rate
   // tools call, so the dashboard and what Nort says can never diverge.
-  const trend = computeRevenueTrend(payments ?? [], refunds ?? [], new Date());
-  const ar = computeArAging((invoices ?? []) as any[], Date.now());
+  const trend = computeRevenueTrend(payments ?? [], refunds ?? [], todayYmd, tz);
+  const ar = computeArAging((invoices ?? []) as any[], todayYmd);
   const qs = computeQuoteStats((quotes ?? []) as any[]);
 
   // ── Job profitability ─────────────────────────────────────────────────────
@@ -69,7 +76,7 @@ export default async function AnalyticsPage() {
     entries: entries ?? [],
   }).slice(0, 8);
 
-  // ── Overhead (year to date, by category) ─────────────────────────────────
+  // ── Overhead (all time, by category — matches the tile's label) ──────────
   const overhead = new Map<string, number>();
   for (const b of (bills ?? []) as any[]) {
     if (b.job_id) continue;

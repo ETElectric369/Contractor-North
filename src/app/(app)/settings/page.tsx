@@ -34,7 +34,7 @@ import { AvatarUpload } from "./avatar-upload";
 import { CodeTemplatesManager } from "./code-templates-manager";
 import { PasskeyManager } from "./passkey-manager";
 import { listPasskeys } from "./passkey-actions";
-import { gcalConfigured } from "@/lib/google-calendar";
+import { gcalConfigured, connectionNeedsReauth } from "@/lib/google-calendar";
 import { GcalCard } from "./gcal-card";
 import QRCode from "qrcode";
 import { translator } from "@/lib/i18n";
@@ -153,7 +153,7 @@ export default async function SettingsPage({
   const { data: gcalSync } = gcalConn
     ? await supabase
         .from("calendar_connections")
-        .select("selected_calendars, last_synced_at")
+        .select("selected_calendars, last_synced_at, sync_tokens")
         .eq("provider", "google")
         .maybeSingle()
     : { data: null };
@@ -444,6 +444,7 @@ export default async function SettingsPage({
                       : []
                   }
                   lastSyncedAt={(gcalSync as { last_synced_at?: string | null } | null)?.last_synced_at ?? null}
+                  needsReauth={connectionNeedsReauth(gcalSync)}
                 />
               </Section>
             </div>

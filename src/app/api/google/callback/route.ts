@@ -44,6 +44,11 @@ export async function GET(req: Request) {
         expires_at: new Date(Date.now() + (t.expires_in ?? 3600) * 1000).toISOString(),
         connected_by: user.id,
         connected_at: new Date().toISOString(),
+        // A (re)connect clears the dead-grant "reauth" marker AND the old
+        // per-calendar sync tokens — the next sweep re-baselines each mirror
+        // in full, which is exactly right after a broken spell. Calendar
+        // picks (selected_calendars) are untouched and survive the reconnect.
+        sync_tokens: {},
       },
       { onConflict: "org_id,provider" },
     );

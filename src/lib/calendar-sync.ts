@@ -22,6 +22,7 @@ import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/observe";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import {
+  connectionNeedsReauth,
   gcalConnection,
   gcalTokenForConnection,
   gcalUpsertEvent,
@@ -172,10 +173,19 @@ export async function syncOrgCalendars(service: any, conn: any): Promise<OrgSync
   const res: OrgSyncResult = { org_id: conn.org_id, pulled: 0, removed: 0, swept: 0, errors: [] };
   const startedAt = new Date().toISOString();
 
+  // A connection already marked broken (dead grant) is skipped OUTRIGHT — no
+  // Google calls, no sentry rows. The one reportError happened on the transition
+  // (gcalTokenForConnection); the marker clears when the user reconnects.
+  if (connectionNeedsReauth(conn)) {
+    res.errors.push("Google connection needs to be reconnected — open Settings → Google Calendar.");
+    return res;
+  }
+
   let token: string | null = null;
   try {
     token = await gcalTokenForConnection(service, conn);
   } catch (e) {
+    // Transient refresh failure only — a dead grant returns null (and marks itself).
     reportError("gcal-sync-token", e, { orgId: conn.org_id });
   }
   if (!token) {

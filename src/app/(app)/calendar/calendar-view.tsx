@@ -439,8 +439,11 @@ export function CalendarView({
    *  window — an explicit (non-sentinel) start time on their start day — or
    *  the org work-day window when all-day; appointments run starts_at →
    *  ends_at (or +1h); tasks have no time of day, so they ride the tray
-   *  (never faked into a slot). */
-  function gridDataFor(k: string): { events: TimeGridEvent[]; allDay: TimeGridAllDay[] } {
+   *  (never faked into a slot). `openApptRecords`: in the DAY view an appt
+   *  pill opens the appointment itself (/appointments/[id] — view + Edit
+   *  Details, like a job pill opens its job); in the WEEK view it keeps
+   *  drilling into the day (the drill list carries the edit/move handles). */
+  function gridDataFor(k: string, opts?: { openApptRecords?: boolean }): { events: TimeGridEvent[]; allDay: TimeGridAllDay[] } {
     const data = byDay.get(k);
     const events: TimeGridEvent[] = [];
     const tray: TimeGridAllDay[] = [];
@@ -492,8 +495,9 @@ export function CalendarView({
         label: a.title,
         sub: a.customers?.name ?? a.jobs?.name ?? null,
         color: apptGridColor(a),
-        // The day drill hosts the appointment's edit pencil + quick actions.
-        href: `/schedule?view=day&date=${k}`,
+        // Day view → the appointment itself; week view → the day drill
+        // (which hosts the edit pencil + quick actions).
+        href: opts?.openApptRecords ? `/appointments/${a.id}` : `/schedule?view=day&date=${k}`,
       });
     }
     for (const t of data.tasks) {
@@ -547,7 +551,7 @@ export function CalendarView({
       weekGridTray.push(...g.allDay);
     }
   }
-  const dayGrid = view === "day" ? gridDataFor(anchorK) : { events: [], allDay: [] };
+  const dayGrid = view === "day" ? gridDataFor(anchorK, { openApptRecords: true }) : { events: [], allDay: [] };
 
   const title =
     view === "month"
@@ -994,15 +998,20 @@ function ApptRow({ a, picker, tz }: { a: CalAppt; picker: SchedulePicker; tz: st
   };
   return (
     <li className="flex flex-wrap items-start gap-3 px-4 py-3">
-      <div className="w-16 shrink-0 text-sm font-medium text-slate-700">
+      {/* Time + title open the appointment itself (view + Edit Details) — an appt
+          row is clickable exactly like a job card (Erik 7/15). The pencil/move
+          handles on the right stay for in-place edits. */}
+      <Link href={`/appointments/${a.id}`} className="w-16 shrink-0 text-sm font-medium text-slate-700 hover:text-brand">
         {formatTime(a.starts_at, tz)}
         {a.ends_at ? <span className="block text-[11px] font-normal text-slate-400">{formatTime(a.ends_at, tz)}</span> : null}
-      </div>
+      </Link>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           {/* Inspection = teal everywhere; amber belongs to move-mode alone. */}
           <Badge tone="blue" className={a.type === "inspection" ? "bg-teal-100 text-teal-800" : undefined}>{a.type}</Badge>
-          <span className="truncate text-sm font-medium text-slate-900">{a.title}</span>
+          <Link href={`/appointments/${a.id}`} className="truncate text-sm font-medium text-slate-900 hover:text-brand hover:underline">
+            {a.title}
+          </Link>
           {a.status === "completed" && <Badge tone="green">done</Badge>}
           {a.status === "proposed" && <Badge tone="amber">pending pick</Badge>}
         </div>

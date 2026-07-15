@@ -74,8 +74,24 @@ export async function gcalRefresh(refreshToken: string): Promise<GoogleTokens> {
       grant_type: "refresh_token",
     }),
   });
-  if (!r.ok) throw new Error(`Token refresh failed (${r.status})`);
+  if (!r.ok) {
+    // Carry the HTTP status so callers can tell a DEAD grant (400 invalid_grant /
+    // 401 revoked — reconnect required) from a transient failure worth retrying.
+    const err = new Error(`Token refresh failed (${r.status})`) as Error & { status?: number };
+    err.status = r.status;
+    throw err;
+  }
   return r.json();
+}
+
+/** The schema-free "this connection is dead, stop trying" marker: sync_tokens
+ *  (JSONB) carries {"error":"reauth"} instead of per-calendar sync tokens. Set
+ *  when a refresh comes back 400/401 (revoked/expired grant); cleared by the
+ *  OAuth callback on reconnect. While set, every token ask short-circuits to
+ *  null — no Google call, no sentry row — so a dead June-era token can't spam
+ *  "Token refresh failed (400)" from the 15-min cron forever. */
+export function connectionNeedsReauth(conn: any): boolean {
+  return (conn?.sync_tokens as { error?: string } | null | undefined)?.error === "reauth";
 }
 
 /** The org's calendar_connections row (RLS-scoped for a user client; pass
@@ -88,13 +104,35 @@ export async function gcalConnection(supabase: any, orgId?: string): Promise<any
 }
 
 /** A valid access token for a fetched connection row, refreshing (and
- *  persisting) when it's within 2 minutes of expiry. Throws on refresh
- *  failure — callers treat that as "reconnect needed". */
+ *  persisting) when it's within 2 minutes of expiry. Returns null when the
+ *  connection needs a reconnect — already marked broken, no refresh token, or
+ *  a refresh that just came back 400/401 (dead grant → marked broken HERE, with
+ *  ONE reportError on the transition; later calls skip silently until the OAuth
+ *  callback clears the marker). Only TRANSIENT refresh failures still throw. */
 export async function gcalTokenForConnection(supabase: any, conn: any): Promise<string | null> {
+  if (connectionNeedsReauth(conn)) return null; // broken until reconnect — don't retry a dead token every 15 min
   const expiresAt = conn.expires_at ? new Date(conn.expires_at).getTime() : 0;
   if (expiresAt > Date.now() + 120_000) return conn.access_token as string;
   if (!conn.refresh_token) return null;
-  const t = await gcalRefresh(conn.refresh_token);
+  let t: GoogleTokens;
+  try {
+    t = await gcalRefresh(conn.refresh_token);
+  } catch (e) {
+    const status = (e as { status?: number }).status;
+    if (status === 400 || status === 401) {
+      // invalid_grant / revoked — permanently dead. Mark the connection broken so
+      // every future ask (cron, live push/delete, settings) skips it quietly.
+      await supabase.from("calendar_connections").update({ sync_tokens: { error: "reauth" } }).eq("id", conn.id);
+      try {
+        const { reportError } = await import("@/lib/observe"); // dynamic: keeps this module importable in unit tests
+        reportError("gcal-token-reauth", e, { connectionId: conn.id, orgId: conn.org_id });
+      } catch {
+        /* reporting must never break the caller */
+      }
+      return null;
+    }
+    throw e; // transient (5xx / network) — leave the connection alone and retry next run
+  }
   await supabase
     .from("calendar_connections")
     .update({
