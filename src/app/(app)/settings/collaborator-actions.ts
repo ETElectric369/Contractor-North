@@ -11,7 +11,7 @@ import { rateLimited } from "@/lib/rate-limit";
  * RLS-scoped to the staff's own org; the collaborator claims the grant by signing up with the
  * invited email. Nothing here can grant access to anything but site_posts.
  */
-export type Result = { ok: boolean; error?: string; link?: string };
+export type Result = { ok: boolean; error?: string; link?: string; emailSent?: boolean };
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
@@ -51,7 +51,9 @@ export async function inviteSiteCollaborator(email: string): Promise<Result> {
   const { data: org } = await supabase.from("organizations").select("name").eq("id", orgId).maybeSingle();
   const orgName = (org as { name?: string } | null)?.name || "our team";
   const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
-  await sendEmail({
+  // Best-effort email, but REPORT whether it actually went out — the old fire-and-forget
+  // swallowed Resend failures, so staff saw "Invite sent" while nobody ever got an email.
+  const emailSent = await sendEmail({
     to: clean,
     fromName: orgName,
     subject: `${orgName} invited you to manage their website articles`,
@@ -61,10 +63,12 @@ export async function inviteSiteCollaborator(email: string): Promise<Result> {
       <p style="margin:24px 0"><a href="${link}" style="background:#0b57c4;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600;display:inline-block">Get started</a></p>
       <p style="color:#94a3b8;font-size:13px;word-break:break-all">Or open this link: ${link}</p>
     </div>`,
-  }).catch(() => {}); // best-effort — the returned link is the guaranteed fallback
+  })
+    .then((r) => r.ok)
+    .catch(() => false); // the returned link is the guaranteed fallback
 
   revalidatePath("/settings");
-  return { ok: true, link };
+  return { ok: true, link, emailSent };
 }
 
 export async function revokeSiteCollaborator(id: string): Promise<Result> {

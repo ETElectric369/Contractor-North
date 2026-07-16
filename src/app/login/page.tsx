@@ -8,12 +8,16 @@ import { PasswordInput } from "@/components/ui/password-input";
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; message?: string; mode?: string; email?: string; sent?: string }>;
+  searchParams: Promise<{ error?: string; message?: string; mode?: string; email?: string; sent?: string; next?: string }>;
 }) {
-  const { error, message, mode, email, sent } = await searchParams;
+  const { error, message, mode, email, sent, next } = await searchParams;
   const isSignup = mode === "signup";
   const isCode = mode === "code";
   const codeSent = isCode && sent === "1";
+  // Collaborator invite links arrive as /login?mode=signup&email=…&next=/content — keep `next`
+  // alive across the mode toggles and pass it into the form (the action validates it).
+  const withNext = (href: string) =>
+    next ? `${href}${href.includes("?") ? "&" : "?"}next=${encodeURIComponent(next)}` : href;
 
   const heading = isSignup ? "Create your account" : isCode ? "Sign in with a code" : "Sign in";
   const sub = isSignup
@@ -93,6 +97,7 @@ export default async function LoginPage({
           ) : (
             // ── Password login / signup ──
             <form className="space-y-4">
+              {next && <input type="hidden" name="next" value={next} />}
               {isSignup && (
                 <div>
                   <Label htmlFor="full_name">Full name</Label>
@@ -127,9 +132,9 @@ export default async function LoginPage({
 
           <p className="mt-6 text-center text-sm text-slate-500">
             {isSignup ? (
-              <>Already have an account? <Link href="/login" className="font-medium text-brand hover:underline">Sign In</Link></>
+              <>Already have an account? <Link href={withNext("/login")} className="font-medium text-brand hover:underline">Sign In</Link></>
             ) : (
-              <>Need an account? <Link href="/login?mode=signup" className="font-medium text-brand hover:underline">Sign up</Link></>
+              <>Need an account? <Link href={withNext("/login?mode=signup")} className="font-medium text-brand hover:underline">Sign up</Link></>
             )}
           </p>
         </div>

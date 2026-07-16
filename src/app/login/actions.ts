@@ -3,6 +3,30 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { safeNextPath } from "@/lib/safe-next";
+
+/**
+ * Where does a freshly-signed-in user with NO org belong? An external site collaborator
+ * (site_collaborators seat, profile org_id NULL — cn-v459) lives on /content, never the app.
+ * auth/callback already claims + routes them — but that's only the email-confirmation path;
+ * with confirmations OFF, signup/login/OTP create an INSTANT session and used to dump them on
+ * /planner → the (app) shell's /onboarding "create your company" wall with zero access. So
+ * every session-creating action calls this: claim any grants invited to this email, then
+ * return "/content" for a collaborator, null for everyone else (org members skip the RPC).
+ */
+async function collaboratorHome(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+): Promise<string | null> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return null;
+  const { data: me } = await supabase.from("profiles").select("org_id").eq("id", user.id).maybeSingle();
+  if (me?.org_id) return null; // org member → normal app, untouched
+  await supabase.rpc("claim_site_collaborations");
+  const { data: g } = await supabase.from("site_collaborators").select("org_id").eq("user_id", user.id).limit(1);
+  return g?.length ? "/content" : null;
+}
 
 export async function login(formData: FormData) {
   const supabase = await createClient();
@@ -14,8 +38,11 @@ export async function login(formData: FormData) {
     redirect(`/login?error=${encodeURIComponent(error.message)}`);
   }
 
+  // A RETURNING org-less collaborator belongs on /content (their grants may still be pending
+  // claim if their first session never hit a claiming route).
+  const dest = (await collaboratorHome(supabase)) ?? "/planner";
   revalidatePath("/", "layout");
-  redirect("/planner");
+  redirect(dest);
 }
 
 export async function signup(formData: FormData) {
@@ -23,6 +50,9 @@ export async function signup(formData: FormData) {
   const email = String(formData.get("email") ?? "");
   const password = String(formData.get("password") ?? "");
   const full_name = String(formData.get("full_name") ?? "");
+  // Carried through the signup form as a hidden field (collaborator invite links arrive as
+  // /login?mode=signup&email=…&next=/content). Validated: same-app relative paths only.
+  const next = safeNextPath(formData.get("next"));
 
   // INVITE-ONLY (migration 0125): the real gate is a BEFORE INSERT trigger on auth.users
   // (it also stops bots POSTing straight to GoTrue with the anon key). This pre-check just
@@ -56,8 +86,12 @@ export async function signup(formData: FormData) {
   } = await supabase.auth.getUser();
 
   if (user) {
+    // Instant session (confirmations off): the auth/callback claim never runs, so claim + route
+    // HERE. An org-less collaborator goes to their invite's next (or /content); everyone else
+    // keeps today's /planner.
+    const collab = await collaboratorHome(supabase);
     revalidatePath("/", "layout");
-    redirect("/planner");
+    redirect(collab ? (next ?? collab) : "/planner");
   }
 
   redirect(
@@ -131,8 +165,10 @@ export async function verifyLoginCode(formData: FormData) {
   if (!email || token.length < 6) redirect(`${back}&error=${enc("Enter the 6-digit code from your email.")}`);
   const { error } = await supabase.auth.verifyOtp({ email, token, type: "email" });
   if (error) redirect(`${back}&error=${enc(error.message)}`);
+  // Same routing as password login: an org-less site collaborator belongs on /content.
+  const dest = (await collaboratorHome(supabase)) ?? "/planner";
   revalidatePath("/", "layout");
-  redirect("/planner");
+  redirect(dest);
 }
 
 export async function signOut() {

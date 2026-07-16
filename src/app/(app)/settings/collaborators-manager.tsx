@@ -23,26 +23,62 @@ export function CollaboratorsManager({ initial }: { initial: Collab[] }) {
   const [email, setEmail] = useState("");
   const [pending, start] = useTransition();
   const [lastLink, setLastLink] = useState<string | null>(null);
+  // Failures stay ON SCREEN (a toast alone is gone in 5s — invites "sent" into the void were
+  // invisible); emailFailed marks "row created but the email didn't go out → share the link".
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [emailFailed, setEmailFailed] = useState(false);
 
   function invite() {
     const e = email.trim();
     if (!e) return;
+    setErrorMsg(null);
+    setEmailFailed(false);
     start(async () => {
-      const res = await inviteSiteCollaborator(e);
-      if (!res.ok) { toast(res.error ?? "Couldn't send the invite.", "error"); return; }
-      toast("Invite sent", "success");
-      setEmail("");
-      setLastLink(res.link ?? null);
-      router.refresh();
+      try {
+        const res = await inviteSiteCollaborator(e);
+        if (!res.ok) {
+          const msg = res.error ?? "Couldn't send the invite.";
+          setErrorMsg(msg);
+          toast(msg, "error");
+          return;
+        }
+        setEmail("");
+        setLastLink(res.link ?? null);
+        if (res.emailSent === false) {
+          setEmailFailed(true);
+          toast("Invite created — but the email didn't send. Share the link below.", "error");
+        } else {
+          toast("Invite sent", "success");
+        }
+        router.refresh();
+      } catch {
+        // A thrown server action rejects inside the transition — without this catch it dies
+        // silently and the invite looks sent when nothing happened.
+        const msg = "Couldn't send the invite — check your connection and try again.";
+        setErrorMsg(msg);
+        toast(msg, "error");
+      }
     });
   }
 
   function revoke(c: Collab) {
+    setErrorMsg(null);
     start(async () => {
-      const res = await revokeSiteCollaborator(c.id);
-      if (!res.ok) { toast(res.error ?? "Couldn't remove access.", "error"); return; }
-      toast("Access removed", "success");
-      router.refresh();
+      try {
+        const res = await revokeSiteCollaborator(c.id);
+        if (!res.ok) {
+          const msg = res.error ?? "Couldn't remove access.";
+          setErrorMsg(msg);
+          toast(msg, "error");
+          return;
+        }
+        toast("Access removed", "success");
+        router.refresh();
+      } catch {
+        const msg = "Couldn't remove access — check your connection and try again.";
+        setErrorMsg(msg);
+        toast(msg, "error");
+      }
     });
   }
 
@@ -78,6 +114,12 @@ export function CollaboratorsManager({ initial }: { initial: Collab[] }) {
         </ul>
       )}
 
+      {errorMsg && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {errorMsg}
+        </div>
+      )}
+
       <div className="flex flex-wrap items-end gap-2">
         <div className="min-w-[220px] flex-1">
           <Input
@@ -94,8 +136,12 @@ export function CollaboratorsManager({ initial }: { initial: Collab[] }) {
       </div>
 
       {lastLink && (
-        <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
-          <span className="truncate text-slate-500">Share this link if the email doesn&apos;t arrive: {lastLink}</span>
+        <div className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs ${emailFailed ? "border-amber-300 bg-amber-50" : "border-slate-200 bg-slate-50"}`}>
+          <span className={`truncate ${emailFailed ? "text-amber-800" : "text-slate-500"}`}>
+            {emailFailed
+              ? <>The invite email couldn&apos;t be sent — copy this link and send it to them yourself: {lastLink}</>
+              : <>Share this link if the email doesn&apos;t arrive: {lastLink}</>}
+          </span>
           <button
             type="button"
             onClick={() => { navigator.clipboard?.writeText(lastLink); toast("Link copied", "success"); }}
