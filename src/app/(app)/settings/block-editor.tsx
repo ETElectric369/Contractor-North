@@ -11,10 +11,11 @@ import { BLOCK_PALETTE, SECTION_PALETTE, type Block, type BlockStyle, type Block
 
 /**
  * The reusable visual block editor — the sections list (add / reorder / remove), the per-block field
- * inputs + styling toolbox, image upload, and a live Preview toggle. Owns nothing but the preview
- * flag: all block state flows through `blocks` + `onChange`, so the SAME editor drives custom pages
- * (PagesManager) and the homepage (HomeBlocksEditor). `orgId` enables device upload; `brand` colors
- * the preview's buttons; `previewTitle` shows an H1 atop the preview.
+ * inputs + styling toolbox, image upload, and a layout-sketch Preview toggle (content and order only
+ * — wired sections render as placeholders, so it's labeled a sketch, not "your site"). Owns nothing
+ * but the preview flag: all block state flows through `blocks` + `onChange`, so the SAME editor
+ * drives custom pages (PagesManager) and the homepage (HomeBlocksEditor). `orgId` enables device
+ * upload; `brand` colors the preview's buttons; `previewTitle` shows an H1 atop the preview.
  */
 export function BlockEditor({
   blocks,
@@ -61,7 +62,7 @@ export function BlockEditor({
 
       {preview ? (
         <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-          <div className="border-b border-slate-100 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-400">Live preview — how this looks on your site</div>
+          <div className="border-b border-slate-100 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-400">Layout sketch — content and order only; wired sections show as placeholders</div>
           <div className="max-h-[58vh] overflow-y-auto">
             {previewTitle && <h1 className="mx-auto max-w-3xl px-4 pt-8 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">{previewTitle}</h1>}
             <BlockRenderer blocks={blocks} brand={brand} />
@@ -155,8 +156,10 @@ function BlockFields({ block, orgId, onChange }: { block: Block; orgId?: string;
   return null;
 }
 
-/** A URL input paired with an upload-from-device button (+ a thumbnail preview). Upload needs orgId. */
-function ImageField({ value, onChange, orgId, placeholder }: { value: string; onChange: (url: string) => void; orgId?: string; placeholder?: string }) {
+/** A URL input paired with an upload-from-device button (+ a thumbnail preview). Upload needs orgId
+ *  (goes through uploadSiteImage — the path both storage policies accept). Exported: PostsManager
+ *  reuses it for the article cover image. */
+export function ImageField({ value, onChange, orgId, placeholder, id }: { value: string; onChange: (url: string) => void; orgId?: string; placeholder?: string; id?: string }) {
   const ref = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -177,7 +180,7 @@ function ImageField({ value, onChange, orgId, placeholder }: { value: string; on
   return (
     <div className="space-y-1">
       <div className="flex items-center gap-2">
-        <Input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />
+        <Input id={id} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />
         <input ref={ref} type="file" accept="image/*" className="hidden" onChange={onFile} />
         {orgId && (
           <Button type="button" variant="outline" size="sm" onClick={() => ref.current?.click()} disabled={busy} title="Upload from your device">
@@ -197,20 +200,26 @@ function ImageField({ value, onChange, orgId, placeholder }: { value: string; on
 function GalleryFields({ urls, orgId, onChange }: { urls: string[]; orgId?: string; onChange: (urls: string[]) => void }) {
   const ref = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
   async function onFiles(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []).filter((f) => f.type.startsWith("image/"));
     if (!files.length || !orgId) return;
+    setErr(null);
     setBusy(true);
-    try {
-      const added: string[] = [];
-      for (const f of files) added.push(await uploadSiteImage(orgId, f));
-      onChange([...urls, ...added]);
-    } catch {
-      /* per-file failure surfaces nothing here; the row inputs still let them paste a URL */
-    } finally {
-      setBusy(false);
-      if (ref.current) ref.current.value = "";
+    // Per-file try/catch: one bad photo must not sink the batch — keep every success, name every failure.
+    const added: string[] = [];
+    const failed: string[] = [];
+    for (const f of files) {
+      try {
+        added.push(await uploadSiteImage(orgId, f));
+      } catch {
+        failed.push(f.name);
+      }
     }
+    if (added.length) onChange([...urls, ...added]);
+    if (failed.length) setErr(`Couldn't upload ${failed.join(", ")}${added.length ? " — the rest were added" : ""}.`);
+    setBusy(false);
+    if (ref.current) ref.current.value = "";
   }
   return (
     <div className="space-y-2">
@@ -231,6 +240,7 @@ function GalleryFields({ urls, orgId, onChange }: { urls: string[]; orgId?: stri
           </>
         )}
       </div>
+      {err && <p className="text-xs text-red-600">{err}</p>}
     </div>
   );
 }

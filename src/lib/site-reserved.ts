@@ -17,6 +17,8 @@ import { CONTENT_ROOTS } from "@/lib/site-content-roots";
 // services, faq, gallery, reviews…) are NOT app routes, so they stay available.
 export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   ...CONTENT_ROOTS, // "blog", "blog-1-1" — the article engine owns these
+  // The homepage itself is "/" — a /home (or /index, /homepage) decoy page must be impossible
+  "home", "index", "homepage",
   // Auth / onboarding (the login flow is the one app path reachable from an org's public site)
   "login", "logout", "forgot", "reset", "set-password", "account-deactivated", "onboarding",
   "subscribe", "auth",
@@ -40,6 +42,12 @@ const SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
 
 export function isReservedSlug(slug: string): boolean {
   return RESERVED_SLUGS.has(String(slug || "").toLowerCase());
+}
+
+/** Normalize a raw title/slug input into a legal page slug — shared by saveSitePage AND the page
+ *  editor's pre-save check, so both sides test the SAME string against the reserved set. */
+export function slugifySiteSlug(s: string): string {
+  return s.toLowerCase().replace(/['’]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
 }
 
 /**

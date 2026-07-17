@@ -2,13 +2,14 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ExternalLink, FileText, Pencil, Plus, Trash2 } from "lucide-react";
+import { ExternalLink, Eye, FileText, Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { useToast } from "@/components/toast";
 import { formatDate } from "@/lib/utils";
+import { ImageField } from "./block-editor";
 import { saveSitePost, deleteSitePost } from "./posts-actions";
 
 type PostRow = {
@@ -42,10 +43,14 @@ const EMPTY: Draft = { id: null, title: "", path: "", description: "", cover_url
 export function PostsManager({
   initial,
   siteUrl,
+  handle,
   orgId,
 }: {
   initial: PostRow[];
   siteUrl: string | null;
+  /** public_handle — draft previews route through the app host (/site/<handle>/…) where the
+      editor's session cookie lives. */
+  handle?: string | null;
   /** Set only on the external-collaborator surface (/content) to name which org's site — staff
       leave it undefined and the action infers their own org. */
   orgId?: string;
@@ -89,7 +94,8 @@ export function PostsManager({
         orgId,
       });
       if (!res.ok) { setError(res.error ?? "Couldn't save the article."); return; }
-      toast(editing.id ? "Article updated" : "Article published", "success");
+      // Say what actually happened: an unpublished save is a draft, not a publish.
+      toast(!editing.published ? "Draft saved" : editing.id ? "Article updated" : "Article published", "success");
       setEditing(null);
       router.refresh();
     });
@@ -141,6 +147,20 @@ export function PostsManager({
                   <ExternalLink className="h-4 w-4" />
                 </a>
               )}
+              {handle && !p.published && (
+                // Draft preview goes through the APP host, not the org's domain: the editor's
+                // session cookie lives here — on the custom domain the gate would see an
+                // anonymous visitor and 404.
+                <a
+                  href={`/site/${handle}/${p.path}?preview=1`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 rounded-md p-1.5 text-xs font-medium text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                  title="Preview the draft at its web address — only you can see it"
+                >
+                  <Eye className="h-4 w-4" /> <span className="hidden sm:inline">Preview draft</span>
+                </a>
+              )}
               <button
                 type="button"
                 onClick={() => openEdit(p)}
@@ -175,7 +195,8 @@ export function PostsManager({
             onCancel={() => setEditing(null)}
             onSave={save}
             saving={pending}
-            saveLabel={editing?.id ? "Save article" : "Publish article"}
+            // The button promises only what the Published checkbox will deliver.
+            saveLabel={editing && !editing.published ? "Save draft" : editing?.id ? "Save article" : "Publish article"}
           />
         }
       >
@@ -213,11 +234,12 @@ export function PostsManager({
               />
             </div>
             <div>
-              <Label htmlFor="post-cover">Cover image URL</Label>
-              <Input
+              <Label htmlFor="post-cover">Cover image</Label>
+              <ImageField
                 id="post-cover"
                 value={editing.cover_url}
-                onChange={(e) => setEditing({ ...editing, cover_url: e.target.value })}
+                onChange={(url) => setEditing({ ...editing, cover_url: url })}
+                orgId={orgId}
                 placeholder="https://… (shown on the article + as the social preview image)"
               />
             </div>

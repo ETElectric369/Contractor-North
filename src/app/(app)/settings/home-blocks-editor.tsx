@@ -9,7 +9,8 @@ import { BlockEditor } from "./block-editor";
 import { saveHomeBlocks } from "./pages-actions";
 
 /** Build the homepage's own custom sections with the SAME block editor as the page builder. Saves to
- *  settings.home_blocks; the homepage renders them below the hero. */
+ *  settings.home_blocks; the homepage renders them below the always-on-top banner (hero + trust
+ *  band), where they REPLACE the default template sections (work/services/reviews/contact). */
 export function HomeBlocksEditor({ initial, brand, orgId }: { initial: Block[]; brand?: string; orgId?: string }) {
   const router = useRouter();
   const [blocks, setBlocks] = useState<Block[]>(initial ?? []);
@@ -32,10 +33,10 @@ export function HomeBlocksEditor({ initial, brand, orgId }: { initial: Block[]; 
   return (
     <div className="space-y-3">
       <p className="text-sm text-slate-500">
-        Build your homepage from blocks — headings, text, images, banners, and the wired sections
-        (photo gallery, reviews, contact form, estimate button). As soon as you add a section here,
-        <strong> these become your homepage</strong> (the default template steps aside). Empty = the
-        default template.
+        Build the rest of your homepage from blocks — headings, text, images, banners, and the wired
+        sections (photo gallery, reviews, contact form, estimate button). As soon as you add a section
+        here, <strong>these replace the standard sections below your top banner</strong> (the banner
+        stays). Empty = the standard layout.
       </p>
       <BlockEditor blocks={blocks} onChange={setBlocks} brand={brand} orgId={orgId} sections />
       {error && <p className="text-sm text-red-600">{error}</p>}

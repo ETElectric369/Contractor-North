@@ -20,13 +20,12 @@ import { PaymentMethods } from "./payment-methods";
 import { AutomationSettings } from "./automation-settings";
 import { TaxRatesManager } from "./tax-rates-manager";
 import { JobCodesManager } from "./job-codes-manager";
-import { SplashSettings } from "./splash-settings";
+import { HomepageCard } from "./homepage-card";
 import { WebsiteSettings } from "./website-settings";
 import { PortfolioManager } from "./portfolio-manager";
 import { ReviewsManager } from "./reviews-manager";
 import { PostsManager } from "./posts-manager";
 import { PagesManager } from "./pages-manager";
-import { HomeBlocksEditor } from "./home-blocks-editor";
 import { CollaboratorsManager } from "./collaborators-manager";
 import { AiStatus } from "./ai-status";
 import { QuotePlaybookForm } from "./quote-playbook-form";
@@ -245,10 +244,13 @@ export default async function SettingsPage({
                 <WebsiteSettings settings={settings} siteUrl={siteUrl} sitesDomain={sitesDomain} />
               </Section>
               <Section title="Homepage">
-                <SplashSettings settings={settings} portfolio={settings.portfolio ?? []} orgId={(org as Organization).id} />
-              </Section>
-              <Section title="Homepage sections">
-                <HomeBlocksEditor initial={renderReadyBlocks(settings.home_blocks)} brand={accentHex(settings.glass_tint)} orgId={(org as Organization).id} />
+                <HomepageCard
+                  settings={settings}
+                  homeBlocks={renderReadyBlocks(settings.home_blocks)}
+                  brand={accentHex(settings.glass_tint)}
+                  orgId={(org as Organization).id}
+                  siteUrl={settings.public_handle ? orgPublicBaseUrl(settings) : null}
+                />
               </Section>
               <Section title="Portfolio photos">
                 <PortfolioManager orgId={(org as Organization).id} initial={settings.portfolio ?? []} />
@@ -260,12 +262,15 @@ export default async function SettingsPage({
                 <PostsManager
                   initial={(sitePosts ?? []) as any}
                   siteUrl={settings.public_handle ? orgPublicBaseUrl(settings) : null}
+                  handle={settings.public_handle}
+                  orgId={(org as Organization).id}
                 />
               </Section>
               <Section title="Custom pages">
                 <PagesManager
                   initial={sitePages as any}
                   siteUrl={settings.public_handle ? orgPublicBaseUrl(settings) : null}
+                  handle={settings.public_handle}
                   brand={accentHex(settings.glass_tint)}
                   orgId={(org as Organization).id}
                 />

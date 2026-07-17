@@ -23,23 +23,42 @@ export function SiteSeoFields({ settings, orgId }: { settings: OrgSettings; orgI
   const [pending, start] = useTransition();
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Last-SAVED values — the diff baseline. The Website panel edits several of these same keys, so
+  // each save sends ONLY the keys changed here; sending the whole form would overwrite the other
+  // panel's saves with this form's stale copies.
+  const [saved, setSaved] = useState({
+    gbp: settings.google_business_url ?? "",
+    area: settings.service_area ?? "",
+    ig: settings.social_instagram ?? "",
+    theme: settings.site_theme ?? "classic",
+    specHead: settings.specialty_headline ?? "",
+    specBlurb: settings.specialty_blurb ?? "",
+  });
 
   function save() {
     setError(null);
     setDone(false);
     start(async () => {
-      const res = await updateOrgSettings(
-        {
-          google_business_url: gbp.trim(),
-          service_area: area.trim(),
-          social_instagram: ig.replace(/^@/, "").trim(),
-          site_theme: theme,
-          specialty_headline: specHead.trim(),
-          specialty_blurb: specBlurb.trim(),
-        },
-        orgId,
-      );
-      if (!res.ok) { setError(res.error ?? "Couldn't save."); return; }
+      const next = {
+        gbp: gbp.trim(),
+        area: area.trim(),
+        ig: ig.replace(/^@/, "").trim(),
+        theme,
+        specHead: specHead.trim(),
+        specBlurb: specBlurb.trim(),
+      };
+      const patch: Record<string, unknown> = {};
+      if (next.gbp !== saved.gbp) patch.google_business_url = next.gbp;
+      if (next.area !== saved.area) patch.service_area = next.area;
+      if (next.ig !== saved.ig) patch.social_instagram = next.ig;
+      if (next.theme !== saved.theme) patch.site_theme = next.theme;
+      if (next.specHead !== saved.specHead) patch.specialty_headline = next.specHead;
+      if (next.specBlurb !== saved.specBlurb) patch.specialty_blurb = next.specBlurb;
+      if (Object.keys(patch).length) {
+        const res = await updateOrgSettings(patch, orgId);
+        if (!res.ok) { setError(res.error ?? "Couldn't save."); return; }
+        setSaved(next);
+      }
       setDone(true);
       setTimeout(() => setDone(false), 2500);
     });
@@ -50,7 +69,14 @@ export function SiteSeoFields({ settings, orgId }: { settings: OrgSettings; orgI
       <div>
         <Label htmlFor="seo-gbp">Google Business Profile link</Label>
         <Input id="seo-gbp" value={gbp} onChange={(e) => setGbp(e.target.value)} placeholder="Paste the Google Maps link to your listing" />
-        <p className="mt-1 text-xs text-slate-400">The local-SEO anchor — it ties this site to your Google listing so they rank as one business.</p>
+        {gbp.trim() !== "" ? (
+          <p className="mt-1 flex items-start gap-1 text-xs font-medium text-green-700">
+            <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            Linked to your Google Business Profile — this feeds Google&apos;s structured data on every page.
+          </p>
+        ) : (
+          <p className="mt-1 text-xs text-slate-400">The local-SEO anchor — it ties this site to your Google listing so they rank as one business.</p>
+        )}
       </div>
       <div>
         <Label htmlFor="seo-area">Service area</Label>

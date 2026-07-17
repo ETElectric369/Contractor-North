@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { getPublicOrgByDomain } from "@/lib/public-org";
 import { getPublicPosts } from "@/lib/public-posts";
 import { getNavPages } from "@/lib/public-pages";
+import { orgPublicBaseUrl } from "@/lib/org-settings";
 import { OrgSite, orgSiteMetadata } from "../org-site";
 
 export const dynamic = "force-dynamic";
@@ -21,7 +22,10 @@ async function orgFromHost() {
 
 export async function generateMetadata(): Promise<Metadata> {
   const org = await orgFromHost();
-  return org ? orgSiteMetadata(org) : {};
+  if (!org) return {};
+  // Canonical = the org's one public base (custom domain when set, else the free subdomain) — the
+  // same URL the sitemap advertises — so www/apex variants of the domain don't compete.
+  return { ...orgSiteMetadata(org), alternates: { canonical: `${orgPublicBaseUrl(org.settings)}/` } };
 }
 
 export default async function SiteByDomain() {

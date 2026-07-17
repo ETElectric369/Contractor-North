@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Phone, Mail, MapPin, ArrowRight, Check, ShieldCheck, Clock, Zap, Instagram, Star } from "lucide-react";
+import { Phone, Mail, MapPin, ArrowRight, Check, ShieldCheck, Clock, Zap, Instagram, Star, Menu } from "lucide-react";
 import { accentHex, orgPublicBaseUrl, parseGeoFromMapUrl, type OrgSettings } from "@/lib/org-settings";
+import { pageSlugFromHref } from "@/lib/site-nav";
 import type { PublicOrg } from "@/lib/public-org";
 import { jsonLdSafe } from "@/lib/jsonld";
 import { renderReadyBlocks } from "@/lib/public-pages";
@@ -174,15 +175,31 @@ export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg;
   // actually stated on the page even when the logo is a wordless emblem.
   const showName = s.show_name_with_logo === true;
   const homeBlocks = renderReadyBlocks(s.home_blocks);
+  const hasBlocks = homeBlocks.length > 0;
+  // Which wired sections the custom layout actually renders — nav links and anchors key off this
+  // so no link ever points at a section the block homepage left out.
+  const blockSections = new Set(homeBlocks.flatMap((b) => (b.type === "section" ? [b.props.key] : [])));
   const ig = (s.social_instagram || "").replace(/^@/, "").trim();
   const reviews = (s.reviews ?? []).filter((r) => r && r.text && r.name);
+  // The banner (hero + trust band) always tops the page — template AND block homepages. Natural
+  // opt-out: no hero image (none set, no portfolio fallback) and no headline → no banner at all.
+  const showBanner = Boolean(hero || s.splash_headline);
+  const showWorkLink = photos.length > 0 && (!hasBlocks || blockSections.has("portfolio"));
+  const showServicesLink = services.length > 0 && !hasBlocks;
+  const showReviewsLink = reviews.length > 0 && (!hasBlocks || blockSections.has("reviews"));
   // Primary CTA: orgs that price from a catalog get the instant configurator; everyone else
   // (e.g. an electrician on the research method) routes to the branded inquiry form.
   const hasConfigurator = s.estimating_mode === "catalog";
-  // Catalog orgs → the instant configurator; everyone else → the on-page contact form.
-  const estimateHref = hasConfigurator ? `/estimate/${handle}` : "#contact-form";
+  // Catalog orgs → the instant configurator; everyone else → the on-page contact form (or the
+  // footer when a block homepage carries no contact-form section — never a dead anchor).
+  const estimateHref = hasConfigurator ? `/estimate/${handle}` : !hasBlocks || blockSections.has("contact") ? "#contact-form" : "#contact";
   const ctaLabel = hasConfigurator ? "Get your free instant estimate" : "Request a free estimate";
   const telHref = org.phone ? `tel:${org.phone.replace(/[^0-9+]/g, "")}` : null;
+  // A published builder page whose slug is "portfolio"/"contact" (already resolved into pageLinks
+  // by the route — no extra query) gets a teaser link appended to the matching homepage section,
+  // so those pages are reachable from the content they extend, not just the nav.
+  const portfolioPageHref = pageLinks.find((p) => pageSlugFromHref(p.href) === "portfolio")?.href ?? null;
+  const contactPageHref = pageLinks.find((p) => pageSlugFromHref(p.href) === "contact")?.href ?? null;
 
   // schema.org LocalBusiness markup — how Google connects this site to the real-world business.
   // The linchpin is `sameAs`/`hasMap` pointing at the org's Google Business Profile: it tells
@@ -231,9 +248,9 @@ export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg;
             )}
           </a>
           <nav className="hidden items-center gap-6 text-sm font-medium text-slate-600 md:flex">
-            {photos.length > 0 && <a href="#work" className="hover:text-slate-900">Our work</a>}
-            {services.length > 0 && <a href="#services" className="hover:text-slate-900">Services</a>}
-            {reviews.length > 0 && <a href="#reviews" className="hover:text-slate-900">Reviews</a>}
+            {showWorkLink && <a href="#work" className="hover:text-slate-900">Our work</a>}
+            {showServicesLink && <a href="#services" className="hover:text-slate-900">Services</a>}
+            {showReviewsLink && <a href="#reviews" className="hover:text-slate-900">Reviews</a>}
             {articlesHref && <Link href={articlesHref} className="hover:text-slate-900">Articles</Link>}
             {pageLinks.map((p) => (
               <Link key={p.href} href={p.href} className="hover:text-slate-900">{p.label}</Link>
@@ -249,14 +266,81 @@ export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg;
             <Link href={estimateHref} className="rounded-lg px-4 py-2 text-sm font-semibold text-white" style={{ backgroundColor: brand }}>
               Get an estimate
             </Link>
+            {/* Mobile nav — the link row above is hidden below md, which stranded builder pages on
+                phones. A <details> disclosure keeps this a server component (no client JS). */}
+            <details className="relative md:hidden">
+              <summary className="flex h-9 w-9 cursor-pointer list-none items-center justify-center rounded-lg border border-slate-200 text-slate-700 [&::-webkit-details-marker]:hidden" aria-label="Menu">
+                <Menu className="h-5 w-5" />
+              </summary>
+              <nav className="absolute right-0 top-full z-50 mt-2 flex w-56 flex-col rounded-xl border border-slate-200 bg-white py-2 text-sm font-medium text-slate-700 shadow-lg">
+                {telHref && (
+                  <a href={telHref} className="flex items-center gap-2 px-4 py-2 hover:bg-slate-50 sm:hidden">
+                    <Phone className="h-4 w-4" style={{ color: brand }} /> {org.phone}
+                  </a>
+                )}
+                {showWorkLink && <a href="#work" className="px-4 py-2 hover:bg-slate-50">Our work</a>}
+                {showServicesLink && <a href="#services" className="px-4 py-2 hover:bg-slate-50">Services</a>}
+                {showReviewsLink && <a href="#reviews" className="px-4 py-2 hover:bg-slate-50">Reviews</a>}
+                {articlesHref && <Link href={articlesHref} className="px-4 py-2 hover:bg-slate-50">Articles</Link>}
+                {pageLinks.map((p) => (
+                  <Link key={p.href} href={p.href} className="px-4 py-2 hover:bg-slate-50">{p.label}</Link>
+                ))}
+                <a href="#contact" className="px-4 py-2 hover:bg-slate-50">Contact</a>
+              </nav>
+            </details>
           </div>
         </div>
       </header>
 
-      {/* When the homepage has custom blocks, they ARE the homepage (below the header/footer chrome);
-          otherwise the designed template renders. So an org "graduates" to the block homepage just by
-          adding sections — no separate mode, and Tahoe Deck (no blocks) is untouched. */}
-      {homeBlocks.length > 0 ? (
+      {/* The banner — hero + trust band — ALWAYS tops the page when it has content; custom
+          home_blocks replace only the default sections below it, never the banner. Opting out is
+          natural: clear the hero image (and portfolio) and the headline. */}
+      {showBanner && (
+        <>
+          {/* Hero — presentation varies by settings.site_theme; the copy/CTA/data are identical. */}
+          <Hero
+            theme={s.site_theme}
+            name={showName ? org.name : undefined}
+            headline={s.splash_headline}
+            headlineSize={s.splash_headline_size}
+            tagline={s.splash_tagline}
+            brand={brand}
+            hero={hero}
+            area={area}
+            estimateHref={estimateHref}
+            ctaLabel={ctaLabel}
+            hasPhotos={showWorkLink}
+            creds={creds}
+          />
+
+          {/* Trust band */}
+          <section className="border-b border-slate-100 bg-slate-50">
+            <div className="mx-auto grid max-w-6xl grid-cols-2 gap-6 px-4 py-8 sm:grid-cols-4">
+              {[
+                { icon: ShieldCheck, label: org.license || "Licensed & insured" },
+                { icon: Zap, label: hasConfigurator ? "Instant online estimates" : "Free estimates" },
+                { icon: MapPin, label: area || "Serving your area" },
+                { icon: Clock, label: "Free consultation" },
+              ].map((f, i) => {
+                const Icon = f.icon;
+                return (
+                  <div key={i} className="flex items-center gap-3">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full" style={{ backgroundColor: `${brand}1a`, color: brand }}>
+                      <Icon className="h-5 w-5" />
+                    </span>
+                    <span className="text-sm font-semibold text-slate-700">{f.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        </>
+      )}
+
+      {/* Custom home_blocks replace the DEFAULT SECTIONS (work/services/reviews/contact) below the
+          banner; without them the designed template renders. An org "graduates" to the block layout
+          just by adding sections — no separate mode, and Tahoe Deck (no blocks) is untouched. */}
+      {hasBlocks ? (
         <HomeBlockRenderer
           blocks={homeBlocks}
           org={org}
@@ -266,76 +350,41 @@ export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg;
           estimateHref={estimateHref}
           ctaLabel={ctaLabel}
           hasConfigurator={hasConfigurator}
+          gbpUrl={gbpUrl}
+          portfolioPageHref={portfolioPageHref}
+          contactPageHref={contactPageHref}
         />
       ) : (
         <>
-      {/* Hero — presentation varies by settings.site_theme; the copy/CTA/data are identical. */}
-      <Hero
-        theme={s.site_theme}
-        name={showName ? org.name : undefined}
-        headline={s.splash_headline}
-        headlineSize={s.splash_headline_size}
-        tagline={s.splash_tagline}
-        brand={brand}
-        hero={hero}
-        area={area}
-        estimateHref={estimateHref}
-        ctaLabel={ctaLabel}
-        hasPhotos={photos.length > 0}
-        creds={creds}
-      />
+          {/* Signature-specialty showcase — an elegant dark gallery band spotlighting the org's marquee
+              offering (e.g. custom lighting). Data-driven: hidden unless a headline is set. Features the
+              first several captioned portfolio photos; the full set still shows in "Our work" below. */}
+          {s.specialty_headline && portfolio.length > 0 && (
+            <SpecialtyShowcase headline={s.specialty_headline} blurb={s.specialty_blurb} brand={brand} photos={portfolio.slice(0, 6)} />
+          )}
 
-      {/* Trust band */}
-      <section className="border-b border-slate-100 bg-slate-50">
-        <div className="mx-auto grid max-w-6xl grid-cols-2 gap-6 px-4 py-8 sm:grid-cols-4">
-          {[
-            { icon: ShieldCheck, label: org.license || "Licensed & insured" },
-            { icon: Zap, label: hasConfigurator ? "Instant online estimates" : "Free estimates" },
-            { icon: MapPin, label: area || "Serving your area" },
-            { icon: Clock, label: "Free consultation" },
-          ].map((f, i) => {
-            const Icon = f.icon;
-            return (
-              <div key={i} className="flex items-center gap-3">
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full" style={{ backgroundColor: `${brand}1a`, color: brand }}>
-                  <Icon className="h-5 w-5" />
-                </span>
-                <span className="text-sm font-semibold text-slate-700">{f.label}</span>
+          {/* Services */}
+          {services.length > 0 && (
+            <section id="services" className="mx-auto max-w-6xl px-4 py-16">
+              <h2 className="text-3xl font-extrabold tracking-tight">What we do</h2>
+              <p className="mt-2 max-w-2xl text-slate-600">Quality craftsmanship from the smallest fix to the biggest build — done right, on time.</p>
+              <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {services.map((svc, i) => (
+                  <div key={i} className="flex items-start gap-3 rounded-2xl border border-slate-200 p-5">
+                    <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full" style={{ backgroundColor: `${brand}1a`, color: brand }}>
+                      <Check className="h-4 w-4" />
+                    </span>
+                    <span className="font-semibold text-slate-800">{svc}</span>
+                  </div>
+                ))}
               </div>
-            );
-          })}
-        </div>
-      </section>
+            </section>
+          )}
 
-      {/* Signature-specialty showcase — an elegant dark gallery band spotlighting the org's marquee
-          offering (e.g. custom lighting). Data-driven: hidden unless a headline is set. Features the
-          first several captioned portfolio photos; the full set still shows in "Our work" below. */}
-      {s.specialty_headline && portfolio.length > 0 && (
-        <SpecialtyShowcase headline={s.specialty_headline} blurb={s.specialty_blurb} brand={brand} photos={portfolio.slice(0, 6)} />
-      )}
-
-      {/* Services */}
-      {services.length > 0 && (
-        <section id="services" className="mx-auto max-w-6xl px-4 py-16">
-          <h2 className="text-3xl font-extrabold tracking-tight">What we do</h2>
-          <p className="mt-2 max-w-2xl text-slate-600">Quality craftsmanship from the smallest fix to the biggest build — done right, on time.</p>
-          <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {services.map((svc, i) => (
-              <div key={i} className="flex items-start gap-3 rounded-2xl border border-slate-200 p-5">
-                <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full" style={{ backgroundColor: `${brand}1a`, color: brand }}>
-                  <Check className="h-4 w-4" />
-                </span>
-                <span className="font-semibold text-slate-800">{svc}</span>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      <PortfolioBand portfolio={portfolio} brand={brand} orgName={org.name} />
-      <ReviewsBand reviews={reviews} brand={brand} />
-      <EstimateBand hasConfigurator={hasConfigurator} estimateHref={estimateHref} ctaLabel={ctaLabel} brand={brand} />
-      <ContactBand orgId={org.id} brand={brand} hasConfigurator={hasConfigurator} />
+          <PortfolioBand portfolio={portfolio} brand={brand} orgName={org.name} moreHref={portfolioPageHref} />
+          <ReviewsBand reviews={reviews} brand={brand} gbpUrl={gbpUrl} />
+          <EstimateBand hasConfigurator={hasConfigurator} estimateHref={estimateHref} ctaLabel={ctaLabel} brand={brand} />
+          <ContactBand orgId={org.id} brand={brand} hasConfigurator={hasConfigurator} pageHref={contactPageHref} />
         </>
       )}
 
@@ -359,6 +408,11 @@ export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg;
             {org.email && <a href={`mailto:${org.email}`} className="flex items-center gap-2 hover:text-white"><Mail className="h-4 w-4" style={{ color: brand }} /> {org.email}</a>}
             {area && <p className="flex items-center gap-2"><MapPin className="h-4 w-4" style={{ color: brand }} /> {area}</p>}
             {ig && <a href={`https://www.instagram.com/${ig}`} className="flex items-center gap-2 hover:text-white"><Instagram className="h-4 w-4" style={{ color: brand }} /> @{ig}</a>}
+            {gbpUrl && (
+              <a href={gbpUrl} target="_blank" rel="noopener" className="flex items-center gap-2 hover:text-white">
+                <Star className="h-4 w-4" style={{ color: brand }} /> Review us on Google
+              </a>
+            )}
             <Link href={estimateHref} className="mt-2 inline-flex items-center gap-2 rounded-lg px-4 py-2 font-semibold text-white" style={{ backgroundColor: brand }}>
               Get an estimate <ArrowRight className="h-4 w-4" />
             </Link>
@@ -383,20 +437,35 @@ export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg;
 // ── The wired homepage sections, as standalone bands. Used by BOTH the default template AND the
 // block homepage (as "smart" section blocks), so there's ONE copy of each — no duplicated JSX. ──
 
-function PortfolioBand({ portfolio, brand, orgName }: { portfolio: { url: string; caption?: string }[]; brand: string; orgName: string }) {
+function PortfolioBand({ portfolio, brand, orgName, moreHref }: { portfolio: { url: string; caption?: string }[]; brand: string; orgName: string; moreHref?: string | null }) {
   if (!portfolio.length) return null;
   return (
     <div id="work" className="border-t border-slate-100 bg-slate-50/60 pt-14">
       <PortfolioGallery photos={portfolio} brand={brand} orgName={orgName} />
+      {/* Teaser to the full builder "portfolio" page, when the org has published one. */}
+      {moreHref && (
+        <div className="mx-auto -mt-8 max-w-5xl px-4 pb-14">
+          <Link href={moreHref} className="inline-flex items-center gap-1.5 font-semibold hover:underline" style={{ color: brand }}>
+            See the full portfolio <ArrowRight className="h-4 w-4" />
+          </Link>
+        </div>
+      )}
     </div>
   );
 }
 
-function ReviewsBand({ reviews, brand }: { reviews: { name: string; text: string; rating?: number }[]; brand: string }) {
+function ReviewsBand({ reviews, brand, gbpUrl }: { reviews: { name: string; text: string; rating?: number }[]; brand: string; gbpUrl?: string }) {
   if (!reviews.length) return null;
   return (
     <section id="reviews" className="mx-auto max-w-6xl px-4 py-16">
-      <h2 className="text-3xl font-extrabold tracking-tight">What our customers say</h2>
+      <div className="flex flex-wrap items-baseline justify-between gap-3">
+        <h2 className="text-3xl font-extrabold tracking-tight">What our customers say</h2>
+        {gbpUrl && (
+          <a href={gbpUrl} target="_blank" rel="noopener" className="inline-flex items-center gap-1.5 text-sm font-semibold hover:underline" style={{ color: brand }}>
+            <Star className="h-4 w-4" fill={brand} /> Review us on Google
+          </a>
+        )}
+      </div>
       <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
         {reviews.map((r, i) => {
           const stars = Math.max(1, Math.min(5, Math.round(r.rating ?? 5)));
@@ -433,19 +502,27 @@ function EstimateBand({ hasConfigurator, estimateHref, ctaLabel, brand }: { hasC
   );
 }
 
-function ContactBand({ orgId, brand, hasConfigurator }: { orgId: string; brand: string; hasConfigurator: boolean }) {
+function ContactBand({ orgId, brand, hasConfigurator, pageHref }: { orgId: string; brand: string; hasConfigurator: boolean; pageHref?: string | null }) {
   return (
     <section id="contact-form" className="border-t border-slate-100 bg-slate-50 px-4 py-16">
       <ContactForm orgId={orgId} brand={brand} heading={hasConfigurator ? "Prefer to just message us?" : "Request a free estimate"} />
+      {/* Teaser to the full builder "contact" page, when the org has published one. */}
+      {pageHref && (
+        <p className="mt-6 text-center">
+          <Link href={pageHref} className="inline-flex items-center gap-1.5 text-sm font-semibold hover:underline" style={{ color: brand }}>
+            Visit the contact page <ArrowRight className="h-4 w-4" />
+          </Link>
+        </p>
+      )}
     </section>
   );
 }
 
-/** Render a custom homepage: the owner's ordered home_blocks. Content blocks group into a
- *  BlockRenderer; a "section" block renders its wired band (gallery/reviews/contact/estimate) with
- *  live org data. This is what replaces the fixed template once the homepage has blocks. */
+/** Render the owner's ordered home_blocks. Content blocks group into a BlockRenderer; a "section"
+ *  block renders its wired band (gallery/reviews/contact/estimate) with live org data. This replaces
+ *  only the DEFAULT SECTIONS below the always-on-top banner once the homepage has blocks. */
 function HomeBlockRenderer({
-  blocks, org, brand, portfolio, reviews, estimateHref, ctaLabel, hasConfigurator,
+  blocks, org, brand, portfolio, reviews, estimateHref, ctaLabel, hasConfigurator, gbpUrl, portfolioPageHref, contactPageHref,
 }: {
   blocks: Block[];
   org: PublicOrg;
@@ -455,6 +532,9 @@ function HomeBlockRenderer({
   estimateHref: string;
   ctaLabel: string;
   hasConfigurator: boolean;
+  gbpUrl?: string;
+  portfolioPageHref?: string | null;
+  contactPageHref?: string | null;
 }) {
   const out: React.ReactNode[] = [];
   let run: Block[] = [];
@@ -469,9 +549,9 @@ function HomeBlockRenderer({
     if (b.type === "section") {
       flush();
       const k = `s${key++}`;
-      if (b.props.key === "portfolio") out.push(<PortfolioBand key={k} portfolio={portfolio} brand={brand} orgName={org.name} />);
-      else if (b.props.key === "reviews") out.push(<ReviewsBand key={k} reviews={reviews} brand={brand} />);
-      else if (b.props.key === "contact") out.push(<ContactBand key={k} orgId={org.id} brand={brand} hasConfigurator={hasConfigurator} />);
+      if (b.props.key === "portfolio") out.push(<PortfolioBand key={k} portfolio={portfolio} brand={brand} orgName={org.name} moreHref={portfolioPageHref} />);
+      else if (b.props.key === "reviews") out.push(<ReviewsBand key={k} reviews={reviews} brand={brand} gbpUrl={gbpUrl} />);
+      else if (b.props.key === "contact") out.push(<ContactBand key={k} orgId={org.id} brand={brand} hasConfigurator={hasConfigurator} pageHref={contactPageHref} />);
       else if (b.props.key === "estimate") out.push(<EstimateBand key={k} hasConfigurator={hasConfigurator} estimateHref={estimateHref} ctaLabel={ctaLabel} brand={brand} />);
     } else {
       run.push(b);

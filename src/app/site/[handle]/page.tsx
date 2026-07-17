@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { getPublicOrgByHandle } from "@/lib/public-org";
 import { getPublicPosts } from "@/lib/public-posts";
 import { getNavPages } from "@/lib/public-pages";
+import { orgPublicBaseUrl } from "@/lib/org-settings";
 import { OrgSite, orgSiteMetadata } from "../org-site";
 import { handleLinkBase } from "../site-base";
 
@@ -13,7 +14,10 @@ export const dynamic = "force-dynamic";
 export async function generateMetadata({ params }: { params: Promise<{ handle: string }> }): Promise<Metadata> {
   const { handle } = await params;
   const org = await getPublicOrgByHandle(handle);
-  return org ? orgSiteMetadata(org) : {};
+  if (!org) return {};
+  // Canonical = the org's one public base (custom domain when set, else the free subdomain) — the
+  // same URL the sitemap advertises — so app-host /site/<handle> and the subdomain don't compete.
+  return { ...orgSiteMetadata(org), alternates: { canonical: `${orgPublicBaseUrl(org.settings)}/` } };
 }
 
 export default async function SiteHome({ params }: { params: Promise<{ handle: string }> }) {

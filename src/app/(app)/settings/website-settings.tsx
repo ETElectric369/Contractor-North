@@ -34,6 +34,18 @@ export function WebsiteSettings({
   const [pending, start] = useTransition();
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Last-SAVED values — the diff baseline. Two screens (this one + the SEO/specialty fields) edit
+  // the same settings keys, so each save sends ONLY the keys changed here; sending the whole form
+  // would overwrite the other screen's saves with this form's stale copies.
+  const [saved, setSaved] = useState({
+    handle: settings.public_handle ?? "",
+    domain: settings.custom_domain ?? "",
+    area: settings.service_area ?? "",
+    ig: settings.social_instagram ?? "",
+    gbp: settings.google_business_url ?? "",
+    calendly: settings.calendly_url ?? "",
+    theme: settings.site_theme ?? "classic",
+  });
 
   const base = (siteUrl || "https://contractor-north.vercel.app").replace(/\/$/, "");
   const subUrl = handle ? `https://${handle}.${sitesDomain}` : "";
@@ -47,15 +59,35 @@ export function WebsiteSettings({
       return;
     }
     start(async () => {
-      const h = await setPublicHandle(handle);
-      if (!h.ok) { setError(h.error ?? "Couldn't save the address."); return; }
-      setHandle(h.handle ?? "");
-      // Custom domain has its own guarded, uniqueness-checked setter (not the passthrough).
-      const cd = await setCustomDomain(domain);
-      if (!cd.ok) { setError(cd.error ?? "Couldn't save the domain."); return; }
-      setDomain(cd.domain ?? "");
-      const res = await updateOrgSettings({ service_area: area.trim(), social_instagram: ig.replace(/^@/, "").trim(), site_theme: theme, google_business_url: gbp.trim(), calendly_url: cal });
-      if (!res.ok) { setError(res.error ?? "Couldn't save."); return; }
+      // Advance the baseline per successful step, so a mid-save failure never re-sends (or worse,
+      // silently skips) what already landed.
+      let baseSaved = saved;
+      const record = (patch: Partial<typeof saved>) => { baseSaved = { ...baseSaved, ...patch }; setSaved(baseSaved); };
+      if (handle.trim() !== baseSaved.handle) {
+        const h = await setPublicHandle(handle);
+        if (!h.ok) { setError(h.error ?? "Couldn't save the address."); return; }
+        setHandle(h.handle ?? "");
+        record({ handle: h.handle ?? "" });
+      }
+      if (domain.trim() !== baseSaved.domain) {
+        // Custom domain has its own guarded, uniqueness-checked setter (not the passthrough).
+        const cd = await setCustomDomain(domain);
+        if (!cd.ok) { setError(cd.error ?? "Couldn't save the domain."); return; }
+        setDomain(cd.domain ?? "");
+        record({ domain: cd.domain ?? "" });
+      }
+      const next = { area: area.trim(), ig: ig.replace(/^@/, "").trim(), gbp: gbp.trim(), calendly: cal, theme };
+      const patch: Record<string, unknown> = {};
+      if (next.area !== baseSaved.area) patch.service_area = next.area;
+      if (next.ig !== baseSaved.ig) patch.social_instagram = next.ig;
+      if (next.theme !== baseSaved.theme) patch.site_theme = next.theme;
+      if (next.gbp !== baseSaved.gbp) patch.google_business_url = next.gbp;
+      if (next.calendly !== baseSaved.calendly) patch.calendly_url = next.calendly;
+      if (Object.keys(patch).length) {
+        const res = await updateOrgSettings(patch);
+        if (!res.ok) { setError(res.error ?? "Couldn't save."); return; }
+        record(next);
+      }
       setDone(true);
       setTimeout(() => setDone(false), 2500);
     });
@@ -105,10 +137,17 @@ export function WebsiteSettings({
       <div>
         <Label htmlFor="ws-gbp">Google Business Profile</Label>
         <Input id="ws-gbp" value={gbp} onChange={(e) => setGbp(e.target.value)} placeholder="https://maps.google.com/…  (your Google Maps listing)" />
-        <p className="mt-1 text-xs text-slate-400">
-          Paste your Google Maps listing link. This ties your website to your Google listing for local
-          search — the biggest lever for showing up in the map results when someone nearby searches for you.
-        </p>
+        {gbp.trim() !== "" ? (
+          <p className="mt-1 flex items-start gap-1 text-xs font-medium text-green-700">
+            <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            Linked to your Google Business Profile — this feeds Google&apos;s structured data on every page.
+          </p>
+        ) : (
+          <p className="mt-1 text-xs text-slate-400">
+            Paste your Google Maps listing link. This ties your website to your Google listing for local
+            search — the biggest lever for showing up in the map results when someone nearby searches for you.
+          </p>
+        )}
       </div>
 
       <div>

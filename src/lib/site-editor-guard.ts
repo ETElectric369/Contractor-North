@@ -6,14 +6,14 @@ import { DEFAULT_SETTINGS, type OrgSettings } from "@/lib/org-settings";
 /**
  * The marketing/on-page-SEO settings keys an external collaborator may edit — and, just as
  * important, the ONLY settings values that may be sent to their browser. Must stay in lockstep with
- * the whitelist in the update_site_content RPC (migration 0113): that RPC is the write boundary,
- * this is the read boundary. Everything else in settings (pricing, playbook, secrets, thresholds)
- * is business config and never leaves the server for a collaborator.
+ * the whitelist in the update_site_content RPC (migration 0113, last re-created 0134): that RPC is
+ * the write boundary, this is the read boundary. Everything else in settings (pricing, playbook,
+ * secrets, thresholds) is business config and never leaves the server for a collaborator.
  */
 export const SITE_CONTENT_KEYS = [
-  "splash_headline", "splash_tagline", "splash_bg_url", "splash_bullets", "splash_credentials",
-  "portfolio", "specialty_headline", "specialty_blurb", "service_area", "site_theme",
-  "social_instagram", "google_business_url", "reviews", "home_blocks",
+  "splash_headline", "splash_headline_size", "splash_tagline", "splash_bg_url", "splash_bullets",
+  "splash_credentials", "portfolio", "specialty_headline", "specialty_blurb", "service_area",
+  "site_theme", "social_instagram", "google_business_url", "reviews", "home_blocks",
 ] as const satisfies readonly (keyof OrgSettings)[];
 
 /** Build a settings object safe to hand a collaborator's browser: real marketing values overlaid on

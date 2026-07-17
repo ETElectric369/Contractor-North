@@ -22,7 +22,7 @@ export function LogoUpload({
     const file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith("image/")) {
-      setError("Please choose an image file (PNG, JPG, SVG).");
+      setError("Please choose an image file (PNG, JPG, or WebP).");
       return;
     }
     if (file.size > 2 * 1024 * 1024) {
@@ -73,7 +73,9 @@ export function LogoUpload({
           <input
             ref={fileRef}
             type="file"
-            accept="image/png,image/jpeg,image/svg+xml,image/webp"
+            // SVG dropped: migration 0134 caps the branding bucket to raster image mimes
+            // (an SVG served from the public storage origin is scriptable).
+            accept="image/png,image/jpeg,image/webp"
             className="hidden"
             onChange={onFile}
           />
@@ -98,7 +100,7 @@ export function LogoUpload({
             )}
           </div>
           <p className="text-xs text-slate-400">
-            PNG, JPG, SVG, or WebP · up to 2 MB · shown on your documents.
+            PNG, JPG, or WebP · up to 2 MB · shown on your documents.
           </p>
         </div>
       </div>

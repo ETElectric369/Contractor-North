@@ -1,8 +1,8 @@
 import { headers } from "next/headers";
 import { getPublicOrgByHandle, getPublicOrgByDomain } from "@/lib/public-org";
-import { getPublicPosts } from "@/lib/public-posts";
-import { getPublicPageSlugs } from "@/lib/public-pages";
+import { createServiceClient } from "@/lib/supabase/server";
 import { orgPublicBaseUrl } from "@/lib/org-settings";
+import { lastmodDate, newestLastmod, urlEntry } from "./lastmod";
 
 export const dynamic = "force-dynamic";
 
@@ -32,23 +32,49 @@ export async function GET() {
   // pages' own rel=canonical (e.g. when the subdomain and a custom domain both serve the same site).
   const base = org ? orgPublicBaseUrl(org.settings) : `${proto}://${host}`;
 
-  const urls: string[] = [`${base}/`];
+  const entries: string[] = [];
   if (org) {
+    // Published rows queried here directly (not via getPublicPosts/getPublicPageSlugs) because
+    // <lastmod> needs updated_at, which the render-path helpers don't carry. Same filters, order,
+    // and caps as those helpers, so the URL list itself is unchanged.
+    const supabase = createServiceClient();
+    const [postsRes, pagesRes] = await Promise.all([
+      supabase
+        .from("site_posts")
+        .select("path, updated_at")
+        .eq("org_id", org.id)
+        .eq("published", true)
+        .order("published_at", { ascending: false })
+        .limit(200),
+      supabase
+        .from("site_pages")
+        .select("slug, updated_at")
+        .eq("org_id", org.id)
+        .eq("published", true)
+        .order("nav_order", { ascending: true })
+        .limit(500),
+    ]);
+    const posts = (postsRes.data ?? []) as { path: string; updated_at: string | null }[];
+    const pages = (pagesRes.data ?? []) as { slug: string; updated_at: string | null }[];
+
+    // The homepage changes whenever any content does — its lastmod is the newest of the lot.
+    entries.push(urlEntry(`${base}/`, newestLastmod([...posts, ...pages].map((r) => r.updated_at))));
     const handle = org.settings.public_handle;
-    if (handle && org.settings.estimating_mode === "catalog") urls.push(`${base}/estimate/${handle}`);
+    if (handle && org.settings.estimating_mode === "catalog") entries.push(urlEntry(`${base}/estimate/${handle}`));
     // Articles — the index + every published post at its original path.
-    const posts = await getPublicPosts(org.id);
     if (posts.length) {
-      urls.push(`${base}/blog`);
-      for (const p of posts) urls.push(`${base}/${p.path}`);
+      entries.push(urlEntry(`${base}/blog`, newestLastmod(posts.map((p) => p.updated_at))));
+      for (const p of posts) entries.push(urlEntry(`${base}/${p.path}`, lastmodDate(p.updated_at)));
     }
     // Custom builder pages, each at its root-level /<slug>.
-    for (const slug of await getPublicPageSlugs(org.id)) urls.push(`${base}/${slug}`);
+    for (const p of pages) entries.push(urlEntry(`${base}/${p.slug}`, lastmodDate(p.updated_at)));
+  } else {
+    entries.push(urlEntry(`${base}/`));
   }
 
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-${urls.map((u) => `  <url><loc>${u}</loc></url>`).join("\n")}
+${entries.join("\n")}
 </urlset>`;
   return new Response(xml, { headers: { "Content-Type": "application/xml; charset=utf-8" } });
 }

@@ -29,9 +29,19 @@ const OPTIONS: IOptions = {
   allowedSchemes: ["http", "https", "mailto", "tel"],
   allowedSchemesByTag: { img: ["http", "https"] },
   disallowedTagsMode: "discard",
-  // External links open safely.
+  // External links open safely; INTERNAL links (site-relative "/..." or same-page "#...") stay
+  // plain — forcing nofollow/_blank on them was nofollowing the site's own internal links, which
+  // undercuts exactly the local-SEO internal-linking the article/page content exists for.
+  // Protocol-relative "//host" is external. Scheme safety is enforced by allowedSchemes above
+  // either way — this transform only decides rel/target, never what may load.
   transformTags: {
-    a: sanitizeLib.simpleTransform("a", { rel: "noopener noreferrer nofollow", target: "_blank" }),
+    a: (tagName, attribs) => {
+      const href = attribs.href || "";
+      const internal = (href.startsWith("/") && !href.startsWith("//")) || href.startsWith("#");
+      return internal
+        ? { tagName, attribs }
+        : { tagName, attribs: { ...attribs, rel: "noopener noreferrer nofollow", target: "_blank" } };
+    },
   },
 };
 

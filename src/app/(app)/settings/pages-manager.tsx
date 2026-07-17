@@ -2,13 +2,14 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ExternalLink, FileStack, Pencil, Plus, Trash2 } from "lucide-react";
+import { ExternalLink, Eye, FileStack, Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input, Label } from "@/components/ui/input";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { useToast } from "@/components/toast";
 import { type Block } from "@/lib/site-blocks";
+import { isReservedSlug, slugifySiteSlug } from "@/lib/site-reserved";
 import { BlockEditor } from "./block-editor";
 import { saveSitePage, deleteSitePage } from "./pages-actions";
 
@@ -37,7 +38,7 @@ const EMPTY: Draft = { id: null, slug: "", title: "", description: "", blocks: [
 /** The page BUILDER — compose custom pages from a palette of styled blocks (shared <BlockEditor>).
  *  Owner (Settings) or a granted external designer (/content) uses the same editor; pages go live at
  *  /<slug> on the site. */
-export function PagesManager({ initial, siteUrl, orgId, brand = "#0f172a" }: { initial: PageRow[]; siteUrl: string | null; orgId?: string; brand?: string }) {
+export function PagesManager({ initial, siteUrl, handle, orgId, brand = "#0f172a" }: { initial: PageRow[]; siteUrl: string | null; handle?: string | null; orgId?: string; brand?: string }) {
   const router = useRouter();
   const toast = useToast();
   const [editing, setEditing] = useState<Draft | null>(null);
@@ -54,13 +55,25 @@ export function PagesManager({ initial, siteUrl, orgId, brand = "#0f172a" }: { i
   function save() {
     if (!editing) return;
     setError(null);
+    // Pre-check the slug the ACTION will derive (same slugify), so a reserved address gets a
+    // friendly explanation up front instead of only a server rejection.
+    const slug = slugifySiteSlug(editing.slug || editing.title);
+    if (isReservedSlug(slug)) {
+      setError(
+        slug === "home" || slug === "index" || slug === "homepage"
+          ? `"/${slug}" can't be a page — your homepage already lives at "/". Edit it under Homepage sections instead.`
+          : `"/${slug}" is part of your site itself (like /login or /blog), so a page can't live there. Pick a different web address.`,
+      );
+      return;
+    }
     start(async () => {
       const res = await saveSitePage({
         id: editing.id, slug: editing.slug || null, title: editing.title, description: editing.description || null,
         blocks: editing.blocks, published: editing.published, nav_label: editing.nav_label || null, orgId,
       });
       if (!res.ok) { setError(res.error ?? "Couldn't save the page."); return; }
-      toast(editing.id ? "Page updated" : "Page published", "success");
+      // Say what actually happened: an unpublished save is a draft, not a publish.
+      toast(!editing.published ? "Draft saved" : editing.id ? "Page updated" : "Page published", "success");
       setEditing(null);
       router.refresh();
     });
@@ -96,6 +109,14 @@ export function PagesManager({ initial, siteUrl, orgId, brand = "#0f172a" }: { i
                   <ExternalLink className="h-4 w-4" />
                 </a>
               )}
+              {handle && !p.published && (
+                // Draft preview goes through the APP host, not the org's domain: the editor's
+                // session cookie lives here, and the org-host middleware strips /p/ URLs — on
+                // the custom domain the gate would see an anonymous visitor and 404.
+                <a href={`/site/${handle}/p/${p.slug}?preview=1`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-md p-1.5 text-xs font-medium text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Preview the draft — only signed-in editors can see it">
+                  <Eye className="h-4 w-4" /> <span className="hidden sm:inline">Preview draft</span>
+                </a>
+              )}
               <button type="button" onClick={() => openEdit(p)} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-brand" title="Edit"><Pencil className="h-4 w-4" /></button>
               <button type="button" onClick={() => setDeleting(p)} className="rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600" title="Delete"><Trash2 className="h-4 w-4" /></button>
             </li>
@@ -105,8 +126,9 @@ export function PagesManager({ initial, siteUrl, orgId, brand = "#0f172a" }: { i
 
       <Button type="button" variant="outline" size="sm" onClick={openNew}><Plus className="h-4 w-4" /> New page</Button>
 
+      {/* The save button promises only what the Published checkbox will deliver. */}
       <Modal open={!!editing} onClose={() => setEditing(null)} title={editing?.id ? "Edit page" : "New page"} size="xl"
-        footer={<ModalActions onCancel={() => setEditing(null)} onSave={save} saving={pending} saveLabel={editing?.id ? "Save page" : "Publish page"} />}>
+        footer={<ModalActions onCancel={() => setEditing(null)} onSave={save} saving={pending} saveLabel={editing && !editing.published ? "Save draft" : editing?.id ? "Save page" : "Publish page"} />}>
         {editing && (
           <div className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-2">

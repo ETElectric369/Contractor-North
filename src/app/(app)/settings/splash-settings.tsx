@@ -2,17 +2,16 @@
 
 import { useRef, useState, useTransition } from "react";
 import { Check, Upload, Loader2, ImageOff } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea } from "@/components/ui/input";
-import { prepareImageForUpload } from "@/lib/image-prep";
+import { uploadSiteImage } from "@/lib/upload-site-image";
 import type { OrgSettings } from "@/lib/org-settings";
 import { updateOrgSettings } from "./actions";
 
 type Photo = { url: string; caption?: string };
 
-/** The public homepage editor — headline, tagline, highlights, and the HERO image. The hero is now
- *  a visual picker (preview + upload + pick-from-portfolio) instead of a raw URL field, so restoring
+/** The "Top banner" editor — headline, tagline, highlights, and the HERO image. The hero is a
+ *  visual picker (preview + upload + pick-from-portfolio) instead of a raw URL field, so restoring
  *  or swapping the top image is one click. `portfolio`/`orgId` power the picker + upload. */
 export function SplashSettings({ settings, portfolio = [], orgId }: { settings: OrgSettings; portfolio?: Photo[]; orgId?: string }) {
   const [headline, setHeadline] = useState(settings.splash_headline);
@@ -28,9 +27,11 @@ export function SplashSettings({ settings, portfolio = [], orgId }: { settings: 
   const fileRef = useRef<HTMLInputElement>(null);
 
   function save() {
+    setError(null);
     setDone(false);
     start(async () => {
-      await updateOrgSettings({ splash_headline: headline, splash_headline_size: headlineSize, splash_tagline: tagline, splash_bg_url: bg, splash_bullets: bullets, splash_credentials: credentials }, orgId);
+      const res = await updateOrgSettings({ splash_headline: headline, splash_headline_size: headlineSize, splash_tagline: tagline, splash_bg_url: bg, splash_bullets: bullets, splash_credentials: credentials }, orgId);
+      if (!res.ok) { setError(res.error ?? "Couldn't save."); return; }
       setDone(true);
       setTimeout(() => setDone(false), 2500);
     });
@@ -42,14 +43,9 @@ export function SplashSettings({ settings, portfolio = [], orgId }: { settings: 
     setError(null);
     setUploading(true);
     try {
-      const file = await prepareImageForUpload(f);
-      const ext = file.type === "image/png" ? "png" : "jpg";
-      const path = `${orgId}/hero-${Date.now()}.${ext}`;
-      const supabase = createClient();
-      const { error: upErr } = await supabase.storage.from("branding").upload(path, file, { upsert: true, cacheControl: "3600" });
-      if (upErr) throw upErr;
-      const { data } = supabase.storage.from("branding").getPublicUrl(path);
-      setBg(data.publicUrl); // still needs Save to publish — keeps one clear commit point
+      // The shared helper's portfolio- path prefix is what the branding bucket's collaborator
+      // storage policy allows — so the upload works from Settings AND the /content workspace.
+      setBg(await uploadSiteImage(orgId, f)); // still needs Save to publish — one clear commit point
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed.");
     } finally {
@@ -58,23 +54,31 @@ export function SplashSettings({ settings, portfolio = [], orgId }: { settings: 
     }
   }
 
+  // The public site falls back to the first portfolio photo when no hero is set (org-site.tsx),
+  // so the preview shows that EFFECTIVE image — not a misleading empty frame.
+  const fallbackHero = portfolio.find((p) => p.url)?.url ?? "";
+  const effectiveHero = bg || fallbackHero;
+
   return (
     <div className="space-y-4">
-      <p className="text-sm text-slate-500">Controls the top of your homepage — the hero image and the headline over it.</p>
+      <p className="text-sm text-slate-500">The hero image and the headline over it. Leave both empty to hide the banner entirely.</p>
 
       {/* HERO IMAGE picker */}
       <div>
         <Label>Hero image (top of the page)</Label>
         <div className="mt-1 overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
-          {bg ? (
+          {effectiveHero ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={bg} alt="Current hero" className="aspect-[16/7] w-full object-cover" />
+            <img src={effectiveHero} alt={bg ? "Current hero" : "First portfolio photo (current fallback hero)"} className="aspect-[16/7] w-full object-cover" />
           ) : (
-            <div className="flex aspect-[16/7] w-full items-center justify-center text-sm text-slate-400">
-              <ImageOff className="mr-2 h-4 w-4" /> No hero image — a clean branded gradient shows instead.
+            <div className="flex aspect-[16/7] w-full items-center justify-center px-6 text-center text-sm text-slate-400">
+              <ImageOff className="mr-2 h-4 w-4 shrink-0" /> No image — with a headline the banner shows a branded gradient; with neither, it&apos;s hidden.
             </div>
           )}
         </div>
+        {!bg && fallbackHero && (
+          <p className="mt-1 text-xs text-slate-400">No hero chosen — your site currently uses your first portfolio photo (shown above).</p>
+        )}
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onHeroFile} />
           <Button type="button" variant="outline" size="sm" onClick={() => fileRef.current?.click()} disabled={uploading}>
@@ -144,7 +148,7 @@ export function SplashSettings({ settings, portfolio = [], orgId }: { settings: 
 
       {error && <p className="text-sm text-red-600">{error}</p>}
       <div className="flex items-center gap-3">
-        <Button size="sm" onClick={save} disabled={pending || uploading}>{pending ? "Saving…" : "Save Homepage"}</Button>
+        <Button size="sm" onClick={save} disabled={pending || uploading}>{pending ? "Saving…" : "Save top banner"}</Button>
         {done && <span className="flex items-center gap-1 text-sm font-medium text-green-600"><Check className="h-4 w-4" /> Saved</span>}
       </div>
     </div>
