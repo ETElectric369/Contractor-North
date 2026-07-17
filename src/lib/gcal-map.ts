@@ -10,6 +10,8 @@
  * "external" events (the feedback-loop guard).
  */
 
+import { appointmentTypeLabel } from "@/lib/statuses";
+
 /** The private extendedProperty that marks an event as CN-pushed. */
 export const CN_TAG_KEY = "cn";
 export const CN_TAG_VALUE = "1";
@@ -155,7 +157,10 @@ export function apptEventBody(appt: ApptForEvent, opts?: { linkUrl?: string | nu
   const start = new Date(appt.starts_at);
   let end = appt.ends_at ? new Date(appt.ends_at) : new Date(start.getTime() + 3600_000);
   if (!(end.getTime() > start.getTime())) end = new Date(start.getTime() + 3600_000);
-  const typeLabel = appt.type && appt.type !== "appointment" ? `[${appt.type.replace(/_/g, " ")}] ` : "";
+  // Label from the statuses.ts spine (pure/import-safe, so the file's no-server-imports
+  // rule holds) — an inline replace(/_/g," ") pushed "[final inspection]" while the app
+  // says "Final inspection".
+  const typeLabel = appt.type && appt.type !== "appointment" ? `[${appointmentTypeLabel(appt.type)}] ` : "";
   const description = [appt.notes, opts?.linkUrl ? `Contractor North: ${opts.linkUrl}` : null]
     .filter(Boolean)
     .join("\n\n");

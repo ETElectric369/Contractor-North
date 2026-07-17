@@ -41,19 +41,6 @@ function suggestedDate(defaultDate?: string): string {
   return ymd(d);
 }
 
-/** A sensible START time for a new appointment on `date`: if that day already has appointments
- *  (dayStarts = their ISO starts), suggest the next hour AFTER the last one so a fresh entry
- *  doesn't blindly collide at 08:00; otherwise the honest 08:00 default. Caps at 17:00. */
-function suggestedTime(date: string, dayStarts: string[]): string {
-  const sameDay = dayStarts
-    .map((iso) => new Date(iso))
-    .filter((d) => !isNaN(d.getTime()) && ymd(d) === date);
-  if (!sameDay.length) return "08:00";
-  const last = sameDay.reduce((a, b) => (b > a ? b : a));
-  const h = Math.min(last.getHours() + 1, 17);
-  return `${p2(h)}:00`;
-}
-
 interface Opt { id: string; label: string; address?: string | null }
 
 export interface ApptValue {
@@ -110,10 +97,8 @@ export function AppointmentButton({
   defaultDate,
   defaultCustomerId,
   defaultJobId,
-  fromLead = false,
   defaultType,
   buttonLabel,
-  dayStarts,
   compact = false,
   editLabel,
   afterDeleteHref,
@@ -128,16 +113,12 @@ export function AppointmentButton({
   /** Preselect a job in create mode (e.g. mounted on that job's page) — prefills the
    *  location from the job address and suggests an "Inspection — <job#>" title. */
   defaultJobId?: string;
-  /** Mounted from a lead → default the TYPE to a quote/estimate instead of a plain appointment. */
-  fromLead?: boolean;
   /** Preselect a TYPE in create mode (e.g. "inspection" on the Inspections tab) — must be an
-   *  APPOINTMENT_TYPES value; overrides the fromLead default. */
+   *  APPOINTMENT_TYPES value. (The old fromLead prop this superseded, and the never-passed
+   *  dayStarts suggest-a-slot input, were removed in the 2026-07-16 churn audit.) */
   defaultType?: string;
   /** Create-button copy override ("Schedule inspection" on the Inspections tab). */
   buttonLabel?: string;
-  /** ISO starts of appointments already on the viewed day — lets the create form suggest a
-   *  time AFTER the last one instead of a blind 08:00. Optional; empty → 08:00. */
-  dayStarts?: string[];
   /** Tight card-header variant: small button that stays on one line. */
   compact?: boolean;
   /** Edit-mode trigger as a LABELED outline button ("Edit Details") instead of the
@@ -170,20 +151,20 @@ export function AppointmentButton({
     const ctxJob = !appointment && defaultJobId ? jobs.find((j) => j.id === defaultJobId) : undefined;
     const ctxCust = !appointment && defaultCustomerId ? customers.find((c) => c.id === defaultCustomerId) : undefined;
     // Title: job context reads back the job (its label starts with the job number), else the
-    // customer name; a lead is a quote walk-through, a job/customer is an on-site inspection.
+    // customer name; a job/customer is an on-site inspection.
     const suggestedTitle = ctxJob
       ? `Inspection — ${ctxJob.label}`
       : ctxCust
-      ? `${fromLead ? "Estimate" : "Appointment"} — ${ctxCust.label}`
+      ? `Appointment — ${ctxCust.label}`
       : "";
     const date = appointment ? toLocal(appointment.starts_at).date : suggestedDate(defaultDate);
-    const st = appointment ? toLocal(appointment.starts_at) : { date, time: suggestedTime(date, dayStarts ?? []) };
+    const st = appointment ? toLocal(appointment.starts_at) : { date, time: "08:00" };
     const en = appointment ? toLocal(appointment.ends_at) : { date: "", time: "" };
     return {
       // Default TYPE: caller's explicit defaultType first (the Inspections tab passes
-      // "inspection"), then a lead → quote/estimate, anywhere else → a plain appointment (NOT
-      // the old blind "quote" default that mislabeled every hand-added entry as an estimate).
-      type: appointment?.type ?? defaultType ?? (fromLead ? "quote" : "appointment"),
+      // "inspection"), anywhere else → a plain appointment (NOT the old blind "quote"
+      // default that mislabeled every hand-added entry as an estimate).
+      type: appointment?.type ?? defaultType ?? "appointment",
       assigned_to: appointment?.assigned_to ?? "",
       title: appointment?.title ?? suggestedTitle,
       date,

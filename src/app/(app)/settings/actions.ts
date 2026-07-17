@@ -398,9 +398,30 @@ export async function syncScheduleToGoogle(): Promise<Result & { synced?: number
 
 export async function disconnectGoogleCalendar(): Promise<Result> {
   const supabase = await createClient();
+  // Grab the org BEFORE the row goes — the external_events prune below needs it.
+  const { data: conn } = await supabase
+    .from("calendar_connections")
+    .select("id, org_id")
+    .eq("provider", "google")
+    .maybeSingle();
   const { error } = await supabase.from("calendar_connections").delete().eq("provider", "google");
   if (error) return { ok: false, error: error.message };
+  // Prune the org's mirrored Google events. ALL other pruning lives inside
+  // syncOrgCalendars, which the 15-min cron only reaches for orgs that still HAVE a
+  // connection row — without this, stale mirrored events render on /schedule and
+  // /calendar forever, increasingly wrong. external_events is service-write-only
+  // (read-only org RLS), so the user client can't do it. Best-effort: a failed
+  // prune must not fail the disconnect (the reconnect sweep would also refresh it).
+  if (conn?.org_id) {
+    try {
+      await createServiceClient().from("external_events").delete().eq("org_id", conn.org_id);
+    } catch (e) {
+      reportError("gcal-disconnect-prune", e, { orgId: conn.org_id });
+    }
+  }
   revalidatePath("/settings");
+  revalidatePath("/schedule"); // both mirrors render external_events — clear them now
+  revalidatePath("/calendar");
   return { ok: true };
 }
 

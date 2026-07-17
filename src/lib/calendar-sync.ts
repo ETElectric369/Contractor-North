@@ -16,6 +16,13 @@ import "server-only";
  * the paths that mutate schedule state in SQL (the customer pick-a-time
  * confirm, choose_schedule_slot) where no server action runs to fire the live
  * push. Used by both /api/google/sync (cron) and the settings "Sync now".
+ *
+ * LIVE STATE (audit 2026-07-16): this whole stack is DORMANT-BY-DATA, not dead —
+ * 0 calendar_connections / 0 external_events rows and no appointment carries a
+ * google_event_id yet, so the 15-min cron loops over zero connections as a no-op.
+ * The code paths + sync_tokens lifecycle (per-calendar tokens, deselect prune,
+ * 30-day re-baseline, dead-grant reauth marker) were all verified wired; the
+ * feature simply awaits Erik connecting Google in Settings. Don't re-flag as junk.
  */
 
 import { createClient } from "@/lib/supabase/server";
@@ -241,6 +248,8 @@ export async function syncOrgCalendars(service: any, conn: any): Promise<OrgSync
           continue;
         }
         const row = mapGoogleEvent(ev, calId);
+        // updated_at is a freshness/debug stamp only — no reader selects it (both
+        // mirrors read id/title/starts_at/ends_at/all_day). Kept for ops archaeology.
         if (row) upserts.push({ ...row, org_id: conn.org_id, updated_at: new Date().toISOString() });
       }
       if (upserts.length) {

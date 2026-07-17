@@ -23,6 +23,7 @@ import { AppointmentButton, type ApptValue } from "../appointments/appointment-b
 import { ApptQuickActions } from "../appointments/appointment-status";
 import { JobScheduleCard } from "../schedule/job-schedule-card";
 import { jobLabel } from "@/lib/schedule-options";
+import { appointmentTypeLabel, isInspectionType } from "@/lib/statuses";
 import { allDayEventDays } from "@/lib/gcal-map";
 
 // THE one forward-looking time map. WHEN-DID (clocked hours) lives on
@@ -50,7 +51,8 @@ export interface CalJob {
   customers?: { name: string } | null;
 }
 
-export interface CalMember {
+// Internal-only since week-agenda.tsx (the last external importer) died in cn-v507.
+interface CalMember {
   id: string;
   full_name: string | null;
 }
@@ -112,13 +114,14 @@ export interface CalUnscheduled {
   customer: string | null;
 }
 
-/** One job's presence on one day (pos = "d2/3" on multi-day spans). */
-export interface JobOnDay {
+/** One job's presence on one day (pos = "d2/3" on multi-day spans).
+ *  Internal-only (with DayData) since week-agenda.tsx died in cn-v507. */
+interface JobOnDay {
   job: CalJob;
   pos: string | null;
 }
 
-export interface DayData {
+interface DayData {
   jobs: JobOnDay[];
   appts: CalAppt[];
   tasks: CalTask[];
@@ -1007,8 +1010,12 @@ function ApptRow({ a, picker, tz }: { a: CalAppt; picker: SchedulePicker; tz: st
       </Link>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          {/* Inspection = teal everywhere; amber belongs to move-mode alone. */}
-          <Badge tone="blue" className={a.type === "inspection" ? "bg-teal-100 text-teal-800" : undefined}>{a.type}</Badge>
+          {/* Inspection = teal everywhere; amber belongs to move-mode alone. Type label +
+              inspection-shape come from the statuses.ts spine (isInspectionType covers
+              final_inspection too — a raw a.type === "inspection" check dropped it). */}
+          <Badge tone="blue" className={isInspectionType(a.type) ? "bg-teal-100 text-teal-800" : undefined}>
+            {appointmentTypeLabel(a.type)}
+          </Badge>
           <Link href={`/appointments/${a.id}`} className="truncate text-sm font-medium text-slate-900 hover:text-brand hover:underline">
             {a.title}
           </Link>
@@ -1033,8 +1040,9 @@ function ApptRow({ a, picker, tz }: { a: CalAppt; picker: SchedulePicker; tz: st
       </div>
       <div className="flex items-center gap-1">
         {/* Inspections get a capture surface: field notes/measurements/materials/photos
-            that "Start estimate" carries into the estimator scope. */}
-        {a.type === "inspection" && (
+            that "Start estimate" carries into the estimator scope. Spine predicate so
+            final_inspection keeps the shortcut too. */}
+        {isInspectionType(a.type) && (
           <Link
             href={`/appointments/${a.id}`}
             className="rounded-md p-1 text-slate-400 hover:bg-teal-50 hover:text-teal-700"

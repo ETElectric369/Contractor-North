@@ -21,6 +21,16 @@ export interface InspectionBucketRow {
   capture?: unknown;
 }
 
+/** The estimate this inspection was written up into, stamped on the capture jsonb by
+ *  saveQuote when the builder was opened via /quotes/new?capture=<appt>. This is the
+ *  write-up signal for the LEAD-LESS "Inspect now" path (no inquiry_id/job_id to match),
+ *  which used to leave the row in "To write up" forever. */
+export function captureQuoteId(capture: unknown): string | null {
+  if (!capture || typeof capture !== "object") return null;
+  const q = (capture as { quote_id?: unknown }).quote_id;
+  return typeof q === "string" && q.length > 0 ? q : null;
+}
+
 /** True when the capture jsonb carries any real field data (text or photos). */
 export function hasCaptureData(capture: unknown): boolean {
   if (!capture || typeof capture !== "object") return false;
@@ -48,21 +58,29 @@ export function bucketInspections<T extends InspectionBucketRow>(
   estimateInquiryIds: ReadonlySet<string>,
   estimateJobIds: ReadonlySet<string>,
   now: Date = new Date(),
+  /** Ids of quotes that still EXIST — matched against capture.quote_id so the lead-less
+   *  "Inspect now" write-up files away too (and truthfully un-files if the quote is deleted). */
+  estimateQuoteIds: ReadonlySet<string> = new Set(),
 ): InspectionBuckets<T> {
   const out: InspectionBuckets<T> = { toWriteUp: [], upcoming: [], filed: [] };
   const time = (r: T) => (r.starts_at ? new Date(r.starts_at).getTime() : 0);
 
   for (const r of rows) {
+    const capQuote = captureQuoteId(r.capture);
     const writtenUp =
       (!!r.inquiry_id && estimateInquiryIds.has(r.inquiry_id)) ||
-      (!!r.job_id && estimateJobIds.has(r.job_id));
+      (!!r.job_id && estimateJobIds.has(r.job_id)) ||
+      (!!capQuote && estimateQuoteIds.has(capQuote));
     const past = !!r.starts_at && new Date(r.starts_at).getTime() < now.getTime();
 
     if (r.status === "cancelled") out.filed.push(r);
     else if (r.status === "completed") (writtenUp ? out.filed : out.toWriteUp).push(r);
     // "Done by capture": a past visit with field data counts as happened even if nobody
     // tapped complete — unless its estimate already exists, in which case it's settled.
-    else if (past && hasCaptureData(r.capture)) (writtenUp ? out.filed : out.toWriteUp).push(r);
+    // A written-up estimate is itself the strongest "the visit happened" signal, so a
+    // past visit whose estimate exists files even when the capture text was left blank.
+    else if (past && (hasCaptureData(r.capture) || writtenUp))
+      (writtenUp ? out.filed : out.toWriteUp).push(r);
     else out.upcoming.push(r);
   }
 

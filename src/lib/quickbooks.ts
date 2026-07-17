@@ -16,7 +16,9 @@ const API_BASE =
 const SCOPE = "com.intuit.quickbooks.accounting";
 
 export function redirectUri() {
-  return `${process.env.NEXT_PUBLIC_SITE_URL}/api/quickbooks/callback`;
+  // Pinned like google-calendar.ts: Intuit only accepts registered redirect URIs,
+  // so the callback stays on OAUTH_REDIRECT_BASE while SITE_URL moves domains.
+  return `${process.env.OAUTH_REDIRECT_BASE || process.env.NEXT_PUBLIC_SITE_URL}/api/quickbooks/callback`;
 }
 
 export function authorizeUrl(state: string) {

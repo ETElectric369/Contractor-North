@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { hasInAppHistory } from "./back-link";
+import { hasInAppHistory, resetBackLinkTrackingForTests, trackPathnameForBackLink } from "./back-link";
 
 /**
  * The BackLink doctrine under test: window.history.length LIES (it counts
@@ -12,10 +12,18 @@ import { hasInAppHistory } from "./back-link";
 
 const ORIGIN = "https://app.example.com";
 
-function stubBrowser({ historyLength, referrer }: { historyLength: number; referrer: string }) {
+function stubBrowser({
+  historyLength,
+  referrer,
+  pathname = "/",
+}: {
+  historyLength: number;
+  referrer: string;
+  pathname?: string;
+}) {
   (globalThis as any).window = {
     history: { length: historyLength },
-    location: { origin: ORIGIN },
+    location: { origin: ORIGIN, pathname },
   };
   (globalThis as any).document = { referrer };
 }
@@ -23,6 +31,7 @@ function stubBrowser({ historyLength, referrer }: { historyLength: number; refer
 afterEach(() => {
   delete (globalThis as any).window;
   delete (globalThis as any).document;
+  resetBackLinkTrackingForTests();
 });
 
 describe("hasInAppHistory (document-load signals)", () => {
@@ -53,5 +62,29 @@ describe("hasInAppHistory (document-load signals)", () => {
   it("does not treat a same-PREFIX foreign origin as ours", () => {
     stubBrowser({ historyLength: 2, referrer: "https://app.example.com.evil.io/quotes" });
     expect(hasInAppHistory()).toBe(false);
+  });
+});
+
+describe("hasInAppHistory (module-flag signal + the retrace case)", () => {
+  it("a client-side route change vouches for back() on the NEW page", () => {
+    stubBrowser({ historyLength: 5, referrer: "https://www.google.com/", pathname: "/jobs/55" });
+    trackPathnameForBackLink("/quotes/abc"); // cold entry
+    trackPathnameForBackLink("/jobs/55"); // in-app navigation
+    expect(hasInAppHistory()).toBe(true);
+  });
+
+  it("retraced BACK to the cold-entry page, the flag must NOT claim the pre-app referrer (Google) as in-app history", () => {
+    // Google → /quotes/abc → /jobs/55 → Back → /quotes/abc: behind us is Google again.
+    stubBrowser({ historyLength: 5, referrer: "https://www.google.com/", pathname: "/quotes/abc" });
+    trackPathnameForBackLink("/quotes/abc");
+    trackPathnameForBackLink("/jobs/55");
+    expect(hasInAppHistory()).toBe(false); // falls back to the honest "Back to X" link
+  });
+
+  it("retraced to the cold-entry page with a SAME-ORIGIN referrer, back() is still vouched for", () => {
+    stubBrowser({ historyLength: 5, referrer: `${ORIGIN}/planner`, pathname: "/quotes/abc" });
+    trackPathnameForBackLink("/quotes/abc");
+    trackPathnameForBackLink("/jobs/55");
+    expect(hasInAppHistory()).toBe(true); // the referrer signal, not the flag, answers here
   });
 });

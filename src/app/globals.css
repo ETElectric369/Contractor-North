@@ -174,7 +174,10 @@ body.modal-open .app-bottom-nav {
   );
   pointer-events: none;
 }
-/* Entrance for directly-positioned bloom elements (no translate — they set top/left). */
+/* Entrance for directly-positioned bloom elements (no translate — they set top/left).
+   NOTE (audit 2026-07-16): zero TSX references since cn-v496 gutted glass-bloom.tsx —
+   kept deliberately because the glass dock/bloom design is LOCKED and may re-grow an
+   entrance animation; verify visually with Erik before ever removing. */
 @keyframes cn-fade {
   from { opacity: 0; transform: scale(0.96); }
   to { opacity: 1; transform: scale(1); }

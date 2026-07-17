@@ -1,6 +1,6 @@
 "use client";
 
-import { hmToMin } from "@/lib/tz";
+import { todayStrInTz, tzMinutesOfDay } from "@/lib/tz";
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -60,24 +60,12 @@ const MIN_COL_PX = 92; // 7 columns scroll horizontally on a phone; day view is 
 
 type Now = { dayStr: string; min: number };
 
+/** Where the live "now" line sits: org-tz day + minutes via the lib/tz SSOT
+ *  primitives (the same pair timeEntryGridSpan uses) — not a third hand-rolled
+ *  formatToParts copy of the instant→org-day math. No-tz fallback = browser local. */
 function computeNow(tz?: string): Now {
   const d = new Date();
-  if (tz) {
-    const parts = new Intl.DateTimeFormat("en-CA", {
-      timeZone: tz,
-      hourCycle: "h23",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).formatToParts(d);
-    const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "0";
-    return {
-      dayStr: `${get("year")}-${get("month")}-${get("day")}`,
-      min: Number(get("hour")) * 60 + Number(get("minute")),
-    };
-  }
+  if (tz) return { dayStr: todayStrInTz(tz, d), min: tzMinutesOfDay(d, tz) };
   const p = (n: number) => String(n).padStart(2, "0");
   return {
     dayStr: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`,

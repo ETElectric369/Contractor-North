@@ -8,6 +8,7 @@ import { sendPushToProfiles } from "@/lib/push";
 import { getOrgSettings } from "@/lib/org-settings";
 import { tzDateTimeUtc, todayStrInTz } from "@/lib/tz";
 import { createProposalCore, cleanSlots } from "@/lib/appointments/proposal";
+import { endAfterStart } from "@/lib/appointments/times";
 import { APPOINTMENT_STATUSES, APPOINTMENT_TYPES } from "@/lib/statuses";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -81,6 +82,8 @@ export async function createAppointment(formData: FormData): Promise<Result> {
   const endIso =
     emptyToNull(formData.get("ends_at_iso")) ??
     (endTime ? await resolveIso(supabase, null, apptDate, endTime) : null);
+  const endErr = endAfterStart(startIso, endIso);
+  if (endErr) return { ok: false, error: endErr };
 
   const cust = await resolveCustomer(supabase, formData, ctx.userId);
   if (cust.error) return { ok: false, error: cust.error };
@@ -284,7 +287,7 @@ export async function saveAppointmentCapture(
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
 
-  const clean = {
+  const clean: Record<string, unknown> = {
     notes: String(capture?.notes ?? "").trim().slice(0, 8000),
     measurements: String(capture?.measurements ?? "").trim().slice(0, 8000),
     materials: String(capture?.materials ?? "").trim().slice(0, 8000),
@@ -292,6 +295,12 @@ export async function saveAppointmentCapture(
       .filter((p): p is string => typeof p === "string" && p.length > 0 && p.length < 2000)
       .slice(0, 60),
   };
+
+  // Preserve the write-up backlink saveQuote stamped (capture.quote_id — how a lead-less
+  // inspection files on /inspections): a later field-notes edit must not wipe it.
+  const { data: existing } = await supabase.from("appointments").select("capture").eq("id", id).maybeSingle();
+  const prevQuoteId = (existing?.capture as { quote_id?: unknown } | null)?.quote_id;
+  if (typeof prevQuoteId === "string" && prevQuoteId) clean.quote_id = prevQuoteId;
 
   const { data, error } = await supabase
     .from("appointments")
@@ -324,6 +333,8 @@ export async function updateAppointment(id: string, formData: FormData): Promise
   const endIso =
     emptyToNull(formData.get("ends_at_iso")) ??
     (endTime ? await resolveIso(supabase, null, apptDate, endTime) : null);
+  const endErr = endAfterStart(startIso, endIso);
+  if (endErr) return { ok: false, error: endErr };
 
   const typed = resolveType(formData, "appointment");
   if (typed.error) return { ok: false, error: typed.error };

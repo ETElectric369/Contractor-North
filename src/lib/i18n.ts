@@ -1,6 +1,9 @@
 // Lightweight i18n for employee-facing screens. Spanish falls back to English
-// for any missing key. Keyed two ways: nav labels use their English text as the
-// key (so the sidebar can translate in place); UI strings use semantic keys.
+// for any missing key; UI strings use semantic keys (tc_* timeclock, s_* settings).
+// The old nav-label dictionary (English-text keys for a sidebar that would
+// "translate in place") was dead data — no nav code ever imported i18n (the glass
+// dock hardcodes labels) and several keys named features retired in cn-v496
+// (Scheduler, Plans & LiDAR) — removed in the 2026-07-16 churn audit.
 
 export type Lang = "en" | "es";
 
@@ -12,30 +15,6 @@ export const LANGUAGES: { code: Lang; label: string }[] = [
 type Dict = Record<string, string>;
 
 const en: Dict = {
-  // nav sections
-  Overview: "Overview",
-  Sales: "Sales",
-  Operations: "Operations",
-  Office: "Office",
-  System: "System",
-  // nav items
-  Dashboard: "Dashboard",
-  Assistant: "Assistant",
-  Inquiries: "Leads",
-  Customers: "Customers",
-  Quotes: "Quotes",
-  Scheduler: "Scheduler",
-  Jobs: "Jobs",
-  "Work Orders": "Work Orders",
-  Timeclock: "Timeclock",
-  "Material Lists": "Material Lists",
-  Purchasing: "Purchasing",
-  Inventory: "Inventory",
-  Billing: "Billing",
-  "Change Orders": "Change Orders",
-  Forms: "Forms",
-  "Plans & LiDAR": "Plans & LiDAR",
-  Settings: "Settings",
   // timeclock
   tc_title: "Timeclock",
   tc_desc: "Clock in and out, log lunch, and record what you worked on.",
@@ -69,28 +48,6 @@ const en: Dict = {
 };
 
 const es: Dict = {
-  Overview: "Resumen",
-  Sales: "Ventas",
-  Operations: "Operaciones",
-  Office: "Oficina",
-  System: "Sistema",
-  Dashboard: "Panel",
-  Assistant: "Asistente",
-  Inquiries: "Prospectos",
-  Customers: "Clientes",
-  Quotes: "Cotizaciones",
-  Scheduler: "Programador",
-  Jobs: "Trabajos",
-  "Work Orders": "Órdenes de trabajo",
-  Timeclock: "Reloj",
-  "Material Lists": "Listas de materiales",
-  Purchasing: "Compras",
-  Inventory: "Inventario",
-  Billing: "Facturación",
-  "Change Orders": "Órdenes de cambio",
-  Forms: "Formularios",
-  "Plans & LiDAR": "Planos y LiDAR",
-  Settings: "Configuración",
   tc_title: "Reloj de tiempo",
   tc_desc: "Marca entrada y salida, registra el almuerzo y lo que trabajaste.",
   tc_notClockedIn: "No has marcado entrada.",

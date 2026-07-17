@@ -13,6 +13,7 @@ import { invoiceBalance, isDrawKind } from "@/lib/invoice-math";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { jobStatusLabel } from "@/lib/job-status";
+import { appointmentTypeLabel, isInspectionType } from "@/lib/statuses";
 import { Tabs, type TabDef } from "@/components/tabs";
 import {
   formatCurrency,
@@ -620,7 +621,10 @@ export default async function JobDetailPage({
                 return (
                   <li key={a.id} className="flex items-center justify-between gap-3 px-5 py-3 text-sm">
                     <div className="flex min-w-0 items-center gap-2">
-                      <Badge tone={a.type === "inspection" ? "amber" : "blue"}>{a.type}</Badge>
+                      {/* Spine label + predicate (statuses.ts): final_inspection lands exactly
+                          here (code inspection at job end) — a raw {a.type} rendered it as
+                          underscore text in default blue. */}
+                      <Badge tone={isInspectionType(a.type) ? "amber" : "blue"}>{appointmentTypeLabel(a.type)}</Badge>
                       <span className="truncate font-medium text-slate-900">{a.title}</span>
                       {a.status === "completed" && <Badge tone="green">done</Badge>}
                     </div>

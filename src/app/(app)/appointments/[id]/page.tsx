@@ -55,6 +55,10 @@ export default async function AppointmentCapturePage({
   };
 
   // Photos live as PATHS in the private documents bucket — sign them for display.
+  // (Audit 2026-07-16: the whole capture round-trip is live in prod — write via
+  // saveAppointmentCapture, photo paths persisted immediately on upload, read back
+  // here signed, text fields prefill /quotes/new. Photos deliberately do NOT carry
+  // into the quote prefill. Not a written-never-read column.)
   const paths = (Array.isArray(capture.photos) ? capture.photos : []).filter(
     (p): p is string => typeof p === "string" && !!p,
   );

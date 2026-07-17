@@ -41,10 +41,28 @@ import { ArrowLeft } from "lucide-react";
 let initialPathname: string | null = null;
 let navigatedInApp = false;
 
+/** The tracker's brain, pure so it's testable. Exported for tests only. */
+export function trackPathnameForBackLink(pathname: string) {
+  if (initialPathname === null) initialPathname = pathname;
+  else if (pathname !== initialPathname) navigatedInApp = true;
+}
+
+/** Test-only: module state otherwise persists across cases. */
+export function resetBackLinkTrackingForTests() {
+  initialPathname = null;
+  navigatedInApp = false;
+}
+
 /** True when history.back() verifiably stays inside the app. Client-only. */
 export function hasInAppHistory(): boolean {
   if (typeof window === "undefined") return false;
-  if (navigatedInApp) return true;
+  // The one-way flag can vouch only for pages we pushed AFTER the cold entry. Standing
+  // on the INITIAL pathname again (you navigated in, then retraced Back to where the
+  // document entered), the entry behind you is the pre-app referrer — claiming "Back"
+  // here would pop out to Google. Fall through to the referrer signal instead, which
+  // correctly answers both cold-entry shapes (external referrer → fallback link;
+  // same-origin referrer → back() still stays in the app).
+  if (navigatedInApp && window.location.pathname !== initialPathname) return true;
   if (window.history.length <= 1) return false; // new tab: nothing to pop
   // Parse rather than startsWith: "https://ours.com.evil.io" startsWith our origin.
   try {
@@ -58,8 +76,7 @@ export function hasInAppHistory(): boolean {
 export function BackLinkTracker() {
   const pathname = usePathname();
   useEffect(() => {
-    if (initialPathname === null) initialPathname = pathname;
-    else if (pathname !== initialPathname) navigatedInApp = true;
+    trackPathnameForBackLink(pathname);
   }, [pathname]);
   return null;
 }

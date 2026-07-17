@@ -173,7 +173,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "search_price_list",
     description:
-      "Search the company's PRICE LIST — their real priced catalog of materials and services (their own buy price + markup → sell price). HARD RULE for estimates: search here FIRST for EVERY material line, BEFORE any web pricing — a book match is their REAL price (use it verbatim and keep the [CODE] tag on the quote line); web prices are only for items the book doesn't have, and those lines get flagged as estimates. The search is fuzzy on its own (exact code → partial code → whole phrase → word-by-word), so ONE call with the plain item name or part code is enough — if it returns nothing, the item isn't in the book; don't re-phrase and retry.",
+      "Search the company's PRICE LIST — their real priced catalog of materials and services (their own buy price + book markup). HARD RULE for estimates: search here FIRST for EVERY material line, BEFORE any web pricing — a book match is their REAL cost (use buy_price verbatim and keep the [CODE] tag on the quote line); web prices are only for items the book doesn't have, and those lines get flagged as estimates. PRICING THE LINE: default_sell_price is buy_price at the ITEM'S book markup — it is only right when the customer has NO pricing level. A customer on a pricing level gets the LEVEL'S markup instead (sell = buy_price × (1 + level markup% / 100)), exactly like the quote builder; check the customer's pricing level before quoting a sell price, and say which markup you used. The search is fuzzy on its own (exact code → partial code → whole phrase → word-by-word), so ONE call with the plain item name or part code is enough — if it returns nothing, the item isn't in the book; don't re-phrase and retry.",
     input_schema: {
       type: "object",
       properties: {
@@ -1667,8 +1667,12 @@ export async function runDataTool(
             category: r.category,
             unit: r.unit,
             buy_price: money(r.buy_price), // the company's REAL net cost — what the estimator prices from
-            // sell = buy × (1 + markup%) — the same math the quote builder uses.
-            sell_price: money(Number(r.buy_price) * (1 + Number(r.markup_pct) / 100)),
+            markup_pct: Number(r.markup_pct) || 0, // the ITEM's book-default markup
+            // Sell at the BOOK-DEFAULT (item) markup only. The quote builder overrides with the
+            // CUSTOMER's pricing-level markup when one applies (levelMarkup ?? item markup — see
+            // quote-builder markupFor / runEstimator), so a leveled customer's real sell differs.
+            // The tool description tells Nort to check the customer's level before quoting this.
+            default_sell_price: money(Number(r.buy_price) * (1 + Number(r.markup_pct) / 100)),
             supplier: r.supplier,
           }));
 

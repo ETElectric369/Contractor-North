@@ -58,6 +58,11 @@ export function NewInspectionButton({
       </Button>
       {!nowOnly &&
         (schedule ?? (
+          // FALLBACK CAVEAT: the schedule page's generic create modal defaults type to
+          // "appointment" — a record that never shows on /inspections unless the user flips
+          // the Type select. Prefer passing a `schedule` node with an
+          // <AppointmentButton defaultType="inspection"> wherever pickers are available
+          // (the /inspections header AND empty state both do now).
           <Link href="/schedule?new=appointment">
             <Button size={size} variant="outline" className="shrink-0 whitespace-nowrap">
               Schedule inspection

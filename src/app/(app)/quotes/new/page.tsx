@@ -19,9 +19,12 @@ export default async function NewQuotePage({
   // ?capture=<appointment id> — an inspection's field capture prefills the
   // estimator scope (like importing labor into an invoice). RLS scopes the read;
   // a bad/cross-org id just yields no prefill. Also recovers the lead backlink
-  // from the appointment when the URL didn't carry ?inquiry=.
+  // from the appointment when the URL didn't carry ?inquiry=. Photos are
+  // DELIBERATELY not carried into the prefill — only notes/measurements/materials;
+  // they stay on the appointment's capture page (signed URLs, private bucket).
   let initialScope: string | undefined;
   let captureInquiryId: string | undefined;
+  let captureApptId: string | undefined; // verified appointment id — saveQuote stamps the write-up backlink on it
   if (capture) {
     const { data: appt } = await supabase
       .from("appointments")
@@ -41,6 +44,7 @@ export default async function NewQuotePage({
       ].filter(Boolean);
       if (parts.length > 1) initialScope = parts.join("\n\n");
       captureInquiryId = (appt as any).inquiry_id ?? undefined;
+      captureApptId = (appt as any).id;
     }
   }
   const [{ data: customers }, { data: priceItems }, { data: taxRates }, { data: kits }, { data: org }] =
@@ -102,6 +106,7 @@ export default async function NewQuotePage({
         preselected={customer}
         jobId={job}
         inquiryId={inquiry ?? captureInquiryId}
+        captureId={captureApptId}
         initialScope={initialScope}
         priceItems={(priceItems ?? []) as any}
         taxRates={(taxRates ?? []) as any}

@@ -250,6 +250,18 @@ export default async function TimecardsPage({
     .gte("clock_in", tzDayStartUtc(period.start, tz).toISOString())
     .lt("clock_in", tzDayStartUtc(period.end, tz).toISOString());
   const periodRows = aggregatePayrollEntries((periodEntries ?? []) as any[], tz);
+  // The $48.50 lesson (mirrors /payroll's open-entries banner): still-open entries are
+  // EXCLUDED by the closed-only filter above — name the gap or the period card silently
+  // under-counts a whole shift. openNow (org-wide open set) is already fetched above.
+  const periodStartMs = tzDayStartUtc(period.start, tz).getTime();
+  const periodEndMs = tzDayStartUtc(period.end, tz).getTime();
+  const openInPeriod = (openNow ?? []).filter((e: any) => {
+    const t = new Date(e.clock_in).getTime();
+    return t >= periodStartMs && t < periodEndMs;
+  });
+  const openPeriodNames = [
+    ...new Set(openInPeriod.map((e: any) => e.profiles?.full_name).filter(Boolean)),
+  ] as string[];
   // Inclusive last day as a date STRING so formatDate renders it literally
   // (formatting the UTC-midnight instant in the business tz shifts a day back).
   const periodEndIncl = new Date(new Date(`${period.end}T00:00:00Z`).getTime() - 86_400_000)
@@ -377,6 +389,13 @@ export default async function TimecardsPage({
               </Link>
             </span>
           </div>
+          {openInPeriod.length > 0 && (
+            <p className="mb-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800">
+              {openInPeriod.length} open {openInPeriod.length === 1 ? "entry" : "entries"} (
+              {openPeriodNames.join(", ")}) not counted — close {openInPeriod.length === 1 ? "it" : "them"}{" "}
+              below and these totals will update.
+            </p>
+          )}
           {periodRows.length === 0 ? (
             <p className="text-sm text-slate-400">No hours logged this pay period yet.</p>
           ) : (
@@ -445,7 +464,11 @@ export default async function TimecardsPage({
 
       {/* Crew-lead daily reports — what got done + materials needed tomorrow, with the
           GPS day story. This is the review surface the daily_report notification deep-links
-          to; "Mark reviewed" checks a report off (0128's filed → reviewed). */}
+          to; "Mark reviewed" checks a report off (0128's filed → reviewed).
+          KNOWN GAP (audit 2026-07-16): 0128's design says "filed for office EDITING" and the
+          update RLS grants staff that write, but no UI anywhere edits a report's
+          did_today/materials_tomorrow — this list is read+review only. Build the edit
+          affordance here if the office ever needs to correct a filed report. */}
       {dailyReports.length > 0 && (
         <Card className="mb-4 overflow-hidden">
           <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">

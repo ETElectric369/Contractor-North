@@ -21,12 +21,10 @@ interface JobOption {
   name: string;
 }
 
-export function NewListButton({ jobs, defaultJobId }: { jobs: JobOption[]; defaultJobId?: string }) {
+export function NewListButton({ jobs }: { jobs: JobOption[] }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
-  // When opened from a job (Materials tab), default to THAT job so a list made there is
-  // actually linked to it — otherwise it saved unlinked and "disappeared" from the job.
-  const [jobId, setJobId] = useState(defaultJobId ?? "");
+  const [jobId, setJobId] = useState("");
   const [scope, setScope] = useState("");
   const [items, setItems] = useState<DraftMaterial[]>([]);
   const [mDesc, setMDesc] = useState("");

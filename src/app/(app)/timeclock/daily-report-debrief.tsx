@@ -18,6 +18,11 @@ type Field = "did" | "mats";
  * server attaches the GPS story of the day, and the confirmation shows exactly what
  * Nort filed for office editing. Skippable — the clock-out already happened; this
  * never blocks going home.
+ *
+ * ADOPTION (audit 2026-07-16): fully wired end-to-end (crew_lead toggle in Edit
+ * Member → this debrief → upsert → planner card → /timecards review) but ZERO
+ * prod use so far — no profile has crew_lead=true, daily_reports is empty. It's
+ * waiting on Erik flagging crew leads, not on missing code. Don't re-flag as junk.
  */
 export function DailyReportDebrief({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [did, setDid] = useState("");

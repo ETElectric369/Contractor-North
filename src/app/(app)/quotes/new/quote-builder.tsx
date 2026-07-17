@@ -61,6 +61,7 @@ export function QuoteBuilder({
   preselected,
   jobId,
   inquiryId,
+  captureId,
   initialScope,
   priceItems = [],
   taxRates = [],
@@ -75,6 +76,9 @@ export function QuoteBuilder({
   jobId?: string;
   /** When launched from a lead conversion, the quote keeps the provenance backlink. */
   inquiryId?: string;
+  /** The inspection appointment being written up (?capture=) — saveQuote stamps the new
+   *  quote's id onto its capture jsonb so /inspections files the row (lead-less path). */
+  captureId?: string;
   /** Prefill for the estimator scope box — e.g. an inspection's field capture
    *  (notes/measurements/materials) threaded in via /quotes/new?capture=. */
   initialScope?: string;
@@ -296,6 +300,7 @@ export function QuoteBuilder({
         customer_id: customerId || null,
         job_id: jobId || null,
         inquiry_id: inquiryId || null,
+        capture_appointment_id: captureId || null,
         title,
         description,
         notes,

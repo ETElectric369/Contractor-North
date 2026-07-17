@@ -76,6 +76,8 @@ export async function POST(req: Request) {
     // a calm, refined BRITISH MALE. George is ElevenLabs' premade warm/mature British male
     // (calmer than Daniel's news-presenter read). REVERT: restore Rachel "21m00Tcm4TlvDq8ikWAM"
     // here AND in the GET diag above — or just set ELEVENLABS_VOICE_ID, which always wins.
+    // (Audit 2026-07-16: still deliberately temporary — three lockstep spots: here, GET diag,
+    // and the OpenAI "fable" default below. Ask Erik before treating it as permanent.)
     const elVoice = process.env.ELEVENLABS_VOICE_ID || "JBFqnCBsd6RMkjVDRZzb"; // George (was Rachel 21m00Tcm4TlvDq8ikWAM)
     // Flash = ~75ms (ElevenLabs' real-time model); output_format is a QUERY param; the
     // smaller 64kbps mp3 halves the payload with no audible loss on a voice read-back.

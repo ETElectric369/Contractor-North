@@ -73,6 +73,9 @@ export async function createProposalCore(
   if (!title) return { ok: false, error: "Title is required." };
 
   // Withdraw any still-pending prior proposal for the same context (see doctrine above).
+  // (Audit 2026-07-16: appointments.inquiry_id (0129) verified written AND read exactly as
+  // promised — this dedup filter, the public pick-a-time confirm, and /quotes/new's lead
+  // backlink recovery all consume it. Live rows exist. Not a written-never-read column.)
   let priorQuery = null;
   if (input.inquiryId) {
     priorQuery = supabase

@@ -143,6 +143,10 @@ export interface SaveQuoteInput {
   /** The lead this estimate was seeded from (provenance backlink) — set when a lead is
       converted to a quote; null for quotes started from scratch. */
   inquiry_id?: string | null;
+  /** The inspection appointment this estimate writes up (/quotes/new?capture=<id>) — on save
+      the quote id is stamped onto that appointment's capture jsonb so the Inspections tab can
+      file a LEAD-LESS "Inspect now" row (no inquiry/job to match otherwise). */
+  capture_appointment_id?: string | null;
   title: string;
   description?: string | null;
   notes: string;
@@ -484,6 +488,26 @@ export async function saveQuote(input: SaveQuoteInput) {
   // No auto follow-up task here: the "awaiting reply" inbox item on My Day IS
   // the follow-up, and it self-clears when the quote is answered — one intent,
   // one surface (the old per-quote task factory just piled up orphans).
+
+  // Write-up backlink: stamp the new quote's id onto the source inspection's capture jsonb
+  // so /inspections can file the row (the lead-less Inspect-now path has no inquiry/job link).
+  // RLS-scoped read → a bad/cross-org id is a clean no-op; best-effort, never fails the save.
+  if (input.capture_appointment_id) {
+    const { data: appt } = await supabase
+      .from("appointments")
+      .select("id, capture")
+      .eq("id", input.capture_appointment_id)
+      .maybeSingle();
+    if (appt) {
+      const existing =
+        appt.capture && typeof appt.capture === "object" ? (appt.capture as Record<string, unknown>) : {};
+      await supabase
+        .from("appointments")
+        .update({ capture: { ...existing, quote_id: quote.id }, updated_at: new Date().toISOString() })
+        .eq("id", appt.id);
+      revalidatePath("/inspections");
+    }
+  }
 
   revalidatePath("/quotes");
   // Return the SAVED money figures (the subtotalTaxTotal rollup that was written) +

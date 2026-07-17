@@ -7,6 +7,11 @@
  * extendedProperties.private.cn="1" (CN-owned; re-pushed over Google edits);
  * the pull cron mirrors the org's selected calendars into external_events
  * read-only, skipping cn-tagged echoes. See src/lib/calendar-sync.ts.
+ *
+ * (Audit 2026-07-16: the sync_tokens lifecycle is COMPLETE — written per calendar
+ * after each sweep, pruned on deselect, 30-day re-baseline, reauth marker set here
+ * on 400/401 and cleared only by the OAuth callback. 0128–0132 create no SQL
+ * functions, so there are no uncalled RPCs. Don't re-flag.)
  */
 
 import { jobEventBody, type JobForEvent } from "@/lib/gcal-map";
@@ -21,8 +26,13 @@ const SCOPE =
   "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly";
 const CAL_BASE = "https://www.googleapis.com/calendar/v3";
 
-const site = () => process.env.NEXT_PUBLIC_SITE_URL || "https://contractor-north.vercel.app";
-const redirectUri = () => `${site()}/api/google/callback`;
+// The OAuth callback must EXACTLY match a redirect URI registered in the Google
+// console. OAUTH_REDIRECT_BASE pins it there so NEXT_PUBLIC_SITE_URL (the address
+// the app prints on invites/links) can move domains without breaking the calendar
+// connect. Drop the env once the new domain's /api/google/callback is registered.
+const oauthBase = () =>
+  process.env.OAUTH_REDIRECT_BASE || process.env.NEXT_PUBLIC_SITE_URL || "https://contractor-north.vercel.app";
+const redirectUri = () => `${oauthBase()}/api/google/callback`;
 
 export function gcalConfigured(): boolean {
   return Boolean(process.env.GOOGLE_OAUTH_CLIENT_ID && process.env.GOOGLE_OAUTH_CLIENT_SECRET);

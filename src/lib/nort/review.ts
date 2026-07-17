@@ -48,8 +48,10 @@ const ANALYST_SYSTEM =
 
 /** Pull the org's operational signal and build a compact digest for the analyst. */
 async function buildDigest(supabase: SupabaseClient, orgId: string, sinceIso: string) {
-  const { data: profs } = await supabase.from("profiles").select("id, name").eq("org_id", orgId);
-  const idToName = new Map((profs ?? []).map((p: { id: string; name: string | null }) => [p.id, p.name || "crew"]));
+  // Column is full_name (0001_init) — "name" 42703'd silently and the review generator
+  // read ZERO transcripts for weeks (counts.conversations was always 0). Fixed 2026-07-16.
+  const { data: profs } = await supabase.from("profiles").select("id, full_name").eq("org_id", orgId);
+  const idToName = new Map((profs ?? []).map((p: { id: string; full_name: string | null }) => [p.id, p.full_name || "crew"]));
   const profileIds = (profs ?? []).map((p: { id: string }) => p.id);
 
   // Bug reports the crew filed (open + recent).

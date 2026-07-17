@@ -208,7 +208,9 @@ export default async function TimeclockPage() {
     const tz = orgSettings.timezone;
     const byDay = new Map<string, { label: string; rows: MyTimecardRow[]; total: number }>();
     for (const e of week) {
-      const day = new Date(e.clock_in).toLocaleDateString("en-CA", { timeZone: tz });
+      // Org-local day key via the tz SSOT (same primitive timeEntryGridSpan uses) —
+      // not an inline toLocaleDateString fork of the day-boundary logic.
+      const day = todayStrInTz(tz, new Date(e.clock_in));
       if (!byDay.has(day)) {
         byDay.set(day, {
           label: new Date(e.clock_in).toLocaleDateString("en-US", {
@@ -246,7 +248,15 @@ export default async function TimeclockPage() {
   // (paid_at). Mileage dollars never appear — mileage is a human-stated
   // settlement on /payroll (payroll-two-buckets doctrine), never app-computed.
   let myPeriod:
-    | { label: string; hours: number; gross: number; state: "paid" | "partly" | "unpaid" }
+    | {
+        label: string;
+        hours: number;
+        gross: number;
+        state: "paid" | "partly" | "unpaid";
+        /** The $48.50 lesson (mirrors /payroll's open-entries banner): a still-open shift is
+         *  EXCLUDED by the closed-only filter below — say so, or the period under-counts silently. */
+        openNotCounted: boolean;
+      }
     | null = null;
   if (!isStaff && user) {
     const tz = orgSettings.timezone;
@@ -269,11 +279,16 @@ export default async function TimeclockPage() {
       const endIncl = new Date(new Date(`${period.end}T00:00:00Z`).getTime() - 86_400_000)
         .toISOString()
         .slice(0, 10);
+      const openInMs = openEntry ? new Date(openEntry.clock_in).getTime() : null;
       myPeriod = {
         label: `${formatDate(period.start)} – ${formatDate(endIncl)}`,
         hours: row.paidHours + row.unpaidHours,
         gross: Math.round((row.paidGross + row.unpaidGross) * 100) / 100,
         state: row.unpaidHours === 0 ? "paid" : row.paidHours > 0 ? "partly" : "unpaid",
+        openNotCounted:
+          openInMs != null &&
+          openInMs >= tzDayStartUtc(period.start, tz).getTime() &&
+          openInMs < tzDayStartUtc(period.end, tz).getTime(),
       };
     }
   }
@@ -369,6 +384,12 @@ export default async function TimeclockPage() {
                     )}
                   </span>
                 </div>
+                {myPeriod.openNotCounted && (
+                  <p className="mt-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                    Your current shift is still on the clock and not counted yet — these totals update
+                    when you clock out.
+                  </p>
+                )}
                 <p className="mt-1.5 text-xs text-slate-400">
                   Base pay only — mileage is tracked in miles and settled separately by the office.
                 </p>

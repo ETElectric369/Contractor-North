@@ -13,7 +13,7 @@ import { jobStatusLabel } from "@/lib/job-status";
 import { formatTime, formatCityStateZip, formatDateShort } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
 import { NavLink } from "@/components/nav-link";
-import { toJobOptions, toCustomerOptions, toStaffOptions, listActiveTechs, listCustomerOptions } from "@/lib/schedule-options";
+import { toJobOptions, toCustomerOptions, toStaffOptions, listActiveTechs, listCustomerOptions, jobLabel } from "@/lib/schedule-options";
 import { todayBoundsInTz, prettyDay, tzDayStartUtc } from "@/lib/tz";
 import { YourList } from "./your-list";
 import { rankSix } from "@/lib/six-rank";
@@ -498,7 +498,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           <MyDayClock
             className="h-full"
             open={openEntry ? { id: openEntry.id, clock_in: openEntry.clock_in, notes: openEntry.notes ?? null } : null}
-            jobLabel={currentJob ? `${currentJob.job_number} — ${currentJob.name}` : null}
+            jobLabel={currentJob ? jobLabel(currentJob) : null}
           />
           <Link
             href="/leads"
@@ -529,7 +529,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       ) : (
         <MyDayClock
           open={openEntry ? { id: openEntry.id, clock_in: openEntry.clock_in, notes: openEntry.notes ?? null } : null}
-          jobLabel={currentJob ? `${currentJob.job_number} — ${currentJob.name}` : null}
+          jobLabel={currentJob ? jobLabel(currentJob) : null}
         />
       )}
 

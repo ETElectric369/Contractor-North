@@ -136,16 +136,18 @@ describe("apptEventBody", () => {
 
   it("prefixes non-generic types, defaults end to +1h, tags cn", () => {
     const b = apptEventBody(appt, { linkUrl: "https://app/appointments/a1" });
-    expect(b.summary).toBe("[inspection] Rough-in walk");
+    expect(b.summary).toBe("[Inspection] Rough-in walk");
     expect(b.end.dateTime).toBe("2026-07-21T17:00:00.000Z");
     expect(b.description).toContain("bring ladder");
     expect(b.description).toContain("https://app/appointments/a1");
     expect(b.extendedProperties.private).toMatchObject({ cn: "1", cn_kind: "appointment", cn_id: "a1" });
   });
 
-  it("plain 'appointment' type gets no prefix; underscores read as spaces", () => {
+  it("plain 'appointment' type gets no prefix; the type label comes from the statuses.ts spine", () => {
     expect(apptEventBody({ ...appt, type: "appointment" }).summary).toBe("Rough-in walk");
-    expect(apptEventBody({ ...appt, type: "final_inspection" }).summary).toBe("[final inspection] Rough-in walk");
+    // Same label the app renders (appointmentTypeLabel) — pushed events must not drift
+    // into "[final inspection]" while the app says "Final inspection".
+    expect(apptEventBody({ ...appt, type: "final_inspection" }).summary).toBe("[Final inspection] Rough-in walk");
   });
 
   it("keeps a real end when it's after the start", () => {

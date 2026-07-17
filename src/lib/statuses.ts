@@ -25,7 +25,9 @@ export const APPOINTMENT_STATUSES = ["scheduled", "proposed", "completed", "canc
  *  inspections are ONE platform. His "client_meeting" converges onto the pre-existing
  *  `meeting` value (label-only change — no data rewrite), and `final_inspection` is the
  *  one genuinely new value (the code-inspection at job end, distinct from the pre-sale
- *  site walk-through). The create/edit dropdown and the write-guards both read this list. */
+ *  site walk-through). The create/edit dropdown and the write-guards both read this list.
+ *  (Audit 2026-07-16: TS spine and the 0131 DB check are in lockstep; final_inspection
+ *  simply has no rows yet — expected early adoption lag, not a dead value.) */
 export const APPOINTMENT_TYPES = [
   "inspection",
   "final_inspection",

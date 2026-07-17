@@ -55,8 +55,9 @@ export default async function InspectionsPage({
       .in("type", [...INSPECTION_TYPES])
       .order("starts_at", { ascending: false })
       .limit(500),
-    // Which inquiries/jobs already have an estimate — the "written up" signal.
-    supabase.from("quotes").select("inquiry_id, job_id").or("inquiry_id.not.is.null,job_id.not.is.null"),
+    // Which inquiries/jobs already have an estimate — the "written up" signal. Ids too:
+    // a lead-less Inspect-now write-up is matched via capture.quote_id (no inquiry/job link).
+    supabase.from("quotes").select("id, inquiry_id, job_id"),
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),
     getSchedulePickerOptions(supabase),
   ]);
@@ -67,7 +68,14 @@ export default async function InspectionsPage({
     (quoteLinks ?? []).map((q: any) => q.inquiry_id).filter(Boolean),
   );
   const estimateJobIds = new Set<string>((quoteLinks ?? []).map((q: any) => q.job_id).filter(Boolean));
-  const { toWriteUp, upcoming, filed } = bucketInspections(rows, estimateInquiryIds, estimateJobIds);
+  const estimateQuoteIds = new Set<string>((quoteLinks ?? []).map((q: any) => q.id).filter(Boolean));
+  const { toWriteUp, upcoming, filed } = bucketInspections(
+    rows,
+    estimateInquiryIds,
+    estimateJobIds,
+    new Date(),
+    estimateQuoteIds,
+  );
 
   const pill = (active: boolean) =>
     `rounded-full border px-3 py-1 text-sm font-medium ${
@@ -75,6 +83,20 @@ export default async function InspectionsPage({
         ? "border-brand bg-brand-light/40 text-brand-dark"
         : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
     }`;
+
+  // The EXISTING appointment flow (Set a Time | Propose Times) preset to the inspection
+  // type — shared by the header AND the empty state. The empty state used to mount a bare
+  // <NewInspectionButton />, whose fallback links the generic /schedule create modal
+  // (type defaults to "appointment"), so a trusting tap made a record that never appears here.
+  const scheduleInspection = (
+    <AppointmentButton
+      jobs={pickers.jobOpts}
+      customers={pickers.custOpts}
+      staff={pickers.staffOpts}
+      defaultType="inspection"
+      buttonLabel="Schedule inspection"
+    />
+  );
 
   return (
     <div>
@@ -84,17 +106,7 @@ export default async function InspectionsPage({
       >
         {/* The shared two-mode affordance: Inspect now (one tap → capture) or the EXISTING
             appointment flow (Set a Time | Propose Times), preset to the inspection type. */}
-        <NewInspectionButton
-          schedule={
-            <AppointmentButton
-              jobs={pickers.jobOpts}
-              customers={pickers.custOpts}
-              staff={pickers.staffOpts}
-              defaultType="inspection"
-              buttonLabel="Schedule inspection"
-            />
-          }
-        />
+        <NewInspectionButton schedule={scheduleInspection} />
       </PageHeader>
 
       {/* Open work is the default view; settled paperwork files away (estimates pattern). */}
@@ -123,7 +135,7 @@ export default async function InspectionsPage({
           title="No open inspections"
           description="Start one from a lead, schedule one, or tap Inspect now when you're already onsite."
         >
-          <NewInspectionButton />
+          <NewInspectionButton schedule={scheduleInspection} />
         </EmptyState>
       ) : (
         <div className="space-y-6">
