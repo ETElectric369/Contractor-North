@@ -31,12 +31,15 @@ import {
   updatePayment,
   deletePayment,
 } from "../actions";
+import { effectiveMarkupPct } from "@/lib/pricing/markup";
 
 interface PriceItemLite { id: string; code: string | null; description: string; unit: string; buy_price: number; markup_pct: number; }
 interface TaxRateLite { id: string; name: string; rate: number; is_default: boolean; }
 interface CustomerLite { id: string; name: string; }
 interface JobLite { id: string; name: string | null; job_number: string | null; customer_id: string | null; }
 
+// Markup is resolved through effectiveMarkupPct (level → item → org default) at both
+// call sites, so the invoice picker prices like the quote builder — never raw net cost.
 const sellPrice = (buy: number, markup: number) => buy * (1 + (markup || 0) / 100);
 
 /** ISO timestamp → "YYYY-MM-DD" in local time, for a <input type=date>. */
@@ -56,6 +59,8 @@ export function InvoiceDetail({
   taxRates = [],
   paymentMethods = [],
   materialMarkup = 0,
+  levelMarkupPct = null,
+  defaultMarkupPct = 0,
   customers = [],
   jobs = [],
 }: {
@@ -66,6 +71,9 @@ export function InvoiceDetail({
   taxRates?: TaxRateLite[];
   paymentMethods?: string[];
   materialMarkup?: number;
+  /** The invoice customer's pricing-level markup (null = no level) — feeds effectiveMarkupPct. */
+  levelMarkupPct?: number | null;
+  defaultMarkupPct?: number;
   customers?: CustomerLite[];
   jobs?: JobLite[];
 }) {
@@ -225,7 +233,7 @@ export function InvoiceDetail({
         description: p.code ? `${p.code} — ${p.description}` : p.description,
         quantity: 1,
         unit: p.unit || "ea",
-        unit_price: Number(sellPrice(p.buy_price, p.markup_pct).toFixed(2)),
+        unit_price: Number(sellPrice(p.buy_price, effectiveMarkupPct({ levelPct: levelMarkupPct, itemPct: p.markup_pct, orgDefaultPct: defaultMarkupPct })).toFixed(2)),
       });
       if (!res?.ok) { toast(res?.error ?? "Couldn't add the line item — try again.", "error"); return; }
       setPlQuery("");
@@ -428,7 +436,7 @@ export function InvoiceDetail({
                         {p.code && <span className="mr-1 font-mono text-xs text-slate-400">{p.code}</span>}
                         {p.description}
                       </span>
-                      <span className="shrink-0 text-slate-600">{formatCurrency(sellPrice(p.buy_price, p.markup_pct))}</span>
+                      <span className="shrink-0 text-slate-600">{formatCurrency(sellPrice(p.buy_price, effectiveMarkupPct({ levelPct: levelMarkupPct, itemPct: p.markup_pct, orgDefaultPct: defaultMarkupPct })))}</span>
                     </button>
                   </li>
                 ))}

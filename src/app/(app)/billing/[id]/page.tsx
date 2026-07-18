@@ -33,7 +33,7 @@ export default async function InvoicePage({
 
   const { data: invoice, error: invoiceErr } = await supabase
     .from("invoices")
-    .select("*, customers(id, name), quotes(id, quote_number)")
+    .select("*, customers(id, name, pricing_levels(markup_pct)), quotes(id, quote_number)")
     .eq("id", id)
     .maybeSingle();
 
@@ -193,6 +193,8 @@ export default async function InvoicePage({
         taxRates={(taxRates ?? []) as any}
         paymentMethods={paymentMethods}
         materialMarkup={orgSettings.material_markup_percent}
+        levelMarkupPct={(inv as any).customers?.pricing_levels?.markup_pct ?? null}
+        defaultMarkupPct={orgSettings.default_markup_pct}
         customers={(customers ?? []) as any}
         jobs={(jobs ?? []) as any}
       />

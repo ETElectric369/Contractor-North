@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
+import { resolveSiteContext } from "@/lib/site-editor-guard";
 
 export type BugReport = {
   id: string;
@@ -13,8 +14,12 @@ export type BugReport = {
   screenshot_path: string | null;
 };
 
-/** File a bug report (any org member). Tagged with the page, captured console errors,
- *  browser/viewport, and the reporter via the set_org_id trigger + RLS. */
+/** File a bug report (any org member, or an external site collaborator from /content).
+ *  Tagged with the page, captured console errors, browser/viewport, and the reporter.
+ *  Org members: org_id comes from the set_org_id trigger + RLS, exactly as before.
+ *  Collaborators pass `orgId` (their profile has org_id NULL, so the trigger can't stamp):
+ *  verified here via the same resolution /content's actions use, and re-checked by the
+ *  extended bug_reports_insert policy (migration 0135) — RLS stays the real boundary. */
 export async function createBugReport(input: {
   page: string;
   note: string;
@@ -22,6 +27,7 @@ export async function createBugReport(input: {
   userAgent: string;
   viewport: string;
   screenshotPath?: string;
+  orgId?: string;
 }): Promise<{ ok: boolean; error?: string }> {
   const supabase = await createClient();
   const {
@@ -31,14 +37,25 @@ export async function createBugReport(input: {
   const note = (input.note || "").trim();
   if (!note) return { ok: false, error: "Tell me what happened." };
 
+  let collabOrgId: string | null = null;
+  if (input.orgId) {
+    const ctx = await resolveSiteContext(input.orgId);
+    if ("error" in ctx) return { ok: false, error: ctx.error };
+    collabOrgId = ctx.orgId;
+  }
+
   const { error } = await supabase.from("bug_reports").insert({
+    // Explicit org only on the /content path; otherwise the trigger stamps it as before.
+    ...(collabOrgId ? { org_id: collabOrgId } : {}),
     reported_by: user.id,
     page: (input.page || "").slice(0, 300) || null,
     note: note.slice(0, 4000),
     console: (input.console || []).slice(0, 20),
     user_agent: (input.userAgent || "").slice(0, 300) || null,
     viewport: (input.viewport || "").slice(0, 50) || null,
-    screenshot_path: input.screenshotPath || null,
+    // The documents bucket denies collaborators (storage RLS keys on auth_org_id), so the
+    // /content path never carries a screenshot — drop any client-sent path there.
+    screenshot_path: collabOrgId ? null : input.screenshotPath || null,
   });
   if (error) return { ok: false, error: error.message };
   return { ok: true };

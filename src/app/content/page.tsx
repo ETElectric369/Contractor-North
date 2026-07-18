@@ -11,6 +11,7 @@ import { HomepageCard } from "../(app)/settings/homepage-card";
 import { SiteSeoFields } from "../(app)/settings/site-seo-fields";
 import { ReviewsManager } from "../(app)/settings/reviews-manager";
 import { PortfolioManager } from "../(app)/settings/portfolio-manager";
+import { BugReporter } from "@/components/bug-reporter";
 import { renderReadyBlocks } from "@/lib/public-pages";
 
 function Panel({ icon: Icon, title, brand, children }: { icon: typeof FileText; title: string; brand: string; children: React.ReactNode }) {
@@ -206,6 +207,9 @@ export default async function ContentWorkspace({ searchParams }: { searchParams:
           <ReviewsManager initial={marketing.reviews ?? []} orgId={selected} />
         </Panel>
       </div>
+      {/* Same one-tap "Report a bug" button as the app, filed against the SELECTED client org
+          (a collaborator has no org of their own for the report to land in). */}
+      <BugReporter orgId={selected} collaborator />
     </Shell>
   );
 }

@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { formatCurrency } from "@/lib/utils";
+import { effectiveMarkupPct } from "@/lib/pricing/markup";
 import { subtotalTaxTotal } from "@/lib/invoice-math";
 import { useDraft } from "@/lib/use-draft";
 import { useToast } from "@/components/toast";
@@ -67,6 +68,7 @@ export function QuoteBuilder({
   taxRates = [],
   kits = [],
   quoteExpiryDays = 30,
+  defaultMarkupPct = 0,
   deckRates,
   showDeckGenerator = false,
 }: {
@@ -86,6 +88,8 @@ export function QuoteBuilder({
   taxRates?: TaxRateLite[];
   kits?: KitLite[];
   quoteExpiryDays?: number;
+  /** Org Settings default_markup_pct — the last fallback in effectiveMarkupPct's chain. */
+  defaultMarkupPct?: number;
   /** Deck price codes → sell price (catalog orgs) — feeds the on-page deck generator. */
   deckRates?: Record<string, number>;
   showDeckGenerator?: boolean;
@@ -107,14 +111,15 @@ export function QuoteBuilder({
   const [plQuery, setPlQuery] = useState("");
   const [plOpen, setPlOpen] = useState(false);
 
-  // Resolve the markup to use: the selected customer's pricing-level markup
-  // overrides the item's own default markup.
+  // Resolve the markup via THE one rule (effectiveMarkupPct): the selected customer's
+  // pricing-level markup → the item's own markup when > 0 → the org default → 0.
   const selectedCust = customers.find((c) => c.id === customerId);
   const levelMarkup = selectedCust?.level_markup;
   // The customer's pricing level can also carry its own labor rate (e.g. Local = $125/hr);
   // when set, the estimator uses it instead of the org default.
   const levelRate = selectedCust?.level_rate;
-  const markupFor = (p: PriceItemLite) => (levelMarkup != null ? levelMarkup : p.markup_pct);
+  const markupFor = (p: PriceItemLite) =>
+    effectiveMarkupPct({ levelPct: levelMarkup, itemPct: p.markup_pct, orgDefaultPct: defaultMarkupPct });
 
   const plMatches = plQuery.trim()
     ? priceItems

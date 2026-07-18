@@ -37,8 +37,13 @@ async function captureScreen(): Promise<Blob | null> {
 
 /** One-tap "Report a bug" button (staff only — mounted by the app layout). Auto-attaches
  *  the page, captured console errors, browser/viewport + reporter to each report, and
- *  shows the org's recent reports so the team can track what's logged/fixed. */
-export function BugReporter({ orgId }: { orgId: string }) {
+ *  shows the org's recent reports so the team can track what's logged/fixed.
+ *
+ *  `collaborator` = the /content mount (external SEO pros): orgId is their GRANTED org and
+ *  travels with the report (their profile has no org for the trigger to stamp). No
+ *  screenshot (the documents bucket denies them via storage RLS) and no recent-reports
+ *  panel (bug_reports reads are staff-only). Default (absent) keeps the staff path as is. */
+export function BugReporter({ orgId, collaborator = false }: { orgId: string; collaborator?: boolean }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [note, setNote] = useState("");
@@ -55,16 +60,18 @@ export function BugReporter({ orgId }: { orgId: string }) {
   }, []);
 
   async function openPanel() {
-    // Grab the screen they're looking at FIRST (before the dialog covers it), then open.
-    setCapturing(true);
-    shotRef.current = await captureScreen();
-    setCapturing(false);
+    if (!collaborator) {
+      // Grab the screen they're looking at FIRST (before the dialog covers it), then open.
+      setCapturing(true);
+      shotRef.current = await captureScreen();
+      setCapturing(false);
+    }
     setOpen(true);
     setSent(false);
     setNote("");
     setError(null);
     setErrCount(getLogs().filter((l) => l.level === "error").length);
-    listBugReports().then(setReports).catch(() => {});
+    if (!collaborator) listBugReports().then(setReports).catch(() => {});
   }
 
   function submit() {
@@ -73,9 +80,10 @@ export function BugReporter({ orgId }: { orgId: string }) {
     setError(null);
     start(async () => {
       // Best-effort: upload the screenshot to the documents bucket (path starts with org_id
-      // per the storage RLS). A failed upload never blocks the report.
+      // per the storage RLS — which is also why the collaborator path never has one). A
+      // failed upload never blocks the report.
       let screenshotPath: string | undefined;
-      if (shotRef.current) {
+      if (!collaborator && shotRef.current) {
         // Retry the upload — a single attempt drops the screenshot on a flaky connection
         // (e.g. reporting from the field while driving), which is exactly when we most want
         // it. upsert:true so a retry to the same path doesn't collide. Report sends regardless.
@@ -99,12 +107,13 @@ export function BugReporter({ orgId }: { orgId: string }) {
         userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "",
         viewport: typeof window !== "undefined" ? `${window.innerWidth}x${window.innerHeight}` : "",
         screenshotPath,
+        orgId: collaborator ? orgId : undefined,
       });
       if (!res.ok) return setError(res.error ?? "Could not send.");
       shotRef.current = null;
       setSent(true);
       setNote("");
-      listBugReports().then(setReports).catch(() => {});
+      if (!collaborator) listBugReports().then(setReports).catch(() => {});
     });
   }
 
@@ -130,7 +139,10 @@ export function BugReporter({ orgId }: { orgId: string }) {
         disabled={capturing}
         title="Report a bug"
         aria-label="Report a bug"
-        className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] right-4 z-[71] flex h-11 w-11 items-center justify-center rounded-full bg-slate-900 text-white shadow-lg transition hover:bg-slate-700 disabled:opacity-70 sm:bottom-4"
+        // /content has no mobile bottom nav to clear, so the collaborator mount sits at the corner.
+        className={`fixed right-4 z-[71] flex h-11 w-11 items-center justify-center rounded-full bg-slate-900 text-white shadow-lg transition hover:bg-slate-700 disabled:opacity-70 ${
+          collaborator ? "bottom-4" : "bottom-[calc(5.5rem+env(safe-area-inset-bottom))] sm:bottom-4"
+        }`}
       >
         {capturing ? <Loader2 className="h-5 w-5 animate-spin" /> : <Bug className="h-5 w-5" />}
       </button>
@@ -145,9 +157,18 @@ export function BugReporter({ orgId }: { orgId: string }) {
             <div className="space-y-2">
               <Textarea rows={3} autoFocus placeholder="What happened? (e.g. clock-out wouldn't save)" value={note} onChange={(e) => setNote(e.target.value)} />
               <p className="text-xs text-slate-400">
-                Auto-attached: a <span className="font-medium text-slate-500">screenshot</span> of this screen
-                {shotRef.current ? " ✓" : ""}, this page (<span className="font-mono">{pathname}</span>)
-                {errCount > 0 ? `, ${errCount} console error${errCount > 1 ? "s" : ""}` : ""}, your name + browser.
+                {collaborator ? (
+                  <>
+                    Auto-attached: this page (<span className="font-mono">{pathname}</span>)
+                    {errCount > 0 ? `, ${errCount} console error${errCount > 1 ? "s" : ""}` : ""}, your name + browser.
+                  </>
+                ) : (
+                  <>
+                    Auto-attached: a <span className="font-medium text-slate-500">screenshot</span> of this screen
+                    {shotRef.current ? " ✓" : ""}, this page (<span className="font-mono">{pathname}</span>)
+                    {errCount > 0 ? `, ${errCount} console error${errCount > 1 ? "s" : ""}` : ""}, your name + browser.
+                  </>
+                )}
               </p>
               {error && <p className="text-sm text-red-600">{error}</p>}
               <Button onClick={submit} disabled={pending} className="w-full">

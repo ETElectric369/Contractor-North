@@ -9,6 +9,7 @@ import { subtotalTaxTotal } from "@/lib/invoice-math";
 import { QUOTE_STATUSES } from "@/lib/statuses";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { getOrgSettings, accentHex } from "@/lib/org-settings";
+import { effectiveMarkupPct } from "@/lib/pricing/markup";
 import { sendEmail, renderQuoteNoticeEmail, ownerBcc } from "@/lib/email";
 import { sendSms } from "@/lib/sms";
 import { createWorkOrderFromQuote } from "../work-orders/actions";
@@ -739,8 +740,9 @@ export async function updateQuoteStatus(id: string, status: string) {
  * (+ instruction) — and returns priced line items + review questions from the org's OWN price book
  * (single source of truth, never web prices). Book items carry a "[CODE]" catalog tag (so the CED
  * order sheet resolves them); anything not in the book is flagged with a Home Depot estimate.
- * `markupPct` and `laborRate` come from the customer's pricing level (else the org defaults) and
- * set the material sell price and the labor $/hr respectively.
+ * `markupPct` and `laborRate` come from the customer's pricing level; material sell resolves per
+ * item through THE one markup rule (effectiveMarkupPct: level → item markup > 0 → org
+ * default_markup_pct → 0), and labor $/hr falls back to the org default rate.
  */
 async function runEstimator(
   content: any,
@@ -750,11 +752,13 @@ async function runEstimator(
   const supabase = await createClient();
   const [{ data: org }, { data: book }] = await Promise.all([
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),
-    supabase.from("price_list_items").select("code, description, buy_price, unit, category").eq("archived", false),
+    supabase
+      .from("price_list_items")
+      .select("code, description, buy_price, markup_pct, unit, category")
+      .eq("archived", false),
   ]);
   const orgS = getOrgSettings((org as any)?.settings);
   const playbook = orgS.quote_playbook?.trim();
-  const markup = markupPct != null ? markupPct : orgS.material_markup_percent ?? 0;
   const rate = laborRate != null && laborRate > 0 ? laborRate : orgS.default_labor_rate;
 
   const rows = (book ?? []) as any[];
@@ -792,7 +796,7 @@ async function runEstimator(
   const questions = Array.isArray(parsed.questions)
     ? parsed.questions.map((q) => String(q).trim()).filter(Boolean)
     : [];
-  const sell = (cost: number) => Math.round(cost * (1 + markup / 100) * 100) / 100;
+  const sell = (cost: number, pct: number) => Math.round(cost * (1 + pct / 100) * 100) / 100;
   const items: DraftLineItem[] = raw.map((i) => {
     const kind = i.kind === "labor" ? "labor" : "material";
     if (kind === "labor") {
@@ -806,12 +810,19 @@ async function runEstimator(
     const cat = i.catalog ? String(i.catalog).trim() : null;
     const pl = cat ? byCode.get(cat.toUpperCase()) : null;
     const cost = pl ? Number(pl.buy_price) : Number(i.unit_cost) || 0;
+    // THE markup rule, per item: customer level → the book item's own markup → org default.
+    // (An off-book Home Depot line has no item markup, so it's level → org default.)
+    const pct = effectiveMarkupPct({
+      levelPct: markupPct ?? null,
+      itemPct: pl ? Number(pl.markup_pct) : 0,
+      orgDefaultPct: orgS.default_markup_pct,
+    });
     const base = String(i.description ?? pl?.description ?? "");
     return {
       description: pl ? `${base} [${pl.code}]` : base, // book items carry [CODE] so the CED order sheet resolves them
       quantity: Number(i.quantity) || 1,
       unit: String(i.unit ?? pl?.unit ?? "ea"),
-      unit_price: sell(cost),
+      unit_price: sell(cost, pct),
       flag: pl ? undefined : "est · Home Depot — confirm",
     };
   });

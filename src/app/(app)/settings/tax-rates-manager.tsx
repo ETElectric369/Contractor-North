@@ -47,6 +47,7 @@ export function TaxRatesManager({
   const [mileageRate, setMileageRate] = useState(settings.mileage_rate);
   const [materialMarkup, setMaterialMarkup] = useState(settings.material_markup_percent);
   const [materialBuffer, setMaterialBuffer] = useState(settings.material_buffer_percent);
+  const [defaultMarkup, setDefaultMarkup] = useState(settings.default_markup_pct);
   const [savedLabor, setSavedLabor] = useState(false);
 
   const [levelName, setLevelName] = useState("");
@@ -172,7 +173,7 @@ export function TaxRatesManager({
 
       <div className="border-t border-slate-100 pt-4">
         <h4 className="mb-2 text-sm font-semibold text-slate-900">Defaults</h4>
-        <div className="flex items-end gap-3">
+        <div className="flex flex-wrap items-end gap-3">
           <div className="w-44">
             <Label htmlFor="fin-labor">Default labor rate ($/hr)</Label>
             <NumberInput id="fin-labor" value={laborRate} onValueChange={setLaborRate} />
@@ -180,6 +181,10 @@ export function TaxRatesManager({
           <div className="w-44">
             <Label htmlFor="fin-mileage">Mileage rate ($/mi)</Label>
             <NumberInput id="fin-mileage" value={mileageRate} onValueChange={setMileageRate} />
+          </div>
+          <div className="w-44">
+            <Label htmlFor="fin-default-markup">Default markup (%)</Label>
+            <NumberInput id="fin-default-markup" value={defaultMarkup} onValueChange={setDefaultMarkup} />
           </div>
           <div className="w-44">
             <Label htmlFor="fin-markup">Materials markup (%)</Label>
@@ -191,7 +196,7 @@ export function TaxRatesManager({
           </div>
           <Button
             size="sm"
-            onClick={() => start(async () => { await updateOrgSettings({ default_labor_rate: laborRate, mileage_rate: mileageRate, material_markup_percent: materialMarkup, material_buffer_percent: materialBuffer }); setSavedLabor(true); setTimeout(() => setSavedLabor(false), 2000); })}
+            onClick={() => start(async () => { await updateOrgSettings({ default_labor_rate: laborRate, mileage_rate: mileageRate, default_markup_pct: defaultMarkup, material_markup_percent: materialMarkup, material_buffer_percent: materialBuffer }); setSavedLabor(true); setTimeout(() => setSavedLabor(false), 2000); })}
             disabled={pending}
           >
             Save
@@ -199,7 +204,7 @@ export function TaxRatesManager({
           {savedLabor && <span className="flex items-center gap-1 text-sm font-medium text-green-600"><Check className="h-4 w-4" /> Saved</span>}
         </div>
         <p className="mt-1 text-xs text-slate-500">
-          Mileage rate is used only for the tax-report deduction estimate — payroll mileage is settled separately, by hand.
+          Default markup prices a price-book item when the item has no markup of its own and the customer has no pricing level — so a net-cost catalog import never quotes at cost. Materials markup applies when importing job costs to an invoice. Mileage rate is used only for the tax-report deduction estimate — payroll mileage is settled separately, by hand.
         </p>
       </div>
 

@@ -7,6 +7,7 @@ import { createTriagedInquiry } from "@/lib/inquiries/create-triaged-inquiry";
 import type { LeadIntake } from "@/lib/lead-triage";
 import { computeDeckEstimate, buildDeckRates, DECK_ESTIMATE_CODES, type DeckAnswers } from "@/lib/estimate/deck";
 import { rateLimited, clientIp } from "@/lib/rate-limit";
+import { effectiveMarkupPct } from "@/lib/pricing/markup";
 
 export const runtime = "nodejs";
 
@@ -180,7 +181,7 @@ ${pricingHow}
   ].join("\n");
 }
 
-async function searchPrices(supabase: ReturnType<typeof createServiceClient>, orgId: string, input: unknown): Promise<string> {
+async function searchPrices(supabase: ReturnType<typeof createServiceClient>, org: PublicOrg, input: unknown): Promise<string> {
   const raw = (input ?? {}) as { search?: unknown; limit?: unknown };
   // Sanitize hard: strip anything that could alter a PostgREST filter or an ilike pattern.
   const search = String(raw.search ?? "").replace(/[^a-zA-Z0-9 &'-]/g, "").trim().slice(0, 60);
@@ -188,16 +189,23 @@ async function searchPrices(supabase: ReturnType<typeof createServiceClient>, or
   let q = supabase
     .from("price_list_items")
     .select("description, category, unit, buy_price, markup_pct")
-    .eq("org_id", orgId)
+    .eq("org_id", org.id)
     .eq("archived", false)
     .limit(limit);
   if (search) q = q.or(`description.ilike.%${search}%,category.ilike.%${search}%`);
   const { data } = await q;
   const rows = (data ?? []) as { description: string | null; unit: string | null; buy_price: number | null; markup_pct: number | null }[];
+  // Sell at THE markup rule (item markup > 0 → org default) — a 0-markup item (net-cost catalog
+  // import) must never quote the company's real cost to the public.
   const items = rows.map((r) => ({
     item: r.description,
     unit: r.unit,
-    price: Math.round((Number(r.buy_price) || 0) * (1 + (Number(r.markup_pct) || 0) / 100) * 100) / 100,
+    price:
+      Math.round(
+        (Number(r.buy_price) || 0) *
+          (1 + effectiveMarkupPct({ itemPct: Number(r.markup_pct) || 0, orgDefaultPct: org.settings.default_markup_pct }) / 100) *
+          100,
+      ) / 100,
   }));
   return JSON.stringify({ items });
 }
@@ -341,7 +349,7 @@ export async function POST(req: Request) {
       for (const block of resp.content) {
         if (block.type !== "tool_use") continue; // ignore server_tool_use / web_search_tool_result blocks
         let out = "{}";
-        if (block.name === "search_prices") out = await searchPrices(supabase, org.id, block.input);
+        if (block.name === "search_prices") out = await searchPrices(supabase, org, block.input);
         else if (block.name === "deck_estimate") { const de = deckEstimate(block.input, deckRates); out = de.summary; lastEstimate = de.est; }
         else if (block.name === "capture_lead") { out = await captureLead(supabase, org, block.input, lastEstimate, images); if (out.includes('"ok":true')) leadCaptured = true; }
         results.push({ type: "tool_result", tool_use_id: block.id, content: out });

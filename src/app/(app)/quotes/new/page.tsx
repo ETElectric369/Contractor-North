@@ -115,6 +115,7 @@ export default async function NewQuotePage({
         taxRates={(taxRates ?? []) as any}
         kits={estimateKits as any}
         quoteExpiryDays={expiryDays}
+        defaultMarkupPct={settings.default_markup_pct}
         deckRates={deckRates}
         showDeckGenerator={catalogMode}
       />

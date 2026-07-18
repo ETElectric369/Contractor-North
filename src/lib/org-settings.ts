@@ -30,6 +30,12 @@ export interface OrgSettings {
   default_labor_rate: number;
   mileage_rate: number; // $ per mile (e.g. IRS standard rate)
   material_markup_percent: number; // default markup applied when importing job costs to an invoice
+  /** Org-wide DEFAULT markup % for pricing price-book items — the last fallback in THE one
+   *  markup rule (src/lib/pricing/markup.ts effectiveMarkupPct): customer pricing-level markup
+   *  → else the item's own markup_pct when > 0 → else THIS → else 0. Exists so a net-cost
+   *  catalog import (every item markup_pct = 0, e.g. CED) can't quote the company's real cost.
+   *  0 = disabled — byte-identical behavior for orgs that never set it. */
+  default_markup_pct: number;
   /** Safety buffer (%) the AI adds to RESEARCHED/ESTIMATED material prices so an estimate holds up. */
   material_buffer_percent: number;
   /** Free-text "how we quote" playbook injected into AI quote drafts + assistant. */
@@ -170,6 +176,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   default_labor_rate: 0,
   mileage_rate: 0.7,
   material_markup_percent: 25,
+  default_markup_pct: 0,
   material_buffer_percent: 10,
   quote_playbook: "",
   estimating_mode: "research",
