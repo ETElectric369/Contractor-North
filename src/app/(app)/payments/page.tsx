@@ -6,7 +6,9 @@ import { DataTable } from "@/components/ui/data-table";
 import { FactsGrid, StatTile } from "@/components/ui/stat-tile";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
+import { invoiceBalance } from "@/lib/invoice-math";
 import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
+import { RecordPaymentButton } from "./record-payment-button";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +16,7 @@ export const dynamic = "force-dynamic";
  *  which previously lived only inside each invoice. */
 export default async function PaymentsPage() {
   const supabase = await createClient();
-  const [{ data }, { data: refunds }, { data: allInv }, { data: orgRow }] = await Promise.all([
+  const [{ data }, { data: refunds }, { data: allInv }, { data: orgRow }, { data: openInv }] = await Promise.all([
     supabase
       .from("payments")
       .select("id, amount, method, note, paid_at, invoices(id, invoice_number, status, customers(name))")
@@ -26,6 +28,14 @@ export default async function PaymentsPage() {
     // headline the moment there are more than 500 payments.
     supabase.from("invoices").select("amount_paid, status"),
     supabase.from("organizations").select("settings").maybeSingle(),
+    // Invoices the Record-payment picker may offer: billed (non-draft, non-void)
+    // and still carrying a balance — the same set recordPayment will accept.
+    supabase
+      .from("invoices")
+      .select("id, invoice_number, total, amount_paid, customers(name)")
+      .in("status", ["sent", "partial", "overdue"])
+      .order("created_at", { ascending: false })
+      .limit(500),
   ]);
 
   // A voided invoice means the money was reversed (Erik's rule), so drop its
@@ -36,7 +46,13 @@ export default async function PaymentsPage() {
   // This-month + all-time totals — net of refunds (money actually kept). The month
   // boundary is midnight on the 1st in the ORG's timezone — a server-local (UTC on
   // Vercel) boundary shifts late-month evening payments into the wrong month tile.
-  const tz = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone;
+  const orgSettings = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings);
+  const tz = orgSettings.timezone;
+  // Belt-and-suspenders: recalcInvoice flips status on full payment, but a $0
+  // balance under a stale status must still not be offered to the picker.
+  const openInvoices = ((openInv ?? []) as any[]).filter(
+    (i) => invoiceBalance(i.total, i.amount_paid) > 0,
+  );
   const monthStart = tzDayStartUtc(`${todayStrInTz(tz).slice(0, 7)}-01`, tz);
   const refundTotal = refundList.reduce((s, r) => s + Number(r.amount ?? 0), 0);
   const refundMonth = refundList
@@ -52,14 +68,18 @@ export default async function PaymentsPage() {
 
   return (
     <div>
-      <PageHeader title="Payments" description="Every payment collected, newest first." />
+      <PageHeader title="Payments" description="Every payment collected, newest first.">
+        <RecordPaymentButton invoices={openInvoices} paymentMethods={orgSettings.payment_methods} />
+      </PageHeader>
 
       {payments.length === 0 ? (
         <EmptyState
           icon={CreditCard}
           title="No payments yet"
-          description="Payments you record on an invoice show up here."
-        />
+          description="Record a payment here or on any invoice — either way it shows up in this ledger."
+        >
+          <RecordPaymentButton invoices={openInvoices} paymentMethods={orgSettings.payment_methods} />
+        </EmptyState>
       ) : (
         <>
           <FactsGrid cols={2} className="mb-4 sm:max-w-md">

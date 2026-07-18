@@ -10,6 +10,7 @@ import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { useDraft } from "@/lib/use-draft";
 import { useToast } from "@/components/toast";
 import { ACTIVE_JOB_STATUSES, jobStatusLabel } from "@/lib/job-status";
+import { addressPrefillOnCustomerPick } from "@/lib/schedule-options";
 import { createJob } from "./actions";
 
 // The new-job form offers the spine's non-terminal statuses (a brand-new job is never
@@ -25,6 +26,7 @@ const NEW_JOB_STATUSES = [...ACTIVE_JOB_STATUSES].sort((a, b) => {
 interface CustomerOption {
   id: string;
   name: string;
+  address?: string | null; // one-line site-address prefill (formatFullAddress shape)
 }
 
 // The whole form as ONE serializable object so useDraft can mirror it.
@@ -63,6 +65,8 @@ export function NewJobButton({
     const p = (n: number) => String(n).padStart(2, "0");
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
   })();
+  // The picked customer's site-address prefill ("" when none/unknown).
+  const customerAddress = (id: string) => customers.find((c) => c.id === id)?.address ?? "";
   const emptyForm = (): JobForm => ({
     name: "",
     customer_id: defaultCustomerId ?? "",
@@ -72,7 +76,8 @@ export function NewJobButton({
     new_customer_email: "",
     status: "in_progress", // a hand-created job is usually already underway (Erik 2026-07)
     billing_type: "tm",
-    address: "",
+    // A launch-context customer (the customer-page button) prefills too — still editable.
+    address: defaultCustomerId ? customerAddress(defaultCustomerId) : "",
     scheduled_date: today,
     scheduled_time: "",
     description: "",
@@ -222,7 +227,24 @@ export function NewJobButton({
                   id="customer_id"
                   name="customer_id"
                   value={form.customer_id}
-                  onChange={(e) => patch({ customer_id: e.target.value })}
+                  onChange={(e) => {
+                    const cid = e.target.value;
+                    // Prefill the site address from the picked customer — only while the
+                    // field is empty or still holds the previous pick's prefill, so it
+                    // never clobbers typed input (addressPrefillOnCustomerPick).
+                    const prefill = addressPrefillOnCustomerPick(
+                      form.address,
+                      customerAddress(form.customer_id),
+                      customerAddress(cid),
+                    );
+                    if (prefill === null) {
+                      patch({ customer_id: cid });
+                    } else {
+                      patch({ customer_id: cid, address: prefill });
+                      // Uncontrolled AddressAutocomplete only reads defaultValue on mount.
+                      setFormKey((k) => k + 1);
+                    }
+                  }}
                 >
                   <option value="">— None —</option>
                   {customers.map((c) => (

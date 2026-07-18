@@ -6,7 +6,7 @@ import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { ACTIVE_JOB_STATUSES, JOB_STATUS_PRIORITY, jobStatusLabel } from "@/lib/job-status";
-import { listCustomerOptions } from "@/lib/schedule-options";
+import { listNewJobCustomerOptions, toNewJobCustomerOptions } from "@/lib/schedule-options";
 import { formatDate } from "@/lib/utils";
 import { NewJobButton } from "../schedule/new-job-button";
 import { JobImportButton } from "./job-import-button";
@@ -31,12 +31,14 @@ export default async function JobsPage({
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  const [{ data: jobsData }, { data: customers }, { data: me }] = await Promise.all([
+  const [{ data: jobsData }, { data: customerRows }, { data: me }] = await Promise.all([
     query,
-    listCustomerOptions(supabase),
+    listNewJobCustomerOptions(supabase),
     user ? supabase.from("profiles").select("role").eq("id", user.id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
   const isStaff = isStaffRole((me as { role?: string } | null)?.role ?? "");
+  // id/name + the one-line address so picking a customer prefills the site address.
+  const customers = toNewJobCustomerOptions(customerRows);
   const allJobs = (jobsData ?? []) as (Job & { customers: { name: string } | null })[];
 
   // Default (unfiltered) view: ACTIVE jobs only — finished/cancelled hide behind a
@@ -59,7 +61,7 @@ export default async function JobsPage({
       <PageHeader title="Jobs" description="All jobs across the business.">
         <div className="flex items-center gap-2">
           {isStaff && <JobImportButton />}
-          <NewJobButton customers={customers ?? []} />
+          <NewJobButton customers={customers} />
         </div>
       </PageHeader>
 
@@ -85,7 +87,7 @@ export default async function JobsPage({
           title={!status && allJobs.length > 0 ? "No active jobs" : "No jobs"}
           description="Create a job to get started."
         >
-          <NewJobButton customers={customers ?? []} />
+          <NewJobButton customers={customers} />
         </EmptyState>
       ) : (
         <Card className="overflow-hidden">

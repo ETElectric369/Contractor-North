@@ -142,6 +142,21 @@ export function JobScheduleControl({
                 aria-label="Start time (optional)"
                 title="Optional start time — leave blank for all-day"
               />
+              {startTime && (
+                // Explicit reset — mobile time pickers have no clear affordance.
+                // Goes through persist(ranges, "") so ALL segments are kept and
+                // only the time-of-day returns to all-day.
+                <button
+                  type="button"
+                  onClick={() => updateTime("")}
+                  disabled={pending}
+                  className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                  aria-label="Clear start time — back to all-day"
+                  title="Clear time — back to all-day"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
             </div>
           )}
           {ranges.length > 1 && (

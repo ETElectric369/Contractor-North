@@ -52,7 +52,7 @@ export default async function NewQuotePage({
       supabase.from("customers").select("id, name, company_name, pricing_levels(markup_pct, labor_rate)").order("name"),
       supabase
         .from("price_list_items")
-        .select("id, code, description, category, unit, buy_price, markup_pct")
+        .select("id, code, description, category, unit, buy_price, markup_pct, updated_at")
         .eq("archived", false)
         .order("description")
         .limit(2000),
@@ -75,10 +75,13 @@ export default async function NewQuotePage({
     : (kits ?? []);
   // Deck generator rates (catalog orgs) — the deck price codes → sell price, from the same
   // price list, so the on-page generator matches the public configurator to the penny.
+  // buildDeckRates' dedupe contract is first-row-per-code-wins from NEWEST-FIRST rows; the
+  // query above orders by description for the picker, so re-sort the deck subset here.
   const deckRates = catalogMode
     ? buildDeckRates(
         (priceItems ?? [])
           .filter((p: any) => p.code && (DECK_ESTIMATE_CODES as readonly string[]).includes(p.code))
+          .sort((a: any, b: any) => String(b.updated_at ?? "").localeCompare(String(a.updated_at ?? "")))
           .map((p: any) => ({ code: p.code, buy_price: p.buy_price, markup_pct: p.markup_pct })),
       )
     : undefined;

@@ -47,8 +47,12 @@ body {
 
 /* ── Mobile polish ────────────────────────────────────────────────────────
    iOS Safari zooms the whole page when a focused input's font-size is under
-   16px ("screen resizes for the keyboard"). Keep inputs ≥16px on phones. */
-@media (max-width: 1023px) {
+   16px ("screen resizes for the keyboard"). Keep inputs ≥16px on touch devices.
+   Scoped by POINTER, not width alone: iPads in landscape are ≥1024px — they get
+   the desktop shell (side dock) yet iPadOS still auto-zooms, which narrowed the
+   visual viewport to mobile width and slid the dock off-screen (the /crm search
+   box report). Desktop mice/trackpads are `pointer: fine`, so they keep 14px. */
+@media (max-width: 1023px), (pointer: coarse) {
   input,
   select,
   textarea {

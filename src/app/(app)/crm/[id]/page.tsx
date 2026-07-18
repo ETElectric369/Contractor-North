@@ -256,7 +256,10 @@ export default async function CustomerDetailPage({
               <Phone className="h-4 w-4 shrink-0" /> Call
             </a>
           )}
-          <NewJobButton customers={[{ id: c.id, name: c.name }]} defaultCustomerId={c.id} />
+          <NewJobButton
+            customers={[{ id: c.id, name: c.name, address: formatFullAddress(c.address, c.city, c.state, c.zip) || null }]}
+            defaultCustomerId={c.id}
+          />
           <AppointmentButton
             jobs={toJobOptions(jobs)}
             customers={[{ id: c.id, label: c.name }]}

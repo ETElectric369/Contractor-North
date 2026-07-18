@@ -3,6 +3,7 @@
 // places and drifted; keep the mappers here so they can't.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { formatFullAddress } from "@/lib/utils";
 
 export type PickerOption = { id: string; label: string; address?: string | null };
 
@@ -31,6 +32,38 @@ export const listCustomerOptions = (supabase: SupabaseClient, limit?: number) =>
   const q = supabase.from("customers").select("id, name").order("name");
   return limit ? q.limit(limit) : q;
 };
+
+/** The new-job form's customer options — name plus the ONE-LINE site-address prefill
+ *  (a job stores a single address string; formatFullAddress is the canonical shape). */
+export type NewJobCustomerOption = { id: string; name: string; address: string | null };
+
+export const toNewJobCustomerOptions = (rows: any[] | null | undefined): NewJobCustomerOption[] =>
+  (rows ?? []).map((c) => ({
+    id: c.id,
+    name: c.name,
+    address: formatFullAddress(c.address, c.city, c.state, c.zip) || null,
+  }));
+
+/** listCustomerOptions + the address parts — ONLY for surfaces that prefill a site
+ *  address from the pick (NewJobButton). A separate query so the plain pickers
+ *  (e.g. billing's 2000-row list) don't ship four extra columns to the client. */
+export const listNewJobCustomerOptions = (supabase: SupabaseClient) =>
+  supabase.from("customers").select("id, name, address, city, state, zip").order("name");
+
+/** New-job form: what the site-address field should become when the customer pick
+ *  changes. Returns the string to apply (possibly "" — dropping a stale prefill when
+ *  the new pick has no address), or null to leave the field alone. The pick's address
+ *  applies only while the field is empty or still holds the PREVIOUS pick's prefill,
+ *  so typed input is never clobbered. */
+export function addressPrefillOnCustomerPick(
+  current: string,
+  prevPrefill: string,
+  nextPrefill: string,
+): string | null {
+  const untouched = current.trim() === "" || current === prevPrefill;
+  if (!untouched || nextPrefill === current) return null;
+  return nextPrefill;
+}
 
 /** Fetch the jobs/customers/staff rows and map them to picker options — for
  *  callers that don't already have the rows on hand. */
