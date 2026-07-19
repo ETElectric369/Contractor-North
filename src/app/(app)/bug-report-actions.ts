@@ -1,6 +1,6 @@
 "use server";
 
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
 import { resolveSiteContext } from "@/lib/site-editor-guard";
 
@@ -61,21 +61,55 @@ export async function createBugReport(input: {
   return { ok: true };
 }
 
-/** The org's recent reports (staff only via RLS). */
+/** The org's recent reports. Staff-gated in the app layer (belt) on top of the RLS staff
+ *  read policy (suspenders) — this action also does a narrow service-role name lookup, so
+ *  the gate must hold even if the RLS policy ever loosens. */
 export async function listBugReports(): Promise<BugReport[]> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return [];
+  const supabase = ctx.supabase;
   const { data } = await supabase
     .from("bug_reports")
-    .select("id, note, page, status, created_at, screenshot_path, profiles:reported_by(full_name)")
+    .select("id, note, page, status, created_at, screenshot_path, reported_by, profiles:reported_by(full_name)")
     .order("created_at", { ascending: false })
     .limit(30);
-  return ((data ?? []) as any[]).map((r) => ({
+  const rows = (data ?? []) as any[];
+
+  // Collaborator reporters: their profile (org_id NULL) is INVISIBLE under profiles RLS —
+  // deliberately. Migration 0135 briefly opened the whole profile row (pay fields included)
+  // to client-org staff just to label these reports; 0138 dropped that policy. Resolve the
+  // display name here instead: verify each nameless reporter holds a site grant for THIS
+  // org (site_collaborators read runs under the caller's RLS, which only shows the org's
+  // own grants), then fetch full_name ONLY via the service client. Nothing else of the
+  // profile ever reaches the caller.
+  const nameless = [...new Set(rows.filter((r) => !r.profiles?.full_name && r.reported_by).map((r) => r.reported_by as string))];
+  const collabNames = new Map<string, string>();
+  if (nameless.length && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    const { data: grants } = await supabase
+      .from("site_collaborators")
+      .select("user_id")
+      .in("user_id", nameless);
+    const grantedIds = [...new Set((grants ?? []).map((g: any) => g.user_id as string))];
+    if (grantedIds.length) {
+      const svc = createServiceClient();
+      const { data: names } = await svc
+        .from("profiles")
+        .select("id, full_name")
+        .in("id", grantedIds)
+        .is("org_id", null); // collaborators only — never a member of some other org
+      for (const n of (names ?? []) as { id: string; full_name: string | null }[]) {
+        if (n.full_name) collabNames.set(n.id, n.full_name);
+      }
+    }
+  }
+
+  return rows.map((r) => ({
     id: r.id,
     note: r.note,
     page: r.page,
     status: r.status,
     created_at: r.created_at,
-    reporter: r.profiles?.full_name ?? null,
+    reporter: r.profiles?.full_name ?? collabNames.get(r.reported_by) ?? null,
     screenshot_path: r.screenshot_path ?? null,
   }));
 }

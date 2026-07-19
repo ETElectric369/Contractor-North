@@ -309,6 +309,9 @@ export default async function JobDetailPage({
   // reaches this hub automatically. fetchJobLaborRows also captures cross-job allocations.
   const materialMarkup = getOrgSettings((org as any)?.settings).material_markup_percent;
   const defaultLaborRate = getOrgSettings((org as any)?.settings).default_labor_rate;
+  // timeclock_job_codes=false must hide EVERY code picker (cn-v517) — including the
+  // Time tab's add/edit modals here, not just the /timecards mounts.
+  const jobCodesEnabled = getOrgSettings((org as any)?.settings).timeclock_job_codes;
   const laborRows = await fetchJobLaborRows(supabase, id);
   const billableLabor = computeJobLaborBilling(laborRows.jobEntries, laborRows.jobAllocs, defaultLaborRate).total;
   const progress = computeJobProgress({
@@ -567,6 +570,7 @@ export default async function JobDetailPage({
                   defaultProfileId={user?.id ?? ""}
                   companyAddress={companyAddress}
                   jobAddress={jobAddress}
+                  jobCodesEnabled={jobCodesEnabled}
                 />
               )}
             </div>
@@ -590,6 +594,7 @@ export default async function JobDetailPage({
                       jobs={allJobs ?? []}
                       members={(techs ?? []) as any}
                       isStaff={viewerIsStaff}
+                      jobCodesEnabled={jobCodesEnabled}
                     />
                   </div>
                 </li>

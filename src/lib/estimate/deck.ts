@@ -80,23 +80,40 @@ function derivedRailingLf(L: number, W: number, wrap: boolean): number {
   return wrap ? 2 * L + 2 * W : 2 * L + W;
 }
 
+export type DeckRateRow = { code: string | null; buy_price: number | null; markup_pct: number | null };
+
 /**
- * Build the code→customer-rate map from price-list rows. Applies markup so the rate is the
- * SELL price (buy × (1 + markup%/100)) — matching every other customer-facing price in the
- * app (quote builder, AI, convert→quote), so the estimate and any draft seeded from it agree.
- * Dedupes deterministically: pass rows NEWEST-FIRST (order by updated_at desc) and the first
- * row per code wins, so a duplicate active code can't make two callers pick different prices.
+ * Build the code→rate map from price-list rows with a CALLER-supplied markup rule: rate =
+ * buy × (1 + markupPctFor(item markup_pct)%/100). Dedupes deterministically: pass rows
+ * NEWEST-FIRST (order by updated_at desc) and the first row per code wins, so a duplicate
+ * active code can't make two callers pick different prices.
+ *
+ * The office quote builder passes THE markup rule (effectiveMarkupPct with the selected
+ * customer's level + org default) so generator lines price exactly like the hand-picker
+ * beside them. The PUBLIC configurator + site-chat keep buildDeckRates below.
  */
-export function buildDeckRates(
-  rows: { code: string | null; buy_price: number | null; markup_pct: number | null }[],
+export function buildDeckRatesWithMarkup(
+  rows: DeckRateRow[],
+  markupPctFor: (itemMarkupPct: number | null) => number,
 ): Record<string, number> {
   const out: Record<string, number> = {};
   for (const r of rows) {
     const code = String(r?.code ?? "");
     if (!code || code in out) continue; // first (newest) wins
-    out[code] = (Number(r?.buy_price) || 0) * (1 + (Number(r?.markup_pct) || 0) / 100);
+    out[code] = (Number(r?.buy_price) || 0) * (1 + markupPctFor(r?.markup_pct ?? null) / 100);
   }
   return out;
+}
+
+/**
+ * The PUBLIC deck-rate map: item markup only (buy × (1 + markup_pct%/100)) — DELIBERATELY
+ * frozen without the customer-level/org-default rungs, pending Chris's sign-off, so the
+ * public configurator's prices never move under him (regression-pinned in deck.test.ts).
+ * Used by /estimate/[handle] and the site-chat deck tool; the office generator resolves
+ * markup through buildDeckRatesWithMarkup instead.
+ */
+export function buildDeckRates(rows: DeckRateRow[]): Record<string, number> {
+  return buildDeckRatesWithMarkup(rows, (pct) => Number(pct) || 0);
 }
 
 export function computeDeckEstimate(a: DeckAnswers, rate: Rate): DeckEstimate {

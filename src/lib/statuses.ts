@@ -20,6 +20,17 @@ export const INQUIRY_STATUSES = ["new", "contacted", "quoted", "won", "lost"] as
  *  spine-style message instead of a raw Postgres constraint error. */
 export const APPOINTMENT_STATUSES = ["scheduled", "proposed", "completed", "cancelled"] as const;
 
+/** Statuses whose appointments should EXIST as a Google Calendar event (calendar-sync's
+ *  push set) — DERIVED from the spine above, never hand-listed, so a future spine change
+ *  can't silently drift the push set. The EXCLUSIONS carry the semantic: `proposed` stays
+ *  off Google until the customer picks (the confirm flips it to `scheduled`, which the
+ *  cron sweep catches); `cancelled` deletes the event. A status added to the spine later
+ *  pushes by default — list it here ONLY if it must stay off Google. */
+const APPT_NON_PUSH_STATUSES: ReadonlySet<string> = new Set(["proposed", "cancelled"]);
+export const APPT_PUSH_STATUSES: readonly string[] = APPOINTMENT_STATUSES.filter(
+  (s) => !APPT_NON_PUSH_STATUSES.has(s),
+);
+
 /** Appointment TYPES — mirrors the 0051 check constraint + 0131 (final_inspection).
  *  Erik's design (2026-07-14): an inspection IS an appointment type — appointments and
  *  inspections are ONE platform. His "client_meeting" converges onto the pre-existing

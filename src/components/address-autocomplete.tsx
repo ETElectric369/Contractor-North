@@ -45,6 +45,11 @@ export function AddressAutocomplete({
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
   const justSelected = useRef(false);
+  // The value the component MOUNTED with (customer-pick prefill remounts, draft restore)
+  // must not fetch predictions: the dropdown would pop open under an UNFOCUSED field —
+  // over unrelated form fields — and burn a Places call per prefill. Cleared on the
+  // first real edit so typing behaves exactly as before.
+  const seeded = useRef((defaultValue ?? "").trim());
   const boxRef = useRef<HTMLDivElement>(null);
 
   // Surface the current text to the parent (typing + selection).
@@ -60,6 +65,7 @@ export function AddressAutocomplete({
       justSelected.current = false;
       return;
     }
+    if (seeded.current && value.trim() === seeded.current) return; // mount-seeded value, not typing
     const q = value.trim();
     if (q.length < 3) {
       setSuggestions([]);
@@ -147,10 +153,21 @@ export function AddressAutocomplete({
     }
   }
 
-  // No key → plain input.
+  // No key → plain input (no suggestions), but still CONTROLLED and surfaced through
+  // onTextChange exactly like the autocomplete path. The old uncontrolled fallback left
+  // the parent blind to typing, so the New-Job customer-pick prefill (which trusts
+  // form.address via addressPrefillOnCustomerPick's never-clobber contract) judged the
+  // field "untouched" and its remount clobbered typed text. Same contract, both paths.
   if (!key) {
     return (
-      <Input id={id} name={name} defaultValue={defaultValue} placeholder={placeholder ?? "Address"} autoComplete="off" />
+      <Input
+        id={id}
+        name={name}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder={placeholder ?? "Address"}
+        autoComplete="off"
+      />
     );
   }
 
@@ -160,7 +177,10 @@ export function AddressAutocomplete({
         id={id}
         name={name}
         value={value}
-        onChange={(e) => setValue(e.target.value)}
+        onChange={(e) => {
+          seeded.current = ""; // a real edit — predictions may flow again
+          setValue(e.target.value);
+        }}
         onKeyDown={onKeyDown}
         onFocus={() => suggestions.length > 0 && setOpen(true)}
         placeholder={placeholder ?? "Start typing an address…"}

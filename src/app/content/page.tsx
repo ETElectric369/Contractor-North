@@ -148,7 +148,7 @@ export default async function ContentWorkspace({ searchParams }: { searchParams:
     .select("id, slug, title, description, blocks, published, nav_label, nav_order")
     .eq("org_id", selected)
     .order("nav_order", { ascending: true })
-    .order("created_at", { ascending: true });
+    .order("title", { ascending: true }); // same tiebreak as the public reads — list matches live nav
   const pages = (rawPages ?? []).map((p) => ({
     ...(p as Record<string, unknown>),
     blocks: renderReadyBlocks((p as { blocks?: unknown }).blocks), // sanitize for the editor preview too

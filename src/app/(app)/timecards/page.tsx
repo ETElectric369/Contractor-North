@@ -371,6 +371,7 @@ export default async function TimecardsPage({
           jobCodes={(jobCodes ?? []) as JobCode[]}
           jobs={jobs ?? []}
           members={members ?? []}
+          jobCodesEnabled={orgSettings.timeclock_job_codes}
         />
       )}
 

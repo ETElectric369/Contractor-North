@@ -7,7 +7,7 @@ import { ChevronRight, X } from "lucide-react";
 import type { DockNode, DockSection } from "@/lib/dock";
 
 /**
- * The LONG-menu counterpart to SectionSubnav's pill strip (mobile only, lg:hidden).
+ * The LONG-menu counterpart to SectionSubnav's pill strip (mobile only, shell:hidden).
  * Past ~6 pages the horizontal strip stops being scannable — Jobs' 13 / Office's 12 /
  * Money's 9 became a blind sideways scroll — so those sections trade it 1:1 for:
  *
@@ -22,7 +22,7 @@ import type { DockNode, DockSection } from "@/lib/dock";
  *
  * NOT global chrome: it renders only where the long strip used to (never both), via
  * SectionSubnav's own section matching. Desktop never sees it — the dock's
- * inside-left rail already lists the pages on lg+.
+ * inside-left rail already lists the pages at shell:.
  *
  * Position/transform on the handle are INLINE because .glass-gloss forces
  * position:relative, which beats Tailwind's `fixed` (the known gotcha); ditto the
@@ -76,7 +76,7 @@ export function SectionSheet({
         aria-haspopup="menu"
         title={`${group.label} — ${handleLabel}`}
         style={{ position: "fixed", left: 0, top: "50%", transform: "translateY(-50%)", borderLeft: "none" }}
-        className="app-bottom-nav glass glass-tint glass-gloss z-[60] flex w-9 flex-col items-center gap-1.5 rounded-r-2xl py-3 text-[color:rgb(var(--glass-ink))] lg:hidden"
+        className="app-bottom-nav glass glass-tint glass-gloss z-[60] flex w-9 flex-col items-center gap-1.5 rounded-r-2xl py-3 text-[color:rgb(var(--glass-ink))] shell:hidden"
       >
         <HandleIcon className="relative z-10 h-4 w-4 shrink-0" />
         <span
@@ -98,7 +98,7 @@ export function SectionSheet({
       <div
         onClick={() => setOpen(false)}
         aria-hidden="true"
-        className={`fixed inset-0 z-[100] touch-none bg-slate-900/30 transition-opacity duration-200 lg:hidden ${
+        className={`fixed inset-0 z-[100] touch-none bg-slate-900/30 transition-opacity duration-200 shell:hidden ${
           open ? "opacity-100" : "pointer-events-none opacity-0"
         }`}
       />
@@ -108,7 +108,7 @@ export function SectionSheet({
       <div
         aria-hidden={!open}
         style={{ borderLeft: "none" }}
-        className={`glass glass-menu fixed inset-y-0 left-0 z-[100] flex w-[280px] max-w-[82vw] flex-col rounded-r-2xl shadow-xl transition-[transform,visibility] duration-200 ease-out lg:hidden ${
+        className={`glass glass-menu fixed inset-y-0 left-0 z-[100] flex w-[280px] max-w-[82vw] flex-col rounded-r-2xl shadow-xl transition-[transform,visibility] duration-200 ease-out shell:hidden ${
           open ? "visible translate-x-0" : "invisible -translate-x-full"
         }`}
       >

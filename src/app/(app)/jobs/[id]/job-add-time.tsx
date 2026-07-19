@@ -29,6 +29,7 @@ export function JobAddTimeEntry({
   defaultProfileId,
   companyAddress,
   jobAddress,
+  jobCodesEnabled = true,
 }: {
   jobId: string;
   techs: Tech[];
@@ -36,6 +37,8 @@ export function JobAddTimeEntry({
   defaultProfileId: string;
   companyAddress?: string;
   jobAddress?: string;
+  /** Org setting timeclock_job_codes — when false the code picker is hidden (job-only entries). */
+  jobCodesEnabled?: boolean;
 }) {
   const router = useRouter();
   const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
@@ -160,15 +163,17 @@ export function JobAddTimeEntry({
                 ))}
               </Select>
             </div>
-            <div>
-              <Label htmlFor="at-code">Job code</Label>
-              <Select id="at-code" value={jobCode} onChange={(e) => setJobCode(e.target.value)}>
-                <option value="">— Code —</option>
-                {jobCodes.map((c) => (
-                  <option key={c.id} value={c.code}>{c.code} — {c.description}</option>
-                ))}
-              </Select>
-            </div>
+            {jobCodesEnabled && (
+              <div>
+                <Label htmlFor="at-code">Job code</Label>
+                <Select id="at-code" value={jobCode} onChange={(e) => setJobCode(e.target.value)}>
+                  <option value="">— Code —</option>
+                  {jobCodes.map((c) => (
+                    <option key={c.id} value={c.code}>{c.code} — {c.description}</option>
+                  ))}
+                </Select>
+              </div>
+            )}
           </div>
           <div>
             <Label htmlFor="at-rate">Pay rate ($/hr) — supervisor / override</Label>

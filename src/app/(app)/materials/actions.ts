@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getOrgSettings } from "@/lib/org-settings";
+import { effectiveMarkupPct } from "@/lib/pricing/markup";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { visibleJobIdOrNull } from "@/lib/job-visibility";
 
@@ -300,9 +301,13 @@ export async function createMaterialListFromQuote(quoteId: string): Promise<Resu
     if (k && !byDesc.has(k)) byDesc.set(k, b);
   }
   // An order sheet is a BUY list. Lines that don't match the price book carry the estimate's SELL
-  // price, so back the markup out (the customer's pricing level, else the org default) to get cost.
+  // price, so back the markup out to get cost — through the SAME rule that built the sell:
+  // runEstimator prices off-book lines at customer level → default_markup_pct (the item rung is
+  // vacuous off-book), so the reverse must read the same knobs. material_markup_percent is a
+  // DIFFERENT lane (the job-cost → invoice import in billing) and must not leak in here — with
+  // the two Settings fields set differently it would over/understate cost on every unmatched line.
   const { data: orgS } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
-  let markup = getOrgSettings((orgS as any)?.settings).material_markup_percent ?? 0;
+  let levelPct: number | null = null;
   if (quote.customer_id) {
     const { data: cust } = await supabase
       .from("customers")
@@ -310,8 +315,13 @@ export async function createMaterialListFromQuote(quoteId: string): Promise<Resu
       .eq("id", quote.customer_id)
       .maybeSingle();
     const lvl = (cust as any)?.pricing_levels?.markup_pct;
-    if (lvl != null) markup = Number(lvl);
+    if (lvl != null) levelPct = Number(lvl);
   }
+  const markup = effectiveMarkupPct({
+    levelPct,
+    itemPct: 0, // off-book: no item markup exists
+    orgDefaultPct: getOrgSettings((orgS as any)?.settings).default_markup_pct,
+  });
   const costFromSell = (p: number) => Math.round((p / (1 + markup / 100)) * 100) / 100;
 
   const CODE_RE = /\[([^\]]+)\]/;

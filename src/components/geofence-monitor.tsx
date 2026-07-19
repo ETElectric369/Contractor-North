@@ -451,7 +451,7 @@ export function GeofenceMonitor({
     <div
       role="status"
       aria-live="polite"
-      className="fixed inset-x-3 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-[130] lg:inset-x-auto lg:bottom-6 lg:right-6 lg:w-96"
+      className="fixed inset-x-3 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-[130] shell:inset-x-auto shell:bottom-6 shell:right-6 shell:w-96"
     >
       <div className="rounded-2xl border border-amber-300 bg-white p-4 shadow-xl">
         {phase === "confirmed" ? (

@@ -26,9 +26,10 @@ export interface KitForPicker {
 }
 
 /** The Kit Picker — a kit is a TEMPLATE you choose items from, not a dump-everything
- *  button. Every item opens pre-checked (open → Add keeps the one-tap feel); uncheck
- *  what this estimate doesn't need, tweak qty/price for THIS import only, or explicitly
- *  push edits/new lines back onto the kit for next time. */
+ *  button. Every item opens pre-checked (open → Add keeps the one-tap feel) except
+ *  template lines saved at qty 0, which open unchecked; uncheck what this estimate
+ *  doesn't need, tweak qty/price for THIS import only, or explicitly push edits/new
+ *  lines back onto the kit for next time. */
 export function KitPickerModal({
   kit,
   onClose,
@@ -189,8 +190,9 @@ export function KitPickerModal({
     >
       <div className="space-y-3">
         <p className="text-xs text-slate-500">
-          Everything starts checked — uncheck what this estimate doesn&apos;t need. Qty/price edits
-          apply to this estimate only, unless you Save changes to kit.
+          Everything starts checked (zero-quantity kit lines start unchecked) — uncheck what this
+          estimate doesn&apos;t need. Qty/price edits apply to this estimate only, unless you Save
+          changes to kit.
         </p>
 
         {/* Select all / none */}

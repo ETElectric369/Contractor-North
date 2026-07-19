@@ -61,7 +61,14 @@ export function SplashSettings({ settings, portfolio = [], orgId }: { settings: 
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-slate-500">The hero image and the headline over it. Leave both empty to hide the banner entirely.</p>
+      {/* Honest opt-out copy: org-site.tsx falls back to the first portfolio photo when no hero
+          is set, so an org WITH portfolio photos can't hide the banner from here — don't promise
+          it. (The no-portfolio copy keeps the real leave-both-empty rule.) */}
+      <p className="text-sm text-slate-500">
+        {fallbackHero
+          ? "The hero image and the headline over it. With no hero chosen, your first portfolio photo fills in — the banner only disappears entirely if the headline is empty and there are no portfolio photos."
+          : "The hero image and the headline over it. Leave both empty to hide the banner entirely."}
+      </p>
 
       {/* HERO IMAGE picker */}
       <div>

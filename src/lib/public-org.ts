@@ -11,6 +11,9 @@ export type PublicOrg = {
   logo_url: string | null;
   city: string | null;
   state: string | null;
+  /** organizations.updated_at (touch trigger) — the sitemap folds it into the homepage
+   *  <lastmod>, since most homepage content lives in settings, not posts/pages. */
+  updated_at: string | null;
   settings: OrgSettings;
 };
 
@@ -35,11 +38,12 @@ function toPublicOrg(data: unknown): PublicOrg | null {
     logo_url: (o.logo_url as string) ?? null,
     city: (o.city as string) ?? null,
     state: (o.state as string) ?? null,
+    updated_at: (o.updated_at as string) ?? null,
     settings,
   };
 }
 
-const SELECT = "id, name, phone, email, license, logo_url, city, state, settings";
+const SELECT = "id, name, phone, email, license, logo_url, city, state, updated_at, settings";
 
 export const getPublicOrgByHandle = cache(async (handle: string): Promise<PublicOrg | null> => {
   const supabase = createServiceClient();

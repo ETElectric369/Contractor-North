@@ -52,13 +52,19 @@ export async function GET() {
         .eq("org_id", org.id)
         .eq("published", true)
         .order("nav_order", { ascending: true })
+        .order("title", { ascending: true }) // same tiebreak as getPublicPageSlugs/getNavPages
         .limit(500),
     ]);
     const posts = (postsRes.data ?? []) as { path: string; updated_at: string | null }[];
     const pages = (pagesRes.data ?? []) as { slug: string; updated_at: string | null }[];
 
-    // The homepage changes whenever any content does — its lastmod is the newest of the lot.
-    entries.push(urlEntry(`${base}/`, newestLastmod([...posts, ...pages].map((r) => r.updated_at))));
+    // The homepage's content is mostly organizations.settings (hero, headline, home_blocks,
+    // portfolio, reviews…), so fold the org row's touch-trigger updated_at into the lastmod
+    // alongside posts/pages — otherwise a homepage redesign reports "unchanged" to crawlers.
+    // Caveat: organizations.updated_at also bumps on non-public changes (billing/business
+    // settings), so lastmod can read newer than the visible homepage — the harmless direction
+    // of error versus stale-forever.
+    entries.push(urlEntry(`${base}/`, newestLastmod([org.updated_at, ...[...posts, ...pages].map((r) => r.updated_at)])));
     const handle = org.settings.public_handle;
     if (handle && org.settings.estimating_mode === "catalog") entries.push(urlEntry(`${base}/estimate/${handle}`));
     // Articles — the index + every published post at its original path.

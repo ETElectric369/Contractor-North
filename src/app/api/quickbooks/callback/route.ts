@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { exchangeCode } from "@/lib/quickbooks";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { verifyOAuthState } from "@/lib/oauth-state";
+import { oauthRedirectBase } from "@/lib/oauth-base";
 
 export const runtime = "nodejs";
 
@@ -35,7 +36,9 @@ export async function GET(req: Request) {
   }
 
   try {
-    const t = await exchangeCode(code);
+    // Same per-request base the connect route sent to Intuit — the token exchange
+    // must repeat the exact redirect_uri that was authorized.
+    const t = await exchangeCode(code, oauthRedirectBase(req));
     const svc = createServiceClient();
     await svc.from("accounting_connections").upsert({
       org_id: profile.org_id,

@@ -32,12 +32,12 @@ const CLUSTER_ICONS: Record<string, LucideIcon> = {
  * for office not related to settings but in the way").
  *
  * TWO shapes, matching SectionSubnav's grammar exactly:
- *   - MOBILE (lg:hidden): the SectionSheet visual — the left-edge glass handle opening a
+ *   - MOBILE (shell:hidden): the SectionSheet visual — the left-edge glass handle opening a
  *     vertical slide-over of the clusters. We synthesize the DockSection/DockNode shapes it
  *     wants ({title:"Settings"} group + one node per cluster, href /settings?tab=<id>) and
  *     pass activeHref /settings?tab=<activeTab> so the current cluster lights.
- *   - DESKTOP (hidden lg:block): a compact top pill row of the same clusters (the dock rail
- *     is already the left column on lg+, so a second left nav would double it).
+ *   - DESKTOP (hidden shell:flex): a compact top pill row of the same clusters (the dock rail
+ *     is already the left column at shell:, so a second left nav would double it).
  *
  * Route-driven (usePathname/useSearchParams), so it stays lit through reloads and deep links.
  */
@@ -77,7 +77,7 @@ export function SettingsSubnav({
       <SectionSheet group={group} items={items} activeHref={activeHref} />
 
       {/* Desktop: a compact top pill row (the dock rail already owns the left column). */}
-      <div className="mb-5 hidden gap-1.5 border-b border-slate-200 pb-3 lg:flex">
+      <div className="mb-5 hidden gap-1.5 border-b border-slate-200 pb-3 shell:flex">
         {clusters.map((c) => {
           const active = c.id === current;
           const Icon = CLUSTER_ICONS[c.id] ?? Settings;

@@ -21,7 +21,7 @@ export interface KitPickerRow {
 export interface KitItemRaw {
   id?: string;
   description: string;
-  quantity: number | string;
+  quantity: number | string | null;
   unit: string | null;
   unit_price: number | string;
   sort_order?: number | string | null;
@@ -36,27 +36,38 @@ function stableBySortOrder<T extends { sort_order: number }>(rows: T[]): T[] {
     .map(({ r }) => r);
 }
 
-/** Kit items → picker rows: everything pre-checked (open → Add keeps the one-tap feel),
- *  numerics coerced the same way the old instant-import did (qty 0/blank → 1, price blank → 0). */
+/** Kit items → picker rows: pre-checked (open → Add keeps the one-tap feel), numerics
+ *  coerced the way the old instant-import did for MISSING values (qty null/blank → 1,
+ *  price blank → 0). An EXPLICIT qty 0 is different: the write path (kit-actions
+ *  updateKitItems/addKitItem) deliberately persists it as a template value, so it must
+ *  come back as 0 — and the row opens UNCHECKED, because one confirm would otherwise
+ *  silently re-bill a line the kit author zeroed. */
 export function kitItemsToPickerRows(items: KitItemRaw[]): KitPickerRow[] {
   return stableBySortOrder(
-    (items ?? []).map((it) => ({
-      id: it.id,
-      description: it.description ?? "",
-      quantity: Number(it.quantity) || 1,
-      unit: it.unit || "ea",
-      unit_price: Number(it.unit_price) || 0,
-      sort_order: Number(it.sort_order) || 0,
-      checked: true,
-    })),
+    (items ?? []).map((it) => {
+      const raw = it.quantity;
+      const num = Number(raw);
+      const missing = raw === null || raw === undefined || raw === "" || !Number.isFinite(num);
+      const quantity = missing ? 1 : num;
+      return {
+        id: it.id,
+        description: it.description ?? "",
+        quantity,
+        unit: it.unit || "ea",
+        unit_price: Number(it.unit_price) || 0,
+        sort_order: Number(it.sort_order) || 0,
+        checked: quantity !== 0,
+      };
+    }),
   );
 }
 
 /** Selection → quote lines: only checked rows, with their edited qty/price/description,
  *  in kit order, each tagged with the kit's name as its collapsible group. Blank
  *  descriptions are dropped (the quote save filters them anyway). Qty is NOT re-coerced
- *  0 → 1 here: rows arrive pre-normalized (kitItemsToPickerRows), so a 0 is a USER-cleared
- *  qty whose on-screen row total reads $0.00 — re-inflating it would silently charge for it. */
+ *  0 → 1 here: a 0 is either a USER-cleared qty or a template 0 the author saved
+ *  (kitItemsToPickerRows keeps it) — either way the on-screen row total reads $0.00,
+ *  so re-inflating it would silently charge for it. */
 export function kitSelectionToLines(kitName: string, rows: KitPickerRow[]): DraftLineItem[] {
   return stableBySortOrder(rows.filter((r) => r.checked && r.description.trim())).map((r) => ({
     description: r.description,

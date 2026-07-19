@@ -19,6 +19,7 @@ import { MoveToDay } from "@/components/move-to-day";
 import { useToast } from "@/components/toast";
 import { formatDate } from "@/lib/utils";
 import { toggleTask, updateTask, type ToggleTaskResult } from "../tasks/actions";
+import { taskHref } from "@/lib/task-href";
 import { jobLabel } from "@/lib/schedule-options";
 
 /** A ranked slot (lib/six-rank picks it; planner/page.tsx decorates it). */
@@ -355,7 +356,7 @@ export function YourList({
               {sheetTask.pinned ? "Unpin From Today" : "Pin to Today"}
             </button>
             <Link
-              href={sheetTask.job_id ? `/jobs/${sheetTask.job_id}?tab=tasks` : `/tasks/${sheetTask.category}`}
+              href={taskHref(sheetTask)}
               onClick={() => setSheetFor(null)}
               className={SHEET_ROW}
             >

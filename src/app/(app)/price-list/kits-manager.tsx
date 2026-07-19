@@ -9,6 +9,7 @@ import { NumberInput } from "@/components/ui/number-input";
 import { Card } from "@/components/ui/card";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { formatCurrency } from "@/lib/utils";
+import { effectiveMarkupPct } from "@/lib/pricing/markup";
 import { createKit, updateKit, deleteKit, addKitItem, updateKitItem, deleteKitItem } from "./kit-actions";
 import { ImportKitsButton } from "./import-kits-button";
 
@@ -18,7 +19,7 @@ interface PriceItem { id: string; code: string | null; description: string; cate
 
 const sellPrice = (buy: number, markup: number) => buy * (1 + (markup || 0) / 100);
 
-function AddItemRow({ kitId, priceItems, onDone }: { kitId: string; priceItems: PriceItem[]; onDone: () => void }) {
+function AddItemRow({ kitId, priceItems, defaultMarkupPct, onDone }: { kitId: string; priceItems: PriceItem[]; defaultMarkupPct: number; onDone: () => void }) {
   const [desc, setDesc] = useState("");
   const [qty, setQty] = useState(1);
   const [unit, setUnit] = useState("ea");
@@ -31,10 +32,17 @@ function AddItemRow({ kitId, priceItems, onDone }: { kitId: string; priceItems: 
     ? priceItems.filter((p) => [p.code, p.description].some((v) => (v ?? "").toLowerCase().includes(q.trim().toLowerCase()))).slice(0, 6)
     : [];
 
+  // THE markup rule (item's own markup → org default), mirroring the quote builder's
+  // markupFor — so a net-cost book row (e.g. a CED import with markup_pct 0) lands in the
+  // kit at sell price, never at the company's real cost. No customer level applies here:
+  // a kit is an org-wide template, authored for no customer in particular.
+  const bookSell = (p: PriceItem) =>
+    sellPrice(p.buy_price, effectiveMarkupPct({ itemPct: p.markup_pct, orgDefaultPct: defaultMarkupPct }));
+
   function pick(p: PriceItem) {
     setDesc(p.code ? `${p.code} — ${p.description}` : p.description);
     setUnit(p.unit || "ea");
-    setPrice(Number(sellPrice(p.buy_price, p.markup_pct).toFixed(2)));
+    setPrice(Number(bookSell(p).toFixed(2)));
     setQ("");
     setOpen(false);
   }
@@ -59,7 +67,7 @@ function AddItemRow({ kitId, priceItems, onDone }: { kitId: string; priceItems: 
                 <li key={p.id}>
                   <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => pick(p)} className="flex w-full justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-slate-50">
                     <span className="truncate">{p.description}</span>
-                    <span className="text-slate-600">{formatCurrency(sellPrice(p.buy_price, p.markup_pct))}</span>
+                    <span className="text-slate-600">{formatCurrency(bookSell(p))}</span>
                   </button>
                 </li>
               ))}
@@ -153,7 +161,7 @@ function EditItemModal({ item, onClose }: { item: KitItem; onClose: () => void }
   );
 }
 
-export function KitsManager({ kits, priceItems }: { kits: Kit[]; priceItems: PriceItem[] }) {
+export function KitsManager({ kits, priceItems, defaultMarkupPct = 0 }: { kits: Kit[]; priceItems: PriceItem[]; defaultMarkupPct?: number }) {
   const router = useRouter();
   const [name, setName] = useState("");
   const [category, setCategory] = useState("");
@@ -218,7 +226,7 @@ export function KitsManager({ kits, priceItems }: { kits: Kit[]; priceItems: Pri
                       ))}
                     </ul>
                   )}
-                  <AddItemRow kitId={k.id} priceItems={priceItems} onDone={() => router.refresh()} />
+                  <AddItemRow kitId={k.id} priceItems={priceItems} defaultMarkupPct={defaultMarkupPct} onDone={() => router.refresh()} />
                 </div>
               </Card>
             );

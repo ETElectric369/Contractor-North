@@ -45,7 +45,7 @@ describe("kitItemsToPickerRows", () => {
     expect(rows.map((r) => r.description)).toEqual(["A", "B", "C"]);
   });
 
-  it("coerces stringy/blank numerics the way the old instant-import did (qty 0 → 1, price → 0)", () => {
+  it("coerces stringy/blank numerics the way the old instant-import did (missing qty → 1, price → 0)", () => {
     const [r] = kitItemsToPickerRows([
       { id: "a", description: "Odd", quantity: "2.5", unit: null, unit_price: "" as unknown as string, sort_order: null },
     ]);
@@ -53,10 +53,25 @@ describe("kitItemsToPickerRows", () => {
     expect(r.unit).toBe("ea");
     expect(r.unit_price).toBe(0);
     expect(r.sort_order).toBe(0);
-    const [z] = kitItemsToPickerRows([
-      { id: "b", description: "Zero qty", quantity: 0, unit: "ea", unit_price: 5, sort_order: 0 },
-    ]);
-    expect(z.quantity).toBe(1);
+    for (const missing of [null, undefined as unknown as null, "" as unknown as string, "x" as unknown as string]) {
+      const [m] = kitItemsToPickerRows([
+        { id: "m", description: "Missing qty", quantity: missing, unit: "ea", unit_price: 5, sort_order: 0 },
+      ]);
+      expect(m.quantity).toBe(1);
+      expect(m.checked).toBe(true);
+    }
+  });
+
+  it("keeps an explicit qty 0 at 0 and opens the row UNCHECKED (the author zeroed it on the kit)", () => {
+    // The write path (kit-actions updateKitItems/addKitItem) persists 0 as a legal template
+    // value; re-inflating it to 1 here silently re-billed the line on the next estimate.
+    for (const zero of [0, "0" as unknown as string]) {
+      const [z] = kitItemsToPickerRows([
+        { id: "b", description: "Zero qty", quantity: zero, unit: "ea", unit_price: 5, sort_order: 0 },
+      ]);
+      expect(z.quantity).toBe(0);
+      expect(z.checked).toBe(false);
+    }
   });
 });
 
@@ -100,9 +115,9 @@ describe("kitSelectionToLines", () => {
   });
 
   it("keeps a user-cleared qty at 0 — never re-inflated to 1 (the row's total reads $0.00)", () => {
-    // Rows arrive pre-normalized (kitItemsToPickerRows maps legacy qty 0 → 1), so a 0
-    // here is a deliberate in-picker edit; silently charging 1 × price for it would
-    // make the footer disagree with the $0.00 the row itself shows.
+    // A 0 is a deliberate value — an in-picker edit or a template 0 the kit author saved
+    // (kitItemsToPickerRows keeps it); silently charging 1 × price for it would make the
+    // footer disagree with the $0.00 the row itself shows.
     const [l] = kitSelectionToLines("Kit", [row({ quantity: 0, unit_price: 500 })]);
     expect(l.quantity).toBe(0);
   });

@@ -1,6 +1,7 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { createServiceClient } from "@/lib/supabase/server";
-import { accentHex } from "@/lib/org-settings";
+import { accentHex, orgPublicBaseUrl } from "@/lib/org-settings";
 import { getPublicOrgByHandle } from "@/lib/public-org";
 import { DECK_ESTIMATE_CODES, buildDeckRates } from "@/lib/estimate/deck";
 import { Configurator } from "./configurator";
@@ -8,6 +9,26 @@ import { PortfolioGallery } from "./portfolio-gallery";
 import { AskNort } from "../../site/ask-nort";
 
 export const dynamic = "force-dynamic";
+
+/** Real metadata for the org's lead front door — without this the page inherits the root
+ *  layout's "Contractor North" SaaS title/description, and with the same content served on
+ *  four hosts (custom domain, subdomain, app host, vercel.app) and no rel=canonical, Google
+ *  could index the wrong host under the wrong name. Title/description reuse the page's own
+ *  headline/tagline fallbacks (below) so meta and visible content agree; the canonical
+ *  byte-matches the sitemap entry (sitemap.xml builds `${orgPublicBaseUrl}/estimate/${handle}`),
+ *  consolidating all four hosts onto the org's one public base. getPublicOrgByHandle is
+ *  React-cache()d, so this shares the page's query. */
+export async function generateMetadata({ params }: { params: Promise<{ handle: string }> }): Promise<Metadata> {
+  const { handle } = await params;
+  const org = await getPublicOrgByHandle(handle);
+  if (!org) return {}; // the page itself 404s
+  const s = org.settings;
+  return {
+    title: s.splash_headline || `${org.name} — Deck Estimate`,
+    description: s.splash_tagline || "Answer a few quick questions for an instant ballpark.",
+    alternates: { canonical: `${orgPublicBaseUrl(s)}/estimate/${handle}` },
+  };
+}
 
 /**
  * Public, org-scoped deck estimate configurator at /estimate/<handle>. Resolves the org by its

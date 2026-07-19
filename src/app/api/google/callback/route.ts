@@ -3,6 +3,7 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { gcalExchangeCode } from "@/lib/google-calendar";
 import { createClient } from "@/lib/supabase/server";
 import { verifyOAuthState } from "@/lib/oauth-state";
+import { oauthRedirectBase } from "@/lib/oauth-base";
 
 export const runtime = "nodejs";
 
@@ -33,7 +34,9 @@ export async function GET(req: Request) {
   }
 
   try {
-    const t = await gcalExchangeCode(code);
+    // Same per-request base the connect route sent to Google — the token exchange
+    // must repeat the exact redirect_uri that was authorized.
+    const t = await gcalExchangeCode(code, oauthRedirectBase(req));
     // RLS-friendly upsert: the signed-in staff member owns this org row.
     const { error } = await supabase.from("calendar_connections").upsert(
       {

@@ -16,11 +16,15 @@ export function OpenEntryEditor({
   jobCodes,
   jobs,
   members,
+  jobCodesEnabled = true,
 }: {
   entry: { id: string } & Record<string, any>;
   jobCodes: JobCode[];
   jobs: { id: string; job_number: string; name: string }[];
   members: { id: string; full_name: string | null; hourly_rate?: number | null; bill_rate?: number | null }[];
+  /** Org setting timeclock_job_codes — must ride through to the editor so the deep-link
+   *  path hides the code picker exactly like the page's other editor mounts. */
+  jobCodesEnabled?: boolean;
 }) {
   const searchParams = useSearchParams();
   if (searchParams.get("entry") !== entry.id) return null;
@@ -38,6 +42,7 @@ export function OpenEntryEditor({
       jobs={jobs}
       members={members}
       isStaff
+      jobCodesEnabled={jobCodesEnabled}
       initialOpen
       hideTrigger
       onClosed={stripParam}

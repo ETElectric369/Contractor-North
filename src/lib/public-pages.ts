@@ -2,6 +2,7 @@ import { cache } from "react";
 import { createServiceClient } from "@/lib/supabase/server";
 import { normalizeBlocks, type Block } from "@/lib/site-blocks";
 import { sanitizeHtml } from "@/lib/sanitize-html";
+import { isReservedSlug } from "@/lib/site-reserved";
 
 /**
  * Sanitize on READ, not just at write. The saveSitePage action sanitizes text blocks, but the real
@@ -35,6 +36,11 @@ export type PublicPage = {
 export const getPublicPageBySlug = cache(async (orgId: string, slug: string): Promise<PublicPage | null> => {
   const clean = String(slug || "").toLowerCase();
   if (!/^[a-z0-9][a-z0-9-]*$/.test(clean)) return null;
+  // Reserved slugs can never serve as pages, even if a ROW exists (saveSitePage refuses new
+  // ones, but a slug reserved AFTER a page was published — e.g. "home"/"index"/"homepage",
+  // added in cn-v513 — would otherwise shadow the route middleware owns). Miss → the caller's
+  // existing 307-home behavior, same as any unknown slug.
+  if (isReservedSlug(clean)) return null;
   const supabase = createServiceClient();
   const { data } = await supabase
     .from("site_pages")
@@ -48,7 +54,10 @@ export const getPublicPageBySlug = cache(async (orgId: string, slug: string): Pr
   return { ...(data as PublicPage), blocks: renderReadyBlocks((data as { blocks?: unknown }).blocks) };
 });
 
-/** Every published page's slug, for the sitemap. */
+/** Every published page's slug, for the sitemap. Secondary sort on title: Postgres gives
+ *  no order guarantee for tied nav_orders, and every page consumer (here, getNavPages, the
+ *  settings/content lists) must tiebreak the SAME way or the live nav can shuffle between
+ *  page views. */
 export const getPublicPageSlugs = cache(async (orgId: string): Promise<string[]> => {
   const supabase = createServiceClient();
   const { data } = await supabase
@@ -57,11 +66,14 @@ export const getPublicPageSlugs = cache(async (orgId: string): Promise<string[]>
     .eq("org_id", orgId)
     .eq("published", true)
     .order("nav_order", { ascending: true })
+    .order("title", { ascending: true })
     .limit(500);
-  return ((data ?? []) as { slug: string }[]).map((p) => p.slug);
+  // A stranded row at a NOW-reserved slug is unservable (see getPublicPageBySlug) — never advertise it.
+  return ((data ?? []) as { slug: string }[]).map((p) => p.slug).filter((s) => !isReservedSlug(s));
 });
 
-/** Published pages that opt into the site nav (nav_label set), for the header menu. */
+/** Published pages that opt into the site nav (nav_label set), for the header menu.
+ *  nav_order then title — deterministic even when orders tie (see getPublicPageSlugs). */
 export const getNavPages = cache(async (orgId: string): Promise<{ slug: string; nav_label: string }[]> => {
   const supabase = createServiceClient();
   const { data } = await supabase
@@ -71,8 +83,9 @@ export const getNavPages = cache(async (orgId: string): Promise<{ slug: string; 
     .eq("published", true)
     .not("nav_label", "is", null)
     .order("nav_order", { ascending: true })
+    .order("title", { ascending: true })
     .limit(20);
   return ((data ?? []) as { slug: string; nav_label: string | null }[])
-    .filter((p) => p.nav_label)
+    .filter((p) => p.nav_label && !isReservedSlug(p.slug)) // unservable slugs never reach the menu
     .map((p) => ({ slug: p.slug, nav_label: p.nav_label as string }));
 });

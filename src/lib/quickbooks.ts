@@ -15,18 +15,22 @@ const API_BASE =
     : "https://quickbooks.api.intuit.com";
 const SCOPE = "com.intuit.quickbooks.accounting";
 
-export function redirectUri() {
-  // Pinned like google-calendar.ts: Intuit only accepts registered redirect URIs,
-  // so the callback stays on OAUTH_REDIRECT_BASE while SITE_URL moves domains.
-  return `${process.env.OAUTH_REDIRECT_BASE || process.env.NEXT_PUBLIC_SITE_URL}/api/quickbooks/callback`;
+export function redirectUri(base?: string) {
+  // Per-request base like google-calendar.ts: the connect/callback routes pass
+  // oauthRedirectBase (the REQUEST's own origin on an app host) so the round-trip
+  // stays on the host holding the host-only session + state cookies; the env pin is
+  // the fallback. ⚠ Intuit only accepts registered redirect URIs — every base used
+  // needs <base>/api/quickbooks/callback registered in the Intuit developer portal
+  // (contractor-north.vercel.app AND app.contractornorth.com; see src/lib/oauth-base.ts).
+  return `${base || process.env.OAUTH_REDIRECT_BASE || process.env.NEXT_PUBLIC_SITE_URL}/api/quickbooks/callback`;
 }
 
-export function authorizeUrl(state: string) {
+export function authorizeUrl(state: string, redirectBase?: string) {
   const p = new URLSearchParams({
     client_id: process.env.QBO_CLIENT_ID!,
     response_type: "code",
     scope: SCOPE,
-    redirect_uri: redirectUri(),
+    redirect_uri: redirectUri(redirectBase),
     state,
   });
   return `${AUTH_BASE}?${p.toString()}`;
@@ -49,12 +53,14 @@ async function tokenRequest(body: URLSearchParams) {
   return res.json();
 }
 
-export async function exchangeCode(code: string) {
+export async function exchangeCode(code: string, redirectBase?: string) {
   return tokenRequest(
     new URLSearchParams({
       grant_type: "authorization_code",
       code,
-      redirect_uri: redirectUri(),
+      // Must repeat the EXACT redirect_uri the authorize step sent — the callback
+      // derives the same per-request base, so connect and exchange always agree.
+      redirect_uri: redirectUri(redirectBase),
     }),
   );
 }

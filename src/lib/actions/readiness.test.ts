@@ -24,9 +24,14 @@ describe("computeReadiness — schemas as the missing-field engine", () => {
   });
 
   it("a present-but-invalid value blocks readiness WITHOUT appearing in missing", () => {
-    const r = computeReadiness("task.create", { title: "x", category: "nonsense" });
+    // priority is a 0|1|2 literal union — 7 is present but invalid.
+    const r = computeReadiness("task.create", { title: "x", priority: 7 });
     expect(r.ready).toBe(false);
-    expect(r.missing).not.toContain("category");
+    expect(r.missing).not.toContain("priority");
+  });
+
+  it("task.create category is free-form org vocabulary since 0136 — never enum-rejected", () => {
+    expect(computeReadiness("task.create", { title: "x", category: "Permits" }).ready).toBe(true);
   });
 
   it("missingFieldPaths reports dot-joined nested paths", () => {

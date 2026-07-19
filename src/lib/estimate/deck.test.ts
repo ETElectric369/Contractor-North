@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeDeckEstimate, buildDeckRates, type DeckAnswers } from "@/lib/estimate/deck";
+import { computeDeckEstimate, buildDeckRates, buildDeckRatesWithMarkup, type DeckAnswers } from "@/lib/estimate/deck";
 
 // Chris's real Tahoe Deck / GiddyUp catalog rates (by his reference code), so the math is his math.
 const RATES: Record<string, number> = {
@@ -176,6 +176,45 @@ describe("buildDeckRates — markup + deterministic dedup", () => {
     const r = buildDeckRates([{ code: "", buy_price: 5, markup_pct: 0 }, { code: "X", buy_price: null, markup_pct: null }]);
     expect(r[""]).toBeUndefined();
     expect(r["X"]).toBe(0);
+  });
+
+  it("REGRESSION PIN — the public rate map is ITEM markup only: no org-default/level rung may creep in", () => {
+    // The public configurator + site-chat deck tool are deliberately frozen at
+    // buy × (1 + item markup) pending Chris's sign-off. A 0-markup row must price at
+    // raw buy here even though the office chain would apply an org default — if this
+    // test breaks, someone rewired buildDeckRates through the office markup chain.
+    const r = buildDeckRates([{ code: "D1", buy_price: 60, markup_pct: 0 }]);
+    expect(r["D1"]).toBe(60);
+  });
+});
+
+describe("buildDeckRatesWithMarkup — the office generator's markup hook", () => {
+  it("routes each code's item markup through the caller's rule (level/default rungs live there)", () => {
+    // Simulates the quote builder's markupFor with a leveled customer at 10%:
+    // the level wins over the item markup, exactly like the hand-picker beside it.
+    const withLevel = buildDeckRatesWithMarkup(
+      [{ code: "D1", buy_price: 60, markup_pct: 25 }],
+      () => 10,
+    );
+    expect(withLevel["D1"]).toBeCloseTo(66, 10); // 60 × 1.10, not 60 × 1.25
+  });
+  it("keeps the newest-first dedupe contract of the public builder", () => {
+    const r = buildDeckRatesWithMarkup(
+      [
+        { code: "DS5A", buy_price: 12, markup_pct: 0 },
+        { code: "DS5A", buy_price: 999, markup_pct: 0 },
+      ],
+      (pct) => Number(pct) || 0,
+    );
+    expect(r["DS5A"]).toBe(12);
+  });
+  it("with the item-only rule it is byte-identical to buildDeckRates (the public path)", () => {
+    const rows = [
+      { code: "D1", buy_price: 60, markup_pct: 25 },
+      { code: "D2", buy_price: 30, markup_pct: 0 },
+      { code: "X", buy_price: null, markup_pct: null },
+    ];
+    expect(buildDeckRatesWithMarkup(rows, (pct) => Number(pct) || 0)).toEqual(buildDeckRates(rows));
   });
 });
 

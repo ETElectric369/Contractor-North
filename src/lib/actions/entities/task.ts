@@ -37,7 +37,9 @@ async function refuseCrossAssigneeChild(
 // whole org's list, and the handler refuses > 100 matches as a second bound.
 const BULK_FILTER_FIELDS = z.object({
   title_contains: z.string().trim().min(1).optional(),
-  category: z.enum(["office", "operations", "sales"]).optional(),
+  // Free-form since 0136 — the org invents its own category vocabulary, so a hard enum
+  // here made Nort reject any category the tasks UI happily stores. Blank → absent.
+  category: z.string().trim().optional(),
   job_id: z.string().optional(),
   due_before: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD").optional(),
   undated_only: z.boolean().optional(),
@@ -76,7 +78,9 @@ async function matchOpenTasks(f: BulkFilter): Promise<{ ids: string[] } | { erro
   let q = supabase.from("tasks").select("id").eq("status", "open").is("parent_id", null);
   // Escape LIKE wildcards so a title with % / _ matches literally, not as a pattern.
   if (f.title_contains) q = q.ilike("title", `%${f.title_contains.replace(/[\\%_]/g, "\\$&")}%`);
-  if (f.category) q = q.eq("category", f.category);
+  // ilike with wildcards escaped = case-insensitive EXACT match — the vocabulary is
+  // user-typed ("Permits" vs "permits" must sweep the same list).
+  if (f.category) q = q.ilike("category", f.category.replace(/[\\%_]/g, "\\$&"));
   if (f.job_id) q = q.eq("job_id", f.job_id);
   if (f.due_before) q = q.lt("due_date", f.due_before); // NULL due dates never match — undated_only is the explicit ask
   if (f.undated_only) q = q.is("due_date", null);
@@ -90,8 +94,11 @@ async function matchOpenTasks(f: BulkFilter): Promise<{ ids: string[] } | { erro
 function revalidateBulkViews(f: BulkFilter) {
   revalidatePath("/tasks");
   revalidatePath("/planner"); // task sweeps change My Day
-  // Category pages: the touched one when filtered, all three when the sweep spans categories.
-  for (const c of f.category ? [f.category] : ["office", "operations", "sales"]) revalidatePath(`/tasks/${c}`);
+  // Only the 3 LEGACY categories have their own /tasks/<slug> page (free-form categories
+  // live on the /tasks workbench, revalidated above): the touched one when the filter names
+  // it, all three when the sweep spans categories.
+  const legacy = ["office", "operations", "sales"];
+  for (const c of legacy) if (!f.category || f.category.toLowerCase() === c) revalidatePath(`/tasks/${c}`);
   if (f.job_id) revalidatePath(`/jobs/${f.job_id}`);
 }
 
@@ -102,12 +109,14 @@ export const taskActions: Record<string, ActionDef> = {
     group: "task",
     label: "Add task",
     description:
-      "Create a task with a title and category (office | operations | sales). Optionally capture whatever else was given: due_date (YYYY-MM-DD), job_id (resolve with list_jobs), assigned_to (a profile id), notes, priority (0 normal | 1 high | 2 urgent). Steps of ONE deliverable become subtasks: pass parent_id (an existing task's id) per step instead of minting siblings — the due date lives on the parent, never on children. focus_date (YYYY-MM-DD) pins it into that day's six on My Day — set it ONLY when the user explicitly says today/tomorrow, never inferred. A same-title open task from the last 48h is returned instead of duplicated.",
+      "Create a task with a title. category is FREE-FORM org vocabulary (e.g. the classics office | operations | sales, or anything the org already uses like Permits) — pass the user's word verbatim, and OMIT it when none was given (the task stores as uncategorized; never invent one). Optionally capture whatever else was given: due_date (YYYY-MM-DD), job_id (resolve with list_jobs), assigned_to (a profile id), notes, priority (0 normal | 1 high | 2 urgent). Steps of ONE deliverable become subtasks: pass parent_id (an existing task's id) per step instead of minting siblings — the due date lives on the parent, never on children. focus_date (YYYY-MM-DD) pins it into that day's six on My Day — set it ONLY when the user explicitly says today/tomorrow, never inferred. A same-title open task from the last 48h is returned instead of duplicated.",
     // Fragment-first: createTask already takes all of these — the old 2-field schema
     // silently DROPPED a spoken due date / job / assignee / note.
     input: z.object({
       title: z.string().min(1),
-      category: z.enum(["office", "operations", "sales"]).default("operations"),
+      // Free-form since 0136; no default — a category nobody said must store NULL
+      // (uncategorized), matching the tasks UI, never a silent "operations" stamp.
+      category: z.string().trim().nullable().optional(),
       due_date: z.string().nullable().optional(),
       job_id: z.string().nullable().optional(),
       assigned_to: z.string().nullable().optional(),
@@ -132,7 +141,7 @@ export const taskActions: Record<string, ActionDef> = {
       }
       return createTask({
         title: i.title,
-        category: i.category,
+        category: i.category ?? null, // createTask nulls blank → uncategorized
         due_date: i.due_date ?? null,
         job_id: job.id,
         assigned_to: person.id,
@@ -212,7 +221,7 @@ export const taskActions: Record<string, ActionDef> = {
     group: "task",
     label: "Complete tasks in bulk",
     description:
-      "Complete MANY open tasks in one shot by filter — 'clear everything about ZZ TEST', 'mark all the Henderson-job tasks done'. Pass at least one filter: title_contains (word/phrase in the title), category (office | operations | sales), job_id (resolve with list_jobs), due_before (YYYY-MM-DD), undated_only (true = only tasks with no due date). Filters AND together. It proposes a confirm naming the filter and refuses over 100 matches. For ONE known task use task.complete.",
+      "Complete MANY open tasks in one shot by filter — 'clear everything about ZZ TEST', 'mark all the Henderson-job tasks done'. Pass at least one filter: title_contains (word/phrase in the title), category (free-form org vocabulary, matched case-insensitively — e.g. office, operations, sales, or the org's own like Permits), job_id (resolve with list_jobs), due_before (YYYY-MM-DD), undated_only (true = only tasks with no due date). Filters AND together. It proposes a confirm naming the filter and refuses over 100 matches. For ONE known task use task.complete.",
     input: BULK_FILTER_FIELDS.superRefine(requireFilter),
     auth: "staff", // an org-wide sweep is an office move, not tech self-service
     effect: "write",
@@ -254,7 +263,7 @@ export const taskActions: Record<string, ActionDef> = {
     group: "task",
     label: "Reschedule tasks in bulk",
     description:
-      "Move MANY open tasks to ONE new due date — 'push all follow-ups to Monday', 'move everything overdue to Friday'. new_due (YYYY-MM-DD) is required, plus at least one filter: title_contains, category (office | operations | sales), job_id (resolve with list_jobs), due_before (YYYY-MM-DD — overdue = due before today), undated_only (true = only tasks with no due date). Filters AND together. It proposes a confirm naming the filter and refuses over 100 matches. For ONE known task use task.setDue.",
+      "Move MANY open tasks to ONE new due date — 'push all follow-ups to Monday', 'move everything overdue to Friday'. new_due (YYYY-MM-DD) is required, plus at least one filter: title_contains, category (free-form org vocabulary, matched case-insensitively — e.g. office, operations, sales, or the org's own like Permits), job_id (resolve with list_jobs), due_before (YYYY-MM-DD — overdue = due before today), undated_only (true = only tasks with no due date). Filters AND together. It proposes a confirm naming the filter and refuses over 100 matches. For ONE known task use task.setDue.",
     input: BULK_FILTER_FIELDS.extend({
       new_due: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD"),
     }).superRefine(requireFilter),

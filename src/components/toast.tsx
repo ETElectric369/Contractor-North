@@ -31,7 +31,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastCtx.Provider value={toast}>
       {children}
       {/* Above the mobile bottom nav; centered, non-blocking. */}
-      <div className="pointer-events-none fixed inset-x-0 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-[200] flex flex-col items-center gap-2 px-4 lg:bottom-6">
+      <div className="pointer-events-none fixed inset-x-0 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-[200] flex flex-col items-center gap-2 px-4 shell:bottom-6">
         {toasts.map((t) => (
           <div
             key={t.id}

@@ -1,0 +1,21 @@
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Contractor North — migration 0138: drop 0135's profiles_read_org_collaborators
+--
+-- 0135 let org staff SELECT the profile row of anyone holding a site_collaborators
+-- grant for their org, so the /bugs list could show a collaborator reporter's name.
+-- But RLS cannot column-restrict: the policy exposed the ENTIRE profiles row — and
+-- profiles carries hourly_rate (0001), bill_rate (0054), phone, email, role. For a
+-- DUAL-ROLE account (staff of org B + granted collaborator on org A), that let org
+-- A's staff read a competing org's internal comp data across the tenant boundary —
+-- the first policy ever to admit reading a profile whose org_id is a different org.
+--
+-- Latent today (current collaborators have org_id NULL), but the leak arms the
+-- moment any dual-role account exists, which resolveSiteContext explicitly supports.
+--
+-- The /bugs reporter name is now resolved app-side instead: listBugReports (staff-
+-- guarded) does a narrow service-client lookup of full_name ONLY, restricted to
+-- reporters who hold a grant on the caller's org (see bug-report-actions.ts).
+-- profiles reads return to 0004's own-row-or-own-org predicate.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+drop policy if exists profiles_read_org_collaborators on public.profiles;

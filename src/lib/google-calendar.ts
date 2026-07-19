@@ -27,21 +27,26 @@ const SCOPE =
 const CAL_BASE = "https://www.googleapis.com/calendar/v3";
 
 // The OAuth callback must EXACTLY match a redirect URI registered in the Google
-// console. OAUTH_REDIRECT_BASE pins it there so NEXT_PUBLIC_SITE_URL (the address
-// the app prints on invites/links) can move domains without breaking the calendar
-// connect. Drop the env once the new domain's /api/google/callback is registered.
+// console. The connect/callback routes pass a per-request base (oauthRedirectBase:
+// the REQUEST's own origin on an app host) so the round-trip stays on the host that
+// holds the host-only session + state cookies — a callback pinned to a different
+// host finds neither and dead-ends in ?gcal=denied (the app.contractornorth.com
+// cutover bug). OAUTH_REDIRECT_BASE / NEXT_PUBLIC_SITE_URL remain the fallback when
+// no base is passed. ⚠ Every base used must have <base>/api/google/callback
+// registered in the Google Cloud console — both contractor-north.vercel.app and
+// app.contractornorth.com (see src/lib/oauth-base.ts).
 const oauthBase = () =>
   process.env.OAUTH_REDIRECT_BASE || process.env.NEXT_PUBLIC_SITE_URL || "https://contractor-north.vercel.app";
-const redirectUri = () => `${oauthBase()}/api/google/callback`;
+const redirectUri = (base?: string) => `${base || oauthBase()}/api/google/callback`;
 
 export function gcalConfigured(): boolean {
   return Boolean(process.env.GOOGLE_OAUTH_CLIENT_ID && process.env.GOOGLE_OAUTH_CLIENT_SECRET);
 }
 
-export function gcalAuthorizeUrl(state: string): string {
+export function gcalAuthorizeUrl(state: string, redirectBase?: string): string {
   const p = new URLSearchParams({
     client_id: process.env.GOOGLE_OAUTH_CLIENT_ID!,
-    redirect_uri: redirectUri(),
+    redirect_uri: redirectUri(redirectBase),
     response_type: "code",
     scope: SCOPE,
     access_type: "offline", // we need a refresh token
@@ -57,7 +62,7 @@ export interface GoogleTokens {
   expires_in?: number;
 }
 
-export async function gcalExchangeCode(code: string): Promise<GoogleTokens> {
+export async function gcalExchangeCode(code: string, redirectBase?: string): Promise<GoogleTokens> {
   const r = await fetch(TOKEN_URL, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -65,7 +70,9 @@ export async function gcalExchangeCode(code: string): Promise<GoogleTokens> {
       code,
       client_id: process.env.GOOGLE_OAUTH_CLIENT_ID!,
       client_secret: process.env.GOOGLE_OAUTH_CLIENT_SECRET!,
-      redirect_uri: redirectUri(),
+      // Must repeat the EXACT redirect_uri the authorize step sent — the callback
+      // derives the same per-request base, so connect and exchange always agree.
+      redirect_uri: redirectUri(redirectBase),
       grant_type: "authorization_code",
     }),
   });

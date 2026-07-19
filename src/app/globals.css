@@ -1,5 +1,24 @@
 @import "tailwindcss";
 
+/* ── The app-shell breakpoint ─────────────────────────────────────────────
+   `shell:` = "wears the DESKTOP shell": side dock + inside-left rail, no
+   bottom bar. Everything that got the desktop shell at lg keeps it (any
+   viewport ≥1024px — iPads in landscape included), and fine-pointer devices
+   (mouse/trackpad: desktops, laptops, the installed desktop PWA — whose
+   window restores ~900px wide, which used to land it in the PHONE layout)
+   gain it from 900px. Coarse-pointer phones/tablets under 1024px stay mobile.
+   SHELL CHROME ONLY (dock / bottom nav / topbar / section subnav+sheet /
+   the offsets that clear them) — content layouts inside pages (grids,
+   columns, tables) keep the standard lg: breakpoint.
+   Interaction note: the anti-zoom guard below is (max-width:1023px) OR
+   (pointer:coarse), so a 900–1023px fine-pointer window shows the desktop
+   shell while inputs stay 16px — deliberate and harmless. */
+@custom-variant shell {
+  @media (min-width: 1024px), ((min-width: 900px) and (pointer: fine)) {
+    @slot;
+  }
+}
+
 /* ── Contractor North theme ───────────────────────────────────────────────
    Brand color echoes the CED blue from the letterhead.                      */
 /* Plain @theme so brand utilities reference var(--color-brand) and can be

@@ -14,7 +14,9 @@ type DockProps = {
 /**
  * ONE dock, two orientations. The same section tiles — from the same `activeSection()`
  * match, with the same `.seaglass-active` highlight — render as a vertical rail on the
- * left for desktop (lg+) and as a bar pinned to the bottom on phones. Previously these
+ * left for desktop (the `shell:` breakpoint — lg+, or ≥900px with a fine
+ * pointer, so the ~900px desktop-PWA window gets it) and as a bar pinned to
+ * the bottom on phones. Previously these
  * were TWO components (this file + a separate <BottomNav>) hand-styled in parallel, so
  * the active look kept drifting between them (the bottom bar lagged the desktop dock a
  * whole release). Now the tile lives once; change it and both surfaces move together.
@@ -52,8 +54,8 @@ function DockInner({ branding, role, badges }: DockProps) {
 
   return (
     <>
-      {/* ── DESKTOP (lg+): the left icon rail + an inside-left nav column for the section's pages ── */}
-      <div className="hidden h-full lg:flex">
+      {/* ── DESKTOP (shell:): the left icon rail + an inside-left nav column for the section's pages ── */}
+      <div className="hidden h-full shell:flex">
         <aside className="glass relative z-[70] flex h-full w-[84px] flex-col items-center gap-1 border-r border-white/40 py-3">
           <Link href="/planner" className="mb-1 flex h-11 w-11 items-center justify-center rounded-2xl" aria-label={branding?.name ?? "Home"} title={branding?.name ?? "Contractor North"}>
             {logo ? (
@@ -97,7 +99,7 @@ function DockInner({ branding, role, badges }: DockProps) {
 
         {/* The inside-left nav — shown for EVERY section with more than one page, so the
             section's siblings are always one glance away on desktop. The mobile counterpart
-            is SectionSubnav's top strip (which hides itself on lg+ to avoid doubling). */}
+            is SectionSubnav's top strip (which hides itself at shell: to avoid doubling). */}
         {active && items.filter((c) => c.href).length > 1 && (
           <nav className="flex h-full w-[186px] shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-slate-200/80 bg-white/55 px-2.5 py-3 backdrop-blur-sm">
             <div className="px-2 pb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">{active.label}</div>
@@ -133,7 +135,7 @@ function DockInner({ branding, role, badges }: DockProps) {
         )}
       </div>
 
-      {/* ── MOBILE (<lg): the same section tiles, pinned to the bottom as a glass bar ── */}
+      {/* ── MOBILE (below shell:): the same section tiles, pinned to the bottom as a glass bar ── */}
       <nav
         // transform:translateZ(0) keeps the bar from drifting during iOS momentum scroll.
         style={{ transform: "translateZ(0)", WebkitBackfaceVisibility: "hidden" }}
@@ -142,7 +144,7 @@ function DockInner({ branding, role, badges }: DockProps) {
         // gap-1 SEPARATES the tiles so the lit pill no longer touches its neighbor; the
         // balanced pt-1 / safe-area-floored pb keeps the content vertically centered above
         // the home indicator instead of riding high with dead space below it.
-        className="app-bottom-nav glass fixed inset-x-2 bottom-2 z-[70] flex items-center gap-1 rounded-2xl border-white/40 px-1 pt-1 pb-[max(0.25rem,min(env(safe-area-inset-bottom),0.5rem))] lg:hidden"
+        className="app-bottom-nav glass fixed inset-x-2 bottom-2 z-[70] flex items-center gap-1 rounded-2xl border-white/40 px-1 pt-1 pb-[max(0.25rem,min(env(safe-area-inset-bottom),0.5rem))] shell:hidden"
       >
         {sections.map((s) => {
           const Icon = s.icon;

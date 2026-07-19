@@ -19,6 +19,7 @@ import { shiftApptToDay } from "@/lib/appt-time";
 import { placeJobOnDay, setJobScheduleRanges } from "../schedule/actions";
 import { rescheduleAppointment } from "../appointments/actions";
 import { updateTask, type TaskCategory } from "../tasks/actions";
+import { taskHref } from "@/lib/task-href";
 import { AppointmentButton, type ApptValue } from "../appointments/appointment-button";
 import { ApptQuickActions } from "../appointments/appointment-status";
 import { JobScheduleCard } from "../schedule/job-schedule-card";
@@ -509,7 +510,7 @@ export function CalendarView({
         dayStr: k,
         label: t.title,
         color: TASK_TRAY_TONE,
-        href: t.job_id ? `/jobs/${t.job_id}?tab=tasks` : `/tasks/${t.category}`,
+        href: taskHref(t),
       });
     }
     // Mirrored Google events: zinc, NO href — read-only display, Google owns
@@ -1080,7 +1081,7 @@ function TaskRow({ t }: { t: CalTask }) {
   return (
     <li className="flex items-center gap-3 px-4 py-2.5">
       <Badge tone="slate">task</Badge>
-      <Link href={t.job_id ? `/jobs/${t.job_id}?tab=tasks` : `/tasks/${t.category}`} className="min-w-0 flex-1 hover:opacity-80">
+      <Link href={taskHref(t)} className="min-w-0 flex-1 hover:opacity-80">
         <div className="truncate text-sm font-medium text-slate-900">{t.title}</div>
         {sub && <div className="truncate text-xs text-slate-400">{sub}</div>}
       </Link>

@@ -132,7 +132,7 @@ export default async function SettingsPage({
         .from("site_pages")
         .select("id, slug, title, description, blocks, published, nav_label, nav_order")
         .order("nav_order", { ascending: true })
-        .order("created_at", { ascending: true })
+        .order("title", { ascending: true }) // same tiebreak as the public reads — list matches live nav
     : { data: null };
   const sitePages = (rawSitePages ?? []).map((p) => ({
     ...(p as Record<string, unknown>),

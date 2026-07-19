@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { BackLink } from "@/components/back-link";
 import { PageHeader } from "@/components/page-header";
 import { getOrgSettings } from "@/lib/org-settings";
-import { buildDeckRates, DECK_ESTIMATE_CODES } from "@/lib/estimate/deck";
+import { DECK_ESTIMATE_CODES } from "@/lib/estimate/deck";
 import { NewInspectionButton } from "../../appointments/new-inspection-button";
 import { QuoteBuilder } from "./quote-builder";
 
@@ -74,17 +74,18 @@ export default async function NewQuotePage({
   const estimateKits = catalogMode
     ? (kits ?? []).filter((k: any) => k.name === "Decks" || k.name === "Remodels")
     : (kits ?? []);
-  // Deck generator rates (catalog orgs) — the deck price codes → sell price, from the same
-  // price list, so the on-page generator matches the public configurator to the penny.
-  // buildDeckRates' dedupe contract is first-row-per-code-wins from NEWEST-FIRST rows; the
-  // query above orders by description for the picker, so re-sort the deck subset here.
-  const deckRates = catalogMode
-    ? buildDeckRates(
-        (priceItems ?? [])
-          .filter((p: any) => p.code && (DECK_ESTIMATE_CODES as readonly string[]).includes(p.code))
-          .sort((a: any, b: any) => String(b.updated_at ?? "").localeCompare(String(a.updated_at ?? "")))
-          .map((p: any) => ({ code: p.code, buy_price: p.buy_price, markup_pct: p.markup_pct })),
-      )
+  // Deck generator rows (catalog orgs) — the deck price codes as RAW {code, buy, markup_pct}
+  // rows. The office builder prices them client-side through THE markup rule (effectiveMarkupPct
+  // with the selected customer's level + org default), so generator lines re-price when the
+  // customer changes and always agree with the hand-picker on the same page. (The PUBLIC
+  // configurator keeps buildDeckRates' item-markup-only freeze.) The dedupe contract is
+  // first-row-per-code-wins from NEWEST-FIRST rows; the query above orders by description
+  // for the picker, so re-sort the deck subset here.
+  const deckRateRows = catalogMode
+    ? (priceItems ?? [])
+        .filter((p: any) => p.code && (DECK_ESTIMATE_CODES as readonly string[]).includes(p.code))
+        .sort((a: any, b: any) => String(b.updated_at ?? "").localeCompare(String(a.updated_at ?? "")))
+        .map((p: any) => ({ code: p.code, buy_price: p.buy_price, markup_pct: p.markup_pct }))
     : undefined;
 
   return (
@@ -117,7 +118,7 @@ export default async function NewQuotePage({
         kits={estimateKits as any}
         quoteExpiryDays={expiryDays}
         defaultMarkupPct={settings.default_markup_pct}
-        deckRates={deckRates}
+        deckRateRows={deckRateRows}
         showDeckGenerator={catalogMode}
       />
     </div>

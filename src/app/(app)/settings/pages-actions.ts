@@ -58,9 +58,12 @@ export async function saveSitePage(input: {
     blocks: cleanBlocks(input.blocks ?? []),
     published: input.published ?? true,
     nav_label: String(input.nav_label ?? "").trim() || null,
-    nav_order: Number.isFinite(input.nav_order) ? input.nav_order : 0,
     updated_at: new Date().toISOString(),
   };
+  // nav_order: only write it when the caller actually sent one. The editor doesn't (yet)
+  // carry an order field, so an omitted value must PRESERVE the stored order on edit —
+  // the old `?? 0` reset every edited page to 0, piling the menu into undefined tie order.
+  if (Number.isFinite(input.nav_order)) row.nav_order = input.nav_order;
 
   const dupMsg = "A page already exists at that web address.";
   if (input.id) {
@@ -75,6 +78,18 @@ export async function saveSitePage(input: {
     return { ok: true, id: input.id };
   }
 
+  // New pages APPEND to the menu (max nav_order + 1) instead of piling at the DB default 0,
+  // where the tie order between them is undefined and the public nav could shuffle.
+  if (!Number.isFinite(input.nav_order)) {
+    const { data: last } = await ctx.supabase
+      .from("site_pages")
+      .select("nav_order")
+      .eq("org_id", ctx.orgId)
+      .order("nav_order", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    row.nav_order = (Number((last as { nav_order?: number } | null)?.nav_order) || 0) + 1;
+  }
   const { data, error } = await ctx.supabase
     .from("site_pages")
     .insert({ ...row, created_by: ctx.userId })

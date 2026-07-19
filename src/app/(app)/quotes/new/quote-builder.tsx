@@ -11,6 +11,7 @@ import { SegmentedControl } from "@/components/ui/segmented";
 import { docLabel, type QuoteDocType } from "@/lib/doc-label";
 import { formatCurrency } from "@/lib/utils";
 import { effectiveMarkupPct } from "@/lib/pricing/markup";
+import { buildDeckRatesWithMarkup, type DeckRateRow } from "@/lib/estimate/deck";
 import { subtotalTaxTotal } from "@/lib/invoice-math";
 import { useDraft } from "@/lib/use-draft";
 import { useToast } from "@/components/toast";
@@ -68,7 +69,7 @@ export function QuoteBuilder({
   kits = [],
   quoteExpiryDays = 30,
   defaultMarkupPct = 0,
-  deckRates,
+  deckRateRows,
   showDeckGenerator = false,
 }: {
   customers: CustomerOption[];
@@ -89,8 +90,9 @@ export function QuoteBuilder({
   quoteExpiryDays?: number;
   /** Org Settings default_markup_pct — the last fallback in effectiveMarkupPct's chain. */
   defaultMarkupPct?: number;
-  /** Deck price codes → sell price (catalog orgs) — feeds the on-page deck generator. */
-  deckRates?: Record<string, number>;
+  /** Deck price-code rows (catalog orgs), NEWEST-FIRST — priced here client-side through THE
+   *  markup rule so generator lines re-price with the selected customer, like the hand-picker. */
+  deckRateRows?: DeckRateRow[];
   showDeckGenerator?: boolean;
 }) {
   const router = useRouter();
@@ -122,6 +124,19 @@ export function QuoteBuilder({
   const levelRate = selectedCust?.level_rate;
   const markupFor = (p: PriceItemLite) =>
     effectiveMarkupPct({ levelPct: levelMarkup, itemPct: p.markup_pct, orgDefaultPct: defaultMarkupPct });
+
+  // Deck generator rates through the SAME rule as markupFor — D-code lines honor the selected
+  // customer's level + the org default exactly like a hand-picked line, and re-price when the
+  // customer changes. (The public configurator deliberately keeps item-markup-only pricing.)
+  const deckRates = useMemo(
+    () =>
+      deckRateRows
+        ? buildDeckRatesWithMarkup(deckRateRows, (itemPct) =>
+            effectiveMarkupPct({ levelPct: levelMarkup, itemPct, orgDefaultPct: defaultMarkupPct }),
+          )
+        : undefined,
+    [deckRateRows, levelMarkup, defaultMarkupPct],
+  );
 
   const plMatches = plQuery.trim()
     ? priceItems

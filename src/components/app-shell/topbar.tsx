@@ -37,7 +37,7 @@ export function Topbar({
     // for its position:fixed descendants, which trapped Nort's floating panel inside the bar
     // (it rendered behind the section pills — cn-v344 regression). The bar never overlaps the
     // scrolling content, so a blur had nothing to frost anyway; the translucency reads glassy.
-    <header className="flex h-16 items-center justify-between gap-2 border-b border-white/50 bg-[rgba(255,255,255,0.8)] px-4 lg:px-6">
+    <header className="flex h-16 items-center justify-between gap-2 border-b border-white/50 bg-[rgba(255,255,255,0.8)] px-4 shell:px-6">
       <button
         className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100"
         onClick={() => {

@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { Tabs } from "@/components/tabs";
+import { getOrgSettings } from "@/lib/org-settings";
 import { PriceListManager } from "./price-list-manager";
 import { KitsManager } from "./kits-manager";
 import { PaidPrices } from "./paid-prices";
@@ -9,7 +10,7 @@ export const dynamic = "force-dynamic";
 
 export default async function PriceListPage() {
   const supabase = await createClient();
-  const [{ data: items }, { data: kits }] = await Promise.all([
+  const [{ data: items }, { data: kits }, { data: org }] = await Promise.all([
     supabase
       .from("price_list_items")
       .select("id, code, description, category, supplier, unit, buy_price, markup_pct")
@@ -20,7 +21,11 @@ export default async function PriceListPage() {
       .from("kits")
       .select("id, name, category, kit_items(id, description, quantity, unit, unit_price, sort_order)")
       .order("name"),
+    // default_markup_pct rides to the kit builder so a kit line picked from the book prices
+    // through THE markup rule (item → org default), not the item's raw markup alone.
+    supabase.from("organizations").select("settings").limit(1).maybeSingle(),
   ]);
+  const defaultMarkupPct = getOrgSettings((org as any)?.settings).default_markup_pct;
 
   const priceItems = items ?? [];
 
@@ -42,7 +47,7 @@ export default async function PriceListPage() {
             id: "kits",
             label: "Kits",
             count: (kits ?? []).length,
-            content: <KitsManager kits={(kits ?? []) as any} priceItems={priceItems as any} />,
+            content: <KitsManager kits={(kits ?? []) as any} priceItems={priceItems as any} defaultMarkupPct={defaultMarkupPct} />,
           },
           {
             id: "paid",

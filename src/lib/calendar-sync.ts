@@ -28,6 +28,7 @@ import "server-only";
 import { createClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/observe";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
+import { APPT_PUSH_STATUSES } from "@/lib/statuses";
 import {
   connectionNeedsReauth,
   gcalConnection,
@@ -43,10 +44,9 @@ export type CalendarItemKind = "job" | "appointment";
 const appBase = () =>
   (process.env.NEXT_PUBLIC_SITE_URL || "https://contractor-north.vercel.app").replace(/\/+$/, "");
 
-/** Appointment statuses that should EXIST as a Google event. `proposed` stays
- *  off Google until the customer picks (the confirm flips it to `scheduled`,
- *  which the cron sweep catches); `cancelled` deletes the event. */
-const APPT_PUSH_STATUSES = ["scheduled", "completed"];
+// Which appointment statuses exist as a Google event: derived from the
+// APPOINTMENT_STATUSES spine in statuses.ts (see APPT_PUSH_STATUSES there for
+// the proposed/cancelled exclusion semantics) — imported, never hand-listed.
 
 const JOB_PUSH_COLS =
   "id, org_id, job_number, name, address, description, status, scheduled_start, scheduled_end, google_event_id";
