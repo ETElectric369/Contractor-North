@@ -14,7 +14,10 @@
    (pointer:coarse), so a 900–1023px fine-pointer window shows the desktop
    shell while inputs stay 16px — deliberate and harmless. */
 @custom-variant shell {
-  @media (min-width: 1024px), ((min-width: 900px) and (pointer: fine)) {
+  /* 840 (not 900): the installed desktop PWA restores at whatever width it last had —
+     Erik's opens ~885px — and a desktop should never see the phone shell. Coarse-pointer
+     devices still switch at 1024. */
+  @media (min-width: 1024px), ((min-width: 840px) and (pointer: fine)) {
     @slot;
   }
 }
