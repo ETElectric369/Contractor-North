@@ -4,6 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { getPublicOrgByDomain } from "@/lib/public-org";
 import { getPublicPageBySlug } from "@/lib/public-pages";
 import { CustomPageView, customPageMetadata } from "../../../page-view";
+import { getSiteNav } from "../../../site-chrome";
 import {
   previewRequested,
   getDraftPageForPreview,
@@ -38,8 +39,10 @@ export default async function CustomPageByDomain({ params, searchParams }: { par
   const { slug } = await params;
   const org = await orgFromHost();
   if (!org) notFound();
+  // The shared chrome's nav (Articles + builder-page links), root-relative on the org's own domain.
+  const nav = await getSiteNav(org.id, "");
   const page = await getPublicPageBySlug(org.id, slug);
-  if (page) return <CustomPageView org={org} page={page} base="" />;
+  if (page) return <CustomPageView org={org} page={page} base="" nav={nav} />;
   // Draft preview (?preview=1): the page's editor — org staff or a granted external
   // collaborator — sees the unpublished page at its real URL; everyone else falls through.
   if (await previewRequested(searchParams)) {
@@ -48,7 +51,7 @@ export default async function CustomPageByDomain({ params, searchParams }: { par
       return (
         <>
           <DraftPreviewBanner />
-          <CustomPageView org={org} page={draft} base="" />
+          <CustomPageView org={org} page={draft} base="" nav={nav} />
         </>
       );
     }

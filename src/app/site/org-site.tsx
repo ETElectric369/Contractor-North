@@ -1,13 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Phone, Mail, MapPin, ArrowRight, Check, ShieldCheck, Clock, Zap, Instagram, Star, Menu } from "lucide-react";
-import { accentHex, orgPublicBaseUrl, parseGeoFromMapUrl, type OrgSettings } from "@/lib/org-settings";
+import { MapPin, ArrowRight, Check, ShieldCheck, Clock, Zap, Star } from "lucide-react";
+import { orgPublicBaseUrl, parseGeoFromMapUrl, type OrgSettings } from "@/lib/org-settings";
 import { pageSlugFromHref } from "@/lib/site-nav";
 import type { PublicOrg } from "@/lib/public-org";
 import { jsonLdSafe } from "@/lib/jsonld";
-import { renderReadyBlocks } from "@/lib/public-pages";
 import type { Block } from "@/lib/site-blocks";
 import { BlockRenderer } from "./block-renderer";
+import { deriveSiteChrome, SiteHeader, SiteFooter } from "./site-chrome";
 import { PortfolioGallery } from "../estimate/[handle]/portfolio-gallery";
 import { SpecialtyShowcase } from "./specialty-showcase";
 import { ContactForm } from "./contact-form";
@@ -164,37 +164,14 @@ function Hero({
 export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg; articlesHref?: string | null; pageLinks?: { href: string; label: string }[] }) {
   const s = org.settings;
   const handle = s.public_handle;
-  const brand = accentHex(s.glass_tint);
-  const portfolio = (s.portfolio ?? []).filter((p) => p.url);
-  const photos = portfolio.map((p) => p.url);
-  const hero = s.splash_bg_url || photos[0] || "";
-  const services = String(s.splash_bullets || "").split("\n").map((x) => x.trim()).filter(Boolean);
-  const creds = String(s.splash_credentials || "").split("\n").map((x) => x.trim()).filter(Boolean);
-  const area = s.service_area || [org.city, org.state].filter(Boolean).join(", ");
-  // Show the business NAME as text (not just the logo image) when the org opts in — so the name is
-  // actually stated on the page even when the logo is a wordless emblem.
-  const showName = s.show_name_with_logo === true;
-  const homeBlocks = renderReadyBlocks(s.home_blocks);
-  const hasBlocks = homeBlocks.length > 0;
-  // Which wired sections the custom layout actually renders — nav links and anchors key off this
-  // so no link ever points at a section the block homepage left out.
-  const blockSections = new Set(homeBlocks.flatMap((b) => (b.type === "section" ? [b.props.key] : [])));
-  const ig = (s.social_instagram || "").replace(/^@/, "").trim();
-  const reviews = (s.reviews ?? []).filter((r) => r && r.text && r.name);
+  // ONE derivation of the shared header/footer inputs (brand, nav visibility, estimate CTA) —
+  // the same call builder pages and articles make, so the chrome can't drift per-surface.
+  const chrome = deriveSiteChrome(org, { onHomepage: true });
+  const { brand, showName, portfolio, services, creds, reviews, area, gbpUrl, ig, homeBlocks, hasBlocks, showWorkLink, hasConfigurator, estimateHref, ctaLabel } = chrome;
+  const hero = s.splash_bg_url || portfolio[0]?.url || "";
   // The banner (hero + trust band) always tops the page — template AND block homepages. Natural
   // opt-out: no hero image (none set, no portfolio fallback) and no headline → no banner at all.
   const showBanner = Boolean(hero || s.splash_headline);
-  const showWorkLink = photos.length > 0 && (!hasBlocks || blockSections.has("portfolio"));
-  const showServicesLink = services.length > 0 && !hasBlocks;
-  const showReviewsLink = reviews.length > 0 && (!hasBlocks || blockSections.has("reviews"));
-  // Primary CTA: orgs that price from a catalog get the instant configurator; everyone else
-  // (e.g. an electrician on the research method) routes to the branded inquiry form.
-  const hasConfigurator = s.estimating_mode === "catalog";
-  // Catalog orgs → the instant configurator; everyone else → the on-page contact form (or the
-  // footer when a block homepage carries no contact-form section — never a dead anchor).
-  const estimateHref = hasConfigurator ? `/estimate/${handle}` : !hasBlocks || blockSections.has("contact") ? "#contact-form" : "#contact";
-  const ctaLabel = hasConfigurator ? "Get your free instant estimate" : "Request a free estimate";
-  const telHref = org.phone ? `tel:${org.phone.replace(/[^0-9+]/g, "")}` : null;
   // A published builder page whose slug is "portfolio"/"contact" (already resolved into pageLinks
   // by the route — no extra query) gets a teaser link appended to the matching homepage section,
   // so those pages are reachable from the content they extend, not just the nav.
@@ -208,7 +185,6 @@ export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg;
   // GBP link when it carries coordinates. NAP (name/phone/address) mirrors the org record, which
   // must match the GBP verbatim for the binding to hold.
   const siteUrl = orgPublicBaseUrl(s);
-  const gbpUrl = (s.google_business_url || "").trim();
   const geo = parseGeoFromMapUrl(gbpUrl);
   const sameAs = [gbpUrl, ig ? `https://www.instagram.com/${ig}` : ""].filter(Boolean);
   const jsonLd = {
@@ -235,62 +211,8 @@ export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg;
           social, hero URL) containing `</script>` can't break out and execute — stored-XSS guard. */}
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLdSafe(jsonLd) }} />
 
-      {/* Header */}
-      <header className="sticky top-0 z-40 border-b border-slate-200/70 bg-white/85 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
-          <a href="#top" className="flex items-center gap-2">
-            {org.logo_url && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={org.logo_url} alt={org.name} className="h-9 w-auto" />
-            )}
-            {(!org.logo_url || showName) && (
-              <span className="text-lg font-extrabold tracking-tight">{org.name}</span>
-            )}
-          </a>
-          <nav className="hidden items-center gap-6 text-sm font-medium text-slate-600 md:flex">
-            {showWorkLink && <a href="#work" className="hover:text-slate-900">Our work</a>}
-            {showServicesLink && <a href="#services" className="hover:text-slate-900">Services</a>}
-            {showReviewsLink && <a href="#reviews" className="hover:text-slate-900">Reviews</a>}
-            {articlesHref && <Link href={articlesHref} className="hover:text-slate-900">Articles</Link>}
-            {pageLinks.map((p) => (
-              <Link key={p.href} href={p.href} className="hover:text-slate-900">{p.label}</Link>
-            ))}
-            <a href="#contact" className="hover:text-slate-900">Contact</a>
-          </nav>
-          <div className="flex items-center gap-2">
-            {telHref && (
-              <a href={telHref} className="hidden items-center gap-1.5 text-sm font-semibold text-slate-700 sm:flex">
-                <Phone className="h-4 w-4" style={{ color: brand }} /> {org.phone}
-              </a>
-            )}
-            <Link href={estimateHref} className="rounded-lg px-4 py-2 text-sm font-semibold text-white" style={{ backgroundColor: brand }}>
-              Get an estimate
-            </Link>
-            {/* Mobile nav — the link row above is hidden below md, which stranded builder pages on
-                phones. A <details> disclosure keeps this a server component (no client JS). */}
-            <details className="relative md:hidden">
-              <summary className="flex h-9 w-9 cursor-pointer list-none items-center justify-center rounded-lg border border-slate-200 text-slate-700 [&::-webkit-details-marker]:hidden" aria-label="Menu">
-                <Menu className="h-5 w-5" />
-              </summary>
-              <nav className="absolute right-0 top-full z-50 mt-2 flex w-56 flex-col rounded-xl border border-slate-200 bg-white py-2 text-sm font-medium text-slate-700 shadow-lg">
-                {telHref && (
-                  <a href={telHref} className="flex items-center gap-2 px-4 py-2 hover:bg-slate-50 sm:hidden">
-                    <Phone className="h-4 w-4" style={{ color: brand }} /> {org.phone}
-                  </a>
-                )}
-                {showWorkLink && <a href="#work" className="px-4 py-2 hover:bg-slate-50">Our work</a>}
-                {showServicesLink && <a href="#services" className="px-4 py-2 hover:bg-slate-50">Services</a>}
-                {showReviewsLink && <a href="#reviews" className="px-4 py-2 hover:bg-slate-50">Reviews</a>}
-                {articlesHref && <Link href={articlesHref} className="px-4 py-2 hover:bg-slate-50">Articles</Link>}
-                {pageLinks.map((p) => (
-                  <Link key={p.href} href={p.href} className="px-4 py-2 hover:bg-slate-50">{p.label}</Link>
-                ))}
-                <a href="#contact" className="px-4 py-2 hover:bg-slate-50">Contact</a>
-              </nav>
-            </details>
-          </div>
-        </div>
-      </header>
+      {/* Header — the shared site chrome (same header every public page wears). */}
+      <SiteHeader chrome={chrome} articlesHref={articlesHref} pageLinks={pageLinks} />
 
       {/* The banner — hero + trust band — ALWAYS tops the page when it has content; custom
           home_blocks replace only the default sections below it, never the banner. Opting out is
@@ -388,46 +310,8 @@ export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg;
         </>
       )}
 
-      {/* Footer / contact */}
-      <footer id="contact" className="border-t border-slate-200 bg-slate-900 text-slate-300">
-        <div className="mx-auto grid max-w-6xl gap-8 px-4 py-14 sm:grid-cols-2">
-          <div>
-            {org.logo_url && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={org.logo_url} alt={org.name} className="h-10 w-auto brightness-0 invert" />
-            )}
-            {(!org.logo_url || showName) && (
-              <span className={`text-xl font-extrabold text-white ${org.logo_url ? "mt-2 block" : ""}`}>{org.name}</span>
-            )}
-            {s.splash_tagline && <p className="mt-3 max-w-sm text-sm text-slate-400">{s.splash_tagline}</p>}
-            {creds.length > 0 && <p className="mt-4 text-xs text-slate-500">{creds.join("  ·  ")}</p>}
-          </div>
-          <div className="space-y-3 text-sm sm:justify-self-end">
-            <h3 className="font-semibold uppercase tracking-wide text-slate-400">Get in touch</h3>
-            {telHref && <a href={telHref} className="flex items-center gap-2 hover:text-white"><Phone className="h-4 w-4" style={{ color: brand }} /> {org.phone}</a>}
-            {org.email && <a href={`mailto:${org.email}`} className="flex items-center gap-2 hover:text-white"><Mail className="h-4 w-4" style={{ color: brand }} /> {org.email}</a>}
-            {area && <p className="flex items-center gap-2"><MapPin className="h-4 w-4" style={{ color: brand }} /> {area}</p>}
-            {ig && <a href={`https://www.instagram.com/${ig}`} className="flex items-center gap-2 hover:text-white"><Instagram className="h-4 w-4" style={{ color: brand }} /> @{ig}</a>}
-            {gbpUrl && (
-              <a href={gbpUrl} target="_blank" rel="noopener" className="flex items-center gap-2 hover:text-white">
-                <Star className="h-4 w-4" style={{ color: brand }} /> Review us on Google
-              </a>
-            )}
-            <Link href={estimateHref} className="mt-2 inline-flex items-center gap-2 rounded-lg px-4 py-2 font-semibold text-white" style={{ backgroundColor: brand }}>
-              Get an estimate <ArrowRight className="h-4 w-4" />
-            </Link>
-          </div>
-        </div>
-        <div className="border-t border-white/10">
-          <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-2 px-4 py-5 text-xs text-slate-500 sm:flex-row">
-            <span>© {org.name}. All rights reserved.</span>
-            <span className="flex items-center gap-4">
-              <Link href="/login" className="hover:text-slate-300">Team login</Link>
-              <span>Powered by Contractor North</span>
-            </span>
-          </div>
-        </div>
-      </footer>
+      {/* Footer / contact — the shared site chrome (same footer every public page wears). */}
+      <SiteFooter chrome={chrome} />
 
       {handle && <AskNort handle={handle} orgName={org.name} brand={brand} />}
     </div>

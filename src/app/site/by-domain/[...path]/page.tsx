@@ -4,6 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { getPublicOrgByDomain } from "@/lib/public-org";
 import { getPublicPosts, getPublicPostByPath } from "@/lib/public-posts";
 import { ArticlePage, BlogIndex, articleMetadata, blogIndexMetadata } from "../../article-pages";
+import { getSiteNav } from "../../site-chrome";
 import {
   previewRequested,
   getDraftPostForPreview,
@@ -45,14 +46,16 @@ export default async function SiteContentByDomain({ params, searchParams }: { pa
   const { path } = await params;
   const org = await orgFromHost();
   if (!org) notFound();
+  // The shared chrome's nav (Articles + builder-page links), root-relative on the org's own domain.
+  const nav = await getSiteNav(org.id, "");
   const pathStr = path.join("/").toLowerCase();
   if (pathStr === "blog") {
     const posts = await getPublicPosts(org.id);
     if (!posts.length) redirect("/"); // empty index → the live homepage (not a thin page)
-    return <BlogIndex org={org} posts={posts} base="" />;
+    return <BlogIndex org={org} posts={posts} base="" nav={nav} />;
   }
   const post = await getPublicPostByPath(org.id, pathStr);
-  if (post) return <ArticlePage org={org} post={post} base="" />;
+  if (post) return <ArticlePage org={org} post={post} base="" nav={nav} />;
   // Draft preview (?preview=1): the post's editor — org staff or a granted external
   // collaborator — sees the unpublished article at its real URL; everyone else falls through.
   if (await previewRequested(searchParams)) {
@@ -61,7 +64,7 @@ export default async function SiteContentByDomain({ params, searchParams }: { pa
       return (
         <>
           <DraftPreviewBanner />
-          <ArticlePage org={org} post={draft} base="" />
+          <ArticlePage org={org} post={draft} base="" nav={nav} />
         </>
       );
     }

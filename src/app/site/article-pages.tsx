@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowRight, ArrowLeft, Phone } from "lucide-react";
-import { accentHex, orgPublicBaseUrl } from "@/lib/org-settings";
+import { ArrowRight, ArrowLeft } from "lucide-react";
+import { orgPublicBaseUrl } from "@/lib/org-settings";
 import { DEFAULT_TIMEZONE } from "@/lib/utils";
 import { jsonLdSafe } from "@/lib/jsonld";
 import type { PublicOrg } from "@/lib/public-org";
 import type { PublicPost } from "@/lib/public-posts";
+import { deriveSiteChrome, SiteHeader, SiteFooter, type SiteNav } from "./site-chrome";
 
 /**
  * The org-site ARTICLE pages (blog index + single post) — the content layer of the site
@@ -14,8 +15,12 @@ import type { PublicPost } from "@/lib/public-posts";
  * ORIGINAL paths on the org's domain (e.g. tahoedeck.com/blog-1-1/redwood), so a migrated
  * site's already-indexed URLs keep serving 200s — the SEO vendor's content keeps its rankings.
  *
+ * Both pages wear the FULL shared site chrome (site-chrome.tsx) — the same header/footer as the
+ * homepage, with the Articles nav item marked current — so no article is a navigation dead-end.
+ *
  * `base` prefixes internal article links: "" on the org's own host (subdomain / custom domain,
  * where middleware rewrites root-level paths), "/site/<handle>" when browsing on the app host.
+ * `nav` is the route-fetched site nav (getSiteNav) — the Articles link + builder-page links.
  */
 
 function fmtDate(iso: string): string {
@@ -27,57 +32,6 @@ function fmtDate(iso: string): string {
     month: "long",
     day: "numeric",
   });
-}
-
-/** Simplified site header for article pages — logo home, one CTA. Matches the OrgSite header. */
-function ArticleHeader({ org, base }: { org: PublicOrg; base: string }) {
-  const s = org.settings;
-  const brand = accentHex(s.glass_tint);
-  const home = base || "/";
-  const hasConfigurator = s.estimating_mode === "catalog" && !!s.public_handle;
-  const estimateHref = hasConfigurator ? `/estimate/${s.public_handle}` : `${home}#contact-form`;
-  const telHref = org.phone ? `tel:${org.phone.replace(/[^\d+]/g, "")}` : null;
-  return (
-    <header className="sticky top-0 z-40 border-b border-slate-200/70 bg-white/85 backdrop-blur">
-      <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
-        <Link href={home} className="flex items-center gap-2">
-          {org.logo_url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={org.logo_url} alt={org.name} className="h-9 w-auto" />
-          ) : (
-            <span className="text-lg font-extrabold tracking-tight">{org.name}</span>
-          )}
-        </Link>
-        <div className="flex items-center gap-2">
-          {telHref && (
-            <a href={telHref} className="hidden items-center gap-1.5 text-sm font-semibold text-slate-700 sm:flex">
-              <Phone className="h-4 w-4" style={{ color: brand }} /> {org.phone}
-            </a>
-          )}
-          <Link href={estimateHref} className="rounded-lg px-4 py-2 text-sm font-semibold text-white" style={{ backgroundColor: brand }}>
-            Get an estimate
-          </Link>
-        </div>
-      </div>
-    </header>
-  );
-}
-
-function ArticleFooter({ org, base }: { org: PublicOrg; base: string }) {
-  return (
-    <footer className="border-t border-slate-200 bg-white">
-      <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-8 text-sm text-slate-500">
-        <span>
-          {/* license is stored display-ready ("CA Lic # 1111315") — no prefix, same as OrgSite */}
-          © {new Date().getFullYear()} {org.name}
-          {org.license ? ` · ${org.license}` : ""}
-        </span>
-        <Link href={base || "/"} className="font-medium text-slate-600 hover:text-slate-900">
-          {org.name} home
-        </Link>
-      </div>
-    </footer>
-  );
 }
 
 export function blogIndexMetadata(org: PublicOrg): Metadata {
@@ -103,11 +57,12 @@ export function articleMetadata(org: PublicOrg, post: PublicPost): Metadata {
   };
 }
 
-export function BlogIndex({ org, posts, base }: { org: PublicOrg; posts: PublicPost[]; base: string }) {
-  const brand = accentHex(org.settings.glass_tint);
+export function BlogIndex({ org, posts, base, nav }: { org: PublicOrg; posts: PublicPost[]; base: string; nav: SiteNav }) {
+  const chrome = deriveSiteChrome(org, { base, onHomepage: false });
+  const brand = chrome.brand;
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
-      <ArticleHeader org={org} base={base} />
+      <SiteHeader chrome={chrome} articlesHref={nav.articlesHref} pageLinks={nav.pageLinks} current="articles" />
       <section className="border-b border-slate-100 bg-white">
         <div className="mx-auto max-w-6xl px-4 py-14">
           <p className="text-sm font-semibold uppercase tracking-[0.25em]" style={{ color: brand }}>
@@ -144,13 +99,14 @@ export function BlogIndex({ org, posts, base }: { org: PublicOrg; posts: PublicP
           </div>
         )}
       </main>
-      <ArticleFooter org={org} base={base} />
+      <SiteFooter chrome={chrome} />
     </div>
   );
 }
 
-export function ArticlePage({ org, post, base }: { org: PublicOrg; post: PublicPost; base: string }) {
-  const brand = accentHex(org.settings.glass_tint);
+export function ArticlePage({ org, post, base, nav }: { org: PublicOrg; post: PublicPost; base: string; nav: SiteNav }) {
+  const chrome = deriveSiteChrome(org, { base, onHomepage: false });
+  const brand = chrome.brand;
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "Article",
@@ -167,7 +123,7 @@ export function ArticlePage({ org, post, base }: { org: PublicOrg; post: PublicP
       {/* jsonLdSafe escapes `<` so a title/description containing `</script>` can't break out of
           the JSON-LD block (title/description aren't HTML-sanitized — they render as text elsewhere). */}
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLdSafe(jsonLd) }} />
-      <ArticleHeader org={org} base={base} />
+      <SiteHeader chrome={chrome} articlesHref={nav.articlesHref} pageLinks={nav.pageLinks} current="articles" />
       <main className="mx-auto max-w-3xl px-4 py-12">
         <Link href={`${base}/blog`} className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-800">
           <ArrowLeft className="h-4 w-4" /> All articles
@@ -189,11 +145,7 @@ export function ArticlePage({ org, post, base }: { org: PublicOrg; post: PublicP
         <div className="mt-12 rounded-2xl border border-slate-200 bg-slate-50 p-6 text-center">
           <p className="text-lg font-semibold">Ready to start your project?</p>
           <Link
-            href={
-              org.settings.estimating_mode === "catalog" && org.settings.public_handle
-                ? `/estimate/${org.settings.public_handle}`
-                : `${base || "/"}#contact-form`
-            }
+            href={chrome.estimateHref}
             className="mt-3 inline-flex items-center gap-2 rounded-lg px-6 py-3 text-base font-semibold text-white"
             style={{ backgroundColor: brand }}
           >
@@ -201,7 +153,7 @@ export function ArticlePage({ org, post, base }: { org: PublicOrg; post: PublicP
           </Link>
         </div>
       </main>
-      <ArticleFooter org={org} base={base} />
+      <SiteFooter chrome={chrome} />
     </div>
   );
 }

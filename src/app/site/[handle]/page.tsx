@@ -1,10 +1,9 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getPublicOrgByHandle } from "@/lib/public-org";
-import { getPublicPosts } from "@/lib/public-posts";
-import { getNavPages } from "@/lib/public-pages";
 import { orgPublicBaseUrl } from "@/lib/org-settings";
 import { OrgSite, orgSiteMetadata } from "../org-site";
+import { getSiteNav } from "../site-chrome";
 import { handleLinkBase } from "../site-base";
 
 export const dynamic = "force-dynamic";
@@ -24,12 +23,9 @@ export default async function SiteHome({ params }: { params: Promise<{ handle: s
   const { handle } = await params;
   const org = await getPublicOrgByHandle(handle);
   if (!org) notFound();
-  // The Articles nav link appears only when the org has published posts.
+  // Articles link (only when posts exist) + builder-page links, in the shape this host needs:
+  // base "" → root /<slug> (the public URL); app-host base → the internal /p/<slug> route.
   const base = await handleLinkBase(handle);
-  const [posts, navPages] = await Promise.all([getPublicPosts(org.id), getNavPages(org.id)]);
-  const articlesHref = posts.length ? `${base}/blog` : null;
-  // On the org's own host base is "" → root /<slug> (the public URL); on the app-host preview base is
-  // /site/<handle> → the internal /p/<slug> route (root slugs are an org-host-only middleware rewrite).
-  const pageLinks = navPages.map((p) => ({ href: base ? `${base}/p/${p.slug}` : `/${p.slug}`, label: p.nav_label }));
-  return <OrgSite org={org} articlesHref={articlesHref} pageLinks={pageLinks} />;
+  const nav = await getSiteNav(org.id, base);
+  return <OrgSite org={org} articlesHref={nav.articlesHref} pageLinks={nav.pageLinks} />;
 }

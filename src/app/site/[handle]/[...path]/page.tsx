@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { getPublicOrgByHandle } from "@/lib/public-org";
 import { getPublicPosts, getPublicPostByPath } from "@/lib/public-posts";
 import { ArticlePage, BlogIndex, articleMetadata, blogIndexMetadata } from "../../article-pages";
+import { getSiteNav } from "../../site-chrome";
 import { handleLinkBase } from "../../site-base";
 import {
   previewRequested,
@@ -44,14 +45,17 @@ export default async function SiteContent({ params, searchParams }: { params: Pa
   const org = await getPublicOrgByHandle(handle);
   if (!org) notFound();
   const base = await handleLinkBase(handle);
+  // The shared chrome's nav (Articles + builder-page links) — cache()d reads, no extra queries
+  // beyond what the header needs.
+  const nav = await getSiteNav(org.id, base);
   const pathStr = path.join("/").toLowerCase();
   if (pathStr === "blog") {
     const posts = await getPublicPosts(org.id);
     if (!posts.length) redirect(base || "/"); // empty index → the live homepage (not a thin page)
-    return <BlogIndex org={org} posts={posts} base={base} />;
+    return <BlogIndex org={org} posts={posts} base={base} nav={nav} />;
   }
   const post = await getPublicPostByPath(org.id, pathStr);
-  if (post) return <ArticlePage org={org} post={post} base={base} />;
+  if (post) return <ArticlePage org={org} post={post} base={base} nav={nav} />;
   // Draft preview (?preview=1): the post's editor — org staff or a granted external
   // collaborator — sees the unpublished article at its real URL; everyone else falls through.
   if (await previewRequested(searchParams)) {
@@ -60,7 +64,7 @@ export default async function SiteContent({ params, searchParams }: { params: Pa
       return (
         <>
           <DraftPreviewBanner />
-          <ArticlePage org={org} post={draft} base={base} />
+          <ArticlePage org={org} post={draft} base={base} nav={nav} />
         </>
       );
     }
