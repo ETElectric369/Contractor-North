@@ -108,18 +108,78 @@ export async function addKitItem(input: {
   unit?: string;
   unit_price?: number;
 }): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   if (!input.description.trim()) return { ok: false, error: "Description is required." };
-  const { error } = await supabase.from("kit_items").insert({
-    kit_id: input.kit_id,
-    description: input.description.trim(),
-    quantity: input.quantity ?? 1,
-    unit: input.unit?.trim() || "ea",
-    unit_price: input.unit_price ?? 0,
-  });
-  if (error) return { ok: false, error: error.message };
+  // Org-safe: RLS scopes the kit to the caller's org; confirm it's visible before
+  // inserting so a hidden/foreign kit_id can't be written into.
+  const { data: kit } = await supabase.from("kits").select("id").eq("id", input.kit_id).maybeSingle();
+  if (!kit) return { ok: false, error: "Kit not found." };
+  // New items land at the END of the kit — max existing sort_order + 1 (legacy rows
+  // all default 0, so appends stay after them and keep a stable authored order).
+  const { data: last } = await supabase
+    .from("kit_items")
+    .select("sort_order")
+    .eq("kit_id", input.kit_id)
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  // Same clamp as updateKitItems — a NaN/negative from a direct caller must not land
+  // in a kit template (every future estimate would inherit it).
+  const qty = typeof input.quantity === "number" && Number.isFinite(input.quantity) ? Math.max(0, input.quantity) : 1;
+  const price = typeof input.unit_price === "number" && Number.isFinite(input.unit_price) ? Math.max(0, input.unit_price) : 0;
+  const { data, error } = await supabase
+    .from("kit_items")
+    .insert({
+      kit_id: input.kit_id,
+      description: input.description.trim(),
+      quantity: qty,
+      unit: input.unit?.trim() || "ea",
+      unit_price: price,
+      sort_order: (Number(last?.sort_order) || 0) + 1,
+    })
+    .select("id")
+    .single();
+  if (error || !data) return { ok: false, error: error?.message ?? "Could not add the item." };
   revalidatePath("/price-list");
-  return { ok: true };
+  return { ok: true, id: data.id };
+}
+
+/** Batch-write the Kit Picker's row edits back onto the kit itself — the explicit
+ *  "Save changes to kit" path (never silent; import edits alone stay quote-only).
+ *  Only ids that actually belong to this kit are touched, so a forged/foreign id in
+ *  the payload is skipped rather than upserted into existence. Deleting kit items
+ *  stays in Price list & kits. */
+export async function updateKitItems(
+  kitId: string,
+  edits: { id: string; description: string; quantity: number; unit: string; unit_price: number }[],
+): Promise<Result & { updated?: number }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  // Org-safe: RLS scopes the kit to the caller's org; confirm it's visible before mutating.
+  const { data: kit } = await supabase.from("kits").select("id").eq("id", kitId).maybeSingle();
+  if (!kit) return { ok: false, error: "Kit not found." };
+  const { data: owned } = await supabase.from("kit_items").select("id").eq("kit_id", kitId);
+  const ownedIds = new Set((owned ?? []).map((r) => r.id));
+  let updated = 0;
+  for (const e of edits ?? []) {
+    if (!ownedIds.has(e.id) || !e.description.trim()) continue;
+    const { error } = await supabase
+      .from("kit_items")
+      .update({
+        description: e.description.trim(),
+        quantity: Number.isFinite(e.quantity) ? Math.max(0, e.quantity) : 1,
+        unit: e.unit?.trim() || "ea",
+        unit_price: Number.isFinite(e.unit_price) ? Math.max(0, e.unit_price) : 0,
+      })
+      .eq("id", e.id);
+    if (error) return { ok: false, error: error.message };
+    updated++;
+  }
+  revalidatePath("/price-list");
+  return { ok: true, updated };
 }
 
 export async function updateKitItem(

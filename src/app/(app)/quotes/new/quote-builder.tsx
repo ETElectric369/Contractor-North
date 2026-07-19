@@ -19,6 +19,7 @@ import {
   type DraftLineItem,
 } from "../actions";
 import { DeckGeneratorPanel } from "./deck-generator-panel";
+import { KitPickerModal, type KitForPicker } from "./kit-picker-modal";
 
 interface CustomerOption {
   id: string;
@@ -42,11 +43,7 @@ interface TaxRateLite {
   rate: number;
   is_default: boolean;
 }
-interface KitLite {
-  id: string;
-  name: string;
-  kit_items: { description: string; quantity: number; unit: string; unit_price: number }[];
-}
+type KitLite = KitForPicker;
 
 const blankItem = (): DraftLineItem => ({
   description: "",
@@ -146,22 +143,13 @@ export function QuoteBuilder({
     setPlOpen(false);
   }
 
-  function addKit(kitId: string) {
-    const k = kits.find((x) => x.id === kitId);
-    if (!k) return;
-    const real = items.filter((i) => i.description.trim());
-    const kitLines: DraftLineItem[] = (k.kit_items ?? []).map((it) => ({
-      description: it.description,
-      quantity: Number(it.quantity) || 1,
-      unit: it.unit || "ea",
-      unit_price: Number(it.unit_price) || 0,
-      group: k.name, // tag each line with its group so the estimate reads as collapsible groups
-    }));
-    setItems([...real, ...kitLines]);
-  }
+  // Picking a kit opens the Kit Picker (all items pre-checked — one confirm keeps the old
+  // one-tap feel) instead of dumping every kit line onto the quote. The picker maps the
+  // selection to lines tagged with the kit's name (collapsible groups, same as before).
+  const [pickerKit, setPickerKit] = useState<KitLite | null>(null);
 
-  // The deck generator drops its computed lines in (tagged group "Decks"), keeping any
-  // real lines already entered — same append rule as addKit.
+  // The deck generator and the Kit Picker both drop their lines in (tagged with a group),
+  // keeping any real lines already entered — the one append rule.
   function addGeneratedLines(lines: DraftLineItem[]) {
     const real = items.filter((i) => i.description.trim());
     setItems([...real, ...lines]);
@@ -467,8 +455,15 @@ export function QuoteBuilder({
 
             {kits.length > 0 && (
               <div className="mb-3">
-                <Select value="" onChange={(e) => { if (e.target.value) { addKit(e.target.value); e.target.value = ""; } }}>
-                  <option value="">+ Add a kit…</option>
+                <Select
+                  value=""
+                  onChange={(e) => {
+                    const k = kits.find((x) => x.id === e.target.value);
+                    if (k) setPickerKit(k);
+                    e.target.value = "";
+                  }}
+                >
+                  <option value="">+ Add from a kit…</option>
                   {kits.map((k) => (
                     <option key={k.id} value={k.id}>{k.name}</option>
                   ))}
@@ -535,6 +530,17 @@ export function QuoteBuilder({
             </div>
           </CardContent>
         </Card>
+
+        {pickerKit && (
+          <KitPickerModal
+            kit={pickerKit}
+            onClose={() => setPickerKit(null)}
+            onAdd={(lines) => {
+              addGeneratedLines(lines);
+              setPickerKit(null);
+            }}
+          />
+        )}
       </div>
 
       {/* Sidebar: details + totals */}

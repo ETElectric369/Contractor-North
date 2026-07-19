@@ -59,7 +59,8 @@ export default async function NewQuotePage({
       supabase.from("tax_rates").select("id, name, rate, is_default").order("created_at"),
       supabase
         .from("kits")
-        .select("id, name, kit_items(description, quantity, unit, unit_price, sort_order)")
+        // kit_items ids ride along so the Kit Picker can write edits back to the kit.
+        .select("id, name, kit_items(id, description, quantity, unit, unit_price, sort_order)")
         .order("name"),
       supabase.from("organizations").select("settings").limit(1).maybeSingle(),
     ]);

@@ -61,3 +61,21 @@ export function shiftSegmentCovering(
 export function addDaySegment(segments: DaySegment[], dateISO: string): DaySegment[] {
   return mergeSegments([...(segments ?? []), { start: dateISO, end: dateISO }]);
 }
+
+/** EDIT one bound of a range without ever inverting it: the edited bound wins
+ *  and the other bound follows when crossed (start moved past end drags end up;
+ *  end moved before start drags start back). Same-day (start === end) is a
+ *  valid one-day job, so "follow" means match, not +1. Blank or partial bounds
+ *  pass through untouched — a half-filled row isn't saved anyway.
+ *
+ *  Why: the range editor saves on every change, so pushing a job later by
+ *  editing the start FIRST used to trip an "ends before it starts" error and
+ *  block the save (bug report: "Date range can't finish before start"). */
+export function applyRangeEdit(current: DaySegment, patch: Partial<DaySegment>): DaySegment {
+  const next = { ...current, ...patch };
+  if (!isYmd(next.start) || !isYmd(next.end) || next.start <= next.end) return next;
+  if (patch.end !== undefined && patch.start === undefined) {
+    return { start: next.end, end: next.end }; // end pulled back → start follows
+  }
+  return { start: next.start, end: next.start }; // start pushed forward (or both set inverted) → end follows
+}

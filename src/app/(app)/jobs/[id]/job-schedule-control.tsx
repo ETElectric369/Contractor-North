@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Check, Plus, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { applyRangeEdit } from "@/lib/schedule-math";
 import { setJobScheduleRanges, type DateRange } from "../../schedule/actions";
 
 /** ISO → yyyy-mm-dd in local time for a date input. */
@@ -67,11 +68,13 @@ export function JobScheduleControl({
 
   function persist(next: DateRange[], time = startTime) {
     setError(null);
-    const filled = next.filter((r) => r.start);
-    if (filled.some((r) => r.end && r.end < r.start)) {
-      setError("A range ends before it starts.");
-      return;
-    }
+    // update() already keeps each range non-inverted (applyRangeEdit drags the
+    // other bound along), so this righting only catches legacy inverted rows —
+    // the same one-day clamp the server applies. Never block the save over it:
+    // erroring here was the "Date range can't finish before start" bug.
+    const filled = next
+      .filter((r) => r.start)
+      .map((r) => (r.end && r.end < r.start ? { start: r.start, end: r.start } : r));
     startT(async () => {
       // Only send a time when there's a primary start to attach it to.
       const res = await setJobScheduleRanges(id, filled, filled.length ? time || null : null);
@@ -86,7 +89,10 @@ export function JobScheduleControl({
   }
 
   function update(i: number, patch: Partial<DateRange>) {
-    const next = ranges.map((r, idx) => (idx === i ? { ...r, ...patch } : r));
+    // The edited bound wins; the other follows when crossed (start pushed past
+    // end drags end up, end pulled before start drags start back) — moving a
+    // range is two taps in either order, never an error. Same-day stays valid.
+    const next = ranges.map((r, idx) => (idx === i ? applyRangeEdit(r, patch) : r));
     setRanges(next);
     persist(next);
   }

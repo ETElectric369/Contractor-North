@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { addDaySegment, mergeSegments, shiftSegmentCovering } from "@/lib/schedule-math";
+import { addDaySegment, applyRangeEdit, mergeSegments, shiftSegmentCovering } from "@/lib/schedule-math";
 
 /**
  * Schedule math had ZERO tests while being the exact bug class the calendar gut
@@ -104,6 +104,62 @@ describe("addDaySegment — union-place, never a replace", () => {
     expect(addDaySegment([{ start: "2026-07-06", end: "2026-07-08" }], "2026-07-09")).toEqual([
       { start: "2026-07-06", end: "2026-07-09" },
     ]);
+  });
+});
+
+describe("applyRangeEdit — edited bound wins, the other follows when crossed", () => {
+  it("start pushed past end drags end to match (the bug-report flow: move a job later, start first)", () => {
+    expect(applyRangeEdit({ start: "2026-07-07", end: "2026-07-11" }, { start: "2026-07-21" })).toEqual({
+      start: "2026-07-21",
+      end: "2026-07-21",
+    });
+  });
+
+  it("end pulled before start drags start to match (move a job earlier, end first)", () => {
+    expect(applyRangeEdit({ start: "2026-07-07", end: "2026-07-11" }, { end: "2026-07-03" })).toEqual({
+      start: "2026-07-03",
+      end: "2026-07-03",
+    });
+  });
+
+  it("non-crossing edits pass through untouched", () => {
+    expect(applyRangeEdit({ start: "2026-07-07", end: "2026-07-11" }, { start: "2026-07-09" })).toEqual({
+      start: "2026-07-09",
+      end: "2026-07-11",
+    });
+    expect(applyRangeEdit({ start: "2026-07-07", end: "2026-07-11" }, { end: "2026-07-30" })).toEqual({
+      start: "2026-07-07",
+      end: "2026-07-30",
+    });
+  });
+
+  it("same-day (start === end) is a VALID one-day job — no adjustment, no error", () => {
+    expect(applyRangeEdit({ start: "2026-07-07", end: "2026-07-11" }, { start: "2026-07-11" })).toEqual({
+      start: "2026-07-11",
+      end: "2026-07-11",
+    });
+    expect(applyRangeEdit({ start: "2026-07-07", end: "2026-07-11" }, { end: "2026-07-07" })).toEqual({
+      start: "2026-07-07",
+      end: "2026-07-07",
+    });
+  });
+
+  it("blank or partial bounds pass through — a half-filled row isn't adjusted", () => {
+    expect(applyRangeEdit({ start: "", end: "" }, { start: "2026-07-07" })).toEqual({
+      start: "2026-07-07",
+      end: "",
+    });
+    expect(applyRangeEdit({ start: "", end: "" }, { end: "2026-07-07" })).toEqual({
+      start: "",
+      end: "2026-07-07",
+    });
+  });
+
+  it("both bounds patched inverted rights to a one-day range at the start (matches the server clamp)", () => {
+    expect(applyRangeEdit({ start: "", end: "" }, { start: "2026-07-11", end: "2026-07-07" })).toEqual({
+      start: "2026-07-11",
+      end: "2026-07-11",
+    });
   });
 });
 
