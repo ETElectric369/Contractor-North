@@ -10,18 +10,38 @@ import { NumberInput } from "@/components/ui/number-input";
 import { hoursBetween, formatDuration } from "@/lib/utils";
 import type { JobCode } from "@/lib/types";
 import { completeAutoClockOut } from "./actions";
-import { jobLabel } from "@/lib/schedule-options";
+import { jobLabel, jobSiteLabel } from "@/lib/schedule-options";
 
-type JobOpt = { id: string; job_number: string; name: string; codes?: string[] };
+type JobOpt = {
+  id: string;
+  job_number: string;
+  name: string;
+  address?: string | null;
+  customer_name?: string | null; // feeds the codes-off customer · address label
+  codes?: string[];
+};
 type Entry = { id: string; clock_in: string; clock_out: string; lunch_minutes: number; jobId: string | null; jobLabel: string };
 type AllocRow = { job_id: string; job_code: string; hours: number; minutes: number; description: string };
 
 /** Shown on /timeclock when a clock-out left the breakdown unfinished — either the geofence
  *  auto-clocked the tech out (they drove off the job) OR they tapped "break it down later" at
- *  clock-out. They answer the questions after the fact: which code(s) + hours, and whether they
- *  took lunch. The clock in/out times are locked; only the code split + lunch are added here. */
-export function AutoClockoutPrompt({ entry, jobCodes, jobs }: { entry: Entry; jobCodes: JobCode[]; jobs: JobOpt[] }) {
+ *  clock-out. They answer the questions after the fact: which code(s) + hours (codes-off orgs:
+ *  which JOB(s) + hours — no code question), and whether they took lunch. The clock in/out
+ *  times are locked; only the split + lunch are added here. */
+export function AutoClockoutPrompt({
+  entry,
+  jobCodes,
+  jobs,
+  jobCodesEnabled = true,
+}: {
+  entry: Entry;
+  jobCodes: JobCode[];
+  jobs: JobOpt[];
+  /** org setting timeclock_job_codes — false hides every code control here. */
+  jobCodesEnabled?: boolean;
+}) {
   const router = useRouter();
+  const optionLabel = (j: JobOpt) => (jobCodesEnabled ? jobLabel(j) : jobSiteLabel(j));
   const worked0 = hoursBetween(entry.clock_in, entry.clock_out, entry.lunch_minutes);
   const [allocations, setAllocations] = useState<AllocRow[]>([
     {
@@ -38,7 +58,10 @@ export function AutoClockoutPrompt({ entry, jobCodes, jobs }: { entry: Entry; jo
 
   const worked = hoursBetween(entry.clock_in, entry.clock_out, lunch ? 30 : 0);
   const allocated = allocations.reduce((s, a) => s + (a.hours || 0) + (a.minutes || 0) / 60, 0);
-  const ok = allocations.some((a) => a.job_code && (a.hours || 0) + (a.minutes || 0) / 60 > 0);
+  // Codes off: the split identifies work by the JOB, so a job (not a code) unlocks Save.
+  const ok = allocations.some(
+    (a) => (jobCodesEnabled ? a.job_code : a.job_id) && (a.hours || 0) + (a.minutes || 0) / 60 > 0,
+  );
 
   function update(i: number, patch: Partial<AllocRow>) {
     setAllocations((p) => p.map((a, idx) => (idx === i ? { ...a, ...patch } : a)));
@@ -75,7 +98,11 @@ export function AutoClockoutPrompt({ entry, jobCodes, jobs }: { entry: Entry; jo
             <div className="text-sm font-semibold text-amber-800">
               Finish your timecard — you clocked out at {new Date(entry.clock_out).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.
             </div>
-            <div className="text-xs text-amber-700">Break down the hours you worked: which code(s) and how long, so they bill to the right job.</div>
+            <div className="text-xs text-amber-700">
+              {jobCodesEnabled
+                ? "Break down the hours you worked: which code(s) and how long, so they bill to the right job."
+                : "Break down the hours you worked: which job(s) and how long, so they bill to the right job."}
+            </div>
           </div>
         </div>
 
@@ -92,15 +119,17 @@ export function AutoClockoutPrompt({ entry, jobCodes, jobs }: { entry: Entry; jo
                 <Select value={a.job_id} onChange={(e) => update(i, { job_id: e.target.value })} className="h-9 flex-1">
                   <option value="">— Job —</option>
                   {jobs.map((j) => (
-                    <option key={j.id} value={j.id}>{jobLabel(j)}</option>
+                    <option key={j.id} value={j.id}>{optionLabel(j)}</option>
                   ))}
                 </Select>
-                <Select value={a.job_code} onChange={(e) => update(i, { job_code: e.target.value })} className="h-9 w-28">
-                  <option value="">Code</option>
-                  {codesForJob(a.job_id).map((c) => (
-                    <option key={c.id} value={c.code}>{c.code}</option>
-                  ))}
-                </Select>
+                {jobCodesEnabled && (
+                  <Select value={a.job_code} onChange={(e) => update(i, { job_code: e.target.value })} className="h-9 w-28">
+                    <option value="">Code</option>
+                    {codesForJob(a.job_id).map((c) => (
+                      <option key={c.id} value={c.code}>{c.code}</option>
+                    ))}
+                  </Select>
+                )}
                 <div className="flex items-center gap-1">
                   <NumberInput value={a.hours} onValueChange={(n) => update(i, { hours: n })} className="h-9 w-12 text-center" placeholder="h" />
                   <span className="text-xs text-slate-400">h</span>
@@ -116,7 +145,7 @@ export function AutoClockoutPrompt({ entry, jobCodes, jobs }: { entry: Entry; jo
           ))}
           <div className="flex items-center justify-between">
             <button type="button" onClick={() => setAllocations((p) => [...p, { job_id: "", job_code: "", hours: 0, minutes: 0, description: "" }])} className="inline-flex items-center gap-1.5 rounded-lg bg-white px-2.5 py-1 text-xs font-medium text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50">
-              <Plus className="h-4 w-4 shrink-0" /> Add Another Code
+              <Plus className="h-4 w-4 shrink-0" /> {jobCodesEnabled ? "Add Another Code" : "Add Another Job"}
             </button>
             <span className={`text-xs ${Math.abs(allocated - worked) > 0.1 ? "text-amber-600" : "text-slate-500"}`}>
               {formatDuration(allocated)} of {formatDuration(worked)} worked

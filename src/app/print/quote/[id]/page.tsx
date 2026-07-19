@@ -6,6 +6,7 @@ import { companyFromOrg } from "@/components/doc-letterhead";
 import { templateFor } from "@/components/doc-templates";
 import { getOrgSettings } from "@/lib/org-settings";
 import { QuoteDocument } from "@/components/quote-document";
+import { docLabel } from "@/lib/doc-label";
 import { docTitle } from "@/lib/doc-title";
 import type { Metadata } from "next";
 import type { Organization, Quote, QuoteLineItem } from "@/lib/types";
@@ -16,7 +17,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   const { id } = await params;
   const supabase = await createClient();
   const { data } = await supabase.from("quotes").select("quote_number, doc_type, customers(name)").eq("id", id).maybeSingle();
-  const label = ((data as any)?.doc_type ?? "quote") === "estimate" ? "Estimate" : "Quote";
+  const label = docLabel(data as { doc_type?: string | null } | null);
   return { title: docTitle(data ? `${label} ${(data as any).quote_number}` : "Quote", (data as any)?.customers?.name) };
 }
 
@@ -53,9 +54,8 @@ export default async function QuotePrintPage({
 
   const lineItems = (items ?? []) as QuoteLineItem[];
   // Quote = fixed price · Estimate = time & materials. Same record, the
-  // customer-facing wording follows doc_type.
-  const isEstimate = ((q as any).doc_type ?? "quote") === "estimate";
-  const docLabel = isEstimate ? "Estimate" : "Quote";
+  // customer-facing wording follows doc_type (via THE one docLabel helper).
+  const label = docLabel(q);
 
   return (
     <div className="min-h-screen bg-slate-100 py-8 print:bg-white print:py-0">
@@ -67,7 +67,7 @@ export default async function QuotePrintPage({
       <QuoteDocument
         co={co}
         template={template}
-        docLabel={docLabel}
+        docLabel={label}
         number={q.quote_number}
         createdAt={q.created_at}
         validUntil={q.valid_until}

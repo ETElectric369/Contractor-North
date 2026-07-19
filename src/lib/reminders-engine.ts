@@ -4,6 +4,7 @@ import { invoiceBalance } from "@/lib/invoice-math";
 import { todayStrInTz } from "@/lib/tz";
 import { reportError } from "@/lib/observe";
 import { getOrgSettings, accentHex, orgPublicBaseUrl } from "@/lib/org-settings";
+import { docLabel } from "@/lib/doc-label";
 import { reminderSuppressed } from "@/lib/automations-math";
 
 /** The opt-in customer-reminder engine (run by the daily automations cron). For each
@@ -106,7 +107,7 @@ export async function sendDueReminders(supabase: any): Promise<Counts> {
       const cutoff = new Date(now - 3 * DAY).toISOString();
       const { data: qs } = await supabase
         .from("quotes")
-        .select("id, quote_number, public_token, customers(name, email)")
+        .select("id, quote_number, public_token, doc_type, customers(name, email)")
         .eq("org_id", org.id)
         .eq("status", "sent")
         .lt("updated_at", cutoff);
@@ -114,16 +115,19 @@ export async function sendDueReminders(supabase: any): Promise<Counts> {
         const cust = (q as any).customers;
         if (!cust?.email) { counts.skipped_no_email++; continue; }
         if (await suppress("quote_followup", q.id, 7, 2)) continue;
+        // The customer reads the word their document uses — Estimate or Quote (doc_type).
+        const label = docLabel(q as { doc_type?: string | null });
+        const noun = label.toLowerCase();
         const html = renderReminderEmail({
           company: brand,
           customerName: cust.name || "there",
-          heading: `Following up on Quote ${q.quote_number}`,
-          message: `We wanted to follow up on the quote we sent over (${q.quote_number}). We'd be glad to answer any questions or get your project on the schedule whenever you're ready.`,
-          cta: q.public_token ? { label: "View quote", link: `${site}/q/${q.public_token}` } : undefined,
+          heading: `Following up on ${label} ${q.quote_number}`,
+          message: `We wanted to follow up on the ${noun} we sent over (${q.quote_number}). We'd be glad to answer any questions or get your project on the schedule whenever you're ready.`,
+          cta: q.public_token ? { label: `View ${noun}`, link: `${site}/q/${q.public_token}` } : undefined,
         });
         const r = await sendEmail({
           to: cust.email,
-          subject: `Following up on your quote from ${brand.name}`,
+          subject: `Following up on your ${noun} from ${brand.name}`,
           fromName: brand.name,
           html,
           replyTo: brand.email ?? undefined,

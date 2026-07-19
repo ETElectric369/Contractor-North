@@ -149,7 +149,9 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     // matches the page it opens). Feeds ONLY the Grab-One gate now — the door links
     // this used to number are gone (office tasks live at /tasks).
     isStaff
-      ? headCount().eq("status", "open").is("parent_id", null).neq("category", "office")
+      // category is nullable since 0136 (free-form categories) — bare neq drops NULL rows,
+      // which would make this door's count disagree with /tasks?else=1.
+      ? headCount().eq("status", "open").is("parent_id", null).or("category.neq.office,category.is.null")
       : headCount().eq("status", "open").is("parent_id", null).eq("assigned_to", uid),
     // Office inventory count (staff only) — the other half of the Grab-One gate.
     isStaff

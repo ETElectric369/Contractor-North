@@ -13,6 +13,21 @@ export type PickerOption = { id: string; label: string; address?: string | null 
 export const jobLabel = (j: { job_number?: string | null; name?: string | null }): string =>
   `${j.job_number} · ${j.name}`;
 
+/** The CODES-OFF job identity label — "Smith · 123 Main St" (customer · street address).
+ *  Orgs that turn timeclock_job_codes off identify work by whose house the crew is at,
+ *  not by a number/code; every codes-off timeclock picker/chip uses THIS shape (same
+ *  SSOT rule as jobLabel — no per-surface forks). Falls back to jobLabel when the job
+ *  carries neither part, so a bare row still labels. Client-safe (pure). */
+export const jobSiteLabel = (j: {
+  job_number?: string | null;
+  name?: string | null;
+  address?: string | null;
+  customer_name?: string | null;
+}): string => {
+  const parts = [j.customer_name, j.address].map((s) => (s ?? "").trim()).filter(Boolean);
+  return parts.length ? parts.join(" · ") : jobLabel(j);
+};
+
 export const toJobOptions = (rows: any[] | null | undefined): PickerOption[] =>
   (rows ?? []).map((j) => ({ id: j.id, label: jobLabel(j), address: j.address ?? null }));
 export const toCustomerOptions = (rows: any[] | null | undefined): PickerOption[] =>

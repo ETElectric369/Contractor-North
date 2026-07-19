@@ -20,7 +20,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { hoursBetween, formatDuration, formatFullAddress } from "@/lib/utils";
-import { jobLabel } from "@/lib/schedule-options";
+import { jobLabel, jobSiteLabel } from "@/lib/schedule-options";
 import { translator } from "@/lib/i18n";
 import { drivingDistanceMiles } from "@/lib/google-maps";
 import { getPosition } from "@/lib/geo";
@@ -56,6 +56,7 @@ interface JobOption {
   city?: string | null;
   state?: string | null;
   zip?: string | null;
+  customer_name?: string | null; // feeds the codes-off customer · address label
   codes?: string[]; // this job's template codes (undefined = all org codes)
 }
 
@@ -105,6 +106,7 @@ export function TimeclockPanel({
   homeAddress = "",
   isStaff = true,
   crewLead = false,
+  jobCodesEnabled = true,
 }: {
   openEntry: TimeEntry | null;
   openAllocations?: OpenAlloc[];
@@ -116,8 +118,14 @@ export function TimeclockPanel({
   isStaff?: boolean;
   /** Crew leads (any role) get the Nort end-of-day debrief after clocking out. */
   crewLead?: boolean;
+  /** org setting timeclock_job_codes: false = no code pickers anywhere on the clock,
+   *  and job labels lead with customer · street address. Default true = today's flow. */
+  jobCodesEnabled?: boolean;
 }) {
   const t = translator(lang);
+  // The ONE label per mode (both from the schedule-options SSOT — never a local fork):
+  // codes on = "J-0012 · Panel swap"; codes off = "Smith · 123 Main St".
+  const optionLabel = (j: JobOption) => (jobCodesEnabled ? jobLabel(j) : jobSiteLabel(j));
   const toast = useToast();
   const [error, setError] = useState<string | null>(null);
   const [gpsNote, setGpsNote] = useState<string | null>(null); // "punch wasn't GPS-stamped" — surfaced, not silent
@@ -412,7 +420,7 @@ export function TimeclockPanel({
         setSwitchJobId("");
         setSwitchJobCode("");
         const j = jobs.find((x) => x.id === switchJobId);
-        toast(`Switched to ${j ? jobLabel(j) : "the new job"}`, "success");
+        toast(`Switched to ${j ? optionLabel(j) : "the new job"}`, "success");
       } catch {
         setError(OFFLINE_MSG);
       }
@@ -519,10 +527,15 @@ export function TimeclockPanel({
 
   if (openEntry) {
     const elapsed = hoursBetween(openEntry.clock_in, new Date(now), lunchToUse);
-    // Name only (not the shared number·name jobLabel helper) — the running banner
-    // reads better without the job number; renamed so the helper isn't shadowed.
-    const currentJobName =
-      jobs.find((j) => j.id === openEntry.job_id)?.name ?? "No job selected";
+    // Codes on: name only (not the shared number·name jobLabel helper) — the running
+    // banner reads better without the job number; renamed so the helper isn't shadowed.
+    // Codes off: the customer · address identity IS the name the crew knows.
+    const currentJob = jobs.find((j) => j.id === openEntry.job_id);
+    const currentJobName = currentJob
+      ? jobCodesEnabled
+        ? currentJob.name
+        : jobSiteLabel(currentJob)
+      : "No job selected";
     return (
       <>
       <Card className="border-green-200">
@@ -622,23 +635,27 @@ export function TimeclockPanel({
                               .filter((j) => j.id !== openEntry.job_id)
                               .map((j) => (
                                 <option key={j.id} value={j.id}>
-                                  {jobLabel(j)}
+                                  {optionLabel(j)}
                                 </option>
                               ))}
                           </Select>
-                          <Select
-                            value={switchJobCode}
-                            onChange={(e) => setSwitchJobCode(e.target.value)}
-                            className="h-11 w-full"
-                            aria-label="New job code"
-                          >
-                            <option value="">Code (optional)</option>
-                            {codesForJob(switchJobId).map((c) => (
-                              <option key={c.id} value={c.code}>
-                                {c.code}{c.description ? ` · ${c.description}` : ""}
-                              </option>
-                            ))}
-                          </Select>
+                          {/* Codes off: the switch is just "which job now" — no code question;
+                              the allocation the server records carries a null code. */}
+                          {jobCodesEnabled && (
+                            <Select
+                              value={switchJobCode}
+                              onChange={(e) => setSwitchJobCode(e.target.value)}
+                              className="h-11 w-full"
+                              aria-label="New job code"
+                            >
+                              <option value="">Code (optional)</option>
+                              {codesForJob(switchJobId).map((c) => (
+                                <option key={c.id} value={c.code}>
+                                  {c.code}{c.description ? ` · ${c.description}` : ""}
+                                </option>
+                              ))}
+                            </Select>
+                          )}
                           <div className="flex gap-2">
                             <Button className="flex-1" onClick={doSwitchJob} disabled={switchPending || !switchJobId}>
                               {switchPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowLeftRight className="h-4 w-4" />} Switch
@@ -705,7 +722,9 @@ export function TimeclockPanel({
               </button>
             </div>
             <p className="mb-2 text-xs text-slate-500">
-              Which job code(s) did you work today, and how many hours on each? Usually one — split it if you worked more than one.
+              {jobCodesEnabled
+                ? "Which job code(s) did you work today, and how many hours on each? Usually one — split it if you worked more than one."
+                : "Which job(s) did you work today, and how many hours on each? Usually one — split it if you worked more than one."}
             </p>
             {allocations.length === 0 ? (
               <p className="text-xs text-slate-400">{t("tc_breakdownHint")}</p>
@@ -724,7 +743,7 @@ export function TimeclockPanel({
                         <option value="">— Job —</option>
                         {jobs.map((j) => (
                           <option key={j.id} value={j.id}>
-                            {jobLabel(j)}
+                            {optionLabel(j)}
                           </option>
                         ))}
                       </Select>
@@ -739,20 +758,23 @@ export function TimeclockPanel({
                     </div>
                     {/* Row 2: code + hours/minutes. STACKS under the job on a narrow phone
                         (instead of cramming 5 controls into one 327px row, where a minute
-                        got typed into the hours box). The h/m boxes are wider here too. */}
-                    <div className="flex items-center gap-2">
-                      <Select
-                        value={a.job_code}
-                        onChange={(e) => updateAlloc(i, { job_code: e.target.value })}
-                        className="h-11 min-w-0 flex-1"
-                      >
-                        <option value="">Code</option>
-                        {codesForJob(a.job_id).map((c) => (
-                          <option key={c.id} value={c.code}>
-                            {c.code}{c.description ? ` · ${c.description}` : ""}
-                          </option>
-                        ))}
-                      </Select>
+                        got typed into the hours box). The h/m boxes are wider here too.
+                        Codes off: no code question — the row is just the job + its hours. */}
+                    <div className={jobCodesEnabled ? "flex items-center gap-2" : "flex items-center justify-end gap-2"}>
+                      {jobCodesEnabled && (
+                        <Select
+                          value={a.job_code}
+                          onChange={(e) => updateAlloc(i, { job_code: e.target.value })}
+                          className="h-11 min-w-0 flex-1"
+                        >
+                          <option value="">Code</option>
+                          {codesForJob(a.job_id).map((c) => (
+                            <option key={c.id} value={c.code}>
+                              {c.code}{c.description ? ` · ${c.description}` : ""}
+                            </option>
+                          ))}
+                        </Select>
+                      )}
                       <div className="flex shrink-0 items-center gap-1">
                         <NumberInput
                           value={a.hours}
@@ -923,28 +945,31 @@ export function TimeclockPanel({
             </button>
             {showTools && (
               <div className="mt-2 grid gap-4 sm:grid-cols-2">
-                <div>
+                {/* Codes off: the job picker spans the row and the code question is gone. */}
+                <div className={jobCodesEnabled ? "" : "sm:col-span-2"}>
                   <Label htmlFor="job">{t("tc_job")}</Label>
                   <Select id="job" value={jobId} onChange={(e) => setJobId(e.target.value)} className="h-11">
                     <option value="">{t("tc_noJob")}</option>
                     {jobs.map((j) => (
                       <option key={j.id} value={j.id}>
-                        {jobLabel(j)}
+                        {optionLabel(j)}
                       </option>
                     ))}
                   </Select>
                 </div>
-                <div>
-                  <Label htmlFor="code">{t("tc_jobCode")}</Label>
-                  <Select id="code" value={jobCode} onChange={(e) => setJobCode(e.target.value)} className="h-11">
-                    <option value="">{t("tc_selectCode")}</option>
-                    {codesForJob(jobId).map((c) => (
-                      <option key={c.id} value={c.code}>
-                        {c.code} — {c.description}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
+                {jobCodesEnabled && (
+                  <div>
+                    <Label htmlFor="code">{t("tc_jobCode")}</Label>
+                    <Select id="code" value={jobCode} onChange={(e) => setJobCode(e.target.value)} className="h-11">
+                      <option value="">{t("tc_selectCode")}</option>
+                      {codesForJob(jobId).map((c) => (
+                        <option key={c.id} value={c.code}>
+                          {c.code} — {c.description}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                )}
               </div>
             )}
           </div>

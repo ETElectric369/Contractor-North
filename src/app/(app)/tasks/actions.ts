@@ -5,7 +5,10 @@ import { createClient } from "@/lib/supabase/server";
 
 export type Result = { ok: boolean; error?: string };
 
-export type TaskCategory = "sales" | "operations" | "office";
+/** Free-form since migration 0136 (was the fixed "sales" | "operations" | "office").
+ *  Stored as-typed (trimmed); null = uncategorized. The legacy 'office' value keeps
+ *  its My-Day meaning (Office door split, six-rank flagged-undated exclusion). */
+export type TaskCategory = string;
 
 function revalidateTaskViews(category?: string | null, jobId?: string | null) {
   revalidatePath("/tasks");
@@ -25,7 +28,8 @@ export type CreateTaskResult = Result & {
 
 export async function createTask(input: {
   title: string;
-  category: TaskCategory;
+  /** Optional free-form category; blank/undefined stores null ("No category"). */
+  category?: string | null;
   job_id?: string | null;
   due_date?: string | null;
   priority?: number;
@@ -78,11 +82,14 @@ export async function createTask(input: {
   }
 
   const tags = (input.tags ?? []).map((t) => t.trim()).filter(Boolean);
+  // Explicit key on purpose: blank → null (uncategorized), never the DB's
+  // 'operations' default — that default exists only for paths omitting the column.
+  const category = input.category?.trim() || null;
   const { data: created, error } = await supabase
     .from("tasks")
     .insert({
       title,
-      category: input.category,
+      category,
       job_id: input.job_id || null,
       due_date: input.due_date || null,
       priority: input.priority ?? 0,
@@ -96,7 +103,7 @@ export async function createTask(input: {
     .select("id")
     .single();
   if (error) return { ok: false, error: error.message };
-  revalidateTaskViews(input.category, input.job_id);
+  revalidateTaskViews(category, input.job_id);
   return { ok: true, id: created?.id as string | undefined };
 }
 
@@ -159,7 +166,8 @@ export async function updateTask(
   id: string,
   patch: {
     title?: string;
-    category?: TaskCategory;
+    /** Free-form category; blank/null clears to uncategorized. */
+    category?: string | null;
     job_id?: string | null;
     due_date?: string | null;
     priority?: number;
@@ -173,7 +181,7 @@ export async function updateTask(
   const supabase = await createClient();
   const clean: Record<string, unknown> = {};
   if (patch.title !== undefined) clean.title = patch.title.trim();
-  if (patch.category !== undefined) clean.category = patch.category;
+  if (patch.category !== undefined) clean.category = patch.category?.trim() || null;
   if (patch.job_id !== undefined) {
     // Persist a job link only if it's actually in the caller's org (the RLS-scoped
     // jobs read returns nothing for a foreign/crafted id) — never a cross-org id.

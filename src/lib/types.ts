@@ -159,6 +159,9 @@ export interface Quote {
   customer_id: string | null;
   job_id: string | null;
   status: QuoteStatus;
+  /** The customer-facing document word — 'estimate' (T&M, default) or 'quote'
+   *  (fixed price). Display strings derive via docLabel() (src/lib/doc-label.ts). */
+  doc_type: "estimate" | "quote";
   title: string | null;
   description: string | null;
   notes: string | null;

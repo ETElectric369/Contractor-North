@@ -1,5 +1,29 @@
 import { describe, expect, it } from "vitest";
-import { addressPrefillOnCustomerPick, toNewJobCustomerOptions } from "./schedule-options";
+import { addressPrefillOnCustomerPick, jobLabel, jobSiteLabel, toNewJobCustomerOptions } from "./schedule-options";
+
+/**
+ * The codes-off job identity label (org setting timeclock_job_codes = false): the
+ * timeclock identifies work by "customer · street address", never a fork per surface.
+ */
+describe("jobSiteLabel — the codes-off customer · address identity", () => {
+  const job = { job_number: "J-0012", name: "Panel swap", address: "123 Main St", customer_name: "Smith" };
+
+  it("leads with customer · street address", () => {
+    expect(jobSiteLabel(job)).toBe("Smith · 123 Main St");
+  });
+
+  it("degrades to whichever half exists", () => {
+    expect(jobSiteLabel({ ...job, address: null })).toBe("Smith");
+    expect(jobSiteLabel({ ...job, customer_name: "" })).toBe("123 Main St");
+    expect(jobSiteLabel({ ...job, customer_name: "  " })).toBe("123 Main St"); // whitespace ≠ a name
+  });
+
+  it("falls back to the number · name jobLabel when the job has neither part", () => {
+    const bare = { job_number: "J-0012", name: "Panel swap" };
+    expect(jobSiteLabel(bare)).toBe(jobLabel(bare));
+    expect(jobSiteLabel({ ...bare, address: "", customer_name: null })).toBe("J-0012 · Panel swap");
+  });
+});
 
 /**
  * The new-job customer→address prefill (bug 07-12: "customer choice doesn't apply

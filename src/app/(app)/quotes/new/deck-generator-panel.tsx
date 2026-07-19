@@ -10,14 +10,19 @@ import { Button } from "@/components/ui/button";
 import { formatCurrency } from "@/lib/utils";
 import type { DraftLineItem } from "../actions";
 
-// Height at the tallest point → a representative ft for the band adder (mirrors the public
-// configurator's bands, so office + web produce identical estimates).
-const HEIGHT_BANDS = [
-  { value: "ground", label: "On the ground / low", ft: 2 },
-  { value: "under10", label: "Up to 10 ft", ft: 8 },
-  { value: "10_20", label: "10–20 ft", ft: 15 },
-  { value: "20_30", label: "20–30 ft", ft: 25 },
-  { value: "over30", label: "Over 30 ft", ft: 35 },
+// Height is a CUSTOM number here (inches — Chris measures off the ground), unlike the public
+// configurator's bands. Chips just prefill the input around the 30-in guardrail rule: at or
+// under 30 in the engine skips the derived railing, so Under 12/24 (11/23 in) omit it while
+// Under 36 (35 in) deliberately keeps it. The tall chips are the public bands' representative
+// heights so a chip-picked estimate matches the web configurator.
+const HEIGHT_PRESETS = [
+  { label: "Under 12 in", inches: 11 },
+  { label: "Under 24 in", inches: 23 },
+  { label: "Under 36 in", inches: 35 },
+  { label: "Up to 10 ft", inches: 96 },
+  { label: "10–20 ft", inches: 180 },
+  { label: "20–30 ft", inches: 300 },
+  { label: "Over 30 ft", inches: 420 },
 ];
 
 type Form = {
@@ -25,7 +30,7 @@ type Form = {
   material: DeckMaterial;
   lengthFt: number;
   widthFt: number;
-  heightBand: string;
+  heightIn: number;
   shape: DeckShape;
   wrapAround: boolean;
   railingLf: number;
@@ -57,7 +62,7 @@ export function DeckGeneratorPanel({
     material: "wood",
     lengthFt: 0,
     widthFt: 0,
-    heightBand: "under10",
+    heightIn: 96,
     shape: "rectangle",
     wrapAround: false,
     railingLf: 0,
@@ -76,7 +81,8 @@ export function DeckGeneratorPanel({
       material: f.material,
       lengthFt: f.lengthFt,
       widthFt: f.widthFt,
-      heightFt: HEIGHT_BANDS.find((b) => b.value === f.heightBand)?.ft ?? 8,
+      heightFt: f.heightIn / 12,
+      heightIsExact: true,
       railingLf: f.railingLf > 0 ? f.railingLf : null,
       stairFlights: f.stairFlights,
       stairSteps: f.stairSteps,
@@ -134,15 +140,30 @@ export function DeckGeneratorPanel({
                 <option value="composite">Composite</option>
               </Select>
             </div>
-            <div>
-              <Label>Height</Label>
-              <Select value={f.heightBand} onChange={(e) => set("heightBand", e.target.value)}>
-                {HEIGHT_BANDS.map((b) => (
-                  <option key={b.value} value={b.value}>
-                    {b.label}
-                  </option>
+            <div className="col-span-2 sm:col-span-3">
+              <Label>Height off the ground (in)</Label>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="w-24">
+                  <NumberInput value={f.heightIn} onValueChange={(n) => set("heightIn", n)} />
+                </div>
+                {f.heightIn > 0 && (
+                  <span className="text-xs tabular-nums text-slate-400">≈ {(f.heightIn / 12).toFixed(1)} ft</span>
+                )}
+                {HEIGHT_PRESETS.map((p) => (
+                  <button
+                    key={p.label}
+                    type="button"
+                    onClick={() => set("heightIn", p.inches)}
+                    className={`rounded-full border px-2.5 py-1 text-xs font-medium transition ${
+                      f.heightIn === p.inches
+                        ? "border-transparent bg-[color:rgb(var(--glass-ink))] text-white"
+                        : "border-slate-200 text-slate-500 hover:border-slate-300 hover:text-slate-700"
+                    }`}
+                  >
+                    {p.label}
+                  </button>
                 ))}
-              </Select>
+              </div>
             </div>
             <div>
               <Label>Length (ft)</Label>

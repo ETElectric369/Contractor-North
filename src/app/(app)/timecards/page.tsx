@@ -281,6 +281,7 @@ export default async function TimecardsPage({
         <div className="flex flex-wrap items-center gap-2">
           <AddEntryButton
             isStaff
+            jobCodesEnabled={orgSettings.timeclock_job_codes}
             members={members ?? []}
             jobCodes={(jobCodes ?? []) as JobCode[]}
             jobs={jobs ?? []}
@@ -453,6 +454,7 @@ export default async function TimecardsPage({
                       jobs={jobs ?? []}
                       members={members ?? []}
                       isStaff
+                      jobCodesEnabled={orgSettings.timeclock_job_codes}
                     />
                   </li>
                 );
@@ -610,6 +612,7 @@ export default async function TimecardsPage({
                             jobs={jobs ?? []}
                             members={members ?? []}
                             isStaff
+                            jobCodesEnabled={orgSettings.timeclock_job_codes}
                           />
                         </div>
                       </div>

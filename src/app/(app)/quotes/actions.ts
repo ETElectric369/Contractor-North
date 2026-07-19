@@ -16,6 +16,7 @@ import { createWorkOrderFromQuote } from "../work-orders/actions";
 import { createMaterialListFromQuote } from "../materials/actions";
 import { findMatchingCustomerId, type DupCustomer } from "@/lib/crm/duplicates";
 import { visibleCustomerIdOrNull } from "@/lib/job-visibility";
+import { docLabel, type QuoteDocType } from "@/lib/doc-label";
 import type { QuoteCircuit } from "@/lib/types";
 
 function publicQuoteLink(token: string) {
@@ -50,7 +51,7 @@ export async function textQuote(
   if (!customer?.phone)
     return { ok: false, error: "This customer has no phone number." };
 
-  const label = ((quote as any).doc_type ?? "quote") === "estimate" ? "Estimate" : "Quote";
+  const label = docLabel(quote as { doc_type?: string | null });
   const { data: org } = await supabase.from("organizations").select("name, settings").maybeSingle();
   const link = publicQuoteLink((quote as any).public_token);
   const body = `${org?.name ?? "Your contractor"}: ${label} ${quote.quote_number} ($${Number(quote.total).toFixed(2)}). View: ${link}`;
@@ -82,7 +83,7 @@ export async function emailQuote(
   if (!customer?.email)
     return { ok: false, error: "This customer has no email address." };
   const link = publicQuoteLink((quote as any).public_token);
-  const label = ((quote as any).doc_type ?? "quote") === "estimate" ? "Estimate" : "Quote";
+  const label = docLabel(quote as { doc_type?: string | null });
 
   const { data: org } = await supabase
     .from("organizations")
@@ -153,6 +154,9 @@ export interface SaveQuoteInput {
   notes: string;
   tax_rate: number;
   valid_until: string | null;
+  /** The customer-facing document word (builder toggle) — omitted = 'estimate',
+   *  matching the app's estimate-first default (migration 0086). */
+  doc_type?: QuoteDocType;
   items: DraftLineItem[];
 }
 
@@ -458,7 +462,8 @@ export async function saveQuote(input: SaveQuoteInput) {
       tax,
       total,
       valid_until: input.valid_until,
-      doc_type: "estimate", // everything is an Estimate (T&M) by default; toggle to a fixed-price Quote
+      // The builder's Estimate|Quote toggle; absent (Nort, duplicates of old rows) = Estimate (T&M).
+      doc_type: input.doc_type === "quote" ? "quote" : "estimate",
       created_by: ctx.userId,
     })
     // quote_number is stamped by the BEFORE-INSERT trigger (0004 next_doc_number),
@@ -541,7 +546,7 @@ export async function duplicateQuote(
 
   const { data: quote } = await supabase
     .from("quotes")
-    .select("customer_id, title, notes, tax_rate, valid_until")
+    .select("customer_id, title, notes, tax_rate, valid_until, doc_type")
     .eq("id", id)
     .maybeSingle();
   if (!quote) return { ok: false, error: "Quote not found." };
@@ -559,6 +564,8 @@ export async function duplicateQuote(
     notes: quote.notes ?? "",
     tax_rate: Number(quote.tax_rate) || 0,
     valid_until: quote.valid_until ?? null,
+    // A copy keeps the customer-facing word — a fixed-price Quote doesn't revert to Estimate.
+    doc_type: quote.doc_type === "quote" ? "quote" : "estimate",
     items: (items ?? []).map((it: any) => ({
       description: it.description,
       quantity: Number(it.quantity) || 1,

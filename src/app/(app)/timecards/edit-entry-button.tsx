@@ -64,6 +64,7 @@ export function EditEntryButton({
   jobs = [],
   members = [],
   isStaff = false,
+  jobCodesEnabled = true,
   initialOpen = false,
   hideTrigger = false,
   onClosed,
@@ -73,6 +74,8 @@ export function EditEntryButton({
   jobs?: JobOption[];
   members?: Member[];
   isStaff?: boolean;
+  /** Org setting timeclock_job_codes — when false the code picker is hidden (job-only entries). */
+  jobCodesEnabled?: boolean;
   /** Mount with the modal already open — the /timecards?entry=<id> deep link
    *  (a week-grid pill tap). Pair with hideTrigger + onClosed. */
   initialOpen?: boolean;
@@ -340,17 +343,19 @@ export function EditEntryButton({
           </div>
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <div className="col-span-2">
-              <Label htmlFor="e-code">Job code</Label>
-              <Select id="e-code" value={jobCode} onChange={(e) => setJobCode(e.target.value)}>
-                <option value="">— Code —</option>
-                {jobCodes.map((c) => (
-                  <option key={c.id} value={c.code}>
-                    {c.code} — {c.description}
-                  </option>
-                ))}
-              </Select>
-            </div>
+            {jobCodesEnabled && (
+              <div className="col-span-2">
+                <Label htmlFor="e-code">Job code</Label>
+                <Select id="e-code" value={jobCode} onChange={(e) => setJobCode(e.target.value)}>
+                  <option value="">— Code —</option>
+                  {jobCodes.map((c) => (
+                    <option key={c.id} value={c.code}>
+                      {c.code} — {c.description}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            )}
             <div>
               <Label htmlFor="e-miles">Miles</Label>
               <NumberInput id="e-miles" value={miles} onValueChange={setMiles} />

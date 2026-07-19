@@ -101,6 +101,60 @@ describe("computeDeckEstimate — stairs bill per STEP, sets flag the engineerin
   });
 });
 
+describe("computeDeckEstimate — exact height vs the 30-in guardrail threshold", () => {
+  it("an EXACT height at/under 30 in skips the derived railing and says why", () => {
+    const e = computeDeckEstimate(
+      base({ lengthFt: 20, widthFt: 15, heightFt: 23 / 12, heightIsExact: true }),
+      rate,
+    );
+    // 300sqft*75 + footings 5*1500 — no D2 line, no height supplement
+    expect(e.total).toBe(22500 + 7500);
+    expect(e.lines.some((l) => l.description === "Deck railing")).toBe(false);
+    expect(e.assumptions.some((a) => a.includes("guardrail"))).toBe(true);
+    expect(e.assumptions.some((a) => a.includes("Railing estimated"))).toBe(false);
+  });
+  it("exactly 30 in is NOT above the threshold — still no derived railing", () => {
+    const e = computeDeckEstimate(base({ lengthFt: 10, widthFt: 10, heightFt: 30 / 12, heightIsExact: true }), rate);
+    expect(e.lines.some((l) => l.description === "Deck railing")).toBe(false);
+  });
+  it("31 in is above the threshold — railing derives exactly as today", () => {
+    const e = computeDeckEstimate(base({ lengthFt: 10, widthFt: 10, heightFt: 31 / 12, heightIsExact: true }), rate);
+    expect(e.lines.find((l) => l.description === "Deck railing")?.quantity).toBe(30); // 2*10+10
+  });
+  it("a measured railing LF still prices below the threshold (Chris wants one anyway)", () => {
+    const e = computeDeckEstimate(
+      base({ lengthFt: 10, widthFt: 10, heightFt: 1, heightIsExact: true, railingLf: 25 }),
+      rate,
+    );
+    expect(e.lines.find((l) => l.description === "Deck railing")?.quantity).toBe(25);
+    expect(e.assumptions.some((a) => a.includes("guardrail"))).toBe(false);
+  });
+  it("REGRESSION PIN: a band height (no heightIsExact) never waives railing — public configurator output is unchanged", () => {
+    // The public 'On the ground / low' band sends heightFt 2 (= 24 in) with no flag.
+    const e = computeDeckEstimate(base({ lengthFt: 20, widthFt: 15, heightFt: 2 }), rate);
+    expect(e.lines.find((l) => l.description === "Deck railing")?.quantity).toBe(55); // 2*20+15
+    expect(e.total).toBe(22500 + 9625 + 7500);
+    expect(e.assumptions.some((a) => a.includes("guardrail"))).toBe(false);
+  });
+  it("exact height 0 (blank input) means unknown — keeps today's derive-railing behavior", () => {
+    const e = computeDeckEstimate(base({ lengthFt: 10, widthFt: 10, heightFt: 0, heightIsExact: true }), rate);
+    expect(e.lines.find((l) => l.description === "Deck railing")?.quantity).toBe(30);
+  });
+  it("a resurface below the threshold gets no guardrail note (it never derived railing)", () => {
+    const e = computeDeckEstimate(
+      base({ projectType: "resurface", lengthFt: 10, widthFt: 10, heightFt: 1, heightIsExact: true }),
+      rate,
+    );
+    expect(e.assumptions.some((a) => a.includes("guardrail"))).toBe(false);
+  });
+  it("an exact fractional height still picks the right supplement band (138 in = 11.5 ft → over 10)", () => {
+    const e = computeDeckEstimate(base({ lengthFt: 10, widthFt: 10, heightFt: 138 / 12, heightIsExact: true }), rate);
+    const bands = e.lines.filter((l) => l.description.startsWith("Height supplement"));
+    expect(bands).toHaveLength(1);
+    expect(bands[0].description).toContain("over 10");
+  });
+});
+
 describe("buildDeckRates — markup + deterministic dedup", () => {
   it("applies markup so the rate is the customer SELL price (buy × (1+markup))", () => {
     const r = buildDeckRates([{ code: "D1", buy_price: 60, markup_pct: 25 }]);

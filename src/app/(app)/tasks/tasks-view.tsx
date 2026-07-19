@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, useTransition, type ReactNode } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import Link from "next/link";
 import { Plus, Trash2, Flag, Briefcase, Pencil, Pin, User } from "lucide-react";
@@ -17,7 +17,8 @@ import { jobLabel } from "@/lib/schedule-options";
 export interface ViewTask {
   id: string;
   title: string;
-  category: string;
+  /** Free-form since 0136; null = uncategorized ("No category"). */
+  category: string | null;
   status: string;
   priority: number;
   due_date: string | null;
@@ -42,20 +43,62 @@ interface Person {
   full_name: string | null;
 }
 
-const CATEGORIES: { id: TaskCategory; label: string }[] = [
-  { id: "sales", label: "Sales" },
-  { id: "operations", label: "Operations" },
-  { id: "office", label: "Office" },
-];
+// Categories are free-form since 0136 — the org's own vocabulary, no fixed
+// list. The legacy three keep their pretty labels + chip colors; anything
+// else gets a capitalized label and the neutral chip.
+const LEGACY_LABELS: Record<string, string> = {
+  sales: "Sales",
+  operations: "Operations",
+  office: "Office",
+};
 
-// Category is a glance-chip on the row now, not the organizing principle —
-// the sections answer "what's next", the chip answers "what kind".
+// Category is a glance-chip on the row (default view), not the organizing
+// principle — the sections answer "what's next", the chip answers "what kind".
 const CATEGORY_CHIP: Record<string, string> = {
   sales: "bg-indigo-50 text-indigo-700",
   operations: "bg-green-50 text-green-700",
   office: "bg-amber-50 text-amber-700",
 };
-const categoryLabel = (id: string) => CATEGORIES.find((c) => c.id === id)?.label ?? id;
+const categoryLabel = (id: string) =>
+  LEGACY_LABELS[id.toLowerCase()] ?? id.charAt(0).toUpperCase() + id.slice(1);
+
+/** Datalist-backed free-text category input — autocompletes the org's OWN
+ *  existing values (no invented taxonomy), still accepts anything new. */
+function CategoryInput({
+  value,
+  onChange,
+  categories = [],
+  id,
+  className,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  categories?: string[];
+  id?: string;
+  className?: string;
+}) {
+  const listId = useId();
+  return (
+    <>
+      <Input
+        id={id}
+        list={categories.length ? listId : undefined}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="Category (optional)"
+        aria-label="Category"
+        className={className}
+      />
+      {categories.length > 0 && (
+        <datalist id={listId}>
+          {categories.map((c) => (
+            <option key={c} value={c} />
+          ))}
+        </datalist>
+      )}
+    </>
+  );
+}
 
 const PRIORITIES: { value: number; label: string }[] = [
   { value: 0, label: "Normal" },
@@ -64,18 +107,21 @@ const PRIORITIES: { value: number; label: string }[] = [
 ];
 const priorityLabel = (p: number) => PRIORITIES.find((x) => x.value === p)?.label ?? "High";
 
-/** ONE entry box for all tasks — category picked from a dropdown. */
+/** ONE entry box for all tasks — category is optional free text (org-vocabulary autocomplete). */
 export function NewTaskBox({
   jobs,
   people,
   defaultCategory,
   todayStr,
+  categories,
 }: {
   jobs: JobOption[];
   people: Person[];
   defaultCategory?: TaskCategory;
   /** Org-local today — enables the destination toast ("Added to today's six"). */
   todayStr?: string;
+  /** Existing category values for the autocomplete datalist. */
+  categories?: string[];
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -83,7 +129,7 @@ export function NewTaskBox({
   const pathname = usePathname();
   const [pending, start] = useTransition();
   const [title, setTitle] = useState("");
-  const [category, setCategory] = useState<TaskCategory>(defaultCategory ?? "office");
+  const [category, setCategory] = useState<string>(defaultCategory ?? "");
   const [jobId, setJobId] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [priority, setPriority] = useState(0);
@@ -111,7 +157,7 @@ export function NewTaskBox({
     start(async () => {
       const res = await createTask({
         title,
-        category,
+        category: category.trim() || null,
         job_id: jobId || null,
         due_date: dueDate || null,
         priority,
@@ -136,7 +182,7 @@ export function NewTaskBox({
               ? "Added to today's six"
               : dueDate && dueDate < todayStr
                 ? "Added — overdue"
-                : category === "office"
+                : category.trim().toLowerCase() === "office"
                   ? "Added to Office"
                   : "Added to Everything else";
         toast(landed, "success");
@@ -165,16 +211,7 @@ export function NewTaskBox({
             className="min-w-[200px] flex-1"
           />
           {expanded && (
-            <Select
-              value={category}
-              onChange={(e) => setCategory(e.target.value as TaskCategory)}
-              className="w-36"
-              aria-label="Category"
-            >
-              {CATEGORIES.map((c) => (
-                <option key={c.id} value={c.id}>{c.label}</option>
-              ))}
-            </Select>
+            <CategoryInput value={category} onChange={setCategory} categories={categories} className="w-40" />
           )}
           <Button onClick={add} disabled={pending || !title.trim()}>
             <Plus className="h-4 w-4" /> Add
@@ -209,25 +246,29 @@ export function NewTaskBox({
   );
 }
 
-/** Full edit modal: title, job, due date, priority, and assigned person. */
+/** Full edit modal: title, category, job, due date, priority, and assigned person. */
 function TaskEditModal({
   t,
   jobs,
   people,
   category,
+  categories,
   open,
   onClose,
 }: {
   t: ViewTask;
   jobs: JobOption[];
   people: Person[];
-  category: TaskCategory;
+  category: string | null;
+  /** Existing category values for the autocomplete datalist. */
+  categories?: string[];
   open: boolean;
   onClose: () => void;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [title, setTitle] = useState(t.title);
+  const [cat, setCat] = useState(t.category ?? "");
   const [jobId, setJobId] = useState(t.job_id ?? "");
   const [dueDate, setDueDate] = useState(t.due_date ?? "");
   const [priority, setPriority] = useState(t.priority);
@@ -244,6 +285,7 @@ function TaskEditModal({
         t.id,
         {
           title,
+          category: cat.trim() || null,
           job_id: jobId || null,
           due_date: dueDate || null,
           priority,
@@ -271,6 +313,10 @@ function TaskEditModal({
         <div>
           <Label htmlFor="te-title">Title</Label>
           <Input id="te-title" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />
+        </div>
+        <div>
+          <Label htmlFor="te-cat">Category</Label>
+          <CategoryInput id="te-cat" value={cat} onChange={setCat} categories={categories} />
         </div>
         <div>
           <Label htmlFor="te-job">Job</Label>
@@ -335,6 +381,7 @@ export function TaskRow({
   jobs,
   people,
   category,
+  categories,
   subtasks = [],
   showCategory = false,
   overdue = false,
@@ -343,7 +390,9 @@ export function TaskRow({
   t: ViewTask;
   jobs: JobOption[];
   people: Person[];
-  category: TaskCategory;
+  category: string | null;
+  /** Existing category values — feeds the edit modal's autocomplete. */
+  categories?: string[];
   subtasks?: ViewTask[];
   showCategory?: boolean;
   overdue?: boolean;
@@ -433,8 +482,8 @@ export function TaskRow({
                 <Briefcase className="h-3 w-3" /> {t.jobs.name}
               </Link>
             )}
-            {showCategory && (
-              <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${CATEGORY_CHIP[t.category] ?? "bg-slate-100 text-slate-500"}`}>
+            {showCategory && t.category && (
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${CATEGORY_CHIP[t.category.toLowerCase()] ?? "bg-slate-100 text-slate-500"}`}>
                 {categoryLabel(t.category)}
               </span>
             )}
@@ -509,7 +558,7 @@ export function TaskRow({
       )}
 
       {editing && (
-        <TaskEditModal t={t} jobs={jobs} people={people} category={category} open={editing} onClose={() => setEditing(false)} />
+        <TaskEditModal t={t} jobs={jobs} people={people} category={category} categories={categories} open={editing} onClose={() => setEditing(false)} />
       )}
     </li>
   );
@@ -550,15 +599,18 @@ function TimeSection({
 }
 
 /**
- * Tasks grouped by WHEN, not what kind — Overdue / Today / This week / Later /
- * Someday, in that order, so "what's next" is a 3-second read. Empty sections
- * stay hidden; completed sinks to the bottom behind a bounded fetch.
+ * Tasks grouped by WHEN by default — Overdue / Today / This week / Later /
+ * Someday, in that order, so "what's next" is a 3-second read — with a
+ * ?by=category toggle that regroups the same open tasks by the org's own
+ * category vocabulary (uncategorized last, under "No category"). Empty
+ * sections stay hidden; completed sinks to the bottom behind a bounded fetch.
  */
 export function TasksView({
   tasks,
   jobs,
   people = [],
   category,
+  categories = [],
   todayStr,
   doneTotal = 0,
   showingAllDone = false,
@@ -567,14 +619,27 @@ export function TasksView({
   jobs: JobOption[];
   people?: Person[];
   category?: TaskCategory;
+  /** The org's existing category values (autocomplete + by-category view). */
+  categories?: string[];
   todayStr: string;
   doneTotal?: number;
   showingAllDone?: boolean;
 }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  // Keep the tech door's ?mine=1 filter when expanding completed history.
-  const mineQ = searchParams.get("mine") === "1" ? "mine=1&" : "";
+  // The by-category regroup only exists on the all-tasks pages — a single
+  // category's page has nothing to regroup.
+  const byCategory = !category && searchParams.get("by") === "category";
+
+  // Preserve every live filter (?mine / ?else / ?by) when building links —
+  // only the transient ?new focus flag is dropped.
+  const hrefWith = (mutate: (p: URLSearchParams) => void) => {
+    const p = new URLSearchParams(searchParams.toString());
+    p.delete("new");
+    mutate(p);
+    const qs = p.toString();
+    return qs ? `${pathname}?${qs}` : pathname;
+  };
 
   // Nest subtasks under their parent; a subtask whose parent wasn't fetched
   // (e.g. an old completed parent past the done limit) surfaces as its own row.
@@ -595,31 +660,81 @@ export function TasksView({
   const doneTop = top.filter((t) => t.status === "done");
   const doneFetched = tasks.filter((t) => t.status === "done").length;
 
-  const row = (t: ViewTask, overdue = false) => (
+  // Overdue is a per-task fact (works in both groupings): in the when-view it
+  // matches the Overdue section exactly; in the category view it keeps the red
+  // due-chip on late tasks inside their category.
+  const row = (t: ViewTask) => (
     <TaskRow
       key={t.id}
       t={t}
       jobs={jobs}
       people={people}
-      category={(t.category as TaskCategory) ?? "office"}
+      category={t.category ?? null}
+      categories={categories}
       subtasks={childrenByParent.get(t.id) ?? []}
-      showCategory={!category}
-      overdue={overdue}
+      showCategory={!category && !byCategory}
+      overdue={!!t.due_date && t.due_date < todayStr}
       todayStr={todayStr}
     />
   );
 
-  const sections: { key: string; label: string; tone: string; countClass?: string; tasks: ViewTask[]; overdue?: boolean }[] = [
-    { key: "overdue", label: "Overdue", tone: "border-red-200 bg-red-50/60", countClass: "font-semibold text-red-600", overdue: true, tasks: openTop.filter((t) => !!t.due_date && t.due_date! < todayStr) },
+  const timeSections: { key: string; label: string; tone: string; countClass?: string; tasks: ViewTask[] }[] = [
+    { key: "overdue", label: "Overdue", tone: "border-red-200 bg-red-50/60", countClass: "font-semibold text-red-600", tasks: openTop.filter((t) => !!t.due_date && t.due_date! < todayStr) },
     { key: "today", label: "Today", tone: "border-sky-200 bg-sky-50/60", tasks: openTop.filter((t) => t.due_date === todayStr) },
     { key: "week", label: "This week", tone: "border-slate-200 bg-slate-50/60", tasks: openTop.filter((t) => !!t.due_date && t.due_date! > todayStr && t.due_date! <= weekEnd) },
     { key: "later", label: "Later", tone: "border-slate-200 bg-slate-50/40", tasks: openTop.filter((t) => !!t.due_date && t.due_date! > weekEnd) },
     { key: "someday", label: "Someday", tone: "border-slate-200 bg-white", tasks: openTop.filter((t) => !t.due_date) },
   ].filter((s) => s.tasks.length > 0);
 
+  // Same open tasks regrouped by category — grouped case-insensitively (the
+  // datalist steers toward one casing, but "Permits"/"permits" never split),
+  // A→Z, uncategorized last under "No category".
+  const catMap = new Map<string, { label: string; tasks: ViewTask[] }>();
+  const uncategorized: ViewTask[] = [];
+  if (byCategory) {
+    for (const t of openTop) {
+      const raw = (t.category ?? "").trim();
+      if (!raw) { uncategorized.push(t); continue; }
+      const g = catMap.get(raw.toLowerCase());
+      if (g) g.tasks.push(t);
+      else catMap.set(raw.toLowerCase(), { label: categoryLabel(raw), tasks: [t] });
+    }
+  }
+  const categorySections = [...catMap.values()]
+    .sort((a, b) => a.label.localeCompare(b.label))
+    .map((g) => ({ key: `cat-${g.label}`, label: g.label, tone: "border-slate-200 bg-slate-50/60", countClass: undefined as string | undefined, tasks: g.tasks }));
+  if (uncategorized.length > 0) {
+    categorySections.push({ key: "cat-none", label: "No category", tone: "border-slate-200 bg-white", countClass: undefined, tasks: uncategorized });
+  }
+
+  const sections = byCategory ? categorySections : timeSections;
+
   return (
     <div>
-      <NewTaskBox jobs={jobs} people={people} defaultCategory={category} todayStr={todayStr} />
+      <NewTaskBox jobs={jobs} people={people} defaultCategory={category} todayStr={todayStr} categories={categories} />
+      {/* View toggle — link pills (the app's filter idiom), URL-driven so the
+          grouping survives reloads and deep links. Hidden on /tasks/[category]. */}
+      {!category && (
+        <div className="mb-4 flex items-center gap-1.5">
+          {([
+            { on: false, label: "By when" },
+            { on: true, label: "By category" },
+          ] as const).map((p) => (
+            <Link
+              key={p.label}
+              href={hrefWith((q) => (p.on ? q.set("by", "category") : q.delete("by")))}
+              aria-current={byCategory === p.on ? "page" : undefined}
+              className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-medium ${
+                byCategory === p.on
+                  ? "bg-brand text-white shadow-sm"
+                  : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              {p.label}
+            </Link>
+          ))}
+        </div>
+      )}
       <div className="space-y-4">
         {sections.length === 0 && (
           <Card>
@@ -628,7 +743,7 @@ export function TasksView({
         )}
         {sections.map((s) => (
           <TimeSection key={s.key} label={s.label} tone={s.tone} count={s.tasks.length} countClass={s.countClass}>
-            {s.tasks.map((t) => row(t, s.overdue))}
+            {s.tasks.map((t) => row(t))}
           </TimeSection>
         ))}
         {doneTop.length > 0 && (
@@ -640,7 +755,7 @@ export function TasksView({
             footer={
               !showingAllDone && doneTotal > doneFetched ? (
                 <div className="border-t border-slate-200/70 bg-white px-4 py-2.5 text-center">
-                  <Link href={`${pathname}?${mineQ}done=all`} className="text-xs font-medium text-brand hover:underline">
+                  <Link href={hrefWith((q) => q.set("done", "all"))} className="text-xs font-medium text-brand hover:underline">
                     Show all completed ({doneTotal})
                   </Link>
                 </div>

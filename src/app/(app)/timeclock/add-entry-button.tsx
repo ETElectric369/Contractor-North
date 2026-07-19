@@ -10,12 +10,14 @@ import { NumberInput } from "@/components/ui/number-input";
 import { createManualEntry } from "./actions";
 import { todayStrInTz } from "@/lib/tz";
 import type { JobCode } from "@/lib/types";
-import { jobLabel } from "@/lib/schedule-options";
+import { jobLabel, jobSiteLabel } from "@/lib/schedule-options";
 
 interface JobOption {
   id: string;
   job_number: string;
   name: string;
+  address?: string | null;
+  customer_name?: string | null; // feeds the codes-off customer · address label
 }
 interface Member {
   id: string;
@@ -33,6 +35,7 @@ export function AddEntryButton({
   jobCodes,
   jobs,
   tz = "America/Los_Angeles",
+  jobCodesEnabled = true,
 }: {
   isStaff: boolean;
   members: Member[];
@@ -41,6 +44,9 @@ export function AddEntryButton({
   /** Org IANA timezone, so the default date is the business's local "today"
    *  rather than the browser/UTC day. Defaults to the org-settings default. */
   tz?: string;
+  /** org setting timeclock_job_codes — false drops the code question and labels
+   *  jobs customer · address. Default true = today's form. */
+  jobCodesEnabled?: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -183,17 +189,20 @@ export function AddEntryButton({
           </div>
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            <div className="col-span-2">
-              <Label htmlFor="m-code">Job code</Label>
-              <Select id="m-code" value={jobCode} onChange={(e) => setJobCode(e.target.value)}>
-                <option value="">— Code —</option>
-                {jobCodes.map((c) => (
-                  <option key={c.id} value={c.code}>
-                    {c.code} — {c.description}
-                  </option>
-                ))}
-              </Select>
-            </div>
+            {/* Codes off: no code question — the entry carries just its job below. */}
+            {jobCodesEnabled && (
+              <div className="col-span-2">
+                <Label htmlFor="m-code">Job code</Label>
+                <Select id="m-code" value={jobCode} onChange={(e) => setJobCode(e.target.value)}>
+                  <option value="">— Code —</option>
+                  {jobCodes.map((c) => (
+                    <option key={c.id} value={c.code}>
+                      {c.code} — {c.description}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            )}
             <div>
               <Label htmlFor="m-miles">Miles</Label>
               <NumberInput id="m-miles" value={miles} onValueChange={setMiles} />
@@ -226,7 +235,7 @@ export function AddEntryButton({
               <option value="">— No job —</option>
               {jobs.map((j) => (
                 <option key={j.id} value={j.id}>
-                  {jobLabel(j)}
+                  {jobCodesEnabled ? jobLabel(j) : jobSiteLabel(j)}
                 </option>
               ))}
             </Select>

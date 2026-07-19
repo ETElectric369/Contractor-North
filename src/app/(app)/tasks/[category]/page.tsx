@@ -23,7 +23,7 @@ export default async function CategoryTasksPage({
   if (!LABELS[category]) notFound();
 
   const showAllDone = sp?.done === "all";
-  const { todayStr, tasks, doneTotal, jobs, people } = await getTasksPageData(category, showAllDone);
+  const { todayStr, tasks, doneTotal, jobs, people, categories } = await getTasksPageData(category, showAllDone);
 
   return (
     <div>
@@ -36,6 +36,7 @@ export default async function CategoryTasksPage({
         jobs={jobs}
         people={people}
         category={category as TaskCategory}
+        categories={categories}
         todayStr={todayStr}
         doneTotal={doneTotal}
         showingAllDone={showAllDone}

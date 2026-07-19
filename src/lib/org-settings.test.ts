@@ -1,5 +1,24 @@
 import { describe, it, expect } from "vitest";
-import { parseGeoFromMapUrl } from "@/lib/org-settings";
+import { getOrgSettings, parseGeoFromMapUrl } from "@/lib/org-settings";
+
+/**
+ * timeclock_job_codes (owner: "I don't want job code…") — the default MUST reproduce
+ * today's behavior byte-identically: an org that never touched the setting keeps the
+ * code pickers everywhere. Only an explicit false turns them off.
+ */
+describe("timeclock_job_codes default", () => {
+  it("defaults ON for orgs that never saved the setting (today's behavior)", () => {
+    expect(getOrgSettings(undefined).timeclock_job_codes).toBe(true);
+    expect(getOrgSettings(null).timeclock_job_codes).toBe(true);
+    expect(getOrgSettings({}).timeclock_job_codes).toBe(true);
+    expect(getOrgSettings({ auto_lunch_30: true }).timeclock_job_codes).toBe(true);
+  });
+
+  it("honors an explicit stored choice", () => {
+    expect(getOrgSettings({ timeclock_job_codes: false }).timeclock_job_codes).toBe(false);
+    expect(getOrgSettings({ timeclock_job_codes: true }).timeclock_job_codes).toBe(true);
+  });
+});
 
 describe("parseGeoFromMapUrl — geo from a pasted Google Maps link", () => {
   it("prefers the place marker (!3d/!4d) — the actual business pin", () => {

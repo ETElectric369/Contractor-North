@@ -26,6 +26,11 @@ export const DECK_ESTIMATE_CODES = [
   "DS3D", "DS3C",
 ] as const;
 
+/** IRC R312.1: a guardrail is code-required only when the walking surface sits MORE than
+ *  30 in above grade. Only an exact measured height may waive the derived railing (see
+ *  heightIsExact) — band-representative heights keep the always-derive behavior. */
+export const GUARDRAIL_REQUIRED_ABOVE_IN = 30;
+
 /** What the configurator collects. Measurements are the homeowner's best guess; the office
  *  confirms on site. railingLf null → derive it from the footprint. */
 export type DeckAnswers = {
@@ -34,6 +39,11 @@ export type DeckAnswers = {
   lengthFt: number;
   widthFt: number;
   heightFt: number; // height at the tallest point
+  /** true → heightFt is a MEASURED number (office custom input), so a deck at or under the
+   *  30-in guardrail threshold skips the DERIVED railing (code doesn't require one; explicit
+   *  railingLf still prices). Absent/false → a band representative: never waives railing, so
+   *  the public configurator's prices are unchanged. */
+  heightIsExact?: boolean;
   railingLf: number | null;
   stairFlights: number; // SETS of stairs — a second set implies a landing + extra engineering
   stairSteps?: number; // total individual steps across all sets — D4 bills per step (default 0)
@@ -137,15 +147,22 @@ export function computeDeckEstimate(a: DeckAnswers, rate: Rate): DeckEstimate {
   }
 
   // Railing: use the measured value; else derive from the footprint, but ONLY for a new
-  // build — a resurface keeps its existing railing, so don't invent one.
+  // build — a resurface keeps its existing railing, so don't invent one. An exact measured
+  // height at or under the 30-in guardrail threshold also skips the derivation (code doesn't
+  // require a rail down there) — a measured LF still prices one when Chris wants it anyway.
+  const belowGuardrail = a.heightIsExact === true && H > 0 && H <= GUARDRAIL_REQUIRED_ABOVE_IN / 12;
   const measuredRail = a.railingLf != null && a.railingLf > 0;
   const railingLf = measuredRail
     ? n(a.railingLf)
-    : buildsDeck && !isResurface
+    : buildsDeck && !isResurface && !belowGuardrail
       ? derivedRailingLf(L, W, a.wrapAround)
       : 0;
   if (!measuredRail && railingLf > 0) {
     assumptions.push(`Railing estimated at ${Math.round(railingLf)} LF from the footprint — confirmed on site.`);
+  } else if (!measuredRail && belowGuardrail && buildsDeck && !isResurface && L > 0 && W > 0) {
+    assumptions.push(
+      `${GUARDRAIL_REQUIRED_ABOVE_IN} in or less above grade — code doesn't require a guardrail, so none is included; enter railing LF to add one.`,
+    );
   }
   add("D2", "Deck railing", railingLf, "LF");
 

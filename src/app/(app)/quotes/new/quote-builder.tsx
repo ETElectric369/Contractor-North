@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
+import { SegmentedControl } from "@/components/ui/segmented";
+import { docLabel, type QuoteDocType } from "@/lib/doc-label";
 import { formatCurrency } from "@/lib/utils";
 import { effectiveMarkupPct } from "@/lib/pricing/markup";
 import { subtotalTaxTotal } from "@/lib/invoice-math";
@@ -94,6 +96,9 @@ export function QuoteBuilder({
   const router = useRouter();
   const defaultRate = taxRates.find((t) => t.is_default);
   const [customerId, setCustomerId] = useState(preselected ?? "");
+  // The customer-facing document word — Estimate (T&M) by default, toggle to a
+  // fixed-price Quote per document. Same control as the saved-quote editor.
+  const [docType, setDocType] = useState<QuoteDocType>("estimate");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [notes, setNotes] = useState("");
@@ -175,8 +180,8 @@ export function QuoteBuilder({
   // orphan the draft) so quotes started from different jobs/customers never
   // share.
   const draftState = useMemo(
-    () => ({ customerId, title, description, notes, taxRate, taxChoice, validUntil, items, scope }),
-    [customerId, title, description, notes, taxRate, taxChoice, validUntil, items, scope],
+    () => ({ customerId, docType, title, description, notes, taxRate, taxChoice, validUntil, items, scope }),
+    [customerId, docType, title, description, notes, taxRate, taxChoice, validUntil, items, scope],
   );
   const draft = useDraft(
     // inquiryId is in the key because a lead-sourced estimate (cn-v477 defers the customer, so it
@@ -186,6 +191,8 @@ export function QuoteBuilder({
     draftState,
     (d) => {
       setCustomerId(d.customerId ?? preselected ?? "");
+      // Pre-toggle drafts carry no docType — they keep the estimate default.
+      if (d.docType === "quote" || d.docType === "estimate") setDocType(d.docType);
       setTitle(d.title ?? "");
       setDescription(d.description ?? "");
       setNotes(d.notes ?? "");
@@ -299,6 +306,7 @@ export function QuoteBuilder({
         notes,
         tax_rate: taxRate,
         valid_until: validUntil || null,
+        doc_type: docType,
         items: cleaned,
       });
       if (!res.ok) {
@@ -547,6 +555,20 @@ export function QuoteBuilder({
       <div className="space-y-6">
         <Card>
           <CardContent className="space-y-4 py-5">
+            {/* What the customer's document calls itself — same control as the saved-quote
+                editor. Internal nav stays "Estimates"; this word is document-facing only. */}
+            <div title="Quote = fixed price · Estimate = time & materials">
+              <Label>Document</Label>
+              <SegmentedControl
+                stretch
+                activeId={docType}
+                onSelect={(id) => setDocType(id as QuoteDocType)}
+                items={[
+                  { id: "quote", label: "Quote (Fixed)" },
+                  { id: "estimate", label: "Estimate (T&M)" },
+                ]}
+              />
+            </div>
             <div>
               <Label htmlFor="customer">Customer</Label>
               <Select
@@ -653,7 +675,7 @@ export function QuoteBuilder({
               <p className="pt-2 text-sm text-red-600">{saveError}</p>
             )}
             <Button className="mt-2 w-full" onClick={onSave} disabled={saving}>
-              {saving ? "Saving…" : "Save Estimate"}
+              {saving ? "Saving…" : `Save ${docLabel({ doc_type: docType })}`}
             </Button>
           </CardContent>
         </Card>

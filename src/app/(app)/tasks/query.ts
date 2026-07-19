@@ -41,7 +41,9 @@ export async function getTasksPageData(
   if (mineId) openQ = openQ.eq("assigned_to", mineId);
   // ?else=1 — the staff "Everything else" door counts NON-office tasks, so the
   // page it opens must exclude office too (else the door number never matches).
-  if (opts?.noOffice) openQ = openQ.neq("category", "office");
+  // Since 0136 category can be NULL (uncategorized) — a bare neq would drop
+  // those rows (NULL <> 'office' is NULL), hiding real work behind the door.
+  if (opts?.noOffice) openQ = openQ.or("category.neq.office,category.is.null");
 
   let doneQ = supabase
     .from("tasks")
@@ -50,16 +52,25 @@ export async function getTasksPageData(
     .order("completed_at", { ascending: false, nullsFirst: false });
   if (category) doneQ = doneQ.eq("category", category);
   if (mineId) doneQ = doneQ.eq("assigned_to", mineId);
-  if (opts?.noOffice) doneQ = doneQ.neq("category", "office");
+  if (opts?.noOffice) doneQ = doneQ.or("category.neq.office,category.is.null");
   if (!showAllDone) doneQ = doneQ.limit(DONE_LIMIT);
 
-  const [{ data: orgRow }, openR, doneR, { data: jobs }, { data: people }] =
+  const [{ data: orgRow }, openR, doneR, { data: jobs }, { data: people }, { data: catRows }] =
     await Promise.all([
       supabase.from("organizations").select("settings").limit(1).maybeSingle(),
       openQ,
       doneQ,
       supabase.from("jobs").select("id, job_number, name").order("created_at", { ascending: false }).limit(100),
       listActiveTechs(supabase),
+      // The org's OWN category vocabulary (free-form since 0136) — feeds the
+      // create/edit autocomplete and the by-category pills. Recent-first slice,
+      // deduped below; no invented taxonomy, only values actually in use.
+      supabase
+        .from("tasks")
+        .select("category")
+        .not("category", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(1000),
     ]);
 
   // The ?mine cut filters by assignee — which drops the UNASSIGNED subtasks of a
@@ -79,11 +90,21 @@ export async function getTasksPageData(
 
   const tz = getOrgSettings((orgRow as any)?.settings).timezone || "America/Los_Angeles";
 
+  // Dedupe case-insensitively but keep the casing the org actually typed
+  // (first hit wins = most recent, thanks to the recent-first order).
+  const seen = new Map<string, string>();
+  for (const r of (catRows ?? []) as { category: string | null }[]) {
+    const raw = (r.category ?? "").trim();
+    if (raw && !seen.has(raw.toLowerCase())) seen.set(raw.toLowerCase(), raw);
+  }
+  const categories = Array.from(seen.values()).sort((a, b) => a.localeCompare(b));
+
   return {
     todayStr: todayStrInTz(tz),
     tasks: [...(openR.data ?? []), ...(doneR.data ?? []), ...extraKids],
     doneTotal: doneR.count ?? doneR.data?.length ?? 0,
     jobs: jobs ?? [],
     people: people ?? [],
+    categories,
   };
 }

@@ -5,6 +5,7 @@ import { companyFromOrg } from "@/components/doc-letterhead";
 import { templateFor } from "@/components/doc-templates";
 import { PublicQuoteAccept } from "./accept";
 import { QuoteDocument } from "@/components/quote-document";
+import { docLabel } from "@/lib/doc-label";
 import { docTitle } from "@/lib/doc-title";
 import type { Metadata } from "next";
 import type { Organization } from "@/lib/types";
@@ -16,7 +17,7 @@ export async function generateMetadata({ params }: { params: Promise<{ token: st
   const supabase = await createClient();
   const { data } = await supabase.rpc("public_quote", { p_token: token });
   const q = (data as any)?.quote;
-  const label = (q?.doc_type ?? "quote") === "estimate" ? "Estimate" : "Quote";
+  const label = docLabel(q);
   return { title: docTitle(q ? `${label} ${q.quote_number}` : "Quote") };
 }
 
@@ -36,7 +37,7 @@ export default async function PublicQuotePage({
   const org = data.org as Organization | null;
   const co = companyFromOrg(org);
   const template = templateFor(org, "quote");
-  const docLabel = (q.doc_type ?? "quote") === "estimate" ? "Estimate" : "Quote";
+  const label = docLabel(q);
 
   return (
     <div className="min-h-screen bg-slate-100 py-8 print:bg-white print:py-0">
@@ -47,7 +48,7 @@ export default async function PublicQuotePage({
       <QuoteDocument
         co={co}
         template={template}
-        docLabel={docLabel}
+        docLabel={label}
         number={q.quote_number}
         createdAt={q.created_at}
         validUntil={q.valid_until}
@@ -71,7 +72,7 @@ export default async function PublicQuotePage({
             accepted={q.status === "accepted"}
             declined={q.status === "declined"}
             brand={co.brand}
-            docLabel={docLabel}
+            docLabel={label}
           />
         }
       />

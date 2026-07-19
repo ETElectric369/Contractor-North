@@ -15,7 +15,7 @@ import { aggregatePayrollEntries } from "@/lib/payroll-math";
 import { hoursBetween, formatCurrency, formatDate, formatDuration, formatTime } from "@/lib/utils";
 import { translator } from "@/lib/i18n";
 import type { JobCode, TimeEntry } from "@/lib/types";
-import { jobLabel } from "@/lib/schedule-options";
+import { jobLabel, jobSiteLabel } from "@/lib/schedule-options";
 
 export const dynamic = "force-dynamic";
 
@@ -61,16 +61,17 @@ export default async function TimeclockPage() {
     supabase.from("job_codes").select("*").eq("active", true).order("code"),
     supabase
       .from("jobs")
-      .select("id, job_number, name, address, city, state, zip, code_template_id")
+      // customers(name) feeds the codes-off job identity label (customer · address).
+      .select("id, job_number, name, address, city, state, zip, code_template_id, customers(name)")
       .in("status", ACTIVE_JOB_STATUSES)
       .order("created_at", { ascending: false })
       .limit(50),
     supabase
       .from("time_entries")
-      // job_number rides along for the tech's read-only "My timecard" card below —
-      // entries can point at finished jobs, so the ACTIVE-jobs options list can't
-      // resolve the label.
-      .select("*, job:job_id(job_number)")
+      // The job label fields ride along for the tech's read-only "My timecard" card
+      // and the week summary below — entries can point at finished jobs, so the
+      // ACTIVE-jobs options list can't resolve the label.
+      .select("*, job:job_id(job_number, name, address, customers(name))")
       .eq("profile_id", user?.id ?? "")
       .gte("clock_in", weekAgo)
       .order("clock_in", { ascending: false }),
@@ -88,6 +89,9 @@ export default async function TimeclockPage() {
   ]);
   const orgSettings = getOrgSettings((orgRes.data as any)?.settings);
   const crewLead = !!(leadRes.data as any)?.crew_lead;
+  // Codes on (default) = today's behavior everywhere. Codes off = no code pickers on
+  // any timeclock surface, and job labels lead with customer · street address.
+  const jobCodesOn = orgSettings.timeclock_job_codes;
 
   // Each member's current assignment for the staff crew-assignment board — the SAME
   // priority the clock-in job resolution uses (the shared tier-1 pick in
@@ -124,8 +128,22 @@ export default async function TimeclockPage() {
   const tmplMap = new Map((tmplData ?? []).map((t: any) => [t.id as string, (t.codes ?? []) as string[]]));
   const jobOptions = ((jobsRes.data ?? []) as any[]).map((j) => ({
     ...j,
+    customer_name: (j.customers?.name as string | undefined) ?? null,
     codes: j.code_template_id ? tmplMap.get(j.code_template_id) : undefined,
   }));
+
+  // The label a week-old entry's JOB shows on this page: the job number (codes on,
+  // unchanged) or the customer · address identity (codes off). Entries can point at
+  // finished jobs, so this reads the entry's own join, not the active-jobs options.
+  const weekJobTag = (e: TimeEntry): string | null => {
+    const j = (e as any).job as
+      | { job_number?: string | null; name?: string | null; address?: string | null; customers?: { name?: string | null } | null }
+      | null;
+    if (!j) return null;
+    return jobCodesOn
+      ? (j.job_number ?? null)
+      : jobSiteLabel({ ...j, customer_name: j.customers?.name ?? null });
+  };
 
   const openEntry = (openRes.data as TimeEntry) ?? null;
   // The open entry's switch-recorded allocations, in the order they were written.
@@ -149,7 +167,7 @@ export default async function TimeclockPage() {
     const threeDaysAgo = new Date(Date.now() - 3 * 86_400_000).toISOString();
     const { data: autoEntry } = await supabase
       .from("time_entries")
-      .select("id, clock_in, clock_out, lunch_minutes, job_id, job:job_id(job_number, name)")
+      .select("id, clock_in, clock_out, lunch_minutes, job_id, job:job_id(job_number, name, address, customers(name))")
       .eq("profile_id", user.id)
       .eq("source", "auto_gps")
       .eq("status", "closed")
@@ -170,7 +188,11 @@ export default async function TimeclockPage() {
           clock_out: (autoEntry as any).clock_out,
           lunch_minutes: (autoEntry as any).lunch_minutes ?? 0,
           jobId: (autoEntry as any).job_id ?? null,
-          jobLabel: j ? jobLabel(j) : "the jobsite",
+          jobLabel: j
+            ? jobCodesOn
+              ? jobLabel(j)
+              : jobSiteLabel({ ...j, customer_name: j.customers?.name ?? null })
+            : "the jobsite",
         };
       }
     }
@@ -179,14 +201,16 @@ export default async function TimeclockPage() {
   // The old "Recent entries" table lived here — removed by Erik's call (2026-07 notes):
   // entries already live on /timecards, so the clock page stays a clock, not a ledger.
 
-  // Aggregate hours per job code for the week (closed entries only).
+  // Aggregate the week's hours (closed entries only) — per job CODE (codes on,
+  // unchanged), or per JOB identity when the org turned codes off (every badge
+  // would otherwise read "—").
   const perCode = new Map<string, number>();
   let weekTotal = 0;
   for (const e of week) {
     if (e.status !== "closed" || !e.clock_out) continue;
     const h = hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes);
     weekTotal += h;
-    const key = e.job_code ?? "—";
+    const key = (jobCodesOn ? e.job_code : weekJobTag(e)) ?? "—";
     perCode.set(key, (perCode.get(key) ?? 0) + h);
   }
 
@@ -201,7 +225,7 @@ export default async function TimeclockPage() {
     out: string | null; // null = still on the clock
     lunch: number;
     hours: number | null; // closed entries only; open shows "on the clock"
-    jobNumber: string | null;
+    jobTag: string | null; // job number (codes on) or customer · address (codes off)
   };
   const myTimecard: { day: string; label: string; rows: MyTimecardRow[]; total: number }[] = [];
   if (!isStaff) {
@@ -233,7 +257,7 @@ export default async function TimeclockPage() {
         out: e.clock_out ? formatTime(e.clock_out, tz) : null,
         lunch: Math.max(0, Number(e.lunch_minutes) || 0),
         hours: h,
-        jobNumber: ((e as any).job?.job_number as string | undefined) ?? null,
+        jobTag: weekJobTag(e),
       });
       if (h != null) g.total += h;
     }
@@ -301,13 +325,19 @@ export default async function TimeclockPage() {
           members={members ?? []}
           jobCodes={(codesRes.data ?? []) as JobCode[]}
           jobs={jobOptions}
+          jobCodesEnabled={jobCodesOn}
         />
       </PageHeader>
 
       <div className="grid gap-6 lg:grid-cols-5">
         <div className="lg:col-span-3">
           {autoPrompt && (
-            <AutoClockoutPrompt entry={autoPrompt} jobCodes={(codesRes.data ?? []) as JobCode[]} jobs={jobOptions} />
+            <AutoClockoutPrompt
+              entry={autoPrompt}
+              jobCodes={(codesRes.data ?? []) as JobCode[]}
+              jobs={jobOptions}
+              jobCodesEnabled={jobCodesOn}
+            />
           )}
           <TimeclockPanel
             openEntry={openEntry}
@@ -319,6 +349,7 @@ export default async function TimeclockPage() {
             homeAddress={(prof as any)?.home_address ?? ""}
             isStaff={isStaff}
             crewLead={crewLead}
+            jobCodesEnabled={jobCodesOn}
           />
 
           {/* MY TIMECARD (techs only) — the week's punches, grouped by day, read-only:
@@ -343,7 +374,7 @@ export default async function TimeclockPage() {
                           <span className="min-w-0 truncate text-slate-700">
                             {r.in}–{r.out ?? "now"}
                             {r.lunch > 0 ? ` · ${r.lunch}m lunch` : ""}
-                            {r.jobNumber ? ` · ${r.jobNumber}` : ""}
+                            {r.jobTag ? ` · ${r.jobTag}` : ""}
                           </span>
                           <span className="shrink-0 text-slate-600">
                             {r.hours != null ? formatDuration(r.hours) : "on the clock"}
@@ -404,8 +435,15 @@ export default async function TimeclockPage() {
           {isStaff && (
             <CrewAssignments
               members={(members ?? []).map((m: any) => ({ id: m.id, full_name: m.full_name }))}
-              jobs={jobOptions.map((j: any) => ({ id: j.id, job_number: j.job_number, name: j.name }))}
+              jobs={jobOptions.map((j: any) => ({
+                id: j.id,
+                job_number: j.job_number,
+                name: j.name,
+                address: j.address,
+                customer_name: j.customer_name,
+              }))}
               current={currentAssignment}
+              jobCodesEnabled={jobCodesOn}
             />
           )}
           <Card>

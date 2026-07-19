@@ -4,20 +4,32 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2, Flag, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input, Label, Select } from "@/components/ui/input";
+import { Input, Label } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { formatDate } from "@/lib/utils";
 import { useToast } from "@/components/toast";
-import { createTask, toggleTask, deleteTask, updateTask, type TaskCategory } from "../../tasks/actions";
+import { createTask, toggleTask, deleteTask, updateTask } from "../../tasks/actions";
 
 interface Task {
   id: string;
   title: string;
-  category: string;
+  /** Free-form since 0136; null = uncategorized. */
+  category: string | null;
   status: string;
   priority: number;
   due_date: string | null;
+}
+
+/** Categories already used on THIS job — the datalist for the free-text field
+ *  (free-form since 0136; the org-wide vocabulary lives on /tasks). */
+function jobCategories(tasks: Task[]): string[] {
+  const seen = new Map<string, string>();
+  for (const t of tasks) {
+    const raw = (t.category ?? "").trim();
+    if (raw && !seen.has(raw.toLowerCase())) seen.set(raw.toLowerCase(), raw);
+  }
+  return Array.from(seen.values()).sort((a, b) => a.localeCompare(b));
 }
 
 export function JobTasks({ jobId, tasks }: { jobId: string; tasks: Task[] }) {
@@ -26,10 +38,13 @@ export function JobTasks({ jobId, tasks }: { jobId: string; tasks: Task[] }) {
   const [pending, start] = useTransition();
   const [title, setTitle] = useState("");
   const [dueDate, setDueDate] = useState("");
-  const [category, setCategory] = useState<TaskCategory>("operations");
+  // Pre-filled with the old fixed default so a quick add lands exactly where it
+  // always did (the staff "Everything else" door) — clear it for "No category".
+  const [category, setCategory] = useState("operations");
   const [high, setHigh] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editTask, setEditTask] = useState<Task | null>(null);
+  const categories = jobCategories(tasks);
 
   const open = tasks.filter((t) => t.status !== "done");
   const done = tasks.filter((t) => t.status === "done");
@@ -40,7 +55,7 @@ export function JobTasks({ jobId, tasks }: { jobId: string; tasks: Task[] }) {
     start(async () => {
       const res = await createTask({
         title,
-        category,
+        category: category.trim() || null,
         job_id: jobId,
         due_date: dueDate || null,
         priority: high ? 1 : 0,
@@ -80,7 +95,7 @@ export function JobTasks({ jobId, tasks }: { jobId: string; tasks: Task[] }) {
             <div className="text-xs text-slate-400">Due {formatDate(t.due_date)}</div>
           )}
         </div>
-        <Badge tone="slate">{t.category}</Badge>
+        {t.category && <Badge tone="slate">{t.category}</Badge>}
         <button
           onClick={() => setEditTask(t)}
           className="text-slate-400 hover:text-brand"
@@ -127,12 +142,21 @@ export function JobTasks({ jobId, tasks }: { jobId: string; tasks: Task[] }) {
             <Input id="t-due" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
           </div>
           <div>
-            <Label htmlFor="t-cat">Area</Label>
-            <Select id="t-cat" value={category} onChange={(e) => setCategory(e.target.value as TaskCategory)}>
-              <option value="sales">Sales</option>
-              <option value="operations">Operations</option>
-              <option value="office">Office</option>
-            </Select>
+            <Label htmlFor="t-cat">Category</Label>
+            <Input
+              id="t-cat"
+              list={categories.length ? "jt-cat-options" : undefined}
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              placeholder="Optional"
+            />
+            {categories.length > 0 && (
+              <datalist id="jt-cat-options">
+                {categories.map((c) => (
+                  <option key={c} value={c} />
+                ))}
+              </datalist>
+            )}
           </div>
           <label className="flex items-end gap-2 pb-2 text-sm text-slate-600">
             <input type="checkbox" checked={high} onChange={(e) => setHigh(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand" />
@@ -156,20 +180,20 @@ export function JobTasks({ jobId, tasks }: { jobId: string; tasks: Task[] }) {
       )}
 
       {editTask && (
-        <JobTaskEditModal key={editTask.id} task={editTask} jobId={jobId} onClose={() => setEditTask(null)} />
+        <JobTaskEditModal key={editTask.id} task={editTask} jobId={jobId} categories={categories} onClose={() => setEditTask(null)} />
       )}
     </div>
   );
 }
 
-/** Edit a job task's title / due date / area / priority. Uses updateTask's
+/** Edit a job task's title / due date / category / priority. Uses updateTask's
  *  partial patch, so it never touches the assignee or tags set elsewhere. */
-function JobTaskEditModal({ task, jobId, onClose }: { task: Task; jobId: string; onClose: () => void }) {
+function JobTaskEditModal({ task, jobId, categories = [], onClose }: { task: Task; jobId: string; categories?: string[]; onClose: () => void }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [title, setTitle] = useState(task.title);
   const [dueDate, setDueDate] = useState(task.due_date ?? "");
-  const [category, setCategory] = useState<TaskCategory>((task.category as TaskCategory) ?? "operations");
+  const [category, setCategory] = useState(task.category ?? "");
   const [high, setHigh] = useState(task.priority > 0);
   const [error, setError] = useState<string | null>(null);
 
@@ -179,7 +203,7 @@ function JobTaskEditModal({ task, jobId, onClose }: { task: Task; jobId: string;
     start(async () => {
       const res = await updateTask(
         task.id,
-        { title, due_date: dueDate || null, category, priority: high ? 1 : 0 },
+        { title, due_date: dueDate || null, category: category.trim() || null, priority: high ? 1 : 0 },
         { jobId },
       );
       if (!res.ok) return setError(res.error ?? "Could not save.");
@@ -207,12 +231,21 @@ function JobTaskEditModal({ task, jobId, onClose }: { task: Task; jobId: string;
             <Input id="jte-due" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
           </div>
           <div>
-            <Label htmlFor="jte-cat">Area</Label>
-            <Select id="jte-cat" value={category} onChange={(e) => setCategory(e.target.value as TaskCategory)}>
-              <option value="sales">Sales</option>
-              <option value="operations">Operations</option>
-              <option value="office">Office</option>
-            </Select>
+            <Label htmlFor="jte-cat">Category</Label>
+            <Input
+              id="jte-cat"
+              list={categories.length ? "jte-cat-options" : undefined}
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              placeholder="Optional"
+            />
+            {categories.length > 0 && (
+              <datalist id="jte-cat-options">
+                {categories.map((c) => (
+                  <option key={c} value={c} />
+                ))}
+              </datalist>
+            )}
           </div>
         </div>
         <label className="flex items-center gap-2 text-sm text-slate-600">

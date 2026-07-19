@@ -6,7 +6,7 @@ import { Loader2, Users } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select } from "@/components/ui/input";
 import { assignMemberToJob } from "./actions";
-import { jobLabel } from "@/lib/schedule-options";
+import { jobLabel, jobSiteLabel } from "@/lib/schedule-options";
 
 interface MemberRow {
   id: string;
@@ -16,6 +16,8 @@ interface JobOpt {
   id: string;
   job_number: string;
   name: string;
+  address?: string | null;
+  customer_name?: string | null; // feeds the codes-off customer · address label
 }
 
 /**
@@ -29,10 +31,13 @@ export function CrewAssignments({
   members,
   jobs,
   current,
+  jobCodesEnabled = true,
 }: {
   members: MemberRow[];
   jobs: JobOpt[];
   current: Record<string, string>;
+  /** org setting timeclock_job_codes — false labels jobs customer · address. */
+  jobCodesEnabled?: boolean;
 }) {
   const router = useRouter();
   const [assign, setAssign] = useState<Record<string, string>>(current);
@@ -87,7 +92,7 @@ export function CrewAssignments({
                 <option value="">— No job —</option>
                 {jobs.map((j) => (
                   <option key={j.id} value={j.id}>
-                    {jobLabel(j)}
+                    {jobCodesEnabled ? jobLabel(j) : jobSiteLabel(j)}
                   </option>
                 ))}
               </Select>

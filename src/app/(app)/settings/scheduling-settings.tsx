@@ -22,6 +22,7 @@ export function SchedulingSettings({
   const [method, setMethod] = useState(settings.time_tracking_method);
   const [autoLunch, setAutoLunch] = useState(settings.auto_lunch_30);
   const [remindClock, setRemindClock] = useState(settings.remind_timeclock);
+  const [askJobCodes, setAskJobCodes] = useState(settings.timeclock_job_codes);
   const [geofence, setGeofence] = useState(settings.geofence_logout);
   const [radius, setRadius] = useState(settings.geofence_radius_m);
   const [supervisor, setSupervisor] = useState(settings.timecard_supervisor_id);
@@ -42,6 +43,7 @@ export function SchedulingSettings({
         time_tracking_method: method,
         auto_lunch_30: autoLunch,
         remind_timeclock: remindClock,
+        timeclock_job_codes: askJobCodes,
         geofence_logout: geofence,
         geofence_radius_m: Math.max(50, Math.round(Number(radius) || 300)),
         timecard_supervisor_id: supervisor,
@@ -99,6 +101,21 @@ export function SchedulingSettings({
           <input type="checkbox" checked={remindClock} onChange={(e) => setRemindClock(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand" />
           <span>Text timeclock reminders to techs — a morning nudge if they haven&apos;t clocked in, and an end-of-day reminder to clock out / fill in the day&apos;s details.</span>
         </label>
+      </div>
+
+      <div className="space-y-2 border-t border-slate-100 pt-4">
+        <div className="text-sm font-medium text-slate-700">Job codes on the timeclock</div>
+        <label className="flex items-start gap-2 text-sm text-slate-600">
+          <input type="checkbox" checked={askJobCodes} onChange={(e) => setAskJobCodes(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand" />
+          <span>Ask the crew for job codes (the clock-out code breakdown and the code pickers).</span>
+        </label>
+        {!askJobCodes && (
+          <p className="pl-6 text-xs text-slate-400">
+            Codes off: each entry just carries its job — no code questions anywhere on the clock —
+            and job pickers identify work by customer &amp; street address instead of the job number.
+            Mid-shift job switching and hours still work the same, and pay math is unchanged.
+          </p>
+        )}
       </div>
 
       <div className="space-y-2 border-t border-slate-100 pt-4">
