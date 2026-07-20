@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeArAging, computeArByCustomer, computeRevenueTrend, computeQuoteStats, computeCustomerValue, trailing12Months } from "@/lib/analytics/money-metrics";
+import { computeArAging, computeArByCustomer, computeRevenueTrend, computeQuoteStats, computeCustomerValue, trailing12Months, jobBillingStatus } from "@/lib/analytics/money-metrics";
 
 describe("computeArAging — A/R buckets (reconciles /analytics)", () => {
   const TODAY = "2026-07-05"; // org-local today
@@ -60,6 +60,71 @@ describe("computeArAging — A/R buckets (reconciles /analytics)", () => {
     expect(byNum["2026-07-05"].daysLate).toBe(0);
     expect(byNum["2026-07-04"].bucket).toBe("d30");
     expect(byNum["2026-07-04"].daysLate).toBe(1);
+  });
+});
+
+describe("jobBillingStatus — the /jobs completed-row tag (shares AR's invoiceBalance math)", () => {
+  const inv = (status: string, total = 1000, paid = 0) => ({ status, total, amount_paid: paid });
+
+  it("no invoices at all → To Be Invoiced", () => {
+    expect(jobBillingStatus([])).toBe("to_be_invoiced");
+  });
+
+  it("draft-ONLY → To Be Invoiced (the finish-job 'held for review' queue case)", () => {
+    // auto_send_invoice_on_complete=false parks the auto-invoice as a draft in the
+    // "To be invoiced" queue — the tag must use the app's own vocabulary for that.
+    expect(jobBillingStatus([inv("draft", 500)])).toBe("to_be_invoiced");
+  });
+
+  it("void invoices don't count as billed", () => {
+    expect(jobBillingStatus([inv("void", 500)])).toBe("to_be_invoiced");
+    expect(jobBillingStatus([inv("void", 500), inv("draft", 500)])).toBe("to_be_invoiced");
+  });
+
+  it("sent + nothing paid → Pending", () => {
+    expect(jobBillingStatus([inv("sent", 1000)])).toBe("pending");
+  });
+
+  it("OVERDUE still reads Pending here — aging is /billing/ar's concern, not the tag's", () => {
+    expect(jobBillingStatus([inv("overdue", 1000)])).toBe("pending");
+  });
+
+  it("some but not all paid → Partial (partially-paid invoice)", () => {
+    expect(jobBillingStatus([inv("partial", 1000, 400)])).toBe("partial");
+  });
+
+  it("one invoice paid, another still open → Partial (job-level, not invoice-level)", () => {
+    expect(jobBillingStatus([inv("paid", 500, 500), inv("sent", 500)])).toBe("partial");
+  });
+
+  it("every live invoice settled → Paid In Full", () => {
+    expect(jobBillingStatus([inv("paid", 1000, 1000)])).toBe("paid_in_full");
+    expect(jobBillingStatus([inv("paid", 500, 500), inv("paid", 250, 250)])).toBe("paid_in_full");
+  });
+
+  it("a VOID invoice can't block Paid In Full", () => {
+    expect(jobBillingStatus([inv("paid", 1000, 1000), inv("void", 800)])).toBe("paid_in_full");
+  });
+
+  it("cents-tolerant like invoiceBalance: float dust never leaves a job stuck Partial", () => {
+    // 0.01 + 2.01-style dust: owed 0.004 must read settled, not "partial".
+    expect(jobBillingStatus([inv("paid", 100, 99.996)])).toBe("paid_in_full");
+  });
+
+  it("paid deposit + a DRAFTED final draw → Partial, never Paid In Full (billing isn't finished)", () => {
+    // The real draw workflow: deposit collected, finish-job drafts the final draw.
+    // The lingering draft is money still to bill — the job can't read settled.
+    expect(jobBillingStatus([inv("paid", 2000, 2000), inv("draft", 3000)])).toBe("partial");
+  });
+
+  it("a $0 leftover draft doesn't block Paid In Full (nothing left to bill)", () => {
+    expect(jobBillingStatus([inv("paid", 1000, 1000), inv("draft", 0)])).toBe("paid_in_full");
+  });
+
+  it("null/garbage money fields never poison the tag", () => {
+    expect(jobBillingStatus([{ status: "sent", total: null, amount_paid: null }])).toBe("paid_in_full"); // $0 sent = zero open balance
+    expect(jobBillingStatus([{ status: "sent", total: NaN, amount_paid: undefined }])).toBe("paid_in_full");
+    expect(jobBillingStatus([inv("sent", 1000, NaN)])).toBe("pending");
   });
 });
 

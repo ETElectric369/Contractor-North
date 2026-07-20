@@ -1,18 +1,25 @@
 import Link from "next/link";
 import { isStaffRole } from "@/lib/actions/perms";
-import { Briefcase, MapPin, X } from "lucide-react";
+import { Briefcase, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
-import { Badge, statusTone } from "@/components/ui/badge";
 import { ACTIVE_JOB_STATUSES, JOB_STATUS_PRIORITY, jobStatusLabel } from "@/lib/job-status";
 import { listNewJobCustomerOptions, toNewJobCustomerOptions } from "@/lib/schedule-options";
-import { formatDate } from "@/lib/utils";
+import { jobBillingStatus, type JobBillingInvoice, type JobBillingStatus } from "@/lib/analytics/money-metrics";
 import { NewJobButton } from "../schedule/new-job-button";
 import { JobImportButton } from "./job-import-button";
+import { JobRow, type JobRowData } from "./job-row";
+import { CompletedJobsSection } from "./completed-section";
 import type { Job } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+
+/** Newest-first cap on the collapsed Completed shelf — the section stays honest
+ *  ("showing latest N of M") instead of rendering an unbounded history. */
+const COMPLETED_CAP = 100;
+
+type JobWithCustomer = Job & { customers: { name: string } | null };
 
 export default async function JobsPage({
   searchParams,
@@ -31,26 +38,60 @@ export default async function JobsPage({
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  const [{ data: jobsData }, { data: customerRows }, { data: me }] = await Promise.all([
+
+  // Billing tags show wherever COMPLETED rows show: the default view's Completed
+  // shelf + the ?status=complete view. ONE org-wide batched fetch of the job-linked
+  // invoices (the same 4 fields the AR/billing SSOT math reads — RLS scopes the
+  // org), fired in parallel with the jobs query: no N+1, no jobs→invoices waterfall.
+  const needBillingTags = !status || status === "complete";
+  const [{ data: jobsData }, { data: customerRows }, { data: me }, invoiceRes] = await Promise.all([
     query,
     listNewJobCustomerOptions(supabase),
     user ? supabase.from("profiles").select("role").eq("id", user.id).maybeSingle() : Promise.resolve({ data: null }),
+    needBillingTags
+      ? supabase.from("invoices").select("job_id, status, total, amount_paid").not("job_id", "is", null)
+      : Promise.resolve({ data: null }),
   ]);
   const isStaff = isStaffRole((me as { role?: string } | null)?.role ?? "");
   // id/name + the one-line address so picking a customer prefills the site address.
   const customers = toNewJobCustomerOptions(customerRows);
-  const allJobs = (jobsData ?? []) as (Job & { customers: { name: string } | null })[];
+  const allJobs = (jobsData ?? []) as JobWithCustomer[];
 
-  // Default (unfiltered) view: ACTIVE jobs only — finished/cancelled hide behind a
-  // quiet footer count that links to their ?status= filters (the pills still show
-  // everything when chosen). Within the active set: priority sort (in_progress up
-  // top), newest-first inside a status (stable sort).
+  // Group the invoices per job, then derive each completed job's tag through
+  // jobBillingStatus — THE shared definition in analytics/money-metrics (built on
+  // invoiceBalance, the same math /billing/ar ages), never an inline recompute.
+  const invoicesByJob = new Map<string, JobBillingInvoice[]>();
+  for (const i of ((invoiceRes?.data ?? []) as ({ job_id: string } & JobBillingInvoice)[])) {
+    const list = invoicesByJob.get(i.job_id) ?? [];
+    list.push(i);
+    invoicesByJob.set(i.job_id, list);
+  }
+  const billingOf = (jobId: string): JobBillingStatus => jobBillingStatus(invoicesByJob.get(jobId) ?? []);
+  const toRow = (j: JobWithCustomer, billing?: JobBillingStatus): JobRowData => ({
+    id: j.id,
+    name: j.name,
+    job_number: j.job_number,
+    status: j.status,
+    address: j.address,
+    scheduled_start: j.scheduled_start,
+    customer: j.customers?.name ?? null,
+    billing,
+  });
+
+  // Default (unfiltered) view: ACTIVE jobs in the main list — priority sort
+  // (in_progress up top), newest-first inside a status (stable sort). COMPLETED
+  // jobs don't hide behind a link anymore (owner spec 2026-07-20): they sit in a
+  // collapsed shelf at the bottom, each wearing its billing tag. Cancelled stays
+  // a quiet footer count.
   let jobs = allJobs;
+  let completedJobs: JobWithCustomer[] = [];
   let completedCount = 0;
   let cancelledCount = 0;
   if (!status) {
     const active = new Set<string>(ACTIVE_JOB_STATUSES);
-    completedCount = allJobs.filter((j) => j.status === "complete").length;
+    const completed = allJobs.filter((j) => j.status === "complete"); // already newest-first
+    completedCount = completed.length;
+    completedJobs = completed.slice(0, COMPLETED_CAP);
     cancelledCount = allJobs.filter((j) => j.status === "cancelled").length;
     jobs = allJobs.filter((j) => active.has(j.status));
     jobs.sort((a, b) => (JOB_STATUS_PRIORITY[a.status] ?? 9) - (JOB_STATUS_PRIORITY[b.status] ?? 9));
@@ -93,50 +134,27 @@ export default async function JobsPage({
         <Card className="overflow-hidden">
           <ul className="divide-y divide-slate-100">
             {jobs.map((j) => (
-              <li key={j.id}>
-                <Link href={`/jobs/${j.id}`} className="flex items-center gap-4 px-5 py-3 hover:bg-slate-50">
-                  <div className="flex-1">
-                    <div className="font-medium text-slate-900">{j.name}</div>
-                    <div className="flex items-center gap-2 text-xs text-slate-400">
-                      <span>{j.job_number}</span>
-                      {j.customers?.name && <span>· {j.customers.name}</span>}
-                      {j.address && (
-                        <span className="flex items-center gap-0.5">
-                          <MapPin className="h-3 w-3" /> {j.address}
-                        </span>
-                      )}
-                      {j.scheduled_start && <span>· {formatDate(j.scheduled_start)}</span>}
-                    </div>
-                  </div>
-                  <Badge tone={statusTone(j.status)}>{jobStatusLabel(j.status)}</Badge>
-                </Link>
-              </li>
+              // ?status=complete rows wear the same billing tags as the shelf (shared row).
+              <JobRow key={j.id} job={toRow(j, status === "complete" ? billingOf(j.id) : undefined)} />
             ))}
           </ul>
         </Card>
       )}
 
-      {/* Finished jobs don't clutter the working list — a quiet count line keeps
-          them one tap away (the status pills/rail still show everything when chosen). */}
-      {!status && (completedCount > 0 || cancelledCount > 0) && (
+      {/* The collapsed Completed shelf — count + chevron, billing tag per row. */}
+      {!status && (
+        <CompletedJobsSection
+          jobs={completedJobs.map((j) => toRow(j, billingOf(j.id)))}
+          total={completedCount}
+        />
+      )}
+
+      {/* Cancelled jobs stay out of the way — a quiet count line keeps them one
+          tap away (the status pills/rail still show everything when chosen). */}
+      {!status && cancelledCount > 0 && (
         <p className="mt-3 text-center text-xs text-slate-400">
-          {completedCount > 0 && (
-            <Link href="/jobs?status=complete" className="hover:text-brand hover:underline">
-              {completedCount} completed
-            </Link>
-          )}
-          {completedCount > 0 && cancelledCount > 0 && " · "}
-          {cancelledCount > 0 && (
-            <Link href="/jobs?status=cancelled" className="hover:text-brand hover:underline">
-              {cancelledCount} cancelled
-            </Link>
-          )}
-          {" — "}
-          <Link
-            href={completedCount > 0 ? "/jobs?status=complete" : "/jobs?status=cancelled"}
-            className="font-medium text-brand hover:underline"
-          >
-            view
+          <Link href="/jobs?status=cancelled" className="hover:text-brand hover:underline">
+            {cancelledCount} cancelled
           </Link>
         </p>
       )}

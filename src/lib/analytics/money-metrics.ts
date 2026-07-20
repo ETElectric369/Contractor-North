@@ -70,6 +70,51 @@ export function computeArAging(invoices: any[], todayYmd: string): ArAging {
   };
 }
 
+// ── Job billing status (the /jobs completed-row tag) ─────────────────────────
+export type JobBillingStatus = "to_be_invoiced" | "pending" | "partial" | "paid_in_full";
+
+export const JOB_BILLING_STATUS_LABEL: Record<JobBillingStatus, string> = {
+  to_be_invoiced: "To Be Invoiced",
+  pending: "Pending",
+  partial: "Partial",
+  paid_in_full: "Paid In Full",
+};
+
+/** The invoice fields the tag needs — amount_paid is THE rolled-up payments figure
+ *  (recalcTotals keeps it in sync with the payments table), the same field AR reads. */
+export type JobBillingInvoice = { status: string; total?: number | null; amount_paid?: number | null };
+
+/**
+ * ONE definition of "where does this job's money stand", shared by the /jobs
+ * completed list and anything else that tags a job — built ON the AR pieces
+ * (invoiceBalance + the same status vocabulary computeArAging reads) so the tag
+ * and /billing/ar can never disagree. Rules, in precedence order:
+ *
+ *  1. "to_be_invoiced" — no non-draft/non-void invoice exists. A draft-ONLY job
+ *     counts here: the finish-job flow parks its auto-invoice as a draft in the
+ *     "To be invoiced" queue (org-settings auto_send_invoice_on_complete), so a
+ *     held draft is not-yet-invoiced by THE app's own vocabulary.
+ *  2. "paid_in_full" — nothing owed on ANY live (non-void) invoice, cents-tolerant.
+ *     Live DRAFTS count in this gate: a paid deposit + a drafted final draw is NOT
+ *     settled — billing isn't finished — so it reads "partial", never "paid_in_full"
+ *     (exactly the job getMoneyPipeline would still show in its drafts stage).
+ *  3. "partial" — money in (any payment recorded on a billed invoice) but not all.
+ *  4. "pending" — billed (sent/partial/overdue), nothing paid yet. Overdue is an AR
+ *     concern (aging lives on /billing/ar); here it still reads "pending"/"partial".
+ */
+export function jobBillingStatus(invoices: JobBillingInvoice[]): JobBillingStatus {
+  const live = (invoices ?? []).filter((i) => i.status !== "void");
+  const billed = live.filter((i) => i.status !== "draft");
+  if (billed.length === 0) return "to_be_invoiced";
+  const owed = live.reduce((s, i) => s + invoiceBalance(i.total, i.amount_paid), 0);
+  if (owed <= 0.005) return "paid_in_full";
+  const paid = billed.reduce((s, i) => {
+    const n = Number(i.amount_paid);
+    return s + (Number.isFinite(n) && n > 0 ? n : 0);
+  }, 0);
+  return paid > 0.005 ? "partial" : "pending";
+}
+
 // ── A/R by customer (WHO owes, rolled up) ────────────────────────────────────
 export type ArCustomer = { customer: string; balance: number; worstDaysLate: number; invoices: ArInvoice[] };
 

@@ -193,7 +193,7 @@ export const DOCK: DockSection[] = [
     key: "office",
     label: "Office",
     icon: Building2,
-    href: "/compliance", // permits moved to Jobs; Office lands on Liabilities now
+    href: "/team", // Erik 2026-07-20: Office lands on Team (was /compliance)
     children: [
       // Liabilities (Alexa's grouping). Insurance (e.g. workers' comp) + compliance Audits are
       // the next pages to build — flagged, not stubbed as dead links.
