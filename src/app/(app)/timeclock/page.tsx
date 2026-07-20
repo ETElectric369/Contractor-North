@@ -116,7 +116,9 @@ export default async function TimeclockPage() {
   // feeds the planner's muted "auto" hints below (today + future days only).
   const thisWeekDays = weekDayStrs(todayStr, orgSettings.week_start, 0);
   // memberId → dayStr → inferred jobId for the CURRENT week: today = the full
-  // pickMemberCurrentJob inference (what a job-less Clock In resolves to),
+  // pickMemberCurrentJob inference (the BOARD's pick — its tier-2/3 fallbacks are
+  // member-scoped, unlike resolveTechJobToday's org-single-in-progress tier 2, so this
+  // is a best guess, not a promise about the punch; a pinned row makes them agree),
   // future days = schedule-only. Both planner surfaces show these as muted
   // "auto"; an explicit crew_day_assignments row always wins.
   const autoPlan: CrewAutoPlan = {};

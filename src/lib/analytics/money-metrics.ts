@@ -94,7 +94,8 @@ export type JobBillingInvoice = { status: string; total?: number | null; amount_
  *     counts here: the finish-job flow parks its auto-invoice as a draft in the
  *     "To be invoiced" queue (org-settings auto_send_invoice_on_complete), so a
  *     held draft is not-yet-invoiced by THE app's own vocabulary.
- *  2. "paid_in_full" — nothing owed on ANY live (non-void) invoice, cents-tolerant.
+ *  2. "paid_in_full" — nothing owed on ANY live (non-void) invoice, cents-tolerant, AND
+ *     no un-drawn payment-schedule milestone (opts.hasOpenMilestones) still to bill.
  *     Live DRAFTS count in this gate: a paid deposit + a drafted final draw is NOT
  *     settled — billing isn't finished — so it reads "partial", never "paid_in_full"
  *     (exactly the job getMoneyPipeline would still show in its drafts stage).
@@ -102,12 +103,20 @@ export type JobBillingInvoice = { status: string; total?: number | null; amount_
  *  4. "pending" — billed (sent/partial/overdue), nothing paid yet. Overdue is an AR
  *     concern (aging lives on /billing/ar); here it still reads "pending"/"partial".
  */
-export function jobBillingStatus(invoices: JobBillingInvoice[]): JobBillingStatus {
+export function jobBillingStatus(
+  invoices: JobBillingInvoice[],
+  opts: { hasOpenMilestones?: boolean } = {},
+): JobBillingStatus {
   const live = (invoices ?? []).filter((i) => i.status !== "void");
   const billed = live.filter((i) => i.status !== "draft");
   if (billed.length === 0) return "to_be_invoiced";
   const owed = live.reduce((s, i) => s + invoiceBalance(i.total, i.amount_paid), 0);
-  if (owed <= 0.005) return "paid_in_full";
+  // An un-drawn payment-schedule milestone is contract money not yet billed — the SAME
+  // reason a drafted draw blocks "paid_in_full" (rule 2), one step earlier in the flow.
+  // finishJob completes a draw job WITHOUT drafting the remaining draws, so this is the
+  // routine state: the deposit is paid, most of the contract is still to bill, and
+  // getMoneyPipeline shows the job in "Done — not invoiced". It must never read green.
+  if (owed <= 0.005) return opts.hasOpenMilestones ? "partial" : "paid_in_full";
   const paid = billed.reduce((s, i) => {
     const n = Number(i.amount_paid);
     return s + (Number.isFinite(n) && n > 0 ? n : 0);
@@ -207,7 +216,12 @@ export async function getArAging(supabase: any): Promise<ArAging> {
   const [{ data }, { todayYmd }] = await Promise.all([
     supabase
       .from("invoices")
-      .select("id, customer_id, invoice_number, status, total, amount_paid, due_date, created_at, customers(name)"),
+      .select("id, customer_id, invoice_number, status, total, amount_paid, due_date, created_at, customers(name)")
+      // Push OPEN_EXCLUDED into the query: computeArAging drops these anyway, and an
+      // unbounded select silently truncates at PostgREST's 1000-row cap once an org has
+      // history. Filtered, the cap is 1000 OPEN invoices — effectively unreachable.
+      .not("status", "in", `(${OPEN_EXCLUDED.join(",")})`)
+      .limit(1000),
     orgClock(supabase),
   ]);
   return computeArAging(data ?? [], todayYmd);

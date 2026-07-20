@@ -33,14 +33,12 @@ describe("DOCK jobs section ← JOB_STATUSES", () => {
     );
     // Statuses are for everyone (techs filter their own job list) — never staff-gated.
     expect(statusChildren.every((c) => !c.staffOnly)).toBe(true);
-    // After the statuses: exactly Permits + Plans & LiDAR, staff-only, no header, and NO
-    // resurrected cross-job list links (those records are reached through the job's tabs).
+    // After the statuses: NOTHING. Every cross-job list link is gone — those records are
+    // reached through the job's own tabs. Permits left last (Erik 2026-07-20: "permits live
+    // with the job like materials"); Plans & LiDAR left 2026-07-14.
     const rest = children.slice(JOB_STATUSES.length);
-    // Plans & LiDAR left too (Erik 2026-07-14: plans live with the estimator's Upload Plans;
-    // LiDAR ships with the native app) — Permits is the one surviving cross-job link.
-    expect(rest.map((c) => c.id)).toEqual(["j-permits"]);
-    expect(rest.every((c) => c.staffOnly && !c.header)).toBe(true);
-    for (const gone of ["/work-orders", "/materials", "/change-orders"]) {
+    expect(rest).toEqual([]);
+    for (const gone of ["/work-orders", "/materials", "/change-orders", "/permits"]) {
       expect(children.some((c) => c.href && basePath(c.href) === gone)).toBe(false);
     }
   });

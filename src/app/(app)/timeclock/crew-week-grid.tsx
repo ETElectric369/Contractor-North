@@ -32,7 +32,8 @@ interface MemberRow {
  * assigned job for that day — a short-label pill in the member's /timecards
  * color, ★ = crew leader. A cell with NO explicit row shows the `autoPlan`
  * inference as a muted DASHED pill instead of blank (today = the job a
- * job-less Clock In would infer, future days of the current week = the
+ * board's best guess (schedule + active jobs — NOT a promise about what a job-less
+ * Clock In resolves to: resolveTechJobToday's fallback tiers differ), future days = the
  * schedule) — the old board always showed where everyone was, and a brand-new
  * planner with zero explicit rows must not read as "the assignments vanished".
  * Never time entries — that's /timecards. The header/column look deliberately
@@ -192,7 +193,7 @@ export function CrewWeekGrid({
                       row?.job
                         ? `${m.full_name ?? "Member"} · ${dayTag(ds)}: ${assignmentJobLabel(row.job, jobCodesEnabled)}${row.is_crew_lead ? " · crew lead" : ""}`
                         : hintJob
-                          ? `${m.full_name ?? "Member"} · ${dayTag(ds)}: ${assignmentJobLabel(hintJob, jobCodesEnabled)} — auto (${isToday ? "the job a Clock In would infer" : "from the schedule"}), not pinned. Tap to pin or change.`
+                          ? `${m.full_name ?? "Member"} · ${dayTag(ds)}: ${assignmentJobLabel(hintJob, jobCodesEnabled)} — auto (${isToday ? "best guess from schedule + active jobs" : "from the schedule"}), not pinned. Tap to pin so Clock In uses it.`
                           : `Assign ${m.full_name ?? "member"} · ${dayTag(ds)}`
                     }
                     aria-label={`${m.full_name ?? "Member"}, ${dayTag(ds)}`}

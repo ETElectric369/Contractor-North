@@ -102,6 +102,18 @@ describe("jobBillingStatus — the /jobs completed-row tag (shares AR's invoiceB
     expect(jobBillingStatus([inv("paid", 500, 500), inv("paid", 250, 250)])).toBe("paid_in_full");
   });
 
+  it("an UN-DRAWN milestone keeps a paid-deposit draw job at Partial (audit 2026-07-20)", () => {
+    // finishJob completes a draw job without drafting the remaining draws: the deposit is
+    // the only live invoice and it's paid, but most of the contract is still to bill —
+    // getMoneyPipeline shows the same job in "Done — not invoiced". Green would be a lie.
+    expect(jobBillingStatus([inv("paid", 5000, 5000)], { hasOpenMilestones: true })).toBe("partial");
+    expect(jobBillingStatus([inv("paid", 5000, 5000)], { hasOpenMilestones: false })).toBe("paid_in_full");
+    // No milestones at all (T&M jobs) behaves exactly as before the option existed.
+    expect(jobBillingStatus([inv("paid", 5000, 5000)])).toBe("paid_in_full");
+    // An un-drawn milestone can't upgrade a not-yet-invoiced job either.
+    expect(jobBillingStatus([inv("draft", 5000, 0)], { hasOpenMilestones: true })).toBe("to_be_invoiced");
+  });
+
   it("a VOID invoice can't block Paid In Full", () => {
     expect(jobBillingStatus([inv("paid", 1000, 1000), inv("void", 800)])).toBe("paid_in_full");
   });

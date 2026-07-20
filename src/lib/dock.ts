@@ -155,7 +155,6 @@ export const DOCK: DockSection[] = [
       // Permits live under active jobs (moved out of Office per Alexa). The old "Across all
       // jobs" cluster (Work Orders / Materials / Change Orders) left the nav with it — those
       // records are HUB-ONLY now, reached through the job's own tabs (Erik: "GO AWAY").
-      { id: "j-permits", label: "Permits", icon: Stamp, href: "/permits", staffOnly: true },
       // Plans & LiDAR left the nav (Erik 2026-07-14): "plans live with the estimator" — the
       // Upload Plans take-off on /quotes/new IS the plans feature; LiDAR ships with the native app.
     ],

@@ -218,7 +218,7 @@ export function CrewAssignments({
                   <span
                     title={
                       selectedDay === todayStr
-                        ? "No day assignment yet — this is the job a Clock In would infer today. Pick a job (or tap ★) to pin it for the day."
+                        ? "No day assignment yet — this is the board's best guess from today's schedule and active jobs. Pin a job (or tap ★) so Clock In uses it for sure."
                         : "No day assignment yet — the schedule puts them here. Pick a job (or tap ★) to pin it for the day."
                     }
                     className="shrink-0 rounded border border-dashed border-slate-300 bg-slate-50 px-1 py-px text-[9px] font-semibold uppercase tracking-wide text-slate-500"

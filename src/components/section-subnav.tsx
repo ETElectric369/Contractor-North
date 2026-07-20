@@ -21,7 +21,7 @@ import { SectionSheet } from "./section-sheet";
  *  pages, so either shape would just double it. On phones (no left rail) it's the only
  *  sibling nav, so it stays — and it persists on detail/sub-routes too (/quotes/[id],
  *  /forms/[id], /purchasing/[id]…), not just on a section's exact landing pages. */
-export function SectionSubnav({ isStaff, hiddenIds = [] }: { isStaff?: boolean; hiddenIds?: string[] }) {
+export function SectionSubnav({ isStaff }: { isStaff?: boolean }) {
   const pathname = usePathname();
   const search = useSearchParams();
   const current = pathname + (search.toString() ? `?${search.toString()}` : "");
@@ -37,7 +37,7 @@ export function SectionSubnav({ isStaff, hiddenIds = [] }: { isStaff?: boolean; 
   // Scoped to the jobs group only so /billing/[id], /quotes/[id] etc. keep their strips.
   // (/work-orders/[id] has no strip at all now — work orders left the dock, hub-only.)
   if (group.key === "jobs" && pathname.startsWith("/jobs/")) return null;
-  const tabs = group.children.filter((c) => c.href && (isStaff || !c.staffOnly) && !hiddenIds.includes(c.id));
+  const tabs = group.children.filter((c) => c.href && (isStaff || !c.staffOnly));
   if (tabs.length < 2) return null;
 
   const exact = tabs.find((c) => c.href === current);
@@ -52,7 +52,7 @@ export function SectionSubnav({ isStaff, hiddenIds = [] }: { isStaff?: boolean; 
     return (
       <SectionSheet
         group={group}
-        items={group.children.filter((c) => (isStaff || !c.staffOnly) && !hiddenIds.includes(c.id))}
+        items={group.children.filter((c) => isStaff || !c.staffOnly)}
         activeHref={activeHref}
       />
     );

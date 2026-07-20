@@ -44,12 +44,24 @@ export default async function JobsPage({
   // invoices (the same 4 fields the AR/billing SSOT math reads — RLS scopes the
   // org), fired in parallel with the jobs query: no N+1, no jobs→invoices waterfall.
   const needBillingTags = !status || status === "complete";
-  const [{ data: jobsData }, { data: customerRows }, { data: me }, invoiceRes] = await Promise.all([
+  const [{ data: jobsData }, { data: customerRows }, { data: me }, invoiceRes, milestoneRes] = await Promise.all([
     query,
     listNewJobCustomerOptions(supabase),
     user ? supabase.from("profiles").select("role").eq("id", user.id).maybeSingle() : Promise.resolve({ data: null }),
     needBillingTags
-      ? supabase.from("invoices").select("job_id, status, total, amount_paid").not("job_id", "is", null)
+      ? supabase
+          .from("invoices")
+          .select("job_id, status, total, amount_paid")
+          .not("job_id", "is", null)
+          // Bounded like its siblings — an unbounded select truncates silently at 1000.
+          .order("created_at", { ascending: false })
+          .limit(1000)
+      : Promise.resolve({ data: null }),
+    // Un-drawn payment-schedule milestones ("unbilled" = no linked invoice, the
+    // billing-pipeline rule): a draw job whose deposit is paid but whose remaining draws
+    // were never drafted still owes contract money — it must not tag "Paid In Full".
+    needBillingTags
+      ? supabase.from("payment_milestones").select("job_id").is("invoice_id", null).limit(1000)
       : Promise.resolve({ data: null }),
   ]);
   const isStaff = isStaffRole((me as { role?: string } | null)?.role ?? "");
@@ -66,7 +78,11 @@ export default async function JobsPage({
     list.push(i);
     invoicesByJob.set(i.job_id, list);
   }
-  const billingOf = (jobId: string): JobBillingStatus => jobBillingStatus(invoicesByJob.get(jobId) ?? []);
+  const openMilestoneJobs = new Set(
+    ((milestoneRes.data ?? []) as { job_id: string | null }[]).map((m) => m.job_id).filter(Boolean) as string[],
+  );
+  const billingOf = (jobId: string): JobBillingStatus =>
+    jobBillingStatus(invoicesByJob.get(jobId) ?? [], { hasOpenMilestones: openMilestoneJobs.has(jobId) });
   const toRow = (j: JobWithCustomer, billing?: JobBillingStatus): JobRowData => ({
     id: j.id,
     name: j.name,
@@ -135,7 +151,7 @@ export default async function JobsPage({
           <ul className="divide-y divide-slate-100">
             {jobs.map((j) => (
               // ?status=complete rows wear the same billing tags as the shelf (shared row).
-              <JobRow key={j.id} job={toRow(j, status === "complete" ? billingOf(j.id) : undefined)} />
+              <JobRow key={j.id} job={toRow(j, isStaff && status === "complete" ? billingOf(j.id) : undefined)} />
             ))}
           </ul>
         </Card>
@@ -144,7 +160,7 @@ export default async function JobsPage({
       {/* The collapsed Completed shelf — count + chevron, billing tag per row. */}
       {!status && (
         <CompletedJobsSection
-          jobs={completedJobs.map((j) => toRow(j, billingOf(j.id)))}
+          jobs={completedJobs.map((j) => toRow(j, isStaff ? billingOf(j.id) : undefined))}
           total={completedCount}
         />
       )}
