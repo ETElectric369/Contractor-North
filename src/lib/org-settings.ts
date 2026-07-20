@@ -36,6 +36,8 @@ export interface OrgSettings {
    *  catalog import (every item markup_pct = 0, e.g. CED) can't quote the company's real cost.
    *  0 = disabled — byte-identical behavior for orgs that never set it. */
   default_markup_pct: number;
+  /** Hide the Permits entry from the Jobs section nav (Chris/Tahoe: not part of their flow). */
+  hide_permits: boolean;
   /** Safety buffer (%) the AI adds to RESEARCHED/ESTIMATED material prices so an estimate holds up. */
   material_buffer_percent: number;
   /** Free-text "how we quote" playbook injected into AI quote drafts + assistant. */
@@ -184,6 +186,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   mileage_rate: 0.7,
   material_markup_percent: 25,
   default_markup_pct: 0,
+  hide_permits: false,
   material_buffer_percent: 10,
   quote_playbook: "",
   estimating_mode: "research",

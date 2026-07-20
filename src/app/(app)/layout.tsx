@@ -88,6 +88,8 @@ export default async function AppLayout({
   }
 
   const settings = getOrgSettings((org as any)?.settings);
+  // Org-level nav pruning (Chris 2026-07-20: permits aren't part of Tahoe Deck's flow).
+  const hiddenDockIds = settings.hide_permits ? ["j-permits"] : [];
 
   // Geofence: if the user is on the clock, mount the exit monitor. The clock-in GPS
   // is the fence anchor when it exists; entries WITHOUT one mount too (My Day and the
@@ -162,12 +164,12 @@ export default async function AppLayout({
         } as React.CSSProperties
       }
     >
-      <Dock branding={branding} role={profile.role} badges={badges} />
+      <Dock branding={branding} role={profile.role} badges={badges} hiddenIds={hiddenDockIds} />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Topbar profile={(profile as Profile) ?? null} lang={profile.language} branding={branding} />
         <main className="flex-1 overflow-y-auto bg-slate-50/70 p-4 pb-[calc(7.5rem+env(safe-area-inset-bottom))] shell:p-6 shell:pb-6">
           <Suspense fallback={null}>
-            <SectionSubnav isStaff={isStaff} />
+            <SectionSubnav isStaff={isStaff} hiddenIds={hiddenDockIds} />
           </Suspense>
           <ToastProvider>{children}</ToastProvider>
         </main>

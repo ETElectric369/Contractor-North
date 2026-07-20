@@ -9,6 +9,8 @@ type DockProps = {
   branding?: { name: string | null; logo: string | null };
   role?: string;
   badges?: Record<string, number>;
+  /** Dock child ids hidden for this org (e.g. "j-permits" when settings.hide_permits). */
+  hiddenIds?: string[];
 };
 
 /**
@@ -32,7 +34,7 @@ export function Dock(props: DockProps) {
   );
 }
 
-function DockInner({ branding, role, badges }: DockProps) {
+function DockInner({ branding, role, badges, hiddenIds = [] }: DockProps) {
   const pathname = usePathname();
   const search = useSearchParams();
   const current = pathname + (search.toString() ? `?${search.toString()}` : "");
@@ -44,7 +46,7 @@ function DockInner({ branding, role, badges }: DockProps) {
   // old `?? sections[0]` fallback lit "Today" (and railed My day/Tasks/Organize) on every
   // orphan route — an actively wrong map, never a lie again.
   const active = activeSection(pathname, sections);
-  const items = (active?.children ?? []).filter((c) => isStaff || !c.staffOnly);
+  const items = (active?.children ?? []).filter((c) => (isStaff || !c.staffOnly) && !hiddenIds.includes(c.id));
   // Exactly ONE rail row lights: prefer the exact href-with-query match (the ?status=
   // children), else the query-less page whose base path matches — SectionSubnav's rule.
   const exact = items.find((c) => c.href === current);
