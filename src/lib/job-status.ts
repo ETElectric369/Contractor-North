@@ -80,21 +80,36 @@ export function pickJobScheduledToday<T extends TodayJobPick>(
 
 /**
  * The crew board's full pick — where the office sees a member "at" right now:
+ *   0. the member's explicit CREW DAY-ASSIGNMENT for the org-local today
+ *      (crew_day_assignments, migration 0139) — pass its job_id as
+ *      `assignedJobId`. THE PRECEDENCE LAW (Erik, 2026-07-20): when a
+ *      day-assignment differs from what any other surface says, the
+ *      day-assignment WINS — the board, the job-less clock-in resolution, and
+ *      (via the clock-in default) My Day's current job all follow it.
  *   1. an assigned job scheduled TODAY (pickJobScheduledToday — the shared tier),
  *   2. else an assigned job already in_progress,
  *   3. else any other active assigned job,
  * deterministic inside a tier (earliest scheduled today; otherwise most recently
- * created). The clock-in resolution deliberately does NOT take tiers 2–3 per member —
- * a punch never guesses beyond today's schedule or the org's one unambiguous
- * in_progress job — but the board must always point somewhere if the member is
- * assigned anywhere, which is why the fallbacks live here.
+ * created). Tier 0 only fires when the assigned job is actually IN `jobs` (the
+ * caller's active set) — a day-assignment pointing at a finished/cancelled job
+ * falls through instead of resurrecting it. The clock-in resolution deliberately
+ * does NOT take tiers 2–3 per member — a punch never guesses beyond the
+ * day-assignment, today's schedule, or the org's one unambiguous in_progress
+ * job — but the board must always point somewhere if the member is assigned
+ * anywhere, which is why the fallbacks live here.
  */
 export function pickMemberCurrentJob<T extends TodayJobPick>(
   jobs: T[],
   segTodayJobIds: ReadonlySet<string>,
   dayStart: Date,
   dayEnd: Date,
+  /** Tier 0: the member's crew_day_assignments.job_id for the org-local today (if any). */
+  assignedJobId?: string | null,
 ): T | null {
+  if (assignedJobId) {
+    const assigned = jobs.find((j) => j.id === assignedJobId);
+    if (assigned) return assigned;
+  }
   const today = pickJobScheduledToday(jobs, segTodayJobIds, dayStart, dayEnd);
   if (today) return today;
   const byNewest = [...jobs].sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""));

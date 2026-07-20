@@ -9,6 +9,8 @@ import { Badge } from "@/components/ui/badge";
 import { TimeclockPanel } from "./timeclock-panel";
 import { AutoClockoutPrompt } from "./auto-clockout-prompt";
 import { CrewAssignments } from "./crew-assignments";
+import { listWeekAssignments, setCrewDayAssignment } from "./crew-actions";
+import { CrewWeekGrid } from "./crew-week-grid";
 import { getOrgSettings } from "@/lib/org-settings";
 import { AddEntryButton } from "./add-entry-button";
 import { aggregatePayrollEntries } from "@/lib/payroll-math";
@@ -94,11 +96,13 @@ export default async function TimeclockPage() {
   const jobCodesOn = orgSettings.timeclock_job_codes;
 
   // Each member's current assignment for the staff crew-assignment board — the SAME
-  // priority the clock-in job resolution uses (the shared tier-1 pick in
-  // lib/job-status): scheduled TODAY (segment covering the org-local day, or
-  // scheduled_start inside it) → in_progress → newest other active job. The old
-  // `.find()` over an UNORDERED query pointed a member on several jobs at an
-  // arbitrary one (e.g. a stale on_hold job). One batched segments read — no N+1.
+  // priority the clock-in job resolution uses (the shared pick in lib/job-status):
+  // TIER 0 the explicit crew DAY-assignment for the org-local today (0139 — the
+  // precedence law: a planned day-assignment WINS and pushes everywhere) →
+  // scheduled TODAY (segment covering the org-local day, or scheduled_start
+  // inside it) → in_progress → newest other active job. The old `.find()` over an
+  // UNORDERED query pointed a member on several jobs at an arbitrary one (e.g. a
+  // stale on_hold job). One batched segments read — no N+1.
   const crewJobs = ((crewJobsRes.data ?? []) as {
     id: string;
     assigned_to: string[] | null;
@@ -106,22 +110,51 @@ export default async function TimeclockPage() {
     scheduled_start?: string | null;
     created_at?: string | null;
   }[]);
+  const { todayStr } = todayBoundsInTz(orgSettings.timezone);
   const currentAssignment: Record<string, string> = {};
+  // Today's day-assignment JOB per member — the tier-0 source for the board's
+  // inferred-current pick below. (The planner UI's own rows — incl. the ★ lead
+  // checkboxes — seed from listWeekAssignments, not from this map.)
+  const dayAssignments: Record<string, string> = {};
   if (isStaff && crewJobs.length) {
-    const { dayStart, dayEnd, todayStr } = todayBoundsInTz(orgSettings.timezone);
-    const { data: segRows } = await supabase
-      .from("job_schedule_segments")
-      .select("job_id")
-      .in("job_id", crewJobs.map((j) => j.id))
-      .lte("start_date", todayStr)
-      .gte("end_date", todayStr);
+    const { dayStart, dayEnd } = todayBoundsInTz(orgSettings.timezone);
+    const [{ data: segRows }, dayRes] = await Promise.all([
+      supabase
+        .from("job_schedule_segments")
+        .select("job_id")
+        .in("job_id", crewJobs.map((j) => j.id))
+        .lte("start_date", todayStr)
+        .gte("end_date", todayStr),
+      // Fails soft (empty) until migration 0139 lands — an unknown table must
+      // never de-board the page (the 0128 crew_lead precedent).
+      supabase
+        .from("crew_day_assignments")
+        .select("profile_id, job_id")
+        .eq("work_date", todayStr),
+    ]);
+    for (const r of ((dayRes.data ?? []) as { profile_id: string; job_id: string }[])) {
+      dayAssignments[r.profile_id] = r.job_id;
+    }
     const segToday = new Set(((segRows ?? []) as { job_id: string }[]).map((s) => s.job_id));
     for (const m of members ?? []) {
       const mine = crewJobs.filter((cj) => (cj.assigned_to ?? []).includes(m.id));
-      const pick = pickMemberCurrentJob(mine, segToday, dayStart, dayEnd);
+      // Tier-0 lookup searches the FULL active set, not just the member's
+      // assigned jobs — the day-assignment wins even if the additive
+      // write-through hasn't put them on jobs.assigned_to (yet).
+      const dayJobId = dayAssignments[m.id] ?? null;
+      if (dayJobId && !mine.some((j) => j.id === dayJobId)) {
+        const dayJob = crewJobs.find((j) => j.id === dayJobId);
+        if (dayJob) mine.unshift(dayJob);
+      }
+      const pick = pickMemberCurrentJob(mine, segToday, dayStart, dayEnd, dayJobId);
       if (pick) currentAssignment[m.id] = pick.id;
     }
   }
+
+  // The week grid's data (staff render) — the same read the grid's client paging
+  // uses (listWeekAssignments, offset 0 = this week), called server-side so the
+  // grid hydrates with the current week instead of flashing empty.
+  const weekAssignments = isStaff ? await listWeekAssignments(0) : null;
 
   // Attach each job's template codes so the code picker can narrow to the right codes.
   const { data: tmplData } = await supabase.from("job_code_templates").select("id, codes");
@@ -131,6 +164,29 @@ export default async function TimeclockPage() {
     customer_name: (j.customers?.name as string | undefined) ?? null,
     codes: j.code_template_id ? tmplMap.get(j.code_template_id) : undefined,
   }));
+
+  // The crew day-planner's shared prop bundle (staff only) — the SAME data feeds
+  // the day-picker board (right column) and the CrewWeekGrid (under the clock):
+  // current-week rows server-fetched above, week paging + saves through the
+  // crew-actions pair, labels per the org's codes flag.
+  const crewPlan = isStaff
+    ? {
+        members: (members ?? []).map((m: any) => ({ id: m.id as string, full_name: (m.full_name ?? null) as string | null })),
+        jobs: jobOptions.map((j: any) => ({
+          id: j.id as string,
+          job_number: (j.job_number ?? null) as string | null,
+          name: (j.name ?? null) as string | null,
+          address: (j.address ?? null) as string | null,
+          customer_name: (j.customer_name ?? null) as string | null,
+        })),
+        weekRows: weekAssignments?.rows ?? [],
+        tz: orgSettings.timezone,
+        weekStart: orgSettings.week_start,
+        jobCodesEnabled: jobCodesOn,
+        setCrewDayAssignment,
+        listWeekAssignments,
+      }
+    : null;
 
   // The label a week-old entry's JOB shows on this page: the job number (codes on,
   // unchanged) or the customer · address identity (codes off). Entries can point at
@@ -352,6 +408,11 @@ export default async function TimeclockPage() {
             jobCodesEnabled={jobCodesOn}
           />
 
+          {/* THE CREW WEEK — directly under the timeclock (staff only): the org week
+              as a timecards-style grid showing ONLY the day-assignments (job pill +
+              ★ lead per member per day). A cell tap opens its inline editor. */}
+          {crewPlan && <CrewWeekGrid {...crewPlan} />}
+
           {/* MY TIMECARD (techs only) — the week's punches, grouped by day, read-only:
               date, in–out, lunch, hours, job number, + the week total. Edits are office
               work (/timecards), which techs can't reach — so no edit buttons here. */}
@@ -430,22 +491,10 @@ export default async function TimeclockPage() {
         </div>
 
         <div className="space-y-6 lg:col-span-2">
-          {/* The office's who's-on-which-job board — what a tech's job-less Clock In
-              resolves against. Staff only. */}
-          {isStaff && (
-            <CrewAssignments
-              members={(members ?? []).map((m: any) => ({ id: m.id, full_name: m.full_name }))}
-              jobs={jobOptions.map((j: any) => ({
-                id: j.id,
-                job_number: j.job_number,
-                name: j.name,
-                address: j.address,
-                customer_name: j.customer_name,
-              }))}
-              current={currentAssignment}
-              jobCodesEnabled={jobCodesOn}
-            />
-          )}
+          {/* The office's day-planner board — day strip + per-member job/★-lead lines.
+              A day row here WINS: the tech's job-less Clock In resolves to it (with
+              `current` as the inferred today-fallback, shown as "auto"). Staff only. */}
+          {crewPlan && <CrewAssignments {...crewPlan} current={currentAssignment} />}
           <Card>
             <CardContent className="py-5">
               <h3 className="mb-3 text-sm font-semibold text-slate-900">

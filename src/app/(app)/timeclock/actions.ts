@@ -22,8 +22,13 @@ export type ClockResult = { ok: boolean; error?: string };
  * The simple clock-in flow's server-side job resolution: the DEFAULT punch carries no
  * job picker for ANY role now (Erik: "the clock is two buttons"; staff pick a job only
  * via the More-options disclosure), so the job is derived here —
- *   1. the job the tech is ASSIGNED to that's scheduled TODAY (scheduled_start today,
- *      or a job_schedule_segments row covering the org-local day),
+ *   0. the member's explicit CREW DAY-ASSIGNMENT for the org-local today
+ *      (crew_day_assignments, migration 0139) — THE PRECEDENCE LAW: a planned
+ *      day-assignment WINS over schedule/in_progress guesses, so the punch lands
+ *      on the job the office put them on. Honored only while that job is still
+ *      in flight (never punches into a completed/cancelled job);
+ *   1. else the job the tech is ASSIGNED to that's scheduled TODAY (scheduled_start
+ *      today, or a job_schedule_segments row covering the org-local day),
  *   2. else the org's ONLY in_progress job (unambiguous),
  *   3. else null — the entry lands job-less and the office attaches it later.
  * Never guesses between candidates beyond "earliest scheduled first"; RLS scopes every
@@ -34,6 +39,25 @@ async function resolveTechJobToday(supabase: SupabaseClient, uid: string): Promi
     const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
     const tz = getOrgSettings((org as { settings?: unknown } | null)?.settings).timezone;
     const { dayStart, dayEnd, todayStr } = todayBoundsInTz(tz);
+
+    // TIER 0 — today's crew day-assignment wins. Fails soft (falls through) until
+    // migration 0139 lands: the select errors → data null → next tier.
+    const { data: dayRow } = await supabase
+      .from("crew_day_assignments")
+      .select("job_id")
+      .eq("profile_id", uid)
+      .eq("work_date", todayStr)
+      .maybeSingle();
+    const dayJobId = (dayRow as { job_id?: string } | null)?.job_id ?? null;
+    if (dayJobId) {
+      const { data: dayJob } = await supabase
+        .from("jobs")
+        .select("id")
+        .eq("id", dayJobId)
+        .in("status", ACTIVE_JOB_STATUSES)
+        .maybeSingle();
+      if (dayJob) return dayJobId;
+    }
 
     const { data: mine } = await supabase
       .from("jobs")

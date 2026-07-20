@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { payPeriodBounds, payPeriodForOffset, timeEntryGridSpan, todayStrInTz, tzMinutesOfDay } from "@/lib/tz";
+import { payPeriodBounds, payPeriodForOffset, timeEntryGridSpan, todayStrInTz, tzMinutesOfDay, weekDayStrs } from "@/lib/tz";
 
 const ANCHOR = "2026-01-05"; // a Monday
 
@@ -72,6 +72,40 @@ describe("timeEntryGridSpan", () => {
     // Same instant, New York org: 10:00 AM EDT on July 14
     const s = timeEntryGridSpan("2026-07-14T14:00:00Z", null, "America/New_York");
     expect(s).toMatchObject({ dayStr: "2026-07-14", startMin: 10 * 60 });
+  });
+});
+
+// The crew week-planner's day columns (crew_day_assignments, 0139). SIGNED offset,
+// POSITIVE = FUTURE — deliberately the opposite of /timecards' back-paging weekRange.
+describe("weekDayStrs", () => {
+  it("monday week containing a Wednesday runs Mon..Sun", () => {
+    // 2026-07-15 is a Wednesday
+    expect(weekDayStrs("2026-07-15", "monday", 0)).toEqual([
+      "2026-07-13", "2026-07-14", "2026-07-15", "2026-07-16", "2026-07-17", "2026-07-18", "2026-07-19",
+    ]);
+  });
+  it("sunday-start orgs shift the same week back a day", () => {
+    expect(weekDayStrs("2026-07-15", "sunday", 0)).toEqual([
+      "2026-07-12", "2026-07-13", "2026-07-14", "2026-07-15", "2026-07-16", "2026-07-17", "2026-07-18",
+    ]);
+  });
+  it("today ON the week boundary starts its own week (Monday, monday-start)", () => {
+    expect(weekDayStrs("2026-07-13", "monday", 0)[0]).toBe("2026-07-13");
+    // …and a Sunday belongs to the PREVIOUS monday-start week.
+    expect(weekDayStrs("2026-07-19", "monday", 0)[0]).toBe("2026-07-13");
+  });
+  it("positive offset pages FORWARD (next week), negative back", () => {
+    expect(weekDayStrs("2026-07-15", "monday", 1)[0]).toBe("2026-07-20");
+    expect(weekDayStrs("2026-07-15", "monday", -1)[0]).toBe("2026-07-06");
+  });
+  it("crosses month/year boundaries by real calendar days", () => {
+    expect(weekDayStrs("2026-12-30", "monday", 0)).toEqual([
+      "2026-12-28", "2026-12-29", "2026-12-30", "2026-12-31", "2027-01-01", "2027-01-02", "2027-01-03",
+    ]);
+  });
+  it("garbage input never throws — falls back to a fixed week", () => {
+    expect(() => weekDayStrs("2026-13-40", "monday", Number.NaN)).not.toThrow();
+    expect(weekDayStrs("nope", "monday", 0)).toHaveLength(7);
   });
 });
 

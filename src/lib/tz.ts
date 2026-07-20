@@ -163,6 +163,37 @@ export function payPeriodForOffset(
   return p;
 }
 
+/** The 7 org-local day-strings of the week containing `todayStr`, shifted by
+ *  `offset` weeks — SIGNED, and **positive = FUTURE** (crew planning looks
+ *  ahead; note /timecards' local weekRange pages BACK with positive offsets —
+ *  different surface, different direction, hence the loud name difference).
+ *  Pure UTC-noon arithmetic on the day STRING (the caller already resolved
+ *  "today" in the org tz via todayStrInTz), so it's deterministic and DST-safe.
+ *  `weekStart` mirrors org settings week_start. Invalid input falls back to a
+ *  fixed date instead of throwing (the payPeriodBounds guard precedent). */
+export function weekDayStrs(
+  todayStr: string,
+  weekStart: "sunday" | "monday",
+  offset = 0,
+): string[] {
+  const safe =
+    /^\d{4}-\d{2}-\d{2}$/.test(todayStr ?? "") && !Number.isNaN(new Date(`${todayStr}T00:00:00Z`).getTime())
+      ? todayStr
+      : "2026-01-01";
+  const weeks = Math.max(-520, Math.min(520, Math.trunc(Number(offset) || 0)));
+  const utcDow = new Date(`${safe}T00:00:00Z`).getUTCDay(); // Sunday = 0
+  const dow = weekStart === "sunday" ? utcDow : (utcDow + 6) % 7; // days since the week started
+  const start = new Date(`${safe}T00:00:00Z`);
+  start.setUTCDate(start.getUTCDate() - dow + weeks * 7);
+  const days: string[] = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(start);
+    d.setUTCDate(d.getUTCDate() + i);
+    days.push(d.toISOString().slice(0, 10));
+  }
+  return days;
+}
+
 /** Pretty "Weekday, Month D" label for a "YYYY-MM-DD", tz-stable. */
 export function prettyDay(ymd: string): string {
   return new Date(`${ymd}T12:00:00Z`).toLocaleDateString("en-US", {
