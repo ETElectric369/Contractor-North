@@ -102,9 +102,17 @@ export function GlobalQuickAdd({
                 offset, which dragged an absolute menu up behind the bar so "New
                 task" was unreachable. position is set INLINE because .glass-gloss
                 forces position:relative (for its ::before sheen), which would
-                override a Tailwind `fixed`. top 4.5rem clears the 4rem header. */}
+                override a Tailwind `fixed`. top 4.5rem clears the 4rem header.
+                max-height (viewport minus header + mobile bottom nav) + y-scroll
+                keeps the last verbs reachable on short/landscape viewports. */}
             <div
-              style={{ position: "fixed", top: "4.5rem", right: "0.5rem" }}
+              style={{
+                position: "fixed",
+                top: "4.5rem",
+                right: "0.5rem",
+                maxHeight: "calc(100dvh - 9.5rem)",
+                overflowY: "auto",
+              }}
               className={`${GLASS_MENU_CLASS} w-60`}
             >
               {items}
@@ -123,7 +131,16 @@ export function GlobalQuickAdd({
           <div className="fixed inset-0 z-[80]" onClick={() => setOpen(false)} />
           <div
             className="glass glass-gloss glass-menu fixed z-[90] w-60 overflow-hidden rounded-lg py-1.5 shadow-xl"
-            style={{ right: pos.x, bottom: pos.y + 56 }}
+            // Opens UP from the FAB; cap to the space above the anchor (+12px
+            // breathing room) + y-scroll so a high-dragged FAB or a short
+            // landscape viewport can't clip the top rows off-screen. The 6rem
+            // floor keeps the panel usable if the FAB was dragged near the top.
+            style={{
+              right: pos.x,
+              bottom: pos.y + 56,
+              maxHeight: `max(6rem, calc(100dvh - ${pos.y + 56 + 12}px))`,
+              overflowY: "auto",
+            }}
           >
             {items}
           </div>

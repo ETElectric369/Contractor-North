@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MoreHorizontal, Loader2, Pause, Play, Trash2 } from "lucide-react";
-import { GLASS_MENU_CLASS } from "@/components/ui/glass-menu";
+import { GLASS_MENU_CLASS, useGlassMenuPlacement } from "@/components/ui/glass-menu";
 import { EditMemberButton } from "../settings/edit-member-button";
 import { setMemberActive, memberFootprint, removeMember } from "../settings/actions";
 
@@ -55,6 +55,11 @@ export function TeamMemberMenu({
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  // Viewport-aware vertical placement: the LAST roster row's menu used to drop
+  // down under the mobile bottom nav, burying Remove (Chris's report). The shared
+  // hook flips it upward when the trigger sits too low, and caps+scrolls it if
+  // even that can't fit.
+  const { panelRef, panelStyle } = useGlassMenuPlacement(open);
 
   useEffect(() => {
     if (!open) return;
@@ -137,9 +142,11 @@ export function TeamMemberMenu({
       {open && (
         // position set inline because .glass-gloss forces position:relative, which would
         // override a Tailwind `absolute` (the documented gotcha). Right-anchored — ⋯ is
-        // the row's rightmost control.
+        // the row's rightmost control; panelStyle owns the vertical side (down, or UP when
+        // the row is near the bottom of the viewport / the mobile bottom nav).
         <div
-          style={{ position: "absolute", right: 0, top: "calc(100% + 0.25rem)" }}
+          ref={panelRef}
+          style={{ ...panelStyle, right: 0 }}
           className={`${GLASS_MENU_CLASS} w-56`}
         >
           {/* Opaque backing — the roster list can sit inside a card; keep the glass rows

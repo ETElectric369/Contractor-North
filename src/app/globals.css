@@ -14,10 +14,11 @@
    (pointer:coarse), so a 900–1023px fine-pointer window shows the desktop
    shell while inputs stay 16px — deliberate and harmless. */
 @custom-variant shell {
-  /* Erik's law (2026-07-20, third iteration — 900 then 840 both missed real windows):
-     a device with a mouse/trackpad NEVER sees the phone shell, at ANY window width.
-     Touch devices (phones/iPads, pointer: coarse) still switch at 1024. */
-  @media (min-width: 1024px), (pointer: fine) {
+  /* Erik's law (2026-07-20, fourth iteration): a mouse/trackpad device gets the desktop
+     shell at any REALISTIC window width — with a 640px sanity floor, because dock+subnav
+     in a sub-640 window crushes content to nothing (browser-verified at 375). Touch
+     devices (phones/iPads, pointer: coarse) still switch at 1024. */
+  @media (min-width: 1024px), ((min-width: 640px) and (pointer: fine)) {
     @slot;
   }
 }

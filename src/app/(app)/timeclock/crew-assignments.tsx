@@ -11,6 +11,7 @@ import {
   orgWeekDayStrs,
   weekRangeLabel,
   type CrewAssignmentRow,
+  type CrewAutoPlan,
   type CrewJobOpt,
   type ListWeekAssignments,
   type SetCrewDayAssignment,
@@ -32,15 +33,17 @@ interface MemberRow {
  *
  * PRECEDENCE: a day row WINS over every other surface — the tech's Clock In
  * that day lands on it, My Day shows it, and the CrewWeekGrid mirrors it. When
- * TODAY has no explicit row, the line falls back to the inferred current job
- * (`current`, the pickMemberCurrentJob pick a job-less Clock In would resolve
- * to) marked with an "auto" chip; clearing a row returns to that inference.
- * Multiple leaders per day are fine (different crews) — plain checkboxes.
+ * a day has no explicit row, the line falls back to `autoPlan`'s inference for
+ * that day — TODAY = the pickMemberCurrentJob pick a job-less Clock In would
+ * resolve to, later days of the current week = the schedule — marked with an
+ * "auto" chip; clearing a row returns to that inference. Past days and paged
+ * weeks show explicit rows only. Multiple leaders per day are fine (different
+ * crews) — plain checkboxes.
  */
 export function CrewAssignments({
   members,
   jobs,
-  current,
+  autoPlan,
   weekRows,
   tz,
   weekStart,
@@ -50,8 +53,8 @@ export function CrewAssignments({
 }: {
   members: MemberRow[];
   jobs: CrewJobOpt[];
-  /** The inferred TODAY fallback (pickMemberCurrentJob over jobs.assigned_to). */
-  current: Record<string, string>;
+  /** memberId → dayStr → inferred jobId for the current week (see CrewAutoPlan). */
+  autoPlan: CrewAutoPlan;
   /** crew_day_assignments rows for the CURRENT org week (page-fetched; other
    *  weeks load through listWeekAssignments). */
   weekRows: CrewAssignmentRow[];
@@ -160,15 +163,20 @@ export function CrewAssignments({
           </button>
         </div>
 
-        {/* One line per member: name · job Select · ★ lead. Dimmed while a
-            paged week's rows are still loading (no edits against stale rows). */}
-        <div className={`space-y-2 ${loading ? "pointer-events-none opacity-60" : ""}`}>
+        {/* One row per member: name · job Select · ★ lead. Dimmed while a
+            paged week's rows are still loading (no edits against stale rows).
+            @container (the cn-v524 pattern): in a narrow CONTAINER — a phone,
+            or the desktop right column — the name takes its own line and the
+            controls get the full width below it; viewport breakpoints lie in
+            the fine-pointer shell band, so this keys off actual width. */}
+        <div
+          className={`@container space-y-2 ${loading ? "pointer-events-none opacity-60" : ""}`}
+        >
           {members.map((m) => {
             const explicit = dayRows.get(m.id) ?? null;
-            // The inferred fallback applies to TODAY only — other days show
-            // exactly what's planned (quietly blank when nothing is).
-            const autoJobId =
-              !explicit && selectedDay === todayStr ? current[m.id] : undefined;
+            // No explicit row → the day's inference (today = clock-in pick,
+            // future = schedule; past days and paged weeks have no entries).
+            const autoJobId = !explicit ? autoPlan[m.id]?.[selectedDay] : undefined;
             const value = explicit?.job_id ?? autoJobId ?? "";
             const isAuto = !explicit && !!autoJobId;
             const busy = busyKey === `${m.id}|${selectedDay}`;
@@ -177,8 +185,8 @@ export function CrewAssignments({
               : null;
             const lead = explicit?.is_crew_lead ?? false;
             return (
-              <div key={m.id} className="flex items-center gap-2">
-                <span className="w-24 shrink-0 truncate text-sm font-medium text-slate-700">
+              <div key={m.id} className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="w-full shrink-0 truncate text-sm font-medium text-slate-700 @[26rem]:w-24">
                   {m.full_name ?? "—"}
                 </span>
                 <Select
@@ -208,8 +216,12 @@ export function CrewAssignments({
                 </Select>
                 {isAuto && (
                   <span
-                    title="No day assignment yet — this is the job a Clock In would infer. Pick a job (or tap ★) to pin it for the day."
-                    className="shrink-0 rounded border border-slate-200 bg-slate-50 px-1 py-px text-[9px] font-semibold uppercase tracking-wide text-slate-400"
+                    title={
+                      selectedDay === todayStr
+                        ? "No day assignment yet — this is the job a Clock In would infer today. Pick a job (or tap ★) to pin it for the day."
+                        : "No day assignment yet — the schedule puts them here. Pick a job (or tap ★) to pin it for the day."
+                    }
+                    className="shrink-0 rounded border border-dashed border-slate-300 bg-slate-50 px-1 py-px text-[9px] font-semibold uppercase tracking-wide text-slate-500"
                   >
                     auto
                   </span>

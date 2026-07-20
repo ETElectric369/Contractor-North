@@ -223,11 +223,18 @@ export function JobTimeButton({
         )}
       </button>
 
+      {/* portal: this button lives INSIDE the dock's `glass glass-menu` bar, whose
+          backdrop-filter makes the bar the containing block for an in-place fixed
+          overlay — the modal gets trapped/crushed inside the 56px bar on fine-pointer
+          browsers (the cn-v463 physics; Chris's "shuts the window"). Same rule the
+          Manage-menu children (Edit/Propose/Finish) already follow. No <form> wraps
+          this Modal, so portaling is safe (footer uses onSave callbacks). */}
       <Modal
         open={open}
         onClose={() => !pending && setOpen(false)}
         title={state === "in" ? "Clock in" : state === "switch" ? "Switch to this job" : "On the clock"}
         size="md"
+        portal
         footer={
           <ModalActions
             onCancel={() => setOpen(false)}

@@ -35,6 +35,14 @@ export interface CrewActionResult {
   error?: string;
 }
 
+/** memberId → dayStr → jobId: the CURRENT week's inferred (non-explicit) jobs,
+ *  built server-side in page.tsx — TODAY is the full pickMemberCurrentJob
+ *  inference (what a job-less Clock In resolves to), later days are
+ *  schedule-only (pickScheduledJobForDay). Both surfaces render these as muted
+ *  "auto" hints; an explicit crew_day_assignments row always wins. Keyed by
+ *  real day strings, so paged-away weeks simply have no hints. */
+export type CrewAutoPlan = Record<string, Record<string, string>>;
+
 /** The setCrewDayAssignment server action (crew-actions.ts), passed into the
  *  client components as a prop. jobId null = clear the member's row for that
  *  day (the lead flag clears with it — a lead with no job has no meaning). */
@@ -129,6 +137,34 @@ export function shortJobTag(
     j.job_number ||
     "Job"
   );
+}
+
+/** SCHEDULE-only pick for a FUTURE day's muted "auto" hint: among the member's
+ *  jobs, the one the schedule puts on `ds` — a job_schedule_segments range
+ *  covering the day, or a scheduled_start falling on it (org-local day
+ *  precomputed by the caller into schedDayByJob — tz stays a server concern).
+ *  Earliest scheduled_start wins, mirroring pickJobScheduledToday's tie-break
+ *  (segment-only jobs sort last, same "9999" sentinel). TODAY's hint
+ *  deliberately does NOT use this — it's the full pickMemberCurrentJob
+ *  inference (tier-0 day-assignment included). PAST days get no hints at all:
+ *  a hint on a past day would read as "was there", and that's /timecards'
+ *  (time-entry) truth to tell, not the schedule's. */
+export function pickScheduledJobForDay<
+  T extends { id: string; scheduled_start?: string | null },
+>(
+  jobs: T[],
+  ds: string,
+  segsByJob: ReadonlyMap<string, { start: string; end: string }[]>,
+  schedDayByJob: ReadonlyMap<string, string | null>,
+): T | null {
+  const hits = jobs
+    .filter(
+      (j) =>
+        (segsByJob.get(j.id) ?? []).some((r) => r.start <= ds && ds <= r.end) ||
+        schedDayByJob.get(j.id) === ds,
+    )
+    .sort((a, b) => (a.scheduled_start ?? "9999").localeCompare(b.scheduled_start ?? "9999"));
+  return hits[0] ?? null;
 }
 
 /** Pure optimistic patch: replace/insert/remove the (profile, day) row in a

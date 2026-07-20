@@ -3,7 +3,7 @@
 import { Children, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MoreHorizontal, Loader2, Trash2 } from "lucide-react";
-import { GLASS_MENU_CLASS } from "@/components/ui/glass-menu";
+import { GLASS_MENU_CLASS, useGlassMenuPlacement } from "@/components/ui/glass-menu";
 import type { NavTree, TreeNode } from "@/lib/nav-tree";
 import { resolveNavTree, type BloomNode } from "./app-shell/glass-bloom";
 import { executeAction } from "@/lib/actions/execute";
@@ -72,6 +72,10 @@ export function SectionActionsMenu({
   // Measured per-open so it follows rotations/resizes.
   const [alignLeft, setAlignLeft] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  // Vertical counterpart to alignLeft (shared hook): flips the panel upward when
+  // the ⋯ sits low enough that the danger row (LAST) would land under the mobile
+  // bottom nav / off-screen; caps+scrolls if neither side fits.
+  const { panelRef, panelStyle } = useGlassMenuPlacement(open);
 
   const PANEL_W = 224; // w-56 below — keep in sync
   function toggle() {
@@ -190,8 +194,10 @@ export function SectionActionsMenu({
         // would override a Tailwind `absolute`. Right-anchored normally (the ⋯ is
         // standardized as the LAST control of the header actions row); left-anchored
         // when a wrapped mobile header would push the panel off-screen (see toggle()).
+        // panelStyle owns the vertical side (down, or UP near the viewport bottom).
         <div
-          style={{ position: "absolute", top: "calc(100% + 0.25rem)", ...(alignLeft ? { left: 0 } : { right: 0 }) }}
+          ref={panelRef}
+          style={{ ...panelStyle, ...(alignLeft ? { left: 0 } : { right: 0 }) }}
           className={`${GLASS_MENU_CLASS} w-56`}
         >
           {children}

@@ -69,6 +69,13 @@ export function Modal({
   // without re-binding the listener on every render.
   const requestCloseRef = useRef(requestClose);
   requestCloseRef.current = requestClose;
+  // Backdrop dismissal must START on the backdrop. A drag that begins INSIDE the
+  // panel (selecting text in an input) and releases outside fires the click on the
+  // WRAPPER (the DOM common ancestor) — the panel's stopPropagation never runs, so
+  // the old bare onClick closed the window mid-use and ate the half-filled form
+  // (the desktop "shuts the window" report). Track where the pointer went down and
+  // only treat a click as a backdrop tap when it both started AND landed there.
+  const downOnBackdrop = useRef(false);
 
   // Disarm whenever the modal opens or closes — a fresh open starts clean.
   useEffect(() => {
@@ -148,7 +155,17 @@ export function Modal({
       className={`z-[120] overflow-y-auto overscroll-contain ${vvRect ? "" : "fixed inset-0"}`}
     >
       <div className="fixed inset-0 bg-slate-900/40" />
-      <div onClick={requestClose} className="relative flex min-h-full items-start justify-center p-3 sm:items-center">
+      <div
+        onPointerDown={(e) => {
+          downOnBackdrop.current = e.target === e.currentTarget;
+        }}
+        onClick={(e) => {
+          const startedHere = downOnBackdrop.current;
+          downOnBackdrop.current = false;
+          if (startedHere && e.target === e.currentTarget) requestClose();
+        }}
+        className="relative flex min-h-full items-start justify-center p-3 sm:items-center"
+      >
         {/* Cap the panel to the viewport: the HEADER and FOOTER are fixed (shrink-0)
             and only the middle BODY scrolls, so the action row is always reachable
             on a short phone (esp. with the keyboard up). stopPropagation so a tap inside

@@ -203,10 +203,16 @@ export function QuickCostButton({
       <button type="button" className={className ?? DEFAULT_TRIGGER} onClick={openModal}>
         {icon === "dollar" ? <DollarSign className="h-4 w-4 shrink-0" /> : <Wallet className="h-4 w-4 shrink-0" />} {label}
       </button>
+      {/* portal: one mount of this button sits INSIDE the job action dock's
+          `glass glass-menu` bar — backdrop-filter makes that bar the containing
+          block for an in-place fixed overlay, trapping/crushing the modal in the
+          bar on fine-pointer browsers (the cn-v463 physics). Portaling is safe for
+          every mount: no <form> wraps this Modal (footer uses onSave callbacks). */}
       <Modal
         open={open}
         onClose={closeModal}
         title="Add a cost"
+        portal
         footer={<ModalActions onCancel={closeModal} onSave={onSave} saving={pending} saveLabel={costSaved ? "Retry photo" : "Save cost"} />}
       >
         <div className="space-y-4">

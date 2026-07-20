@@ -84,9 +84,18 @@ export function AccountMenu({
            which would drag an absolute menu up behind the bar (the documented
            quick-add gotcha). position is set INLINE because .glass-gloss forces
            position:relative (for its ::before sheen), which would override a
-           Tailwind `fixed`. top 4.5rem clears the 4rem header. */
+           Tailwind `fixed`. top 4.5rem clears the 4rem header. The max-height
+           (viewport minus header + mobile bottom nav) + y-scroll keeps Sign Out
+           reachable on short/landscape viewports — no row may ever hide under
+           the dock (the /team "Remove blocked by menu bar" class of bug). */
         <div
-          style={{ position: "fixed", top: "4.5rem", right: "0.5rem" }}
+          style={{
+            position: "fixed",
+            top: "4.5rem",
+            right: "0.5rem",
+            maxHeight: "calc(100dvh - 9.5rem)",
+            overflowY: "auto",
+          }}
           className={`${GLASS_MENU_CLASS} w-60`}
         >
           {/* Who am I — moved out of the bar (it was hidden < sm anyway). */}

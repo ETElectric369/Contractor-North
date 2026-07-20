@@ -13,6 +13,7 @@ import {
   shortJobTag,
   weekRangeLabel,
   type CrewAssignmentRow,
+  type CrewAutoPlan,
   type CrewJobOpt,
   type ListWeekAssignments,
   type SetCrewDayAssignment,
@@ -29,11 +30,14 @@ interface MemberRow {
  * the page's isStaff branch): the org week as columns (week_start honored,
  * arrows page ±1 week), active members as rows, each cell the member's
  * assigned job for that day — a short-label pill in the member's /timecards
- * color, ★ = crew leader — and quietly blank when nothing is planned. Shows
- * ONLY crew_day_assignments rows (never time entries — that's /timecards).
- * The header/column look deliberately matches the /timecards TimeGrid;
- * assignments are day-scoped (no hour axis), so this is a sibling, not a
- * TimeGrid reuse.
+ * color, ★ = crew leader. A cell with NO explicit row shows the `autoPlan`
+ * inference as a muted DASHED pill instead of blank (today = the job a
+ * job-less Clock In would infer, future days of the current week = the
+ * schedule) — the old board always showed where everyone was, and a brand-new
+ * planner with zero explicit rows must not read as "the assignments vanished".
+ * Never time entries — that's /timecards. The header/column look deliberately
+ * matches the /timecards TimeGrid; assignments are day-scoped (no hour axis),
+ * so this is a sibling, not a TimeGrid reuse.
  *
  * Tapping a cell opens an INLINE EDITOR BAR under the grid (job Select + ★
  * lead) — chosen over remote-selecting the board because it keeps the two
@@ -45,6 +49,7 @@ export function CrewWeekGrid({
   members,
   jobs,
   weekRows,
+  autoPlan = {},
   tz,
   weekStart,
   jobCodesEnabled = true,
@@ -56,6 +61,8 @@ export function CrewWeekGrid({
   /** crew_day_assignments rows for the CURRENT org week (page-fetched; other
    *  weeks load through listWeekAssignments). */
   weekRows: CrewAssignmentRow[];
+  /** memberId → dayStr → inferred jobId for the current week (see CrewAutoPlan). */
+  autoPlan?: CrewAutoPlan;
   tz: string;
   weekStart: "sunday" | "monday";
   /** Org setting timeclock_job_codes — false labels jobs customer · address. */
@@ -104,7 +111,7 @@ export function CrewWeekGrid({
       <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-2.5">
         <span className="text-sm font-semibold text-slate-900">Crew week</span>
         <span className="hidden text-xs text-slate-400 sm:inline">
-          who&apos;s planned where · ★ leads
+          who&apos;s planned where · ★ leads · dashed = auto
         </span>
         <span className="ml-auto flex shrink-0 items-center gap-1.5">
           {loading && <Loader2 className="h-4 w-4 animate-spin text-slate-400" />}
@@ -130,10 +137,14 @@ export function CrewWeekGrid({
         </span>
       </div>
 
-      {/* The grid — header/column look matching the /timecards TimeGrid. */}
+      {/* The grid — header/column look matching the /timecards TimeGrid. Day
+          columns floor at 60px (not TimeGrid's 92 — these pills carry a short
+          tag, not time spans) so the whole week FITS the lg left column
+          (~520px) without a sideways scroll; narrower containers scroll INSIDE
+          this overflow-x wrapper, the /timecards pattern. */}
       <div className="overflow-x-auto">
         <div
-          style={{ minWidth: 96 + days.length * 84 }}
+          style={{ minWidth: 96 + days.length * 60 }}
           className={loading ? "pointer-events-none opacity-60" : ""}
         >
           <div className="flex border-b border-slate-100">
@@ -146,13 +157,10 @@ export function CrewWeekGrid({
                   key={ds}
                   className={`min-w-0 flex-1 truncate px-1 py-1.5 text-center text-xs font-medium text-slate-600 ${colBorder}`}
                 >
+                  {/* Today = bold brand + the tinted column below. No "today"
+                      text tag — it doesn't fit the 60px column floor. */}
                   <span className={isToday ? "font-bold text-brand" : ""}>
                     {dow} {dom}
-                    {isToday && (
-                      <span className="ml-1 text-[9px] font-semibold uppercase tracking-wide">
-                        today
-                      </span>
-                    )}
                   </span>
                 </div>
               );
@@ -170,6 +178,11 @@ export function CrewWeekGrid({
                 const row = byKey.get(`${m.id}|${ds}`);
                 const isSel = sel?.profileId === m.id && sel?.dayStr === ds;
                 const isToday = ds === todayStr;
+                // No explicit row → the day's inference, rendered as a muted
+                // dashed pill (needs its label from the active options list —
+                // an unlabelable hint is skipped, not shown as "Job").
+                const hintId = !row ? autoPlan[m.id]?.[ds] : undefined;
+                const hintJob = hintId ? (jobsById.get(hintId) ?? null) : null;
                 return (
                   <button
                     key={ds}
@@ -178,7 +191,9 @@ export function CrewWeekGrid({
                     title={
                       row?.job
                         ? `${m.full_name ?? "Member"} · ${dayTag(ds)}: ${assignmentJobLabel(row.job, jobCodesEnabled)}${row.is_crew_lead ? " · crew lead" : ""}`
-                        : `Assign ${m.full_name ?? "member"} · ${dayTag(ds)}`
+                        : hintJob
+                          ? `${m.full_name ?? "Member"} · ${dayTag(ds)}: ${assignmentJobLabel(hintJob, jobCodesEnabled)} — auto (${isToday ? "the job a Clock In would infer" : "from the schedule"}), not pinned. Tap to pin or change.`
+                          : `Assign ${m.full_name ?? "member"} · ${dayTag(ds)}`
                     }
                     aria-label={`${m.full_name ?? "Member"}, ${dayTag(ds)}`}
                     className={`group min-h-[34px] min-w-0 flex-1 p-0.5 text-left ${colBorder} ${
@@ -194,6 +209,14 @@ export function CrewWeekGrid({
                         )}
                         <span className="truncate">
                           {shortJobTag(row.job, jobCodesEnabled)}
+                        </span>
+                      </span>
+                    ) : hintJob ? (
+                      // Muted + dashed + slate (never the member's color): an
+                      // inference must read differently from a pinned plan.
+                      <span className="flex items-center rounded-md border border-dashed border-slate-300 bg-slate-50/70 px-1 py-0.5 text-[10px] font-medium leading-tight text-slate-500">
+                        <span className="truncate">
+                          {shortJobTag(hintJob, jobCodesEnabled)}
                         </span>
                       </span>
                     ) : (

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { isStaffRole } from "@/lib/actions/perms";
 import { ACTIVE_JOB_STATUSES, pickMemberCurrentJob } from "@/lib/job-status";
-import { payPeriodBounds, todayBoundsInTz, todayStrInTz, tzDayStartUtc } from "@/lib/tz";
+import { payPeriodBounds, todayBoundsInTz, todayStrInTz, tzDayStartUtc, weekDayStrs } from "@/lib/tz";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
@@ -11,6 +11,7 @@ import { AutoClockoutPrompt } from "./auto-clockout-prompt";
 import { CrewAssignments } from "./crew-assignments";
 import { listWeekAssignments, setCrewDayAssignment } from "./crew-actions";
 import { CrewWeekGrid } from "./crew-week-grid";
+import { pickScheduledJobForDay, type CrewAutoPlan } from "./crew-plan";
 import { getOrgSettings } from "@/lib/org-settings";
 import { AddEntryButton } from "./add-entry-button";
 import { aggregatePayrollEntries } from "@/lib/payroll-math";
@@ -111,7 +112,14 @@ export default async function TimeclockPage() {
     created_at?: string | null;
   }[]);
   const { todayStr } = todayBoundsInTz(orgSettings.timezone);
-  const currentAssignment: Record<string, string> = {};
+  // The current org week's 7 day-strings — bounds for the schedule read that
+  // feeds the planner's muted "auto" hints below (today + future days only).
+  const thisWeekDays = weekDayStrs(todayStr, orgSettings.week_start, 0);
+  // memberId → dayStr → inferred jobId for the CURRENT week: today = the full
+  // pickMemberCurrentJob inference (what a job-less Clock In resolves to),
+  // future days = schedule-only. Both planner surfaces show these as muted
+  // "auto"; an explicit crew_day_assignments row always wins.
+  const autoPlan: CrewAutoPlan = {};
   // Today's day-assignment JOB per member — the tier-0 source for the board's
   // inferred-current pick below. (The planner UI's own rows — incl. the ★ lead
   // checkboxes — seed from listWeekAssignments, not from this map.)
@@ -121,10 +129,13 @@ export default async function TimeclockPage() {
     const [{ data: segRows }, dayRes] = await Promise.all([
       supabase
         .from("job_schedule_segments")
-        .select("job_id")
+        // The WHOLE current org week, not just today (same single batched read,
+        // wider bounds): today's rows feed the segToday pick, the rest feed the
+        // future-day schedule hints.
+        .select("job_id, start_date, end_date")
         .in("job_id", crewJobs.map((j) => j.id))
-        .lte("start_date", todayStr)
-        .gte("end_date", todayStr),
+        .lte("start_date", thisWeekDays[6])
+        .gte("end_date", thisWeekDays[0]),
       // Fails soft (empty) until migration 0139 lands — an unknown table must
       // never de-board the page (the 0128 crew_lead precedent).
       supabase
@@ -135,7 +146,24 @@ export default async function TimeclockPage() {
     for (const r of ((dayRes.data ?? []) as { profile_id: string; job_id: string }[])) {
       dayAssignments[r.profile_id] = r.job_id;
     }
-    const segToday = new Set(((segRows ?? []) as { job_id: string }[]).map((s) => s.job_id));
+    const segWeek = (segRows ?? []) as { job_id: string; start_date: string; end_date: string }[];
+    const segToday = new Set(
+      segWeek.filter((s) => s.start_date <= todayStr && s.end_date >= todayStr).map((s) => s.job_id),
+    );
+    const segsByJob = new Map<string, { start: string; end: string }[]>();
+    for (const s of segWeek) {
+      const list = segsByJob.get(s.job_id) ?? [];
+      list.push({ start: s.start_date, end: s.end_date });
+      segsByJob.set(s.job_id, list);
+    }
+    // Each job's scheduled_start as an org-local day string, for segment-less
+    // jobs' hints (tz resolved HERE so the pick helper stays pure).
+    const schedDayByJob = new Map<string, string | null>(
+      crewJobs.map((j) => [
+        j.id,
+        j.scheduled_start ? todayStrInTz(orgSettings.timezone, new Date(j.scheduled_start)) : null,
+      ]),
+    );
     for (const m of members ?? []) {
       const mine = crewJobs.filter((cj) => (cj.assigned_to ?? []).includes(m.id));
       // Tier-0 lookup searches the FULL active set, not just the member's
@@ -147,7 +175,16 @@ export default async function TimeclockPage() {
         if (dayJob) mine.unshift(dayJob);
       }
       const pick = pickMemberCurrentJob(mine, segToday, dayStart, dayEnd, dayJobId);
-      if (pick) currentAssignment[m.id] = pick.id;
+      const plan: Record<string, string> = {};
+      if (pick) plan[todayStr] = pick.id;
+      // FUTURE days only — no hints on past days (a past-day hint would read as
+      // "was there", which is /timecards' time-entry truth to tell).
+      for (const ds of thisWeekDays) {
+        if (ds <= todayStr) continue;
+        const sched = pickScheduledJobForDay(mine, ds, segsByJob, schedDayByJob);
+        if (sched) plan[ds] = sched.id;
+      }
+      if (Object.keys(plan).length) autoPlan[m.id] = plan;
     }
   }
 
@@ -180,6 +217,7 @@ export default async function TimeclockPage() {
           customer_name: (j.customer_name ?? null) as string | null,
         })),
         weekRows: weekAssignments?.rows ?? [],
+        autoPlan,
         tz: orgSettings.timezone,
         weekStart: orgSettings.week_start,
         jobCodesEnabled: jobCodesOn,
@@ -385,8 +423,15 @@ export default async function TimeclockPage() {
         />
       </PageHeader>
 
+      {/* min-w-0 on BOTH columns is load-bearing: the CrewWeekGrid's fixed-min-width
+          scroller lives inside these grid items, and a grid item's automatic minimum
+          (min-width:auto) would otherwise size the item to the scroller's full
+          content width — stretching the whole page sideways on phones and pushing
+          the columns past the viewport on desktop (the cn-v523 fallout). With
+          min-w-0 the wide grid scrolls INSIDE its own overflow-x container, the
+          /timecards pattern. */}
       <div className="grid gap-6 lg:grid-cols-5">
-        <div className="lg:col-span-3">
+        <div className="min-w-0 lg:col-span-3">
           {autoPrompt && (
             <AutoClockoutPrompt
               entry={autoPrompt}
@@ -490,11 +535,11 @@ export default async function TimeclockPage() {
           )}
         </div>
 
-        <div className="space-y-6 lg:col-span-2">
+        <div className="min-w-0 space-y-6 lg:col-span-2">
           {/* The office's day-planner board — day strip + per-member job/★-lead lines.
               A day row here WINS: the tech's job-less Clock In resolves to it (with
-              `current` as the inferred today-fallback, shown as "auto"). Staff only. */}
-          {crewPlan && <CrewAssignments {...crewPlan} current={currentAssignment} />}
+              autoPlan as the inferred fallback, shown as "auto"). Staff only. */}
+          {crewPlan && <CrewAssignments {...crewPlan} />}
           <Card>
             <CardContent className="py-5">
               <h3 className="mb-3 text-sm font-semibold text-slate-900">

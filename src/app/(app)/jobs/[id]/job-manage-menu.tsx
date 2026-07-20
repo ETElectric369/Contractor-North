@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MoreHorizontal, Loader2, Receipt, Users, List, Trash2 } from "lucide-react";
-import { GLASS_MENU_CLASS } from "@/components/ui/glass-menu";
+import { GLASS_MENU_CLASS, useGlassMenuPlacement } from "@/components/ui/glass-menu";
 
 /** The one menu-row style — shared with the modal-owning items (Edit / Propose /
  *  Finish) composed in as children, so every row in the panel looks identical. */
@@ -51,6 +51,10 @@ export function JobManageMenu({
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  // Viewport-aware vertical placement (shared hook): flips the panel upward when
+  // the trigger sits low enough that Delete Job (deliberately LAST) would land
+  // under the mobile bottom nav / off-screen; caps+scrolls if neither side fits.
+  const { panelRef, panelStyle } = useGlassMenuPlacement(open);
 
   useEffect(() => {
     if (!open) return;
@@ -138,9 +142,11 @@ export function JobManageMenu({
       {open && (
         // position set inline because .glass-gloss forces position:relative, which
         // would override a Tailwind `absolute` (the documented gotcha). Right-anchored:
-        // Manage is the dock's rightmost control.
+        // Manage is the dock's rightmost control; panelStyle owns the vertical side
+        // (down, or UP near the bottom of the viewport / the mobile bottom nav).
         <div
-          style={{ position: "absolute", right: 0, top: "calc(100% + 0.25rem)" }}
+          ref={panelRef}
+          style={{ ...panelStyle, right: 0 }}
           className={`${GLASS_MENU_CLASS} w-60`}
         >
           {/* Opaque backing — the "ghost Edit pill" / menu-opacity bug. This panel

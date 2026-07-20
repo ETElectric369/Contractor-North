@@ -140,8 +140,13 @@ export function BugReporter({ orgId, collaborator = false }: { orgId: string; co
         title="Report a bug"
         aria-label="Report a bug"
         // /content has no mobile bottom nav to clear, so the collaborator mount sits at the corner.
+        // In-app the clearance must follow the SHELL rule, not a width rule: the old `sm:bottom-4`
+        // dropped the FAB onto the glass bottom nav on any coarse-pointer viewport 640-1023px wide
+        // (iPad portrait / phone landscape — mobile shell, nav present), a floater permanently
+        // parked on the nav. `shell:` is the same variant the nav itself hides by, so the two can
+        // never disagree: nav present → cleared; desktop shell (no nav) → corner.
         className={`fixed right-4 z-[71] flex h-11 w-11 items-center justify-center rounded-full bg-slate-900 text-white shadow-lg transition hover:bg-slate-700 disabled:opacity-70 ${
-          collaborator ? "bottom-4" : "bottom-[calc(5.5rem+env(safe-area-inset-bottom))] sm:bottom-4"
+          collaborator ? "bottom-4" : "bottom-[calc(5.5rem+env(safe-area-inset-bottom))] shell:bottom-4"
         }`}
       >
         {capturing ? <Loader2 className="h-5 w-5 animate-spin" /> : <Bug className="h-5 w-5" />}
