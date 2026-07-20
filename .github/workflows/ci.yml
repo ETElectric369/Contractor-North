@@ -6,9 +6,17 @@ on:
   pull_request:
     branches: [main]
 
+# Ship cadence here is many pushes a day — a superseded run is pure wasted minutes.
+# Cancel the in-flight run when a newer push to the same ref lands.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    # A wedged run would otherwise burn the 360-minute default against the monthly quota.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
