@@ -160,6 +160,53 @@ export interface SaveQuoteInput {
   items: DraftLineItem[];
 }
 
+/** The accepted-quote lock — the quote-side twin of requireDraftInvoice.
+ *
+ *  An accepted quote IS the contract, and `contractTotalFromQuotes` reads its live total.
+ *  A partially-drawn payment schedule prices already-billed milestones off their FROZEN
+ *  billed_amount but recomputes pending ones as `percent × the CURRENT contract` — so
+ *  editing an accepted quote after the deposit is drawn silently re-bases the rest of the
+ *  schedule. Drop a $10,000 quote to $8,000 after a $3,000 deposit and the remaining 40/30
+ *  draws come to $5,600, billing $8,600 against an $8,000 contract; edit it upward and the
+ *  difference is never billed. setPaymentSchedule's over-contract check only ever runs at
+ *  schedule-creation time, so nothing downstream catches the drift.
+ *
+ *  A scope change after acceptance is a legitimate business event, so this is NOT a freeze
+ *  on every accepted quote — only on one whose schedule has already drawn real money. The
+ *  escape hatch is to revise: duplicate the quote (or void the draw), don't mutate the
+ *  contract under a customer who already paid against it. */
+async function requireEditableQuote(
+  supabase: any,
+  quoteId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { data: quote } = await supabase
+    .from("quotes")
+    .select("status, job_id, quote_number, doc_type")
+    .eq("id", quoteId)
+    .maybeSingle();
+  if (!quote) return { ok: false, error: "Quote not found." };
+  if ((quote as any).status !== "accepted") return { ok: true };
+  const jobId = (quote as any).job_id as string | null;
+  if (!jobId) return { ok: true }; // accepted but no job yet → no schedule to shift
+
+  // "Drawn" = a milestone linked to an invoice that still stands. A deleted/void draw
+  // releases the lock (deleting a draft draw nulls the FK, the same signal the schedule
+  // itself uses for billed-vs-pending), so a mistaken draw doesn't wedge the quote.
+  const { data: drawn } = await supabase
+    .from("payment_milestones")
+    .select("invoice_id, invoices(status)")
+    .eq("job_id", jobId)
+    .not("invoice_id", "is", null);
+  const live = ((drawn ?? []) as any[]).filter((m) => (m.invoices?.status ?? "") !== "void");
+  if (!live.length) return { ok: true };
+
+  const label = docLabel(quote as { doc_type?: string | null });
+  return {
+    ok: false,
+    error: `${(quote as any).quote_number || `This ${label.toLowerCase()}`} is accepted and ${live.length} scheduled payment${live.length === 1 ? " has" : "s have"} already been billed against it — changing it now would re-price the remaining draws. Duplicate it as a revision (or void the draw) instead.`,
+  };
+}
+
 /** Recompute subtotal/tax/total from the quote's line items. */
 async function recalcQuote(supabase: any, quoteId: string) {
   const { data: quote } = await supabase
@@ -189,6 +236,8 @@ export async function addQuoteItem(
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
   if (!item.description.trim()) return { ok: false, error: "Description is required." };
+  const editable = await requireEditableQuote(supabase, quoteId);
+  if (!editable.ok) return editable;
   const { data: last } = await supabase
     .from("quote_line_items")
     .select("sort_order")
@@ -230,6 +279,8 @@ export async function updateQuoteItem(
   if (item.unit !== undefined) clean.unit = item.unit.trim() || "ea";
   if (item.unit_price !== undefined) clean.unit_price = item.unit_price || 0;
   if (Object.keys(clean).length === 0) return { ok: false, error: "Nothing to update." };
+  const editable = await requireEditableQuote(supabase, quoteId);
+  if (!editable.ok) return editable;
   const { error } = await supabase
     .from("quote_line_items")
     .update(clean)
@@ -248,6 +299,8 @@ export async function deleteQuoteItem(
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  const editable = await requireEditableQuote(supabase, quoteId);
+  if (!editable.ok) return editable;
   const { error } = await supabase.from("quote_line_items").delete().eq("id", itemId);
   if (error) return { ok: false, error: error.message };
   await recalcQuote(supabase, quoteId);
@@ -273,6 +326,13 @@ export async function updateQuoteMeta(
   if (meta.tax_rate !== undefined) clean.tax_rate = meta.tax_rate || 0;
   if (meta.valid_until !== undefined) clean.valid_until = meta.valid_until;
   if (Object.keys(clean).length === 0) return { ok: false, error: "Nothing to update." };
+  // Only the tax rate moves `total` (through recalcQuote) — so only a tax-rate change on a
+  // drawn contract trips the accepted-lock. Re-titling or re-noting an accepted quote is
+  // harmless and stays allowed.
+  if (meta.tax_rate !== undefined) {
+    const editable = await requireEditableQuote(supabase, quoteId);
+    if (!editable.ok) return editable;
+  }
   const { error } = await supabase
     .from("quotes")
     .update(clean)

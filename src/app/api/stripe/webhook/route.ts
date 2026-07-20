@@ -2,7 +2,7 @@ import { getStripe } from "@/lib/stripe";
 import { createServiceClient } from "@/lib/supabase/server";
 import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
 import { formatCurrency } from "@/lib/utils";
-import { paidStatus } from "@/lib/invoice-math";
+import { recalcInvoice } from "@/lib/invoice-recalc";
 import type Stripe from "stripe";
 
 export const runtime = "nodejs";
@@ -59,24 +59,18 @@ export async function POST(req: Request) {
       if ((insErr as { code?: string }).code === "23505") return; // already recorded this event
       throw new Error(insErr.message);
     }
-    const { data: pays } = await supabase
-      .from("payments")
-      .select("amount")
-      .eq("invoice_id", invoiceId);
+    // Settle through THE shared recalc (items + payments + open customer credits) instead
+    // of a local payments-only sum. The old code blind-wrote `amount_paid = sum(payments)`,
+    // which ERASED any posted credit: a $200 account credit + an $800 card payment on a
+    // $1,000 invoice came back as $800 paid / status "partial", so the invoice kept a
+    // phantom $200 balance forever — aged in A/R, dunned by the reminder cron, and payable
+    // a SECOND time on the public page. One definition, both paths agree by construction.
+    await recalcInvoice(supabase, invoiceId);
     const { data: inv } = await supabase
       .from("invoices")
-      .select("total, status, invoice_number, customers(name)")
+      .select("invoice_number, customers(name)")
       .eq("id", invoiceId)
       .single();
-    const paid =
-      Math.round((pays ?? []).reduce((s: number, p: any) => s + Number(p.amount ?? 0), 0) * 100) / 100;
-    // Cents-tolerant status (shared with recalcTotals) — a raw `paid >= total` float
-    // compare used to leave a fully-paid online customer "partial" and then dunned.
-    const status = paidStatus(Number(inv?.total ?? 0), paid, inv?.status ?? "sent");
-    await supabase
-      .from("invoices")
-      .update({ amount_paid: paid, status })
-      .eq("id", invoiceId);
 
     // A customer paid online — ping office staff (no recorder to exclude).
     // Awaited (not fire-and-forget): a serverless function can freeze right after

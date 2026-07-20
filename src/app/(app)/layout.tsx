@@ -96,13 +96,19 @@ export default async function AppLayout({
   // clock-in. Requiring gps_in here is what silently disabled the geofence for most
   // punches (the 30-hour open shift).
   let openEntry:
-    | { id: string; gps_in: GeoPoint | null; clock_in: string; job: { job_number: string; name: string } | null }
+    | {
+        id: string;
+        gps_in: GeoPoint | null;
+        clock_in: string;
+        job_id: string | null;
+        job: { job_number: string; name: string } | null;
+      }
     | null = null;
   if (settings.geofence_logout) {
     try {
       const { data: oe } = await supabase
         .from("time_entries")
-        .select("id, gps_in, clock_in, job:job_id(job_number, name)")
+        .select("id, gps_in, clock_in, job_id, job:job_id(job_number, name)")
         .eq("profile_id", user.id)
         .eq("status", "open")
         .maybeSingle();
@@ -180,6 +186,9 @@ export default async function AppLayout({
           gpsIn={openEntry.gps_in}
           clockInIso={openEntry.clock_in}
           radiusM={settings.geofence_radius_m}
+          // The entry's CURRENT job — a mid-shift switch re-points it, and the monitor
+          // must retire the old site's anchor + trip state instead of fencing on it.
+          jobId={openEntry.job_id ?? null}
           jobLabel={openEntry.job ? jobLabel(openEntry.job) : "the job site"}
         />
       )}

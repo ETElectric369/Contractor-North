@@ -85,11 +85,15 @@ export function Modal({
     };
   }, [open]);
 
-  // Rendered IN-PLACE (not portaled). While open, <body> gets `modal-open`, which
-  // hides the fixed mobile bottom nav (globals.css) so it can't cover the Save
-  // button. NOTE: do NOT portal this to <body> — many callers wrap the <Modal> in
-  // a <form>, and portaling moves the fields + Save button out of that form, so
-  // Save silently does nothing. The nav-hide alone fixes the original bug.
+  // Rendered IN-PLACE BY DEFAULT (opt into portaling via the `portal` prop — see its
+  // docs above). While open, <body> gets `modal-open`, which hides the fixed mobile
+  // bottom nav (globals.css) so it can't cover the Save button. Default in-place is
+  // deliberate: many callers wrap the <Modal> in a <form>, and portaling to <body> moves
+  // the fields + Save button out of that form, so Save silently does nothing — those
+  // callers must leave `portal` off. Turn it ON only for a modal opened inside a
+  // backdrop-filter/transform ancestor (which would otherwise clip the fixed overlay),
+  // and then submit via ModalActions `formId` rather than DOM nesting. The nav-hide (and
+  // so the body.modal-open flag other menus watch) runs in EITHER mode.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && requestCloseRef.current();

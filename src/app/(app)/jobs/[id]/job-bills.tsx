@@ -20,9 +20,30 @@ interface Bill {
   amount: number;
   status: string;
   bill_date: string | null;
+  /** The PO this bill pays — when set, the bill SUPERSEDES that PO in every cost sum. */
+  po_id?: string | null;
 }
 
-export function JobBills({ jobId, bills }: { jobId: string; bills: Bill[] }) {
+export interface JobPo {
+  id: string;
+  po_number: string;
+  vendor: string;
+  status: string;
+  total: number;
+}
+
+/** The POs a bill may claim to pay: real orders only (not a draft that was never sent,
+ *  not a cancelled one) — those aren't costs, so superseding them would mean nothing. */
+function billablePos(pos: JobPo[]): JobPo[] {
+  return (pos ?? []).filter((p) => p.status !== "draft" && p.status !== "cancelled");
+}
+
+/** Label for the PO picker: "PO-00012 · CED · $2,400.00". */
+function poLabel(p: JobPo): string {
+  return `${p.po_number} · ${p.vendor} · ${formatCurrency(p.total)}`;
+}
+
+export function JobBills({ jobId, bills, pos = [] }: { jobId: string; bills: Bill[]; pos?: JobPo[] }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
@@ -35,8 +56,11 @@ export function JobBills({ jobId, bills }: { jobId: string; bills: Bill[] }) {
   const [amount, setAmount] = useState(0);
   const [status, setStatus] = useState("unpaid");
   const [billDate, setBillDate] = useState("");
+  const [poId, setPoId] = useState("");
 
   const total = bills.reduce((s, b) => s + Number(b.amount), 0);
+  const poOptions = billablePos(pos);
+  const poNumberById = new Map(pos.map((p) => [p.id, p.po_number]));
 
   function add() {
     setError(null);
@@ -49,12 +73,14 @@ export function JobBills({ jobId, bills }: { jobId: string; bills: Bill[] }) {
         status,
         bill_date: billDate || null,
         notes: "",
+        po_id: poId || null,
       });
       if (!res.ok) return setError(res.error ?? "Could not save.");
       setSupplier("");
       setBillNumber("");
       setAmount(0);
       setBillDate("");
+      setPoId("");
       setAdding(false);
       router.refresh();
     });
@@ -111,6 +137,23 @@ export function JobBills({ jobId, bills }: { jobId: string; bills: Bill[] }) {
                 <option value="paid">Paid</option>
               </Select>
             </div>
+            {poOptions.length > 0 && (
+              <div className="col-span-2">
+                <Label htmlFor="b-po">Pays purchase order</Label>
+                <Select id="b-po" value={poId} onChange={(e) => setPoId(e.target.value)}>
+                  <option value="">Not a PO — a separate cost</option>
+                  {poOptions.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {poLabel(p)}
+                    </option>
+                  ))}
+                </Select>
+                <p className="mt-1 text-xs text-slate-500">
+                  Pick the order this supplier invoice pays and it replaces that PO in the job&apos;s
+                  material cost — so the delivery is only charged once.
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </Modal>
@@ -125,6 +168,9 @@ export function JobBills({ jobId, bills }: { jobId: string; bills: Bill[] }) {
                 <div className="font-medium text-slate-900">{b.supplier}</div>
                 <div className="text-xs text-slate-400">
                   {b.bill_number ? `#${b.bill_number} · ` : ""}{b.bill_date ? formatDate(b.bill_date) : ""}
+                  {b.po_id && poNumberById.has(b.po_id)
+                    ? ` · pays ${poNumberById.get(b.po_id)}`
+                    : ""}
                 </div>
               </div>
               <span className="font-medium text-slate-800">{formatCurrency(b.amount)}</span>
@@ -165,7 +211,12 @@ export function JobBills({ jobId, bills }: { jobId: string; bills: Bill[] }) {
       )}
 
       {editBill && (
-        <JobBillEditModal key={editBill.id} bill={editBill} onClose={() => setEditBill(null)} />
+        <JobBillEditModal
+          key={editBill.id}
+          bill={editBill}
+          pos={pos}
+          onClose={() => setEditBill(null)}
+        />
       )}
     </div>
   );
@@ -173,7 +224,15 @@ export function JobBills({ jobId, bills }: { jobId: string; bills: Bill[] }) {
 
 /** Edit a supplier bill. Routes through the unified Action Registry
  *  (executeAction → "bill.update") — the same capability the AI agent calls. */
-function JobBillEditModal({ bill, onClose }: { bill: Bill; onClose: () => void }) {
+function JobBillEditModal({
+  bill,
+  pos = [],
+  onClose,
+}: {
+  bill: Bill;
+  pos?: JobPo[];
+  onClose: () => void;
+}) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [supplier, setSupplier] = useState(bill.supplier);
@@ -181,7 +240,14 @@ function JobBillEditModal({ bill, onClose }: { bill: Bill; onClose: () => void }
   const [amount, setAmount] = useState(Number(bill.amount));
   const [status, setStatus] = useState(bill.status);
   const [billDate, setBillDate] = useState(bill.bill_date ?? "");
+  const [poId, setPoId] = useState(bill.po_id ?? "");
   const [error, setError] = useState<string | null>(null);
+  // Offer the real orders, PLUS whichever PO this bill already claims even if it was since
+  // cancelled — otherwise the picker would render blank and saving would silently drop the
+  // link, putting the double-charge back.
+  const linked = pos.find((p) => p.id === bill.po_id);
+  const poOptions = billablePos(pos);
+  if (linked && !poOptions.some((p) => p.id === linked.id)) poOptions.unshift(linked);
 
   function save() {
     if (!supplier.trim()) return setError("Supplier is required.");
@@ -194,6 +260,7 @@ function JobBillEditModal({ bill, onClose }: { bill: Bill; onClose: () => void }
         amount,
         status,
         bill_date: billDate || null,
+        po_id: poId || null,
       });
       if (!res.ok) return setError(res.error ?? "Could not save.");
       onClose();
@@ -234,6 +301,23 @@ function JobBillEditModal({ bill, onClose }: { bill: Bill; onClose: () => void }
               <option value="paid">Paid</option>
             </Select>
           </div>
+          {poOptions.length > 0 && (
+            <div className="col-span-2">
+              <Label htmlFor="be-po">Pays purchase order</Label>
+              <Select id="be-po" value={poId} onChange={(e) => setPoId(e.target.value)}>
+                <option value="">Not a PO — a separate cost</option>
+                {poOptions.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {poLabel(p)}
+                  </option>
+                ))}
+              </Select>
+              <p className="mt-1 text-xs text-slate-500">
+                Linked, this invoice replaces the PO in the job&apos;s material cost — the delivery
+                is charged once, at the amount the supplier actually billed.
+              </p>
+            </div>
+          )}
         </div>
       </div>
     </Modal>

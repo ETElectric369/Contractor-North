@@ -7,11 +7,12 @@ import { JOB_STATUSES } from "@/lib/job-status";
 import { DRAW_KINDS } from "@/lib/invoice-math";
 import { emptyToNull } from "@/lib/forms";
 import { notifyJobCrewAdded } from "@/lib/crew-notify";
-import { visibleJobIdOrNull, visibleTemplateIdOrNull } from "@/lib/job-visibility";
+import { visibleJobIdOrNull, visiblePoIdOnJobOrNull, visibleTemplateIdOrNull } from "@/lib/job-visibility";
 import { requireStaff } from "@/lib/staff-guard";
 import { getOrgSettings } from "@/lib/org-settings";
 import { reportError } from "@/lib/observe";
 import { escapeLike } from "@/lib/utils";
+import { shouldImportActuals } from "@/lib/invoice-import-rule";
 import {
   createInvoiceFromQuote,
   createBlankInvoice,
@@ -27,8 +28,11 @@ export async function createInvoiceForJob(
   jobId: string,
   opts: { importLabor?: boolean; importCosts?: boolean } = {},
 ): Promise<{ ok: boolean; error?: string; id?: string; importWarning?: string }> {
-  const wantLabor = opts.importLabor !== false; // default ON
-  const wantCosts = opts.importCosts !== false;
+  // Defaults are decided AFTER we know whether this invoice came from a quote — see
+  // fromQuote below. A quoted job is billed by its CONTRACT; auto-importing the actuals
+  // on top of the copied quote lines double-bills it (audit 2026-07-20: a $20k quote +
+  // 64 logged hours + a $6k PO shipped a $35.5k draft). An explicit `true` from a caller
+  // that really wants T&M on top of a quote still works.
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -72,6 +76,14 @@ export async function createInvoiceForJob(
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
+
+  // THE contract-vs-actuals switch. FinishJobButton already initialised its toggles to
+  // !hasQuote — this makes that rule structural, so the three entry points that pass no
+  // opts (job Invoices tab "New invoice", /billing "Create Invoice →", and Nort's
+  // job.invoice verb) can't double-bill a quoted job.
+  const fromQuote = !!quote;
+  const wantLabor = shouldImportActuals(fromQuote, opts.importLabor);
+  const wantCosts = shouldImportActuals(fromQuote, opts.importCosts);
 
   let res: { ok: boolean; error?: string; id?: string };
   if (quote) {
@@ -144,7 +156,10 @@ export async function setJobStatus(id: string, status: string): Promise<{ ok: bo
 
 export async function finishJob(
   jobId: string,
-  opts: { importLabor: boolean; importCosts: boolean; sendInvoice?: boolean },
+  // importLabor/importCosts OPTIONAL: an unspecified flag lets createInvoiceForJob's
+  // contract rule decide (quoted job → the quote IS the bill; T&M job → import the
+  // actuals). FinishJobButton passes its explicit toggles; Nort passes neither.
+  opts: { importLabor?: boolean; importCosts?: boolean; sendInvoice?: boolean },
 ): Promise<{ ok: boolean; error?: string; id?: string; sent?: boolean }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -198,12 +213,102 @@ export async function finishJob(
   return { ok: true, id: inv.id, sent };
 }
 
-/** Delete a job after warning about linked records (quotes/invoices keep
- *  their data; their job link is cleared by FK rules). */
-export async function deleteJob(id: string): Promise<{ ok: boolean; error?: string }> {
+export type DeleteJobResult = {
+  ok: boolean;
+  error?: string;
+  /** The caller must show these to the user and call again with confirmDestructive. */
+  needsConfirm?: boolean;
+  /** Plain-English list of what deleting the job PERMANENTLY destroys. */
+  destroys?: string[];
+};
+
+/**
+ * Delete a job — with the linked-record guard deleteCustomer has always had.
+ *
+ * Deleting a job is not the tidy operation the old confirm dialog promised. Quotes,
+ * invoices and time entries do survive (their job_id is ON DELETE SET NULL), but a dozen
+ * child tables are ON DELETE CASCADE and vanish with no undo: the contract — including
+ * signed_at / signed_name / signed_ip / signed_body, the frozen legal record the DB
+ * otherwise makes immutable — the lien record with its served CA 20-day Preliminary
+ * Notice, the insurance claim, the payment schedule, permits, change orders, and every
+ * job photo. There is no soft delete and no backup surface, so a mis-tap on a duplicated
+ * job was unrecoverable.
+ *
+ * Two tiers:
+ *   HARD BLOCK on records that must never disappear on a mis-tap — a customer-SIGNED
+ *   contract, or a lien record whose preliminary notice has actually been served (that
+ *   notice is the basis of lien rights). Void the contract / clear the record first, or
+ *   cancel the job instead of deleting it.
+ *   ITEMIZED CONFIRM for everything else: the first call returns what would be destroyed
+ *   so the dialog can name it, and only a second call with confirmDestructive proceeds.
+ */
+export async function deleteJob(
+  id: string,
+  opts: { confirmDestructive?: boolean } = {},
+): Promise<DeleteJobResult> {
   const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+
+  const headCount = (table: string, apply?: (q: any) => any) => {
+    const q = supabase.from(table).select("id", { count: "exact", head: true }).eq("job_id", id);
+    return apply ? apply(q) : q;
+  };
+  const [
+    { count: signedContracts },
+    { count: liveContracts },
+    { data: lien },
+    { count: claims },
+    { count: billedMilestones },
+    { count: milestones },
+    { count: docs },
+    { count: permits },
+    { count: changeOrders },
+  ] = await Promise.all([
+    headCount("contracts", (q: any) => q.eq("status", "signed")),
+    headCount("contracts", (q: any) => q.in("status", ["draft", "sent"])),
+    supabase.from("lien_records").select("prelim_sent_at").eq("job_id", id).maybeSingle(),
+    headCount("insurance_claims"),
+    headCount("payment_milestones", (q: any) => q.eq("status", "billed")),
+    headCount("payment_milestones"),
+    headCount("documents"),
+    headCount("permits"),
+    headCount("change_orders"),
+  ]);
+
+  // ── Tier 1: legal records that a delete must never be able to take with it ──
+  const prelimServed = !!(lien as { prelim_sent_at: string | null } | null)?.prelim_sent_at;
+  const blockers: string[] = [];
+  if (signedContracts) blockers.push("a contract the customer has signed");
+  if (prelimServed) blockers.push("a served preliminary notice (your lien rights)");
+  if (billedMilestones) blockers.push(`${billedMilestones} already-billed payment milestone${billedMilestones > 1 ? "s" : ""}`);
+  if (blockers.length) {
+    return {
+      ok: false,
+      error:
+        `This job has ${blockers.join(" and ")}. Deleting it would destroy that permanently, ` +
+        `with no undo. Void or unlink those records first — or set the job to cancelled instead of deleting it.`,
+    };
+  }
+
+  // ── Tier 2: name what really goes, then require a second, informed confirm ──
+  const destroys: string[] = [];
+  if (liveContracts) destroys.push(`${liveContracts} contract${liveContracts > 1 ? "s" : ""}`);
+  if (lien) destroys.push("the lien / preliminary-notice record");
+  if (claims) destroys.push(`${claims} insurance claim${claims > 1 ? "s" : ""}`);
+  if (milestones) destroys.push(`${milestones} payment milestone${milestones > 1 ? "s" : ""}`);
+  if (docs) destroys.push(`${docs} document${docs > 1 ? "s" : ""} / photo${docs > 1 ? "s" : ""}`);
+  if (permits) destroys.push(`${permits} permit${permits > 1 ? "s" : ""}`);
+  if (changeOrders) destroys.push(`${changeOrders} change order${changeOrders > 1 ? "s" : ""}`);
+  if (destroys.length && !opts.confirmDestructive) {
+    return {
+      ok: false,
+      needsConfirm: true,
+      destroys,
+      error: `Deleting this job also permanently deletes ${destroys.join(", ")}.`,
+    };
+  }
+
   // BEFORE the row goes (it reads google_event_id off the row). Fire-safe.
   await deleteCalendarItem("job", id);
   const { error } = await supabase.from("jobs").delete().eq("id", id);
@@ -309,6 +414,10 @@ export async function createBill(input: {
   bill_date: string | null;
   notes: string;
   category?: string | null;
+  /** The purchase order this bill pays (migration 0142). Setting it makes the bill
+   *  SUPERSEDE that PO in every material-cost sum, so one delivery entered as both a
+   *  PO and the supplier's invoice is costed and billed ONCE, at the invoiced amount. */
+  po_id?: string | null;
 }): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -318,9 +427,14 @@ export async function createBill(input: {
   // Drop a job_id the caller can't see (e.g. a crafted voice/registry call) — never
   // persist a cross-org job reference on a bill.
   const jobId = await visibleJobIdOrNull(supabase, input.job_id);
+  // The PO link: keep it only when the PO is visible (RLS) AND on THIS bill's job — a bill
+  // may only supersede a PO on its own job, or the supersede silently drops another job's
+  // order from the cost rollup. A mismatched/foreign id is ignored (the bill still saves).
+  const poId = await visiblePoIdOnJobOrNull(supabase, input.po_id ?? null, jobId);
 
   const { error } = await supabase.from("bills").insert({
     job_id: jobId,
+    po_id: poId,
     supplier: input.supplier.trim(),
     bill_number: input.bill_number.trim() || null,
     amount: input.amount || 0,
@@ -347,6 +461,7 @@ export async function updateBill(
     notes?: string | null;
     category?: string | null;
     job_id?: string | null;
+    po_id?: string | null;
   },
 ): Promise<Result> {
   const ctx = await requireStaff();
@@ -365,12 +480,23 @@ export async function updateBill(
   if (patch.category !== undefined) clean.category = patch.category ?? null;
   if (patch.job_id !== undefined) clean.job_id = patch.job_id || null;
 
-  // If the bill is being re-pointed to a different job, refresh the OLD job too (its
-  // cost rollup must drop the moved bill), not just the new one.
+  // One stored-row read of the bill's current job — feeds BOTH the old-job revalidation (a
+  // re-pointed bill's cost must leave its old job) AND the PO same-job check below. Read
+  // whenever either needs it: a job move, or a PO link on a bill whose job isn't changing.
   let oldJobId: string | null = null;
-  if (patch.job_id !== undefined) {
+  if (patch.job_id !== undefined || (patch.po_id !== undefined && !!patch.po_id)) {
     const { data: prev } = await supabase.from("bills").select("job_id").eq("id", id).maybeSingle();
     oldJobId = (prev as { job_id: string | null } | null)?.job_id ?? null;
+  }
+
+  // Linking/unlinking the PO this bill pays MOVES money: a linked PO stops being counted
+  // (the bill supersedes it), an unlinked one starts counting again. The bill may only
+  // supersede a PO on ITS OWN job — a cross-job link would silently cancel a DIFFERENT
+  // job's order — so scope the check to the bill's TARGET job (the just-changed job when
+  // this update moves it, else its stored job). A mismatch is ignored (clears the link).
+  if (patch.po_id !== undefined) {
+    const targetJob = patch.job_id !== undefined ? patch.job_id || null : oldJobId;
+    clean.po_id = await visiblePoIdOnJobOrNull(supabase, patch.po_id || null, targetJob);
   }
 
   const { data, error } = await supabase.from("bills").update(clean).eq("id", id).select("job_id").maybeSingle();

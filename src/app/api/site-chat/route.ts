@@ -23,6 +23,18 @@ const MODEL = process.env.SITE_CHAT_MODEL || "claude-haiku-4-5-20251001";
 const MAX_ROUNDS = 6; // headroom for web_search pause_turn continuations on research-mode orgs
 const MAX_MESSAGES = 24;
 const MAX_LEN = 4000;
+// SPEND CEILING, layer 1. MAX_MESSAGES × MAX_LEN allowed ~96KB of caller-chosen text on EVERY
+// model call (the client rebuilds the whole history each request, so it's all attacker-controlled
+// on an unauthenticated endpoint). A total-characters budget is the real cap; 12k chars is a long
+// genuine estimate conversation and ~8x cheaper than the worst case the per-message caps allowed.
+const MAX_TOTAL_CHARS = 12_000;
+// SPEND CEILING, layer 2 — daily caps, since the only other limiter is per-IP-per-minute.
+const MAX_CHATS_PER_ORG_DAY = 500;
+const MAX_CHATS_PER_DAY = 2000;
+// One captured lead per visitor per hour, and a sane org-wide hourly ceiling. Separate from the
+// chat limiter: 15 chats/minute is fine, 15 LEADS/minute is a flood of pushes, emails and rows.
+const MAX_LEADS_PER_IP_HOUR = 3;
+const MAX_LEADS_PER_ORG_HOUR = 20;
 
 const TOOLS = [
   {
@@ -216,6 +228,7 @@ async function captureLead(
   input: unknown,
   lastEstimate: DeckEstimateResult | null,
   attachments: string[],
+  ip: string,
 ): Promise<string> {
   const raw = (input ?? {}) as Record<string, unknown>;
   const name = String(raw.name ?? "").trim().slice(0, 120);
@@ -228,6 +241,19 @@ async function captureLead(
   // office lead view today (structured copy also lives in intakeJson.attachments).
   const attachLine = attachments.length ? `📎 Customer photos:\n${attachments.join("\n")}` : "";
   const summary = [projectSummary, attachLine].filter(Boolean).join("\n\n") || null;
+
+  // A lead is not free: it inserts a row, notifies every office profile in-app, pushes to their
+  // phones, and sends a Resend email from the org's verified domain. The endpoint's 15/min chat
+  // limiter does NOT bound this — one HTTP request can drive several rounds, and a captured lead
+  // is worth far more to an abuser than a chat turn. Cap it on its own axis, per-visitor AND
+  // per-org (the per-org key is what survives a rotating-IP flood).
+  if (await rateLimited(`lead:${org.id}:${ip}`, MAX_LEADS_PER_IP_HOUR, 3600)) {
+    return JSON.stringify({ ok: false, error: "They've already been saved — no need to save them again." });
+  }
+  if (await rateLimited(`lead:${org.id}`, MAX_LEADS_PER_ORG_HOUR, 3600)) {
+    return JSON.stringify({ ok: false, error: "Couldn't save — ask them to call instead." });
+  }
+
   // Prefer the deterministic deck total + line items (so the office can one-click convert the
   // lead to a priced draft quote); fall back to whatever total the model passed.
   const total = lastEstimate?.total || Number(raw.estimate_total) || 0;
@@ -252,6 +278,15 @@ async function captureLead(
         attachments: attachments.length ? attachments : undefined,
       },
       inspectionThreshold: org.settings.site_inspection_threshold,
+      // NEVER auto-book the contractor's calendar from here. `total` above can be a number the
+      // MODEL wrote from the visitor's own description (estimate_total is a free field on the
+      // capture_lead tool), and createTriagedInquiry turns total > site_inspection_threshold into
+      // a real 9am appointment on the live Schedule. That is precisely the "a client can't game an
+      // instant big-ticket price" hole the shared-secret partner webhook (/api/inbound/lead)
+      // exists to close — an anonymous website visitor must not have MORE reach than a partner.
+      // The lead still lands, still triages, and still alerts on all three channels; booking the
+      // visit becomes a one-tap action on the Leads board where a human sees it first.
+      autoBookInspection: false,
     });
     return JSON.stringify({ ok: true });
   } catch {
@@ -282,18 +317,40 @@ export async function POST(req: Request) {
   if (!handle || !rawMessages.length) return NextResponse.json({ error: "Bad request." }, { status: 400 });
   if (rawMessages.length > MAX_MESSAGES) return NextResponse.json({ error: "Let's start a fresh conversation." }, { status: 400 });
 
-  if (await rateLimited(`chat:${clientIp(req.headers)}`, 15, 60)) {
+  const ip = clientIp(req.headers);
+  // FAIL CLOSED here. This endpoint is unauthenticated and every call SPENDS MONEY at the model
+  // provider, so a limiter hiccup must degrade Ask Nort, not remove the only cost control. (The
+  // other rateLimited callers stay fail-open on purpose — blocking a real user is worse there.)
+  if (await rateLimited(`chat:${ip}`, 15, 60, { failClosed: true })) {
     return NextResponse.json({ error: "One sec — try again in a moment." }, { status: 429 });
   }
 
   const org = await getPublicOrgByHandle(handle);
   if (!org) return NextResponse.json({ error: "Not available." }, { status: 404 });
 
+  // DAILY SPEND CEILINGS, resolved AFTER the org (so an unknown handle can't burn a real org's
+  // budget) but BEFORE any model call. Per-minute-per-IP alone bounds nothing over a day, and
+  // nothing bounds a distributed flood at all — these are the ceilings that do. Same Postgres
+  // fixed-window RPC, no new infrastructure.
+  if (await rateLimited(`chat-day:${org.id}`, MAX_CHATS_PER_ORG_DAY, 86400, { failClosed: true })) {
+    return NextResponse.json({ error: "Nort's had a busy day — please use the contact form." }, { status: 429 });
+  }
+  if (await rateLimited("chat-day:all", MAX_CHATS_PER_DAY, 86400, { failClosed: true })) {
+    return NextResponse.json({ error: "Nort's had a busy day — please use the contact form." }, { status: 429 });
+  }
+
   const convo: Anthropic.MessageParam[] = rawMessages
     .filter((m): m is { role: "user" | "assistant"; content: string } =>
       !!m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string" && m.content.trim().length > 0)
     .map((m) => ({ role: m.role, content: String(m.content).slice(0, MAX_LEN) }));
   if (!convo.length || convo[convo.length - 1].role !== "user") return NextResponse.json({ error: "Bad request." }, { status: 400 });
+
+  // TOTAL input budget, not just per-message: the caller rebuilds the whole history every request,
+  // so MAX_MESSAGES × MAX_LEN was the real per-call input size an attacker could choose.
+  const totalChars = convo.reduce((n, m) => n + (typeof m.content === "string" ? m.content.length : 0), 0);
+  if (totalChars > MAX_TOTAL_CHARS) {
+    return NextResponse.json({ error: "Let's start a fresh conversation." }, { status: 400 });
+  }
 
   // Photos the visitor attached THIS turn (URLs from our upload endpoint only). Attach them to the
   // current user message as vision blocks so Nort can read them; they only ride this one turn.
@@ -338,7 +395,17 @@ export async function POST(req: Request) {
   let lastEstimate: DeckEstimateResult | null = null;
   try {
     for (let round = 0; round < MAX_ROUNDS; round++) {
-      const resp = await client.messages.create({ model: MODEL, max_tokens: 900, system, tools, messages: convo });
+      // The system prompt + tool defs are IDENTICAL across every round of a request (and across
+      // every turn of a visitor's conversation) — one cache breakpoint makes rounds 2..N read that
+      // prefix at ~0.1x instead of re-billing it in full. The volatile part is the convo, which
+      // stays after the breakpoint. Pure cost control; no behavior change.
+      const resp = await client.messages.create({
+        model: MODEL,
+        max_tokens: 900,
+        system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+        tools,
+        messages: convo,
+      });
       convo.push({ role: "assistant", content: resp.content });
       // web_search runs server-side and can pause a long turn — re-invoke to let it finish, but
       // do NOT push a tool_result (there's no CLIENT tool to answer). Only client tool_use gets one.
@@ -351,7 +418,14 @@ export async function POST(req: Request) {
         let out = "{}";
         if (block.name === "search_prices") out = await searchPrices(supabase, org, block.input);
         else if (block.name === "deck_estimate") { const de = deckEstimate(block.input, deckRates); out = de.summary; lastEstimate = de.est; }
-        else if (block.name === "capture_lead") { out = await captureLead(supabase, org, block.input, lastEstimate, images); if (out.includes('"ok":true')) leadCaptured = true; }
+        else if (block.name === "capture_lead") {
+          // ONE lead per HTTP request, whatever the model does across the round loop — a single
+          // request can otherwise drive MAX_ROUNDS × N tool_use blocks, each a full notify fan-out.
+          out = leadCaptured
+            ? JSON.stringify({ ok: true, already_saved: true })
+            : await captureLead(supabase, org, block.input, lastEstimate, images, ip);
+          if (out.includes('"ok":true')) leadCaptured = true;
+        }
         results.push({ type: "tool_result", tool_use_id: block.id, content: out });
       }
       if (!results.length) break; // no client tool to respond to — avoid an invalid empty message

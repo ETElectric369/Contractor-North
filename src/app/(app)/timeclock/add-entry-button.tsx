@@ -8,6 +8,7 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { createManualEntry } from "./actions";
+import { buildShiftSpan, spanGrossHours } from "./shift-span";
 import { todayStrInTz } from "@/lib/tz";
 import type { JobCode } from "@/lib/types";
 import { jobLabel, jobSiteLabel } from "@/lib/schedule-options";
@@ -58,6 +59,11 @@ export function AddEntryButton({
   const [date, setDate] = useState(today);
   const [startT, setStartT] = useState("08:00");
   const [endT, setEndT] = useState("16:00");
+  // EXPLICIT end date (same as the Edit modal). Without it, deriving the end stamp from the
+  // single start date turned an end-BEFORE-start typo (e.g. 4pm–8am flipped) into a ~23h
+  // overnight shift instead of the rejection it should be. Seeded to the start date, so a
+  // same-day end<start still trips "End time must be after start", and an overnight is opt-in.
+  const [endDate, setEndDate] = useState(today);
   const [jobId, setJobId] = useState("");
   const [jobCode, setJobCode] = useState("");
   // Default to "taken" so a normal workday entry saves in one tap; uncheck if
@@ -79,25 +85,24 @@ export function AddEntryButton({
   const billRateTyped =
     rate > 0 && billRate > 0 && Math.abs(rate - billRate) <= 0.01 && Math.abs(billRate - baseRate) > 0.01;
 
-  const grossHrs = (() => {
-    const ci = new Date(`${date}T${startT}:00`);
-    const co = new Date(`${date}T${endT}:00`);
-    if (isNaN(ci.getTime()) || isNaN(co.getTime()) || co <= ci) return 0;
-    return (co.getTime() - ci.getTime()) / 3_600_000;
-  })();
+  // Span-aware, with an EXPLICIT end date (parity with the Edit modal): a same-day
+  // end<start is rejected (a typo, not a 23h shift), while a real overnight is opt-in via
+  // the End date field. The derivation is a fallback only when the two dates match.
+  const span = buildShiftSpan(date, startT, endT, endDate);
+  const grossHrs = spanGrossHours(span);
   const lunchRequired = grossHrs > 5;
   const breaksRequired = grossHrs > 3.5;
   const twoBreaks = grossHrs > 5;
 
   function submit() {
     setError(null);
-    // Build ISO from local date + time so the user's timezone is respected.
-    const clockIn = new Date(`${date}T${startT}:00`);
-    const clockOut = new Date(`${date}T${endT}:00`);
-    if (isNaN(clockIn.getTime()) || isNaN(clockOut.getTime())) {
+    // Build ISO from local date + time so the user's timezone is respected; an end time
+    // before the start rolls onto the next day (overnight shift).
+    if (!span) {
       setError("Enter a valid date and times.");
       return;
     }
+    const { clockIn, clockOut } = span;
     if (clockOut <= clockIn) {
       setError("End time must be after start time.");
       return;
@@ -173,10 +178,21 @@ export function AddEntryButton({
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            <div className="col-span-2 sm:col-span-1">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div>
               <Label htmlFor="date">Date</Label>
-              <Input id="date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+              <Input
+                id="date"
+                type="date"
+                value={date}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  // A same-day shift's end date follows the start date; a shift already
+                  // marked overnight keeps its own end date.
+                  setEndDate((prev) => (prev === date ? v : prev));
+                  setDate(v);
+                }}
+              />
             </div>
             <div>
               <Label htmlFor="start">Start</Label>
@@ -185,6 +201,11 @@ export function AddEntryButton({
             <div>
               <Label htmlFor="end">End</Label>
               <Input id="end" type="time" value={endT} onChange={(e) => setEndT(e.target.value)} />
+            </div>
+            <div>
+              <Label htmlFor="end-date">End date</Label>
+              <Input id="end-date" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+              {span?.overnight && <p className="mt-1 text-xs text-slate-500">Overnight shift</p>}
             </div>
           </div>
 

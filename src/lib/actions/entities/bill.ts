@@ -20,6 +20,9 @@ export const billActions: Record<string, ActionDef> = {
       bill_date: z.string().nullable().optional(),
       notes: z.string().optional().default(""),
       category: z.string().nullable().optional(),
+      // The PO this bill pays. Set it and the bill supersedes that PO everywhere material
+      // cost is summed — the one way to stop a delivery being charged twice (0142).
+      po_id: z.string().nullable().optional(),
     }),
     auth: "staff",
     effect: "write",
@@ -43,6 +46,7 @@ export const billActions: Record<string, ActionDef> = {
         bill_date: i.bill_date ?? null,
         notes: i.notes ?? "",
         category: i.category ?? null,
+        po_id: i.po_id ?? null,
       });
     },
   },
@@ -61,6 +65,9 @@ export const billActions: Record<string, ActionDef> = {
       notes: z.string().nullable().optional(),
       category: z.string().nullable().optional(),
       job_id: z.string().nullable().optional(),
+      // Linking/unlinking the PO this bill pays MOVES the job's material cost (a linked
+      // PO stops counting — the bill supersedes it), hence the financial confirm tier.
+      po_id: z.string().nullable().optional(),
     }),
     auth: "staff",
     effect: "write",

@@ -7,10 +7,13 @@ import { deliverInvoiceEmail } from "@/lib/invoice-email";
 import { sendSms } from "@/lib/sms";
 import { pushInvoiceToQbo } from "@/lib/quickbooks";
 import { getOrgSettings } from "@/lib/org-settings";
-import { tzLocalHourUtc, todayStrInTz } from "@/lib/tz";
+import { tzLocalHourUtc } from "@/lib/tz";
 import { requireStaff } from "@/lib/staff-guard";
 import { computeJobLaborBilling, fetchJobLaborRows } from "@/lib/labor-billing";
-import { recalcTotals, resolveDrawCredit, shouldBlockStandardImport, invoiceBalance, DRAW_KINDS, isDrawKind } from "@/lib/invoice-math";
+import { livePurchaseOrders } from "@/lib/job-progress-math";
+import { resolveDrawCredit, shouldBlockStandardImport, invoiceBalance, DRAW_KINDS, isDrawKind } from "@/lib/invoice-math";
+import { recalcInvoice } from "@/lib/invoice-recalc";
+import { defaultDueDateIsoForOrg } from "@/lib/invoice-due";
 import { standardBillingBlockerOnJob, standardBillingConflictError } from "@/lib/billing-guards";
 import { scheduleStatus, contractTotalFromQuotes, type Milestone } from "@/lib/payment-schedule-math";
 import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
@@ -117,17 +120,11 @@ export type Result = { ok: boolean; error?: string; id?: string };
 /** Default invoice due date = today (in the org tz) + the org's net terms, stamped to
  *  NOON in the org tz (same convention as setInvoiceDueDate / payment dates). Without a
  *  due date the Overdue tracker never fires, so EVERY creation path stamps one. Net terms
- *  come from the org's invoice_due_days setting; if it's unset/0 we fall back to Net 30. */
+ *  come from the org's invoice_due_days setting; if it's unset/0 we fall back to Net 30.
+ *  (Body lifted to @/lib/invoice-due so the unattended recurring-invoice cron — which has
+ *  no auth context and must name its org explicitly — stamps the SAME date.) */
 async function defaultDueDateIso(supabase: { from: (t: string) => any }): Promise<string> {
-  const { data } = await supabase.from("organizations").select("settings").maybeSingle();
-  const settings = getOrgSettings((data as { settings?: unknown } | null)?.settings);
-  const tz = settings.timezone || "America/Los_Angeles";
-  const netDays = settings.invoice_due_days > 0 ? settings.invoice_due_days : 30;
-  // Start from today in the org tz so "+net days" lands on the right calendar day, then
-  // shift forward by netDays of local-midnight days and stamp noon in the org tz.
-  const todayStart = tzLocalHourUtc(todayStrInTz(tz), 0, tz);
-  const dueStr = todayStrInTz(tz, new Date(todayStart.getTime() + netDays * 86_400_000));
-  return tzLocalHourUtc(dueStr, 12, tz).toISOString();
+  return defaultDueDateIsoForOrg(supabase); // user client: RLS scopes the org read
 }
 
 /** Convert an accepted (or any) quote into a draft invoice, copying line items. */
@@ -550,15 +547,18 @@ export async function importCostsIntoInvoice(invoiceId: string, markupPercent = 
   }
 
   const [{ data: pos }, { data: bills }] = await Promise.all([
-    supabase.from("purchase_orders").select("po_number, vendor, total").eq("job_id", inv.job_id),
-    supabase.from("bills").select("supplier, bill_number, amount").eq("job_id", inv.job_id),
+    supabase.from("purchase_orders").select("id, po_number, vendor, total, status").eq("job_id", inv.job_id),
+    supabase.from("bills").select("supplier, bill_number, amount, po_id").eq("job_id", inv.job_id),
   ]);
 
   // Mark up cost → sell price. Markup is NOT shown on the line (customers don't
   // see your margin); only the price reflects it.
   const mark = (cost: number) => Math.round(cost * (1 + (Number(markupPercent) || 0) / 100) * 100) / 100;
   const rows: { description: string; unit_price: number }[] = [];
-  for (const p of pos ?? []) {
+  // Bill only LIVE purchase orders (the one shared rule): a draft/cancelled order was
+  // never a real cost, and a PO whose supplier bill has arrived is superseded by that
+  // bill — otherwise one CED delivery goes out on the invoice as two material charges.
+  for (const p of livePurchaseOrders((pos ?? []) as any[], (bills ?? []) as any[])) {
     if (Number(p.total) > 0) rows.push({ description: `Materials — ${p.vendor} (PO ${p.po_number})`, unit_price: mark(Number(p.total)) });
   }
   for (const b of bills ?? []) {
@@ -1293,34 +1293,6 @@ export async function setInvoiceCustomerJob(
   return { ok: true };
 }
 
-/** Recompute totals from items + payments, and auto-advance paid status. Applied
- *  customer credits (disposition "credit", still open) count toward amount_paid the
- *  same as a payment — a credit on account reduces the balance the customer owes — so
- *  they're folded into the payments side here and survive every recalc. (Refunds are a
- *  cash-OUT, tracked separately in `collected`, and never reduce this balance.) */
-async function recalcInvoice(supabase: any, invoiceId: string) {
-  const [{ data: items }, { data: pays }, { data: credits }, { data: inv }] = await Promise.all([
-    supabase.from("invoice_items").select("line_total").eq("invoice_id", invoiceId),
-    supabase.from("payments").select("amount").eq("invoice_id", invoiceId),
-    supabase.from("customer_credits").select("amount").eq("invoice_id", invoiceId).eq("disposition", "credit").eq("status", "open"),
-    supabase.from("invoices").select("tax_rate, status").eq("id", invoiceId).single(),
-  ]);
-
-  const { subtotal, tax, total, amountPaid, status } = recalcTotals(
-    (items ?? []).map((i: any) => Number(i.line_total ?? 0)),
-    [
-      ...(pays ?? []).map((p: any) => Number(p.amount ?? 0)),
-      ...(credits ?? []).map((c: any) => Number(c.amount ?? 0)),
-    ],
-    Number(inv?.tax_rate ?? 0),
-    inv?.status ?? "draft",
-  );
-
-  const { error } = await supabase
-    .from("invoices")
-    .update({ subtotal, tax, total, amount_paid: amountPaid, status })
-    .eq("id", invoiceId);
-  // If this silently fails the invoice shows stale totals/status (wrong balance,
-  // wrong paid state) — surface it rather than letting the money figures drift.
-  if (error) reportError("recalcInvoice", error, { invoiceId });
-}
+/* recalcInvoice now lives in @/lib/invoice-recalc (imported above) — the Stripe webhook
+ * is a route handler and can't import a private helper out of a "use server" module, so
+ * it carried a second, credit-blind copy of the amount_paid math. One definition now. */

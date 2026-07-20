@@ -109,6 +109,11 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   // review inbox. Pure local insert (no AI call, nothing sent, no money) — tier-1,
   // open to every role, so Nort can always "just write that down".
   "capture.quick",
+  // Nort's long-term memory. It USED to bypass this whole apparatus — an inline insert in the
+  // chat route with no role gate, no audit row, and (because it was `continue`d before the
+  // MAX_WRITES check) no blast-radius cap either, while writing text that gets injected into
+  // every crew member's system prompt forever. It's a write; it belongs in the write set.
+  "memory.remember",
 ]);
 
 // Registry names are group.verb (a dot); Anthropic tool names can't contain dots.

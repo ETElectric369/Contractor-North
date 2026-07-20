@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeArAging, computeArByCustomer, computeRevenueTrend, computeQuoteStats, computeCustomerValue, trailing12Months, jobBillingStatus } from "@/lib/analytics/money-metrics";
+import { computeArAging, computeArByCustomer, computeRevenueTrend, computeQuoteStats, computeCustomerValue, computeCollected, trailing12Months, jobBillingStatus } from "@/lib/analytics/money-metrics";
 
 describe("computeArAging — A/R buckets (reconciles /analytics)", () => {
   const TODAY = "2026-07-05"; // org-local today
@@ -264,5 +264,45 @@ describe("computeArByCustomer — the AR ledger rollup", () => {
     expect(out).toHaveLength(1);
     expect(out[0].customer).toBe("No customer");
     expect(out[0].balance).toBe(50);
+  });
+});
+
+describe("computeCollected — THE cash definition (/billing + /payments headline)", () => {
+  const pays = [
+    { amount: 1000, paid_at: "2026-06-15T18:00:00Z", invoices: { status: "paid" } },
+    { amount: 400, paid_at: "2026-07-02T18:00:00Z", invoices: { status: "partial" } },
+  ];
+
+  it("sums the payments table — an account CREDIT is not cash and never appears here", () => {
+    // The bug: both tiles summed invoices.amount_paid, and recalcInvoice folds open credits
+    // into that field. Writing off a disputed invoice as a $1,500 credit — no cash anywhere —
+    // pushed "Collected" UP by $1,500, above the payments ledger printed right below it and
+    // above what /analytics and Nort reported for the same period.
+    expect(computeCollected(pays, [])).toBe(1400);
+  });
+
+  it("refunds are cash OUT and come off the top", () => {
+    expect(computeCollected(pays, [{ amount: 150, created_at: "2026-07-03T18:00:00Z" }])).toBe(1250);
+  });
+
+  it("a voided invoice's payments are reversed money — dropped (matches the ledger + revenue trend)", () => {
+    const withVoid = [...pays, { amount: 900, paid_at: "2026-07-04T18:00:00Z", invoices: { status: "void" } }];
+    expect(computeCollected(withVoid, [])).toBe(1400);
+  });
+
+  it("`since` narrows both sides to the period (the /payments month tile)", () => {
+    const monthStart = new Date("2026-07-01T07:00:00Z"); // org-local July 1, Pacific
+    expect(computeCollected(pays, [{ amount: 100, created_at: "2026-06-20T18:00:00Z" }], monthStart)).toBe(400);
+    expect(computeCollected(pays, [{ amount: 100, created_at: "2026-07-05T18:00:00Z" }], monthStart)).toBe(300);
+  });
+
+  it("agrees with computeRevenueTrend on the same rows — one number across the app", () => {
+    const trend = computeRevenueTrend(pays, [], "2026-07-20", "America/Los_Angeles");
+    expect(computeCollected(pays, [])).toBe(trend.collected12);
+  });
+
+  it("empty/garbage rows are $0, never NaN", () => {
+    expect(computeCollected([], [])).toBe(0);
+    expect(computeCollected([{ amount: null, paid_at: null }], [])).toBe(0);
   });
 });

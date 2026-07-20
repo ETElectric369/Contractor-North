@@ -49,11 +49,20 @@ export function laborCostForJob(
  *
  *  Rule (Erik's): bill the EXACT time on this job — (1) every time-allocation
  *  tagged to the job, even from a shift clocked mainly into another job, plus
- *  (2) un-split closed entries on the job (gross hours). Rate = bill_rate ??
- *  hourly_rate ?? default_labor_rate. Quantity is rounded to the quarter hour
- *  PER PERSON (so a 2.6h person bills 2.5h, matching the printed line).
+ *  (2) the UNLABELED allocation rows on this job's own entries, plus (3) un-split
+ *  closed entries on the job (gross hours). Rate = bill_rate ?? hourly_rate ??
+ *  default_labor_rate. Quantity is rounded to the quarter hour PER PERSON (so a
+ *  2.6h person bills 2.5h, matching the printed line).
  *
- *  jobEntries: closed time_entries on the job, each with profiles + time_allocations.
+ *  (2) is the fix for the silent-unbilled-week bug: a job-less clock-in writes an
+ *  allocation row with job_id NULL, which laborCostForJob:27 COSTS to the entry's job
+ *  ("unlabeled → the entry's job"). This used to skip any entry that had allocations at
+ *  all, so those hours were costed but never billable — the job hub showed thousands of
+ *  labor while the draw imported $0. Same predicate on both sides now, so cost and bill
+ *  can't disagree about what a null job_id means.
+ *
+ *  jobEntries: closed time_entries on the job, each with profiles + time_allocations
+ *              (id, job_id, hours — the contents, not just ids).
  *  jobAllocs: time_allocations tagged to the job, each with time_entries.profiles. */
 export function computeJobLaborBilling(
   jobEntries: any[],
@@ -83,10 +92,27 @@ export function computeJobLaborBilling(
     }
   };
   // (1) exact hours allocated to this job (handles split shifts)
-  for (const a of jobAllocs ?? []) addHours(a.time_entries?.profiles, Number(a.hours ?? 0));
-  // (2) un-split closed entries on this job → gross hours
+  const billedAllocIds = new Set<string>();
+  for (const a of jobAllocs ?? []) {
+    if (a.id) billedAllocIds.add(String(a.id));
+    addHours(a.time_entries?.profiles, Number(a.hours ?? 0));
+  }
   for (const e of jobEntries ?? []) {
-    if ((e.time_allocations?.length ?? 0) > 0 || !e.clock_out) continue;
+    const allocs = e.time_allocations ?? [];
+    if (allocs.length) {
+      // (2) this entry is split. Its rows tagged to ANOTHER job aren't ours; its rows
+      // tagged to THIS job already came through jobAllocs above (id-dedupe guards a
+      // double-count if that query ever widens). What's left is the UNLABELED hours —
+      // costed to this entry's job, so billed to it too.
+      for (const a of allocs) {
+        if (a.job_id) continue;
+        if (a.id && billedAllocIds.has(String(a.id))) continue;
+        addHours(e.profiles, Number(a.hours ?? 0));
+      }
+      continue;
+    }
+    // (3) un-split closed entries on this job → gross hours
+    if (!e.clock_out) continue;
     const lunch = Math.max(0, Number(e.lunch_minutes) || 0); // a negative lunch can't add billable time
     addHours(e.profiles, (new Date(e.clock_out).getTime() - new Date(e.clock_in).getTime()) / 3_600_000 - lunch / 60);
   }
@@ -106,12 +132,15 @@ export async function fetchJobLaborRows(supabase: any, jobId: string): Promise<{
   const [{ data: jobEntries }, { data: jobAllocs }] = await Promise.all([
     supabase
       .from("time_entries")
-      .select("clock_in, clock_out, lunch_minutes, profiles(id, full_name, hourly_rate, bill_rate), time_allocations(id)")
+      // allocation CONTENTS, not just ids: computeJobLaborBilling has to bill the
+      // unlabeled (job_id NULL) rows on this job's entries, which the cost side already
+      // charges to the job — selecting only ids is what hid a whole unbilled week.
+      .select("clock_in, clock_out, lunch_minutes, profiles(id, full_name, hourly_rate, bill_rate), time_allocations(id, job_id, hours)")
       .eq("job_id", jobId)
       .eq("status", "closed"),
     supabase
       .from("time_allocations")
-      .select("hours, time_entries!inner(status, profiles(id, full_name, hourly_rate, bill_rate))")
+      .select("id, hours, time_entries!inner(status, profiles(id, full_name, hourly_rate, bill_rate))")
       .eq("job_id", jobId)
       .eq("time_entries.status", "closed"),
   ]);

@@ -306,9 +306,10 @@ function MoreMenu({ items, activeId, onSelect }: { items: TabBarItem[]; activeId
 
   useEffect(() => {
     if (!open) return;
-    // THE MODAL RULE: the app's Modal is in-place (not portaled), so never close —
-    // and thereby unmount panel contents — while one is open. Its z-[120] overlay
-    // covers this panel; bail until body.modal-open clears.
+    // THE MODAL RULE: the app's Modal is in-place by default (portaling, when a caller
+    // opts in, still leaves the child in this tree), so never close — and thereby unmount
+    // panel contents — while one is open. It sets body.modal-open in either mode and its
+    // z-[120] overlay covers this panel; bail until body.modal-open clears.
     const onDoc = (e: MouseEvent) => {
       if (document.body.classList.contains("modal-open")) return;
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);

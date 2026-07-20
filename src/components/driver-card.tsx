@@ -5,7 +5,7 @@ import {
   Briefcase, FileText, Receipt, User, Calendar, CheckSquare, List,
   MapPin, Navigation, ArrowRight, X, ExternalLink,
 } from "lucide-react";
-import type { AgentHudCard } from "@/lib/assistant-protocol";
+import { safeInternalHref, type AgentHudCard } from "@/lib/assistant-protocol";
 
 const KIND_ICON = {
   job: Briefcase, estimate: FileText, invoice: Receipt,
@@ -24,6 +24,10 @@ export function DriverCard({ card, onDismiss }: { card: AgentHudCard; onDismiss:
     ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(card.address)}`
     : null;
   const facts = (card.facts ?? []).slice(0, 4);
+  // Defense in depth: the server (sanitizeHudCard) already dropped any off-origin href before this
+  // card left the route, but re-check at the render boundary so a link is NEVER built from an
+  // unvalidated string — internal absolute paths only, otherwise render the plain (no-link) branch.
+  const titleHref = safeInternalHref(card.href);
 
   return (
     <div className="glass glass-gloss relative m-2 overflow-hidden rounded-2xl p-4">
@@ -39,8 +43,8 @@ export function DriverCard({ card, onDismiss }: { card: AgentHudCard; onDismiss:
       </div>
 
       <div className="relative z-10 mt-2.5">
-        {card.href ? (
-          <Link href={card.href} className="group inline-flex items-start gap-1.5">
+        {titleHref ? (
+          <Link href={titleHref} className="group inline-flex items-start gap-1.5">
             <span className="text-2xl font-semibold leading-tight text-[color:rgb(var(--glass-ink))]">{card.title}</span>
             <ExternalLink className="mt-1.5 h-4 w-4 shrink-0 text-[color:rgb(var(--glass-ink))]/60 opacity-0 transition-opacity group-hover:opacity-100" />
           </Link>
@@ -91,8 +95,9 @@ export function DriverCard({ card, onDismiss }: { card: AgentHudCard; onDismiss:
                   {r.value ? <div className="shrink-0 text-sm font-semibold text-slate-900">{r.value}</div> : null}
                 </div>
               );
-              return r.href ? (
-                <Link key={i} href={r.href} className="block hover:bg-white/60">{inner}</Link>
+              const rowHref = safeInternalHref(r.href);
+              return rowHref ? (
+                <Link key={i} href={rowHref} className="block hover:bg-white/60">{inner}</Link>
               ) : (
                 <div key={i}>{inner}</div>
               );

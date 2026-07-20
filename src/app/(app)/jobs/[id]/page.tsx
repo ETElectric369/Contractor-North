@@ -42,7 +42,7 @@ import { PaymentScheduleCard } from "./payment-schedule-card";
 import { ContractCard } from "./contract-card";
 import { LienInsuranceCard } from "./lien-insurance-card";
 import { JobDescription } from "./job-description";
-import { computeJobProgress } from "@/lib/job-progress-math";
+import { computeJobProgress, livePurchaseOrders } from "@/lib/job-progress-math";
 import { jobLabel } from "@/lib/schedule-options";
 import { ProgressInvoiceButton } from "./progress-invoice-button";
 import { NewInvoiceButton } from "./new-invoice-button";
@@ -166,7 +166,7 @@ export default async function JobDetailPage({
       : Promise.resolve({ data: [] as any[] }),
     supabase
       .from("bills")
-      .select("id, supplier, bill_number, amount, status, bill_date")
+      .select("id, supplier, bill_number, amount, status, bill_date, po_id")
       .eq("job_id", id)
       .order("created_at", { ascending: false }),
     supabase
@@ -296,11 +296,14 @@ export default async function JobDetailPage({
   // (bill rate) — the latter feeds the estimate-vs-actual draw tracking.
   // laborCost (what we PAY) via the shared allocation-aware helper — identical math to /analytics.
   const { hours: laborHours, cost: laborCost } = laborCostForJob(entries ?? [], id);
-  // KNOWN DOUBLE-COUNT (mirrored on /analytics): a cost entered as BOTH a purchase
-  // order AND a supplier bill is counted twice here (materialCost + billsCost). There's
-  // no FK linking a bill to the PO it pays, so we can't dedupe yet — recording either
-  // the PO or the bill (not both) keeps the number honest. Fix is a po_id on bills.
-  const materialCost = (pos ?? []).reduce((s: number, p: any) => s + Number(p.total ?? 0), 0);
+  // Materials, via the ONE shared rule (livePurchaseOrders): a draft/cancelled PO isn't a
+  // cost, and a PO whose supplier bill has arrived is SUPERSEDED by that bill (bills.po_id,
+  // migration 0142) — so one CED delivery entered as both a PO and the supplier's invoice
+  // is costed once, at the invoiced amount, here and on /analytics and on the draw.
+  const materialCost = livePurchaseOrders((pos ?? []) as any[], (bills ?? []) as any[]).reduce(
+    (s: number, p: any) => s + Number(p.total ?? 0),
+    0,
+  );
   const billsCost = (bills ?? []).reduce((s: number, b: any) => s + Number(b.amount ?? 0), 0);
   // Billable work to date + the progress rollups — via the extracted computeJobProgress
   // SSOT (the exact rollup the draw modal / print report use: estimate = accepted contract
@@ -691,7 +694,7 @@ export default async function JobDetailPage({
           <Card>
             <div className="border-b border-slate-100 px-5 py-3 text-sm font-semibold text-slate-900">Supplier bills</div>
             <CardContent className="py-5">
-              <JobBills jobId={j.id} bills={(bills ?? []) as any} />
+              <JobBills jobId={j.id} bills={(bills ?? []) as any} pos={(pos ?? []) as any} />
             </CardContent>
           </Card>
 

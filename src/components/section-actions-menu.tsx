@@ -27,13 +27,14 @@ const DIVIDER = <div className="relative z-10 my-1 border-t border-white/50" />;
  * action then navigate (hrefPrefix + returned id, or the node's `href`); links
  * navigate. Danger nodes render red and last behind a divider, confirm-guarded.
  *
- * THE MODAL RULE: modal-owning `children` render their Modal IN-PLACE (not
- * portaled), so they must stay MOUNTED while their modal is open. The panel
- * therefore never closes itself while <body> has `modal-open` (Modal always
- * sets it): the outside-click and Escape close handlers bail — including the
- * click on a modal's own backdrop — and the z-[120] modal overlay simply covers
- * the z-[90] panel. Do NOT "fix" this with conditional rendering or
- * display:none; both silently destroy a half-filled form mid-edit.
+ * THE MODAL RULE: modal-owning `children` render their Modal IN-PLACE by default
+ * (a child may opt into the `portal` prop, but the child COMPONENT still lives in
+ * this tree — portaling moves only the overlay), so they must stay MOUNTED while
+ * their modal is open. The panel therefore never closes itself while <body> has
+ * `modal-open` (Modal sets it in either mode): the outside-click and Escape close
+ * handlers bail — including the click on a modal's own backdrop — and the z-[120]
+ * modal overlay simply covers the z-[90] panel. Do NOT "fix" this with conditional
+ * rendering or display:none; both silently destroy a half-filled form mid-edit.
  */
 export function SectionActionsMenu({
   tree,

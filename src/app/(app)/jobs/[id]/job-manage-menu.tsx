@@ -18,13 +18,14 @@ export const MANAGE_ROW_CLS =
  * jobSectionTree on this page (whose "Clock in here" ejected you to /timeclock —
  * the TIME button keeps you on the job now).
  *
- * THE MODAL RULE: the Modal is rendered IN-PLACE (not portaled), so the children
- * that own modals must stay MOUNTED while their modal is open. The panel therefore
- * never closes itself while <body> has `modal-open` (Modal always sets it): the
- * outside-click and Escape close handlers bail — including the click on a modal's
- * own backdrop — and the z-[120] modal overlay simply covers the z-[90] panel.
- * Do NOT "fix" this with conditional rendering or display:none on the panel; both
- * silently destroy a half-filled form mid-edit (the documented Save-eating bug).
+ * THE MODAL RULE: the Modal renders IN-PLACE by default (it can opt into a `portal`,
+ * but even then the child COMPONENT stays in this tree — portaling only moves the
+ * overlay), so the children that own modals must stay MOUNTED while their modal is
+ * open. The panel therefore never closes itself while <body> has `modal-open` (Modal
+ * sets it in either mode): the outside-click and Escape close handlers bail —
+ * including the click on a modal's own backdrop — and the z-[120] modal overlay simply
+ * covers the z-[90] panel. Do NOT "fix" this with conditional rendering or display:none
+ * on the panel; both silently destroy a half-filled form mid-edit (the Save-eating bug).
  */
 export function JobManageMenu({
   isStaff,
@@ -40,8 +41,15 @@ export function JobManageMenu({
   jobNumber: string;
   /** Bound server action — creates the invoice, returns its id (staff). */
   createInvoice?: () => Promise<{ ok: boolean; error?: string; id?: string }>;
-  /** Bound server action — deletes the job (staff). */
-  deleteJob?: () => Promise<{ ok: boolean; error?: string }>;
+  /** Bound server action — deletes the job (staff). Called twice when the job has
+   *  cascade children: once to LEARN what would be destroyed, then with
+   *  confirmDestructive once the user has seen the real list and agreed. */
+  deleteJob?: (opts?: { confirmDestructive?: boolean }) => Promise<{
+    ok: boolean;
+    error?: string;
+    needsConfirm?: boolean;
+    destroys?: string[];
+  }>;
   triggerClassName?: string;
   /** Staff modal-owning menu items (JobEditButton etc. with `menuItem`). */
   children?: React.ReactNode;
@@ -98,11 +106,26 @@ export function JobManageMenu({
 
   async function runDelete() {
     if (!deleteJob) return;
+    // First confirm covers only what we can promise without asking the server. The old
+    // copy stopped here and claimed nothing was lost — untrue: contracts, lien records,
+    // permits, change orders and every job photo CASCADE away. So the server itemizes
+    // the real damage and we put THAT in front of the user before anything is deleted.
     if (!confirm(`Delete job ${jobNumber}? Time entries, estimates, and invoices keep their data but lose the job link.`)) return;
     setErr(null);
     setBusy("delete");
     try {
-      const res = await deleteJob();
+      let res = await deleteJob();
+      if (res.needsConfirm && res.destroys?.length) {
+        const list = res.destroys.map((d) => `  • ${d}`).join("\n");
+        const agreed = confirm(
+          `Deleting job ${jobNumber} also permanently deletes:\n\n${list}\n\nThis cannot be undone. Delete anyway?`,
+        );
+        if (!agreed) {
+          setBusy(null);
+          return;
+        }
+        res = await deleteJob({ confirmDestructive: true });
+      }
       if (res.ok) {
         setOpen(false);
         router.push("/jobs");

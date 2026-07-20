@@ -7,6 +7,7 @@ import { Badge, statusTone } from "@/components/ui/badge";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { getMoneyPipeline } from "@/lib/billing-pipeline";
 import { invoiceBalance } from "@/lib/invoice-math";
+import { getCollected } from "@/lib/analytics/money-metrics";
 import { listCustomerOptions } from "@/lib/schedule-options";
 import { NewInvoiceButton } from "./new-invoice-button";
 import { InvoiceJobButton } from "./invoice-job-button";
@@ -18,19 +19,21 @@ const money = (n: number) => formatCurrency(n);
 export default async function BillingPage() {
   const supabase = await createClient();
 
-  const [pipeline, { data: quotes }, { data: customers }, { data: jobs }, { data: refunds }, { data: allInv }] =
+  const [pipeline, { data: quotes }, { data: customers }, { data: jobs }, collectedTotals, { data: allInv }] =
     await Promise.all([
       getMoneyPipeline(supabase),
       supabase.from("quotes").select("id, quote_number, total, customers(name)").in("status", ["sent", "accepted"]).order("created_at", { ascending: false }).limit(100),
       listCustomerOptions(supabase),
       supabase.from("jobs").select("id, name, job_number, customer_id").not("status", "in", "(cancelled)").order("created_at", { ascending: false }).limit(300),
-      supabase.from("customer_credits").select("amount").eq("disposition", "refund"),
+      // "Collected" = cash that landed (the payments table net of voids and refunds), NOT
+      // sum(amount_paid) — that field folds in account credits, so writing off a disputed
+      // invoice used to RAISE this tile above what /payments, /analytics and Nort report.
+      getCollected(supabase),
       supabase.from("invoices").select("id, invoice_number, total, amount_paid, status, due_date, customers(name)").order("created_at", { ascending: false }),
     ]);
 
   const list = (allInv ?? []) as any[];
-  const refundsTotal = (refunds ?? []).reduce((s: number, r: any) => s + Number(r.amount ?? 0), 0);
-  const collected = list.filter((i) => i.status !== "void").reduce((s: number, i: any) => s + Number(i.amount_paid ?? 0), 0) - refundsTotal;
+  const collected = collectedTotals.allTime;
 
   const { doneNotInvoiced, drafts, unpaid } = pipeline;
   const caughtUp = doneNotInvoiced.length === 0 && drafts.length === 0 && unpaid.length === 0;

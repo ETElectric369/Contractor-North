@@ -7,6 +7,7 @@ import { User, CalendarSync, Check, ChevronDown } from "lucide-react";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { jobStatusLabel } from "@/lib/job-status";
 import { MoveToDay } from "@/components/move-to-day";
+import { useToast } from "@/components/toast";
 import { setJobCrew, moveJobDay } from "./actions";
 
 interface Member {
@@ -35,6 +36,7 @@ export function JobScheduleCard({
   date?: string | null;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [pending, start] = useTransition();
   const [open, setOpen] = useState(false);
   // Optimistic local crew set so ticking several people in a row feels instant (each toggle sends
@@ -45,12 +47,28 @@ export function JobScheduleCard({
     ? new Date(job.scheduled_start).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
     : "";
 
+  // The optimistic tick must be BACKED OUT when the write fails, or the card lies forever: the
+  // list reconciles by key={job.id} so router.refresh() never remounts it, and useState ignores
+  // its initializer on re-render — a failed assign stayed ticked through every refresh. The
+  // try/catch is not optional: React routes an async-transition rejection (offline, 5xx) to
+  // reportGlobalError, so without it a dropped request reaches no handler at all.
   const toggle = (memberId: string) => {
+    const prev = crew;
     const next = crew.includes(memberId) ? crew.filter((x) => x !== memberId) : [...crew, memberId];
     setCrew(next); // optimistic
     start(async () => {
-      await setJobCrew(job.id, next);
-      router.refresh();
+      try {
+        const res = await setJobCrew(job.id, next);
+        if (!res.ok) {
+          setCrew(prev); // rollback
+          toast(res.error ?? "Couldn't save the crew — try again.", "error");
+          return;
+        }
+        router.refresh();
+      } catch {
+        setCrew(prev); // rollback
+        toast("Couldn't save the crew — you may be offline.", "error");
+      }
     });
   };
 

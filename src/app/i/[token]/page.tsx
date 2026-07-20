@@ -6,6 +6,7 @@ import { templateFor } from "@/components/doc-templates";
 import { billingEnabled } from "@/lib/stripe";
 import { formatCurrency } from "@/lib/utils";
 import { docTitle } from "@/lib/doc-title";
+import { NO_INDEX } from "@/lib/no-index";
 import { invoiceTypeLabel, invoiceBalance } from "@/lib/invoice-math";
 import { InvoiceDocument } from "@/components/invoice-document";
 import type { Metadata } from "next";
@@ -18,7 +19,9 @@ export async function generateMetadata({ params }: { params: Promise<{ token: st
   const supabase = await createClient();
   const { data } = await supabase.rpc("public_invoice", { p_token: token });
   const inv = (data as any)?.invoice;
-  return { title: docTitle(inv ? `Invoice ${inv.invoice_number}` : "Invoice") };
+  // NEVER indexed. The token is a permanent bearer credential and the page carries the
+  // customer's name + address + balance — one forwarded link must not become a search result.
+  return { title: docTitle(inv ? `Invoice ${inv.invoice_number}` : "Invoice"), robots: NO_INDEX };
 }
 
 export default async function PublicInvoicePage({

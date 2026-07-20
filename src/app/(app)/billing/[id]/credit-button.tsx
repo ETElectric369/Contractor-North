@@ -64,10 +64,15 @@ export function CreditButton({
           <RotateCcw className="h-4 w-4" /> Credit / Refund
         </button>
       )}
+      {/* portal: the trigger lives in the invoice's glass ⋯ Actions panel, whose backdrop-filter
+          makes it the containing block for this overlay's position:fixed — un-portaled it was
+          sized to the 224px dropdown and clipped by its overflow:hidden. No wrapping <form>
+          here (the footer saves via onSave), so portaling alone is safe. See Modal's `portal`. */}
       <Modal
         open={open}
         onClose={() => setOpen(false)}
         title="Credit / refund"
+        portal
         footer={
           <ModalActions onCancel={() => setOpen(false)} onSave={save} saving={pending} disabled={!(amount > 0)} saveLabel="Post credit" />
         }

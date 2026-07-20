@@ -56,6 +56,10 @@ export function ActionList({
   const [removedIds, setRemovedIds] = useState<Set<string>>(new Set());
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The list banner at the top of the body is PAINTED UNDER an open Modal (overlay z-[120]),
+  // so a failure inside the Assign/Convert sheet was invisible and the button read as dead.
+  // Every modal-driven failure also lands here, inside the dialog that caused it.
+  const [modalError, setModalError] = useState<string | null>(null);
   const [assigning, setAssigning] = useState<ActionItem | null>(null);
   const [assigneeVal, setAssigneeVal] = useState("");
   const [savingAssign, setSavingAssign] = useState(false);
@@ -80,20 +84,21 @@ export function ActionList({
     item: ActionItem,
     verb: Affordance,
     payload?: { date?: string; assignee?: string; target?: "inspection" | "customer" | "quote" | "estimate" | "job" },
-  ) {
+  ): Promise<{ ok: boolean; error?: string }> {
     setError(null);
     setBusyId(item.id);
     const res = await dispatchAction({ kind: item.kind, id: item.id, verb, payload });
     setBusyId(null);
     if (!res.ok) {
-      setError(res.error ?? "Couldn't do that.");
+      const message = res.error ?? "Couldn't do that.";
+      setError(message);
       // roll back the optimistic change
       setDoneIds((s) => { const n = new Set(s); n.delete(item.id); return n; });
       setRemovedIds((s) => { const n = new Set(s); n.delete(item.id); return n; });
-      return false;
+      return { ok: false, error: message };
     }
     router.refresh();
-    return true;
+    return { ok: true };
   }
 
   function onDo(item: ActionItem) {
@@ -138,21 +143,33 @@ export function ActionList({
   }
   function openAssign(item: ActionItem) {
     setAssigneeVal("");
+    setModalError(null);
     setAssigning(item);
   }
+  function openConvert(item: ActionItem) {
+    setModalError(null);
+    setConverting(item);
+  }
   async function saveAssign() {
-    if (!assigning) return;
+    // NEVER dispatch on the "— Unassigned —" default. For a job, an empty assignee is
+    // job.assign's documented CLEAR-THE-WHOLE-CREW branch (written for the agent), so a
+    // single tap on the enabled primary silently wiped the crew and reported success.
+    // The footer is disabled in this state too — this is the belt to that suspenders.
+    if (!assigning || !assigneeVal) return;
+    setModalError(null);
     setSavingAssign(true);
-    const ok = await run(assigning, "assign", { assignee: assigneeVal || undefined });
+    const res = await run(assigning, "assign", { assignee: assigneeVal });
     setSavingAssign(false);
-    if (ok) setAssigning(null);
+    if (res.ok) setAssigning(null);
+    else setModalError(res.error ?? "Couldn't do that.");
   }
   async function doConvert(item: ActionItem, target: "inspection" | "customer" | "quote" | "estimate" | "job") {
+    setModalError(null);
     setRemovedIds((s) => new Set(s).add(item.id)); // converted → leaves the inbox
-    const ok = await run(item, "convert", { target });
+    const res = await run(item, "convert", { target });
     // The convert dispatch drops the redirect, so the row just vanishes — a toast is the only
     // signal the crew gets that it worked (inspection especially: the site visit is now booked).
-    if (ok) {
+    if (res.ok) {
       setConverting(null);
       toast(
         target === "inspection"
@@ -160,11 +177,97 @@ export function ActionList({
           : `Converted to ${target}`,
         "success",
       );
+    } else {
+      setModalError(res.error ?? "Couldn't do that.");
     }
   }
 
+  // The three sheets, hoisted out of the list body: an optimistic removal (convert) can empty
+  // `visible` mid-request, and the old early return unmounted the OPEN dialog along with the list.
+  const modals = (
+    <>
+      <Modal
+        open={!!assigning}
+        onClose={() => setAssigning(null)}
+        title="Assign to"
+        size="sm"
+        footer={
+          <ModalActions
+            onCancel={() => setAssigning(null)}
+            onSave={saveAssign}
+            saving={savingAssign}
+            /* No person picked = the crew-clearing empty assignee. Not a tap away. */
+            disabled={!assigneeVal}
+            saveLabel="Assign"
+          />
+        }
+      >
+        <div className="space-y-3">
+          {modalError && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{modalError}</div>}
+          <div>
+            <Label htmlFor="ai-assignee">Person</Label>
+            <Select id="ai-assignee" value={assigneeVal} onChange={(e) => setAssigneeVal(e.target.value)}>
+              <option value="">— Pick a person —</option>
+              {people.map((p) => (
+                <option key={p.id} value={p.id}>{p.full_name ?? "Unnamed"}</option>
+              ))}
+            </Select>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={!!converting} onClose={() => setConverting(null)} title="Convert inquiry" size="sm">
+        <div className="space-y-3">
+          {modalError && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{modalError}</div>}
+          <p className="text-sm text-slate-500">Turn this inquiry into:</p>
+          <div className="grid grid-cols-2 gap-2">
+            {([
+              ["inspection", "Inspection"],
+              ["estimate", "Estimate"],
+              ["quote", "Quote"],
+              ["job", "Job"],
+              ["customer", "Customer"],
+            ] as const).map(([t, label]) => (
+              <Button
+                key={t}
+                type="button"
+                variant="outline"
+                disabled={busyId === converting?.id}
+                onClick={() => converting && doConvert(converting, t)}
+              >
+                {label}
+              </Button>
+            ))}
+          </div>
+          <p className="text-xs text-slate-400">
+            Inspection books a site visit in ~2 days and keeps the lead open — for big jobs that need a look before a firm price.
+          </p>
+        </div>
+      </Modal>
+
+      <Modal
+        open={!!dismissing}
+        onClose={() => setDismissing(null)}
+        title="Delete this?"
+        size="sm"
+        footer={
+          <ModalActions onCancel={() => setDismissing(null)} onSave={confirmDismiss} saveLabel="Delete" destructive />
+        }
+      >
+        <p className="text-sm text-slate-600">
+          This permanently deletes <span className="font-medium text-slate-900">{dismissing?.title}</span>. It can&apos;t be undone.
+        </p>
+      </Modal>
+    </>
+  );
+
   if (visible.length === 0) {
-    return <p className="px-1 py-2 text-sm text-slate-400">{emptyLabel}</p>;
+    return (
+      <>
+        <p className="px-1 py-2 text-sm text-slate-400">{emptyLabel}</p>
+        {modals}
+      </>
+    );
   }
 
   return (
@@ -230,7 +333,7 @@ export function ActionList({
                     </button>
                   )}
                   {can("convert") && (
-                    <button onClick={() => setConverting(item)} disabled={busyId === item.id} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-brand" title="Convert">
+                    <button onClick={() => openConvert(item)} disabled={busyId === item.id} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-brand" title="Convert">
                       <ArrowRightLeft className="h-4 w-4" />
                     </button>
                   )}
@@ -258,67 +361,7 @@ export function ActionList({
         </div>
       ))}
 
-      <Modal
-        open={!!assigning}
-        onClose={() => setAssigning(null)}
-        title="Assign to"
-        size="sm"
-        footer={
-          <ModalActions onCancel={() => setAssigning(null)} onSave={saveAssign} saving={savingAssign} saveLabel="Assign" />
-        }
-      >
-        <div>
-          <Label htmlFor="ai-assignee">Person</Label>
-          <Select id="ai-assignee" value={assigneeVal} onChange={(e) => setAssigneeVal(e.target.value)}>
-            <option value="">— Unassigned —</option>
-            {people.map((p) => (
-              <option key={p.id} value={p.id}>{p.full_name ?? "Unnamed"}</option>
-            ))}
-          </Select>
-        </div>
-      </Modal>
-
-      <Modal open={!!converting} onClose={() => setConverting(null)} title="Convert inquiry" size="sm">
-        <div className="space-y-3">
-          <p className="text-sm text-slate-500">Turn this inquiry into:</p>
-          <div className="grid grid-cols-2 gap-2">
-            {([
-              ["inspection", "Inspection"],
-              ["estimate", "Estimate"],
-              ["quote", "Quote"],
-              ["job", "Job"],
-              ["customer", "Customer"],
-            ] as const).map(([t, label]) => (
-              <Button
-                key={t}
-                type="button"
-                variant="outline"
-                disabled={busyId === converting?.id}
-                onClick={() => converting && doConvert(converting, t)}
-              >
-                {label}
-              </Button>
-            ))}
-          </div>
-          <p className="text-xs text-slate-400">
-            Inspection books a site visit in ~2 days and keeps the lead open — for big jobs that need a look before a firm price.
-          </p>
-        </div>
-      </Modal>
-
-      <Modal
-        open={!!dismissing}
-        onClose={() => setDismissing(null)}
-        title="Delete this?"
-        size="sm"
-        footer={
-          <ModalActions onCancel={() => setDismissing(null)} onSave={confirmDismiss} saveLabel="Delete" destructive />
-        }
-      >
-        <p className="text-sm text-slate-600">
-          This permanently deletes <span className="font-medium text-slate-900">{dismissing?.title}</span>. It can&apos;t be undone.
-        </p>
-      </Modal>
+      {modals}
     </div>
   );
 }

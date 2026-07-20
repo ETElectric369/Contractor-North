@@ -20,6 +20,11 @@ const PUBLIC_PATHS = [
   "/api/contracts",
   "/api/timeclock",
   "/api/automations",
+  // Vercel Cron calls this with a Bearer CRON_SECRET and NO session cookie — without
+  // this entry the middleware 401s it before requireCron ever runs (the two-way gcal
+  // sync has been dead every 15 min since 0132). NARROW path on purpose: /api/google/
+  // connect + /callback must stay session-gated so the OAuth grant binds to a real user.
+  "/api/google/sync",
   "/api/inbound",
   "/api/site-chat",
   "/api/health",

@@ -226,26 +226,84 @@ export async function bulkImportCustomers(rows: CustomerImportRow[]): Promise<Ac
   return { ok: true, imported: fresh.length, skipped };
 }
 
-/** Delete a customer — blocked while jobs/quotes/invoices still reference it,
- *  so history can never disappear by accident. */
-export async function deleteCustomer(id: string): Promise<ActionResult> {
+/**
+ * EVERY table that carries a customers.id FK — the single list deleteCustomer and
+ * mergeCustomers both read, so the delete guard can never again cover a subset of what
+ * the merge knows about (it used to check 3 of these 11).
+ *
+ * `blocking: true` means losing the link is unacceptable, so the delete is refused:
+ * job_contacts is ON DELETE CASCADE (its rows — a sub's role notes on six live jobs —
+ * are simply gone, unrecoverable), and jobs/quotes/invoices/contracts/customer_credits
+ * are history and money that must stay attributable.
+ *
+ * The rest are ON DELETE SET NULL: they survive the delete but orphan (an appointment
+ * renders with no customer, a document becomes unreachable from any contact). Those get
+ * named in an explicit confirm rather than silently orphaned.
+ */
+const CUSTOMER_CHILD_TABLES = [
+  { table: "jobs", label: "job", blocking: true },
+  { table: "quotes", label: "estimate", blocking: true },
+  { table: "invoices", label: "invoice", blocking: true },
+  { table: "job_contacts", label: "job link", blocking: true },
+  { table: "contracts", label: "contract", blocking: true },
+  { table: "customer_credits", label: "account credit", blocking: true },
+  { table: "inquiries", label: "inquiry", blocking: false },
+  { table: "documents", label: "document", blocking: false },
+  { table: "work_orders", label: "work order", blocking: false },
+  { table: "appointments", label: "appointment", blocking: false },
+  { table: "recurring_templates", label: "recurring template", blocking: false },
+] as const;
+
+const plural = (n: number, label: string) => `${n} ${label}${n === 1 ? "" : "s"}`;
+
+/**
+ * Delete a customer — refused while any history, money or CASCADE-linked record still
+ * points at them.
+ *
+ * The guard used to count only jobs/quotes/invoices, which let a non-paying contact walk
+ * straight through it: a subcontractor like "Sierra Drywall" is never a client, so all
+ * three counts are 0 — and deleting them CASCADE-deleted every job_contacts row, stripping
+ * the sub (and their role notes) off six active jobs with no warning and no undo.
+ *
+ * `confirmOrphans` is the caller's assertion that the user has SEEN the SET NULL tail it
+ * will orphan (appointments, documents, work orders, inquiries, recurring templates) and
+ * agreed. It defaults off, so a programmatic caller — Nort, the action registry, a voice
+ * command — can never orphan records silently; it gets the itemized refusal instead.
+ */
+export async function deleteCustomer(
+  id: string,
+  opts: { confirmOrphans?: boolean } = {},
+): Promise<ActionResult> {
   const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
 
-  const [{ count: jobs }, { count: quotes }, { count: invoices }] = await Promise.all([
-    supabase.from("jobs").select("id", { count: "exact", head: true }).eq("customer_id", id),
-    supabase.from("quotes").select("id", { count: "exact", head: true }).eq("customer_id", id),
-    supabase.from("invoices").select("id", { count: "exact", head: true }).eq("customer_id", id),
-  ]);
-  const linked: string[] = [];
-  if (jobs) linked.push(`${jobs} job${jobs > 1 ? "s" : ""}`);
-  if (quotes) linked.push(`${quotes} quote${quotes > 1 ? "s" : ""}`);
-  if (invoices) linked.push(`${invoices} invoice${invoices > 1 ? "s" : ""}`);
-  if (linked.length) {
+  const counts = await Promise.all(
+    CUSTOMER_CHILD_TABLES.map(({ table }) =>
+      supabase.from(table).select("id", { count: "exact", head: true }).eq("customer_id", id),
+    ),
+  );
+
+  const blocking: string[] = [];
+  const orphaning: string[] = [];
+  CUSTOMER_CHILD_TABLES.forEach((child, i) => {
+    const n = counts[i]?.count ?? 0;
+    if (!n) return;
+    (child.blocking ? blocking : orphaning).push(plural(n, child.label));
+  });
+
+  if (blocking.length) {
     return {
       ok: false,
-      error: `This customer has ${linked.join(", ")}. Reassign or delete those first, or mark the customer inactive instead.`,
+      error:
+        `This contact has ${blocking.join(", ")}. Reassign those first, merge this record into the ` +
+        `one you're keeping, or mark the contact inactive instead of deleting it.`,
+    };
+  }
+  if (orphaning.length && !opts.confirmOrphans) {
+    return {
+      ok: false,
+      error: `Deleting this contact leaves ${orphaning.join(", ")} with no contact attached.`,
     };
   }
 
@@ -300,22 +358,10 @@ export async function mergeCustomers(
     }
   }
 
-  // Re-point every child table that references customers.id from source → target.
-  // (Discovered from the schema: each carries a customer_id FK.) RLS scopes each update.
-  const childTables = [
-    "jobs",
-    "quotes",
-    "invoices",
-    "job_contacts",
-    "customer_credits",
-    "inquiries",
-    "documents",
-    "work_orders",
-    "appointments",
-    "recurring_templates",
-    "contracts",
-  ];
-  for (const table of childTables) {
+  // Re-point every child table that references customers.id from source → target — the
+  // SAME list deleteCustomer guards on (CUSTOMER_CHILD_TABLES), so a new customer_id FK
+  // can't be added to one and forgotten in the other. RLS scopes each update.
+  for (const { table } of CUSTOMER_CHILD_TABLES) {
     const { error } = await supabase
       .from(table)
       .update({ customer_id: targetId })

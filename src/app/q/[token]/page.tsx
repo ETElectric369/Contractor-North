@@ -7,6 +7,7 @@ import { PublicQuoteAccept } from "./accept";
 import { QuoteDocument } from "@/components/quote-document";
 import { docLabel } from "@/lib/doc-label";
 import { docTitle } from "@/lib/doc-title";
+import { NO_INDEX } from "@/lib/no-index";
 import type { Metadata } from "next";
 import type { Organization } from "@/lib/types";
 
@@ -18,7 +19,8 @@ export async function generateMetadata({ params }: { params: Promise<{ token: st
   const { data } = await supabase.rpc("public_quote", { p_token: token });
   const q = (data as any)?.quote;
   const label = docLabel(q);
-  return { title: docTitle(q ? `${label} ${q.quote_number}` : "Quote") };
+  // NEVER indexed — permanent bearer token + customer PII + pricing. See @/lib/no-index.
+  return { title: docTitle(q ? `${label} ${q.quote_number}` : "Quote"), robots: NO_INDEX };
 }
 
 export default async function PublicQuotePage({

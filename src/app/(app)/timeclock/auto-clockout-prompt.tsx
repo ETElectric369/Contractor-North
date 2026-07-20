@@ -10,6 +10,7 @@ import { NumberInput } from "@/components/ui/number-input";
 import { hoursBetween, formatDuration } from "@/lib/utils";
 import type { JobCode } from "@/lib/types";
 import { completeAutoClockOut } from "./actions";
+import { autoClockoutPromptState } from "./close-math";
 import { jobLabel, jobSiteLabel } from "@/lib/schedule-options";
 
 type JobOpt = {
@@ -20,7 +21,20 @@ type JobOpt = {
   customer_name?: string | null; // feeds the codes-off customer · address label
   codes?: string[];
 };
-type Entry = { id: string; clock_in: string; clock_out: string; lunch_minutes: number; jobId: string | null; jobLabel: string };
+type Entry = {
+  id: string;
+  clock_in: string;
+  clock_out: string;
+  lunch_minutes: number;
+  jobId: string | null;
+  jobLabel: string;
+  /** Hours ALREADY recorded on the entry — the segments a mid-shift job switch wrote,
+   *  which now survive a geofence close instead of being deleted by it. Everything here
+   *  is about the REMAINDER: completeAutoClockOut inserts alongside those rows, so
+   *  seeding the full shift would double-bill them (and, since the entry points at the
+   *  post-switch job, would re-file the whole day onto the wrong customer). */
+  allocatedHours?: number;
+};
 type AllocRow = { job_id: string; job_code: string; hours: number; minutes: number; description: string };
 
 /** Shown on /timeclock when a clock-out left the breakdown unfinished — either the geofence
@@ -42,26 +56,46 @@ export function AutoClockoutPrompt({
 }) {
   const router = useRouter();
   const optionLabel = (j: JobOpt) => (jobCodesEnabled ? jobLabel(j) : jobSiteLabel(j));
+  const already = Math.max(0, Number(entry.allocatedHours) || 0);
+  const gross0 = hoursBetween(entry.clock_in, entry.clock_out, 0);
   const worked0 = hoursBetween(entry.clock_in, entry.clock_out, entry.lunch_minutes);
+  const remaining0 = Math.max(0, worked0 - already);
+  // MEAL-ONLY: the whole shift is ALREADY recorded (a mid-shift switch's segments + the
+  // close's tail backstop filled it) and the only thing the auto-close skipped is the
+  // 30-min meal on a >5h shift. Then this prompt is a lunch-only confirmation — there's
+  // nothing left to break down. Same pure gate the page uses to decide to show us at all.
+  const { mealOnly } = autoClockoutPromptState({
+    grossHours: gross0,
+    lunchMinutes: entry.lunch_minutes,
+    allocatedHours: already,
+  });
   const [allocations, setAllocations] = useState<AllocRow[]>([
     {
       job_id: entry.jobId ?? "",
       job_code: "",
-      hours: Math.max(0, Math.floor(worked0)),
-      minutes: Math.max(0, Math.round((worked0 - Math.floor(worked0)) * 60)),
+      hours: Math.max(0, Math.floor(remaining0)),
+      minutes: Math.max(0, Math.round((remaining0 - Math.floor(remaining0)) * 60)),
       description: "",
     },
   ]);
-  const [lunch, setLunch] = useState(entry.lunch_minutes > 0);
+  // In meal-only mode default the meal to TAKEN — the shift is over 5h and the auto-close
+  // deducted none, so a one-tap Save applies the 30-min meal (matching the server's ">5
+  // gross hours ⇒ deduct 30 min" auto-lunch); uncheck only if the tech truly skipped it.
+  // The normal breakdown flow keeps its existing default (whatever lunch is on the entry).
+  const [lunch, setLunch] = useState(entry.lunch_minutes > 0 || mealOnly);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  const worked = hoursBetween(entry.clock_in, entry.clock_out, lunch ? 30 : 0);
+  // The number this form is filling: hours worked MINUS what the shift already recorded.
+  const worked = Math.max(0, hoursBetween(entry.clock_in, entry.clock_out, lunch ? 30 : 0) - already);
   const allocated = allocations.reduce((s, a) => s + (a.hours || 0) + (a.minutes || 0) / 60, 0);
   // Codes off: the split identifies work by the JOB, so a job (not a code) unlocks Save.
-  const ok = allocations.some(
-    (a) => (jobCodesEnabled ? a.job_code : a.job_id) && (a.hours || 0) + (a.minutes || 0) / 60 > 0,
-  );
+  // Meal-only: the hours are already on the entry, so Save just writes the lunch.
+  const ok =
+    mealOnly ||
+    allocations.some(
+      (a) => (jobCodesEnabled ? a.job_code : a.job_id) && (a.hours || 0) + (a.minutes || 0) / 60 > 0,
+    );
 
   function update(i: number, patch: Partial<AllocRow>) {
     setAllocations((p) => p.map((a, idx) => (idx === i ? { ...a, ...patch } : a)));
@@ -99,10 +133,17 @@ export function AutoClockoutPrompt({
               Finish your timecard — you clocked out at {new Date(entry.clock_out).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.
             </div>
             <div className="text-xs text-amber-700">
-              {jobCodesEnabled
-                ? "Break down the hours you worked: which code(s) and how long, so they bill to the right job."
-                : "Break down the hours you worked: which job(s) and how long, so they bill to the right job."}
+              {mealOnly
+                ? "Your hours are already recorded from switching jobs — just confirm your lunch below so the meal break is deducted."
+                : jobCodesEnabled
+                  ? "Break down the hours you worked: which code(s) and how long, so they bill to the right job."
+                  : "Break down the hours you worked: which job(s) and how long, so they bill to the right job."}
             </div>
+            {!mealOnly && already > 0.01 && (
+              <div className="mt-1 text-xs text-amber-700">
+                {`${formatDuration(already)} is already recorded from switching jobs — this is just the rest of the day.`}
+              </div>
+            )}
           </div>
         </div>
 
@@ -112,6 +153,7 @@ export function AutoClockoutPrompt({
           <span className="text-slate-700">Took a 30-minute lunch</span>
         </label>
 
+        {!mealOnly && (
         <div className="space-y-2">
           {allocations.map((a, i) => (
             <div key={i} className="space-y-2 rounded-lg border border-amber-100 bg-white/60 p-2">
@@ -148,10 +190,11 @@ export function AutoClockoutPrompt({
               <Plus className="h-4 w-4 shrink-0" /> {jobCodesEnabled ? "Add Another Code" : "Add Another Job"}
             </button>
             <span className={`text-xs ${Math.abs(allocated - worked) > 0.1 ? "text-amber-600" : "text-slate-500"}`}>
-              {formatDuration(allocated)} of {formatDuration(worked)} worked
+              {formatDuration(allocated)} of {formatDuration(worked)} {already > 0.01 ? "left to log" : "worked"}
             </span>
           </div>
         </div>
+        )}
 
         {error && <p className="text-sm text-red-600">{error}</p>}
         <Button onClick={save} disabled={pending || !ok} className="w-full">

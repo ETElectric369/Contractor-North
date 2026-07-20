@@ -65,52 +65,56 @@ export function WoEditButton({
         </Button>
       )}
 
-      <form action={onSubmit}>
-        <Modal
-          open={open}
-          onClose={() => setOpen(false)}
-          title="Edit work order"
-          footer={
-            <ModalActions onCancel={() => setOpen(false)} submit saving={pending} saveLabel="Save Changes" />
-          }
-        >
-          <div className="space-y-4">
-            {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+      {/* The full cn-v463 treatment, because the trigger sits in the glass ⋯ Actions panel whose
+          backdrop-filter traps + clips a non-portaled overlay: portal the Modal, and move the
+          <form> INSIDE it with an id so the pinned footer (which lives outside the form) still
+          submits via the HTML `form=` attribute. Portaling alone would have broken Save — the
+          old wrapping <form> submitted by DOM nesting, which createPortal severs. */}
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Edit work order"
+        portal
+        footer={
+          <ModalActions onCancel={() => setOpen(false)} submit formId="wo-edit-form" saving={pending} saveLabel="Save Changes" />
+        }
+      >
+        <form id="wo-edit-form" action={onSubmit} className="space-y-4">
+          {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+          <div>
+            <Label htmlFor="wo-title">Title *</Label>
+            <Input id="wo-title" name="title" required defaultValue={wo.title} />
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
-              <Label htmlFor="wo-title">Title *</Label>
-              <Input id="wo-title" name="title" required defaultValue={wo.title} />
-            </div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div>
-                <Label htmlFor="wo-job">Job</Label>
-                <Select id="wo-job" name="job_id" defaultValue={wo.job_id ?? ""}>
-                  <option value="">— None —</option>
-                  {jobs.map((j) => (
-                    <option key={j.id} value={j.id}>{j.job_number} — {j.name}</option>
-                  ))}
-                </Select>
-              </div>
-              <div>
-                <Label htmlFor="wo-tech">Assigned to</Label>
-                <Select id="wo-tech" name="assigned_to" defaultValue={wo.assigned_to ?? ""}>
-                  <option value="">— Unassigned —</option>
-                  {techs.map((t) => (
-                    <option key={t.id} value={t.id}>{t.full_name ?? "Unnamed"}</option>
-                  ))}
-                </Select>
-              </div>
+              <Label htmlFor="wo-job">Job</Label>
+              <Select id="wo-job" name="job_id" defaultValue={wo.job_id ?? ""}>
+                <option value="">— None —</option>
+                {jobs.map((j) => (
+                  <option key={j.id} value={j.id}>{j.job_number} — {j.name}</option>
+                ))}
+              </Select>
             </div>
             <div>
-              <Label htmlFor="wo-sched">Scheduled for</Label>
-              <Input id="wo-sched" name="scheduled_for" type="datetime-local" defaultValue={toLocalInput(wo.scheduled_for)} />
-            </div>
-            <div>
-              <Label htmlFor="wo-desc">Scope / description</Label>
-              <Textarea id="wo-desc" name="description" rows={4} defaultValue={wo.description ?? ""} />
+              <Label htmlFor="wo-tech">Assigned to</Label>
+              <Select id="wo-tech" name="assigned_to" defaultValue={wo.assigned_to ?? ""}>
+                <option value="">— Unassigned —</option>
+                {techs.map((t) => (
+                  <option key={t.id} value={t.id}>{t.full_name ?? "Unnamed"}</option>
+                ))}
+              </Select>
             </div>
           </div>
-        </Modal>
-      </form>
+          <div>
+            <Label htmlFor="wo-sched">Scheduled for</Label>
+            <Input id="wo-sched" name="scheduled_for" type="datetime-local" defaultValue={toLocalInput(wo.scheduled_for)} />
+          </div>
+          <div>
+            <Label htmlFor="wo-desc">Scope / description</Label>
+            <Textarea id="wo-desc" name="description" rows={4} defaultValue={wo.description ?? ""} />
+          </div>
+        </form>
+      </Modal>
     </>
   );
 }

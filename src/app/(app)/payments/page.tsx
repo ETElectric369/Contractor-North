@@ -7,6 +7,7 @@ import { FactsGrid, StatTile } from "@/components/ui/stat-tile";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
 import { invoiceBalance } from "@/lib/invoice-math";
+import { computeCollected, fetchCollectedRows } from "@/lib/analytics/money-metrics";
 import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
 import { RecordPaymentButton } from "./record-payment-button";
 
@@ -16,17 +17,18 @@ export const dynamic = "force-dynamic";
  *  which previously lived only inside each invoice. */
 export default async function PaymentsPage() {
   const supabase = await createClient();
-  const [{ data }, { data: refunds }, { data: allInv }, { data: orgRow }, { data: openInv }] = await Promise.all([
+  const [{ data }, cashRows, { data: orgRow }, { data: openInv }] = await Promise.all([
     supabase
       .from("payments")
       .select("id, amount, method, note, paid_at, invoices(id, invoice_number, status, customers(name))")
       .order("paid_at", { ascending: false })
       .limit(500),
-    supabase.from("customer_credits").select("amount, created_at").eq("disposition", "refund"),
-    // All-time collected comes from invoices.amount_paid (unlimited) — the SAME definition
-    // as /billing's "Collected" tile. Summing the 500-row payments page undercounts the
-    // headline the moment there are more than 500 payments.
-    supabase.from("invoices").select("amount_paid, status"),
+    // The tiles get their OWN unbounded read of the payments table — THE shared cash
+    // definition (@/lib/analytics/money-metrics), the same one /billing, /analytics and
+    // Nort use. It used to sum invoices.amount_paid, which folds in non-cash account
+    // credits, so the "Total collected" tile disagreed with the payment ledger printed
+    // right under it. The 500-row query above stays display-only.
+    fetchCollectedRows(supabase),
     supabase.from("organizations").select("settings").maybeSingle(),
     // Invoices the Record-payment picker may offer: billed (non-draft, non-void)
     // and still carrying a balance — the same set recordPayment will accept.
@@ -41,7 +43,6 @@ export default async function PaymentsPage() {
   // A voided invoice means the money was reversed (Erik's rule), so drop its
   // payments from the ledger. Keep payments with no invoice link.
   const payments = ((data ?? []) as any[]).filter((p) => (p.invoices?.status ?? "") !== "void");
-  const refundList = (refunds ?? []) as any[];
 
   // This-month + all-time totals — net of refunds (money actually kept). The month
   // boundary is midnight on the 1st in the ORG's timezone — a server-local (UTC on
@@ -54,17 +55,8 @@ export default async function PaymentsPage() {
     (i) => invoiceBalance(i.total, i.amount_paid) > 0,
   );
   const monthStart = tzDayStartUtc(`${todayStrInTz(tz).slice(0, 7)}-01`, tz);
-  const refundTotal = refundList.reduce((s, r) => s + Number(r.amount ?? 0), 0);
-  const refundMonth = refundList
-    .filter((r) => new Date(r.created_at) >= monthStart)
-    .reduce((s, r) => s + Number(r.amount ?? 0), 0);
-  const total =
-    ((allInv ?? []) as any[])
-      .filter((i) => i.status !== "void")
-      .reduce((s, i) => s + Number(i.amount_paid ?? 0), 0) - refundTotal;
-  const monthTotal =
-    payments.filter((p) => new Date(p.paid_at) >= monthStart).reduce((s, p) => s + Number(p.amount ?? 0), 0) -
-    refundMonth;
+  const total = computeCollected(cashRows.payments, cashRows.refunds);
+  const monthTotal = computeCollected(cashRows.payments, cashRows.refunds, monthStart);
 
   return (
     <div>

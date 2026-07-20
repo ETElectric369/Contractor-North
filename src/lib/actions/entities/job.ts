@@ -106,8 +106,8 @@ export const jobActions: Record<string, ActionDef> = {
     auth: "staff",
     effect: "write",
     confirm: "financial",
-    describe: () => "Finish this job and draft its invoice from logged labor + materials — say yes to confirm. (It won't send.)",
-    handler: (i) => finishJob(i.id, { importLabor: true, importCosts: true, sendInvoice: false }),
+    describe: () => "Finish this job and draft its invoice — from its accepted estimate if it has one, else from logged labor + materials. Say yes to confirm. (It won't send.)",
+    handler: (i) => finishJob(i.id, { sendInvoice: false }), // flags unset: the contract rule decides (quote vs actuals)
   },
   "job.scheduleDay": {
     name: "job.scheduleDay",

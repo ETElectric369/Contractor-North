@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { executeAction } from "@/lib/actions/execute";
+import { blocksCrewWipe } from "./assign-guard";
 import type { ActionKind, Affordance } from "./types";
 
 type ConvertTarget = "inspection" | "customer" | "quote" | "estimate" | "job";
@@ -56,13 +57,19 @@ export async function dispatchAction(input: {
   source?: "ui" | "voice" | "agent";
 }): Promise<Result> {
   const { kind, id, verb, payload } = input;
+  const source = input.source ?? "ui";
   if ((verb === "schedule" || verb === "snooze") && !payload?.date) {
     return { ok: false, error: "Pick a date." };
+  }
+  // Refuse to translate an unpicked assignee into job.assign's clear-the-whole-crew branch.
+  // See blocksCrewWipe — the agent's explicit-clear contract is deliberately left intact.
+  if (blocksCrewWipe(kind, verb, payload?.assignee, source)) {
+    return { ok: false, error: "Pick a person." };
   }
   const mapped = resolve(kind, verb, id, payload);
   if (!mapped) return { ok: false, error: "That action isn't available here." };
 
-  const res = await executeAction(mapped.name, mapped.input, { source: input.source ?? "ui" });
+  const res = await executeAction(mapped.name, mapped.input, { source });
   if (res.ok) revalidatePath("/planner");
   return { ok: res.ok, error: res.error };
 }

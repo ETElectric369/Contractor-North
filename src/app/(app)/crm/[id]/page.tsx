@@ -275,8 +275,15 @@ export default async function CustomerDetailPage({
             tree={customerSectionTree(
               c.name,
               {
-                run: deleteCustomer.bind(null, c.id),
-                confirm: `Delete ${c.name}? This only works when no jobs, estimates, or invoices reference them.`,
+                // confirmOrphans: the string below names the SET NULL tail this delete
+                // orphans, so the user has actually seen it before agreeing. Programmatic
+                // callers omit the flag and get the itemized refusal instead.
+                run: deleteCustomer.bind(null, c.id, { confirmOrphans: true }),
+                confirm:
+                  `Delete ${c.name}? Only possible when nothing important still points at them — ` +
+                  `jobs, estimates, invoices, contracts, account credits, or a link to a job as a ` +
+                  `sub/supplier all block it. Appointments, documents, work orders and inquiries ` +
+                  `survive but lose their contact.`,
               },
               c.id, // → New invoice opens with this customer preset
             )}

@@ -35,8 +35,8 @@ function entry(profiles: any, hours: number, lunch = 0, time_allocations: any[] 
   return { clock_in, clock_out, lunch_minutes: lunch, profiles, time_allocations };
 }
 /** A time-allocation of `hours` tagged to this job (from any shift). */
-function alloc(profiles: any, hours: number) {
-  return { hours, time_entries: { profiles } };
+function alloc(profiles: any, hours: number, id?: string) {
+  return { id, hours, time_entries: { profiles } };
 }
 
 describe("computeJobLaborBilling", () => {
@@ -88,12 +88,45 @@ describe("computeJobLaborBilling", () => {
     expect(total).toBe(375);
   });
 
-  it("skips an entry that HAS allocations (allocations are the source of truth → no double-count)", () => {
-    // Brian clocked an 8h shift but split it; only the 5h allocated here should bill.
-    const split = entry(brian, 8, 0, [{ id: "a1" }]);
-    const { lines, total } = computeJobLaborBilling([split], [alloc(brian, 5)], 0);
-    expect(total).toBe(375); // 5h × 75, NOT 8h + 5h
+  it("a LABELED split: only the labeled hours from jobAllocs bill, not the gross shift", () => {
+    // Brian clocked 8h and split it — 5h to this job (labeled), the rest elsewhere. The
+    // labeled row arrives via jobAllocs; the entry's own rows are all labeled, so nothing
+    // extra bills off the entry.
+    const split = entry(brian, 8, 0, [
+      { id: "a1", job_id: "J", hours: 5 },
+      { id: "a2", job_id: "OTHER", hours: 3 },
+    ]);
+    const { lines, total } = computeJobLaborBilling([split], [alloc(brian, 5, "a1")], 0);
+    expect(total).toBe(375); // 5h × 75, NOT 8h + 5h and NOT the OTHER 3h
     expect(lines).toHaveLength(1);
+  });
+
+  // ── the silent-unbilled-week fix ────────────────────────────────────────────
+  // A job-less clock-out writes ONE allocation row: hours=8, job_id=NULL. Later the
+  // office assigns the entry to a job. laborCostForJob COSTS those 8h to the job; the
+  // bill side used to skip the entry entirely (it "has allocations") and return $0.
+  it("bills the UNLABELED allocation row on this job's entry (was silently unbilled)", () => {
+    const punch = entry(brian, 8, 0, [{ id: "a1", job_id: null, hours: 8 }]);
+    const { lines, total } = computeJobLaborBilling([punch], [], 0);
+    expect(total).toBe(600); // 8h × 75 — matches what the job hub costs, no longer $0
+    expect(lines).toHaveLength(1);
+  });
+
+  it("bills a MIX of labeled + unlabeled rows on one entry without double-counting", () => {
+    // Brian's shift: 5h labeled to this job (via jobAllocs) + 2h that were never labeled.
+    // Both are costed to the job, so both must bill: 7h total.
+    const e = entry(brian, 8, 0, [
+      { id: "a1", job_id: "J", hours: 5 },
+      { id: "a2", job_id: null, hours: 2 },
+    ]);
+    const { total } = computeJobLaborBilling([e], [alloc(brian, 5, "a1")], 0);
+    expect(total).toBe(525); // (5 + 2) × 75 — the labeled row is not counted twice
+  });
+
+  it("does not bill a row labeled to ANOTHER job that sits on this job's entry", () => {
+    const e = entry(brian, 8, 0, [{ id: "a1", job_id: "OTHER", hours: 8 }]);
+    const { total } = computeJobLaborBilling([e], [], 0);
+    expect(total).toBe(0);
   });
 
   it("reconciles the Tao scenario (Brian 26.5h@75 + Erik 27h@150 = 6037.50)", () => {

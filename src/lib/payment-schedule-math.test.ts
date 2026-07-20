@@ -99,3 +99,42 @@ describe("defaultSchedule", () => {
     expect(defaultSchedule(0)[0].percent).toBe(30);
   });
 });
+
+describe("contract DRIFT under a part-drawn schedule (the accepted-quote edit)", () => {
+  // 30/40/30 on a $10,000 accepted quote, deposit already drawn and sent (frozen at $3,000).
+  const drawn = [
+    { sort_order: 0, label: "Deposit", percent: 30, invoice_id: "inv-1", billed_amount: 3000 },
+    { sort_order: 1, label: "Progress payment", percent: 40 },
+    { sort_order: 2, label: "Final payment", percent: 30 },
+  ];
+
+  it("editing the quote DOWN over-bills the contract — and overContract says so", () => {
+    // Scope drops to $8,000. The billed deposit keeps its frozen $3,000 while the pending
+    // draws re-price off the NEW total: 3000 + 3200 + 2400 = 8600 against an $8,000 contract.
+    // setPaymentSchedule's over-contract check only ever ran at creation time, so this flag
+    // (rendered on the schedule card) is the only thing standing between the office and a
+    // silent $600 overbill.
+    const s = scheduleStatus(drawn, 8000);
+    expect(s.scheduledTotal).toBe(8600);
+    expect(s.overContract).toBe(true);
+    expect(s.next?.dollars).toBe(3200);
+  });
+
+  it("editing the quote UP under-bills — the schedule no longer covers the contract", () => {
+    const s = scheduleStatus(drawn, 12000);
+    expect(s.scheduledTotal).toBe(11400); // 3000 frozen + 4800 + 3600
+    expect(s.overContract).toBe(false);
+    expect(s.scheduledTotal).toBeLessThan(12000);
+  });
+
+  it("an untouched contract stays exactly whole", () => {
+    const s = scheduleStatus(drawn, 10000);
+    expect(s.scheduledTotal).toBe(10000);
+    expect(s.overContract).toBe(false);
+    expect(s.percentOff).toBe(false);
+  });
+
+  it("contractTotalFromQuotes reads the ACCEPTED quote's live total — the value that drifts", () => {
+    expect(contractTotalFromQuotes([{ total: 8000, status: "accepted" }, { total: 10000, status: "declined" }])).toBe(8000);
+  });
+});

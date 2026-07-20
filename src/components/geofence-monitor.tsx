@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Loader2, MapPin } from "lucide-react";
 import { adoptGeofenceAnchor, geoClockOut, notifyGeofenceExit } from "@/app/(app)/timeclock/actions";
+import { adoptWindowMs } from "@/app/(app)/timeclock/adopt-window";
 import { ClockStartPicker } from "@/app/(app)/timeclock/clock-start-picker";
 import { Button } from "@/components/ui/button";
 import { speakSmart } from "@/lib/tts";
@@ -28,10 +29,10 @@ function haversineM(a: { lat: number; lng: number }, b: { lat: number; lng: numb
 const ACCURACY_FLOOR_M = 200;
 // "Still working" quiets every prompt/auto path for this long.
 const SNOOZE_MS = 45 * 60_000;
-// How long after clock-in a missing anchor may still be adopted from a live fix — long
-// enough for "punched from My Day, opened the app at the site", short enough that a
-// reopen-from-home can never become "where the job is".
-const ADOPT_WINDOW_MS = 15 * 60_000;
+// The window in which a missing anchor may still be adopted from a live fix is the SHARED
+// adopt-window rule (imported so it can't drift from the server that enforces it): 15 min
+// after clock-in, but a WIDER 45 min after a mid-shift switch — the switch cleared the
+// anchor on purpose and the tech still has to drive to the new site (see adoptWindowMs).
 // Wake-time exit checks (visibility/focus/route) run at most this often.
 const WAKE_THROTTLE_MS = 60_000;
 // The live-watch prompt sat unanswered this long, with GPS STILL outside → close the
@@ -91,6 +92,7 @@ export function GeofenceMonitor({
   radiusM,
   graceMin = 4,
   jobLabel = "the job site",
+  jobId = null,
 }: {
   entryId: string;
   gpsIn: GeoPoint | null;
@@ -98,6 +100,11 @@ export function GeofenceMonitor({
   radiusM: number;
   graceMin?: number;
   jobLabel?: string;
+  /** The entry's CURRENT job. A mid-shift switch re-points the entry (and moves or
+   *  clears gps_in server-side), so this is the signal that the whole trip — anchor,
+   *  seen-inside, last-inside — belongs to a different site now. Without it the fence
+   *  kept judging the tech against the FIRST job's centre for the rest of the day. */
+  jobId?: string | null;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -134,14 +141,34 @@ export function GeofenceMonitor({
   const anchorLng = anchor?.lng;
   const propLat = gpsIn?.lat;
   const propLng = gpsIn?.lng;
+  // A NEW TRIP is "different entry" or "different job on the same entry" (a mid-shift
+  // switch). Tracked as one key so both the anchor and the trip state below turn over
+  // together and can't disagree about which site we're judging.
+  const tripKey = `${entryId}|${jobId ?? ""}`;
+  const tripKeyRef = useRef(tripKey);
+  // When the CURRENT trip's anchor window opened — clock-in, or the moment we saw the
+  // job change under us. Anchor adoption is measured from here, not from clock-in, or a
+  // switch-cleared anchor could never be re-armed and the fence would stay dead all day.
+  const tripStartMsRef = useRef(Date.parse(clockInIso) || Date.now());
   useEffect(() => {
+    const newTrip = tripKeyRef.current !== tripKey;
+    tripKeyRef.current = tripKey;
+    if (newTrip) tripStartMsRef.current = Date.now();
     if (typeof propLat === "number" && typeof propLng === "number") {
       setAnchor({ lat: propLat, lng: propLng });
+    } else if (newTrip) {
+      // Switched jobs with no fix to anchor on (switchJob nulls gps_in in that case).
+      // DROP the old site's centre rather than keep fencing on it — a null anchor makes
+      // the live watch stand down until adoptGeofenceAnchor re-arms it at the new site.
+      // Only on a new trip: a plain re-render must never clear an adopted anchor.
+      setAnchor(null);
     }
-  }, [entryId, propLat, propLng]);
+  }, [tripKey, propLat, propLng]);
 
-  // Fresh entry ⇒ fresh trip state (the monitor can survive a clock-out → clock-in
-  // cycle without unmounting if renders batch).
+  // Fresh trip ⇒ fresh trip state. Entry change (the monitor can survive a clock-out →
+  // clock-in cycle without unmounting if renders batch) AND job change: after a switch,
+  // a stale seenInside/lastInsideMs from site A would still be the auto-close timestamp,
+  // so the fence could close the shift at the time they left the FIRST job.
   useEffect(() => {
     doneRef.current = false;
     seenInsideRef.current = false;
@@ -151,7 +178,7 @@ export function GeofenceMonitor({
     setPhase("idle");
     setError(null);
     setClosedAt(null);
-  }, [entryId, clockInIso]);
+  }, [tripKey, clockInIso]);
 
   // Opens the sheet. Only touches refs + stable setters, so a stale closure is harmless.
   function openPrompt(source: "live" | "wake") {
@@ -344,7 +371,7 @@ export function GeofenceMonitor({
       stop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entryId, anchorLat, anchorLng, radiusM, graceMin]);
+  }, [tripKey, anchorLat, anchorLng, radiusM, graceMin]);
 
   // ── 1 + 3. WAKE EXIT-CHECK (and anchor adoption) ───────────────────────────────
   // Kept in a ref so the route-change effect below always calls the CURRENT check.
@@ -377,7 +404,14 @@ export function GeofenceMonitor({
         // shift — the evening sweep still flags a forgotten entry.
         if (typeof anchorLat !== "number" || typeof anchorLng !== "number") {
           const ciMs = Date.parse(clockInIso);
-          if (isNaN(ciMs) || now - ciMs > ADOPT_WINDOW_MS) return;
+          // A mid-shift switch opened this trip iff tripStart is AFTER clock-in (a plain
+          // clock-in leaves tripStart == clock-in). Switched ⇒ the wider 45-min window so a
+          // switch-cleared anchor can actually be re-armed after the drive to the new site —
+          // the client used to cap every adoption at 15 min, making the server's post-switch
+          // window dead code.
+          const switched = !isNaN(ciMs) && tripStartMsRef.current > ciMs;
+          const fromMs = Math.max(isNaN(ciMs) ? 0 : ciMs, tripStartMsRef.current || 0);
+          if (!fromMs || now - fromMs > adoptWindowMs(switched)) return;
           const r = await getPosition({ enableHighAccuracy: true, timeout: 4_000, maximumAge: 30_000 });
           if (cancelled || doneRef.current || r.status !== "ok" || (r.accuracy ?? 0) > 150) return;
           const fix = { lat: r.coords.lat, lng: r.coords.lng, accuracy: r.accuracy };
@@ -427,7 +461,7 @@ export function GeofenceMonitor({
       document.removeEventListener("visibilitychange", onVis);
       window.removeEventListener("focus", onFocus);
     };
-  }, [entryId, anchorLat, anchorLng, radiusM, clockInIso]);
+  }, [tripKey, anchorLat, anchorLng, radiusM, clockInIso]);
 
   // Route changes are wakes too (throttled inside check).
   useEffect(() => {

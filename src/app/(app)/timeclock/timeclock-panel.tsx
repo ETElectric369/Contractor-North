@@ -388,11 +388,18 @@ export function TimeclockPanel({
     setError(null);
     startSwitch(async () => {
       try {
+        // Same short cap as the punch: give GPS 2.5s and switch regardless. The fix
+        // becomes the entry's NEW geofence anchor — leaving the old job's centre armed
+        // is what let the fence auto-close the shift at the time they drove away from
+        // the FIRST site. No fix ⇒ the server clears the anchor (it never keeps a stale
+        // one) and the monitor re-adopts once there's a good fix at the new site.
+        const gps = await getGps(2500);
         const res = await switchJob({
           entry_id: openEntry.id,
           job_id: switchJobId,
           job_code: switchJobCode || null,
           notes,
+          gps,
         });
         if (!res.ok) {
           setError(res.error ?? "Could not switch jobs.");
@@ -454,6 +461,13 @@ export function TimeclockPanel({
         const seg = hoursBetween(segmentStartIso ?? openEntry.clock_in, new Date(), punchLunch);
         rows = [...rows.slice(0, -1), { ...rows[rows.length - 1], hours: seg, minutes: 0 }];
       }
+      // A plain one-tap punch (untouched seed, no mid-shift switch → exactly the one
+      // live row) should NOT manufacture an allocation row: a single row whose job_id is
+      // null used to be COSTED to the entry's job (laborCostForJob) yet never BILLED
+      // (the importer skipped any entry that had allocations) — a silent unbilled shift.
+      // Omitting allocations leaves the entry split-free, so cost and bill both read its
+      // gross hours. A dirtied split or a mid-shift switch (>1 row) still rides along.
+      const plainPunch = !allocsDirty && rows.length === 1;
       try {
         const res = await clockOut({
           entry_id: openEntry.id,
@@ -461,12 +475,14 @@ export function TimeclockPanel({
           notes,
           gps,
           miles,
-          allocations: rows.map((a) => ({
-            job_id: a.job_id || null,
-            job_code: a.job_code || null,
-            hours: (a.hours || 0) + (a.minutes || 0) / 60,
-            description: a.description,
-          })),
+          allocations: plainPunch
+            ? undefined
+            : rows.map((a) => ({
+                job_id: a.job_id || null,
+                job_code: a.job_code || null,
+                hours: (a.hours || 0) + (a.minutes || 0) / 60,
+                description: a.description,
+              })),
         });
         if (!res.ok) setError(res.error ?? "Could not clock out.");
         else {

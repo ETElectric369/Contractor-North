@@ -131,8 +131,15 @@ export function JobTimeButton({
       return clockIn({ job_id: jobId, job_code: null, gps, clock_in_at: startAt || null });
     });
 
+  // The tap IS the user gesture, so grab a fix and hand it to switchJob as the entry's
+  // NEW geofence anchor. Without one the server clears the anchor (it must never keep
+  // the OLD site's centre — that's what auto-closed shifts at the moment the tech drove
+  // away from the first job) and the monitor re-adopts at the new site.
   const doSwitch = () =>
-    run(() => switchJob({ entry_id: openEntry!.id, job_id: jobId, job_code: null }));
+    run(async () => {
+      const gps = await gpsBestEffort();
+      return switchJob({ entry_id: openEntry!.id, job_id: jobId, job_code: null, gps });
+    });
 
   const doClockOut = () => run(() => clockOutCurrent({}));
 

@@ -40,25 +40,39 @@ const laborEntry = (jobId: string, hours: number, rate: number) => ({
   profiles: { hourly_rate: rate },
   time_allocations: [{ job_id: jobId, hours }],
 });
-const empty = { jobs: [], invoices: [], pos: [], bills: [], jobRefunds: [], entries: [] };
+// a payment of `amount` on `jobId`'s invoice (THE cash definition — not invoices.amount_paid)
+const pay = (jobId: string, amount: number, status = "paid") => ({ amount, invoices: { job_id: jobId, status } });
+const empty = { jobs: [], payments: [], pos: [], bills: [], jobRefunds: [], entries: [] };
 
-describe("computeJobProfitRows — job profit SSOT (reconciles /analytics + job hub + Nort)", () => {
+describe("computeJobProfitRows — job profit SSOT (reconciles /analytics + Nort)", () => {
   it("profit = revenue collected − (labor at pay rate + materials)", () => {
     const rows = computeJobProfitRows({
       ...empty,
       jobs: [job("A")],
-      invoices: [{ job_id: "A", status: "paid", amount_paid: 1000 }],
+      payments: [pay("A", 1000)],
       bills: [{ job_id: "A", amount: 200 }],
       entries: [laborEntry("A", 8, 50)], // 8h × $50 = 400
     });
     expect(rows).toEqual([{ id: "A", job_number: "J-A", name: "Job A", status: "in_progress", rev: 1000, cost: 600, profit: 400 }]);
   });
 
+  it("revenue is the PAYMENTS ledger, not invoices.amount_paid — a credit writeoff is no cash", () => {
+    // The regression: amount_paid folds a non-cash account credit in, so a disputed invoice
+    // written off as a credit used to inflate the job's revenue. With no payment row, it's $0.
+    const rows = computeJobProfitRows({
+      ...empty,
+      jobs: [job("A")],
+      payments: [], // the invoice's amount_paid was raised by a credit, not cash
+      bills: [{ job_id: "A", amount: 50 }], // keeps the row past the zero-zero filter
+    });
+    expect(rows[0].rev).toBe(0);
+  });
+
   it("nets refunds out of revenue (keyed via the invoice's job)", () => {
     const rows = computeJobProfitRows({
       ...empty,
       jobs: [job("A")],
-      invoices: [{ job_id: "A", status: "paid", amount_paid: 1000 }],
+      payments: [pay("A", 1000)],
       jobRefunds: [{ amount: 150, invoices: { job_id: "A" } }],
     });
     expect(rows[0].rev).toBe(850);
@@ -69,23 +83,49 @@ describe("computeJobProfitRows — job profit SSOT (reconciles /analytics + job 
     const rows = computeJobProfitRows({
       ...empty,
       jobs: [job("A")],
-      invoices: [
-        { job_id: "A", status: "void", amount_paid: 1000 },
-        { job_id: "A", status: "paid", amount_paid: 300 },
-      ],
+      payments: [pay("A", 1000, "void"), pay("A", 300, "paid")],
     });
     expect(rows[0].rev).toBe(300);
   });
 
-  it("counts a PO and a bill both — the documented double-count (no bill↔PO link yet)", () => {
+  it("counts an UNLINKED PO and bill both — they're two separate costs until linked", () => {
     const rows = computeJobProfitRows({
       ...empty,
       jobs: [job("A")],
-      invoices: [{ job_id: "A", status: "paid", amount_paid: 1000 }],
-      pos: [{ job_id: "A", total: 100 }],
-      bills: [{ job_id: "A", amount: 100 }],
+      payments: [pay("A", 1000)],
+      pos: [{ id: "po-1", job_id: "A", total: 100 }],
+      bills: [{ job_id: "A", amount: 100, po_id: null }],
     });
     expect(rows[0].cost).toBe(200);
+  });
+
+  it("a bill that names its PO SUPERSEDES it — one delivery, counted once (0142)", () => {
+    const rows = computeJobProfitRows({
+      ...empty,
+      jobs: [job("A")],
+      payments: [pay("A", 1000)],
+      pos: [{ id: "po-1", job_id: "A", total: 2400, status: "received" }],
+      bills: [{ job_id: "A", amount: 2400, po_id: "po-1" }],
+    });
+    expect(rows[0].cost).toBe(2400); // NOT 4800
+  });
+
+  it("a cancelled PO is not a cost, but a draft (the default) one IS", () => {
+    // Per the 2026-07-20 re-review of livePurchaseOrders: only a KILLED (cancelled) order is
+    // a non-cost; a PO the office left in the default 'draft' status is still real committed
+    // material and must count, so the job hub can't under-report materials.
+    const rows = computeJobProfitRows({
+      ...empty,
+      jobs: [job("A")],
+      payments: [pay("A", 1000)],
+      pos: [
+        { id: "po-1", job_id: "A", total: 500, status: "cancelled" },
+        { id: "po-2", job_id: "A", total: 300, status: "draft" },
+        { id: "po-3", job_id: "A", total: 200, status: "received" },
+      ],
+      bills: [],
+    });
+    expect(rows[0].cost).toBe(500); // 300 (draft) + 200 (received); cancelled excluded
   });
 
   it("only counts THIS job's allocated hours from a split shift", () => {
@@ -99,7 +139,7 @@ describe("computeJobProfitRows — job profit SSOT (reconciles /analytics + job 
     const rows = computeJobProfitRows({
       ...empty,
       jobs: [job("A")],
-      invoices: [{ job_id: "A", status: "paid", amount_paid: 500 }],
+      payments: [pay("A", 500)],
       entries: [shift],
     });
     expect(rows[0].cost).toBe(120); // 3h × $40
@@ -109,7 +149,7 @@ describe("computeJobProfitRows — job profit SSOT (reconciles /analytics + job 
     const rows = computeJobProfitRows({
       ...empty,
       jobs: [job("A"), job("EMPTY")],
-      invoices: [{ job_id: "A", status: "paid", amount_paid: 500 }],
+      payments: [pay("A", 500)],
     });
     expect(rows.map((r) => r.id)).toEqual(["A"]);
   });
@@ -118,10 +158,7 @@ describe("computeJobProfitRows — job profit SSOT (reconciles /analytics + job 
     const rows = computeJobProfitRows({
       ...empty,
       jobs: [job("LOW"), job("HIGH")],
-      invoices: [
-        { job_id: "LOW", status: "paid", amount_paid: 100 },
-        { job_id: "HIGH", status: "paid", amount_paid: 900 },
-      ],
+      payments: [pay("LOW", 100), pay("HIGH", 900)],
     });
     expect(rows.map((r) => r.id)).toEqual(["HIGH", "LOW"]);
   });
@@ -130,7 +167,7 @@ describe("computeJobProfitRows — job profit SSOT (reconciles /analytics + job 
     const rows = computeJobProfitRows({
       ...empty,
       jobs: [job("A")],
-      invoices: [{ job_id: "A", status: "paid", amount_paid: 100 }],
+      payments: [pay("A", 100)],
       bills: [{ job_id: "A", amount: 50 }], // keeps the row past the zero-zero filter
       jobRefunds: [{ amount: 300, invoices: { job_id: "A" } }],
     });

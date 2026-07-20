@@ -36,7 +36,7 @@ export default async function AnalyticsPage() {
   const todayYmd = todayStrInTz(tz);
   const windowStart = tzDayStartUtc(`${trailing12Months(todayYmd)[0]}-01`, tz).toISOString();
 
-  const [{ data: payments }, { data: invoices }, { data: quotes }, { data: jobs }, { data: entries }, { data: pos }, { data: bills }, { data: refunds }, { data: jobRefunds }] =
+  const [{ data: payments }, { data: invoices }, { data: quotes }, { data: jobs }, { data: entries }, { data: pos }, { data: bills }, { data: refunds }, { data: jobRefunds }, { data: jobPayments }] =
     await Promise.all([
       supabase.from("payments").select("amount, paid_at, invoices(status)").gte("paid_at", windowStart),
       supabase.from("invoices").select("id, invoice_number, job_id, status, total, amount_paid, due_date, created_at, customers(name)"),
@@ -49,12 +49,19 @@ export default async function AnalyticsPage() {
         .select("job_id, clock_in, clock_out, lunch_minutes, status, rate_override, profiles(hourly_rate), time_allocations(job_id, hours)")
         .eq("status", "closed")
         .not("job_id", "is", null),
-      supabase.from("purchase_orders").select("job_id, total"),
-      supabase.from("bills").select("job_id, amount, category"),
+      // id + status + po_id feed computeJobProfitRows' shared live-PO rule: a draft/cancelled
+      // order isn't a cost, and a PO paid by a bill is superseded by it (no double-charge).
+      supabase.from("purchase_orders").select("id, job_id, total, status"),
+      supabase.from("bills").select("job_id, amount, category, po_id"),
       supabase.from("customer_credits").select("amount, created_at").eq("disposition", "refund").gte("created_at", windowStart),
       // Per-job refunds (all-time, with the invoice they reversed) so job profitability
       // nets refunds the SAME way the job hub does — keyed to a job via its invoice.
       supabase.from("customer_credits").select("amount, invoices(job_id)").eq("disposition", "refund"),
+      // Per-job CASH collected (all-time): the payments ledger with each payment's invoice
+      // job + status, so job profitability sums real cash (net of void invoices) — THE
+      // computeCollected definition — not invoices.amount_paid (which folds non-cash credits
+      // in and so overstated a job's "collected"). .limit past PostgREST's 1000-row cap.
+      supabase.from("payments").select("amount, invoices(job_id, status)").limit(50000),
     ]);
 
   // ── Money metrics — the SAME computations Nort's revenue_trend / ar_aging / quote_win_rate
@@ -69,7 +76,7 @@ export default async function AnalyticsPage() {
   // list_job_profitability tools so a job can't show two different profits anywhere.
   const jobRows = computeJobProfitRows({
     jobs: jobs ?? [],
-    invoices: invoices ?? [],
+    payments: jobPayments ?? [],
     pos: pos ?? [],
     bills: bills ?? [],
     jobRefunds: jobRefunds ?? [],

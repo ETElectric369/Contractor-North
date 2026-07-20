@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { formatDate } from "@/lib/utils";
 import { useToast } from "@/components/toast";
-import { createTask, toggleTask, deleteTask, updateTask } from "../../tasks/actions";
+import { createTask, toggleTask, deleteTask, updateTask, type ToggleTaskResult } from "../../tasks/actions";
 
 interface Task {
   id: string;
@@ -77,7 +77,18 @@ export function JobTasks({ jobId, tasks }: { jobId: string; tasks: Task[] }) {
           onChange={(e) => {
             const checked = e.target.checked;
             start(async () => {
-              const res = await toggleTask(t.id, checked, { jobId });
+              // The toggleTask cascade contract (same as /tasks and My Day): completing a parent
+              // with open subtasks writes NOTHING and returns needsCascade — confirm, then retry
+              // with cascade:true. Without this the checkbox just snapped back under a red toast
+              // that asked a question with no way to answer it. The count must come from
+              // res.openChildren: the job hub never loads the children (subtasks made on /tasks
+              // carry job_id = null, so the card's query can't see them).
+              let res: ToggleTaskResult = await toggleTask(t.id, checked, { jobId });
+              if (!res?.ok && res?.needsCascade && checked) {
+                const n = res.openChildren ?? 0;
+                if (!confirm(`"${t.title}" has ${n} open subtask${n === 1 ? "" : "s"} — mark ${n === 1 ? "it" : "them"} done too?`)) return;
+                res = await toggleTask(t.id, checked, { jobId, cascade: true });
+              }
               if (!res?.ok) { toast(res?.error ?? "Couldn't update task — try again.", "error"); return; }
               router.refresh();
             });

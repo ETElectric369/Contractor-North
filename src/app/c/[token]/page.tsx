@@ -5,6 +5,7 @@ import { companyFromOrg } from "@/components/doc-letterhead";
 import { DocHeader, templateFor } from "@/components/doc-templates";
 import { formatDate, formatCityStateZip } from "@/lib/utils";
 import { ContractSign } from "./sign";
+import { NO_INDEX } from "@/lib/no-index";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,8 @@ export async function generateMetadata({ params }: { params: Promise<{ token: st
   const supabase = await createClient();
   const { data } = await supabase.rpc("public_contract", { p_token: token });
   const num = data?.contract?.contract_number;
-  return { title: num ? `Contract ${num}` : "Contract" };
+  // NEVER indexed — permanent bearer token + a signable customer contract. See @/lib/no-index.
+  return { title: num ? `Contract ${num}` : "Contract", robots: NO_INDEX };
 }
 
 export default async function PublicContractPage({ params }: { params: Promise<{ token: string }> }) {

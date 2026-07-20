@@ -1,18 +1,27 @@
 import { laborCostForJob } from "@/lib/labor-billing";
 import { jobProgressFinancials } from "@/lib/job-financials";
+import { livePurchaseOrders } from "@/lib/job-progress-math";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 /**
- * Job profitability — the ONE allocation-aware computation shared by /analytics, the job hub, and
- * (now) Nort's get_job_financials / list_job_profitability tools, so a job can never show two
- * different profits. Extracted verbatim from the /analytics inline block; revenue = cash COLLECTED
- * (amount_paid on non-void invoices) net of refunds, cost = labor (laborCostForJob, at pay rate,
- * split-aware) + materials (POs + bills).
+ * Job profitability — the ONE allocation-aware computation shared by /analytics and Nort's
+ * get_job_financials / list_job_profitability tools, so a job can never show two different
+ * profits across them. Revenue = cash COLLECTED net of refunds; cost = labor (laborCostForJob,
+ * at pay rate, split-aware) + materials (live POs + bills, via the shared livePurchaseOrders rule).
  *
- * KNOWN DOUBLE-COUNT (mirrored on the job hub + analytics): a cost entered as BOTH a purchase order
- * AND a supplier bill is counted twice — there's no FK linking a bill to the PO it pays, so it can't
- * be deduped yet. Recording one or the other (not both) keeps it honest. Tools disclose this.
+ * "Collected" is THE cash definition (computeCollected in money-metrics): the PAYMENTS ledger net
+ * of voided invoices — NOT invoices.amount_paid. amount_paid folds non-cash account credits in
+ * (recalcInvoice does that so a posted credit reduces the balance), so a disputed invoice written
+ * off as a credit — no cash anywhere — used to push a job's "collected"/profit UP while /payments'
+ * ledger and /analytics' 12-month tile (both payments-based) disagreed on the same screen. Summing
+ * payments here makes the per-job "in" number the SAME kind of cash everywhere.
+ *
+ * The old materials double-count is CLOSED (migration 0142): a bill that names the PO it pays
+ * (bills.po_id) SUPERSEDES that PO, so one delivery entered as both a purchase order and a supplier
+ * bill is counted once, at the invoiced amount. Draft/cancelled POs are not costs at all. A bill
+ * filed WITHOUT naming its PO still double-counts — there is no way to infer the link, so the fix
+ * is to set the PO on the bill.
  */
 export type JobProfitRow = {
   id: string;
@@ -26,7 +35,9 @@ export type JobProfitRow = {
 
 export type ProfitInputs = {
   jobs: any[];
-  invoices: any[];
+  /** The payments ledger, each row joined to its invoice's { job_id, status }. Revenue is
+   *  the SUM of these net of voided invoices — THE cash definition (not invoices.amount_paid). */
+  payments: any[];
   pos: any[];
   bills: any[];
   jobRefunds: any[];
@@ -40,7 +51,11 @@ export function computeJobProfitRows(inp: ProfitInputs): JobProfitRow[] {
     if (!id) return;
     matCost.set(id, (matCost.get(id) ?? 0) + v);
   };
-  for (const p of inp.pos ?? []) addMat(p.job_id, Number(p.total));
+  // Live POs only — a draft/cancelled order was never a cost, and a PO whose supplier bill
+  // has arrived is superseded by that bill (one delivery, one cost). The bills list is
+  // org-wide here, which is fine: PO ids are unique, so the supersede set can't cross-hit.
+  for (const p of livePurchaseOrders((inp.pos ?? []) as any[], (inp.bills ?? []) as any[]))
+    addMat((p as any).job_id, Number((p as any).total));
   for (const b of inp.bills ?? []) addMat(b.job_id, Number(b.amount));
 
   const refundByJob = new Map<string, number>();
@@ -49,10 +64,14 @@ export function computeJobProfitRows(inp: ProfitInputs): JobProfitRow[] {
     if (jid) refundByJob.set(jid, (refundByJob.get(jid) ?? 0) + Number(r.amount ?? 0));
   }
 
+  // Revenue = CASH collected per job: the payments ledger net of voided invoices (THE
+  // computeCollected definition), keyed to a job via the payment's invoice. NOT
+  // invoices.amount_paid — that includes non-cash account credits and overstated "collected".
   const revenueByJob = new Map<string, number>();
-  for (const i of inp.invoices ?? []) {
-    if (i.job_id && i.status !== "void")
-      revenueByJob.set(i.job_id, (revenueByJob.get(i.job_id) ?? 0) + Number(i.amount_paid ?? 0));
+  for (const p of inp.payments ?? []) {
+    const inv = (p as any).invoices;
+    if (!inv?.job_id || inv.status === "void") continue; // no cash on a voided invoice
+    revenueByJob.set(inv.job_id, (revenueByJob.get(inv.job_id) ?? 0) + Number((p as any).amount ?? 0));
   }
 
   return ((inp.jobs ?? []) as any[])
@@ -71,20 +90,24 @@ async function fetchProfitInputs(supabase: any, jobId?: string): Promise<ProfitI
   const jobsQ = jobId
     ? supabase.from("jobs").select("id, job_number, name, status").eq("id", jobId)
     : supabase.from("jobs").select("id, job_number, name, status").order("created_at", { ascending: false });
-  const invQ = jobId
-    ? supabase.from("invoices").select("job_id, status, amount_paid").eq("job_id", jobId)
-    : supabase.from("invoices").select("job_id, status, amount_paid");
+  // Cash collected per job = the PAYMENTS ledger net of voided invoices (THE computeCollected
+  // definition), NOT invoices.amount_paid (which folds in non-cash account credits). Embedded
+  // filters aren't reliable (same note as jobRefunds below), so a scoped call fetches all
+  // payments with the invoice join and filters in JS. .limit past PostgREST's 1000-row cap.
+  const paymentsQ = supabase.from("payments").select("amount, invoices(job_id, status)").limit(50000);
+  // id/status/po_id feed the shared livePurchaseOrders rule (draft+cancelled aren't costs;
+  // a billed PO is superseded by its bill).
   const posQ = jobId
-    ? supabase.from("purchase_orders").select("job_id, total").eq("job_id", jobId)
-    : supabase.from("purchase_orders").select("job_id, total");
+    ? supabase.from("purchase_orders").select("id, job_id, total, status").eq("job_id", jobId)
+    : supabase.from("purchase_orders").select("id, job_id, total, status");
   const billsQ = jobId
-    ? supabase.from("bills").select("job_id, amount").eq("job_id", jobId)
-    : supabase.from("bills").select("job_id, amount");
+    ? supabase.from("bills").select("job_id, amount, po_id").eq("job_id", jobId)
+    : supabase.from("bills").select("job_id, amount, po_id");
 
-  const [{ data: jobs }, { data: invoices }, { data: pos }, { data: bills }, { data: jobRefunds }, { data: entries }] =
+  const [{ data: jobs }, { data: payments }, { data: pos }, { data: bills }, { data: jobRefunds }, { data: entries }] =
     await Promise.all([
       jobsQ,
-      invQ,
+      paymentsQ,
       posQ,
       billsQ,
       supabase.from("customer_credits").select("amount, invoices(job_id)").eq("disposition", "refund"),
@@ -96,10 +119,10 @@ async function fetchProfitInputs(supabase: any, jobId?: string): Promise<ProfitI
     ]);
   return {
     jobs: jobs ?? [],
-    invoices: invoices ?? [],
+    // payments + refunds embed all-time; filter to this job when scoped (embedded filter isn't reliable).
+    payments: jobId ? ((payments ?? []) as any[]).filter((p) => p.invoices?.job_id === jobId) : (payments ?? []),
     pos: pos ?? [],
     bills: bills ?? [],
-    // refunds embed all-time; filter to this job when scoped (embedded filter isn't reliable).
     jobRefunds: jobId ? ((jobRefunds ?? []) as any[]).filter((r) => r.invoices?.job_id === jobId) : (jobRefunds ?? []),
     entries: entries ?? [],
   };
@@ -174,15 +197,20 @@ export type ActualCategory = { category: string; actual: number };
  *  match the estimate's (quote_line_items.category), so this joins to getJobBudgetByCategory. */
 export async function getJobActualByCategory(supabase: any, jobId: string): Promise<ActualCategory[]> {
   const [{ data: bills }, { data: pos }] = await Promise.all([
-    supabase.from("bills").select("amount, scope_category").eq("job_id", jobId),
-    supabase.from("purchase_orders").select("total").eq("job_id", jobId),
+    supabase.from("bills").select("amount, scope_category, po_id").eq("job_id", jobId),
+    supabase.from("purchase_orders").select("id, total, status").eq("job_id", jobId),
   ]);
   const map = new Map<string, number>();
   for (const b of (bills ?? []) as any[]) {
     const cat = String(b.scope_category ?? "").trim() || "Uncategorized";
     map.set(cat, (map.get(cat) ?? 0) + (Number(b.amount) || 0));
   }
-  const poTotal = ((pos ?? []) as any[]).reduce((s, p) => s + (Number(p.total) || 0), 0);
+  // Same live-PO rule as every other cost sum, so budget-vs-actual can't show a
+  // materials overrun that only exists because a delivery was entered twice.
+  const poTotal = livePurchaseOrders((pos ?? []) as any[], (bills ?? []) as any[]).reduce(
+    (s, p) => s + (Number((p as any).total) || 0),
+    0,
+  );
   if (poTotal) map.set("Uncategorized", (map.get("Uncategorized") ?? 0) + poTotal);
   return [...map.entries()]
     .map(([category, actual]) => ({ category, actual: Math.round(actual * 100) / 100 }))

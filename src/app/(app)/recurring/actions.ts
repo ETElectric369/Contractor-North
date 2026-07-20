@@ -6,21 +6,17 @@ import { requireStaff } from "@/lib/staff-guard";
 import { drawAmount, DRAW_KINDS } from "@/lib/invoice-math";
 import { contractTotalFromQuotes } from "@/lib/payment-schedule-math";
 import { getOrgSettings } from "@/lib/org-settings";
-import { tzLocalHourUtc, todayStrInTz } from "@/lib/tz";
+import { todayStrInTz } from "@/lib/tz";
+import { defaultDueDateIsoForOrg } from "@/lib/invoice-due";
 import { standardBillingBlockerOnJob, standardBillingConflictError } from "@/lib/billing-guards";
 import { runTemplate, runInvoiceTemplate, generateDueTemplates } from "@/lib/recurring-engine";
 
 /** Default invoice due date = today (org tz) + the org's net terms (invoice_due_days, else
  *  Net 30), stamped to NOON in the org tz — same convention billing/actions uses. A draw
- *  with no due date is invisible to the Overdue tracker, so this stamps one at creation. */
+ *  with no due date is invisible to the Overdue tracker, so this stamps one at creation.
+ *  (One definition, in @/lib/invoice-due — shared with billing/actions and the cron.) */
 async function defaultDueDateIso(supabase: { from: (t: string) => any }): Promise<string> {
-  const { data } = await supabase.from("organizations").select("settings").maybeSingle();
-  const settings = getOrgSettings((data as { settings?: unknown } | null)?.settings);
-  const tz = settings.timezone || "America/Los_Angeles";
-  const netDays = settings.invoice_due_days > 0 ? settings.invoice_due_days : 30;
-  const todayStart = tzLocalHourUtc(todayStrInTz(tz), 0, tz);
-  const dueStr = todayStrInTz(tz, new Date(todayStart.getTime() + netDays * 86_400_000));
-  return tzLocalHourUtc(dueStr, 12, tz).toISOString();
+  return defaultDueDateIsoForOrg(supabase); // user client: RLS scopes the org read
 }
 
 export type Result = { ok: boolean; error?: string; id?: string; count?: number };

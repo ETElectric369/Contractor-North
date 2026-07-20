@@ -6,6 +6,7 @@ import { accentHex } from "@/lib/org-settings";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { statusTone, toneClasses } from "@/components/ui/badge";
 import { jobStatusLabel } from "@/lib/job-status";
+import { NO_INDEX } from "@/lib/no-index";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,12 @@ export async function generateMetadata({ params }: { params: Promise<{ token: st
   const { token } = await params;
   const supabase = await createClient();
   const { data } = await supabase.rpc("customer_portal", { p_token: token });
-  return { title: data?.org?.name ? `${data.org.name} — Your account` : "Your account" };
+  // NEVER indexed. This page fans out to EVERY document that customer has — crawling one
+  // portal token would expose their whole invoice/quote/contract history. See @/lib/no-index.
+  return {
+    title: data?.org?.name ? `${data.org.name} — Your account` : "Your account",
+    robots: NO_INDEX,
+  };
 }
 
 // Colors come from the ONE palette (statusTone → toneClasses); the portal no longer
@@ -151,7 +157,9 @@ function Section({ icon, title, brand, children }: { icon: React.ReactNode; titl
 
 function Row({ href, label, sub, status, cta, brand }: { href: string; label: string; sub: string; status: string; cta: string; brand: string }) {
   return (
-    <a href={href} target="_blank" rel="noopener" className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-slate-50">
+    // nofollow: the portal links out to every sibling token document, so a crawler that ever
+    // reaches one portal URL must not fan out across the customer's whole document history.
+    <a href={href} target="_blank" rel="noopener nofollow" className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-slate-50">
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <span className="font-medium text-slate-900">{label}</span>

@@ -15,6 +15,7 @@ import { todayStrInTz, tzDayStartUtc, tzLocalHourUtc } from "@/lib/tz";
 import { createNotifications } from "@/lib/notifications";
 import { sendPushToProfiles } from "@/lib/push";
 import { sendEmail } from "@/lib/email";
+import { rateLimited } from "@/lib/rate-limit";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export interface CreateTriagedInquiryInput {
@@ -35,7 +36,21 @@ export interface CreateTriagedInquiryInput {
    *  the triage `reason` is merged in. Must include `estimate` for the convert→quote path. */
   intakeJson: Record<string, unknown>;
   inspectionThreshold?: number;
+  /**
+   * May a big lead AUTO-BOOK a site inspection onto the org's live Schedule? Default true, which
+   * is what the two SIZE-VERIFIED doors want: the partner webhook (shared-secret authenticated)
+   * and the deck configurator (total recomputed server-side from the org's own catalog).
+   * Pass FALSE from any door where the estimate total is model- or caller-authored — an anonymous
+   * visitor must not be able to talk their way onto the contractor's calendar. The lead still
+   * lands and still alerts; booking becomes a one-tap action on the Leads board.
+   */
+  autoBookInspection?: boolean;
 }
+
+/** Hard ceiling on AUTO-BOOKED inspections per org per day. Even an authorized flood (or a
+ *  rotating-IP one that walks past a per-IP limiter) can't stack unbounded 9am holds on one
+ *  Schedule slot. Real inbound volume is nowhere near this. */
+const MAX_AUTOBOOK_PER_DAY = 10;
 
 export async function createTriagedInquiry(
   supabase: SupabaseClient,
@@ -75,7 +90,15 @@ export async function createTriagedInquiry(
   // A >$20k lead flagged for a site inspection gets one AUTO-BOOKED onto the Schedule, so a big
   // inbound lead never sits with no scheduled action. Service client → org_id explicit (no auth
   // session for the set_org_id trigger). Best-effort: a booking failure must not stop the lead.
-  if (triage.siteInspectionRequired) {
+  // TWO GUARDS, because this writes to the contractor's REAL calendar from public doors:
+  //   · autoBookInspection === false — the caller's total isn't size-verified (site-chat).
+  //   · a per-org/day ceiling — bounds a flood from ANY door, whatever its IP.
+  // Either guard failing only skips the HOLD; the lead itself always lands and always alerts.
+  const mayAutoBook =
+    triage.siteInspectionRequired &&
+    input.autoBookInspection !== false &&
+    !(await rateLimited(`autobook:${orgId}`, MAX_AUTOBOOK_PER_DAY, 86400));
+  if (mayAutoBook) {
     try {
       // 9 AM in the ORG's timezone, two days out — NOT server-local setHours(9), which on
       // Vercel (UTC) stored 9 AM UTC = 1-2 AM Pacific (the exact class cn-v498 fixed in

@@ -1,7 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { createServiceClient } from "@/lib/supabase/server";
+import { rateLimited, clientIp } from "@/lib/rate-limit";
 import { getOrgSettings } from "@/lib/org-settings";
 import { computeDeckEstimate, buildDeckRates, DECK_ESTIMATE_CODES, type DeckAnswers } from "@/lib/estimate/deck";
 import { createTriagedInquiry } from "@/lib/inquiries/create-triaged-inquiry";
@@ -51,6 +53,18 @@ export async function submitEstimateLead(handle: string, payload: EstimatePayloa
   const email = String(payload?.contact?.email ?? "").trim();
   if (!phone && !email) return { ok: false, error: "Add a phone or email so we can reach you." };
 
+  // PER-IP CEILING. This is an unauthenticated public door and every call through it costs the
+  // contractor something real: an inquiry row, a push to every office phone, a Resend send, and
+  // — over the site-inspection threshold — an auto-booked 9am hold on the live Schedule. Every
+  // sibling public entry point already limits (site/actions 10/60, site-chat 15/60, inbound/lead
+  // 60/60); this one didn't. 5/60 is deliberately stricter than the siblings because this one
+  // books calendar rows, and a real homeowner submits once. Placed AFTER the honeypot so trapped
+  // bots keep getting the silent fake-success and never consume limiter budget.
+  const ip = clientIp(await headers());
+  if (await rateLimited(`estimate:${ip}`, 5, 60)) {
+    return { ok: false, error: "Too many requests — please try again in a moment." };
+  }
+
   const supabase = createServiceClient();
 
   const { data: org } = await supabase
@@ -60,6 +74,15 @@ export async function submitEstimateLead(handle: string, payload: EstimatePayloa
     .maybeSingle();
   if (!org) return { ok: false, error: "This estimator isn't available right now." };
   const orgId = (org as { id: string }).id;
+
+  // PER-ORG DAILY CEILING — the backstop rateLimited's per-IP key can't provide. rateLimited is
+  // per-key and fails open, so a rotating-IP flood walks straight past the 5/60 above; this bounds
+  // the blast radius (inquiry rows, pushes, emails, auto-booked inspections) regardless of source.
+  // Chris will never see 50 real deck leads in a day.
+  if (await rateLimited(`estimate-org:${orgId}`, 50, 86400)) {
+    return { ok: false, error: "We've had a lot of requests today — please call us instead." };
+  }
+
   const settings = getOrgSettings((org as { settings?: unknown }).settings);
 
   // Authoritative pricing: rates come from the org's live price list, keyed by code.

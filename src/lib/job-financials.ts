@@ -16,8 +16,10 @@ export async function jobProgressFinancials(supabase: any, jobId: string): Promi
       supabase.from("quotes").select("total, status").eq("job_id", jobId),
       supabase.from("invoices").select("total, status, amount_paid").eq("job_id", jobId),
       fetchJobLaborRows(supabase, jobId),
-      supabase.from("purchase_orders").select("total").eq("job_id", jobId),
-      supabase.from("bills").select("amount").eq("job_id", jobId),
+      // id + status + po_id feed the shared live-PO rule (a draft/cancelled order isn't a
+      // cost, and a PO already paid by a bill is superseded by it — see livePurchaseOrders).
+      supabase.from("purchase_orders").select("id, total, status").eq("job_id", jobId),
+      supabase.from("bills").select("amount, po_id").eq("job_id", jobId),
       supabase.from("organizations").select("settings").maybeSingle(),
     ]);
 

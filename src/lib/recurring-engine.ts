@@ -4,6 +4,7 @@ import { advance } from "@/lib/automations-math";
 import { deliverInvoiceEmail } from "@/lib/invoice-email";
 import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { subtotalTaxTotal } from "@/lib/invoice-math";
+import { defaultDueDateIsoForOrg } from "@/lib/invoice-due";
 import { todayStrInTz, tzDateTimeUtc } from "@/lib/tz";
 
 /** The recurring jobs/expenses/invoices generation engine, extracted so BOTH the
@@ -93,6 +94,13 @@ async function createRecurringInvoice(supabase: any, t: any, userId: string | nu
       subtotal,
       tax,
       total,
+      // EVERY creation path stamps a due date — without one the Overdue tracker,
+      // /billing/ar and the payment-reminder cron all skip the invoice (they filter
+      // `due_date < today`, and SQL's `<` drops NULL), so an auto-sent monthly service
+      // agreement could go unpaid for months while the Overdue tile read $0. org_id is
+      // passed explicitly: the cron runs service-role across ALL orgs, so an unscoped
+      // settings read would price this org's net terms off an arbitrary org's row.
+      due_date: await defaultDueDateIsoForOrg(supabase, t.org_id),
       created_by: userId,
     })
     .select("id")

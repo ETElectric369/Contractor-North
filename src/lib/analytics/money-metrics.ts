@@ -286,3 +286,64 @@ export async function getCustomerValue(supabase: any, limit = 15): Promise<Custo
   for (const c of (customers ?? []) as any[]) nameById.set(c.id, c.name);
   return computeCustomerValue(payments ?? [], jobCount, nameById).slice(0, Math.min(40, Math.max(1, limit)));
 }
+
+// ── Cash collected (THE "Collected" definition) ──────────────────────────────
+/**
+ * Money that actually LANDED: the payments table net of voided invoices, minus refunds
+ * paid back out. Pure — the caller filters nothing.
+ *
+ * /billing and /payments used to derive their headline from `sum(invoices.amount_paid)`,
+ * but recalcInvoice folds open account credits INTO amount_paid (that's what makes a
+ * posted credit reduce the customer's balance). So writing off a disputed invoice as a
+ * credit — no cash anywhere — pushed "Collected" UP. The payments ledger printed directly
+ * under that tile, /analytics' 12-month figure and Nort's revenue_trend all summed the
+ * payments table instead, so two numbers on the SAME screen disagreed and the inflated one
+ * was the one that read as revenue. amount_paid answers "what's the balance"; this answers
+ * "what did we collect" — same as computeRevenueTrend / computeCustomerValue.
+ *
+ * `since` (an instant, normally org-local month start) narrows to a period.
+ */
+export function computeCollected(
+  payments: { amount?: number | null; paid_at?: string | null; invoices?: { status?: string | null } | null }[],
+  refunds: { amount?: number | null; created_at?: string | null }[],
+  since?: Date,
+): number {
+  const after = (at: string | null | undefined) => !since || (!!at && new Date(at) >= since);
+  let cash = 0;
+  for (const p of payments ?? []) {
+    if (p.invoices?.status === "void") continue; // voided invoice → money reversed
+    if (!after(p.paid_at)) continue;
+    cash += Number(p.amount ?? 0);
+  }
+  let refunded = 0;
+  for (const r of refunds ?? []) {
+    if (!after(r.created_at)) continue;
+    refunded += Number(r.amount ?? 0);
+  }
+  return round2(cash - refunded);
+}
+
+/**
+ * Org-scoped cash collected, all-time and (optionally) since `monthStart`. Its own
+ * unbounded payments read — /payments' ledger query is capped at 500 rows for display, and
+ * summing that cap would undercount the headline the moment an org has more payments than
+ * that. Explicit .limit(50000) because PostgREST silently truncates at 1000 otherwise.
+ */
+export async function fetchCollectedRows(supabase: any): Promise<{ payments: any[]; refunds: any[] }> {
+  const [{ data: payments }, { data: refunds }] = await Promise.all([
+    supabase.from("payments").select("amount, paid_at, invoices(status)").limit(50000),
+    supabase.from("customer_credits").select("amount, created_at").eq("disposition", "refund").limit(50000),
+  ]);
+  return { payments: (payments ?? []) as any[], refunds: (refunds ?? []) as any[] };
+}
+
+export async function getCollected(
+  supabase: any,
+  monthStart?: Date,
+): Promise<{ allTime: number; month: number }> {
+  const { payments, refunds } = await fetchCollectedRows(supabase);
+  return {
+    allTime: computeCollected(payments, refunds),
+    month: monthStart ? computeCollected(payments, refunds, monthStart) : 0,
+  };
+}

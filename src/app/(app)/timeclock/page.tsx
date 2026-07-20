@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { TimeclockPanel } from "./timeclock-panel";
 import { AutoClockoutPrompt } from "./auto-clockout-prompt";
+import { autoClockoutPromptState } from "./close-math";
 import { CrewAssignments } from "./crew-assignments";
 import { listWeekAssignments, setCrewDayAssignment } from "./crew-actions";
 import { CrewWeekGrid } from "./crew-week-grid";
@@ -257,7 +258,17 @@ export default async function TimeclockPage() {
   // Geofence auto-clock-out completion: the tech's most recent auto-closed entry that
   // still has no code breakdown — prompt them to answer the clock-out questions.
   let autoPrompt:
-    | { id: string; clock_in: string; clock_out: string; lunch_minutes: number; jobId: string | null; jobLabel: string }
+    | {
+        id: string;
+        clock_in: string;
+        clock_out: string;
+        lunch_minutes: number;
+        jobId: string | null;
+        jobLabel: string;
+        /** Hours already recorded on the entry (mid-shift switch segments) — the
+         *  prompt asks only about the remainder. */
+        allocatedHours: number;
+      }
     | null = null;
   if (user) {
     const threeDaysAgo = new Date(Date.now() - 3 * 86_400_000).toISOString();
@@ -272,11 +283,29 @@ export default async function TimeclockPage() {
       .limit(1)
       .maybeSingle();
     if ((autoEntry as any)?.clock_out) {
-      const { count } = await supabase
+      // How much of the shift is ALREADY recorded (mid-shift switch segments now
+      // survive the geofence close). Ask only about what's still unallocated —
+      // seeding the full shift onto the entry's post-switch job is what re-filed a
+      // whole day onto the wrong customer.
+      const { data: allocRows } = await supabase
         .from("time_allocations")
-        .select("id", { count: "exact", head: true })
+        .select("hours")
         .eq("time_entry_id", (autoEntry as any).id);
-      if (!count) {
+      const allocatedHours = ((allocRows ?? []) as { hours: number | null }[]).reduce(
+        (s, a) => s + (Number(a.hours) || 0),
+        0,
+      );
+      // Surface the prompt when there's unallocated time to break down OR when a >5h
+      // shift's auto-close skipped the 30-min meal (lunch still 0) even though the switch
+      // segments + tail already allocated the whole day — the switched-close meal-skip
+      // regression. The pure gate (autoClockoutPromptState) is unit-tested in close-math.
+      const grossHours = hoursBetween((autoEntry as any).clock_in, (autoEntry as any).clock_out, 0);
+      const { show } = autoClockoutPromptState({
+        grossHours,
+        lunchMinutes: (autoEntry as any).lunch_minutes ?? 0,
+        allocatedHours,
+      });
+      if (show) {
         const j = (autoEntry as any).job;
         autoPrompt = {
           id: (autoEntry as any).id,
@@ -289,6 +318,7 @@ export default async function TimeclockPage() {
               ? jobLabel(j)
               : jobSiteLabel({ ...j, customer_name: j.customers?.name ?? null })
             : "the jobsite",
+          allocatedHours: Math.round(allocatedHours * 100) / 100,
         };
       }
     }

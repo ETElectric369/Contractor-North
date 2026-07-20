@@ -137,3 +137,46 @@ export type AgentHudCard = {
   /** true = clear the card off the glass. */
   cleared?: boolean;
 };
+
+/**
+ * The ONLY kind of link a HUD card may carry: a same-app, absolute, RELATIVE path.
+ *
+ * A card's `href` and its `rows[].href` are MODEL-authored, and the model routinely reads
+ * customer-controlled text (notes, inquiry messages). Rendered as a next/link inside the PWA —
+ * where standalone display mode shows no address bar — an off-origin URL would be an attacker's
+ * page one tap away, dressed as the app. So href is never trusted: only "/..." internal paths
+ * pass; absolute URLs ("https://…"), protocol-relative ("//…"), and backslash tricks ("/\…")
+ * all return null and the consumer falls back to plain text (no link). Same predicate as the
+ * ?next= open-redirect guard (safeNextPath); duplicated here so this module stays dependency-free
+ * and usable from both the server route and the client card renderer.
+ */
+export function safeInternalHref(raw: unknown): string | null {
+  const p = typeof raw === "string" ? raw.trim() : "";
+  return p.startsWith("/") && !p.startsWith("//") && !p.includes("\\") ? p.slice(0, 512) : null;
+}
+
+/**
+ * Server-side clamp for a show_card payload before it reaches the client: strip every href that
+ * isn't a safe internal path so a compromised card can never carry an off-origin link to the
+ * windshield. Structure-preserving — every other field passes through untouched (they render as
+ * plain text, never as a navigation target). The client card renderer applies safeInternalHref
+ * again at the render boundary (defense in depth), so any future consumer inherits the guard too.
+ */
+export function sanitizeHudCard(input: unknown): Partial<AgentHudCard> {
+  const c = (input ?? {}) as Record<string, unknown>;
+  const out: Record<string, unknown> = { ...c };
+  const href = safeInternalHref(c.href);
+  if (href) out.href = href;
+  else delete out.href;
+  if (Array.isArray(c.rows)) {
+    out.rows = c.rows.map((r) => {
+      const row = (r ?? {}) as Record<string, unknown>;
+      const rh = safeInternalHref(row.href);
+      const cleaned = { ...row };
+      if (rh) cleaned.href = rh;
+      else delete cleaned.href;
+      return cleaned;
+    });
+  }
+  return out as Partial<AgentHudCard>;
+}

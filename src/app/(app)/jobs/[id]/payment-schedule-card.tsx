@@ -111,7 +111,17 @@ export function PaymentScheduleCard({
             </ul>
             <div className="mt-2 flex items-center justify-between text-xs text-slate-500">
               <span>Billed {formatCurrency(status.billedTotal)} of {formatCurrency(status.scheduledTotal)}</span>
-              {status.percentOff && <span className="text-amber-600">Percents total {status.scheduledPct}% (not 100%)</span>}
+              {/* setPaymentSchedule's over-contract check runs only at creation time, so a
+                  contract that DRIFTS afterwards (an edited quote under a part-drawn
+                  schedule) was silently over/under-billing with no warning anywhere. These
+                  flags are already computed — render them. */}
+              {status.overContract ? (
+                <span className="text-red-600">
+                  Scheduled {formatCurrency(status.scheduledTotal)} exceeds the {formatCurrency(contractTotal)} contract
+                </span>
+              ) : status.percentOff ? (
+                <span className="text-amber-600">Percents total {status.scheduledPct}% (not 100%)</span>
+              ) : null}
             </div>
             {error && <div className="mt-2 text-sm text-red-600">{error}</div>}
             <div className="mt-3 flex items-center justify-end gap-3">

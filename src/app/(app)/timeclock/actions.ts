@@ -15,6 +15,9 @@ import { setJobCrew } from "../schedule/actions";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { GeoPoint } from "@/lib/types";
 import { jobLabel } from "@/lib/schedule-options";
+import { lastSwitchMs, switchBreadcrumb } from "./switch-breadcrumb";
+import { clampCloseAtMs, tailAllocationHours } from "./close-math";
+import { ADOPT_AFTER_CLOCK_IN_MS, ADOPT_AFTER_SWITCH_MS } from "./adopt-window";
 
 export type ClockResult = { ok: boolean; error?: string };
 
@@ -207,6 +210,9 @@ export async function switchJob(input: {
   job_code?: string | null;
   /** The tech's CURRENT notes text (may hold unsaved typing) — the breadcrumb is appended to this. */
   notes?: string;
+  /** A fix taken AT THE SWITCH — becomes the entry's new geofence anchor (see below).
+   *  Omitted/unusable ⇒ the old site's anchor is CLEARED, never left pointing at site A. */
+  gps?: GeoPoint | null;
 }): Promise<SwitchJobResult> {
   const supabase = await createClient();
   const {
@@ -264,12 +270,32 @@ export async function switchJob(input: {
     .maybeSingle();
   const label = j ? jobLabel((j as any)) : "another job";
   const base = (input.notes ?? entry.notes ?? "").trim();
-  const crumb = `[switched to ${label} at ${new Date().toISOString()}]`;
+  const crumb = switchBreadcrumb(label, new Date().toISOString());
   const notes = base ? `${base}\n${crumb}` : crumb;
 
+  // THE ANCHOR MOVES WITH THE JOB. The geofence fences on the entry's gps_in; leaving
+  // it on site A after a switch meant the live watch saw "left the site" the moment the
+  // tech drove to site B, and its unanswered-prompt fallback closes the entry at the
+  // time they were last seen at A — silently wiping the rest of the day's pay. So:
+  // a usable fix taken at the switch becomes the new anchor; anything else NULLS it, and
+  // a null anchor makes the monitor stand down (honestly quiet) until adoptGeofenceAnchor
+  // re-arms it from a fix at the new site. Never leave a stale centre armed.
+  const gps = input.gps;
+  const usableFix =
+    gps != null &&
+    typeof gps.lat === "number" && typeof gps.lng === "number" &&
+    Number.isFinite(gps.lat) && Number.isFinite(gps.lng) &&
+    (gps.accuracy == null || gps.accuracy <= 200);
   const { error } = await supabase
     .from("time_entries")
-    .update({ job_id: jobId, job_code: input.job_code ?? null, notes })
+    .update({
+      job_id: jobId,
+      job_code: input.job_code ?? null,
+      notes,
+      gps_in: usableFix
+        ? { lat: gps!.lat, lng: gps!.lng, accuracy: gps!.accuracy ?? null, captured_at: new Date().toISOString() }
+        : null,
+    })
     .eq("id", entry.id)
     .eq("profile_id", user.id);
   if (error) return { ok: false, error: error.message };
@@ -334,9 +360,10 @@ export async function clockOut(input: {
   auto?: boolean;
   miles?: number;
   /** undefined = leave the entry's recorded allocation rows alone (a one-tap close must
-   *  never wipe mid-shift switchJob segments); an ARRAY replaces the whole set ([]
-   *  clears it — the "break it down later" / geofence paths rely on that so the
-   *  AutoClockoutPrompt re-asks the breakdown). */
+   *  never wipe mid-shift switchJob segments); a NON-EMPTY array replaces the whole set.
+   *  `[]` is a no-op on the recorded rows — a clock-out may never destroy committed
+   *  segments without replacing them (the "break it down later" / geofence paths pass it,
+   *  and the AutoClockoutPrompt re-asks whenever the entry is left under-allocated). */
   allocations?: JobAllocationInput[];
   at?: string; // explicit clock-out time (ISO) — used by the geofence auto clock-out
 }): Promise<ClockResult> {
@@ -357,20 +384,36 @@ export async function clockOut(input: {
   // auto-lunch, and the allocation clamp below.
   const { data: entRow } = await supabase
     .from("time_entries")
-    .select("clock_in")
+    .select("clock_in, job_id, job_code")
     .eq("id", input.entry_id)
     .eq("profile_id", user.id)
     .maybeSingle();
-  const entClockIn = (entRow as { clock_in?: string } | null)?.clock_in ?? null;
+  const ent = entRow as { clock_in?: string; job_id?: string | null; job_code?: string | null } | null;
+  const entClockIn = ent?.clock_in ?? null;
+
+  // The entry's ALREADY-RECORDED segments (switchJob writes one per mid-shift switch).
+  // Read once: they set the floor for a backdated `at`, and they decide whether the
+  // un-allocated tail needs filling below.
+  const { data: recordedRows } = await supabase
+    .from("time_allocations")
+    .select("id, hours")
+    .eq("time_entry_id", input.entry_id);
+  const recorded = (recordedRows ?? []) as { id: string; hours: number | null }[];
+  const recordedHours = recorded.reduce((s, a) => s + (Number(a.hours) || 0), 0);
 
   // Clock-out time defaults to now; `at` (the geofence "time they left") is honored
   // only if it's not in the future and not before clock-in (never negative hours).
+  // FLOOR IT AT THE LAST RECORDED SEGMENT BOUNDARY: a mid-shift switch already
+  // committed clock_in + recordedHours of work, so no caller — geofence fallback,
+  // voice, a crafted call — may close the shift at a time that erases hours the
+  // entry has already recorded as worked. (Belt to the anchor fix in switchJob:
+  // even a stale-centre auto-close can no longer wipe the day.)
   let clockOutIso = new Date().toISOString();
   if (input.at) {
     const atMs = Date.parse(input.at);
     if (!isNaN(atMs) && atMs <= Date.now() + 60_000) {
       const ciMs = entClockIn ? Date.parse(entClockIn) : 0;
-      clockOutIso = new Date(Math.max(atMs, ciMs + 60_000)).toISOString();
+      clockOutIso = new Date(clampCloseAtMs(atMs, ciMs, recordedHours, Date.now())).toISOString();
     }
   }
 
@@ -426,11 +469,7 @@ export async function clockOut(input: {
       const workedHrs = hoursBetween(entClockIn, clockOutIso, lunchMinutes);
       allocations = clampAllocationHours(allocations, workedHrs);
     }
-    const { data: oldAllocs } = await supabase
-      .from("time_allocations")
-      .select("id")
-      .eq("time_entry_id", input.entry_id);
-    const oldIds = (oldAllocs ?? []).map((a: { id: string }) => a.id);
+    const oldIds = recorded.map((a) => a.id);
     if (allocations.length) {
       // Drop any job_id the caller can't actually see (crafted/registry call) — never
       // persist a cross-org job reference on an allocation.
@@ -446,8 +485,40 @@ export async function clockOut(input: {
       );
       const { error: allocErr } = await supabase.from("time_allocations").insert(rows);
       if (allocErr) return { ok: false, error: allocErr.message };
+      if (oldIds.length) await supabase.from("time_allocations").delete().in("id", oldIds);
     }
-    if (oldIds.length) await supabase.from("time_allocations").delete().in("id", oldIds);
+    // An EMPTY submitted set no longer destroys recorded rows. `[]` used to mean
+    // "clear the split" and the delete ran unconditionally — so the geofence close
+    // (and "break it down later") deleted the segments switchJob had recorded, and
+    // the recovery prompt then re-filed the WHOLE day onto the post-switch job.
+    // Nothing legitimately needs a clock-out to erase committed segments; the office
+    // edit modal (updateTimeEntry) still clears a split with [] when asked to.
+  }
+
+  // TAIL BACKSTOP — the segment from the last switch to clock-out. switchJob records
+  // only the OUTGOING job's hours, and only the timeclock panel seeds a live row for
+  // the incoming one; My Day, the job-page button and voice/registry all close with no
+  // allocations, leaving a partially-allocated entry. Billing treats "has any rows" as
+  // fully allocated (labor-billing.ts), so those tail hours were billed to NO job and
+  // vanished from job cost. Fill the remainder onto the entry's current job here, where
+  // every closer passes through. Payroll is untouched — this writes only the billing split.
+  if (input.allocations === undefined && recorded.length && entClockIn) {
+    const workedHrs = hoursBetween(entClockIn, clockOutIso, lunchMinutes);
+    const tail = tailAllocationHours(workedHrs, recordedHours);
+    if (tail > 0) {
+      await supabase.from("time_allocations").insert({
+        time_entry_id: input.entry_id,
+        job_id: ent?.job_id ?? null,
+        job_code: ent?.job_code ?? null,
+        hours: tail,
+        description: "after switching jobs",
+        sort_order: recorded.length,
+      });
+      if (ent?.job_id) {
+        revalidatePath(`/jobs/${ent.job_id}`); // its labor total just gained the tail
+        revalidatePath("/jobs");
+      }
+    }
   }
 
   revalidatePath("/timeclock");
@@ -502,6 +573,9 @@ export async function clockOutCurrent(input: {
  * never become "where the job is"), and only with a usable fix. The capture time is
  * stored alongside the coords so a backfilled anchor is distinguishable from a true
  * clock-in stamp when someone audits the entry.
+ *
+ * The two adoption windows (clock-in vs after a mid-shift switch) are the SHARED
+ * constants in ./adopt-window, imported by the client monitor too so the two can't drift.
  */
 export async function adoptGeofenceAnchor(entryId: string, gps: GeoPoint): Promise<ClockResult> {
   const supabase = await createClient();
@@ -520,15 +594,23 @@ export async function adoptGeofenceAnchor(entryId: string, gps: GeoPoint): Promi
 
   const { data: open } = await supabase
     .from("time_entries")
-    .select("id, clock_in, gps_in")
+    .select("id, clock_in, gps_in, notes")
     .eq("id", entryId)
     .eq("profile_id", user.id)
     .eq("status", "open")
     .maybeSingle();
   if (!open) return { ok: false, error: "Not clocked in." };
   if ((open as { gps_in: GeoPoint | null }).gps_in) return { ok: false, error: "Anchor already set." };
+  // The adoption window opens at clock-in AND re-opens at each mid-shift switch: a
+  // switch with no fix to hand deliberately NULLS the anchor (never leave the old
+  // site's centre armed), so the fence has to be allowed to re-arm at the new site
+  // or it stays dead for the rest of the day. Bounded either way — an app reopened
+  // from home hours later can still never become "where the job is".
   const ciMs = Date.parse((open as { clock_in: string }).clock_in);
-  if (isNaN(ciMs) || Date.now() - ciMs > 15 * 60_000) {
+  const swMs = lastSwitchMs((open as { notes: string | null }).notes);
+  const openedAt = Math.max(isNaN(ciMs) ? 0 : ciMs, swMs ?? 0);
+  const windowMs = swMs != null && swMs >= (isNaN(ciMs) ? 0 : ciMs) ? ADOPT_AFTER_SWITCH_MS : ADOPT_AFTER_CLOCK_IN_MS;
+  if (!openedAt || Date.now() - openedAt > windowMs) {
     return { ok: false, error: "Too long since clock-in to backfill a location." };
   }
 
@@ -569,6 +651,18 @@ export async function geoClockOut(gps: GeoPoint | null, atIso: string): Promise<
     .eq("status", "open")
     .maybeSingle();
   if (!open) return { ok: false, error: "Not clocked in." };
+
+  // Does the entry already carry recorded segments (a mid-shift switchJob split)?
+  // If so, DON'T send an allocation set at all — the geofence close used to send `[]`,
+  // which deleted those rows, and the recovery prompt then re-filed the entire day onto
+  // the post-switch job (Job A lost its hours, Job B was over-billed the same hours).
+  // With the rows preserved, clockOut's tail backstop allocates the closing segment and
+  // the day's split survives the close. Only a genuinely un-split entry sends `[]`, which
+  // keeps the after-the-fact breakdown flow (completeAutoClockOut) exactly as it was.
+  const { count: allocCount } = await supabase
+    .from("time_allocations")
+    .select("id", { count: "exact", head: true })
+    .eq("time_entry_id", (open as any).id);
   return clockOut({
     entry_id: (open as any).id,
     lunch_minutes: (open as any).lunch_minutes ?? 0,
@@ -576,10 +670,7 @@ export async function geoClockOut(gps: GeoPoint | null, atIso: string): Promise<
     gps,
     auto: true,
     at: atIso,
-    // Explicit clear — the geofence flow's PRE-EXISTING behavior, kept exactly: the
-    // breakdown is answered after the fact via completeAutoClockOut, and the
-    // AutoClockoutPrompt only re-asks while the entry has no allocation rows.
-    allocations: [],
+    allocations: (allocCount ?? 0) > 0 ? undefined : [],
   });
 }
 
@@ -612,12 +703,43 @@ export async function completeAutoClockOut(input: {
   const lunch = Math.max(0, Math.round(Number(input.lunch_minutes) || 0));
   await supabase.from("time_entries").update({ lunch_minutes: lunch }).eq("id", input.entry_id);
 
+  // Whatever the entry already carries. This action INSERTS alongside those rows (it
+  // never replaces them), so both the clamp ceiling and the sort order have to start
+  // from what's there — a mid-shift switch's segments now SURVIVE the geofence close.
+  const { data: existing } = await supabase
+    .from("time_allocations")
+    .select("id, hours")
+    .eq("time_entry_id", input.entry_id);
+  const existingRows = (existing ?? []) as { id: string; hours: number | null }[];
+  let already = existingRows.reduce((s, a) => s + (Number(a.hours) || 0), 0);
+
+  // A meal confirmed HERE, AFTER the switch segments + tail were recorded (the switched
+  // geofence auto-close deducted no lunch, so those rows summed to GROSS), would leave the
+  // BILLED hours above the now-reduced PAID hours. Scale the recorded rows down to the
+  // worked total so billing can never exceed payroll (the C7 no-over-bill law) — only when
+  // the confirmed lunch actually pushed worked below what's already on the entry.
+  if (entry.clock_in && entry.clock_out && existingRows.length) {
+    const workedNow = hoursBetween(entry.clock_in, entry.clock_out, lunch);
+    if (already > workedNow + 0.01) {
+      const scaled = clampAllocationHours(
+        existingRows.map((r) => ({ id: r.id, hours: Number(r.hours) || 0 })),
+        workedNow,
+      );
+      for (const r of scaled) {
+        await supabase.from("time_allocations").update({ hours: r.hours }).eq("id", r.id);
+      }
+      already = scaled.reduce((s, r) => s + (Number(r.hours) || 0), 0);
+    }
+  }
+
   let allocations = (input.allocations ?? []).filter((a) => a.job_code || a.hours);
-  // C7: clamp the post-hoc code split to the entry's worked hours. The geofence locked
-  // the clock in/out times; lunch can only reduce hours — so bill/cost can't exceed payroll.
+  // C7: clamp the post-hoc split to the hours still UNALLOCATED. The geofence locked the
+  // clock in/out times and lunch can only reduce hours, so bill/cost can't exceed payroll —
+  // and clamping against the full shift (rather than the remainder) would let an entry's
+  // recorded switch segments be billed a second time on top.
   if (allocations.length && entry.clock_in && entry.clock_out) {
-    const workedHrs = hoursBetween(entry.clock_in, entry.clock_out, lunch);
-    allocations = clampAllocationHours(allocations, workedHrs);
+    const remaining = Math.max(0, hoursBetween(entry.clock_in, entry.clock_out, lunch) - already);
+    allocations = clampAllocationHours(allocations, remaining);
   }
   if (allocations.length) {
     const rows = await Promise.all(
@@ -627,7 +749,7 @@ export async function completeAutoClockOut(input: {
         job_code: a.job_code || null,
         hours: a.hours || 0,
         description: a.description || null,
-        sort_order: idx,
+        sort_order: existingRows.length + idx,
       })),
     );
     const { error: insErr } = await supabase.from("time_allocations").insert(rows);

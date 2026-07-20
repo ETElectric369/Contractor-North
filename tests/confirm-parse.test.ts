@@ -57,7 +57,36 @@ describe("classifyConfirmReply — voice confirm intent", () => {
   it("garbage / unclear re-prompts", () => {
     expect(classifyConfirmReply("")).toBe("unclear");
     expect(classifyConfirmReply("hmmmm")).toBe("unclear");
-    expect(classifyConfirmReply("what was that")).toBe("unclear");
+    expect(classifyConfirmReply("uhh")).toBe("unclear");
+  });
+
+  // THE money-write misfire this fix closes: the mic is armed the instant Nort finishes speaking a
+  // payment proposal, so the driver's next words — often a QUESTION — land in this classifier. An
+  // affirmative filler in FRONT of a question ("sure, but…", "ok what's…") must NEVER commit.
+  it("a leading affirmative in front of a QUESTION or HEDGE never confirms", () => {
+    for (const u of [
+      "sure, but which invoice is that?",
+      "okay hold on",
+      "ok what's the total",
+      "sure one sec",
+      "yes but wait which one",
+      "ok but hang on",
+      "sure, what am I confirming",
+    ]) {
+      expect(classifyConfirmReply(u)).not.toBe("yes");
+    }
+  });
+
+  it("a bare question re-sends (correction) rather than re-prompting", () => {
+    expect(classifyConfirmReply("what was that")).toBe("correction");
+    expect(classifyConfirmReply("which invoice?")).toBe("correction");
+  });
+
+  it("the weak fillers ok / okay / sure still confirm when they STAND ALONE", () => {
+    expect(classifyConfirmReply("ok")).toBe("yes");
+    expect(classifyConfirmReply("okay")).toBe("yes");
+    expect(classifyConfirmReply("sure")).toBe("yes");
+    expect(classifyConfirmReply("ok do it")).toBe("yes");
   });
 
   it("never returns 'no' when a later affirmative is present (safety invariant)", () => {
