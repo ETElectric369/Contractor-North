@@ -95,7 +95,12 @@ export function EditMemberButton({
         </button>
       )}
 
+      {/* portal: this modal opens from inside TeamMemberMenu's GLASS panel — backdrop-filter
+          creates a containing block, so an in-place fixed overlay renders trapped/clipped
+          inside the little menu frame (Chris's frozen-frame report, 2026-07-20). Same fix as
+          JobEditButton (cn-v463). No <form> inside, so no formId needed. */}
       <Modal
+        portal
         open={open}
         onClose={() => setOpen(false)}
         title={`Edit ${member.full_name ?? "member"}`}
