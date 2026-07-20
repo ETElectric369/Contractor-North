@@ -96,7 +96,10 @@ export function MyDayClock({
 
   return (
     <Card className={`overflow-hidden ${className}`}>
-      <div className="flex h-full items-center gap-4 px-5 py-4">
+      {/* flex-wrap + ml-auto on the button: in a squeezed column (narrow desktop window,
+          the side-by-side top row) the fixed-size button drops to its own line instead of
+          overlapping the label. Wide layouts render identically (no wrap triggers). */}
+      <div className="flex h-full flex-wrap items-center gap-x-4 gap-y-2 px-5 py-4">
         <span
           className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${
             open ? "bg-green-100 text-green-600" : "bg-slate-100 text-slate-400"
@@ -131,11 +134,11 @@ export function MyDayClock({
           {err && <div className="mt-1 text-xs text-red-600">{err}</div>}
         </div>
         {open ? (
-          <Button variant="destructive" size="lg" onClick={doClockOut} disabled={pending} className="shrink-0">
+          <Button variant="destructive" size="lg" onClick={doClockOut} disabled={pending} className="ml-auto shrink-0">
             {pending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Square className="h-5 w-5" />} Clock Out
           </Button>
         ) : (
-          <Button size="lg" onClick={doClockIn} disabled={pending} className="shrink-0">
+          <Button size="lg" onClick={doClockIn} disabled={pending} className="ml-auto shrink-0">
             {pending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Play className="h-5 w-5" />} Clock In
           </Button>
         )}

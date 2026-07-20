@@ -496,7 +496,12 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           few newest open leads + follow-ups), not duplicated. Techs keep the
           full-width clock; /leads is staff territory. */}
       {isStaff ? (
-        <div className="mb-4 grid gap-3 sm:grid-cols-2">
+        <div className="mb-4 @container">
+          {/* Container query, not a viewport breakpoint: in the fine-pointer shell band
+              (840-1023px) the dock + subnav leave ~500px of content while sm/md still say
+              "tablet" — the two cards would squeeze to ~280px and crush the clock button.
+              Columns split only when THIS row actually has the room. */}
+          <div className="grid gap-3 @[42rem]:grid-cols-2">
           <MyDayClock
             className="h-full"
             open={openEntry ? { id: openEntry.id, clock_in: openEntry.clock_in, notes: openEntry.notes ?? null } : null}
@@ -527,6 +532,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
               </ul>
             )}
           </Link>
+          </div>
         </div>
       ) : (
         <MyDayClock
