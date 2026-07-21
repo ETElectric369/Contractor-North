@@ -44,6 +44,7 @@ import { LienInsuranceCard } from "./lien-insurance-card";
 import { JobDescription } from "./job-description";
 import { computeJobProgress, livePurchaseOrders } from "@/lib/job-progress-math";
 import { jobLabel } from "@/lib/schedule-options";
+import { directionsTarget } from "@/lib/maps";
 import { ProgressInvoiceButton } from "./progress-invoice-button";
 import { NewInvoiceButton } from "./new-invoice-button";
 import { NewWorkOrderButton } from "../../work-orders/new-wo-button";
@@ -286,6 +287,14 @@ export default async function JobDetailPage({
   const apptStaffOpts = (techs ?? []).map((t: any) => ({ id: t.id, label: t.full_name ?? "Unnamed" }));
   const companyAddress = formatFullAddress(org?.address_line1, org?.city, org?.state, org?.zip);
   const jobAddress = formatFullAddress(j.address, j.city, j.state, j.zip);
+  // Where "Navigate" should point. Prefer the job's own structured address, else the
+  // customer's saved address (jobs happen at the customer site), else the job NAME —
+  // which in the field often IS the address (typed there as a shortcut). Guarantees the
+  // Navigate/Map control never silently vanishes just because the address fields are blank.
+  const customerAddress = formatFullAddress(
+    (j.customers as any)?.address, (j.customers as any)?.city, (j.customers as any)?.state, (j.customers as any)?.zip,
+  );
+  const navTarget = directionsTarget(jobAddress, customerAddress, j.name);
   const tz = getOrgSettings((org as any)?.settings).timezone; // business tz for time-entry dates
   // The org's all-day work window (Settings → Scheduling) — the same resolver the
   // schedule writers use, threaded into the schedule/edit controls so their "blank
@@ -938,7 +947,7 @@ export default async function JobDetailPage({
         openEntry={openEntry}
         techs={techs ?? []}
         defaultProfileId={user?.id ?? ""}
-        jobAddress={jobAddress}
+        jobAddress={navTarget}
         customerPhone={j.customers?.phone ?? null}
         pendingProposal={(pendingProposal as any) ?? null}
         hasQuote={(quotes ?? []).length > 0}

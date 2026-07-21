@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Cloud, MapPin, MapPinOff } from "lucide-react";
 import { loadGoogleMaps } from "@/lib/google-maps";
 import { geoPermission, getPosition, lastFix, type GeoCoords } from "@/lib/geo";
+import { reportClientError } from "@/app/report-client-error";
 
 interface WeatherData {
   tempF: number;
@@ -72,6 +73,8 @@ export function WeatherWidget({
   const [usingDevice, setUsingDevice] = useState(false); // true = showing the user's own GPS location
   const [denied, setDenied] = useState(false); // OS-level block — swap the locate tap for the explainer
   const [hint, setHint] = useState(false); // the denied explainer line/popover is open
+  const failCodeRef = useRef<number | null>(null); // last non-ok HTTP status (403 = referrer block)
+  const reportedRef = useRef(false); // log the outage to the error sink once per mount, not per retry
 
   const fetchWeatherFor = useCallback(
     async (coords: GeoCoords): Promise<boolean> => {
@@ -81,7 +84,10 @@ export function WeatherWidget({
           `https://weather.googleapis.com/v1/currentConditions:lookup?key=${key}` +
           `&location.latitude=${coords.lat}&location.longitude=${coords.lng}&unitsSystem=IMPERIAL`;
         const r = await fetch(url);
-        if (!r.ok) return false;
+        if (!r.ok) {
+          failCodeRef.current = r.status; // captured so the outage below is diagnosable (403 = referrer block)
+          return false;
+        }
         const w = await r.json();
         const temp = w.temperature?.degrees;
         if (typeof temp !== "number") return false; // partial body — don't fabricate a 0°F
@@ -174,7 +180,21 @@ export function WeatherWidget({
       }
       // The shop's weather so the card ALWAYS shows something — the labeled EXCEPTION state, reached
       // only pre-grant or post-deny.
-      if (!(await showShop()) && !cancelled) setStatus("error");
+      if (!(await showShop()) && !cancelled) {
+        setStatus("error");
+        // Surface the outage in the error log instead of silently vanishing. A 403 here almost
+        // always means the Google Maps/Weather API key's HTTP-referrer allowlist is missing this
+        // domain (the same block breaks the map, autocomplete, and mileage on the same key).
+        if (!reportedRef.current) {
+          reportedRef.current = true;
+          const code = failCodeRef.current;
+          void reportClientError(
+            "weather-widget",
+            `weather fetch failed${code ? ` (HTTP ${code})` : ""}`,
+            { source, httpStatus: code, hint: code === 403 ? "Google Maps API key HTTP-referrer allowlist likely missing this domain" : undefined },
+          );
+        }
+      }
     })();
 
     return () => {
@@ -182,7 +202,10 @@ export function WeatherWidget({
     };
   }, [key, source, fetchWeatherFor, showShop]);
 
-  if (!key || status === "error") return null;
+  // Only vanish when there's genuinely no key to try. On a fetch failure we DEGRADE to a
+  // muted "unavailable" slot instead of disappearing (the silent-vanish is exactly what made
+  // the app.contractornorth.com referrer-block invisible) — and the failure is logged below.
+  if (!key) return null;
 
   if (compact) {
     return (
@@ -194,7 +217,7 @@ export function WeatherWidget({
           <Cloud className="h-7 w-7 text-sky-400" />
         )}
         {status === "loading" || !data ? (
-          <span>—</span>
+          <span title={status === "error" ? "Weather unavailable" : undefined}>—</span>
         ) : (
           <>
             <span className="whitespace-nowrap text-lg font-semibold leading-none text-slate-700">{data.tempF}°F</span>
@@ -237,7 +260,7 @@ export function WeatherWidget({
       )}
       <div className="flex-1">
         {status === "loading" || !data ? (
-          <div className="text-sm text-slate-400">Loading weather…</div>
+          <div className="text-sm text-slate-400">{status === "error" ? "Weather unavailable" : "Loading weather…"}</div>
         ) : (
           <>
             <div className="flex items-baseline gap-2">

@@ -1,0 +1,17 @@
+-- Durable debounce for the geofence "did you leave?" push (notifyGeofenceExit).
+--
+-- THE SPAM. The leave-detection push fires from the CLIENT GeofenceMonitor, which re-runs
+-- its exit-check on every PWA mount/wake — and iOS home-screen PWAs reload aggressively.
+-- Its only guard was an in-memory React ref (exitPushSentRef) that resets on every mount,
+-- and the only cross-reload guard (a localStorage snooze) is written solely by tapping
+-- "Still Working" — so a tech who swipes the lock-screen push away never sets it. Net:
+-- one stray "outside" GPS read (e.g. a clock-in anchored at the shop/truck, not the work
+-- spot) becomes a push that re-fires on every reload. Brian got spammed 2026-07-20 while
+-- still on-site and clocked in, after a coworker left the same job.
+--
+-- This column lets notifyGeofenceExit cap the prompt to once per open shift per window,
+-- enforced server-side so it survives reloads AND device changes. Pure metadata — the
+-- payroll math (payroll-math.ts) reads only clock_in/clock_out/lunch and never touches it,
+-- so it cannot move a paid total; the 0143 non-staff write guard doesn't reference it, so a
+-- tech stamping their own open row still passes.
+alter table public.time_entries add column if not exists last_geofence_push_at timestamptz;

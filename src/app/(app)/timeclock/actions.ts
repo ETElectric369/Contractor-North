@@ -1289,6 +1289,12 @@ export async function markDailyReportReviewed(id: string): Promise<ClockResult> 
  * auto-clockout behavior. Self-targeted by construction — the recipient is always the
  * CALLER — and inert unless they're actually clocked in, so a stray call can't spam.
  */
+// One leave-prompt per shift per this window. The client monitor re-checks on every PWA
+// mount/wake, so without a DURABLE cap a single stray "outside" read re-pushes on every
+// reload (Brian, 2026-07-20 — still on-site, still clocked in). Aligned with the client's
+// 45-min "Still Working" snooze.
+const GEOFENCE_PUSH_DEBOUNCE_MS = 30 * 60 * 1000;
+
 export async function notifyGeofenceExit(jobLabel?: string): Promise<ClockResult> {
   const supabase = await createClient();
   const {
@@ -1299,16 +1305,26 @@ export async function notifyGeofenceExit(jobLabel?: string): Promise<ClockResult
   if (isStaffRole((me as { role?: string } | null)?.role ?? "")) return { ok: true }; // techs only
   const { data: open } = await supabase
     .from("time_entries")
-    .select("id")
+    .select("id, last_geofence_push_at")
     .eq("profile_id", user.id)
     .eq("status", "open")
     .maybeSingle();
   if (!open) return { ok: true }; // not on the clock — nothing to remind
+  // Durable debounce (0147): the in-memory client guard resets on every PWA reload, so this
+  // is what actually stops the spam — no-op if we already prompted this shift within the window.
+  const lastAt = (open as { last_geofence_push_at?: string | null }).last_geofence_push_at;
+  if (lastAt && Date.now() - Date.parse(lastAt) < GEOFENCE_PUSH_DEBOUNCE_MS) return { ok: true };
   const label = (jobLabel ?? "").trim().slice(0, 80) || "the job site";
   await sendPushToProfiles([user.id], "clock_out", {
     title: "Clock out?",
     body: `Looks like you left ${label} — you're still on the clock.`,
     url: "/timeclock",
   });
+  // Stamp AFTER sending so a failed push doesn't silence the next legit prompt. Own open row
+  // + a non-pay column → passes both the RLS owner policy and the 0143 write guard.
+  await supabase
+    .from("time_entries")
+    .update({ last_geofence_push_at: new Date().toISOString() })
+    .eq("id", (open as { id: string }).id);
   return { ok: true };
 }

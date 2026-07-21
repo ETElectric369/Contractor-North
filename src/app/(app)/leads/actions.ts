@@ -33,6 +33,10 @@ function ymdAddDays(ymd: string, n: number): string {
   return new Date(new Date(`${ymd}T12:00:00Z`).getTime() + n * 86_400_000).toISOString().slice(0, 10);
 }
 
+// When "contacted" is tapped with no explicit follow-up, schedule the next touch this
+// many days out — enough to leave the My Day inbox, soon enough that the lead doesn't slip.
+const FOLLOW_UP_DEFAULT_DAYS = 3;
+
 /** The org timezone, for building "9 AM local" instants server-side. */
 async function orgTimezone(supabase: SupabaseClient): Promise<string> {
   const { data } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
@@ -125,7 +129,26 @@ export async function markInquiryContacted(id: string, nextFollowUp?: string | n
     status: "contacted",
     updated_at: new Date().toISOString(),
   };
-  if (nextFollowUp !== undefined) patch.next_follow_up_at = nextFollowUp || null;
+  if (nextFollowUp !== undefined) {
+    // Caller passed an explicit date (or null to clear).
+    patch.next_follow_up_at = nextFollowUp || null;
+  } else {
+    // The bare "contacted" checkbox (My Day inbox) passes no date. Contacting must
+    // still MOVE the lead: the inbox re-includes any lead whose next_follow_up_at is
+    // null or due (query.ts), so leaving it null pulled the just-contacted lead right
+    // back — the "checking the box resets" report (Erik 2026-07-20). A contacted lead
+    // must always carry a next touch, so default one a few days out — but only when the
+    // lead has no FUTURE follow-up already, so an explicit snooze is never shortened.
+    const { data: row } = await supabase
+      .from("inquiries")
+      .select("next_follow_up_at")
+      .eq("id", id)
+      .maybeSingle();
+    const tz = await orgTimezone(supabase);
+    const todayStr = todayStrInTz(tz);
+    const cur = (row as { next_follow_up_at?: string | null } | null)?.next_follow_up_at ?? null;
+    if (!cur || cur <= todayStr) patch.next_follow_up_at = ymdAddDays(todayStr, FOLLOW_UP_DEFAULT_DAYS);
+  }
   const { error } = await supabase.from("inquiries").update(patch).eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/leads");

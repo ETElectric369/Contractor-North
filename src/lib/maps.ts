@@ -11,3 +11,17 @@ export function navUrl(address: string, provider: MapsProvider = "apple"): strin
     ? `https://www.google.com/maps/dir/?api=1&destination=${a}&travelmode=driving`
     : `https://maps.apple.com/?daddr=${a}&dirflg=d`;
 }
+
+/** First non-empty, trimmed candidate — the best free-text destination for a Navigate
+ *  link. Callers pass [structured address, customer address, job/appt name] in preference
+ *  order, so the Navigate button degrades to the next-best target instead of VANISHING
+ *  when a job's address was typed into its name (a common field shortcut — the maps app
+ *  geocodes free text, so "13631 Northwoods" still routes). Returns "" only when every
+ *  candidate is empty, so callers can still gate on it if they truly have nothing. */
+export function directionsTarget(...candidates: (string | null | undefined)[]): string {
+  for (const c of candidates) {
+    const v = (c ?? "").trim();
+    if (v) return v;
+  }
+  return "";
+}

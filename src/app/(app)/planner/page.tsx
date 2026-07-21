@@ -10,7 +10,8 @@ import { MyDayClock } from "./my-day-clock";
 import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { jobStatusLabel } from "@/lib/job-status";
-import { formatTime, formatCityStateZip, formatDateShort } from "@/lib/utils";
+import { formatTime, formatCityStateZip, formatDateShort, formatFullAddress } from "@/lib/utils";
+import { directionsTarget } from "@/lib/maps";
 import { getOrgSettings } from "@/lib/org-settings";
 import { NavLink } from "@/components/nav-link";
 import { toJobOptions, toCustomerOptions, toStaffOptions, listActiveTechs, listCustomerOptions, jobLabel } from "@/lib/schedule-options";
@@ -126,7 +127,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   // count consumers below are the Today's-6 card's Grab-One gate + its "2/6".)
   const [curJobRes, poolR, elseCountR, officeCountR, doneTodayR, dailyReportsR] = await Promise.all([
     openEntry?.job_id
-      ? supabase.from("jobs").select("id, job_number, name, status, address, customers(name)").eq("id", openEntry.job_id).maybeSingle()
+      ? supabase.from("jobs").select("id, job_number, name, status, address, customers(name, address, city, state, zip)").eq("id", openEntry.job_id).maybeSingle()
       : Promise.resolve({ data: null }),
     // TODAY'S 6 pool — my open TOP-LEVEL tasks a rank can claim (subtasks nest
     // under their parent and never count; children fetch below).
@@ -184,6 +185,16 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     profiles: { full_name: string | null } | null;
   }[]);
   const currentJob = ((curJobRes as any)?.data as any) ?? undefined;
+  // Navigate target for the "Now" hero: structured address → customer address → job
+  // name (so the button never vanishes when the address lives in the name). Same rule
+  // the job dock uses (directionsTarget).
+  const currentNavTarget = currentJob
+    ? directionsTarget(
+        currentJob.address,
+        formatFullAddress(currentJob.customers?.address, currentJob.customers?.city, currentJob.customers?.state, currentJob.customers?.zip),
+        currentJob.name,
+      )
+    : "";
   const sixPool = ((poolR as any)?.data ?? []) as any[];
   // THE shared rank (lib/six-rank — the same function behind the morning digest,
   // pinned by tests/badge-economy.test.ts, so the phone and the card can never
@@ -284,7 +295,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         time: j.time,
         title: `${j.job_number} — ${j.name}`,
         sub: [j.customers?.name, j.address].filter(Boolean).join(" · ") || null,
-        address: j.address ?? null,
+        address: directionsTarget(j.address, j.name) || null,
         href: `/jobs/${j.id}`,
         status: j.status,
         jobId: j.id as string,
@@ -376,7 +387,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         time: j.scheduled_start,
         title: `${j.job_number} — ${j.name}`,
         sub: [j.customers?.name, j.address].filter(Boolean).join(" · ") || null,
-        address: j.address ?? null,
+        address: directionsTarget(j.address, j.name) || null,
         href: `/jobs/${j.id}`,
         status: j.status,
       })),
@@ -421,7 +432,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           time: null,
           title: `${j.job_number} — ${j.name}`,
           sub: [j.customers?.name, j.address].filter(Boolean).join(" · ") || null,
-          address: j.address ?? null,
+          address: directionsTarget(j.address, j.name) || null,
           href: `/jobs/${j.id}`,
           status: j.status,
         });
@@ -676,9 +687,9 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
                 </div>
               )}
               <div className="mt-3 grid grid-cols-2 gap-2 text-sm font-medium">
-                {currentJob.address && (
+                {currentNavTarget && (
                   <NavLink
-                    address={currentJob.address}
+                    address={currentNavTarget}
                     className="flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-[rgb(var(--glass-ink))] text-white shadow-sm hover:bg-[rgb(var(--glass-ink))]/90"
                   >
                     <Navigation className="h-4 w-4 shrink-0" /> Navigate
