@@ -120,12 +120,20 @@ export function EditEntryButton({
   const [rate, setRate] = useState(entry.rate_override == null ? 0 : Number(entry.rate_override));
   const [rateDirty, setRateDirty] = useState(false);
   const [notes, setNotes] = useState(entry.notes ?? "");
-  // Split-across-jobs rows (pre-filled from existing allocations so save round-trips them).
-  const [splits, setSplits] = useState<{ job_id: string; hours: number; description: string }[]>(() =>
-    (entry.time_allocations ?? []).map((a) => ({ job_id: a.job_id ?? "", hours: Number(a.hours ?? 0), description: a.description ?? "" })),
+  // "Break this shift into parts" rows. Each part carries ONE choice — `what` — encoded as
+  // `job:<id>` (bill that time to a job, like labor) or `code:<code>` (a time code such as
+  // Drive or Shop: paid, but not billed to any job). Erik wanted to separate drive-time from
+  // job-time, and shop-time from a customer, inside one clock session — a single job_code on
+  // the whole entry couldn't. Free `description` labels the part ("drive", "Andrew Cohen").
+  // Maps 1:1 onto time_allocations {job_id, job_code, hours, description} — no schema change.
+  type Part = { what: string; hours: number; description: string };
+  const allocWhat = (a: { job_id?: string | null; job_code?: string | null }): string =>
+    a.job_id ? `job:${a.job_id}` : a.job_code ? `code:${a.job_code}` : "";
+  const [splits, setSplits] = useState<Part[]>(() =>
+    (entry.time_allocations ?? []).map((a) => ({ what: allocWhat(a), hours: Number(a.hours ?? 0), description: a.description ?? "" })),
   );
-  const addSplit = () => setSplits((s) => [...s, { job_id: jobId || "", hours: 0, description: "" }]);
-  const setSplit = (i: number, patch: Partial<{ job_id: string; hours: number; description: string }>) =>
+  const addSplit = () => setSplits((s) => [...s, { what: jobId ? `job:${jobId}` : "", hours: 0, description: "" }]);
+  const setSplit = (i: number, patch: Partial<Part>) =>
     setSplits((s) => s.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
   const removeSplit = (i: number) => setSplits((s) => s.filter((_, idx) => idx !== i));
 
@@ -165,9 +173,21 @@ export function EditEntryButton({
     if (lunchRequired && !lunchTaken) return setError("Confirm the 30-minute lunch — required for shifts over 5 hours.");
     if (breaksRequired && !breaksTaken) return setError("Confirm the rest break(s) — required by labor law.");
     if (allocated > workedHrs + 0.01) return setError(`Split adds up to ${allocated.toFixed(2)}h — more than the ${workedHrs.toFixed(2)}h worked.`);
+    // Each part → an allocation. `job:<id>` bills that time to the job; `code:<code>` tags it
+    // with a time code (Drive/Shop/…) and leaves job_id null, so it's PAID but not billed to any
+    // job. Pay never reads allocations (payroll-math uses clock times only), so labeling drive as
+    // "Drive" keeps it paid — it only changes what's billed and how analytics buckets the hours.
     const allocations = splits
-      .filter((s) => s.job_id || (Number(s.hours) || 0) > 0)
-      .map((s) => ({ job_id: s.job_id || null, job_code: null, hours: Number(s.hours) || 0, description: s.description || "" }));
+      .filter((s) => s.what || (Number(s.hours) || 0) > 0)
+      .map((s) => {
+        const [kind, val] = s.what.split(":");
+        return {
+          job_id: kind === "job" ? val : null,
+          job_code: kind === "code" ? val : null,
+          hours: Number(s.hours) || 0,
+          description: s.description || "",
+        };
+      });
     start(async () => {
       const res = await updateTimeEntry({
         id: entry.id,
@@ -314,51 +334,72 @@ export function EditEntryButton({
               ))}
             </Select>
             {splits.length > 0 && (
-              <p className="mt-1 text-xs text-slate-400">The split below decides the billing — the job above is just the fallback.</p>
+              <p className="mt-1 text-xs text-slate-400">The parts below decide billing — the job above just covers any time you don&apos;t itemize.</p>
             )}
           </div>
 
-          {/* Split across jobs — e.g. "1h at Northwoods, the rest elsewhere." Each row bills its job
-              its own hours; the single Job above is ignored for billing once a split exists. */}
+          {/* Break this shift into parts — separate drive-time from job-time, or shop-time from a
+              customer, inside ONE clock session (a single job code on the whole entry couldn't).
+              Each part bills to a JOB (like labor) or carries a TIME CODE (Drive/Shop) that's paid
+              but not billed. Parts are hours and sum to the worked time. Pay is untouched — a
+              "Drive" part is still paid time, just labeled; only billing + analytics see the code. */}
           <div className="rounded-lg border border-slate-200 p-3">
             <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-slate-700">Split across jobs</span>
+              <span className="text-sm font-medium text-slate-700">Break this shift into parts</span>
               <button type="button" onClick={addSplit} className="text-xs font-semibold text-brand hover:underline">
-                + Add Job
+                + Add part
               </button>
             </div>
             <p className="mt-1 text-xs text-slate-500">
-              On more than one job this shift? Give each its hours — billing charges each job its own time.
-              Unallocated time is still paid, just not billed to a job.
+              Drove, then worked, then shop time? Give each its hours. Pick a <strong>job</strong> to bill
+              that time to it, or a <strong>code</strong> like Drive/Shop for time that&apos;s paid but not
+              billed to a job. Any hours you don&apos;t itemize are still paid.
             </p>
             {splits.length > 0 && (
               <div className="mt-2 space-y-2">
                 {splits.map((s, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <Select value={s.job_id} onChange={(e) => setSplit(i, { job_id: e.target.value })} className="min-w-0 flex-1">
-                      <option value="">— Job —</option>
-                      {entry.job_id && !jobs.some((j) => j.id === entry.job_id) && (
-                        <option value={entry.job_id}>{entry.job ? jobLabel(entry.job) : "Current job"}</option>
-                      )}
-                      {jobs.map((j) => (
-                        <option key={j.id} value={j.id}>{jobLabel(j)}</option>
-                      ))}
-                    </Select>
-                    <div className="w-24 shrink-0">
-                      <NumberInput value={s.hours} onValueChange={(v) => setSplit(i, { hours: v })} step={0.25} aria-label="Hours" />
+                  <div key={i} className="space-y-1.5 rounded-md border border-slate-100 bg-slate-50/60 p-2">
+                    <div className="flex items-center gap-2">
+                      <Select value={s.what} onChange={(e) => setSplit(i, { what: e.target.value })} className="min-w-0 flex-1">
+                        <option value="">— What —</option>
+                        <optgroup label="Bill to a job">
+                          {entry.job_id && !jobs.some((j) => j.id === entry.job_id) && (
+                            <option value={`job:${entry.job_id}`}>{entry.job ? jobLabel(entry.job) : "Current job"}</option>
+                          )}
+                          {jobs.map((j) => (
+                            <option key={j.id} value={`job:${j.id}`}>{jobLabel(j)}</option>
+                          ))}
+                        </optgroup>
+                        {jobCodes.length > 0 && (
+                          <optgroup label="Time code — paid, not billed">
+                            {jobCodes.map((c) => (
+                              <option key={c.id} value={`code:${c.code}`}>{c.code} — {c.description}</option>
+                            ))}
+                          </optgroup>
+                        )}
+                      </Select>
+                      <div className="w-20 shrink-0">
+                        <NumberInput value={s.hours} onValueChange={(v) => setSplit(i, { hours: v })} step={0.25} aria-label="Hours" />
+                      </div>
+                      <button type="button" onClick={() => removeSplit(i)} className="shrink-0 rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" title="Remove part">
+                        <Trash2 className="h-4 w-4" />
+                      </button>
                     </div>
-                    <button type="button" onClick={() => removeSplit(i)} className="shrink-0 rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" title="Remove">
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                    <Input
+                      value={s.description}
+                      onChange={(e) => setSplit(i, { description: e.target.value })}
+                      placeholder="Label — e.g. drive, Andrew Cohen (optional)"
+                      className="text-sm"
+                    />
                   </div>
                 ))}
                 <div className={allocated > workedHrs + 0.01 ? "text-xs font-medium text-red-600" : "text-xs text-slate-500"}>
-                  {allocated.toFixed(2)}h allocated of {workedHrs.toFixed(2)}h worked
+                  {allocated.toFixed(2)}h of {workedHrs.toFixed(2)}h worked accounted
                   {allocated > workedHrs + 0.01
                     ? " · more than worked"
                     : remainder > 0.01
-                      ? ` · ${remainder.toFixed(2)}h unbilled`
-                      : " · fully allocated"}
+                      ? ` · ${remainder.toFixed(2)}h left (still paid)`
+                      : " · fully accounted"}
                 </div>
               </div>
             )}
