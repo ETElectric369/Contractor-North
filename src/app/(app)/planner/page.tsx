@@ -241,16 +241,49 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
 
   const org = orgRow;
   const orgLocation = formatCityStateZip((org as any)?.city, (org as any)?.state, (org as any)?.zip) || null;
+  // Simple, deep, spiritual — timeless wisdom (public-domain sources + universal proverbs),
+  // grounding for a crew starting the day. Rotated by day-of-YEAR so it advances every day
+  // instead of repeating on the same date each month.
   const QUOTES = [
-    "Service. Integrity. Reliability.",
-    "Measure twice, cut once.",
-    "Do the hard jobs first. The easy jobs will take care of themselves.",
-    "Quality means doing it right when no one is looking.",
-    "Take care of your customers and they'll take care of you.",
-    "Safety first — go home the same way you came to work.",
-    "Small daily improvements lead to stunning results.",
+    "Be still, and know.",
+    "This too shall pass.",
+    "Wherever you are, be all there.",
+    "The quieter you become, the more you can hear.",
+    "What you seek is seeking you. —Rumi",
+    "Nature does not hurry, yet everything is accomplished. —Lao Tzu",
+    "The wound is the place where the light enters you. —Rumi",
+    "Peace comes from within; do not seek it without. —Buddha",
+    "Fall seven times, stand up eight.",
+    "A journey of a thousand miles begins with a single step. —Lao Tzu",
+    "Silence is a source of great strength. —Lao Tzu",
+    "Do your work, then step back. —Tao Te Ching",
+    "Water is soft, yet it wears away stone.",
+    "Let go, or be dragged.",
+    "Empty your cup, and it can be filled.",
+    "Gratitude turns what we have into enough.",
+    "When the student is ready, the teacher appears.",
+    "Still waters run deep.",
+    "As you think, so you become.",
+    "The mountain is climbed one step at a time.",
+    "Where there is love, there is life. —Gandhi",
+    "Tend your own garden.",
+    "Kindness is a language the blind can see and the deaf can hear.",
+    "Rest is part of the work, not a break from it.",
+    "Trust the timing of your life.",
+    "The light you are looking for is within you.",
+    "Do everything with a mind that lets go. —Ajahn Chah",
+    "What we give, we grow.",
+    "The obstacle is the way. —Marcus Aurelius",
+    "Be like water: patient, yielding, unstoppable.",
+    "Slow is smooth, and smooth is fast.",
+    "Every morning we are born again; what we do today matters most.",
+    "Presence is the greatest gift you bring to your work.",
+    "Do good, and good comes back around.",
   ];
-  const dailyQuote = QUOTES[new Date(`${todayStr}T12:00:00Z`).getUTCDate() % QUOTES.length];
+  const _qNow = Date.parse(`${todayStr}T12:00:00Z`);
+  const _qYearStart = Date.parse(`${todayStr.slice(0, 4)}-01-01T12:00:00Z`);
+  const dayOfYear = Math.max(0, Math.round((_qNow - _qYearStart) / 86_400_000));
+  const dailyQuote = QUOTES[dayOfYear % QUOTES.length];
   const jobOpts = toJobOptions(jobOptRows);
   const custOpts = toCustomerOptions(customers);
   const staffOpts = toStaffOptions(staff);
