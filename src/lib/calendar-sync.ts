@@ -112,7 +112,7 @@ async function connectionAuth(
 
 /**
  * Live push of one CN record to Google — FIRE-SAFE (never throws, never blocks
- * the mutation's outcome; failures land in reportError → sentry_events). Call
+ * the mutation's outcome; failures land in reportError → error_events). Call
  * AFTER the CN write succeeds, from a staff server action (uses the caller's
  * RLS client, so a cross-org id is invisible and a no-op). No connection = no-op.
  */
@@ -181,7 +181,7 @@ export async function syncOrgCalendars(service: any, conn: any): Promise<OrgSync
   const startedAt = new Date().toISOString();
 
   // A connection already marked broken (dead grant) is skipped OUTRIGHT — no
-  // Google calls, no sentry rows. The one reportError happened on the transition
+  // Google calls, no error rows. The one reportError happened on the transition
   // (gcalTokenForConnection); the marker clears when the user reconnects.
   if (connectionNeedsReauth(conn)) {
     res.errors.push("Google connection needs to be reconnected — open Settings → Google Calendar.");

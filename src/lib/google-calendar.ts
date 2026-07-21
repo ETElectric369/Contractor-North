@@ -105,7 +105,7 @@ export async function gcalRefresh(refreshToken: string): Promise<GoogleTokens> {
  *  (JSONB) carries {"error":"reauth"} instead of per-calendar sync tokens. Set
  *  when a refresh comes back 400/401 (revoked/expired grant); cleared by the
  *  OAuth callback on reconnect. While set, every token ask short-circuits to
- *  null — no Google call, no sentry row — so a dead June-era token can't spam
+ *  null — no Google call, no error row — so a dead June-era token can't spam
  *  "Token refresh failed (400)" from the 15-min cron forever. */
 export function connectionNeedsReauth(conn: any): boolean {
   return (conn?.sync_tokens as { error?: string } | null | undefined)?.error === "reauth";

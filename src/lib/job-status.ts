@@ -41,7 +41,7 @@ export const JOB_STATUS_PRIORITY: Record<string, number> = {
 
 /** Human label for a status (the UI's "in_progress" → "in progress"). Null-tolerant:
  *  a stray null status renders as "" instead of crashing the whole page render —
- *  the prod sentry_events sink caught exactly that crash class (null.replace) on a
+ *  the prod error_events sink caught exactly that crash class (null.replace) on a
  *  job page 2026-07-13; one bad row must never take down an RSC tree. */
 export const jobStatusLabel = (s: string | null | undefined): string => String(s ?? "").replace(/_/g, " ");
 

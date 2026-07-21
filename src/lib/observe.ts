@@ -1,7 +1,7 @@
 import "server-only";
 import { createServiceClient } from "@/lib/supabase/server";
 
-/** Small pure-JS hash (FNV-1a with two seeds → 16 hex chars) for the sentry_events dedup key.
+/** Small pure-JS hash (FNV-1a with two seeds → 16 hex chars) for the error_events dedup key.
  *  Deliberately NOT node:crypto: this module is now pulled into the edge bundle by the
  *  instrumentation onRequestError hook, and node: URIs don't bundle for edge. The key only
  *  needs to be stable + unique-ish — a rare collision merely merges two rows in the ops log. */
@@ -20,7 +20,7 @@ function dedupKey(s: string): string {
 /**
  * Report a background / best-effort failure that must NOT surface to the user but
  * also must not vanish silently. Sends it to (1) the server console and (2) our OWN
- * sentry_events table so the errors are a queryable ops log the operator + Claude triage
+ * error_events table so the errors are a queryable ops log the operator + Claude triage
  * each session. Never throws — observability must never break the caller.
  */
 export function reportError(where: string, e: unknown, extra?: Record<string, unknown>): void {
@@ -32,7 +32,7 @@ export function reportError(where: string, e: unknown, extra?: Record<string, un
   }
 }
 
-/** Fire-and-forget upsert into sentry_events, deduped by a hash of where+message. */
+/** Fire-and-forget upsert into error_events, deduped by a hash of where+message. */
 function logToDb(where: string, e: unknown, extra?: Record<string, unknown>): void {
   try {
     const message = (e instanceof Error ? e.message : String(e ?? "")).slice(0, 500);

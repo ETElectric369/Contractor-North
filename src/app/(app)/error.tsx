@@ -10,7 +10,7 @@ import { reportClientError } from "@/app/report-client-error";
  *  shows this recoverable card in the content area while the dock, topbar, and back nav stay
  *  alive — instead of bubbling to the root boundary that replaced the entire shell (the
  *  "back button doesn't work / can't tap the menu" symptom). Also reports the crash to our
- *  sentry_events sink so it stops being invisible. NOTE: this does NOT catch a throw in the
+ *  error_events sink so it stops being invisible. NOTE: this does NOT catch a throw in the
  *  (app) LAYOUT itself (a segment boundary can't catch its own layout) — that's why the
  *  layout guards its own awaits directly. */
 export default function AppError({

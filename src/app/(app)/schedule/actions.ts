@@ -344,7 +344,7 @@ export async function setJobScheduleRanges(
 
   // Live Google push — THE choke point covers every schedule writer (movers,
   // tray place, undo, registry verb, schedule control). Fire-safe: a Google
-  // failure reports to sentry_events and never fails the schedule write.
+  // failure reports to error_events and never fails the schedule write.
   // Awaited (not `void`) — serverless can drop an un-awaited promise.
   await pushCalendarItem("job", jobId);
 

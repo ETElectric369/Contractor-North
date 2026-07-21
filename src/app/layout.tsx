@@ -48,7 +48,7 @@ export default function RootLayout({
             history exists (root layout = never unmounts, covers /print too). */}
         <BackLinkTracker />
         {/* Core Web Vitals (LCP/CLS/INP) — Pro Speed Insights. Ranks the public marketing
-            sites for local SEO and surfaces slow routes now that Sentry perf tracing is gone. */}
+            sites for local SEO and surfaces slow routes. */}
         <SpeedInsights />
       </body>
     </html>

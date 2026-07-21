@@ -77,14 +77,14 @@ d("RLS multi-tenant isolation invariant", () => {
     // user, so ONLY the service role (which bypasses RLS) can touch them. That's the CORRECT,
     // secure config for these — written by the server, never read by a client:
     //   rate_limits      — the Postgres rate-limit counters (rate_limit_hit/gc RPCs only)
-    //   sentry_events    — the ops error sink (reportError → record_app_error RPC only; Claude queries it)
+    //   error_events     — the ops error sink (reportError → record_app_error RPC only; Claude queries it)
     //   signup_allowlist — the invite-only gate (migration 0125): read ONLY by the SECURITY
     //                      DEFINER signup trigger + signup_allowed(); written only by the
     //                      service role (Erik's approvals, createEmployee/importCrew pre-approve).
     //                      Client-invisible BY DESIGN — this was the "CI: All jobs have failed"
     //                      email flood from cn-v493 onward.
     // The invariant catches a table ACCIDENTALLY left policy-less; these are deliberate.
-    const SERVER_ONLY = new Set(["rate_limits", "sentry_events", "signup_allowlist"]);
+    const SERVER_ONLY = new Set(["rate_limits", "error_events", "signup_allowlist"]);
     const { rows } = await client.query(`
       select c.relname as tbl
       from pg_class c join pg_namespace n on n.oid=c.relnamespace

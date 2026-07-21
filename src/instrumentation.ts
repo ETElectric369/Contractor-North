@@ -1,6 +1,6 @@
 /**
  * Next 15 instrumentation. Next forwards every server-side request error here (RSC render
- * throws incl. their `digest`, server actions, route handlers). We log it to OUR sentry_events
+ * throws incl. their `digest`, server actions, route handlers). We log it to OUR error_events
  * table — a queryable ops log the operator + Claude triage each session (no external service).
  * observe is imported lazily + guarded so a capture failure (e.g. under the edge runtime) can
  * never break the request itself.
