@@ -129,6 +129,10 @@ export async function markInquiryContacted(id: string, nextFollowUp?: string | n
   const { error } = await supabase.from("inquiries").update(patch).eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/leads");
+  // My Day's "Needs action" inbox lists open leads — mark-contacted from THERE (Alexa
+  // 2026-07-20: "checking the box resets") needs the planner to re-fetch too, else the
+  // lead reappears un-contacted. The My-Day-refresh law.
+  revalidatePath("/planner");
   return { ok: true };
 }
 

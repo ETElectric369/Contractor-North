@@ -2,13 +2,13 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
-import { Plus, Pencil } from "lucide-react";
+import { Plus, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { useToast } from "@/components/toast";
 import { useDraft } from "@/lib/use-draft";
 import { InquiryFields, inquiryFormValue } from "./inquiry-fields";
-import { createInquiry, updateInquiry } from "./actions";
+import { createInquiry, updateInquiry, deleteInquiry } from "./actions";
 import type { Inquiry } from "@/lib/types";
 
 // The leads page mounts the "new" button TWICE (header + empty state); only the
@@ -20,6 +20,7 @@ export function InquiryModal({ inquiry, mode = "new" }: { inquiry?: Inquiry; mod
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const [confirmDel, setConfirmDel] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
   const pathname = usePathname();
@@ -66,6 +67,7 @@ export function InquiryModal({ inquiry, mode = "new" }: { inquiry?: Inquiry; mod
   }, [searchParams, pathname, router, editing]);
 
   function openModal() {
+    setConfirmDel(false);
     if (draft.restored && dirty) toast("Draft restored — pick up where you left off", "info");
     setOpen(true);
   }
@@ -131,6 +133,31 @@ export function InquiryModal({ inquiry, mode = "new" }: { inquiry?: Inquiry; mod
               submit
               saving={pending}
               saveLabel={editing ? "Save Changes" : "Create Lead"}
+              // Delete lives on the EDIT lead (Alexa 2026-07-20: "how to delete leads?" —
+              // the action existed but had no button). Two-tap confirm so a stray tap can't
+              // drop a lead; deleteInquiry revalidates /leads + /planner.
+              extra={
+                editing ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={confirmDel ? "destructive" : "outline"}
+                    disabled={pending}
+                    onClick={() => {
+                      if (!confirmDel) { setConfirmDel(true); return; }
+                      start(async () => {
+                        const res = await deleteInquiry(inquiry!.id);
+                        if (!res.ok) { setError(res.error ?? "Couldn't delete."); setConfirmDel(false); return; }
+                        toast("Lead deleted.", "success");
+                        setOpen(false);
+                        router.refresh();
+                      });
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4" /> {confirmDel ? "Tap to confirm" : "Delete"}
+                  </Button>
+                ) : undefined
+              }
             />
           }
         >
