@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Cloud, MapPin, MapPinOff } from "lucide-react";
-import { loadGoogleMaps } from "@/lib/google-maps";
 import { geoPermission, getPosition, lastFix, type GeoCoords } from "@/lib/geo";
 import { reportClientError } from "@/app/report-client-error";
 
@@ -80,10 +79,8 @@ export function WeatherWidget({
     async (coords: GeoCoords): Promise<boolean> => {
       if (!key) return false;
       try {
-        const url =
-          `https://weather.googleapis.com/v1/currentConditions:lookup?key=${key}` +
-          `&location.latitude=${coords.lat}&location.longitude=${coords.lng}&unitsSystem=IMPERIAL`;
-        const r = await fetch(url);
+        // Same-origin proxy (server key) — works on any domain, no client key, cached server-side.
+        const r = await fetch(`/api/weather?lat=${coords.lat}&lng=${coords.lng}`);
         if (!r.ok) {
           failCodeRef.current = r.status; // captured so the outage below is diagnosable (403 = referrer block)
           return false;
@@ -114,13 +111,15 @@ export function WeatherWidget({
     let c = readCity(location);
     if (!c) {
       try {
-        await loadGoogleMaps(key);
-        const g = (window as any).google;
-        const res = await new g.maps.Geocoder().geocode({ address: location });
-        const loc = res.results?.[0]?.geometry?.location;
-        if (loc) {
-          c = { lat: loc.lat(), lng: loc.lng() };
-          writeCity(location, c);
+        // Same-origin geocode proxy (server key) instead of loading the Maps JS bundle — works
+        // on any domain and doesn't drag in the whole client library just to resolve a city.
+        const res = await fetch(`/api/geocode?address=${encodeURIComponent(location)}`);
+        if (res.ok) {
+          const g = await res.json();
+          if (typeof g.lat === "number") {
+            c = { lat: g.lat, lng: g.lng };
+            writeCity(location, c);
+          }
         }
       } catch {
         /* fall through */

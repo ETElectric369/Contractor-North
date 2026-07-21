@@ -51,6 +51,14 @@ export function AddressAutocomplete({
   // first real edit so typing behaves exactly as before.
   const seeded = useRef((defaultValue ?? "").trim());
   const boxRef = useRef<HTMLDivElement>(null);
+  // Places session token: threads a whole type-then-pick sequence into ONE billed Places
+  // session (keystrokes + the final details lookup), instead of Google billing each call
+  // separately. Generated on the first keystroke of a search, reset after a selection.
+  const sessionRef = useRef<string>("");
+  const ensureSession = () => {
+    if (!sessionRef.current && typeof crypto !== "undefined" && crypto.randomUUID) sessionRef.current = crypto.randomUUID();
+    return sessionRef.current;
+  };
 
   // Surface the current text to the parent (typing + selection).
   useEffect(() => {
@@ -79,7 +87,7 @@ export function AddressAutocomplete({
           method: "POST",
           signal: ctrl.signal,
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ input: q }),
+          body: JSON.stringify({ input: q, sessionToken: ensureSession() }),
         });
         if (!res.ok) return;
         const data = await res.json();
@@ -114,8 +122,12 @@ export function AddressAutocomplete({
     setOpen(false);
     setSuggestions([]);
     if (!key) return;
+    const token = sessionRef.current;
+    sessionRef.current = ""; // the pick ends the billed session; the next search starts a new one
     try {
-      const res = await fetch(`/api/places?placeId=${encodeURIComponent(s.placeId)}`);
+      const res = await fetch(
+        `/api/places?placeId=${encodeURIComponent(s.placeId)}${token ? `&sessionToken=${encodeURIComponent(token)}` : ""}`,
+      );
       const place = res.ok ? await res.json() : {};
       const comps: any[] = place.addressComponents ?? [];
       const get = (type: string, short = false) => {
