@@ -6,6 +6,13 @@
 alter table if exists public.sentry_events rename to error_events;
 alter index if exists sentry_events_issue_uidx rename to error_events_issue_uidx;
 alter index if exists sentry_events_recent_idx rename to error_events_recent_idx;
+-- The PK constraint (+ its backing index) keeps the old name after a table rename; rename it too so
+-- no "sentry" fossil survives. Guarded so the whole file stays safe to re-run against any DB state.
+do $$ begin
+  if exists (select 1 from pg_constraint where conname = 'sentry_events_pkey') then
+    alter table public.error_events rename constraint sentry_events_pkey to error_events_pkey;
+  end if;
+end $$;
 
 -- record_app_error keeps its (already-fine) name but must insert into the renamed table. The
 -- ON CONFLICT DO UPDATE qualifies the target by table name, so it has to be re-stated here — a
