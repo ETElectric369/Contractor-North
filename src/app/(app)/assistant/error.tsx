@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { AlertTriangle } from "lucide-react";
 import { reportClientError } from "@/app/report-client-error";
+import { recoverFromChunkError } from "@/lib/chunk-reload";
 
 /** Segment error boundary for the assistant. A render crash anywhere in the chat / Estimator
  *  now shows this graceful fallback (with a reset) instead of blanking the whole app. The crash
@@ -15,6 +16,7 @@ export default function AssistantError({
   reset: () => void;
 }) {
   useEffect(() => {
+    if (recoverFromChunkError(error)) return; // stale Estimator/chat chunk after a deploy → reload fresh
     // Surface it in the console too, alongside the error_events forward below.
     console.error("Assistant crashed:", error);
     void reportClientError("assistant-boundary", error?.message ?? String(error), {

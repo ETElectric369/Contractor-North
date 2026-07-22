@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { reportClientError } from "@/app/report-client-error";
+import { recoverFromChunkError } from "@/lib/chunk-reload";
 
 /** Catches errors thrown in the root layout itself. Must render <html>/<body>. */
 export default function GlobalError({
@@ -12,6 +13,7 @@ export default function GlobalError({
   reset: () => void;
 }) {
   useEffect(() => {
+    if (recoverFromChunkError(error)) return; // stale chunk after a deploy → reload into the fresh build
     console.error(error);
     void reportClientError("global-error", error?.message ?? String(error), {
       digest: error?.digest,

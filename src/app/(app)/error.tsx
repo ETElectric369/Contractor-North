@@ -5,6 +5,7 @@ import Link from "next/link";
 import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { reportClientError } from "@/app/report-client-error";
+import { recoverFromChunkError } from "@/lib/chunk-reload";
 
 /** Segment error boundary for the whole (app) shell. A render crash in any (app) PAGE now
  *  shows this recoverable card in the content area while the dock, topbar, and back nav stay
@@ -21,6 +22,9 @@ export default function AppError({
   reset: () => void;
 }) {
   useEffect(() => {
+    // A tab left open across a deploy → silently reload into the fresh build instead of
+    // showing this card (and don't log the benign stale-chunk error).
+    if (recoverFromChunkError(error)) return;
     console.error(error);
     void reportClientError("app-boundary", error?.message ?? String(error), {
       digest: error?.digest,
