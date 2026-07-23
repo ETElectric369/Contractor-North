@@ -8,6 +8,7 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { drivingDistanceMiles } from "@/lib/google-maps";
+import { autoLunchMinutes } from "@/lib/lunch-rule";
 import { createManualEntry } from "../../timeclock/actions";
 import type { JobCode } from "@/lib/types";
 
@@ -64,11 +65,6 @@ export function JobAddTimeEntry({
   const [profileId, setProfileId] = useState(defaultProfileId);
   const [jobCode, setJobCode] = useState("");
   const [rate, setRate] = useState(0); // 0 = use the employee's default rate
-  // Default to "taken" so a normal workday entry saves in one tap; uncheck if the
-  // person actually skipped them. (Unchecked-by-default silently blocked saves on
-  // any shift over 5 hrs — same fix the timeclock add-entry form already has.)
-  const [lunchTaken, setLunchTaken] = useState(true);
-  const [breaksTaken, setBreaksTaken] = useState(true);
   const [notes, setNotes] = useState("");
 
   // Mileage origin: the selected employee's home address if set, else the company address.
@@ -90,9 +86,9 @@ export function JobAddTimeEntry({
     if (isNaN(ci.getTime()) || isNaN(co.getTime()) || co <= ci) return 0;
     return (co.getTime() - ci.getTime()) / 3_600_000;
   })();
-  const lunchRequired = grossHrs > 5;
-  const breaksRequired = grossHrs > 3.5;
-  const twoBreaks = grossHrs > 5;
+  // Lunch is AUTOMATIC (>5h ⇒ 30 min, the shared rule) — shown as a note, applied by
+  // the server (lunch_minutes omitted below).
+  const autoLunch = autoLunchMinutes(grossHrs);
 
   function save() {
     setError(null);
@@ -100,8 +96,6 @@ export function JobAddTimeEntry({
     const co = new Date(`${date}T${endT}:00`);
     if (isNaN(ci.getTime()) || isNaN(co.getTime())) return setError("Invalid date/time.");
     if (co <= ci) return setError("End must be after start.");
-    if (lunchRequired && !lunchTaken) return setError("Confirm the 30-minute lunch — required for shifts over 5 hours.");
-    if (breaksRequired && !breaksTaken) return setError("Confirm the rest break(s) — required by labor law.");
     start(async () => {
       const res = await createManualEntry({
         profile_id: profileId,
@@ -109,7 +103,7 @@ export function JobAddTimeEntry({
         clock_out: co.toISOString(),
         job_id: jobId,
         job_code: jobCode || null,
-        lunch_minutes: lunchTaken ? 30 : 0,
+        // Omitted → the server's auto-lunch rule decides (>5h ⇒ 30 min).
         notes,
         miles,
         rate_override: rate > 0 ? rate : null,
@@ -202,14 +196,11 @@ export function JobAddTimeEntry({
               )}
             </div>
           </div>
-          <label className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${lunchRequired && !lunchTaken ? "border-amber-300 bg-amber-50" : "border-slate-200"}`}>
-            <input type="checkbox" checked={lunchTaken} onChange={(e) => setLunchTaken(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand" />
-            <span className="text-slate-700">Took a 30-minute lunch{lunchRequired ? <span className="font-medium text-amber-700"> · required (over 5 hrs)</span> : null}</span>
-          </label>
-          <label className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${breaksRequired && !breaksTaken ? "border-amber-300 bg-amber-50" : "border-slate-200"}`}>
-            <input type="checkbox" checked={breaksTaken} onChange={(e) => setBreaksTaken(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand" />
-            <span className="text-slate-700">Took {twoBreaks ? "two 10-minute rest breaks" : "a 10-minute rest break"}{breaksRequired ? <span className="font-medium text-amber-700"> · required</span> : null}</span>
-          </label>
+          {autoLunch > 0 && (
+            <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+              Over 5 hours — a 30-minute unpaid lunch is deducted automatically. Adjust it on the entry afterwards if needed.
+            </p>
+          )}
           <div>
             <Label htmlFor="at-notes">Notes</Label>
             <Textarea id="at-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />

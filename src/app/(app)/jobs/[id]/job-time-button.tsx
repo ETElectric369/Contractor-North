@@ -151,7 +151,7 @@ export function JobTimeButton({
         hours,
         job_id: jobId,
         job_code: null,
-        lunch_minutes: 0,
+        // lunch omitted → the server's auto rule decides, same as every other entry door
         notes: "",
       }),
     );

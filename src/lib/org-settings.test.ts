@@ -11,7 +11,8 @@ describe("timeclock_job_codes default", () => {
     expect(getOrgSettings(undefined).timeclock_job_codes).toBe(true);
     expect(getOrgSettings(null).timeclock_job_codes).toBe(true);
     expect(getOrgSettings({}).timeclock_job_codes).toBe(true);
-    expect(getOrgSettings({ auto_lunch_30: true }).timeclock_job_codes).toBe(true);
+    // a stored-but-retired key (auto_lunch_30 era) must not disturb defaults
+    expect(getOrgSettings({ auto_lunch_30: true } as Record<string, unknown>).timeclock_job_codes).toBe(true);
   });
 
   it("honors an explicit stored choice", () => {

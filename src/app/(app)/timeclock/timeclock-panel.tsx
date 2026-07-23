@@ -20,6 +20,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { hoursBetween, formatDuration, formatFullAddress } from "@/lib/utils";
+import { autoLunchMinutes } from "@/lib/lunch-rule";
 import { jobLabel, jobSiteLabel } from "@/lib/schedule-options";
 import { translator } from "@/lib/i18n";
 import { drivingDistanceMiles } from "@/lib/google-maps";
@@ -102,7 +103,6 @@ export function TimeclockPanel({
   jobCodes,
   jobs,
   lang,
-  autoLunch = false,
   homeAddress = "",
   isStaff = true,
   crewLead = false,
@@ -113,7 +113,6 @@ export function TimeclockPanel({
   jobCodes: JobCode[];
   jobs: JobOption[];
   lang?: string;
-  autoLunch?: boolean;
   homeAddress?: string;
   isStaff?: boolean;
   /** Crew leads (any role) get the Nort end-of-day debrief after clocking out. */
@@ -149,7 +148,6 @@ export function TimeclockPanel({
   const [startAt, setStartAt] = useState(""); // "" = now; otherwise a chosen ISO
 
   // clock-out form
-  const [lunchTaken, setLunchTaken] = useState(false);
   const [notes, setNotes] = useState(openEntry?.notes ?? "");
   // Last notes value the server has — the debounced mid-shift autosave only fires
   // when the textarea actually moved past this.
@@ -169,9 +167,6 @@ export function TimeclockPanel({
   const [switchJobId, setSwitchJobId] = useState("");
   const [switchJobCode, setSwitchJobCode] = useState("");
   const [switchPending, startSwitch] = useTransition();
-
-  // labor-law break confirmation
-  const [breaksTaken, setBreaksTaken] = useState(false);
 
   function addAlloc() {
     setAllocsDirty(true);
@@ -314,18 +309,11 @@ export function TimeclockPanel({
     });
   }
 
-  // Labor-law break logic (gross hours worked, ignoring lunch deduction).
+  // Lunch is AUTOMATIC (Erik 2026-07-22: no more took-a-lunch/breaks checkboxes) — the
+  // ONE rule (>5 gross hrs ⇒ 30 min unpaid) drives the live display here; the server
+  // applies the same rule at the punch, so the numbers match.
   const grossElapsed = openEntry ? hoursBetween(openEntry.clock_in, new Date(now), 0) : 0;
-  const lunchToUse = lunchTaken ? 30 : 0;
-  const requiredMeal = grossElapsed > 5;
-  const breaksRequired = grossElapsed > 3.5;
-  const twoBreaks = grossElapsed > 5;
-  const breaksOk = (!requiredMeal || lunchTaken) && (!breaksRequired || breaksTaken);
-
-  // If the org auto-applies a 30-min lunch, pre-check it on long shifts.
-  useEffect(() => {
-    if (autoLunch && requiredMeal) setLunchTaken(true);
-  }, [autoLunch, requiredMeal]);
+  const lunchToUse = autoLunchMinutes(grossElapsed);
 
   // The everyday-case row used to be computed ONCE (at mount) and go stale — by
   // clock-out time the numbers didn't match the shift and the row rendered a
@@ -434,26 +422,23 @@ export function TimeclockPanel({
     });
   }
 
-  // ONE clock-out for both doors. withDetails=false is the big one-tap button (every
-  // role): lunch is sent as null — "wasn't asked" — so the server's auto-lunch (>5h ⇒
-  // 30 min) decides, exactly like a tech's punch. withDetails=true is the questionnaire's
-  // "Confirm & clock out": its lunch answer is explicit and honored. Either way the
-  // seeded allocation rows ride along, so a mid-shift switchJob split round-trips.
-  function doClockOut(withDetails: boolean) {
+  // ONE clock-out for both doors — the one-tap button AND the details questionnaire
+  // send the identical payload: lunch is null ("wasn't asked") and the server's
+  // auto-lunch (>5h ⇒ 30 min) is the single source of truth; the questionnaire no
+  // longer has a lunch answer to give (Erik 2026-07-22 — corrections live on
+  // Timecards). Either way the seeded allocation rows ride along, so a mid-shift
+  // switchJob split round-trips.
+  function doClockOut() {
     if (!openEntry) return;
     setError(null);
     start(async () => {
       // Same short GPS cap as clock-in — the button used to sit disabled and
       // silent for up to the full 8s highAccuracy round-trip.
       const gps = await getGps(3000);
-      // The lunch the server will deduct: the questionnaire's answer when asked, else
-      // the same >5h ⇒ 30 min rule clockOut auto-applies to an unasked punch — so the
-      // live row below nets out to the exact paid hours either way.
-      const punchLunch = withDetails
-        ? lunchToUse
-        : hoursBetween(openEntry.clock_in, new Date(), 0) > 5
-          ? 30
-          : 0;
+      // The lunch the server will deduct — the same auto rule clockOut applies to every
+      // punch (no questionnaire answer exists anymore) — so the live row below nets out
+      // to the exact paid hours.
+      const punchLunch = autoLunchMinutes(hoursBetween(openEntry.clock_in, new Date(), 0));
       // Recompute the live row's hours AT THE PUNCH (net of lunch, exact) — the
       // displayed h/m round to the minute, and the old mount-time seed went stale.
       let rows = allocations;
@@ -471,7 +456,9 @@ export function TimeclockPanel({
       try {
         const res = await clockOut({
           entry_id: openEntry.id,
-          lunch_minutes: withDetails ? lunchToUse : null,
+          // null = "wasn't asked" for BOTH doors — the server's auto-lunch is the one
+          // source of truth, immune to a client/server >5h race at the boundary.
+          lunch_minutes: null,
           notes,
           gps,
           miles,
@@ -514,7 +501,7 @@ export function TimeclockPanel({
       try {
         const res = await clockOut({
           entry_id: openEntry.id,
-          lunch_minutes: lunchToUse,
+          lunch_minutes: null, // server auto-lunch decides — same as every other punch
           notes,
           gps,
           miles,
@@ -597,7 +584,7 @@ export function TimeclockPanel({
                 variant="destructive"
                 size="lg"
                 className="w-full"
-                onClick={() => doClockOut(false)}
+                onClick={() => doClockOut()}
                 disabled={pending || switchPending}
               >
                 {pending ? (
@@ -711,16 +698,14 @@ export function TimeclockPanel({
                 <p className="mt-0.5 text-xs text-slate-500">You worked {formatDuration(elapsed)}. Break it down below, then clock out.</p>
               </div>
 
-          <label className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm ${requiredMeal && !lunchTaken ? "border-amber-300 bg-amber-50" : "border-slate-200"}`}>
-            <input type="checkbox" checked={lunchTaken} onChange={(e) => setLunchTaken(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand" />
-            <Coffee className="h-4 w-4 text-slate-400" />
-            <span className="text-slate-700">Took a 30-minute lunch{requiredMeal ? <span className="font-medium text-amber-700"> · required (over 5 hrs)</span> : null}</span>
-          </label>
-          <label className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm ${breaksRequired && !breaksTaken ? "border-amber-300 bg-amber-50" : "border-slate-200"}`}>
-            <input type="checkbox" checked={breaksTaken} onChange={(e) => setBreaksTaken(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand" />
-            <Coffee className="h-4 w-4 text-slate-400" />
-            <span className="text-slate-700">Took {twoBreaks ? "two 10-minute rest breaks" : "a 10-minute rest break"}{breaksRequired ? <span className="font-medium text-amber-700"> · required</span> : null}</span>
-          </label>
+          {/* Lunch is automatic — the checkboxes are gone by design (Erik 2026-07-22).
+              Say what will happen so the deduction is never a surprise. */}
+          {lunchToUse > 0 && (
+            <p className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-600">
+              <Coffee className="h-4 w-4 shrink-0 text-slate-400" />
+              Over 5 hours — a 30-minute unpaid lunch is deducted automatically.
+            </p>
+          )}
 
           {/* Jobs worked today — the PRIMARY clock-out question: which code(s) + hours.
               This is the wrong-hours-on-wrong-jobs fix; required for the field crew. */}
@@ -879,12 +864,6 @@ export function TimeclockPanel({
           </div>
 
               {error && <p className="text-sm text-red-600">{error}</p>}
-              {/* Say WHY the button is disabled — it used to just sit grey. */}
-              {!breaksOk && (
-                <p className="text-center text-xs font-medium text-amber-600">
-                  Confirm your break(s) above to clock out.
-                </p>
-              )}
 
               <div className="flex gap-2">
                 <Button variant="outline" size="lg" onClick={() => setClockingOut(false)} disabled={pending}>
@@ -894,8 +873,8 @@ export function TimeclockPanel({
                   variant="destructive"
                   size="lg"
                   className="flex-1"
-                  onClick={() => doClockOut(true)}
-                  disabled={pending || !breaksOk}
+                  onClick={() => doClockOut()}
+                  disabled={pending}
                 >
                   {pending ? (
                     <>

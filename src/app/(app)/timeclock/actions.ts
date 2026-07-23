@@ -7,6 +7,7 @@ import { visibleJobIdOrNull } from "@/lib/job-visibility";
 import { requireStaff } from "@/lib/staff-guard";
 import { ACTIVE_JOB_STATUSES, pickJobScheduledToday } from "@/lib/job-status";
 import { hoursBetween } from "@/lib/utils";
+import { autoLunchMinutes } from "@/lib/lunch-rule";
 import { getOrgSettings } from "@/lib/org-settings";
 import { tzDateTimeUtc, todayBoundsInTz } from "@/lib/tz";
 import { createNotifications } from "@/lib/notifications";
@@ -384,11 +385,11 @@ export async function clockOut(input: {
   // auto-lunch, and the allocation clamp below.
   const { data: entRow } = await supabase
     .from("time_entries")
-    .select("clock_in, job_id, job_code")
+    .select("clock_in, job_id, job_code, lunch_minutes")
     .eq("id", input.entry_id)
     .eq("profile_id", user.id)
     .maybeSingle();
-  const ent = entRow as { clock_in?: string; job_id?: string | null; job_code?: string | null } | null;
+  const ent = entRow as { clock_in?: string; job_id?: string | null; job_code?: string | null; lunch_minutes?: number | null } | null;
   const entClockIn = ent?.clock_in ?? null;
 
   // The entry's ALREADY-RECORDED segments (switchJob writes one per mid-shift switch).
@@ -417,18 +418,18 @@ export async function clockOut(input: {
     }
   }
 
-  // Auto-lunch (Erik: "automatically deduct lunch"): the one-tap clock-out asks no lunch
-  // question — and that's now EVERY role's default, not just a tech's (Erik clocks
-  // himself and wants the same automation) — so a shift over 5 GROSS hours deducts the
-  // 30-minute meal when the caller sent no explicit lunch figure. An explicit answer
-  // (the "Clock out with details" questionnaire, voice "I took an hour") is honored —
-  // though a tech's is still floored at the 30-minute legal meal, unchanged. The
-  // geofence auto-close (input.auto) keeps its after-the-fact flow exactly as-is —
-  // completeAutoClockOut owns lunch there, and it can only reduce hours.
+  // Auto-lunch (Erik 2026-07-22: no checkboxes anywhere — deduct automatically): EVERY
+  // close applies the rule, INCLUDING the auto ones (geofence / "break it down later").
+  // The old `!input.auto` gate deferred those to the after-the-fact prompt's lunch
+  // question — which no longer exists — so without this an auto-closed >5h shift paid
+  // (and billed) gross with no recovery path. Unasked lunch also PRESERVES a lunch
+  // already set on the open row (e.g. an office fixEntry "his lunch was 45") as the
+  // floor instead of discarding it. An explicit answer (voice "I took an hour") is
+  // honored — though a tech's is still floored at the 30-minute legal meal, unchanged.
   // NaN (a garbage crafted value) counts as NOT asked — the old `|| 0` coercion, kept.
   const lunchAsked = input.lunch_minutes != null && Number.isFinite(input.lunch_minutes);
-  let lunchMinutes = lunchAsked ? (input.lunch_minutes as number) : 0;
-  if (!input.auto && entClockIn) {
+  let lunchMinutes = lunchAsked ? (input.lunch_minutes as number) : Math.max(0, Number(ent?.lunch_minutes) || 0);
+  if (entClockIn) {
     const gross = hoursBetween(entClockIn, clockOutIso, 0);
     if (gross > 5 && (!lunchAsked || !isStaff)) lunchMinutes = Math.max(lunchMinutes, 30);
   }
@@ -665,7 +666,11 @@ export async function geoClockOut(gps: GeoPoint | null, atIso: string): Promise<
     .eq("time_entry_id", (open as any).id);
   return clockOut({
     entry_id: (open as any).id,
-    lunch_minutes: (open as any).lunch_minutes ?? 0,
+    // null = "wasn't asked" → clockOut's auto-lunch (>5h ⇒ 30) applies for EVERY role.
+    // The old explicit 0 counted as an answer, so a STAFF geofence close skipped the
+    // auto-deduct and /timeclock had to ask "took a lunch?" after the fact — the
+    // checkbox Erik ordered removed (2026-07-22). Now the close itself deducts.
+    lunch_minutes: null,
     notes: (open as any).notes ?? "",
     gps,
     auto: true,
@@ -780,7 +785,9 @@ export async function createManualEntry(input: {
   hours?: number; // explicit, user-stated worked hours (duration shape)
   job_id: string | null;
   job_code: string | null;
-  lunch_minutes: number;
+  /** null/undefined = "wasn't stated" → the auto-lunch rule decides (>5h ⇒ 30 min),
+   *  same semantics as clockOut. An explicit number (a Nort/registry correction) is honored. */
+  lunch_minutes?: number | null;
   notes: string;
   miles?: number;
   rate_override?: number | null;
@@ -793,13 +800,18 @@ export async function createManualEntry(input: {
   let clockIn = input.clock_in;
   let clockOut = input.clock_out;
   let notes = input.notes;
+  // Lunch: an explicit number is honored; unstated → the auto rule. For the duration
+  // shape the rule reads the STATED net hours (net > 5 ⇒ gross certainly > 5); for the
+  // times shape it reads the gross span, resolved after the span is known (below).
+  let lunchMin = input.lunch_minutes ?? null;
   if ((!clockIn || !clockOut) && input.work_date && input.hours != null) {
     if (!(input.hours > 0 && input.hours <= 24)) return { ok: false, error: "Hours must be between 0 and 24." };
+    if (lunchMin == null) lunchMin = autoLunchMinutes(input.hours);
     // Center the span on midday in the ORG tz; add the unpaid lunch to the span so the
     // net paid hours come out exactly as stated (payroll deducts lunch from the span).
     const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
     const tz = getOrgSettings((org as { settings?: unknown } | null)?.settings).timezone;
-    const spanMin = Math.round(input.hours * 60) + (input.lunch_minutes || 0);
+    const spanMin = Math.round(input.hours * 60) + (lunchMin || 0);
     const startMin = Math.max(0, 12 * 60 - Math.round(spanMin / 2));
     const hh = String(Math.floor(startMin / 60)).padStart(2, "0");
     const mm = String(startMin % 60).padStart(2, "0");
@@ -818,6 +830,8 @@ export async function createManualEntry(input: {
     return { ok: false, error: "Invalid date/time." };
   }
   if (co <= ci) return { ok: false, error: "End must be after start." };
+  // Times shape, lunch unstated → the auto rule from the gross span.
+  if (lunchMin == null) lunchMin = autoLunchMinutes(hoursBetween(ci.toISOString(), co.toISOString(), 0));
 
   // Drop a job_id the caller can't see (e.g. a crafted voice/registry call) — never
   // persist a cross-org job reference.
@@ -829,7 +843,7 @@ export async function createManualEntry(input: {
     job_code: input.job_code,
     clock_in: ci.toISOString(),
     clock_out: co.toISOString(),
-    lunch_minutes: input.lunch_minutes || 0,
+    lunch_minutes: lunchMin || 0,
     notes: notes || null,
     miles: input.miles ?? 0,
     rate_override: input.rate_override ?? null,

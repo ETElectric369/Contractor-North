@@ -478,7 +478,6 @@ export default async function TimeclockPage() {
             jobCodes={(codesRes.data ?? []) as JobCode[]}
             jobs={jobOptions}
             lang={lang}
-            autoLunch={orgSettings.auto_lunch_30}
             homeAddress={(prof as any)?.home_address ?? ""}
             isStaff={isStaff}
             crewLead={crewLead}

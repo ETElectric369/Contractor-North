@@ -9,6 +9,7 @@ import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { createManualEntry } from "./actions";
 import { buildShiftSpan, spanGrossHours } from "./shift-span";
+import { autoLunchMinutes } from "@/lib/lunch-rule";
 import { todayStrInTz } from "@/lib/tz";
 import type { JobCode } from "@/lib/types";
 import { jobLabel, jobSiteLabel } from "@/lib/schedule-options";
@@ -66,11 +67,6 @@ export function AddEntryButton({
   const [endDate, setEndDate] = useState(today);
   const [jobId, setJobId] = useState("");
   const [jobCode, setJobCode] = useState("");
-  // Default to "taken" so a normal workday entry saves in one tap; uncheck if
-  // the person actually skipped them. (Unchecked-by-default was silently
-  // blocking saves on any shift over 5 hrs.)
-  const [lunchTaken, setLunchTaken] = useState(true);
-  const [breaksTaken, setBreaksTaken] = useState(true);
   const [miles, setMiles] = useState(0);
   const [rate, setRate] = useState(0);
   const [notes, setNotes] = useState("");
@@ -90,9 +86,9 @@ export function AddEntryButton({
   // the End date field. The derivation is a fallback only when the two dates match.
   const span = buildShiftSpan(date, startT, endT, endDate);
   const grossHrs = spanGrossHours(span);
-  const lunchRequired = grossHrs > 5;
-  const breaksRequired = grossHrs > 3.5;
-  const twoBreaks = grossHrs > 5;
+  // Lunch is AUTOMATIC (>5h ⇒ 30 min, the shared rule) — shown as a note, applied by the
+  // server (lunch_minutes omitted below). Corrections happen on the entry afterwards.
+  const autoLunch = autoLunchMinutes(grossHrs);
 
   function submit() {
     setError(null);
@@ -107,14 +103,6 @@ export function AddEntryButton({
       setError("End time must be after start time.");
       return;
     }
-    if (lunchRequired && !lunchTaken) {
-      setError("Confirm the 30-minute lunch — it's required for shifts over 5 hours.");
-      return;
-    }
-    if (breaksRequired && !breaksTaken) {
-      setError("Confirm the rest break(s) — required by labor law.");
-      return;
-    }
     start(async () => {
       const res = await createManualEntry({
         profile_id: member,
@@ -122,7 +110,7 @@ export function AddEntryButton({
         clock_out: clockOut.toISOString(),
         job_id: jobId || null,
         job_code: jobCode || null,
-        lunch_minutes: lunchTaken ? 30 : 0,
+        // Omitted → the server's auto-lunch rule decides (>5h ⇒ 30 min).
         notes,
         miles,
         // Blank/0 ⇒ default rate; a positive number sets a per-entry override.
@@ -241,14 +229,11 @@ export function AddEntryButton({
               {`That's ${person?.full_name ?? "this person"}'s bill rate (what customers are charged)${baseRate > 0 ? ` — their pay rate is $${baseRate.toFixed(2)}/hr.` : "."}`}
             </div>
           )}
-          <label className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${lunchRequired && !lunchTaken ? "border-amber-300 bg-amber-50" : "border-slate-200"}`}>
-            <input type="checkbox" checked={lunchTaken} onChange={(e) => setLunchTaken(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand" />
-            <span className="text-slate-700">Took a 30-minute lunch{lunchRequired ? <span className="font-medium text-amber-700"> · required (over 5 hrs)</span> : null}</span>
-          </label>
-          <label className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${breaksRequired && !breaksTaken ? "border-amber-300 bg-amber-50" : "border-slate-200"}`}>
-            <input type="checkbox" checked={breaksTaken} onChange={(e) => setBreaksTaken(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand" />
-            <span className="text-slate-700">Took {twoBreaks ? "two 10-minute rest breaks" : "a 10-minute rest break"}{breaksRequired ? <span className="font-medium text-amber-700"> · required</span> : null}</span>
-          </label>
+          {autoLunch > 0 && (
+            <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+              Over 5 hours — a 30-minute unpaid lunch is deducted automatically. Adjust it on the entry afterwards if needed.
+            </p>
+          )}
 
           <div>
             <Label htmlFor="m-job">Job (optional)</Label>

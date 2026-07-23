@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Select, Input } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { hoursBetween, formatDuration } from "@/lib/utils";
+import { autoLunchMinutes } from "@/lib/lunch-rule";
 import type { JobCode } from "@/lib/types";
 import { completeAutoClockOut } from "./actions";
 import { autoClockoutPromptState } from "./close-math";
@@ -78,16 +79,18 @@ export function AutoClockoutPrompt({
       description: "",
     },
   ]);
-  // In meal-only mode default the meal to TAKEN — the shift is over 5h and the auto-close
-  // deducted none, so a one-tap Save applies the 30-min meal (matching the server's ">5
-  // gross hours ⇒ deduct 30 min" auto-lunch); uncheck only if the tech truly skipped it.
-  // The normal breakdown flow keeps its existing default (whatever lunch is on the entry).
-  const [lunch, setLunch] = useState(entry.lunch_minutes > 0 || mealOnly);
+  // Lunch is AUTOMATIC — no checkbox (Erik 2026-07-22). New auto closes deduct at the
+  // close itself (clockOut's auto-lunch now runs for auto closes too), so
+  // entry.lunch_minutes is already right; the max() is the belt for LEGACY entries
+  // closed before that fix (lunch 0 on a >5h shift) — in both mealOnly and breakdown
+  // mode Save then applies the same rule in ONE pass (equal-or-increase, so the 0143
+  // guard always allows it), instead of a second resurfaced prompt rescaling the split.
+  const lunchMin = Math.max(entry.lunch_minutes, autoLunchMinutes(gross0));
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
   // The number this form is filling: hours worked MINUS what the shift already recorded.
-  const worked = Math.max(0, hoursBetween(entry.clock_in, entry.clock_out, lunch ? 30 : 0) - already);
+  const worked = Math.max(0, hoursBetween(entry.clock_in, entry.clock_out, lunchMin) - already);
   const allocated = allocations.reduce((s, a) => s + (a.hours || 0) + (a.minutes || 0) / 60, 0);
   // Codes off: the split identifies work by the JOB, so a job (not a code) unlocks Save.
   // Meal-only: the hours are already on the entry, so Save just writes the lunch.
@@ -110,7 +113,7 @@ export function AutoClockoutPrompt({
     start(async () => {
       const res = await completeAutoClockOut({
         entry_id: entry.id,
-        lunch_minutes: lunch ? 30 : 0,
+        lunch_minutes: lunchMin,
         allocations: allocations.map((a) => ({
           job_id: a.job_id || null,
           job_code: a.job_code || null,
@@ -134,7 +137,7 @@ export function AutoClockoutPrompt({
             </div>
             <div className="text-xs text-amber-700">
               {mealOnly
-                ? "Your hours are already recorded from switching jobs — just confirm your lunch below so the meal break is deducted."
+                ? "Your hours are already recorded from switching jobs — tap Save and the 30-minute lunch is deducted automatically."
                 : jobCodesEnabled
                   ? "Break down the hours you worked: which code(s) and how long, so they bill to the right job."
                   : "Break down the hours you worked: which job(s) and how long, so they bill to the right job."}
@@ -147,11 +150,12 @@ export function AutoClockoutPrompt({
           </div>
         </div>
 
-        <label className="flex items-center gap-2 rounded-lg border border-amber-200 bg-white/60 px-3 py-2 text-sm">
-          <input type="checkbox" checked={lunch} onChange={(e) => setLunch(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand" />
-          <Coffee className="h-4 w-4 text-slate-400" />
-          <span className="text-slate-700">Took a 30-minute lunch</span>
-        </label>
+        {lunchMin > 0 && (
+          <p className="flex items-center gap-2 rounded-lg border border-amber-200 bg-white/60 px-3 py-2 text-sm text-slate-600">
+            <Coffee className="h-4 w-4 shrink-0 text-slate-400" />
+            A 30-minute unpaid lunch is deducted automatically.
+          </p>
+        )}
 
         {!mealOnly && (
         <div className="space-y-2">

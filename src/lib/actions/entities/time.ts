@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { clockIn, clockOutCurrent, createManualEntry, updateTimeEntry } from "@/app/(app)/timeclock/actions";
+import { hoursBetween } from "@/lib/utils";
+import { autoLunchMinutes } from "@/lib/lunch-rule";
 import { createClient } from "@/lib/supabase/server";
 import { visibleJobIdOrNull } from "@/lib/job-visibility";
 import { resolveJobId, resolveProfileId } from "../resolve-id";
@@ -69,7 +71,9 @@ export const timeActions: Record<string, ActionDef> = {
         hours: z.number().positive().max(24).optional(),
         job_id: z.string().nullable().optional(),
         job_code: z.string().nullable().optional(),
-        lunch_minutes: z.number().optional().default(0),
+        // No .default(0): unstated lunch must reach the server as "wasn't stated" so the
+        // auto rule (>5h ⇒ 30 min) decides; an explicit 0 ("no lunch") is still honored.
+        lunch_minutes: z.number().optional(),
         notes: z.string().optional().default(""),
         miles: z.number().optional(),
       })
@@ -110,7 +114,8 @@ export const timeActions: Record<string, ActionDef> = {
         hours: i.hours,
         job_id: job.id,
         job_code: i.job_code ?? null,
-        lunch_minutes: i.lunch_minutes ?? 0,
+        // Pass "unstated" through as null — createManualEntry's auto rule decides.
+        lunch_minutes: i.lunch_minutes ?? null,
         notes: i.notes ?? "",
         miles: i.miles,
       });
@@ -192,11 +197,23 @@ export const timeActions: Record<string, ActionDef> = {
         if (!visible) return { ok: false, error: "That job isn't available." };
       }
 
+      // Lunch: an explicitly stated number (incl. 0 = "no lunch") is an office correction,
+      // honored. Otherwise preserve a stored 45/60 — never collapse it. And when this call
+      // CLOSES a previously-open entry (the "Brian forgot to clock out" case) with no stored
+      // lunch, apply the SAME auto rule every clock-out door applies (>5h ⇒ 30) — otherwise
+      // office-closed forgotten shifts would systematically pay the meal half-hour.
+      const closingOpenEntry = !e.clock_out && !!clockOut;
+      const lunchMinutes =
+        i.lunch_minutes ??
+        (closingOpenEntry && !(e.lunch_minutes && e.lunch_minutes > 0)
+          ? autoLunchMinutes(hoursBetween(i.clock_in ?? e.clock_in, clockOut, 0))
+          : (e.lunch_minutes ?? 0));
+
       const res = await updateTimeEntry({
         id: i.entry_id,
         clock_in: i.clock_in ?? e.clock_in,
         clock_out: clockOut,
-        lunch_minutes: i.lunch_minutes ?? e.lunch_minutes ?? 0, // preserve a stored 45/60 lunch — never collapse it
+        lunch_minutes: lunchMinutes,
         ...(i.job_id !== undefined ? { job_id: i.job_id } : {}), // omitted = leave the job alone; null clears it
         job_code: e.job_code ?? null,
         notes: e.notes ?? "",

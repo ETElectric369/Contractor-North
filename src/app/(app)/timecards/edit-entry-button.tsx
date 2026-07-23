@@ -111,9 +111,9 @@ export function EditEntryButton({
   const [jobCode, setJobCode] = useState(entry.job_code ?? "");
   // Real lunch MINUTES (not a 30/0 boolean) so editing an unrelated field can't silently
   // collapse a stored 45/60-min lunch down to 30 and mis-state paid hours (the wage bug).
+  // No attestation checkbox anymore (Erik 2026-07-22) — lunch is auto-applied at the punch;
+  // this field exists for OFFICE corrections (worked-through-lunch → 0, long lunch → 60).
   const [lunchMin, setLunchMin] = useState(entry.lunch_minutes ?? 0);
-  const lunchTaken = lunchMin > 0;
-  const [breaksTaken, setBreaksTaken] = useState(true);
   const [miles, setMiles] = useState(entry.miles ?? 0);
   // rate_override is only WRITTEN when the user actually edits the Rate field — an unrelated
   // save must never silently clear a supervisor override back to base pay.
@@ -157,9 +157,6 @@ export function EditEntryButton({
   // (and updateTimeEntry) rejected it with "End must be after start" every time.
   const span = buildShiftSpan(date, startT, endT, endDate);
   const grossHrs = spanGrossHours(span);
-  const lunchRequired = grossHrs > 5;
-  const breaksRequired = grossHrs > 3.5;
-  const twoBreaks = grossHrs > 5;
   const lunchHrs = lunchMin / 60;
   const workedHrs = Math.max(0, grossHrs - lunchHrs); // billable shift = gross minus the real lunch
   const allocated = splits.reduce((s, r) => s + (Number(r.hours) || 0), 0);
@@ -170,8 +167,6 @@ export function EditEntryButton({
     if (!span) return setError("Invalid date/time.");
     const { clockIn: ci, clockOut: co } = span;
     if (co <= ci) return setError("End must be after start.");
-    if (lunchRequired && !lunchTaken) return setError("Confirm the 30-minute lunch — required for shifts over 5 hours.");
-    if (breaksRequired && !breaksTaken) return setError("Confirm the rest break(s) — required by labor law.");
     if (allocated > workedHrs + 0.01) return setError(`Split adds up to ${allocated.toFixed(2)}h — more than the ${workedHrs.toFixed(2)}h worked.`);
     // Each part → an allocation. `job:<id>` bills that time to the job; `code:<code>` tags it
     // with a time code (Drive/Shop/…) and leaves job_id null, so it's PAID but not billed to any
@@ -436,25 +431,19 @@ export function EditEntryButton({
               {`That's ${person?.full_name ?? "this person"}'s bill rate (what customers are charged)${baseRate > 0 ? ` — their pay rate is $${baseRate.toFixed(2)}/hr.` : "."}`}
             </div>
           )}
-          <label className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${lunchRequired && !lunchTaken ? "border-amber-300 bg-amber-50" : "border-slate-200"}`}>
-            <input
-              type="checkbox"
-              checked={lunchTaken}
-              onChange={(e) => setLunchMin(e.target.checked ? Math.max(30, entry.lunch_minutes ?? 30) : 0)}
-              className="h-4 w-4 rounded border-slate-300 text-brand"
-            />
-            <span className="text-slate-700">Took a lunch{lunchRequired ? <span className="font-medium text-amber-700"> · required (over 5 hrs)</span> : null}</span>
-            {lunchTaken && (
-              <span className="ml-auto flex items-center gap-1 text-slate-600">
-                <span className="w-16"><NumberInput value={lunchMin} onValueChange={setLunchMin} step={15} aria-label="Lunch minutes" /></span>
-                min
-              </span>
-            )}
-          </label>
-          <label className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${breaksRequired && !breaksTaken ? "border-amber-300 bg-amber-50" : "border-slate-200"}`}>
-            <input type="checkbox" checked={breaksTaken} onChange={(e) => setBreaksTaken(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand" />
-            <span className="text-slate-700">Took {twoBreaks ? "two 10-minute rest breaks" : "a 10-minute rest break"}{breaksRequired ? <span className="font-medium text-amber-700"> · required</span> : null}</span>
-          </label>
+          {/* No attestation checkboxes (Erik 2026-07-22): lunch is auto-deducted at the
+              punch (>5 hrs ⇒ 30 min); this plain minutes field is the OFFICE correction —
+              0 = worked through lunch (adds paid time), 60 = long lunch, etc. */}
+          <div className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm">
+            <span className="text-slate-700">Unpaid lunch</span>
+            <span className="ml-auto flex items-center gap-1 text-slate-600">
+              <span className="w-16"><NumberInput value={lunchMin} onValueChange={setLunchMin} step={15} aria-label="Lunch minutes" /></span>
+              min
+            </span>
+          </div>
+          <p className="text-xs text-slate-400">
+            Deducted automatically at the punch (30 min over 5 hrs) — change it here to correct an entry.
+          </p>
           <div>
             <Label htmlFor="e-notes">Notes</Label>
             <Textarea id="e-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />

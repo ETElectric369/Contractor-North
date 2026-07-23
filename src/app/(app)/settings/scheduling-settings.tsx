@@ -20,7 +20,6 @@ export function SchedulingSettings({
   const [end, setEnd] = useState(settings.work_day_end);
   const [weekStart, setWeekStart] = useState(settings.week_start);
   const [method, setMethod] = useState(settings.time_tracking_method);
-  const [autoLunch, setAutoLunch] = useState(settings.auto_lunch_30);
   const [remindClock, setRemindClock] = useState(settings.remind_timeclock);
   const [askJobCodes, setAskJobCodes] = useState(settings.timeclock_job_codes);
   const [geofence, setGeofence] = useState(settings.geofence_logout);
@@ -41,7 +40,6 @@ export function SchedulingSettings({
         work_day_end: end,
         week_start: weekStart,
         time_tracking_method: method,
-        auto_lunch_30: autoLunch,
         remind_timeclock: remindClock,
         timeclock_job_codes: askJobCodes,
         geofence_logout: geofence,
@@ -90,13 +88,9 @@ export function SchedulingSettings({
       <div className="space-y-2 border-t border-slate-100 pt-4">
         <div className="text-sm font-medium text-slate-700">Timeclock (labor law)</div>
         <p className="text-xs text-slate-500">
-          On every time entry, the crew confirms a 30-min lunch (required over 5 hrs) and rest breaks
-          (two 10-min over 5 hrs, otherwise one).
+          A 30-minute unpaid lunch is deducted automatically on shifts over 5 hours — nobody
+          confirms checkboxes. The office can adjust any entry&apos;s lunch from Timecards.
         </p>
-        <label className="flex items-start gap-2 text-sm text-slate-600">
-          <input type="checkbox" checked={autoLunch} onChange={(e) => setAutoLunch(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand" />
-          <span>Pre-check the 30-min unpaid lunch on shifts over 5 hours (crew still confirms).</span>
-        </label>
         <label className="flex items-start gap-2 text-sm text-slate-600">
           <input type="checkbox" checked={remindClock} onChange={(e) => setRemindClock(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand" />
           <span>Text timeclock reminders to techs — a morning nudge if they haven&apos;t clocked in, and an end-of-day reminder to clock out / fill in the day&apos;s details.</span>

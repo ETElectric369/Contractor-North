@@ -54,7 +54,8 @@ export interface OrgSettings {
   work_day_end: string; // "17:00"
   week_start: "sunday" | "monday";
   time_tracking_method: "start_end" | "duration";
-  auto_lunch_30: boolean; // auto-apply 30-min unpaid lunch on shifts > 5h
+  // (auto_lunch_30 RETIRED cn-v537: the 30-min >5h lunch is now UNCONDITIONAL — see lib/lunch-rule.ts.
+  //  Old orgs may still carry the key in stored JSON; it's ignored.)
   timecard_supervisor_id: string; // who approves timecards ("" = org owner)
   /** Geofence auto clock-out: when a clocked-in employee leaves the spot they clocked
    *  in at by more than the radius (for a grace period), clock them out — AT the time
@@ -192,7 +193,6 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   work_day_end: "17:00",
   week_start: "monday",
   time_tracking_method: "start_end",
-  auto_lunch_30: false,
   timecard_supervisor_id: "",
   geofence_logout: true,
   geofence_radius_m: 300,
