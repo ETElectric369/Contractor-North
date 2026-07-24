@@ -59,9 +59,13 @@ export function NavLink({
   }
 
   // First use → tapping asks which maps app, then remembers it.
+  // `grow` on the button: in a stretched context (the 2×2 job-action grids) the wrapper span is
+  // stretched to the cell but the button inside was content-sized — the "squished Navigate
+  // button" that only appeared on devices with NO saved maps choice (the chosen branch renders
+  // a bare <a>, which stretches). grow is a no-op in content-sized inline contexts.
   return (
     <span ref={ref} className="relative inline-flex">
-      <button type="button" onClick={() => setPicking((v) => !v)} className={className}>
+      <button type="button" onClick={() => setPicking((v) => !v)} className={`${className ?? ""} grow`}>
         {children}
       </button>
       {picking && (
