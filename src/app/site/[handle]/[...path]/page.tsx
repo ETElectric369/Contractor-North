@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
-import { notFound, redirect } from "next/navigation";
+import { notFound, permanentRedirect, redirect } from "next/navigation";
 import { getPublicOrgByHandle } from "@/lib/public-org";
+import { getSiteRedirect } from "@/lib/site-redirects";
 import { getPublicPosts, getPublicPostByPath } from "@/lib/public-posts";
 import { ArticlePage, BlogIndex, articleMetadata, blogIndexMetadata } from "../../article-pages";
 import { getSiteNav } from "../../site-chrome";
@@ -69,5 +70,9 @@ export default async function SiteContent({ params, searchParams }: { params: Pa
       );
     }
   }
-  redirect(base || "/"); // stale/unknown content URL → the live homepage (307, recoverable)
+  // A renamed post leaves a mapping behind (site_redirects, 0148) — honor it with a real 301.
+  const target = await getSiteRedirect(org.id, `/${pathStr}`);
+  if (target) permanentRedirect(`${base}${target}`);
+  // Genuinely unknown → a REAL 404 (the old 307-home was a soft-404; SEO audit 2026-07-24).
+  notFound();
 }

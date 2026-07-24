@@ -1,4 +1,5 @@
 import { headers } from "next/headers";
+import { socialImage } from "@/lib/site-image";
 
 const SITES_DOMAIN = (process.env.SITES_DOMAIN || "contractornorth.com").toLowerCase();
 
@@ -14,4 +15,18 @@ export async function handleLinkBase(handle: string): Promise<string> {
   const host = ((await headers()).get("host") || "").toLowerCase().split(":")[0];
   if (host === `${handle}.${SITES_DOMAIN}`) return "";
   return `/site/${handle}`;
+}
+
+import type { PublicOrg } from "@/lib/public-org";
+
+/**
+ * The org's default social-share image — the same fallback chain the homepage has always
+ * used (hero background → first portfolio photo → logo). Builder pages, the blog index, and
+ * cover-less articles previously shipped NO og:image at all, so shares rendered bare cards
+ * (SEO wave 2026-07-24). Null only when the org truly has no imagery.
+ */
+export function defaultSocialImage(org: PublicOrg): string | null {
+  const s = org.settings;
+  // socialImage caps the served variant at ~1200px — scrapers shouldn't pull a full camera original.
+  return socialImage(s.splash_bg_url || s.portfolio?.[0]?.url || org.logo_url || null);
 }

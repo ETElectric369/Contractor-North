@@ -1,4 +1,5 @@
 import type { PortfolioPhoto } from "../estimate/[handle]/portfolio-gallery";
+import { imageSrcSet, sizedImage } from "@/lib/site-image";
 
 /**
  * SIGNATURE-SPECIALTY showcase — an elegant, dark "gallery moment" on the public homepage that
@@ -61,9 +62,12 @@ export function SpecialtyShowcase({
           <div className="overflow-hidden border p-2 sm:p-3" style={{ borderColor: hairline }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={lead.url}
+              src={sizedImage(lead.url, 1280)}
+              srcSet={imageSrcSet(lead.url, [640, 1280, 1920])}
+              sizes="(min-width: 1280px) 1152px, 100vw"
               alt={lead.caption || headline}
               loading="lazy"
+              decoding="async"
               className="aspect-[16/10] w-full object-cover sm:aspect-[16/9]"
             />
           </div>
@@ -80,7 +84,15 @@ export function SpecialtyShowcase({
               <figure key={i} className="mb-10 break-inside-avoid sm:mb-8">
                 <div className="overflow-hidden border p-2 sm:p-2.5" style={{ borderColor: hairline }}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={p.url} alt={p.caption || headline} loading="lazy" className="block h-auto w-full" />
+                  <img
+                    src={sizedImage(p.url, 960)}
+                    srcSet={imageSrcSet(p.url, [480, 960])}
+                    sizes="(min-width: 640px) 50vw, 100vw"
+                    alt={p.caption || headline}
+                    loading="lazy"
+                    decoding="async"
+                    className="block h-auto w-full"
+                  />
                 </div>
                 <Caption text={p.caption} />
               </figure>

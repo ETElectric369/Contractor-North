@@ -29,6 +29,11 @@ Disallow: /schedule
 Disallow: /leads
 Disallow: /onboarding
 Disallow: /login
+Disallow: /forgot
+Disallow: /reset
+Disallow: /set-password
+Disallow: /subscribe
+Disallow: /account-deactivated
 Disallow: /i/
 Disallow: /q/
 Disallow: /c/

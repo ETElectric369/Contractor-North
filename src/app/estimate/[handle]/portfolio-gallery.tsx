@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { X, ChevronLeft, ChevronRight } from "lucide-react";
+import { imageSrcSet, sizedImage } from "@/lib/site-image";
 
 export type PortfolioPhoto = { url: string; caption?: string };
 
@@ -59,9 +60,12 @@ export function PortfolioGallery({
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={p.url}
+              src={sizedImage(p.url, 640)}
+              srcSet={imageSrcSet(p.url, [320, 640])}
+              sizes="(min-width: 768px) 25vw, 50vw"
               alt={alt(p, i)}
               loading="lazy"
+              decoding="async"
               className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
             />
             {p.caption && (
@@ -95,7 +99,7 @@ export function PortfolioGallery({
           )}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={photos[open].url}
+            src={sizedImage(photos[open].url, 1600, 80)}
             alt={alt(photos[open], open)}
             className="max-h-[80vh] max-w-full rounded-lg object-contain"
             onClick={(e) => e.stopPropagation()}

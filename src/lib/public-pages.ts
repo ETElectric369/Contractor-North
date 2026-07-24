@@ -31,6 +31,7 @@ export type PublicPage = {
   description: string | null;
   blocks: Block[];
   nav_label: string | null;
+  seo_title?: string | null;
 };
 
 export const getPublicPageBySlug = cache(async (orgId: string, slug: string): Promise<PublicPage | null> => {
@@ -44,7 +45,7 @@ export const getPublicPageBySlug = cache(async (orgId: string, slug: string): Pr
   const supabase = createServiceClient();
   const { data } = await supabase
     .from("site_pages")
-    .select("id, slug, title, description, blocks, nav_label")
+    .select("id, slug, title, description, blocks, nav_label, seo_title")
     .eq("org_id", orgId)
     .eq("published", true)
     .eq("slug", clean)

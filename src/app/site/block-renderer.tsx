@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Block, BlockStyle } from "@/lib/site-blocks";
+import { imageSrcSet, sizedImage } from "@/lib/site-image";
 
 /** Only http(s)/mailto/tel or a same-site relative path may become a link/image src — a collaborator
  *  can't slip a javascript:/data: scheme into a button href or image. Anything else → "#". */
@@ -64,7 +65,15 @@ export function BlockRenderer({ blocks, brand }: { blocks: Block[]; brand: strin
             return (
               <figure key={i} className="space-y-2">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={src} alt={b.props.alt || ""} className="w-full rounded-2xl object-cover" />
+                <img
+                  src={sizedImage(src, 1280)}
+                  srcSet={imageSrcSet(src, [640, 1280])}
+                  sizes="(min-width: 768px) 768px, 100vw"
+                  alt={b.props.alt || ""}
+                  loading="lazy"
+                  decoding="async"
+                  className="w-full rounded-2xl object-cover"
+                />
                 {b.props.caption && <figcaption className={`text-sm text-slate-500 ${alignCls(st) === "text-left" ? "text-center" : alignCls(st)}`}>{b.props.caption}</figcaption>}
               </figure>
             );
@@ -91,7 +100,16 @@ export function BlockRenderer({ blocks, brand }: { blocks: Block[]; brand: strin
               <div key={i} className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 {imgs.map((im, j) => (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img key={j} src={im.src} alt={im.alt} className="aspect-square w-full rounded-xl object-cover" />
+                  <img
+                    key={j}
+                    src={sizedImage(im.src, 640)}
+                    srcSet={imageSrcSet(im.src, [320, 640])}
+                    sizes="(min-width: 640px) 33vw, 50vw"
+                    alt={im.alt}
+                    loading="lazy"
+                    decoding="async"
+                    className="aspect-square w-full rounded-xl object-cover"
+                  />
                 ))}
               </div>
             );
@@ -103,7 +121,16 @@ export function BlockRenderer({ blocks, brand }: { blocks: Block[]; brand: strin
               <div key={i} className="relative isolate overflow-hidden rounded-2xl bg-slate-800">
                 {bg && (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={bg} alt="" aria-hidden className="absolute inset-0 -z-10 h-full w-full object-cover" />
+                  <img
+                    src={sizedImage(bg, 1280)}
+                    srcSet={imageSrcSet(bg, [640, 1280])}
+                    sizes="(min-width: 768px) 768px, 100vw"
+                    alt=""
+                    aria-hidden
+                    loading="lazy"
+                    decoding="async"
+                    className="absolute inset-0 -z-10 h-full w-full object-cover"
+                  />
                 )}
                 <div className="absolute inset-0 -z-10 bg-black/45" />
                 <div className="px-6 py-20 text-center text-white sm:py-24">

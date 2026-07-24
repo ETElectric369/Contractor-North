@@ -66,7 +66,10 @@ export async function GET() {
     // of error versus stale-forever.
     entries.push(urlEntry(`${base}/`, newestLastmod([org.updated_at, ...[...posts, ...pages].map((r) => r.updated_at)])));
     const handle = org.settings.public_handle;
-    if (handle && org.settings.estimating_mode === "catalog") entries.push(urlEntry(`${base}/estimate/${handle}`));
+    // Estimate page content = org settings (headline/portfolio) + price list; org.updated_at is
+    // the closest cheap proxy for "this page changed" (same caveat as the homepage lastmod above).
+    if (handle && org.settings.estimating_mode === "catalog")
+      entries.push(urlEntry(`${base}/estimate/${handle}`, lastmodDate(org.updated_at)));
     // Articles — the index + every published post at its original path.
     if (posts.length) {
       entries.push(urlEntry(`${base}/blog`, newestLastmod(posts.map((p) => p.updated_at))));

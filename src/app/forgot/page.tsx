@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { NO_INDEX } from "@/lib/no-index";
 import { Zap } from "lucide-react";
 import { requestPasswordReset } from "@/app/login/actions";
 import { Button } from "@/components/ui/button";
@@ -59,3 +60,8 @@ export default async function ForgotPage({
     </div>
   );
 }
+
+// Never index auth/utility chrome — on a tenant's custom domain this page previously leaked a
+// "Contractor North" title into crawlers with no noindex (the SEO vendor's "hosted on
+// contractornorth" ammunition). Both layers per the no-index doctrine: this metadata + robots.txt.
+export const metadata = { title: "Reset your password", robots: NO_INDEX };

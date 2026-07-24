@@ -4,6 +4,7 @@ import { MapPin, ArrowRight, Check, ShieldCheck, Clock, Zap, Star } from "lucide
 import { orgPublicBaseUrl, parseGeoFromMapUrl, type OrgSettings } from "@/lib/org-settings";
 import { pageSlugFromHref } from "@/lib/site-nav";
 import type { PublicOrg } from "@/lib/public-org";
+import { imageSrcSet, sizedImage, socialImage } from "@/lib/site-image";
 import { jsonLdSafe } from "@/lib/jsonld";
 import type { Block } from "@/lib/site-blocks";
 import { BlockRenderer } from "./block-renderer";
@@ -24,7 +25,7 @@ export function orgSiteMetadata(org: PublicOrg): Metadata {
   const s = org.settings;
   const title = `${org.name} — ${s.splash_headline || "Licensed contractor"}`;
   const description = s.splash_tagline || `${org.name} — quality craftsmanship. Get a free estimate.`;
-  const hero = s.splash_bg_url || s.portfolio[0]?.url;
+  const hero = socialImage(s.splash_bg_url || s.portfolio[0]?.url);
   return {
     title,
     description,
@@ -98,7 +99,14 @@ function Hero({
           </div>
           {hero && (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={hero} alt="" className="aspect-[4/3] w-full rounded-2xl object-cover shadow-2xl ring-1 ring-white/20" />
+            <img
+              src={sizedImage(hero, 1280)}
+              srcSet={imageSrcSet(hero, [640, 1280, 1920])}
+              sizes="(min-width: 1024px) 50vw, 100vw"
+              fetchPriority="high"
+              alt={name ? `${name} — recent project` : "Recent project"}
+              className="aspect-[4/3] w-full rounded-2xl object-cover shadow-2xl ring-1 ring-white/20"
+            />
           )}
         </div>
       </section>
@@ -127,7 +135,14 @@ function Hero({
           </div>
           {hero && (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={hero} alt="" className="aspect-[4/3] w-full rounded-[2rem] object-cover shadow-xl lg:aspect-[4/5]" />
+            <img
+              src={sizedImage(hero, 1280)}
+              srcSet={imageSrcSet(hero, [640, 1280, 1920])}
+              sizes="(min-width: 1024px) 50vw, 100vw"
+              fetchPriority="high"
+              alt={name ? `${name} — recent project` : "Recent project"}
+              className="aspect-[4/3] w-full rounded-[2rem] object-cover shadow-xl lg:aspect-[4/5]"
+            />
           )}
         </div>
       </section>
@@ -139,7 +154,15 @@ function Hero({
     <section id="top" className="relative isolate overflow-hidden">
       {hero && (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={hero} alt="" aria-hidden className="absolute inset-0 -z-10 h-full w-full object-cover" />
+        <img
+          src={sizedImage(hero, 1920)}
+          srcSet={imageSrcSet(hero, [960, 1920, 2560])}
+          sizes="100vw"
+          fetchPriority="high"
+          alt=""
+          aria-hidden
+          className="absolute inset-0 -z-10 h-full w-full object-cover"
+        />
       )}
       <div className="absolute inset-0 -z-10" style={{ background: "linear-gradient(180deg, rgba(2,6,23,.55), rgba(2,6,23,.72))" }} />
       <div className="mx-auto max-w-6xl px-4 py-24 sm:py-32">
@@ -196,7 +219,7 @@ export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg;
     ...(org.phone ? { telephone: org.phone } : {}),
     ...(org.email ? { email: org.email } : {}),
     ...(org.logo_url ? { logo: org.logo_url } : {}),
-    ...(hero ? { image: hero } : {}),
+    ...(hero ? { image: socialImage(hero) } : {}),
     ...(area ? { areaServed: area } : {}),
     priceRange: "$$",
     ...(area ? { address: { "@type": "PostalAddress", addressLocality: org.city, addressRegion: org.state, addressCountry: "US" } } : {}),
@@ -222,8 +245,10 @@ export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg;
           {/* Hero — presentation varies by settings.site_theme; the copy/CTA/data are identical. */}
           <Hero
             theme={s.site_theme}
-            name={showName ? org.name : undefined}
-            headline={s.splash_headline}
+            // No headline set → the org NAME becomes the H1 (every homepage needs exactly one),
+            // and the separate small name line is dropped so it doesn't render twice.
+            name={showName && s.splash_headline ? org.name : undefined}
+            headline={s.splash_headline || org.name}
             headlineSize={s.splash_headline_size}
             tagline={s.splash_tagline}
             brand={brand}

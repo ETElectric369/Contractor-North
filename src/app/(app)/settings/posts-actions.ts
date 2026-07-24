@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { resolveSiteContext } from "@/lib/site-editor-guard";
+import { recordSiteRedirect } from "@/lib/site-redirects";
 import { sanitizeHtml, textToHtml } from "@/lib/sanitize-html";
 import { CONTENT_ROOTS, isValidPostPath } from "@/lib/site-content-roots";
 
@@ -39,6 +40,11 @@ export async function saveSitePost(input: {
   body: string;
   published?: boolean;
   cover_url?: string | null;
+  /** Publish date override (YYYY-MM-DD) — for restoring a migrated article's ORIGINAL date so
+      the byline/schema/RSS don't all read as republished-today. Blank = keep existing behavior. */
+  published_at?: string | null;
+  /** Optional search-result title override (the <title> tag) — blank keeps "<title> — <org>". */
+  seo_title?: string | null;
   /** Which org's site — only needed to disambiguate a collaborator with grants to several. */
   orgId?: string;
 }): Promise<Result> {
@@ -64,12 +70,24 @@ export async function saveSitePost(input: {
   const body_html = /<[a-z][\s\S]*>/i.test(raw) ? sanitizeHtml(raw) : textToHtml(raw);
   const published = input.published ?? true;
 
+  // Optional explicit publish date. Stored at noon UTC so it renders as the SAME calendar day in
+  // any US timezone (the article pages format in the business tz) — no off-by-one at midnight.
+  let publishedAtOverride: string | null = null;
+  const rawDate = String(input.published_at ?? "").trim();
+  if (rawDate) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(rawDate) || Number.isNaN(Date.parse(`${rawDate}T12:00:00Z`))) {
+      return { ok: false, error: "Publish date must be a valid date (YYYY-MM-DD)." };
+    }
+    publishedAtOverride = `${rawDate}T12:00:00.000Z`;
+  }
+
   const base = {
     title,
     path,
     description: String(input.description ?? "").trim() || null,
     body_html,
     published,
+    seo_title: String(input.seo_title ?? "").trim().slice(0, 120) || null,
     updated_at: new Date().toISOString(),
   };
 
@@ -79,7 +97,7 @@ export async function saveSitePost(input: {
     // an edit, and a just-published draft doesn't show its draft-creation date).
     const { data: prev } = await supabase
       .from("site_posts")
-      .select("cover_url, published, published_at")
+      .select("cover_url, published, published_at, path")
       .eq("id", input.id)
       .maybeSingle();
     if (!prev) return { ok: false, error: "That article no longer exists." };
@@ -87,12 +105,17 @@ export async function saveSitePost(input: {
       ...base,
       cover_url: input.cover_url !== undefined ? input.cover_url || null : prev.cover_url,
     };
-    if (published && !prev.published) row.published_at = new Date().toISOString();
+    if (publishedAtOverride) row.published_at = publishedAtOverride;
+    else if (published && !prev.published) row.published_at = new Date().toISOString();
     const { data: updated, error } = await supabase.from("site_posts").update(row).eq("id", input.id).select("id");
     if (error) {
       return { ok: false, error: /duplicate|unique/i.test(error.message) ? "An article already exists at that web address." : error.message };
     }
     if (!updated?.length) return { ok: false, error: "That article no longer exists." };
+    // A changed path orphans the old public URL — record old→new in site_redirects (0148)
+    // so the content resolvers 301 it instead of 404ing (SEO wave 2026-07-24).
+    const oldPath = (prev as { path?: string }).path;
+    if (oldPath && oldPath !== path) await recordSiteRedirect(ctx.orgId, `/${oldPath}`, `/${path}`);
     revalidateSite();
     return { ok: true, id: input.id };
   }
@@ -101,7 +124,13 @@ export async function saveSitePost(input: {
     .from("site_posts")
     // Stamp org_id explicitly: a collaborator's auth_org_id() is null (they're not an org member),
     // so the set_org_id trigger can't infer it — and RLS with-check confirms they hold the grant.
-    .insert({ ...base, org_id: ctx.orgId, cover_url: input.cover_url || null, created_by: ctx.userId })
+    .insert({
+      ...base,
+      org_id: ctx.orgId,
+      cover_url: input.cover_url || null,
+      created_by: ctx.userId,
+      ...(publishedAtOverride ? { published_at: publishedAtOverride } : {}),
+    })
     .select("id")
     .single();
   if (error) {

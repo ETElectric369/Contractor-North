@@ -7,6 +7,8 @@ import { jsonLdSafe } from "@/lib/jsonld";
 import type { PublicOrg } from "@/lib/public-org";
 import type { PublicPost } from "@/lib/public-posts";
 import { deriveSiteChrome, SiteHeader, SiteFooter, type SiteNav } from "./site-chrome";
+import { defaultSocialImage } from "./site-base";
+import { imageSrcSet, sizedImage, socialImage } from "@/lib/site-image";
 
 /**
  * The org-site ARTICLE pages (blog index + single post) — the content layer of the site
@@ -37,23 +39,29 @@ function fmtDate(iso: string): string {
 export function blogIndexMetadata(org: PublicOrg): Metadata {
   const title = `Articles — ${org.name}`;
   const description = `Guides and articles from ${org.name}.`;
+  const url = `${orgPublicBaseUrl(org.settings)}/blog`;
+  const img = defaultSocialImage(org);
   return {
     title,
     description,
-    alternates: { canonical: `${orgPublicBaseUrl(org.settings)}/blog` },
-    openGraph: { title, description, type: "website" },
+    alternates: { canonical: url },
+    openGraph: { title, description, type: "website", url, ...(img ? { images: [img] } : {}) },
+    twitter: { card: "summary_large_image", title, description, ...(img ? { images: [img] } : {}) },
   };
 }
 
 export function articleMetadata(org: PublicOrg, post: PublicPost): Metadata {
-  const title = `${post.title} — ${org.name}`;
+  const title = post.seo_title || `${post.title} — ${org.name}`;
   const description = post.description || `${post.title} — from ${org.name}.`;
+  const url = `${orgPublicBaseUrl(org.settings)}/${post.path}`;
+  // Cover-less posts fall back to the org's default social image instead of a bare card.
+  const img = socialImage(post.cover_url) || defaultSocialImage(org);
   return {
     title,
     description,
-    alternates: { canonical: `${orgPublicBaseUrl(org.settings)}/${post.path}` },
-    openGraph: { title, description, type: "article", images: post.cover_url ? [post.cover_url] : [] },
-    twitter: { card: "summary_large_image", title, description, images: post.cover_url ? [post.cover_url] : [] },
+    alternates: { canonical: url },
+    openGraph: { title, description, type: "article", url, images: img ? [img] : [] },
+    twitter: { card: "summary_large_image", title, description, images: img ? [img] : [] },
   };
 }
 
@@ -84,7 +92,15 @@ export function BlogIndex({ org, posts, base, nav }: { org: PublicOrg; posts: Pu
               >
                 {p.cover_url && (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={p.cover_url} alt={p.title} className="aspect-[16/9] w-full object-cover" />
+                  <img
+                    src={sizedImage(p.cover_url, 640)}
+                    srcSet={imageSrcSet(p.cover_url, [320, 640])}
+                    sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
+                    alt={p.title}
+                    loading="lazy"
+                    decoding="async"
+                    className="aspect-[16/9] w-full object-cover"
+                  />
                 )}
                 <div className="p-5">
                   <p className="text-xs font-medium uppercase tracking-wide text-slate-400">{fmtDate(p.published_at)}</p>
@@ -107,22 +123,35 @@ export function BlogIndex({ org, posts, base, nav }: { org: PublicOrg; posts: Pu
 export function ArticlePage({ org, post, base, nav }: { org: PublicOrg; post: PublicPost; base: string; nav: SiteNav }) {
   const chrome = deriveSiteChrome(org, { base, onHomepage: false });
   const brand = chrome.brand;
+  const pageUrl = `${orgPublicBaseUrl(org.settings)}/${post.path}`;
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "Article",
     headline: post.title,
     description: post.description || undefined,
-    image: post.cover_url || undefined,
+    image: socialImage(post.cover_url) || defaultSocialImage(org) || undefined,
     datePublished: post.published_at,
+    dateModified: post.updated_at || post.published_at,
     author: { "@type": "Organization", name: org.name },
     publisher: { "@type": "Organization", name: org.name, logo: org.logo_url || undefined },
-    mainEntityOfPage: `${orgPublicBaseUrl(org.settings)}/${post.path}`,
+    mainEntityOfPage: pageUrl,
+  };
+  // Breadcrumb trail (Home → Articles → this post) — SERP breadcrumbs + structure signal.
+  const breadcrumbs = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Home", item: orgPublicBaseUrl(org.settings) },
+      { "@type": "ListItem", position: 2, name: "Articles", item: `${orgPublicBaseUrl(org.settings)}/blog` },
+      { "@type": "ListItem", position: 3, name: post.title, item: pageUrl },
+    ],
   };
   return (
     <div className="min-h-screen bg-white text-slate-900">
       {/* jsonLdSafe escapes `<` so a title/description containing `</script>` can't break out of
           the JSON-LD block (title/description aren't HTML-sanitized — they render as text elsewhere). */}
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLdSafe(jsonLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLdSafe(breadcrumbs) }} />
       <SiteHeader chrome={chrome} articlesHref={nav.articlesHref} pageLinks={nav.pageLinks} current="articles" />
       <main className="mx-auto max-w-3xl px-4 py-12">
         <Link href={`${base}/blog`} className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-800">
@@ -134,7 +163,14 @@ export function ArticlePage({ org, post, base, nav }: { org: PublicOrg; post: Pu
         </p>
         {post.cover_url && (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={post.cover_url} alt={post.title} className="mt-8 w-full rounded-2xl object-cover" />
+          <img
+            src={sizedImage(post.cover_url, 1280)}
+            srcSet={imageSrcSet(post.cover_url, [640, 1280])}
+            sizes="(min-width: 768px) 768px, 100vw"
+            fetchPriority="high"
+            alt={post.title}
+            className="mt-8 w-full rounded-2xl object-cover"
+          />
         )}
         {/* body_html is sanitized on READ in getPublicPostByPath (sanitize-html.ts) — safe here
             regardless of write path, since RLS (not just the staff-gated action) governs writes. */}

@@ -1,6 +1,7 @@
 import { cache } from "react";
 import { createServiceClient } from "@/lib/supabase/server";
 import { sanitizeHtml } from "@/lib/sanitize-html";
+import { optimizeBodyImages } from "@/lib/site-image";
 
 /**
  * Public reads for the org-site articles (site_posts) — the content layer of the site platform.
@@ -12,6 +13,8 @@ import { sanitizeHtml } from "@/lib/sanitize-html";
 export type PublicPost = {
   id: string;
   path: string;
+  updated_at?: string | null;
+  seo_title?: string | null;
   title: string;
   description: string | null;
   cover_url: string | null;
@@ -19,7 +22,7 @@ export type PublicPost = {
   published_at: string;
 };
 
-const SELECT = "id, path, title, description, cover_url, body_html, published_at";
+const SELECT = "id, path, title, description, cover_url, body_html, published_at, updated_at, seo_title";
 
 export const getPublicPosts = cache(async (orgId: string): Promise<PublicPost[]> => {
   const supabase = createServiceClient();
@@ -51,5 +54,8 @@ export const getPublicPostByPath = cache(async (orgId: string, path: string): Pr
   // action. Re-sanitizing here (server-only) makes the public renderer safe regardless of how the row
   // was written, closing the stored-XSS path into article-pages.tsx's dangerouslySetInnerHTML sink.
   const post = data as PublicPost;
-  return { ...post, body_html: sanitizeHtml(post.body_html ?? "") };
+  // optimizeBodyImages AFTER sanitize: inline images (migrated posts embed full-camera originals)
+  // are served as width-bounded Supabase render variants with lazy-loading, per-request only —
+  // the stored HTML keeps its original URLs.
+  return { ...post, body_html: optimizeBodyImages(sanitizeHtml(post.body_html ?? "")) };
 });

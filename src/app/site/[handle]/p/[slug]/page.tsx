@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
-import { notFound, redirect } from "next/navigation";
+import { notFound, permanentRedirect } from "next/navigation";
 import { getPublicOrgByHandle } from "@/lib/public-org";
+import { getSiteRedirect } from "@/lib/site-redirects";
+import { isLegacyCmsPath } from "@/lib/site-reserved";
 import { getPublicPageBySlug } from "@/lib/public-pages";
 import { CustomPageView, customPageMetadata } from "../../../page-view";
 import { getSiteNav } from "../../../site-chrome";
@@ -52,5 +54,11 @@ export default async function CustomPage({ params, searchParams }: { params: Par
       );
     }
   }
-  redirect(base || "/"); // unknown/unpublished page → the live homepage
+  // A renamed page leaves a mapping behind (site_redirects, 0148) — honor it with a real 301.
+  const target = await getSiteRedirect(org.id, `/${slug}`);
+  if (target) permanentRedirect(`${base}${target}`);
+  // A legacy CMS slug with no builder page behind it: 301 home (stale bookmarks land useful).
+  if (isLegacyCmsPath(`/${slug}`)) permanentRedirect(base || "/");
+  // Genuinely unknown → a REAL 404 (the old 307-home was a soft-404; SEO audit 2026-07-24).
+  notFound();
 }

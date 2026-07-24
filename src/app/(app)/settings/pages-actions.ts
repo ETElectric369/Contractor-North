@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { resolveSiteContext } from "@/lib/site-editor-guard";
+import { recordSiteRedirect } from "@/lib/site-redirects";
 import { sanitizeHtml, textToHtml } from "@/lib/sanitize-html";
 import { normalizeBlocks, type Block } from "@/lib/site-blocks";
 import { isReservedSlug, slugifySiteSlug } from "@/lib/site-reserved";
@@ -37,6 +38,8 @@ export async function saveSitePage(input: {
   published?: boolean;
   nav_label?: string | null;
   nav_order?: number;
+  /** Optional search-result title override (the <title> tag) — blank keeps "<title> — <org>". */
+  seo_title?: string | null;
   orgId?: string;
 }): Promise<Result> {
   const ctx = await resolveSiteContext(input.orgId);
@@ -58,6 +61,7 @@ export async function saveSitePage(input: {
     blocks: cleanBlocks(input.blocks ?? []),
     published: input.published ?? true,
     nav_label: String(input.nav_label ?? "").trim() || null,
+    seo_title: String(input.seo_title ?? "").trim().slice(0, 120) || null,
     updated_at: new Date().toISOString(),
   };
   // nav_order: only write it when the caller actually sent one. The editor doesn't (yet)
@@ -68,11 +72,18 @@ export async function saveSitePage(input: {
   const dupMsg = "A page already exists at that web address.";
   if (input.id) {
     delete (row as { org_id?: unknown }).org_id; // don't move a page across orgs on edit
+    // Rename detection BEFORE the write: a changed slug orphans the old public URL, so the
+    // old→new mapping is recorded in site_redirects (0148) and the resolvers 301 it — the
+    // Squarespace-style URL-mappings behavior, kept automatic (SEO wave 2026-07-24).
+    const { data: prior } = await ctx.supabase
+      .from("site_pages").select("slug").eq("id", input.id).eq("org_id", ctx.orgId).maybeSingle();
     // Scope to the validated org too (not just id): RLS already gates writes, this pins the edit to
     // the context's org so a multi-grant collaborator can't touch another granted org's page by id.
     const { data, error } = await ctx.supabase.from("site_pages").update(row).eq("id", input.id).eq("org_id", ctx.orgId).select("id");
     if (error) return { ok: false, error: /duplicate|unique/i.test(error.message) ? dupMsg : error.message };
     if (!data?.length) return { ok: false, error: "That page no longer exists." };
+    const oldSlug = (prior as { slug?: string } | null)?.slug;
+    if (oldSlug && oldSlug !== slug) await recordSiteRedirect(ctx.orgId, `/${oldSlug}`, `/${slug}`);
     revalidatePath("/settings");
     revalidatePath("/content");
     return { ok: true, id: input.id };

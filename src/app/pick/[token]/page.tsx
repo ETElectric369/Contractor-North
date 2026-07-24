@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { NO_INDEX } from "@/lib/no-index";
 import { DatePicker } from "./date-picker";
 import { accentHex } from "@/lib/org-settings";
 
@@ -85,3 +86,8 @@ export default async function PickDatePage({
     </div>
   );
 }
+
+// Never index auth/utility chrome — on a tenant's custom domain this page previously leaked a
+// "Contractor North" title into crawlers with no noindex (the SEO vendor's "hosted on
+// contractornorth" ammunition). Both layers per the no-index doctrine: this metadata + robots.txt.
+export const metadata = { title: "Pick a time", robots: NO_INDEX };

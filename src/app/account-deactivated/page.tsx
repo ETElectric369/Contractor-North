@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { NO_INDEX } from "@/lib/no-index";
 import { Ban } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 
@@ -40,3 +41,8 @@ export default async function AccountDeactivatedPage() {
     </div>
   );
 }
+
+// Never index auth/utility chrome — on a tenant's custom domain this page previously leaked a
+// "Contractor North" title into crawlers with no noindex (the SEO vendor's "hosted on
+// contractornorth" ammunition). Both layers per the no-index doctrine: this metadata + robots.txt.
+export const metadata = { title: "Account deactivated", robots: NO_INDEX };

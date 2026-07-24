@@ -114,7 +114,7 @@ export default async function SettingsPage({
   const { data: sitePosts } = isStaff
     ? await supabase
         .from("site_posts")
-        .select("id, path, title, description, cover_url, body_html, published, published_at")
+        .select("id, path, title, description, cover_url, body_html, published, published_at, seo_title")
         .order("published_at", { ascending: false })
     : { data: null };
 
@@ -130,7 +130,7 @@ export default async function SettingsPage({
   const { data: rawSitePages } = isStaff
     ? await supabase
         .from("site_pages")
-        .select("id, slug, title, description, blocks, published, nav_label, nav_order")
+        .select("id, slug, title, description, blocks, published, nav_label, nav_order, seo_title")
         .order("nav_order", { ascending: true })
         .order("title", { ascending: true }) // same tiebreak as the public reads — list matches live nav
     : { data: null };

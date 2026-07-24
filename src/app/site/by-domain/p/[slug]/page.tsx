@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
-import { notFound, redirect } from "next/navigation";
+import { notFound, permanentRedirect } from "next/navigation";
 import { getPublicOrgByDomain } from "@/lib/public-org";
+import { getSiteRedirect } from "@/lib/site-redirects";
+import { isLegacyCmsPath } from "@/lib/site-reserved";
 import { getPublicPageBySlug } from "@/lib/public-pages";
 import { CustomPageView, customPageMetadata } from "../../../page-view";
 import { getSiteNav } from "../../../site-chrome";
@@ -56,5 +58,13 @@ export default async function CustomPageByDomain({ params, searchParams }: { par
       );
     }
   }
-  redirect("/"); // unknown/unpublished page → the live homepage
+  // A renamed page leaves a mapping behind (site_redirects, 0148) — honor it with a real 301.
+  const target = await getSiteRedirect(org.id, `/${slug}`);
+  if (target) permanentRedirect(target);
+  // A legacy CMS slug (/gallery, /services…) with no builder page behind it: 301 home so a
+  // migrated site's stale bookmarks land somewhere useful (single-segment paths reach this
+  // resolver BEFORE middleware's legacy check, which is why the test repeats here).
+  if (isLegacyCmsPath(`/${slug}`)) permanentRedirect("/");
+  // Genuinely unknown → a REAL 404 (the old 307-home was a soft-404; SEO audit 2026-07-24).
+  notFound();
 }

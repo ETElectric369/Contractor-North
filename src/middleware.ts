@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
 import { CONTENT_ROOTS } from "@/lib/site-content-roots";
-import { pageSlugFromPath } from "@/lib/site-reserved";
+import { pageSlugFromPath, isLegacyCmsPath } from "@/lib/site-reserved";
 
 // The platform's own domain. A subdomain of it is a free org site: <handle>.SITES_DOMAIN.
 // Any OTHER host pointed at us is a custom domain, resolved by hostname in /site/by-domain.
@@ -14,25 +14,10 @@ const EXTRA_APP_HOSTS = new Set(
   (process.env.APP_HOSTS || "").toLowerCase().split(",").map((s) => s.trim()).filter(Boolean),
 );
 
-// Legacy CMS paths (Squarespace/Wix/WordPress defaults + Tahoe Deck's old Squarespace slugs).
-// When an org moves its domain to North, its old deep URLs (/about, /portfolio) have no
-// equivalent route here — North's public site is a single page with #anchors — so they'd
-// 404. We 301 them to the homepage instead: bookmarks, business cards, and Google's old index
-// entries all land on the live site (which carries the portfolio + instant-estimate CTA) rather
-// than a dead end. Only ever runs on a NON-app host, so it can't touch the app's own routes.
-// NOTE: blog paths are NOT here — they route to the articles engine below, which serves a
-// migrated site's posts at their ORIGINAL URLs (and itself 301s home when no post matches).
-const LEGACY_EXACT = new Set([
-  "/about", "/about-us", "/portfolio", "/gallery", "/services", "/our-work",
-  "/projects", "/contact", "/contact-us", "/home", "/store", "/shop",
-  "/testimonials", "/reviews", "/faq",
-]);
-const LEGACY_PREFIX = ["/shop/", "/store/", "/products", "/product/", "/gallery/", "/portfolio/", "/services/"];
-function isLegacyCmsPath(pathname: string): boolean {
-  const p = pathname.replace(/\/+$/, "") || "/"; // tolerate a trailing slash
-  if (LEGACY_EXACT.has(p)) return true;
-  return LEGACY_PREFIX.some((pre) => pathname.startsWith(pre));
-}
+// Legacy CMS paths (Squarespace/Wix/WordPress defaults): the shared list + check now live in
+// lib/site-reserved (isLegacyCmsPath) because the PAGE RESOLVER needs the same test — a
+// single-segment legacy slug reaches the resolver first, and on a miss it must 301 home
+// rather than 404 a stale bookmark. Multi-segment prefixes still 301 here in middleware.
 
 // Org-site article routes rewritten into the /site catch-all: articles at /blog, /blog/*, and
 // legacy /blog-1-1/* (Squarespace's prefix, served at their original URLs, roots shared via
@@ -67,6 +52,19 @@ export async function middleware(request: NextRequest) {
   }
 
   const onOrgSite = host && !isAppHost(host);
+
+  // RSS (SEO wave 2026-07-24): /blog/rss.xml (+ the common /feed and /rss.xml spellings) on an
+  // org host serve the per-org feed. Must run BEFORE the content rewrite — "blog/rss.xml" would
+  // otherwise fall into the article catch-all and 404.
+  if (onOrgSite && ["/blog/rss.xml", "/rss.xml", "/feed"].includes(request.nextUrl.pathname.replace(/\/+$/, ""))) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/site-rss";
+    if (host.endsWith(`.${SITES_DOMAIN}`)) {
+      const sub = host.slice(0, host.length - SITES_DOMAIN.length - 1);
+      if (sub && !sub.includes(".") && !RESERVED_SUBS.has(sub)) url.searchParams.set("handle", sub);
+    }
+    return NextResponse.rewrite(url);
+  }
 
   // Articles engine: on an org host, /blog* paths rewrite into the site content catch-all —
   // the index at /blog, posts at their ORIGINAL paths (incl. Squarespace's /blog-1-1/<slug>).

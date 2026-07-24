@@ -65,3 +65,22 @@ export function pageSlugFromPath(pathname: string): string | null {
   if (isReservedSlug(slug)) return null;
   return slug;
 }
+
+/**
+ * Legacy CMS paths (Squarespace/Wix/WordPress defaults) from a migrated site's old life.
+ * Shared by middleware (multi-segment prefixes → 301 home) and the page resolver (a
+ * single-segment legacy slug with NO builder page behind it → 301 home instead of 404,
+ * so a stale /gallery bookmark still lands somewhere useful). Moved here from middleware
+ * so the two checks can never drift (SEO wave, 2026-07-24).
+ */
+const LEGACY_EXACT = new Set([
+  "/about", "/about-us", "/portfolio", "/gallery", "/services", "/our-work",
+  "/projects", "/contact", "/contact-us", "/home", "/store", "/shop",
+  "/testimonials", "/reviews", "/faq",
+]);
+const LEGACY_PREFIX = ["/shop/", "/store/", "/products", "/product/", "/gallery/", "/portfolio/", "/services/"];
+export function isLegacyCmsPath(pathname: string): boolean {
+  const p = pathname.replace(/\/+$/, "") || "/"; // tolerate a trailing slash
+  if (LEGACY_EXACT.has(p)) return true;
+  return LEGACY_PREFIX.some((pre) => pathname.startsWith(pre));
+}

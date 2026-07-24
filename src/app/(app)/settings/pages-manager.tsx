@@ -21,6 +21,7 @@ type PageRow = {
   blocks: Block[];
   published: boolean;
   nav_label: string | null;
+  seo_title: string | null;
 };
 
 type Draft = {
@@ -31,9 +32,10 @@ type Draft = {
   blocks: Block[];
   published: boolean;
   nav_label: string;
+  seo_title: string;
 };
 
-const EMPTY: Draft = { id: null, slug: "", title: "", description: "", blocks: [], published: true, nav_label: "" };
+const EMPTY: Draft = { id: null, slug: "", title: "", description: "", blocks: [], published: true, nav_label: "", seo_title: "" };
 
 /** The page BUILDER — compose custom pages from a palette of styled blocks (shared <BlockEditor>).
  *  Owner (Settings) or a granted external designer (/content) uses the same editor; pages go live at
@@ -49,7 +51,7 @@ export function PagesManager({ initial, siteUrl, handle, orgId, brand = "#0f172a
   function openNew() { setError(null); setEditing({ ...EMPTY }); }
   function openEdit(p: PageRow) {
     setError(null);
-    setEditing({ id: p.id, slug: p.slug, title: p.title, description: p.description ?? "", blocks: p.blocks ?? [], published: p.published, nav_label: p.nav_label ?? "" });
+    setEditing({ id: p.id, slug: p.slug, title: p.title, description: p.description ?? "", blocks: p.blocks ?? [], published: p.published, nav_label: p.nav_label ?? "", seo_title: p.seo_title ?? "" });
   }
 
   function save() {
@@ -69,7 +71,8 @@ export function PagesManager({ initial, siteUrl, handle, orgId, brand = "#0f172a
     start(async () => {
       const res = await saveSitePage({
         id: editing.id, slug: editing.slug || null, title: editing.title, description: editing.description || null,
-        blocks: editing.blocks, published: editing.published, nav_label: editing.nav_label || null, orgId,
+        blocks: editing.blocks, published: editing.published, nav_label: editing.nav_label || null,
+        seo_title: editing.seo_title || null, orgId,
       });
       if (!res.ok) { setError(res.error ?? "Couldn't save the page."); return; }
       // Say what actually happened: an unpublished save is a draft, not a publish.
@@ -141,9 +144,15 @@ export function PagesManager({ initial, siteUrl, handle, orgId, brand = "#0f172a
                 <Input id="pg-slug" value={editing.slug} onChange={(e) => setEditing({ ...editing, slug: e.target.value })} placeholder="blank = from the title" />
               </div>
             </div>
-            <div>
-              <Label htmlFor="pg-desc">Short description (for search results)</Label>
-              <Input id="pg-desc" value={editing.description} onChange={(e) => setEditing({ ...editing, description: e.target.value })} />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <Label htmlFor="pg-desc">Short description (for search results)</Label>
+                <Input id="pg-desc" value={editing.description} onChange={(e) => setEditing({ ...editing, description: e.target.value })} />
+              </div>
+              <div>
+                <Label htmlFor="pg-seo-title">Search title (blank = &quot;{editing.title || "Title"} — your business&quot;)</Label>
+                <Input id="pg-seo-title" value={editing.seo_title} onChange={(e) => setEditing({ ...editing, seo_title: e.target.value })} placeholder="The title shown in Google results" />
+              </div>
             </div>
 
             <BlockEditor

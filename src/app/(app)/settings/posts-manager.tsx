@@ -21,6 +21,7 @@ type PostRow = {
   body_html: string;
   published: boolean;
   published_at: string;
+  seo_title: string | null;
 };
 
 type Draft = {
@@ -31,9 +32,17 @@ type Draft = {
   cover_url: string;
   body: string;
   published: boolean;
+  /** YYYY-MM-DD shown in the date field; sent only when it differs from the stored date. */
+  published_at: string;
+  seo_title: string;
 };
 
-const EMPTY: Draft = { id: null, title: "", path: "", description: "", cover_url: "", body: "", published: true };
+const EMPTY: Draft = { id: null, title: "", path: "", description: "", cover_url: "", body: "", published: true, published_at: "", seo_title: "" };
+
+/** ISO timestamp → the YYYY-MM-DD the date input wants (UTC date — matches the noon-UTC storage). */
+function isoToDateInput(iso: string | null | undefined): string {
+  return iso ? iso.slice(0, 10) : "";
+}
 
 /**
  * Articles on the public site — how SEO content gets published INTO North (the vendor writes,
@@ -76,12 +85,18 @@ export function PostsManager({
       cover_url: p.cover_url ?? "",
       body: p.body_html,
       published: p.published,
+      published_at: isoToDateInput(p.published_at),
+      seo_title: p.seo_title ?? "",
     });
   }
 
   function save() {
     if (!editing) return;
     setError(null);
+    // Send the date only when the user actually changed it — an untouched field must not
+    // re-stamp a live post's timestamp to noon.
+    const originalDate = editing.id ? isoToDateInput(initial.find((p) => p.id === editing.id)?.published_at) : "";
+    const dateChanged = editing.published_at !== originalDate;
     start(async () => {
       const res = await saveSitePost({
         id: editing.id,
@@ -91,6 +106,8 @@ export function PostsManager({
         cover_url: editing.cover_url.trim() || null,
         body: editing.body,
         published: editing.published,
+        published_at: dateChanged && editing.published_at ? editing.published_at : null,
+        seo_title: editing.seo_title || null,
         orgId,
       });
       if (!res.ok) { setError(res.error ?? "Couldn't save the article."); return; }
@@ -234,6 +251,19 @@ export function PostsManager({
               />
             </div>
             <div>
+              <Label htmlFor="post-seo-title">Search title (optional)</Label>
+              <Input
+                id="post-seo-title"
+                value={editing.seo_title}
+                onChange={(e) => setEditing({ ...editing, seo_title: e.target.value })}
+                placeholder={`Blank = "${editing.title || "Title"} — your business name"`}
+              />
+              <p className="mt-1 text-xs text-slate-400">
+                The title shown in Google results — your SEO team can tune it for keywords without
+                changing the headline on the page.
+              </p>
+            </div>
+            <div>
               <Label htmlFor="post-cover">Cover image</Label>
               <ImageField
                 id="post-cover"
@@ -252,6 +282,20 @@ export function PostsManager({
                 onChange={(e) => setEditing({ ...editing, body: e.target.value })}
                 placeholder="Paste the article — plain text or HTML both work."
               />
+            </div>
+            <div>
+              <Label htmlFor="post-date">Publish date</Label>
+              <Input
+                id="post-date"
+                type="date"
+                value={editing.published_at}
+                onChange={(e) => setEditing({ ...editing, published_at: e.target.value })}
+                className="max-w-[12rem]"
+              />
+              <p className="mt-1 text-xs text-slate-400">
+                Restoring a migrated article? Set its original date so it doesn&apos;t read as
+                published today. Blank = automatic.
+              </p>
             </div>
             <label className="flex items-center gap-2 text-sm text-slate-700">
               <input

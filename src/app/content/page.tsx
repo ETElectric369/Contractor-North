@@ -138,14 +138,14 @@ export default async function ContentWorkspace({ searchParams }: { searchParams:
   // Posts via the collaborator's OWN RLS-bound client — proves the grant, not the service key.
   const { data: posts } = await supabase
     .from("site_posts")
-    .select("id, path, title, description, cover_url, body_html, published, published_at")
+    .select("id, path, title, description, cover_url, body_html, published, published_at, seo_title")
     .eq("org_id", selected)
     .order("published_at", { ascending: false });
 
   // Custom builder pages (same RLS-bound client).
   const { data: rawPages } = await supabase
     .from("site_pages")
-    .select("id, slug, title, description, blocks, published, nav_label, nav_order")
+    .select("id, slug, title, description, blocks, published, nav_label, nav_order, seo_title")
     .eq("org_id", selected)
     .order("nav_order", { ascending: true })
     .order("title", { ascending: true }); // same tiebreak as the public reads — list matches live nav

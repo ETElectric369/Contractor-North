@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { createServiceClient } from "@/lib/supabase/server";
 import { accentHex, orgPublicBaseUrl } from "@/lib/org-settings";
 import { getPublicOrgByHandle } from "@/lib/public-org";
+import { socialImage } from "@/lib/site-image";
 import { DECK_ESTIMATE_CODES, buildDeckRates } from "@/lib/estimate/deck";
 import { Configurator } from "./configurator";
 import { PortfolioGallery } from "./portfolio-gallery";
@@ -23,10 +24,16 @@ export async function generateMetadata({ params }: { params: Promise<{ handle: s
   const org = await getPublicOrgByHandle(handle);
   if (!org) return {}; // the page itself 404s
   const s = org.settings;
+  const title = s.splash_headline || `${org.name} — Deck Estimate`;
+  const description = s.splash_tagline || "Answer a few quick questions for an instant ballpark.";
+  const url = `${orgPublicBaseUrl(s)}/estimate/${handle}`;
+  const img = socialImage(s.splash_bg_url || s.portfolio?.[0]?.url || org.logo_url || null);
   return {
-    title: s.splash_headline || `${org.name} — Deck Estimate`,
-    description: s.splash_tagline || "Answer a few quick questions for an instant ballpark.",
-    alternates: { canonical: `${orgPublicBaseUrl(s)}/estimate/${handle}` },
+    title,
+    description,
+    alternates: { canonical: url },
+    openGraph: { title, description, type: "website", url, ...(img ? { images: [img] } : {}) },
+    twitter: { card: "summary_large_image", title, description, ...(img ? { images: [img] } : {}) },
   };
 }
 

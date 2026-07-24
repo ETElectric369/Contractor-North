@@ -137,7 +137,10 @@ function BlockFields({ block, orgId, onChange }: { block: Block; orgId?: string;
       </div>
     );
   if (block.type === "gallery")
-    return <GalleryFields urls={block.props.images.map((im) => im.url)} orgId={orgId} onChange={(urls) => onChange({ images: urls.map((url) => ({ url })) })} />;
+    // Full image OBJECTS flow through (not bare urls): the old url-only mapping silently
+    // WIPED every stored alt on any gallery edit, and there was no way to set one — the
+    // audit's most concrete builder defect (SEO wave 2026-07-24).
+    return <GalleryFields images={block.props.images.map((im) => ({ url: im.url, alt: im.alt }))} orgId={orgId} onChange={(images) => onChange({ images })} />;
   if (block.type === "banner")
     return (
       <div className="space-y-2">
@@ -197,7 +200,9 @@ export function ImageField({ value, onChange, orgId, placeholder, id }: { value:
   );
 }
 
-function GalleryFields({ urls, orgId, onChange }: { urls: string[]; orgId?: string; onChange: (urls: string[]) => void }) {
+type GalleryImage = { url: string; alt?: string };
+
+function GalleryFields({ images, orgId, onChange }: { images: GalleryImage[]; orgId?: string; onChange: (images: GalleryImage[]) => void }) {
   const ref = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -207,30 +212,31 @@ function GalleryFields({ urls, orgId, onChange }: { urls: string[]; orgId?: stri
     setErr(null);
     setBusy(true);
     // Per-file try/catch: one bad photo must not sink the batch — keep every success, name every failure.
-    const added: string[] = [];
+    const added: GalleryImage[] = [];
     const failed: string[] = [];
     for (const f of files) {
       try {
-        added.push(await uploadSiteImage(orgId, f));
+        added.push({ url: await uploadSiteImage(orgId, f) });
       } catch {
         failed.push(f.name);
       }
     }
-    if (added.length) onChange([...urls, ...added]);
+    if (added.length) onChange([...images, ...added]);
     if (failed.length) setErr(`Couldn't upload ${failed.join(", ")}${added.length ? " — the rest were added" : ""}.`);
     setBusy(false);
     if (ref.current) ref.current.value = "";
   }
   return (
     <div className="space-y-2">
-      {urls.map((u, i) => (
+      {images.map((im, i) => (
         <div key={i} className="flex gap-2">
-          <Input value={u} onChange={(e) => onChange(urls.map((x, j) => (j === i ? e.target.value : x)))} placeholder="Image URL" />
-          <button type="button" onClick={() => onChange(urls.filter((_, j) => j !== i))} className="rounded-md p-2 text-slate-400 hover:text-red-600"><X className="h-4 w-4" /></button>
+          <Input value={im.url} onChange={(e) => onChange(images.map((x, j) => (j === i ? { ...x, url: e.target.value } : x)))} placeholder="Image URL" />
+          <Input value={im.alt ?? ""} onChange={(e) => onChange(images.map((x, j) => (j === i ? { ...x, alt: e.target.value } : x)))} placeholder="Alt text (for SEO)" className="max-w-[45%]" />
+          <button type="button" onClick={() => onChange(images.filter((_, j) => j !== i))} className="rounded-md p-2 text-slate-400 hover:text-red-600"><X className="h-4 w-4" /></button>
         </div>
       ))}
       <div className="flex flex-wrap gap-2">
-        <button type="button" onClick={() => onChange([...urls, ""])} className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200"><Plus className="h-3.5 w-3.5" /> Add URL</button>
+        <button type="button" onClick={() => onChange([...images, { url: "" }])} className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200"><Plus className="h-3.5 w-3.5" /> Add URL</button>
         {orgId && (
           <>
             <input ref={ref} type="file" accept="image/*" multiple className="hidden" onChange={onFiles} />
