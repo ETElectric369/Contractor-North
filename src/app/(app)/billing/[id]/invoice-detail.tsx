@@ -654,16 +654,16 @@ export function InvoiceDetail({
         <Card id="record-payment" className="scroll-mt-24">
           <CardContent className="space-y-3 py-5">
             <h3 className="text-sm font-semibold text-slate-900">Record payment</h3>
-            {/* You can't collect on an invoice you haven't billed yet. On an unsent
-                draft the form is de-emphasized behind a "send it first" hint so a
-                payment is never recorded against an invoice the customer never got. */}
-            {isDraft ? (
-              <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-500">
-                Send this invoice first — once it&apos;s billed to the customer you can
-                record payments here.
+            {/* Payments record on DRAFTS too (Erik 7/24): deposits and Venmo prepayments
+                arrive before the invoice goes out, and blocking them here forced a fake
+                workflow. The soft note keeps the state honest; the sent invoice shows
+                the money as already paid. */}
+            {isDraft && (
+              <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                This invoice hasn&apos;t been sent yet — recording a prepayment (deposit,
+                Venmo) is fine; it&apos;ll show as already paid when you send it.
               </p>
-            ) : (
-            <>
+            )}
             {payError && <p className="text-sm text-red-600">{payError}</p>}
             <div className="grid grid-cols-2 gap-2">
               <div>
@@ -705,8 +705,6 @@ export function InvoiceDetail({
             <Button className="w-full" onClick={pay} disabled={pending}>
               {pending ? "Saving…" : "Record Payment"}
             </Button>
-            </>
-            )}
           </CardContent>
         </Card>
 
