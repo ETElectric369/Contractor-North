@@ -11,25 +11,37 @@ import { MoveToDay } from "@/components/move-to-day";
 import { useToast } from "@/components/toast";
 import { dispatchAction } from "@/lib/action-items/dispatch";
 import { KIND_META, KIND_STREAM, STREAM_LABEL, STREAM_ORDER, sortActionItems, type ActionItem, type Affordance } from "@/lib/action-items/types";
+import { DEFAULT_TIMEZONE } from "@/lib/utils";
 
-function ymd(d: Date) {
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
-
-/** Friendly relative day for the "when" line; times for datetime values. */
-function prettyWhen(when: string | null | undefined): string | null {
+/**
+ * Friendly relative day for the "when" line; times for datetime values.
+ *
+ * HYDRATION LAW: this runs during SSR (Vercel, UTC) AND in the browser (Pacific), and React
+ * #418s on any text difference — which is exactly what happened every evening ("Today" on one
+ * side, "Tomorrow" on the other) and for timed items all day (UTC vs local clock formatting).
+ * So nothing here may consult the runtime's clock or timezone: "today" comes from the
+ * server-computed business-tz `todayStr` prop, date-only values are compared as noon-UTC
+ * instants (tz-independent difference), and all display formatting pins the business timezone.
+ */
+function prettyWhen(when: string | null | undefined, todayStr: string): string | null {
   if (!when) return null;
   const hasTime = when.includes("T");
-  const d = new Date(hasTime ? when : `${when}T12:00:00`);
+  const d = hasTime ? new Date(when) : new Date(`${when}T12:00:00Z`);
   if (isNaN(d.getTime())) return null;
-  const today = new Date();
-  const day0 = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
-  const diffDays = Math.round((day0(d) - day0(today)) / 86_400_000);
+  const dayStr = hasTime
+    ? d.toLocaleDateString("en-CA", { timeZone: DEFAULT_TIMEZONE }) // en-CA = YYYY-MM-DD
+    : when;
+  const diffDays = Math.round((Date.parse(`${dayStr}T12:00:00Z`) - Date.parse(`${todayStr}T12:00:00Z`)) / 86_400_000);
   const rel =
-    diffDays < 0 ? `${-diffDays}d overdue` : diffDays === 0 ? "Today" : diffDays === 1 ? "Tomorrow" : d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+    diffDays < 0
+      ? `${-diffDays}d overdue`
+      : diffDays === 0
+        ? "Today"
+        : diffDays === 1
+          ? "Tomorrow"
+          : d.toLocaleDateString("en-US", { timeZone: hasTime ? DEFAULT_TIMEZONE : "UTC", weekday: "short", month: "short", day: "numeric" });
   if (hasTime) {
-    const t = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    const t = d.toLocaleTimeString("en-US", { timeZone: DEFAULT_TIMEZONE, hour: "numeric", minute: "2-digit" });
     return diffDays === 0 ? t : `${rel} · ${t}`;
   }
   return rel;
@@ -45,10 +57,14 @@ export function ActionList({
   items,
   people = [],
   emptyLabel = "All caught up.",
+  todayStr,
 }: {
   items: ActionItem[];
   people?: { id: string; full_name: string | null }[];
   emptyLabel?: string;
+  /** The business-tz "today" (YYYY-MM-DD), computed ONCE on the server — the only clock this
+      component may consult, so SSR and hydration can never disagree about what day it is. */
+  todayStr: string;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -281,8 +297,8 @@ export function ActionList({
           {groupItems.map((item) => {
             const can = (v: Affordance) => item.affordances.includes(v);
             const meta = KIND_META[item.kind];
-            const when = prettyWhen(item.when);
-            const overdue = item.when && !item.when.includes("T") && item.when < ymd(new Date());
+            const when = prettyWhen(item.when, todayStr);
+            const overdue = item.when && !item.when.includes("T") && item.when < todayStr;
             return (
               <div
                 key={item.id}

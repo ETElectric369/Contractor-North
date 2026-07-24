@@ -795,7 +795,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
             </span>
           </div>
           <div className="p-3">
-            <ActionList items={visibleActions} people={people} />
+            <ActionList items={visibleActions} people={people} todayStr={todayStr} />
           </div>
           {!showAllActions && actionItems.length > 5 && (
             <Link
