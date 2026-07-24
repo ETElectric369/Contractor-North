@@ -254,6 +254,9 @@ body.modal-open .app-bottom-nav {
   @page {
     margin: 0;
   }
+  /* Never split a table row (or the totals block) across a page boundary. */
+  .print-page tr { break-inside: avoid; }
+  .print-page .totals-block { break-inside: avoid; }
   /* Keep a single-page invoice on ONE page: tighten the vertical rhythm in print. */
   .print-page .mt-10 { margin-top: 0.6rem !important; }
   .print-page .mt-8 { margin-top: 0.6rem !important; }

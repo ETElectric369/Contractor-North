@@ -81,7 +81,9 @@ export function DocHeader({
   if (template === "modern") {
     return (
       <div
-        className="-mx-10 -mt-10 mb-8 flex items-start justify-between px-10 py-8 text-white print:mb-4 print:py-5"
+        // In-flow band (no negative-margin bleed): the old -m-10 trick assumed the sheet's
+        // p-10 padding and CLIPPED the header's top row once the PDF engine owns the margins.
+        className="mb-8 flex items-start justify-between rounded-xl px-8 py-6 text-white print:mb-4 print:py-5"
         style={{ backgroundColor: co.brand }}
       >
         <div className="flex items-center gap-3">
@@ -224,7 +226,7 @@ export function DocTotals({
 }) {
   const hasBalance = balance != null;
   return (
-    <div className="mt-4 flex justify-end">
+    <div className="totals-block mt-4 flex justify-end">
       <div className="w-64 space-y-1 text-sm">
         <div className="flex justify-between text-slate-600"><span>Subtotal</span><span>{formatCurrency(subtotal)}</span></div>
         <div className="flex justify-between text-slate-600">
