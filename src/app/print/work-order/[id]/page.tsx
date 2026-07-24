@@ -48,7 +48,7 @@ export default async function WorkOrderPrintPage({
         <PrintButton />
       </div>
 
-      <div className="print-page mx-auto max-w-3xl bg-white p-10 shadow-sm">
+      <div className="print-page mx-auto bg-white shadow-sm">
         <DocHeader
           co={company}
           template={template}

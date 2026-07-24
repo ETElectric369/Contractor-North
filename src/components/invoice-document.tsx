@@ -68,7 +68,7 @@ export function InvoiceDocument({
   const balance = invoiceBalance(total, amountPaid); // floored at 0 — never a negative "Please remit"
 
   return (
-    <div className="print-page mx-auto max-w-3xl bg-white p-10 shadow-sm">
+    <div className="print-page mx-auto bg-white shadow-sm">
       <DocHeader
         co={co}
         template={template}

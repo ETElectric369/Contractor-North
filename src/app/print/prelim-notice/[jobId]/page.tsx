@@ -69,7 +69,7 @@ export default async function PrelimNoticePage({ params }: { params: Promise<{ j
       <div className="no-print mx-auto mb-4 flex max-w-3xl items-center justify-end px-4">
         <PrintButton label="Print / Save PDF" />
       </div>
-      <div className="print-page mx-auto max-w-3xl bg-white p-10 shadow-sm">
+      <div className="print-page mx-auto bg-white shadow-sm">
         <div className="whitespace-pre-wrap text-sm leading-relaxed text-slate-900">{notice}</div>
         <div className="mt-10 grid grid-cols-2 gap-8 text-sm">
           <div>

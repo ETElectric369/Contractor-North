@@ -220,6 +220,16 @@ body.modal-open .app-bottom-nav {
   );
 }
 /* ── Print: hide UI chrome, give the document clean margins ─────────────── */
+/* WYSIWYG print sheet (Erik 7/24): every print doc renders at true US-letter geometry on
+   screen — 8.5in wide with the SAME 0.6in/0.75in padding the printed page gets — so the
+   preview is exactly the PDF the customer receives. Phones just shrink it (max-width). */
+.print-page {
+  width: 8.5in;
+  max-width: 100%;
+  min-height: 11in;
+  padding: 0.6in 0.75in;
+}
+
 @media print {
   .no-print {
     display: none !important;
@@ -233,11 +243,13 @@ body.modal-open .app-bottom-nav {
     border: none !important;
     margin: 0 !important;
     max-width: none !important;
+    width: auto !important;
+    min-height: 0 !important; /* the 11in screen floor would force a blank trailing page */
     /* The page margin lives on the content now (see @page margin:0), so the doc keeps
        a clean border without the browser stamping a URL/date/page-number header+footer.
        (In Safari the "Print headers & footers" checkbox can still override this — uncheck
-       it there.) Kept modest so a one-page invoice doesn't spill. */
-    padding: 0.4in 0.5in !important;
+       it there.) SAME inches as the on-screen sheet — the preview IS the printed page. */
+    padding: 0.6in 0.75in !important;
   }
   @page {
     margin: 0;

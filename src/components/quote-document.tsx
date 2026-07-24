@@ -80,7 +80,7 @@ export function QuoteDocument({
 
   return (
     <>
-    <div className="print-page mx-auto max-w-3xl bg-white p-10 shadow-sm">
+    <div className="print-page mx-auto bg-white shadow-sm">
       <DocHeader
         co={co}
         template={template}
@@ -171,7 +171,7 @@ export function QuoteDocument({
     {/* Circuit schedule — a second sheet (break-before:page in print) showing the panel layout
         behind the price: which breaker feeds what, on which wire. Only when the estimate carries one. */}
     {circuitRows.length > 0 && (
-      <div className="print-page mx-auto mt-6 max-w-3xl bg-white p-10 shadow-sm print:mt-0" style={{ breakBefore: "page" }}>
+      <div className="print-page mx-auto mt-6 bg-white shadow-sm print:mt-0" style={{ breakBefore: "page" }}>
         <div className="flex items-baseline justify-between border-b border-slate-300 pb-2">
           <h2 className="text-base font-semibold text-slate-900">Circuit Schedule</h2>
           <span className="text-[11px] uppercase tracking-wide text-slate-400">{docLabel} {number}</span>
