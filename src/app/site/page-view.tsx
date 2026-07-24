@@ -5,7 +5,7 @@ import type { PublicOrg } from "@/lib/public-org";
 import type { PublicPage } from "@/lib/public-pages";
 import { BlockRenderer } from "./block-renderer";
 import { deriveSiteChrome, SiteHeader, SiteFooter, type SiteNav } from "./site-chrome";
-import { defaultSocialImage } from "./site-base";
+import { defaultSocialImage, orgIcons } from "./site-base";
 import { socialImage } from "@/lib/site-image";
 
 /**
@@ -26,6 +26,7 @@ export function customPageMetadata(org: PublicOrg, page: PublicPage): Metadata {
   return {
     title,
     description,
+    icons: orgIcons(org),
     alternates: { canonical: url },
     openGraph: { title, description, type: "website", url, ...(img ? { images: [img] } : {}) },
     twitter: { card: "summary_large_image", title, description, ...(img ? { images: [img] } : {}) },

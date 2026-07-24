@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2, Pencil, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -173,6 +173,15 @@ export function InvoiceDetail({
   // import state
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const [markup, setMarkup] = useState(materialMarkup); // material markup % for the costs import
+  // Once a costs import exists (this session OR from a previous one — the items carry their
+  // import_source), changing the % RE-RUNS the import automatically (debounced) — Erik changed
+  // the number and rightly expected the imported prices to move. Guard rails from the
+  // adversarial review: fires only on USER edits (dirty ref — never on mount/refresh), never
+  // while an import/save is in flight (pending gate; re-arms when it clears), never on the
+  // transient 0 a cleared field emits (0% requires the explicit button), and never once the
+  // invoice has left draft (server re-checks regardless).
+  const costsImported = useRef(items.some((i) => i.import_source === "costs"));
+  const markupDirty = useRef(false);
   function runImport(fn: (id: string) => Promise<{ ok: boolean; error?: string }>, label: string) {
     setImportMsg(null);
     start(async () => {
@@ -183,12 +192,24 @@ export function InvoiceDetail({
         setTimeout(() => setImportMsg(null), 5000);
         return;
       }
+      if (label === "Materials") costsImported.current = true;
       setImportMsg(`${label} imported.`);
       toast(`${label} imported`, "success");
       setTimeout(() => setImportMsg(null), 5000);
       refresh();
     });
   }
+
+  useEffect(() => {
+    if (!markupDirty.current || !costsImported.current || !isDraft || !(markup > 0)) return;
+    if (pending) return; // re-armed by the pending flip in deps when the in-flight work ends
+    const t = setTimeout(() => {
+      markupDirty.current = false;
+      runImport((id) => importCostsIntoInvoice(id, markup), "Materials");
+    }, 700);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [markup, pending, isDraft]);
 
   // edit-payment state
   const [payEditId, setPayEditId] = useState<string | null>(null);
@@ -484,7 +505,7 @@ export function InvoiceDetail({
                   <Button size="sm" variant="outline" onClick={() => runImport((id) => importCostsIntoInvoice(id, markup), "Materials")} disabled={pending}>
                     Materials From Costs
                   </Button>
-                  <NumberInput value={markup} onValueChange={setMarkup} className="h-8 w-14 text-center text-sm" aria-label="Material markup percent" />
+                  <NumberInput value={markup} onValueChange={(v) => { markupDirty.current = true; setMarkup(v); }} className="h-8 w-14 text-center text-sm" aria-label="Material markup percent" />
                   <span className="text-xs text-slate-400">% markup</span>
                 </div>
               </>

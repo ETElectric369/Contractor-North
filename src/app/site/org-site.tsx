@@ -5,6 +5,7 @@ import { orgPublicBaseUrl, parseGeoFromMapUrl, type OrgSettings } from "@/lib/or
 import { pageSlugFromHref } from "@/lib/site-nav";
 import type { PublicOrg } from "@/lib/public-org";
 import { imageSrcSet, sizedImage, socialImage } from "@/lib/site-image";
+import { orgIcons } from "./site-base";
 import { jsonLdSafe } from "@/lib/jsonld";
 import type { Block } from "@/lib/site-blocks";
 import { BlockRenderer } from "./block-renderer";
@@ -29,6 +30,7 @@ export function orgSiteMetadata(org: PublicOrg): Metadata {
   return {
     title,
     description,
+    icons: orgIcons(org), // the automatic per-tenant favicon — the org's own logo, resized
     openGraph: { title, description, type: "website", images: hero ? [hero] : [] },
     twitter: { card: "summary_large_image", title, description, images: hero ? [hero] : [] },
   };

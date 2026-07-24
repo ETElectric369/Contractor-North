@@ -1,5 +1,5 @@
 import { headers } from "next/headers";
-import { socialImage } from "@/lib/site-image";
+import { sizedImage, socialImage } from "@/lib/site-image";
 
 const SITES_DOMAIN = (process.env.SITES_DOMAIN || "contractornorth.com").toLowerCase();
 
@@ -29,4 +29,17 @@ export function defaultSocialImage(org: PublicOrg): string | null {
   const s = org.settings;
   // socialImage caps the served variant at ~1200px — scrapers shouldn't pull a full camera original.
   return socialImage(s.splash_bg_url || s.portfolio?.[0]?.url || org.logo_url || null);
+}
+
+/** The AUTOMATIC per-org favicon (Erik 7/24): every tenant site's browser-tab icon is its own
+ *  logo, minted on the fly by the image pipeline (64px favicon + 180px apple-touch) — zero
+ *  config per client, exactly like the rest of the site platform. A <link rel="icon"> in page
+ *  metadata overrides the app-level /favicon.ico in every modern browser. SVG logos pass
+ *  through untransformed (fine as a favicon; skipped for apple-touch, which iOS wants raster).
+ *  No logo → undefined, so the page inherits the platform default. */
+export function orgIcons(org: PublicOrg): { icon: string; apple?: string } | undefined {
+  const logo = org.logo_url;
+  if (!logo) return undefined;
+  const isSvg = /\.svg(\?|$)/i.test(logo);
+  return { icon: sizedImage(logo, 64), ...(isSvg ? {} : { apple: sizedImage(logo, 180) }) };
 }

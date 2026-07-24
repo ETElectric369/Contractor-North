@@ -548,31 +548,88 @@ export async function importCostsIntoInvoice(invoiceId: string, markupPercent = 
 
   const [{ data: pos }, { data: bills }] = await Promise.all([
     supabase.from("purchase_orders").select("id, po_number, vendor, total, status").eq("job_id", inv.job_id),
-    supabase.from("bills").select("supplier, bill_number, amount, po_id").eq("job_id", inv.job_id),
+    supabase.from("bills").select("id, supplier, bill_number, amount, po_id").eq("job_id", inv.job_id),
   ]);
+  // The itemized lines behind each bill (the receipt-reader stores every receipt line).
+  // A bill WITH lines goes onto the invoice item-by-item — real descriptions, quantities,
+  // and per-item prices — instead of one opaque "vendor · 1 lot" lump (Erik, 7/24). A bill
+  // without lines (hand-entered) still imports as its lump.
+  const billIds = ((bills ?? []) as any[]).map((b) => b.id);
+  const { data: blis } = billIds.length
+    ? await supabase
+        .from("bill_line_items")
+        .select("bill_id, description, quantity, unit_price, amount, category, sort_order")
+        .in("bill_id", billIds)
+        .order("sort_order")
+    : { data: [] as any[] };
+  const linesByBill = new Map<string, any[]>();
+  for (const l of (blis ?? []) as any[]) {
+    if (!linesByBill.has(l.bill_id)) linesByBill.set(l.bill_id, []);
+    linesByBill.get(l.bill_id)!.push(l);
+  }
 
   // Mark up cost → sell price. Markup is NOT shown on the line (customers don't
   // see your margin); only the price reflects it.
   const mark = (cost: number) => Math.round(cost * (1 + (Number(markupPercent) || 0) / 100) * 100) / 100;
-  const rows: { description: string; unit_price: number }[] = [];
+  const rows: { description: string; quantity: number; unit: string; unit_price: number }[] = [];
   // Bill only LIVE purchase orders (the one shared rule): a draft/cancelled order was
   // never a real cost, and a PO whose supplier bill has arrived is superseded by that
   // bill — otherwise one CED delivery goes out on the invoice as two material charges.
   for (const p of livePurchaseOrders((pos ?? []) as any[], (bills ?? []) as any[])) {
-    if (Number(p.total) > 0) rows.push({ description: `Materials — ${p.vendor} (PO ${p.po_number})`, unit_price: mark(Number(p.total)) });
+    if (Number(p.total) > 0) rows.push({ description: `Materials — ${p.vendor} (PO ${p.po_number})`, quantity: 1, unit: "lot", unit_price: mark(Number(p.total)) });
   }
-  for (const b of bills ?? []) {
-    if (Number(b.amount) > 0)
-      rows.push({ description: `Materials — ${b.supplier}${b.bill_number ? ` (bill #${b.bill_number})` : ""}`, unit_price: mark(Number(b.amount)) });
+  // ── THE ANCHOR INVARIANT (adversarial-review fix, 7/24) ──────────────────────────────
+  // Each bill's itemized rows must sum to EXACTLY mark(bill.amount) — the same figure the
+  // lump path bills, computeJobProgress reports, and livePurchaseOrders' PO-supersede math
+  // subtracts. Itemization changes PRESENTATION, never the total. Mechanically:
+  //  • line sell = round(signed line AMOUNT × (1+m)) — never per-unit rounding × qty
+  //    (a 1000-count $25 line billed $30 that way); qty×unit renders only when it
+  //    reproduces the exact sell, else the qty folds into the description.
+  //  • negatives (discounts/returns) stay negative rows — dropping or abs()ing them
+  //    overbilled above the bill's net.
+  //  • receipt tax lines aren't itemized as fake marked-up "Sales Tax" rows; they land in
+  //    the per-bill remainder row ("Supplies & tax"), same opacity as the lump always had.
+  //  • the remainder row absorbs tax + rounding + unreadable/unpriced lines, so a bill
+  //    whose lines are junk still bills its full amount (never $0), and a corrected
+  //    bill.amount always wins over stale lines.
+  for (const b of (bills ?? []) as any[]) {
+    if (!(Number(b.amount) > 0)) continue;
+    const target = mark(Number(b.amount));
+    const lines = (linesByBill.get(b.id) ?? []).filter((l) => !/tax/i.test(String(l.category ?? "")));
+    const billRows: typeof rows = [];
+    let emitted = 0;
+    for (const l of lines) {
+      const qty = Number(l.quantity) || 0;
+      const rawAmt =
+        l.amount != null && Number(l.amount) !== 0 && !isNaN(Number(l.amount))
+          ? Number(l.amount)
+          : (Number(l.unit_price) || 0) * (qty || 1);
+      if (!rawAmt) continue; // unpriced line → its cost stays in the remainder row
+      const sell = Math.round(rawAmt * (1 + (Number(markupPercent) || 0) / 100) * 100) / 100;
+      if (!sell) continue;
+      const desc = String(l.description || "Materials").slice(0, 300);
+      const unitExact = qty > 0 ? Math.round((sell / qty) * 100) / 100 : sell;
+      if (qty > 0 && Number.isInteger(qty) && Math.round(unitExact * qty * 100) / 100 === sell) {
+        billRows.push({ description: desc, quantity: qty, unit: "ea", unit_price: unitExact });
+        emitted = Math.round((emitted + unitExact * qty) * 100) / 100;
+      } else {
+        billRows.push({ description: qty > 1 ? `${desc} (${qty} ea)` : desc, quantity: 1, unit: "ea", unit_price: sell });
+        emitted = Math.round((emitted + sell) * 100) / 100;
+      }
+    }
+    const remainder = Math.round((target - emitted) * 100) / 100;
+    if (!billRows.length) {
+      rows.push({ description: `Materials — ${b.supplier}${b.bill_number ? ` (bill #${b.bill_number})` : ""}`, quantity: 1, unit: "lot", unit_price: target });
+      continue;
+    }
+    if (Math.abs(remainder) >= 0.01) {
+      billRows.push({ description: `Supplies & tax — ${b.supplier}`, quantity: 1, unit: "ea", unit_price: remainder });
+    }
+    rows.push(...billRows);
   }
   if (!rows.length) return { ok: false, error: "No purchase orders or bills on this job yet.", empty: true };
 
-  const rep = await replaceImportedItems(
-    supabase,
-    invoiceId,
-    "costs",
-    rows.map((r) => ({ description: r.description, quantity: 1, unit: "lot", unit_price: r.unit_price })),
-  );
+  const rep = await replaceImportedItems(supabase, invoiceId, "costs", rows);
   if (rep.error) return { ok: false, error: rep.error };
   await recalcInvoice(supabase, invoiceId);
   revalidateMoney(invoiceId);

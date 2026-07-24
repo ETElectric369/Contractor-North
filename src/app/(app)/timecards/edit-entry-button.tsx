@@ -361,12 +361,25 @@ export function EditEntryButton({
                           {entry.job_id && !jobs.some((j) => j.id === entry.job_id) && (
                             <option value={`job:${entry.job_id}`}>{entry.job ? jobLabel(entry.job) : "Current job"}</option>
                           )}
+                          {/* Self-heal: a saved part must NEVER lose its job because the picker
+                              list happens not to contain it — render a preserving option so the
+                              select can't silently blank an existing allocation. */}
+                          {s.what.startsWith("job:") &&
+                            s.what.slice(4) !== entry.job_id &&
+                            !jobs.some((j) => `job:${j.id}` === s.what) && (
+                              <option value={s.what}>Job on this part (kept)</option>
+                            )}
                           {jobs.map((j) => (
                             <option key={j.id} value={`job:${j.id}`}>{jobLabel(j)}</option>
                           ))}
                         </optgroup>
-                        {jobCodes.length > 0 && (
+                        {(jobCodes.length > 0 || s.what.startsWith("code:")) && (
                           <optgroup label="Time code — paid, not billed">
+                            {/* Same self-heal as jobs: a saved code the list no longer carries must
+                                stay selectable, not silently blank. */}
+                            {s.what.startsWith("code:") && !jobCodes.some((c) => `code:${c.code}` === s.what) && (
+                              <option value={s.what}>{s.what.slice(5)} (kept)</option>
+                            )}
                             {jobCodes.map((c) => (
                               <option key={c.id} value={`code:${c.code}`}>{c.code} — {c.description}</option>
                             ))}

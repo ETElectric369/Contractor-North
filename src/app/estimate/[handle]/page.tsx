@@ -4,6 +4,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { accentHex, orgPublicBaseUrl } from "@/lib/org-settings";
 import { getPublicOrgByHandle } from "@/lib/public-org";
 import { socialImage } from "@/lib/site-image";
+import { orgIcons } from "../../site/site-base";
 import { DECK_ESTIMATE_CODES, buildDeckRates } from "@/lib/estimate/deck";
 import { Configurator } from "./configurator";
 import { PortfolioGallery } from "./portfolio-gallery";
@@ -31,6 +32,7 @@ export async function generateMetadata({ params }: { params: Promise<{ handle: s
   return {
     title,
     description,
+    icons: orgIcons(org),
     alternates: { canonical: url },
     openGraph: { title, description, type: "website", url, ...(img ? { images: [img] } : {}) },
     twitter: { card: "summary_large_image", title, description, ...(img ? { images: [img] } : {}) },

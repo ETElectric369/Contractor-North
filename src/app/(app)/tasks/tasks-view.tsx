@@ -3,7 +3,7 @@
 import { useEffect, useId, useRef, useState, useTransition, type ReactNode } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import Link from "next/link";
-import { Plus, Trash2, Flag, Briefcase, Pencil, Pin, User } from "lucide-react";
+import { Plus, Trash2, Flag, Briefcase, Pencil, Pin, User, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Modal, ModalActions } from "@/components/ui/modal";
@@ -578,6 +578,8 @@ function TimeSection({
   countClass = "text-slate-500",
   children,
   footer,
+  collapsible = false,
+  defaultExpanded,
 }: {
   label: string;
   tone: string;
@@ -585,15 +587,36 @@ function TimeSection({
   countClass?: string;
   children: ReactNode;
   footer?: ReactNode;
+  /** Collapsed-by-default section (the Completed list, Erik 7/23) — the header is the
+   *  toggle, so done items stay one tap away without burying the open work below them. */
+  collapsible?: boolean;
+  /** Override the initial state — "Show all completed" lands on ?done=all, which must
+   *  arrive OPEN or the just-fetched full list hides behind a collapsed header. */
+  defaultExpanded?: boolean;
 }) {
+  const [expanded, setExpanded] = useState(defaultExpanded ?? !collapsible);
   return (
     <Card className={`overflow-hidden border ${tone}`}>
-      <div className="flex items-center justify-between border-b border-slate-200/70 px-4 py-3">
-        <h3 className="text-sm font-semibold text-slate-900">{label}</h3>
-        <span className={`text-xs ${countClass}`}>{count}</span>
-      </div>
-      <ul className="divide-y divide-slate-100 bg-white">{children}</ul>
-      {footer}
+      {collapsible ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="flex min-h-[44px] w-full items-center justify-between border-b border-slate-200/70 px-4 py-3 text-left"
+        >
+          <h3 className="text-sm font-semibold text-slate-900">{label}</h3>
+          <span className={`flex items-center gap-1.5 text-xs ${countClass}`}>
+            {count}
+            <ChevronDown className={`h-3.5 w-3.5 transition-transform ${expanded ? "rotate-180" : ""}`} />
+          </span>
+        </button>
+      ) : (
+        <div className="flex items-center justify-between border-b border-slate-200/70 px-4 py-3">
+          <h3 className="text-sm font-semibold text-slate-900">{label}</h3>
+          <span className={`text-xs ${countClass}`}>{count}</span>
+        </div>
+      )}
+      {expanded && <ul className="divide-y divide-slate-100 bg-white">{children}</ul>}
+      {expanded && footer}
     </Card>
   );
 }
@@ -749,6 +772,8 @@ export function TasksView({
         {doneTop.length > 0 && (
           <TimeSection
             label="Completed"
+            collapsible
+            defaultExpanded={showingAllDone}
             tone="border-slate-200 bg-slate-50/40"
             count={doneTotal || doneTop.length}
             countClass="text-slate-400"

@@ -7,7 +7,7 @@ import { jsonLdSafe } from "@/lib/jsonld";
 import type { PublicOrg } from "@/lib/public-org";
 import type { PublicPost } from "@/lib/public-posts";
 import { deriveSiteChrome, SiteHeader, SiteFooter, type SiteNav } from "./site-chrome";
-import { defaultSocialImage } from "./site-base";
+import { defaultSocialImage, orgIcons } from "./site-base";
 import { imageSrcSet, sizedImage, socialImage } from "@/lib/site-image";
 
 /**
@@ -44,6 +44,7 @@ export function blogIndexMetadata(org: PublicOrg): Metadata {
   return {
     title,
     description,
+    icons: orgIcons(org),
     alternates: { canonical: url },
     openGraph: { title, description, type: "website", url, ...(img ? { images: [img] } : {}) },
     twitter: { card: "summary_large_image", title, description, ...(img ? { images: [img] } : {}) },
@@ -59,6 +60,7 @@ export function articleMetadata(org: PublicOrg, post: PublicPost): Metadata {
   return {
     title,
     description,
+    icons: orgIcons(org),
     alternates: { canonical: url },
     openGraph: { title, description, type: "article", url, images: img ? [img] : [] },
     twitter: { card: "summary_large_image", title, description, images: img ? [img] : [] },

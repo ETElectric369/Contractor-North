@@ -204,7 +204,8 @@ export function NewCustomerButton() {
                   <option value="residential">Residential</option>
                   <option value="commercial">Commercial</option>
                   <option value="industrial">Industrial</option>
-                  <option value="subcontractor">Subcontractor</option>
+                  <option value="contractor">Contractor</option>
+                <option value="subcontractor">Subcontractor</option>
                 </Select>
               </div>
               <div>

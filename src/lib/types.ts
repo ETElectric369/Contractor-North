@@ -344,6 +344,9 @@ export interface InvoiceItem {
   unit_price: number;
   line_total: number;
   sort_order: number;
+  /** Which import wrote this row ("costs" | "labor" | "quote" | null = hand-entered) —
+   *  drives the markup auto-reapply knowing a costs import exists across reloads. */
+  import_source?: string | null;
 }
 
 export interface Payment {
