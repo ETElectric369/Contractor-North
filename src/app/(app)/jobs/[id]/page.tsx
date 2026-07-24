@@ -136,7 +136,8 @@ export default async function JobDetailPage({
     { data: lienRecord },
     { data: insuranceClaim },
     { data: pos },
-    { data: entries },
+    { data: ownEntries },
+    { data: inboundAllocRows },
     { data: docRows },
     { data: staff },
     { data: bills },
@@ -157,6 +158,14 @@ export default async function JobDetailPage({
       .select("id, profile_id, clock_in, clock_out, lunch_minutes, miles, status, job_id, job_code, notes, rate_override, paid_at, mileage_paid_at, profiles(full_name, hourly_rate, bill_rate), job:job_id(job_number, name), time_allocations(id, job_id, hours, job_code, description)")
       .eq("job_id", id)
       .order("clock_in", { ascending: false }),
+    // Time allocated INTO this job from shifts clocked on OTHER jobs (or no job). Without this
+    // second direction, an hour split onto this job from another job's shift was invisible here —
+    // while billing (fetchJobLaborRows) already billed it. Same two-way read billing uses; the
+    // parent entry comes embedded with ALL its allocations so the per-job share math works.
+    supabase
+      .from("time_allocations")
+      .select("id, time_entries!inner(id, profile_id, clock_in, clock_out, lunch_minutes, status, job_id, job_code, notes, rate_override, paid_at, mileage_paid_at, profiles(full_name, hourly_rate, bill_rate), job:job_id(job_number, name), time_allocations(id, job_id, hours, job_code, description))")
+      .eq("job_id", id),
     supabase
       .from("documents")
       .select("id, name, category, file_url, size_bytes, created_at")
@@ -230,6 +239,22 @@ export default async function JobDetailPage({
   } = await supabase.auth.getUser();
   const { data: meRow } = await supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle();
   const viewerIsStaff = isStaffRole((meRow as any)?.role ?? "");
+  // Merge the two directions into ONE entries list: shifts clocked on this job, plus shifts
+  // clocked elsewhere that allocated hours here (deduped; the row math shows only this job's
+  // share). laborCostForJob already attributes per-allocation, so totals stay exact.
+  const ownIds = new Set(((ownEntries ?? []) as any[]).map((e: any) => e.id));
+  const foreignEntries = Array.from(
+    new Map(
+      ((inboundAllocRows ?? []) as any[])
+        .map((r: any) => r.time_entries)
+        .filter((e: any) => e && !ownIds.has(e.id))
+        .map((e: any) => [e.id, e]),
+    ).values(),
+  );
+  const entries = [...((ownEntries ?? []) as any[]), ...foreignEntries].sort((a: any, b: any) =>
+    a.clock_in < b.clock_in ? 1 : -1,
+  );
+
   const [{ data: techs }, { data: jobCodes }, { data: lists }, { data: org }, { data: allCustomers }, { data: allJobs }, { data: codeTemplates }, { data: openEntryRow }] = await Promise.all([
     // Staff get hourly_rate + bill_rate for the add-time/edit modals' pay-rate
     // anchor; NON-staff keep the narrow select. The gate matters here: this array
@@ -591,15 +616,28 @@ export default async function JobDetailPage({
             {timeTabEntries.map((e) => {
               const h = e.status === "closed" && e.clock_out
                 ? hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes) : null;
+              // THIS job's share of the shift: allocation rows naming this job (unlabeled rows
+              // belong to the entry's own job), else the whole shift. The row shows the share —
+              // the number that actually bills here — with the full-shift context alongside.
+              const allocs = e.time_allocations ?? [];
+              const share = allocs.length
+                ? allocs.reduce((sum: number, a: any) => sum + (((a.job_id ?? e.job_id) === j.id) ? Number(a.hours ?? 0) : 0), 0)
+                : h;
+              const isSplit = allocs.length > 0 && h != null && Math.abs((share ?? 0) - h) > 0.01;
+              const fromOtherJob = e.job_id !== j.id;
               return (
                 <li key={e.id} className="flex items-center justify-between px-5 py-3 text-sm">
                   <div>
                     <span className="text-slate-700">{formatDateTz(e.clock_in, tz)}</span>
                     <span className="ml-2 text-slate-500">{e.profiles?.full_name ?? "—"}</span>
                     {e.job_code && <Badge tone="slate" className="ml-2">{e.job_code}</Badge>}
+                    {fromOtherJob && e.job && (
+                      <Badge tone="blue" className="ml-2">via {e.job.job_number}</Badge>
+                    )}
                   </div>
                   <div className="flex items-center gap-1.5">
-                    <span className="font-medium text-slate-800">{h != null ? formatDuration(h) : "open"}</span>
+                    {isSplit && <span className="text-xs text-slate-400">of {formatDuration(h!)} shift</span>}
+                    <span className="font-medium text-slate-800">{share != null ? formatDuration(share) : "open"}</span>
                     <EditEntryButton
                       entry={e}
                       jobCodes={(jobCodes ?? []) as any}
