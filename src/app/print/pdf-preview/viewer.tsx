@@ -57,7 +57,9 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
 
       const host = pagesRef.current!;
       host.innerHTML = "";
-      const containerW = Math.min(host.clientWidth - 16, 900);
+      // Never measure the host itself — it's display:none while loading, so clientWidth
+      // is 0 and every page rendered into a negative-width canvas (Erik's blank sheets).
+      const containerW = Math.min(Math.max(window.innerWidth - 32, 280), 900);
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
       for (let n = 1; n <= pdf.numPages; n++) {
         const page = await pdf.getPage(n);
