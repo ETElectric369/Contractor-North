@@ -164,7 +164,7 @@ export function QuickCostButton({
       if (!receipt || !targetJob) return finishOk();
       start(async () => {
         if (await attachReceipt(targetJob)) finishOk();
-        else setWarn("Still couldn't upload the photo — you can add it later from the job's Receipts.");
+        else setWarn("Still couldn't upload the receipt — you can add it later from the job's Receipts.");
       });
       return;
     }
@@ -190,7 +190,7 @@ export function QuickCostButton({
       // already safe, so the Save button becomes a one-tap photo retry.
       if (receipt && targetJob) {
         if (!(await attachReceipt(targetJob))) {
-          setWarn("Cost saved ✓ — but the receipt photo didn't upload. Tap “Retry photo”, or close and add it from the job's Receipts.");
+          setWarn("Cost saved ✓ — but the receipt didn't upload. Tap “Retry receipt”, or close and add it from the job's Receipts.");
           return;
         }
       }
@@ -213,7 +213,7 @@ export function QuickCostButton({
         onClose={closeModal}
         title="Add a cost"
         portal
-        footer={<ModalActions onCancel={closeModal} onSave={onSave} saving={pending} saveLabel={costSaved ? "Retry photo" : "Save cost"} />}
+        footer={<ModalActions onCancel={closeModal} onSave={onSave} saving={pending} saveLabel={costSaved ? "Retry receipt" : "Save cost"} />}
       >
         <div className="space-y-4">
           <div>
@@ -254,19 +254,23 @@ export function QuickCostButton({
             Already paid (cash / card) — skip the bill
           </label>
           <div>
-            <Label>Receipt photo</Label>
+            <Label>Receipt</Label>
+            {/* No `capture` attribute, and PDFs allowed: `capture` forced iOS STRAIGHT to the
+                camera (no library, no files) while desktop ignored it and opened a folder —
+                the label lied somewhere on every platform. Without it, mobile shows the native
+                Take Photo / Photo Library / Choose File sheet and desktop opens the file
+                picker, so one honest button covers the emailed-PDF case too. */}
             <input
               ref={fileRef}
               type="file"
-              accept="image/*"
-              capture="environment"
+              accept="image/*,application/pdf,.pdf"
               className="hidden"
               onChange={(e) => {
                 const f = e.target.files?.[0] ?? null;
-                // Block oversized photos at selection so they can't be silently
+                // Block oversized files at selection so they can't be silently
                 // dropped on save — phone cameras routinely exceed 15 MB.
                 if (f && f.size > MAX_PHOTO) {
-                  setError("That photo is over 15 MB — take or pick a smaller one.");
+                  setError("That file is over 15 MB — attach a smaller one.");
                   setReceipt(null);
                   if (fileRef.current) fileRef.current.value = "";
                   return;
@@ -281,12 +285,12 @@ export function QuickCostButton({
               className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 py-3 text-sm text-slate-600 hover:bg-slate-50"
             >
               {receipt ? (
-                <><Check className="h-4 w-4 text-green-600" /> <span className="truncate">{receipt.name || "Photo attached"}</span></>
+                <><Check className="h-4 w-4 text-green-600" /> <span className="truncate">{receipt.name || "Receipt attached"}</span></>
               ) : (
-                <><Camera className="h-4 w-4" /> Snap / attach receipt</>
+                <><Camera className="h-4 w-4" /> Add receipt — photo or PDF</>
               )}
             </button>
-            {receipt && !targetJob && <p className="mt-1 text-xs text-amber-600">Pick a job to file the receipt photo with it.</p>}
+            {receipt && !targetJob && <p className="mt-1 text-xs text-amber-600">Pick a job to file the receipt with it.</p>}
           </div>
           {warn && <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">{warn}</p>}
           {error && <p className="text-sm text-red-600">{error}</p>}
