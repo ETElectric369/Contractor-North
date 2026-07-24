@@ -6,6 +6,12 @@ const nextConfig: NextConfig = {
   // The PDF engine's headless chromium must load from node_modules at runtime, not be
   // webpack-bundled (its brotli-packed binary breaks under bundling).
   serverExternalPackages: ["@sparticuz/chromium", "puppeteer-core"],
+  // The chromium package loads its brotli-packed binary + shared libs (libnss3 et al) from
+  // bin/ with fs at runtime — the file tracer misses them, and the lambda then dies with
+  // "libnss3.so: cannot open shared object file". Force the whole bin/ dir into the bundle.
+  outputFileTracingIncludes: {
+    "/api/pdf/**": ["./node_modules/@sparticuz/chromium/bin/**"],
+  },
   experimental: {
     // Server Actions are stable in Next 15; keep body limit generous for
     // photo / sketch / document uploads handled through actions — incl. plan

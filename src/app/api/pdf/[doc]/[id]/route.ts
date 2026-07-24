@@ -51,8 +51,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ doc: string
     : process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
   const browser = await puppeteer.launch({
     args: isVercel ? chromium.args : [],
+    defaultViewport: isVercel ? chromium.defaultViewport : undefined,
     executablePath,
-    headless: true,
+    headless: isVercel ? chromium.headless : true,
   });
 
   try {
