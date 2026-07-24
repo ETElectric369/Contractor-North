@@ -222,7 +222,12 @@ export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg;
     ...(hero ? { image: socialImage(hero) } : {}),
     ...(area ? { areaServed: area } : {}),
     priceRange: "$$",
-    ...(area ? { address: { "@type": "PostalAddress", addressLocality: org.city, addressRegion: org.state, addressCountry: "US" } } : {}),
+    // Address comes ONLY from the explicit public_city/public_state settings (set to match the
+    // GBP listing) — never from the org record, whose city is a business/mailing address that
+    // must not leak to the public web. Unset = no address block; areaServed + geo still bind.
+    ...(s.public_city
+      ? { address: { "@type": "PostalAddress", addressLocality: s.public_city, addressRegion: s.public_state || org.state, addressCountry: "US" } }
+      : {}),
     ...(geo ? { geo: { "@type": "GeoCoordinates", latitude: geo.lat, longitude: geo.lng } } : {}),
     ...(gbpUrl ? { hasMap: gbpUrl } : {}),
     ...(sameAs.length ? { sameAs } : {}),

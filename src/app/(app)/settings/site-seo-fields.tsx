@@ -16,6 +16,8 @@ import { updateOrgSettings } from "./actions";
 export function SiteSeoFields({ settings, orgId }: { settings: OrgSettings; orgId?: string }) {
   const [gbp, setGbp] = useState(settings.google_business_url ?? "");
   const [area, setArea] = useState(settings.service_area ?? "");
+  const [pubCity, setPubCity] = useState(settings.public_city ?? "");
+  const [pubState, setPubState] = useState(settings.public_state ?? "");
   const [ig, setIg] = useState(settings.social_instagram ?? "");
   const [theme, setTheme] = useState<OrgSettings["site_theme"]>(settings.site_theme ?? "classic");
   const [specHead, setSpecHead] = useState(settings.specialty_headline ?? "");
@@ -29,6 +31,8 @@ export function SiteSeoFields({ settings, orgId }: { settings: OrgSettings; orgI
   const [saved, setSaved] = useState({
     gbp: settings.google_business_url ?? "",
     area: settings.service_area ?? "",
+    pubCity: settings.public_city ?? "",
+    pubState: settings.public_state ?? "",
     ig: settings.social_instagram ?? "",
     theme: settings.site_theme ?? "classic",
     specHead: settings.specialty_headline ?? "",
@@ -42,6 +46,8 @@ export function SiteSeoFields({ settings, orgId }: { settings: OrgSettings; orgI
       const next = {
         gbp: gbp.trim(),
         area: area.trim(),
+        pubCity: pubCity.trim(),
+        pubState: pubState.trim().toUpperCase().slice(0, 2),
         ig: ig.replace(/^@/, "").trim(),
         theme,
         specHead: specHead.trim(),
@@ -50,6 +56,8 @@ export function SiteSeoFields({ settings, orgId }: { settings: OrgSettings; orgI
       const patch: Record<string, unknown> = {};
       if (next.gbp !== saved.gbp) patch.google_business_url = next.gbp;
       if (next.area !== saved.area) patch.service_area = next.area;
+      if (next.pubCity !== saved.pubCity) patch.public_city = next.pubCity;
+      if (next.pubState !== saved.pubState) patch.public_state = next.pubState;
       if (next.ig !== saved.ig) patch.social_instagram = next.ig;
       if (next.theme !== saved.theme) patch.site_theme = next.theme;
       if (next.specHead !== saved.specHead) patch.specialty_headline = next.specHead;
@@ -82,6 +90,24 @@ export function SiteSeoFields({ settings, orgId }: { settings: OrgSettings; orgI
         <Label htmlFor="seo-area">Service area</Label>
         <Input id="seo-area" value={area} onChange={(e) => setArea(e.target.value)} placeholder="e.g. Truckee & North Tahoe" />
       </div>
+      {/* Staff-only (collaborators can't write these keys): the PUBLIC address for search
+          listings. Kept separate from the business address on purpose — that one never
+          appears on the public site. */}
+      {!orgId && (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <Label htmlFor="seo-pub-city">Public city (search listings)</Label>
+            <Input id="seo-pub-city" value={pubCity} onChange={(e) => setPubCity(e.target.value)} placeholder="Match your Google Business Profile" />
+            <p className="mt-1 text-xs text-slate-400">
+              Shown to search engines as your location. Your business address in Settings stays private. Blank = no city listed.
+            </p>
+          </div>
+          <div>
+            <Label htmlFor="seo-pub-state">Public state</Label>
+            <Input id="seo-pub-state" value={pubState} onChange={(e) => setPubState(e.target.value)} placeholder="CA" maxLength={2} className="max-w-[6rem]" />
+          </div>
+        </div>
+      )}
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
           <Label htmlFor="seo-ig">Instagram handle</Label>

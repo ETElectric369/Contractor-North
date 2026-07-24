@@ -49,7 +49,9 @@ export function deriveSiteChrome(org: PublicOrg, { base = "", onHomepage = false
   const services = String(s.splash_bullets || "").split("\n").map((x) => x.trim()).filter(Boolean);
   const creds = String(s.splash_credentials || "").split("\n").map((x) => x.trim()).filter(Boolean);
   const reviews = (s.reviews ?? []).filter((r) => r && r.text && r.name);
-  const area = s.service_area || [org.city, org.state].filter(Boolean).join(", ");
+  // Fallback chain stops at the PUBLIC address fields — the org record's city is a business/
+  // mailing address (often the owner's home base) and must never leak onto the public site.
+  const area = s.service_area || [s.public_city, s.public_state].filter(Boolean).join(", ");
   const ig = (s.social_instagram || "").replace(/^@/, "").trim();
   const gbpUrl = (s.google_business_url || "").trim();
   const homeBlocks = renderReadyBlocks(s.home_blocks);

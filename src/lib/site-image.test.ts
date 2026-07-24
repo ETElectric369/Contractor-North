@@ -6,10 +6,10 @@ const SB_RENDER = "https://rbpokaozcxqownollqlx.supabase.co/storage/v1/render/im
 
 describe("sizedImage", () => {
   it("rewrites a Supabase public object URL onto the render endpoint", () => {
-    expect(sizedImage(SB, 640)).toBe(`${SB_RENDER}?width=640&quality=75`);
+    expect(sizedImage(SB, 640)).toBe(`${SB_RENDER}?width=640&quality=75&resize=contain`);
   });
   it("appends with & when the URL already has a query", () => {
-    expect(sizedImage(`${SB}?v=2`, 640)).toBe(`${SB_RENDER}?v=2&width=640&quality=75`);
+    expect(sizedImage(`${SB}?v=2`, 640)).toBe(`${SB_RENDER}?v=2&width=640&quality=75&resize=contain`);
   });
   it("passes external / relative / svg / empty URLs through untouched", () => {
     expect(sizedImage("https://cdn.example.com/a.jpg", 640)).toBe("https://cdn.example.com/a.jpg");
@@ -23,7 +23,7 @@ describe("sizedImage", () => {
 describe("imageSrcSet", () => {
   it("builds width descriptors for transformable URLs, undefined otherwise", () => {
     expect(imageSrcSet(SB, [320, 640])).toBe(
-      `${SB_RENDER}?width=320&quality=75 320w, ${SB_RENDER}?width=640&quality=75 640w`,
+      `${SB_RENDER}?width=320&quality=75&resize=contain 320w, ${SB_RENDER}?width=640&quality=75&resize=contain 640w`,
     );
     expect(imageSrcSet("https://cdn.example.com/a.jpg", [320])).toBeUndefined();
   });
@@ -31,7 +31,7 @@ describe("imageSrcSet", () => {
 
 describe("socialImage", () => {
   it("caps at 1200 and returns null for empty", () => {
-    expect(socialImage(SB)).toBe(`${SB_RENDER}?width=1200&quality=75`);
+    expect(socialImage(SB)).toBe(`${SB_RENDER}?width=1200&quality=75&resize=contain`);
     expect(socialImage(null)).toBeNull();
     expect(socialImage("")).toBeNull();
   });
@@ -40,7 +40,7 @@ describe("socialImage", () => {
 describe("optimizeBodyImages", () => {
   it("rewrites inline Supabase imgs and adds lazy/async", () => {
     const out = optimizeBodyImages(`<p>hi</p><img src="${SB}" alt="deck">`);
-    expect(out).toContain(`src="${SB_RENDER}?width=1280&quality=75"`);
+    expect(out).toContain(`src="${SB_RENDER}?width=1280&quality=75&resize=contain"`);
     expect(out).toContain('loading="lazy"');
     expect(out).toContain('decoding="async"');
   });

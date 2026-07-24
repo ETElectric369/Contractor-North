@@ -17,12 +17,14 @@ function transformable(url: string): boolean {
   return url.includes(OBJECT_PUBLIC) && !/\.svg(\?|$)/i.test(url);
 }
 
-/** A width-bounded, recompressed variant of a Supabase-hosted image (or the URL unchanged). */
+/** A width-bounded, recompressed variant of a Supabase-hosted image (or the URL unchanged).
+ *  resize=contain is REQUIRED: with width alone the transformer keeps the original height and
+ *  squashes the width (2500×1875 → 640×1875, verified live) — contain preserves aspect. */
 export function sizedImage(url: string | null | undefined, width: number, quality = 75): string {
   const u = String(url ?? "");
   if (!transformable(u)) return u;
   const sep = u.includes("?") ? "&" : "?";
-  return `${u.replace(OBJECT_PUBLIC, RENDER_PUBLIC)}${sep}width=${width}&quality=${quality}`;
+  return `${u.replace(OBJECT_PUBLIC, RENDER_PUBLIC)}${sep}width=${width}&quality=${quality}&resize=contain`;
 }
 
 /** srcSet across standard widths for responsive imgs; undefined when the URL can't be transformed

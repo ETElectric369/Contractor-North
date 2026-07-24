@@ -137,6 +137,13 @@ export interface OrgSettings {
   /** Human service-area label for the public site (e.g. "Truckee & North Tahoe"). Falls back
    *  to the org's city/state. Keeps the homepage template org-agnostic. */
   service_area: string;
+  /** PUBLIC address locality for the site's LocalBusiness schema — must match the Google
+   *  Business Profile listing. Deliberately separate from the org record's city/state: the
+   *  business-record address (invoices, payroll) is often a home base the owner does NOT want
+   *  on the public web, and it must never leak there. Unset = no address in the schema at all
+   *  (areaServed + geo still emit). Staff-only — not in the collaborator whitelist. */
+  public_city: string;
+  public_state: string;
   /** Public-site layout theme. Same data, different presentation so two orgs on the platform
    *  don't look identical: "classic" = full-bleed photo hero w/ dark overlay (the original);
    *  "bold" = saturated brand color-block hero with the photo as a framed card (contractor punch);
@@ -222,6 +229,8 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   specialty_headline: "",
   specialty_blurb: "",
   service_area: "",
+  public_city: "",
+  public_state: "",
   site_theme: "classic",
   social_instagram: "",
   custom_domain: "",
