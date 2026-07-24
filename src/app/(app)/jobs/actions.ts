@@ -418,7 +418,12 @@ export async function createBill(input: {
    *  SUPERSEDE that PO in every material-cost sum, so one delivery entered as both a
    *  PO and the supplier's invoice is costed and billed ONCE, at the invoiced amount. */
   po_id?: string | null;
-}): Promise<Result> {
+  /** The receipt document this bill was entered FROM (quick Add Cost with a file attached).
+   *  Recording the link in organized_items is what makes the receipt-analyzer idempotent:
+   *  a later "Record as cost" tap on that same file answers "already recorded" instead of
+   *  creating a duplicate bill — the exact double-entry Erik hit on J-033. */
+  receipt_document_id?: string | null;
+}): Promise<Result & { id?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -432,22 +437,53 @@ export async function createBill(input: {
   // order from the cost rollup. A mismatched/foreign id is ignored (the bill still saves).
   const poId = await visiblePoIdOnJobOrNull(supabase, input.po_id ?? null, jobId);
 
-  const { error } = await supabase.from("bills").insert({
-    job_id: jobId,
-    po_id: poId,
-    supplier: input.supplier.trim(),
-    bill_number: input.bill_number.trim() || null,
-    amount: input.amount || 0,
-    status: input.status || "unpaid",
-    bill_date: input.bill_date || null,
-    notes: input.notes.trim() || null,
-    category: input.category ?? null,
-    created_by: ctx.userId,
-  });
+  const { data: created, error } = await supabase
+    .from("bills")
+    .insert({
+      job_id: jobId,
+      po_id: poId,
+      supplier: input.supplier.trim(),
+      bill_number: input.bill_number.trim() || null,
+      amount: input.amount || 0,
+      status: input.status || "unpaid",
+      bill_date: input.bill_date || null,
+      notes: input.notes.trim() || null,
+      category: input.category ?? null,
+      created_by: ctx.userId,
+    })
+    .select("id")
+    .single();
   if (error) return { ok: false, error: error.message };
+
+  // Best-effort receipt link (never fails the bill): only when the document is visible
+  // via RLS AND on this bill's job — same containment rule as the po_id link above.
+  if (input.receipt_document_id && created?.id) {
+    const { data: doc } = await supabase
+      .from("documents")
+      .select("id, job_id, file_url")
+      .eq("id", input.receipt_document_id)
+      .maybeSingle();
+    if (doc && doc.job_id === jobId) {
+      await supabase.from("organized_items").insert({
+        kind: "receipt",
+        title: input.supplier.trim(),
+        vendor: input.supplier.trim(),
+        amount: input.amount || 0,
+        item_date: input.bill_date || null,
+        category: input.category ?? null,
+        status: "filed",
+        job_id: jobId,
+        document_id: doc.id,
+        bill_id: created.id,
+        file_url: doc.file_url,
+        created_by: ctx.userId,
+      });
+    }
+  }
+
   if (input.job_id) revalidatePath(`/jobs/${input.job_id}`);
   revalidatePath("/bills");
-  return { ok: true };
+  return { ok: true, id: created?.id };
 }
 
 export async function updateBill(

@@ -10,6 +10,7 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { todayStrInTz } from "@/lib/tz";
 import { getOrgSettings } from "@/lib/org-settings";
 import { createBill, addDocument } from "@/app/(app)/jobs/actions";
+import { billJobReceipt } from "@/app/(app)/organize/actions";
 import { jobLabel } from "@/lib/schedule-options";
 
 const CATEGORIES = ["Materials", "Fuel", "Shop supplies", "Tools", "Subcontractor", "Permit", "Equipment rental", "Office", "Other"];
@@ -138,21 +139,21 @@ export function QuickCostButton({
     router.refresh();
   }
 
-  /** Upload the snapped receipt + file it on the job. Returns false on any failure
+  /** Upload the receipt + file it on the job. Returns the new document id (needed to
+   *  hand the file to the receipt-reader / link it to the bill), or null on any failure
    *  so the caller can tell the user instead of swallowing it. */
-  async function attachReceipt(forJob: string): Promise<boolean> {
-    if (!receipt) return true;
-    if (!effectiveOrg) return false;
+  async function attachReceipt(forJob: string): Promise<string | null> {
+    if (!receipt || !effectiveOrg) return null;
     try {
       const supabase = createClient();
       const safe = (receipt.name || "receipt.jpg").replace(/[^a-zA-Z0-9._-]/g, "_");
       const path = `${effectiveOrg}/${forJob}/${Date.now()}-${safe}`;
       const { error: upErr } = await supabase.storage.from("documents").upload(path, receipt, { upsert: false });
-      if (upErr) return false;
+      if (upErr) return null;
       const res = await addDocument({ job_id: forJob, name: receipt.name || "Receipt", category: "Receipt", file_url: path, size_bytes: receipt.size });
-      return res.ok;
+      return res.ok && res.id ? res.id : null;
     } catch {
-      return false;
+      return null;
     }
   }
 
@@ -168,12 +169,45 @@ export function QuickCostButton({
       });
       return;
     }
+    // Receipt-only save (no amount typed, no supplier): don't invent a $0 bill — run the SAME
+    // receipt-reader the Costs tab uses, so ONE pipeline reads the total/vendor/lines and the
+    // file can never be double-entered later ("already recorded"). This was the two-door bug:
+    // the quick path saved $0 placeholders, then the Costs-tab upload recorded the real
+    // amounts as SEPARATE bills.
+    if (receipt && targetJob && !supplier.trim() && (!amount || amount <= 0)) {
+      start(async () => {
+        const docId = await attachReceipt(targetJob);
+        if (!docId) return setError("The receipt didn't upload — try again.");
+        const res = await billJobReceipt(docId);
+        if (!res.ok) {
+          // Reader failed (unreadable file) — fall back to the placeholder bill so the
+          // cost isn't lost, with the receipt attached and linked for later.
+          const fb = await createBill({
+            job_id: targetJob, supplier: "From receipt — add supplier", bill_number: "",
+            amount: 0, status: paid ? "paid" : "unpaid", bill_date: billDate || null,
+            notes: "", category, receipt_document_id: docId,
+          });
+          if (!fb.ok) return setError(res.error ?? "Couldn't read the receipt.");
+          setWarn(`Couldn't read a total (${res.error ?? "unreadable"}) — saved as $0. Open the bill to enter the amount.`);
+          setCostSaved(true);
+          return;
+        }
+        finishOk();
+      });
+      return;
+    }
     // Fragment-first: snapping a receipt must NEVER be blocked by a missing supplier —
     // the photo IS the capture, and the supplier can be read off it / filled in later.
     // Require the supplier only when there's no receipt to carry the detail.
     if (!supplier.trim() && !receipt) return setError("Who was it paid to? (supplier)");
     const finalSupplier = supplier.trim() || "From receipt — add supplier";
     start(async () => {
+      // With a receipt in hand, upload it FIRST so the bill can be created already linked
+      // to its file — the link is what makes a later "Record as cost" tap on the same file
+      // answer "already recorded" instead of double-entering it. Upload failure falls back
+      // to the old order (save the cost, retry the file).
+      let docId: string | null = null;
+      if (receipt && targetJob) docId = await attachReceipt(targetJob);
       const res = await createBill({
         job_id: targetJob || null,
         supplier: finalSupplier,
@@ -183,16 +217,13 @@ export function QuickCostButton({
         bill_date: billDate || null,
         notes: "",
         category,
+        receipt_document_id: docId,
       });
       if (!res.ok) return setError(res.error ?? "Couldn't save the cost.");
       setCostSaved(true);
-      // Attach the photo (best-effort) — but if it fails, TELL the user; the cost is
-      // already safe, so the Save button becomes a one-tap photo retry.
-      if (receipt && targetJob) {
-        if (!(await attachReceipt(targetJob))) {
-          setWarn("Cost saved ✓ — but the receipt didn't upload. Tap “Retry receipt”, or close and add it from the job's Receipts.");
-          return;
-        }
+      if (receipt && targetJob && !docId) {
+        setWarn("Cost saved ✓ — but the receipt didn't upload. Tap “Retry receipt”, or close and add it from the job's Receipts.");
+        return;
       }
       finishOk();
     });

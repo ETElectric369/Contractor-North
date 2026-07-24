@@ -462,6 +462,7 @@ Respond with ONLY a JSON object (no prose):
   "amount": grand total in dollars as a number (the amount actually paid), or null only if you truly cannot read it,
   "date": "YYYY-MM-DD" printed on the receipt, or null,
   "line_items": [{"description": item name, "quantity": number, "unit_price": price each (number), "amount": line total (number), "category": one of "Materials" | "Electrical" | "Tools" | "Fasteners" | "Lumber" | "Plumbing" | "Paint" | "Rental" | "Tax" | "Other"}],${scopeSchemaLine}
+  "payment": "paid_at_purchase" | "on_account" | "unknown" — "paid_at_purchase" ONLY when the document shows tender (cash tendered/change, a card number/••••, or an explicit PAID stamp); "on_account" when it shows a charge account, ON ACCT, net terms, "invoice", or a balance due (supply-house account purchases),
   "confidence": "low" | "medium" | "high"
 }
 Transcribe EVERY readable line, including tax as its own line. Use [] for line_items only if nothing is legible.
@@ -513,7 +514,11 @@ In every "description", write inches as the word in (e.g. "6 in EMT", not 6") an
       created_by: ctx.userId,
     },
     lines,
-    "paid", // this flow reads a purchase receipt (already paid at the store)
+    // Paid ONLY when the receipt itself shows tender. Supply-house account purchases
+    // (CED "ON ACCT" transaction records — most of Erik's) are debts until the statement
+    // is settled; stamping them paid silently hid real payables. Unknown = unpaid: a
+    // wrongly-unpaid bill nags and gets corrected, a wrongly-paid one loses money.
+    parsed.payment === "paid_at_purchase" ? "paid" : "unpaid",
   );
   if (!billId) return { ok: false, error: "Could not create the bill." };
 
