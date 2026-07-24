@@ -17,6 +17,10 @@ const cents = (n: number) => Math.round(n * 100) / 100;
 export function paidStatus(total: number, amountPaid: number, currentStatus?: string): string {
   let status = currentStatus ?? "draft";
   if (status === "void") return status;
+  // A DRAFT never auto-advances (Erik 7/24): deposits/Venmo prepayments recorded before
+  // sending show in amount_paid, but only an explicit send moves the invoice forward —
+  // otherwise recording a prepayment silently locked the draft's line items.
+  if (status === "draft") return status;
   const t = cents(fin(total));
   const paid = cents(fin(amountPaid));
   if (t <= 0.005) {
