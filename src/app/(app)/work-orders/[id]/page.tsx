@@ -66,7 +66,7 @@ export default async function WorkOrderDetailPage({
             cards below, so they're not duplicated here. */}
         <div className="flex flex-wrap items-center gap-2">
           <Link
-            href={`/print/work-order/${w.id}`}
+            href={`/print/pdf-preview?doc=work-order&id=${w.id}&back=/work-orders/${w.id}`}
             className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
           >
             <Printer className="h-4 w-4 shrink-0" /> Print / PDF

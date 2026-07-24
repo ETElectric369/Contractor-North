@@ -73,7 +73,7 @@ export default async function MaterialListPage({
             The job link lives in the meta row above, so it's not duplicated. */}
         <div className="flex flex-wrap items-center gap-2">
           <Link
-            href={`/print/material-list/${l.id}`}
+            href={`/print/pdf-preview?doc=material-list&id=${l.id}&back=/materials/${l.id}`}
             className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
           >
             <ListChecks className="h-4 w-4 shrink-0" /> Pick List

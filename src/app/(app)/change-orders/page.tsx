@@ -85,7 +85,7 @@ export default async function ChangeOrdersPage() {
                     </span>
                     <div className="flex items-center gap-2">
                       <Link
-                        href={`/print/change-order/${c.id}`}
+                        href={`/print/pdf-preview?doc=change-order&id=${c.id}&back=/change-orders`}
                         className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
                         title="Print / PDF"
                       >

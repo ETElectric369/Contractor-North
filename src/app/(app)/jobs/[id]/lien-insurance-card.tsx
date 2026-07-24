@@ -90,7 +90,7 @@ export function LienInsuranceCard({
                 </div>
               )}
               <div className="flex flex-wrap items-center gap-2 pt-1">
-                <a href={`/print/prelim-notice/${jobId}`} target="_blank" rel="noopener" className="inline-flex items-center gap-1 text-xs font-medium text-brand hover:underline">
+                <a href={`/print/pdf-preview?doc=prelim-notice&id=${jobId}&back=/jobs/${jobId}`} target="_blank" rel="noopener" className="inline-flex items-center gap-1 text-xs font-medium text-brand hover:underline">
                   <ScrollText className="h-3.5 w-3.5" /> Preliminary Notice
                 </a>
               </div>

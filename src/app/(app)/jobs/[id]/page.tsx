@@ -777,7 +777,7 @@ export default async function JobDetailPage({
           {canonicalList && (
             <div className="flex flex-wrap items-center justify-end gap-2">
               <Link
-                href={`/print/material-list/${canonicalList.id}`}
+                href={`/print/pdf-preview?doc=material-list&id=${canonicalList.id}&back=/jobs/${j.id}?tab=materials`}
                 className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
               >
                 <ListChecks className="h-4 w-4 shrink-0" /> Print Pick List
@@ -912,7 +912,7 @@ export default async function JobDetailPage({
                     <span className="text-sm font-semibold text-slate-900">{formatCurrency(c.amount)}</span>
                     <div className="flex items-center gap-2">
                       <Link
-                        href={`/print/change-order/${c.id}`}
+                        href={`/print/pdf-preview?doc=change-order&id=${c.id}&back=/jobs/${j.id}?tab=change-orders`}
                         className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
                         title="Print / PDF"
                       >

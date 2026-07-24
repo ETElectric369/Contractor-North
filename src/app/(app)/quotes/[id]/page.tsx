@@ -82,7 +82,7 @@ export default async function QuoteDetailPage({
               : { id: "qm-ml", label: "Create Material List", icon: "boxes", run: createMaterialListFromQuote.bind(null, q.id), hrefPrefix: "/materials/" },
           ]
         : []),
-      { id: "qm-print", label: "Print / PDF", icon: "fileSpreadsheet", href: `/print/quote/${q.id}` },
+      { id: "qm-print", label: "Print / PDF", icon: "fileSpreadsheet", href: `/print/pdf-preview?doc=quote&id=${q.id}&back=/quotes/${q.id}` },
       {
         id: "qm-del",
         label: "Delete Quote",
