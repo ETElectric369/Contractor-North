@@ -56,7 +56,7 @@ import { AppointmentButton, type ApptValue } from "../../appointments/appointmen
 import { NewPoButton } from "../../purchasing/new-po-button";
 import { EditCustomerButton } from "../../crm/[id]/edit-customer-button";
 import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
-import { computeJobLaborBilling, fetchJobLaborRows, laborCostForJob } from "@/lib/labor-billing";
+import { computeJobLaborBilling, customerLaborRateForJob, fetchJobLaborRows, laborCostForJob } from "@/lib/labor-billing";
 import { formatDateTz } from "@/lib/tz";
 import { NavLink } from "@/components/nav-link";
 import type { Customer } from "@/lib/types";
@@ -350,7 +350,8 @@ export default async function JobDetailPage({
   // Time tab's add/edit modals here, not just the /timecards mounts.
   const jobCodesEnabled = getOrgSettings((org as any)?.settings).timeclock_job_codes;
   const laborRows = await fetchJobLaborRows(supabase, id);
-  const billableLabor = computeJobLaborBilling(laborRows.jobEntries, laborRows.jobAllocs, defaultLaborRate).total;
+  const jobLevelRate = await customerLaborRateForJob(supabase, id);
+  const billableLabor = computeJobLaborBilling(laborRows.jobEntries, laborRows.jobAllocs, defaultLaborRate, jobLevelRate).total;
   const progress = computeJobProgress({
     billingTypeRaw: (j as any).billing_type,
     quotes: (quotes ?? []) as any,

@@ -143,3 +143,19 @@ describe("computeJobLaborBilling", () => {
     expect(computeJobLaborBilling([bad], [], 0)).toEqual({ lines: [], total: 0 });
   });
 });
+
+describe("pricing-level labor rate override", () => {
+  const prof = (name: string, bill: number) => ({ id: name, full_name: name, bill_rate: bill, hourly_rate: 50 });
+  const alloc = (p: any, hours: number, id = Math.random().toString()) => ({ id, hours, time_entries: { status: "closed", profiles: p } });
+  it("level rate flattens EVERY crew line (the quotes semantics)", () => {
+    const r = computeJobLaborBilling([], [alloc(prof("Erik", 150), 10), alloc(prof("Brian", 95), 4)], 0, 145);
+    expect(r.lines.every((l) => l.rate === 145)).toBe(true);
+    expect(r.total).toBe(10 * 145 + 4 * 145);
+  });
+  it("absent/zero level keeps per-person bill rates", () => {
+    const r = computeJobLaborBilling([], [alloc(prof("Erik", 150), 10)], 0, null);
+    expect(r.lines[0].rate).toBe(150);
+    const r0 = computeJobLaborBilling([], [alloc(prof("Erik", 150), 10)], 0, 0);
+    expect(r0.lines[0].rate).toBe(150);
+  });
+});

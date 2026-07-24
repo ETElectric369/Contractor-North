@@ -134,6 +134,10 @@ export interface OrgSettings {
    *  headline = the section is hidden, so orgs that don't set it are unaffected. */
   specialty_headline: string;
   specialty_blurb: string;
+  /** Show document numbers (J-036…) in list rows and panels. Erik navigates by number,
+   *  Chris by name — so it's a per-org display switch, not a data change: numbers keep
+   *  minting either way and stay visible on detail pages/prints. */
+  show_doc_numbers: boolean;
   /** Human service-area label for the public site (e.g. "Truckee & North Tahoe"). Falls back
    *  to the org's city/state. Keeps the homepage template org-agnostic. */
   service_area: string;
@@ -229,6 +233,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   specialty_headline: "",
   specialty_blurb: "",
   service_area: "",
+  show_doc_numbers: true,
   public_city: "",
   public_state: "",
   site_theme: "classic",

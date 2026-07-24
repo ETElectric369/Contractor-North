@@ -1,5 +1,5 @@
 import { getOrgSettings } from "@/lib/org-settings";
-import { computeJobLaborBilling, fetchJobLaborRows } from "@/lib/labor-billing";
+import { computeJobLaborBilling, customerLaborRateForJob, fetchJobLaborRows } from "@/lib/labor-billing";
 import { computeJobProgress, type JobProgressFinancials } from "@/lib/job-progress-math";
 
 export type { JobProgressFinancials };
@@ -26,7 +26,8 @@ export async function jobProgressFinancials(supabase: any, jobId: string): Promi
   // Labor: the exact helper importLaborIntoInvoice uses (per-person, quarter-hour,
   // default-rate fallback) — so the panel can't diverge from the billed lines.
   const defaultRate = getOrgSettings((org as any)?.settings).default_labor_rate; // via the settings SSOT
-  const { total: billableLabor } = computeJobLaborBilling(labor.jobEntries, labor.jobAllocs, defaultRate);
+  const levelRate = await customerLaborRateForJob(supabase, jobId);
+  const { total: billableLabor } = computeJobLaborBilling(labor.jobEntries, labor.jobAllocs, defaultRate, levelRate);
 
   return computeJobProgress({
     billingTypeRaw: (job as any)?.billing_type,

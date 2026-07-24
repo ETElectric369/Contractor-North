@@ -9,7 +9,7 @@ import { pushInvoiceToQbo } from "@/lib/quickbooks";
 import { getOrgSettings } from "@/lib/org-settings";
 import { tzLocalHourUtc } from "@/lib/tz";
 import { requireStaff } from "@/lib/staff-guard";
-import { computeJobLaborBilling, fetchJobLaborRows } from "@/lib/labor-billing";
+import { computeJobLaborBilling, customerLaborRateForJob, fetchJobLaborRows } from "@/lib/labor-billing";
 import { livePurchaseOrders } from "@/lib/job-progress-math";
 import { resolveDrawCredit, shouldBlockStandardImport, invoiceBalance, DRAW_KINDS, isDrawKind } from "@/lib/invoice-math";
 import { recalcInvoice } from "@/lib/invoice-recalc";
@@ -499,12 +499,13 @@ export async function importLaborIntoInvoice(invoiceId: string): Promise<Result 
 
   // Bill the EXACT time on this job via the shared labor-billing helper (so the
   // billed lines reconcile to the penny with the progress-report "work to date").
-  const [labor, { data: org }] = await Promise.all([
+  const [labor, { data: org }, levelRate] = await Promise.all([
     fetchJobLaborRows(supabase, inv.job_id),
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),
+    customerLaborRateForJob(supabase, inv.job_id),
   ]);
   const defaultRate = getOrgSettings((org as any)?.settings).default_labor_rate; // via the settings SSOT
-  const { lines } = computeJobLaborBilling(labor.jobEntries, labor.jobAllocs, defaultRate);
+  const { lines } = computeJobLaborBilling(labor.jobEntries, labor.jobAllocs, defaultRate, levelRate);
   if (lines.length === 0) return { ok: false, error: "No billable hours on this job yet.", empty: true };
 
   const rep = await replaceImportedItems(

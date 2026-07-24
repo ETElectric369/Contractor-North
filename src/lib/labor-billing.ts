@@ -68,7 +68,15 @@ export function computeJobLaborBilling(
   jobEntries: any[],
   jobAllocs: any[],
   defaultRate: number,
+  /** The customer's pricing-level labor rate. When set (> 0) it is THE blended hourly
+   *  rate for EVERY crew line — the same semantics quotes already give it
+   *  (quotes/actions.ts: level rate beats everything) — so "Jackie bills at $145"
+   *  means every hour on her job bills $145 regardless of who worked it. Absent/0 →
+   *  per-person bill_rate as before. */
+  levelRate?: number | null,
 ): { lines: LaborLine[]; total: number } {
+  const rawLevel = Number(levelRate);
+  const level = Number.isFinite(rawLevel) && rawLevel > 0 ? rawLevel : 0;
   const rawDefault = Number(defaultRate);
   const def = Number.isFinite(rawDefault) && rawDefault > 0 ? rawDefault : 0;
   // Track the best REAL rate seen for a person (NOT frozen on first-seen — the alloc
@@ -117,7 +125,7 @@ export function computeJobLaborBilling(
     addHours(e.profiles, (new Date(e.clock_out).getTime() - new Date(e.clock_in).getTime()) / 3_600_000 - lunch / 60);
   }
   const lines: LaborLine[] = [...perPerson.entries()].map(([personId, p]) => {
-    const rate = p.realRate > 0 ? p.realRate : def; // default rate only if no real rate anywhere
+    const rate = level > 0 ? level : p.realRate > 0 ? p.realRate : def; // level > person > default
     const quantity = Math.round(p.hours * 4) / 4; // quarter-hour
     return { personId, name: p.name, rate, rawHours: p.hours, quantity, amount: Math.round(quantity * rate * 100) / 100 };
   });
@@ -145,4 +153,18 @@ export async function fetchJobLaborRows(supabase: any, jobId: string): Promise<{
       .eq("time_entries.status", "closed"),
   ]);
   return { jobEntries: jobEntries ?? [], jobAllocs: jobAllocs ?? [] };
+}
+
+/** The customer's pricing-level labor rate for a JOB (null when the job has no customer,
+ *  the customer has no level, or the level has no labor rate). THE one resolver every
+ *  labor-billing consumer shares — invoice import, job work-to-date panel, and progress
+ *  financials must pass the SAME value or the penny-reconcile promise breaks. */
+export async function customerLaborRateForJob(supabase: any, jobId: string): Promise<number | null> {
+  const { data } = await supabase
+    .from("jobs")
+    .select("customers(pricing_levels(labor_rate))")
+    .eq("id", jobId)
+    .maybeSingle();
+  const raw = Number((data as any)?.customers?.pricing_levels?.labor_rate);
+  return Number.isFinite(raw) && raw > 0 ? raw : null;
 }

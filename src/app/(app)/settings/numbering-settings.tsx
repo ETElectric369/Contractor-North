@@ -39,7 +39,7 @@ export function NumberingSettings({
     setDone(false);
   }
 
-  const pad = (n: number) => String(Math.max(1, Math.floor(n || 1))).padStart(5, "0");
+  const pad = (n: number) => String(Math.max(1, Math.floor(n || 1))).padStart(3, "0");
 
   function save() {
     setError(null);
