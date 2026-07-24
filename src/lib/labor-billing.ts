@@ -68,11 +68,12 @@ export function computeJobLaborBilling(
   jobEntries: any[],
   jobAllocs: any[],
   defaultRate: number,
-  /** The customer's pricing-level labor rate. When set (> 0) it is THE blended hourly
-   *  rate for EVERY crew line — the same semantics quotes already give it
-   *  (quotes/actions.ts: level rate beats everything) — so "Jackie bills at $145"
-   *  means every hour on her job bills $145 regardless of who worked it. Absent/0 →
-   *  per-person bill_rate as before. */
+  /** The customer's pricing-level labor rate — a CEILING on hourly billing for that
+   *  customer tier (Erik 7/24): a person billing ABOVE it drops to it (Erik $150 →
+   *  Local $125), a person below keeps their own rate (Brian stays $95). A person
+   *  with no rate at all bills the level rate directly. Absent/0 → per-person
+   *  bill_rate then org default, as before. (Quotes use the level rate as the single
+   *  draft labor rate — different surface, deliberate.) */
   levelRate?: number | null,
 ): { lines: LaborLine[]; total: number } {
   const rawLevel = Number(levelRate);
@@ -125,7 +126,8 @@ export function computeJobLaborBilling(
     addHours(e.profiles, (new Date(e.clock_out).getTime() - new Date(e.clock_in).getTime()) / 3_600_000 - lunch / 60);
   }
   const lines: LaborLine[] = [...perPerson.entries()].map(([personId, p]) => {
-    const rate = level > 0 ? level : p.realRate > 0 ? p.realRate : def; // level > person > default
+    const personal = p.realRate > 0 ? p.realRate : 0;
+    const rate = personal > 0 ? (level > 0 ? Math.min(personal, level) : personal) : level > 0 ? level : def;
     const quantity = Math.round(p.hours * 4) / 4; // quarter-hour
     return { personId, name: p.name, rate, rawHours: p.hours, quantity, amount: Math.round(quantity * rate * 100) / 100 };
   });

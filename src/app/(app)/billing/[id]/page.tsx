@@ -192,7 +192,7 @@ export default async function InvoicePage({
         priceItems={(priceItems ?? []) as any}
         taxRates={(taxRates ?? []) as any}
         paymentMethods={paymentMethods}
-        materialMarkup={orgSettings.material_markup_percent}
+        materialMarkup={(inv as any).customers?.pricing_levels?.markup_pct ?? orgSettings.material_markup_percent}
         levelMarkupPct={(inv as any).customers?.pricing_levels?.markup_pct ?? null}
         defaultMarkupPct={orgSettings.default_markup_pct}
         customers={(customers ?? []) as any}

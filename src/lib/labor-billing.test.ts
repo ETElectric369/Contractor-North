@@ -147,10 +147,16 @@ describe("computeJobLaborBilling", () => {
 describe("pricing-level labor rate override", () => {
   const prof = (name: string, bill: number) => ({ id: name, full_name: name, bill_rate: bill, hourly_rate: 50 });
   const alloc = (p: any, hours: number, id = Math.random().toString()) => ({ id, hours, time_entries: { status: "closed", profiles: p } });
-  it("level rate flattens EVERY crew line (the quotes semantics)", () => {
-    const r = computeJobLaborBilling([], [alloc(prof("Erik", 150), 10), alloc(prof("Brian", 95), 4)], 0, 145);
-    expect(r.lines.every((l) => l.rate === 145)).toBe(true);
-    expect(r.total).toBe(10 * 145 + 4 * 145);
+  it("level rate is a CEILING: above drops to it, below keeps their own", () => {
+    const r = computeJobLaborBilling([], [alloc(prof("Erik", 150), 10), alloc(prof("Brian", 95), 4)], 0, 125);
+    const byName = Object.fromEntries(r.lines.map((l) => [l.name, l.rate]));
+    expect(byName.Erik).toBe(125);
+    expect(byName.Brian).toBe(95);
+    expect(r.total).toBe(10 * 125 + 4 * 95);
+  });
+  it("no personal rate → level rate directly", () => {
+    const r = computeJobLaborBilling([], [alloc({ id: "x", full_name: "New Guy" }, 8)], 90, 125);
+    expect(r.lines[0].rate).toBe(125);
   });
   it("absent/zero level keeps per-person bill rates", () => {
     const r = computeJobLaborBilling([], [alloc(prof("Erik", 150), 10)], 0, null);
