@@ -60,7 +60,7 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
       // Never measure the host itself — it's display:none while loading, so clientWidth
       // is 0 and every page rendered into a negative-width canvas (Erik's blank sheets).
       const containerW = Math.min(Math.max(window.innerWidth - 32, 280), 900);
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const dpr = Math.min(Math.max(window.devicePixelRatio || 1, 2.5), 3); // high-res: these canvases ARE the print output
       for (let n = 1; n <= pdf.numPages; n++) {
         const page = await pdf.getPage(n);
         if (seq !== renderSeq.current) return;
@@ -72,7 +72,7 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
         canvas.height = Math.floor(vp.height * dpr);
         canvas.style.width = `${Math.floor(vp.width)}px`;
         canvas.style.height = `${Math.floor(vp.height)}px`;
-        canvas.className = "mx-auto mb-6 block bg-white shadow-md";
+        canvas.className = "pdf-page-canvas mx-auto mb-6 block bg-white shadow-md";
         host.appendChild(canvas);
         const ctx = canvas.getContext("2d")!;
         ctx.scale(dpr, dpr);
@@ -92,16 +92,16 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
   }, [load]);
 
   function printPdf() {
-    if (!blobUrl) return;
-    // A hidden window/tab with the raw PDF → the OS print dialog prints the FILE,
-    // not this page's canvases.
-    const w = window.open(blobUrl, "_blank");
-    w?.addEventListener("load", () => w.print());
+    // Print THIS window's rendered pages (print CSS lays them one per sheet, and the
+    // canvases already contain the margins baked into the PDF). window.open() is a trap
+    // in the installed app: the popup belongs to Safari — a different application — so
+    // the print dialog appeared BEHIND the app window (Erik 7/24).
+    window.print();
   }
 
   return (
-    <div className="flex h-screen flex-col bg-slate-200">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-300 bg-white px-4 py-2.5">
+    <div className="pdf-preview-root flex h-screen flex-col bg-slate-200">
+      <div className="no-print flex flex-wrap items-center justify-between gap-3 border-b border-slate-300 bg-white px-4 py-2.5">
         <a href={back || "/"} className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900">
           <ArrowLeft className="h-4 w-4" /> Back
         </a>
@@ -137,7 +137,7 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 py-6">
+      <div className="pdf-pages-scroll min-h-0 flex-1 overflow-y-auto px-2 py-6">
         {state === "loading" && (
           <div className="flex flex-col items-center gap-3 py-24 text-slate-500">
             <Loader2 className="h-8 w-8 animate-spin" />

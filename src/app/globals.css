@@ -254,6 +254,12 @@ body.modal-open .app-bottom-nav {
   @page {
     margin: 0;
   }
+  /* The PDF preview prints its own rendered pages: one canvas per sheet, no chrome,
+     zero @page margin (each canvas already contains the PDF's baked-in margins). */
+  .pdf-preview-root { display: block !important; height: auto !important; background: #fff !important; }
+  .pdf-preview-root .pdf-pages-scroll { overflow: visible !important; padding: 0 !important; }
+  .pdf-page-canvas { width: 100% !important; height: auto !important; margin: 0 !important;
+    box-shadow: none !important; display: block; break-after: page; }
   /* Never split a table row (or the totals block) across a page boundary. */
   .print-page tr { break-inside: avoid; }
   .print-page .totals-block { break-inside: avoid; }
