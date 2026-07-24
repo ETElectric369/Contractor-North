@@ -3,6 +3,9 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   // Lint is run separately in CI; don't fail production builds on lint.
   eslint: { ignoreDuringBuilds: true },
+  // The PDF engine's headless chromium must load from node_modules at runtime, not be
+  // webpack-bundled (its brotli-packed binary breaks under bundling).
+  serverExternalPackages: ["@sparticuz/chromium", "puppeteer-core"],
   experimental: {
     // Server Actions are stable in Next 15; keep body limit generous for
     // photo / sketch / document uploads handled through actions — incl. plan
