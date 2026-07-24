@@ -70,22 +70,20 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ doc: string
     const cookie = (await headers()).get("cookie");
     if (cookie) await page.setExtraHTTPHeaders({ cookie });
     await page.goto(`${url.origin}/print/${path}/${id}`, { waitUntil: "networkidle0", timeout: 45_000 });
-    // Neutralize the on-screen sheet + toolbar: the PDF margin below is the ONE margin.
+    // Neutralize the on-screen sheet + toolbar, and set the page margin via CSS @page —
+    // Chromium IGNORES pdf()'s margin option whenever the page's stylesheets declare an
+    // @page margin (our print CSS does), so CSS is the only channel that actually works
+    // (verified locally: option-margins → content flush to every edge; CSS-margins → correct).
     await page.addStyleTag({
       content: `
         .no-print { display: none !important; }
         html, body { background: #fff !important; }
         .print-page { width: auto !important; max-width: none !important; min-height: 0 !important;
           padding: 0 !important; margin: 0 !important; box-shadow: none !important; border: none !important; }
-        @page { margin: 0; }
+        @page { margin: ${margin} !important; }
       `,
     });
-    const pdf = await page.pdf({
-      format: "letter",
-      printBackground: true,
-      preferCSSPageSize: false,
-      margin: { top: margin, right: margin, bottom: margin, left: margin },
-    });
+    const pdf = await page.pdf({ format: "letter", printBackground: true });
 
     // Friendly filename for invoices ("Invoice INV-048.pdf"); generic for the rest.
     let filename = `${doc}-${id.slice(0, 8)}.pdf`;
