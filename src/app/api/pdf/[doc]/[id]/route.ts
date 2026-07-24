@@ -42,6 +42,14 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ doc: string
 
   // Chromium: the Vercel lambda build on prod; a local Chrome for dev.
   const isVercel = !!process.env.VERCEL;
+  // @sparticuz/chromium only extracts its shared libs (libnss3 et al) when it detects an
+  // AWS runtime via AWS_EXECUTION_ENV / AWS_LAMBDA_JS_RUNTIME — and Vercel STRIPS those,
+  // so no lib branch ever fired ("libnss3.so: cannot open shared object file"). Declare
+  // the runtime ourselves BEFORE the module loads; Vercel functions run Amazon Linux 2023,
+  // which is exactly the al2023 lib set this selects.
+  if (isVercel && !process.env.AWS_LAMBDA_JS_RUNTIME) {
+    process.env.AWS_LAMBDA_JS_RUNTIME = "nodejs22.x";
+  }
   const [{ default: puppeteer }, chromium] = await Promise.all([
     import("puppeteer-core"),
     isVercel ? import("@sparticuz/chromium").then((mod) => mod.default) : Promise.resolve(null as any),
