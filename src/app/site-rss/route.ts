@@ -17,7 +17,12 @@ const esc = (s: string) =>
 export async function GET(req: Request) {
   const host = ((await headers()).get("host") || "").toLowerCase().split(":")[0];
   const handle = new URL(req.url).searchParams.get("handle");
-  const org = handle ? await getPublicOrgByHandle(handle) : await getPublicOrgByDomain(host);
+  // The Host WINS whenever it maps to a tenant: otherwise tahoedeck.com/site-rss?handle=et
+  // serves ET Electric's feed under Chris's domain (a cross-tenant feed with his branding
+  // in the reader, and duplicate content pointing the wrong way). ?handle= stays supported
+  // for the app host, where there is no domain to bind to.
+  const byDomain = await getPublicOrgByDomain(host);
+  const org = byDomain ?? (handle ? await getPublicOrgByHandle(handle) : null);
   if (!org) return new Response("Not found", { status: 404 });
 
   const base = `https://${host}`;

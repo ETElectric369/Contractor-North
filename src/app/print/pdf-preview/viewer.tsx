@@ -99,10 +99,15 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
     window.print();
   }
 
+  // `back` arrives from the query string: only an in-app PATH may be followed. A value like
+  // "//evil.tld" or "https://evil.tld" would turn our own Back button into an off-site
+  // redirect wearing the app's URL — and this page is reached straight from a money document.
+  const safeBack = back && /^\/(?!\/)/.test(back) ? back : "/";
+
   return (
     <div className="pdf-preview-root flex h-screen flex-col bg-slate-200">
       <div className="no-print flex flex-wrap items-center justify-between gap-3 border-b border-slate-300 bg-white px-4 py-2.5">
-        <a href={back || "/"} className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900">
+        <a href={safeBack} className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900">
           <ArrowLeft className="h-4 w-4" /> Back
         </a>
         <div className="flex items-center gap-2">

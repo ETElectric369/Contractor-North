@@ -34,6 +34,9 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   // Infra / assets
   "api", "site", "p", "_next", "assets", "images", "static", "offline",
   "sitemap", "sitemap.xml", "robots.txt", "manifest", "manifest.webmanifest", "sw.js",
+  // middleware rewrites /feed to the RSS route, so a builder page at that slug would save
+  // cleanly and then be unreachable — a silent dead page.
+  "feed", "rss", "site-rss",
   "favicon.ico", "favicon", "icon", "apple-touch-icon",
 ]);
 

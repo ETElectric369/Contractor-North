@@ -48,3 +48,9 @@ describe("slugifySiteSlug", () => {
     expect(slugifySiteSlug("--about--")).toBe("about");
   });
 });
+
+describe("middleware-intercepted slugs are reserved (cn-v562)", () => {
+  it("reserves feed/rss so a builder page there can't be saved and then be unreachable", () => {
+    for (const s of ["feed", "rss", "site-rss"]) expect(isReservedSlug(s)).toBe(true);
+  });
+});
