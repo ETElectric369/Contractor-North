@@ -133,13 +133,16 @@ export function InvoiceDocument({
         </table>
       </div>
 
-      {/* Labor / Materials breakdown (progress reports & job invoices) */}
-      <div className="mt-4 flex justify-end">
-        <CostBreakdown items={items} className="w-64" />
-      </div>
+      {/* Labor / Materials breakdown + totals paginate as ONE unit (totals-group): if a
+          page break would land between them, both jump to the next page together. */}
+      <div className="totals-group">
+        <div className="mt-4 flex justify-end">
+          <CostBreakdown items={items} className="w-64" />
+        </div>
 
-      {/* Totals — invoice passes balance, so Paid + Balance-due render and Balance is the bold line. */}
-      <DocTotals subtotal={subtotal} taxRate={taxRate} tax={tax} total={total} amountPaid={amountPaid} balance={balance} />
+        {/* Totals — invoice passes balance, so Paid + Balance-due render and Balance is the bold line. */}
+        <DocTotals subtotal={subtotal} taxRate={taxRate} tax={tax} total={total} amountPaid={amountPaid} balance={balance} />
+      </div>
 
       {progress && (
         <div className="mt-6">
