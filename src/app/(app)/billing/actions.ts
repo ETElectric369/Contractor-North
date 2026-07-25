@@ -101,6 +101,8 @@ export async function textInvoice(
     return { ok: false, error: "Text not sent — add your Twilio account to enable SMS." };
   if (invoice.status === "draft") {
     await supabase.from("invoices").update({ status: "sent" }).eq("id", id);
+    // Same reason as setInvoiceStatus: a prepaid draft must land on paid/partial, not 'sent'.
+    await recalcInvoice(supabase, id);
   }
   return { ok: true };
 }
@@ -1058,6 +1060,11 @@ export async function setInvoiceStatus(
   const supabase = ctx.supabase;
   const { error } = await supabase.from("invoices").update({ status }).eq("id", id);
   if (error) return { ok: false, error: error.message };
+  // A DRAFT never auto-advances on payment (cn-v549), so a draft that was fully prepaid
+  // (Jackie's Venmo before the invoice went out) leaves this call marked 'sent' and stays
+  // there forever — never 'paid', permanently on the AR list. Recompute once the row is no
+  // longer a draft; recalcInvoice re-derives status from total vs amount_paid.
+  if (status !== "draft" && status !== "void") await recalcInvoice(supabase, id);
   // Voiding a milestone draw re-opens its milestone — the FK only auto-clears on
   // delete, not void — so "Request next payment" offers that slice again and the
   // schedule's billed-to-date stops counting a cancelled draw.
@@ -1164,7 +1171,27 @@ export async function updatePayment(
   const supabase = ctx.supabase;
   if (!patch.amount || patch.amount <= 0) return { ok: false, error: "Enter a payment amount." };
   if (patch.amount > 9_999_999) return { ok: false, error: "That amount is too large." };
+  // EDIT must obey the same two rules as recording (M4 overpay cap, L2 future date) — an
+  // edit is just a second way to write the same number, and the typo it fixes is as likely
+  // as the typo it introduces. Cap against the balance the OTHER payments leave, i.e. the
+  // current balance plus whatever this payment is contributing today.
+  const [{ data: inv }, { data: cur }] = await Promise.all([
+    supabase.from("invoices").select("total, amount_paid, invoice_number").eq("id", invoiceId).maybeSingle(),
+    supabase.from("payments").select("amount").eq("id", paymentId).maybeSingle(),
+  ]);
+  if (!inv) return { ok: false, error: "Invoice not found." };
+  const cap =
+    invoiceBalance((inv as any).total, (inv as any).amount_paid) + Number((cur as any)?.amount ?? 0);
+  if (patch.amount > cap + 0.01) {
+    return {
+      ok: false,
+      error: `That's more than the $${cap.toLocaleString()} this invoice can take. Enter up to that, or fix the invoice first.`,
+    };
+  }
   const paidAt = dateToIso(patch.paid_at, await orgTz(supabase));
+  if (paidAt && Date.parse(paidAt) > Date.now() + 86_400_000) {
+    return { ok: false, error: "That payment date is in the future." };
+  }
   const { error } = await supabase
     .from("payments")
     .update({

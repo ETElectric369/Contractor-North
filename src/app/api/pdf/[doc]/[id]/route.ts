@@ -4,6 +4,10 @@ import { createClient } from "@/lib/supabase/server";
 import { isStaffRole } from "@/lib/actions/perms";
 
 export const dynamic = "force-dynamic";
+/** Concurrent chromium renders allowed per function instance (each is ~150MB). */
+const MAX_CONCURRENT_RENDERS = 1;
+let inFlight = 0;
+
 export const maxDuration = 60; // headless-chromium render can take a few seconds cold
 
 /**
@@ -57,19 +61,55 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ doc: string
   const executablePath = isVercel
     ? await chromium.executablePath()
     : process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-  const browser = await puppeteer.launch({
-    args: isVercel ? chromium.args : [],
-    defaultViewport: isVercel ? chromium.defaultViewport : undefined,
-    executablePath,
-    headless: isVercel ? chromium.headless : true,
-  });
+  // One chromium per instance at a time: each launch is ~150MB and the render makes a SECOND
+  // request back into this same deployment, so an unbounded fan-out (a user dragging the margin
+  // control) can exhaust the function's memory and stall unrelated requests.
+  if (inFlight >= MAX_CONCURRENT_RENDERS) {
+    return NextResponse.json({ error: "Busy rendering — try again in a moment." }, { status: 429 });
+  }
+  inFlight++;
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      args: isVercel ? chromium.args : [],
+      defaultViewport: isVercel ? chromium.defaultViewport : undefined,
+      executablePath,
+      headless: isVercel ? chromium.headless : true,
+    });
+  } catch (e) {
+    // A launch failure must release the slot — otherwise the counter leaks and this
+    // instance answers 429 forever.
+    inFlight--;
+    throw e;
+  }
 
   try {
     const page = await browser.newPage();
-    // Forward THIS request's auth cookies so the print page renders as the signed-in user.
+    // Forward THIS request's auth cookies so the print page renders as the signed-in user —
+    // but ONLY to our own origin. setExtraHTTPHeaders attaches a header to EVERY request the
+    // rendered page makes, including cross-origin subresources (the org logo is a free-text
+    // URL), which would hand the viewer's Supabase access+refresh token to whatever host that
+    // URL names. Request interception lets us scope the credential to the app origin.
     const cookie = (await headers()).get("cookie");
-    if (cookie) await page.setExtraHTTPHeaders({ cookie });
-    await page.goto(`${url.origin}/print/${path}/${id}`, { waitUntil: "networkidle0", timeout: 45_000 });
+    const target = `${url.origin}/print/${path}/${id}`;
+    if (cookie) {
+      await page.setRequestInterception(true);
+      page.on("request", (r) => {
+        try {
+          const sameOrigin = new URL(r.url()).origin === url.origin;
+          void r.continue(sameOrigin ? { headers: { ...r.headers(), cookie } } : undefined);
+        } catch {
+          void r.continue();
+        }
+      });
+    }
+    const res = await page.goto(target, { waitUntil: "networkidle0", timeout: 25_000 });
+    // A deleted/cross-org id renders the app's 404, and an expired session renders /login —
+    // both come back HTTP 200, so without this the customer gets a beautifully typeset PDF of
+    // an error page. The final-URL check is what catches the login redirect.
+    if (!res || !res.ok() || new URL(res.url()).pathname !== `/print/${path}/${id}`) {
+      return NextResponse.json({ error: "That document isn't available." }, { status: 404 });
+    }
     // Neutralize the on-screen sheet + toolbar, and set the page margin via CSS @page —
     // Chromium IGNORES pdf()'s margin option whenever the page's stylesheets declare an
     // @page margin (our print CSS does), so CSS is the only channel that actually works
@@ -95,11 +135,14 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ doc: string
     return new NextResponse(Buffer.from(pdf), {
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `inline; filename="${filename}"`,
+        // Quote/newline-strip: invoice_number is settable via a direct PostgREST PATCH, and a
+        // raw quote or CRLF in a header value is a response-splitting primitive.
+        "Content-Disposition": `inline; filename="${filename.replace(/[\r\n"\\]/g, "")}"`,
         "Cache-Control": "no-store",
       },
     });
   } finally {
+    inFlight--;
     await browser.close();
   }
 }

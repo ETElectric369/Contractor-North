@@ -248,7 +248,11 @@ async function captureLead(
   // is worth far more to an abuser than a chat turn. Cap it on its own axis, per-visitor AND
   // per-org (the per-org key is what survives a rotating-IP flood).
   if (await rateLimited(`lead:${org.id}:${ip}`, MAX_LEADS_PER_IP_HOUR, 3600)) {
-    return JSON.stringify({ ok: false, error: "They've already been saved — no need to save them again." });
+    // Be HONEST when we drop a lead. "They've already been saved" reads as success, so a
+    // genuine second visitor behind the same NAT (an office, a coffee shop) is told their
+    // details are in when nothing was written — and the contractor never learns they existed.
+    // Same fallback as the per-org cap: Nort relays the phone number instead.
+    return JSON.stringify({ ok: false, error: "Couldn't save — ask them to call instead." });
   }
   if (await rateLimited(`lead:${org.id}`, MAX_LEADS_PER_ORG_HOUR, 3600)) {
     return JSON.stringify({ ok: false, error: "Couldn't save — ask them to call instead." });
@@ -366,7 +370,11 @@ export async function POST(req: Request) {
   }
 
   const supabase = createServiceClient();
-  const area = org.settings.service_area || [org.city, org.state].filter(Boolean).join(", ");
+  // PUBLIC surface: never fall back to the org record's real city (the Chilcoot law) —
+  // public_city/public_state are the customer-facing location, same as site-chrome uses.
+  const area =
+    org.settings.service_area ||
+    [org.settings.public_city, org.settings.public_state].filter(Boolean).join(", ");
   const threshold = org.settings.site_inspection_threshold || 20000;
 
   // Give Nort the deterministic deck estimator ONLY if this org actually has deck pricing.

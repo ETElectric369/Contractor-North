@@ -23,13 +23,13 @@ import { DEFAULT_TIMEZONE } from "@/lib/utils";
  * server-computed business-tz `todayStr` prop, date-only values are compared as noon-UTC
  * instants (tz-independent difference), and all display formatting pins the business timezone.
  */
-function prettyWhen(when: string | null | undefined, todayStr: string): string | null {
+function prettyWhen(when: string | null | undefined, todayStr: string, tz: string): string | null {
   if (!when) return null;
   const hasTime = when.includes("T");
   const d = hasTime ? new Date(when) : new Date(`${when}T12:00:00Z`);
   if (isNaN(d.getTime())) return null;
   const dayStr = hasTime
-    ? d.toLocaleDateString("en-CA", { timeZone: DEFAULT_TIMEZONE }) // en-CA = YYYY-MM-DD
+    ? d.toLocaleDateString("en-CA", { timeZone: tz }) // en-CA = YYYY-MM-DD
     : when;
   const diffDays = Math.round((Date.parse(`${dayStr}T12:00:00Z`) - Date.parse(`${todayStr}T12:00:00Z`)) / 86_400_000);
   const rel =
@@ -39,9 +39,9 @@ function prettyWhen(when: string | null | undefined, todayStr: string): string |
         ? "Today"
         : diffDays === 1
           ? "Tomorrow"
-          : d.toLocaleDateString("en-US", { timeZone: hasTime ? DEFAULT_TIMEZONE : "UTC", weekday: "short", month: "short", day: "numeric" });
+          : d.toLocaleDateString("en-US", { timeZone: hasTime ? tz : "UTC", weekday: "short", month: "short", day: "numeric" });
   if (hasTime) {
-    const t = d.toLocaleTimeString("en-US", { timeZone: DEFAULT_TIMEZONE, hour: "numeric", minute: "2-digit" });
+    const t = d.toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" });
     return diffDays === 0 ? t : `${rel} · ${t}`;
   }
   return rel;
@@ -58,6 +58,7 @@ export function ActionList({
   people = [],
   emptyLabel = "All caught up.",
   todayStr,
+  tz = DEFAULT_TIMEZONE,
 }: {
   items: ActionItem[];
   people?: { id: string; full_name: string | null }[];
@@ -65,6 +66,9 @@ export function ActionList({
   /** The business-tz "today" (YYYY-MM-DD), computed ONCE on the server — the only clock this
       component may consult, so SSR and hydration can never disagree about what day it is. */
   todayStr: string;
+  /** The ORG's timezone — must be the same clock todayStr was computed in, or a chip can
+   *  read "Today · 9:00 PM" for an item the day math already counted as tomorrow. */
+  tz?: string;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -297,7 +301,7 @@ export function ActionList({
           {groupItems.map((item) => {
             const can = (v: Affordance) => item.affordances.includes(v);
             const meta = KIND_META[item.kind];
-            const when = prettyWhen(item.when, todayStr);
+            const when = prettyWhen(item.when, todayStr, tz);
             const overdue = item.when && !item.when.includes("T") && item.when < todayStr;
             return (
               <div

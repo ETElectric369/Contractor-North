@@ -327,8 +327,15 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
       .select("content, scope")
       .order("created_at", { ascending: false })
       .limit(60);
-    const biz = (mem ?? []).filter((m: { scope?: string }) => m.scope !== "personal").map((m: { content: string }) => `- ${m.content}`);
-    const pers = (mem ?? []).filter((m: { scope?: string }) => m.scope === "personal").map((m: { content: string }) => `- ${m.content}`);
+    // Sanitize on READ (house law). The fence below is only as strong as its delimiters:
+    // a fact whose text contains a newline plus ">>" (or a forged "<<MEMORY" header) can
+    // close the block early and continue in SYSTEM authority. Facts are single-line claims,
+    // so collapse whitespace and neutralize the delimiter characters at the boundary where
+    // they enter the prompt — the same place tool output is fenced.
+    const fenceSafe = (t: string) =>
+      String(t ?? "").replace(/\s+/g, " ").replaceAll("<<", "«").replaceAll(">>", "»").slice(0, 500);
+    const biz = (mem ?? []).filter((m: { scope?: string }) => m.scope !== "personal").map((m: { content: string }) => `- ${fenceSafe(m.content)}`);
+    const pers = (mem ?? []).filter((m: { scope?: string }) => m.scope === "personal").map((m: { content: string }) => `- ${fenceSafe(m.content)}`);
     // FENCE IT. These rows are written by a MODEL-DRIVEN tool from conversation text, and any of
     // that text can originate outside the company (a stranger's inquiry message copied onto a
     // customer's notes, a supplier's PDF, a web result). Pasting them unfenced into the system

@@ -114,8 +114,11 @@ async function fetchProfitInputs(supabase: any, jobId?: string): Promise<ProfitI
       supabase
         .from("time_entries")
         .select("job_id, clock_in, clock_out, lunch_minutes, status, rate_override, profiles(hourly_rate), time_allocations(job_id, hours)")
-        .eq("status", "closed")
-        .not("job_id", "is", null),
+        .eq("status", "closed"),
+        // NB: no `.not("job_id","is",null)` — a job-less clock-in whose hours were split
+        // ONTO jobs via allocations was dropped here while the job hub costed it, so the
+        // same job showed two different labor numbers. laborCostForJob already ignores
+        // entries that don't touch the job.
     ]);
   return {
     jobs: jobs ?? [],

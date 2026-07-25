@@ -33,6 +33,12 @@ export async function POST(req: NextRequest) {
 // Place details: GET ?placeId=...&sessionToken=...
 export async function GET(req: NextRequest) {
   if (!GOOGLE_KEY) return NextResponse.json({});
+  // Same per-IP bucket as POST: this proxy spends a server key with no referrer
+  // restriction, so an unguarded GET is a billable open relay. A real autocomplete
+  // session makes ~1 details call per selection.
+  if (memRateLimited(`places:${proxyClientIp(req.headers)}`, 100, 60_000)) {
+    return NextResponse.json({}, { status: 429 });
+  }
   const placeId = req.nextUrl.searchParams.get("placeId");
   if (!placeId) return NextResponse.json({}, { status: 400 });
   const sessionToken = req.nextUrl.searchParams.get("sessionToken") || "";
