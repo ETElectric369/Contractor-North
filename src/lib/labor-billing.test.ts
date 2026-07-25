@@ -165,3 +165,35 @@ describe("pricing-level labor rate override", () => {
     expect(r0.lines[0].rate).toBe(150);
   });
 });
+
+describe("time-code parts are paid but NEVER billed (cn-v560)", () => {
+  // The timecard editor's "break this shift into parts" writes a Drive/Shop part as
+  // {job_id: null, job_code: "DRIVE"} and tells the user "paid, not billed". A code row
+  // and a genuinely-unlabeled row both carry job_id NULL, so the biller has to key on
+  // job_code — otherwise the customer pays for the crew's drive time.
+  const brian = { id: "b", full_name: "Brian", bill_rate: 95, hourly_rate: 55 };
+  const splitEntry = (parts: { job_id?: string | null; job_code?: string | null; hours: number }[]) => ({
+    clock_in: "2026-07-20T14:00:00Z",
+    clock_out: "2026-07-20T22:00:00Z",
+    lunch_minutes: 0,
+    profiles: brian,
+    time_allocations: parts.map((p, i) => ({ id: `a${i}`, job_id: p.job_id ?? null, job_code: p.job_code ?? null, hours: p.hours })),
+  });
+
+  it("a DRIVE part on a job-attached entry is not billed", () => {
+    // 8h shift on Job X split 6h job / 2h drive → bill 6h, not 8h.
+    const r = computeJobLaborBilling([splitEntry([{ job_id: "X", hours: 6 }, { job_code: "DRIVE", hours: 2 }])], [{ id: "a0", hours: 6, time_entries: { status: "closed", profiles: brian } }], 0);
+    expect(r.lines[0].quantity).toBe(6);
+    expect(r.total).toBe(6 * 95);
+  });
+
+  it("genuinely unlabeled hours are still billed to the entry's job", () => {
+    const r = computeJobLaborBilling([splitEntry([{ hours: 3 }])], [], 0);
+    expect(r.lines[0].quantity).toBe(3);
+  });
+
+  it("an all-code shift bills nothing", () => {
+    const r = computeJobLaborBilling([splitEntry([{ job_code: "SHOP", hours: 8 }])], [], 0);
+    expect(r).toEqual({ lines: [], total: 0 });
+  });
+});

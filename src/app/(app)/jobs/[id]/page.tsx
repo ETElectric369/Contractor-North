@@ -164,7 +164,7 @@ export default async function JobDetailPage({
     // parent entry comes embedded with ALL its allocations so the per-job share math works.
     supabase
       .from("time_allocations")
-      .select("id, time_entries!inner(id, profile_id, clock_in, clock_out, lunch_minutes, status, job_id, job_code, notes, rate_override, paid_at, mileage_paid_at, profiles(full_name, hourly_rate, bill_rate), job:job_id(job_number, name), time_allocations(id, job_id, hours, job_code, description))")
+      .select("id, time_entries!inner(id, profile_id, clock_in, clock_out, lunch_minutes, miles, status, job_id, job_code, notes, rate_override, paid_at, mileage_paid_at, profiles(full_name, hourly_rate, bill_rate), job:job_id(job_number, name), time_allocations(id, job_id, hours, job_code, description))")
       .eq("job_id", id),
     supabase
       .from("documents")

@@ -58,7 +58,7 @@ export default async function PublicInvoicePage({
           </div>
         </div>
       )}
-      {!paid && balance > 0 && billingEnabled && (
+      {!paid && balance > 0 && billingEnabled && inv.status !== "void" && inv.status !== "draft" && (
         <div className="no-print mx-auto mb-4 max-w-3xl px-4 text-center">
           <a
             href={`/api/pay/${token}`}

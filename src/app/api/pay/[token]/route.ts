@@ -34,10 +34,18 @@ export async function GET(
 
   const { data: inv } = await supabase
     .from("invoices")
-    .select("id, invoice_number, total, amount_paid, org_id, customers(email)")
+    .select("id, invoice_number, total, amount_paid, status, org_id, customers(email)")
     .eq("public_token", token)
     .maybeSingle();
   if (!inv) return new NextResponse("Invoice not found.", { status: 404 });
+
+  // A VOID invoice's old email link stays live forever; a customer paying it hands us cash
+  // the ledger then hides (recalc keeps status void, Collected and AR both exclude void), so
+  // real money would sit with no entry and no tracked refund. A DRAFT isn't a bill yet — the
+  // office may still be editing the lines. Neither is payable: send them to read-only view.
+  if (inv.status === "void" || inv.status === "draft") {
+    return NextResponse.redirect(`${site}/i/${token}`, { status: 303 });
+  }
 
   const balance = invoiceBalance(inv.total, inv.amount_paid);
   if (balance <= 0) {

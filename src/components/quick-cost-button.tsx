@@ -9,7 +9,7 @@ import { NumberInput } from "@/components/ui/number-input";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { todayStrInTz } from "@/lib/tz";
 import { getOrgSettings } from "@/lib/org-settings";
-import { createBill, addDocument } from "@/app/(app)/jobs/actions";
+import { createBill, addDocument, linkReceiptToBill } from "@/app/(app)/jobs/actions";
 import { billJobReceipt } from "@/app/(app)/organize/actions";
 import { jobLabel } from "@/lib/schedule-options";
 
@@ -78,6 +78,9 @@ export function QuickCostButton({
   const [warn, setWarn] = useState<string | null>(null);
   // The cost row is saved; only the photo may still be pending (retry mode).
   const [costSaved, setCostSaved] = useState(false);
+  // The bill the first save created, kept so a later successful receipt upload can LINK to
+  // it. Without the link, re-uploading that same photo files a second bill for the same money.
+  const [savedBillId, setSavedBillId] = useState<string | null>(null);
   // Self-loaded context when not passed in (global + menu use).
   const [autoOrg, setAutoOrg] = useState("");
   const [autoJobs, setAutoJobs] = useState<{ id: string; label: string }[] | null>(null);
@@ -164,8 +167,11 @@ export function QuickCostButton({
     if (costSaved) {
       if (!receipt || !targetJob) return finishOk();
       start(async () => {
-        if (await attachReceipt(targetJob)) finishOk();
-        else setWarn("Still couldn't upload the receipt — you can add it later from the job's Receipts.");
+        const docId = await attachReceipt(targetJob);
+        if (!docId) return setWarn("Still couldn't upload the receipt — you can add it later from the job's Receipts.");
+        // Link it to the cost we already saved, so this file can never be read as a NEW cost.
+        if (savedBillId) await linkReceiptToBill(savedBillId, docId);
+        finishOk();
       });
       return;
     }
@@ -188,6 +194,7 @@ export function QuickCostButton({
             notes: "", category, receipt_document_id: docId,
           });
           if (!fb.ok) return setError(res.error ?? "Couldn't read the receipt.");
+          setSavedBillId(fb.id ?? null);
           setWarn(`Couldn't read a total (${res.error ?? "unreadable"}) — saved as $0. Open the bill to enter the amount.`);
           setCostSaved(true);
           return;
@@ -221,6 +228,7 @@ export function QuickCostButton({
       });
       if (!res.ok) return setError(res.error ?? "Couldn't save the cost.");
       setCostSaved(true);
+      setSavedBillId(res.id ?? null);
       if (receipt && targetJob && !docId) {
         setWarn("Cost saved ✓ — but the receipt didn't upload. Tap “Retry receipt”, or close and add it from the job's Receipts.");
         return;

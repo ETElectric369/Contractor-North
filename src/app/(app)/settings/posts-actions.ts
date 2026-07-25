@@ -99,6 +99,12 @@ export async function saveSitePost(input: {
       .from("site_posts")
       .select("cover_url, published, published_at, path")
       .eq("id", input.id)
+      // Org-scope every id-keyed read/write (mirrors pages-actions): a staff-of-A +
+      // collaborator-of-B session whose ctx resolves to A must fail closed here rather than
+      // succeed under B's RLS grant and then hand recordSiteRedirect the WRONG org — which
+      // writes a 301 into a tenant that never owned the URL while B's renamed article
+      // silently soft-404s (the redirect write is service-role and best-effort).
+      .eq("org_id", ctx.orgId)
       .maybeSingle();
     if (!prev) return { ok: false, error: "That article no longer exists." };
     const row: Record<string, unknown> = {
@@ -107,7 +113,7 @@ export async function saveSitePost(input: {
     };
     if (publishedAtOverride) row.published_at = publishedAtOverride;
     else if (published && !prev.published) row.published_at = new Date().toISOString();
-    const { data: updated, error } = await supabase.from("site_posts").update(row).eq("id", input.id).select("id");
+    const { data: updated, error } = await supabase.from("site_posts").update(row).eq("id", input.id).eq("org_id", ctx.orgId).select("id");
     if (error) {
       return { ok: false, error: /duplicate|unique/i.test(error.message) ? "An article already exists at that web address." : error.message };
     }
@@ -146,7 +152,7 @@ export async function saveSitePost(input: {
 export async function deleteSitePost(id: string, orgId?: string): Promise<Result> {
   const ctx = await resolveSiteContext(orgId);
   if ("error" in ctx) return { ok: false, error: ctx.error };
-  const { data, error } = await ctx.supabase.from("site_posts").delete().eq("id", id).select("id");
+  const { data, error } = await ctx.supabase.from("site_posts").delete().eq("id", id).eq("org_id", ctx.orgId).select("id");
   if (error) return { ok: false, error: error.message };
   if (!data?.length) return { ok: false, error: "That article no longer exists." };
   revalidateSite();

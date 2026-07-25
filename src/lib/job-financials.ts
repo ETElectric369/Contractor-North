@@ -1,5 +1,5 @@
 import { getOrgSettings } from "@/lib/org-settings";
-import { computeJobLaborBilling, customerLaborRateForJob, fetchJobLaborRows } from "@/lib/labor-billing";
+import { computeJobLaborBilling, customerLaborRateForJob, customerMaterialMarkupForJob, fetchJobLaborRows } from "@/lib/labor-billing";
 import { computeJobProgress, type JobProgressFinancials } from "@/lib/job-progress-math";
 
 export type { JobProgressFinancials };
@@ -27,6 +27,13 @@ export async function jobProgressFinancials(supabase: any, jobId: string): Promi
   // default-rate fallback) — so the panel can't diverge from the billed lines.
   const defaultRate = getOrgSettings((org as any)?.settings).default_labor_rate; // via the settings SSOT
   const levelRate = await customerLaborRateForJob(supabase, jobId);
+  // Materials honor the customer's level too — the panel promises to equal the lines the
+  // importers bill, and those now seed from the level (cn-v560).
+  const markupPercent = await customerMaterialMarkupForJob(
+    supabase,
+    jobId,
+    getOrgSettings((org as any)?.settings).material_markup_percent,
+  );
   const { total: billableLabor } = computeJobLaborBilling(labor.jobEntries, labor.jobAllocs, defaultRate, levelRate);
 
   return computeJobProgress({
@@ -36,7 +43,7 @@ export async function jobProgressFinancials(supabase: any, jobId: string): Promi
     billableLabor,
     pos: (pos ?? []) as any,
     bills: (bills ?? []) as any,
-    markupPercent: getOrgSettings((org as any)?.settings).material_markup_percent,
+    markupPercent,
   });
 }
 

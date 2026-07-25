@@ -115,6 +115,11 @@ export function computeJobLaborBilling(
       // costed to this entry's job, so billed to it too.
       for (const a of allocs) {
         if (a.job_id) continue;
+        // A TIME-CODE part (Drive/Shop/…) also carries job_id NULL, but the editor promises
+        // "paid, not billed" — billing it to whichever job the shift was clocked into is the
+        // customer paying for drive time. Only genuinely unlabeled hours belong to the job.
+        // (Cost still counts them: we DID pay for that hour, so it shows as unbilled cost.)
+        if (a.job_code) continue;
         if (a.id && billedAllocIds.has(String(a.id))) continue;
         addHours(e.profiles, Number(a.hours ?? 0));
       }
@@ -145,7 +150,7 @@ export async function fetchJobLaborRows(supabase: any, jobId: string): Promise<{
       // allocation CONTENTS, not just ids: computeJobLaborBilling has to bill the
       // unlabeled (job_id NULL) rows on this job's entries, which the cost side already
       // charges to the job — selecting only ids is what hid a whole unbilled week.
-      .select("clock_in, clock_out, lunch_minutes, profiles(id, full_name, hourly_rate, bill_rate), time_allocations(id, job_id, hours)")
+      .select("clock_in, clock_out, lunch_minutes, profiles(id, full_name, hourly_rate, bill_rate), time_allocations(id, job_id, job_code, hours)")
       .eq("job_id", jobId)
       .eq("status", "closed"),
     supabase
@@ -169,4 +174,26 @@ export async function customerLaborRateForJob(supabase: any, jobId: string): Pro
     .maybeSingle();
   const raw = Number((data as any)?.customers?.pricing_levels?.labor_rate);
   return Number.isFinite(raw) && raw > 0 ? raw : null;
+}
+
+/** The material markup % to bill a JOB at: the customer's pricing-level markup when the
+ *  customer has a level, else the org default. THE one resolver for materials, mirroring
+ *  customerLaborRateForJob — the draw/finish-job importers and the work-to-date panel must
+ *  all seed from this or a level customer gets billed at the org rate on one path and their
+ *  negotiated rate on another (two totals for identical work). A level markup of 0 is a real
+ *  answer (bill at cost), so only null/absent falls through to the default. */
+export async function customerMaterialMarkupForJob(
+  supabase: any,
+  jobId: string,
+  orgDefaultPct: number,
+): Promise<number> {
+  const { data } = await supabase
+    .from("jobs")
+    .select("customers(pricing_levels(markup_pct))")
+    .eq("id", jobId)
+    .maybeSingle();
+  const raw = Number((data as any)?.customers?.pricing_levels?.markup_pct);
+  if (Number.isFinite(raw) && raw >= 0) return raw;
+  const def = Number(orgDefaultPct);
+  return Number.isFinite(def) && def >= 0 ? def : 0;
 }

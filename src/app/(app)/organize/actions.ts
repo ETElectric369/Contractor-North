@@ -71,6 +71,18 @@ function billStatusFor(category: string | null | undefined): "paid" | "unpaid" {
   return /bill|invoice/i.test(category || "") ? "unpaid" : "paid";
 }
 
+/** Paid/unpaid for a bill created from an ALREADY-ANALYZED tray item. Prefers what the AI
+ *  actually read off the paper (organized_items.payment, migration 0153) and only falls back
+ *  to the category-name heuristic for legacy rows analyzed before that column existed.
+ *  A classified-but-not-tendered receipt (ON ACCT, net terms) stays UNPAID so the debt shows
+ *  up in payables instead of surfacing on next month's supply-house statement. */
+function billStatusFromItem(item: { payment?: string | null; category?: string | null }): "paid" | "unpaid" {
+  const p = String(item.payment ?? "");
+  if (p === "paid_at_purchase") return "paid";
+  if (p === "on_account" || p === "unknown") return "unpaid";
+  return billStatusFor(item.category);
+}
+
 /** Insert a bill plus its line items (an itemized receipt → billable cost). */
 async function insertItemizedBill(
   supabase: any,
@@ -227,6 +239,7 @@ Respond with ONLY a JSON object (no prose):
   "amount": total in dollars as a number, or null,
   "date": "YYYY-MM-DD" date printed on it, or null,
   "category": "Receipt" | "Bill" | "Invoice" | "Photo" | "Plan" | "Permit" | "Other",
+  "payment": "paid_at_purchase" | "on_account" | "unknown" — receipts only. "paid_at_purchase" ONLY when the document shows tender (cash tendered/change, a card number/••••, or an explicit PAID stamp); "on_account" when it shows a charge account, ON ACCT, net terms, "invoice", or a balance due (supply-house account purchases); "unknown" when you cannot tell,
   "destination": "job" | "overhead" | "unsure" — receipts only. "job" if the purchase is materials for a specific job; "overhead" if it is clearly a company expense NOT tied to one job (fuel/gas station, shop supplies, small tools, office, vehicle, insurance); "unsure" otherwise,
   "overhead_category": "Fuel" | "Shop supplies" | "Tools" | "Office" | "Insurance" | "Vehicle" | "Other" or null — only when destination is "overhead",
   "job_id": the id of the matching job ONLY if the content clearly points to one (job number, customer name, or address visible), else null,
@@ -260,6 +273,14 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
   const amount = parsed.amount != null && !isNaN(Number(parsed.amount)) ? Number(parsed.amount) : null;
   const itemDate = /^\d{4}-\d{2}-\d{2}$/.test(String(parsed.date ?? "")) ? parsed.date : null;
   const overheadCategory = String(parsed.overhead_category || "Other");
+  // What the paper says about PAYMENT decides paid/unpaid — not the category heuristic.
+  // billStatusFor() calls anything not named "bill/invoice" paid, so an ON-ACCT supply-house
+  // ticket filed here vanished from payables until the monthly statement arrived. Unknown
+  // defaults to UNPAID: a debt you already settled is harmless, one you forget is not.
+  const paymentRead = ["paid_at_purchase", "on_account", "unknown"].includes(String(parsed.payment ?? ""))
+    ? String(parsed.payment)
+    : "unknown";
+  const billStatus: "paid" | "unpaid" = paymentRead === "paid_at_purchase" ? "paid" : "unpaid";
   const lines = kind === "receipt" ? cleanLines(parsed.line_items) : [];
 
   // Decide where it goes — auto-file only when confident, else the tray.
@@ -311,14 +332,14 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
       supabase,
       { job_id: jobId, supplier: vendor, amount, bill_date: itemDate, category, notes: `Receipt filed by Organize My: ${title}`, created_by: ctx.userId },
       lines,
-      billStatusFor(category),
+      billStatus,
     );
   } else if (destination === "overhead") {
     billId = await insertItemizedBill(
       supabase,
       { job_id: null, supplier: vendor, amount, bill_date: itemDate, category: overheadCategory, notes: `Filed by Organize My: ${title}`, created_by: ctx.userId },
       lines,
-      billStatusFor(overheadCategory),
+      billStatus,
     );
   }
 
@@ -340,6 +361,9 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
       document_id: documentId,
       bill_id: billId,
       line_items: lines.length ? lines : null,
+      // Persist HOW it was paid so a later manual file (fileItem) honors the paper
+      // instead of re-guessing from the category name (0153).
+      payment: kind === "receipt" ? paymentRead : null,
     })
     .eq("id", itemId);
   if (error) return { ok: false, error: error.message };
@@ -600,7 +624,7 @@ export async function fileItem(id: string, dest: FileDestination): Promise<Resul
         supabase,
         { job_id: dest.jobId, supplier: item.vendor ?? item.title, amount: item.amount, bill_date: item.item_date, category: "Receipt", notes: `Receipt filed by Organize My: ${item.title}`, created_by: ctx.userId },
         lines,
-        billStatusFor(item.category),
+        billStatusFromItem(item),
       );
     }
   } else if (dest.type === "overhead") {
@@ -609,7 +633,7 @@ export async function fileItem(id: string, dest: FileDestination): Promise<Resul
       supabase,
       { job_id: null, supplier: item.vendor ?? item.title, amount: item.amount ?? 0, bill_date: item.item_date, category: dest.category, notes: `Filed by Organize My: ${item.title}`, created_by: ctx.userId },
       lines,
-      billStatusFor(dest.category),
+      billStatusFromItem(item),
     );
   } else if (dest.type === "petty_cash") {
     category = "Petty cash";

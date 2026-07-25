@@ -10,6 +10,7 @@ import { notifyJobCrewAdded } from "@/lib/crew-notify";
 import { visibleJobIdOrNull, visiblePoIdOnJobOrNull, visibleTemplateIdOrNull } from "@/lib/job-visibility";
 import { requireStaff } from "@/lib/staff-guard";
 import { getOrgSettings } from "@/lib/org-settings";
+import { customerMaterialMarkupForJob } from "@/lib/labor-billing";
 import { reportError } from "@/lib/observe";
 import { escapeLike } from "@/lib/utils";
 import { shouldImportActuals } from "@/lib/invoice-import-rule";
@@ -110,7 +111,14 @@ export async function createInvoiceForJob(
   // straight from the field instead of having to be back at a desk with the data entered.
   if (res.ok && res.id) {
     const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
-    const markup = getOrgSettings((org as any)?.settings).material_markup_percent;
+    // The customer's pricing-level markup when they have one, else the org default — the
+    // same seed the manual "Materials From Costs" box uses, so a level customer can't be
+    // billed at the org rate here and their negotiated rate there.
+    const markup = await customerMaterialMarkupForJob(
+      supabase,
+      jobId,
+      getOrgSettings((org as any)?.settings).material_markup_percent,
+    );
     // CAPTURE each import. A "nothing to pull" no-op (empty:true) is fine; a REAL failure (DB error)
     // must NOT be swallowed — a field tech invoicing by voice can't see the screen, so a silently empty
     // invoice goes out under-billed. Log it AND tell the caller so the UI/voice can flag it.
@@ -484,6 +492,52 @@ export async function createBill(input: {
   if (input.job_id) revalidatePath(`/jobs/${input.job_id}`);
   revalidatePath("/bills");
   return { ok: true, id: created?.id };
+}
+
+/** Link an already-uploaded receipt document to an already-saved bill — the retry path.
+ *  When the photo upload fails on the first save, the bill exists with NO link, so a later
+ *  upload of that same receipt (retry button, or the job's Receipts tab) reads it as a fresh
+ *  cost and files a SECOND bill for the same money — the Tao Zhu double-charge class. This
+ *  writes the same organized_items link createBill would have, making the file answer
+ *  "already recorded". Same containment rule: the document must be visible and on the bill's job. */
+export async function linkReceiptToBill(billId: string, documentId: string): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+
+  const [{ data: bill }, { data: doc }] = await Promise.all([
+    supabase.from("bills").select("id, job_id, supplier, amount, bill_date, category").eq("id", billId).maybeSingle(),
+    supabase.from("documents").select("id, job_id, file_url").eq("id", documentId).maybeSingle(),
+  ]);
+  if (!bill || !doc) return { ok: false, error: "Couldn't find that cost or receipt." };
+  if (!bill.job_id || doc.job_id !== bill.job_id) return { ok: false, error: "That receipt isn't on this cost's job." };
+
+  // Idempotent: a re-tap must not stack duplicate links.
+  const { data: existing } = await supabase
+    .from("organized_items")
+    .select("id")
+    .eq("document_id", doc.id)
+    .limit(1)
+    .maybeSingle();
+  if (existing) return { ok: true };
+
+  const { error } = await supabase.from("organized_items").insert({
+    kind: "receipt",
+    title: bill.supplier ?? "Receipt",
+    vendor: bill.supplier ?? null,
+    amount: bill.amount ?? 0,
+    item_date: bill.bill_date ?? null,
+    category: bill.category ?? null,
+    status: "filed",
+    job_id: bill.job_id,
+    document_id: doc.id,
+    bill_id: bill.id,
+    file_url: doc.file_url,
+    created_by: ctx.userId,
+  });
+  if (error) return { ok: false, error: error.message };
+  revalidatePath(`/jobs/${bill.job_id}`);
+  return { ok: true };
 }
 
 export async function updateBill(

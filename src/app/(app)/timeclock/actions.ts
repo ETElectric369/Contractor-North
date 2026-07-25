@@ -350,6 +350,29 @@ function clampAllocationHours<T extends { hours: number }>(
   }));
 }
 
+/**
+ * Scale an entry's ALREADY-RECORDED allocations down to the worked hours, in place.
+ * The no-over-bill law (C7) says billed hours can never exceed paid hours, but three
+ * paths can push recorded above worked AFTER the rows exist: an auto-lunch applied at
+ * close, a lunch confirmed in the debrief, and an office edit that shortens the shift.
+ * Returns the new recorded total. A no-op when the rows already fit (0.01h slack).
+ */
+async function scaleRecordedToWorked(
+  supabase: any,
+  entryId: string,
+  rows: { id: string; hours: number | null }[],
+  workedHrs: number,
+): Promise<number> {
+  const sum = rows.reduce((s, r) => s + (Number(r.hours) || 0), 0);
+  if (!rows.length || sum <= workedHrs + 0.01) return sum;
+  const scaled = clampAllocationHours(rows.map((r) => ({ id: r.id, hours: Number(r.hours) || 0 })), workedHrs);
+  for (const r of scaled) {
+    await supabase.from("time_allocations").update({ hours: r.hours }).eq("id", r.id);
+  }
+  void entryId;
+  return scaled.reduce((s, r) => s + (Number(r.hours) || 0), 0);
+}
+
 export async function clockOut(input: {
   entry_id: string;
   /** Unpaid lunch in minutes. null/undefined = "wasn't asked" (the one-tap flows) —
@@ -505,7 +528,13 @@ export async function clockOut(input: {
   // every closer passes through. Payroll is untouched — this writes only the billing split.
   if (input.allocations === undefined && recorded.length && entClockIn) {
     const workedHrs = hoursBetween(entClockIn, clockOutIso, lunchMinutes);
-    const tail = tailAllocationHours(workedHrs, recordedHours);
+    // The switch segments were recorded from GROSS time; the auto-lunch applied at this
+    // close then cuts paid hours. When the last segment is shorter than the deduction,
+    // recorded ends up ABOVE worked and tailAllocationHours returns 0 — no tail, no
+    // rescale, and the job silently bills up to 30 min nobody was paid for. Scale first,
+    // then compute the tail from what's actually on the entry (the C7 no-over-bill law).
+    const recordedNow = await scaleRecordedToWorked(supabase, input.entry_id, recorded, workedHrs);
+    const tail = tailAllocationHours(workedHrs, recordedNow);
     if (tail > 0) {
       await supabase.from("time_allocations").insert({
         time_entry_id: input.entry_id,
@@ -901,9 +930,12 @@ export async function updateTimeEntry(input: {
     lunch_minutes: input.lunch_minutes || 0,
     job_code: input.job_code,
     notes: input.notes || null,
-    miles: input.miles ?? 0,
     status: "closed",
   };
+  // Only touch miles when the caller sent the field (mirrors job_id/rate_override): a
+  // surface whose projection omits miles — or an edit that only changes a description —
+  // must not silently zero a settled-or-unsettled mileage figure the tech earned.
+  if (input.miles !== undefined) patch.miles = input.miles ?? 0;
   // Only touch job_id when the caller sent the field, so older callers that omit
   // it don't accidentally null out an entry's job. `null` explicitly clears it.
   if (input.job_id !== undefined) patch.job_id = input.job_id;
@@ -959,7 +991,7 @@ export async function updateTimeEntry(input: {
       (!!input.profile_id && input.profile_id !== stored.profile_id);
     if (payMoved) return { ok: false, error: "Entry is in a paid period — Undo on Payroll first." };
   }
-  if (stored.mileage_paid_at && Math.abs((input.miles ?? 0) - Number(stored.miles ?? 0)) > 0.001) {
+  if (stored.mileage_paid_at && input.miles !== undefined && Math.abs((input.miles ?? 0) - Number(stored.miles ?? 0)) > 0.001) {
     return { ok: false, error: "Entry's mileage is settled — Undo on Payroll first." };
   }
 
@@ -1010,6 +1042,23 @@ export async function updateTimeEntry(input: {
     if (oldIds.length) await supabase.from("time_allocations").delete().in("id", oldIds);
     for (const jid of touched) revalidatePath(`/jobs/${jid}`);
     revalidatePath("/jobs");
+  } else {
+    // Allocations OMITTED but the shift may have been shortened ("Brian actually left at
+    // 2:30"): the stored split still bills the old, longer total, so billed hours exceed
+    // paid hours with nothing to re-check the invariant. Rescale the existing rows to the
+    // new worked hours — same C7 law as the submitted-set branch above.
+    const workedHrs = hoursBetween(input.clock_in, input.clock_out, input.lunch_minutes || 0);
+    const { data: existingAllocs } = await supabase
+      .from("time_allocations")
+      .select("id, job_id, hours")
+      .eq("time_entry_id", input.id);
+    const rows = (existingAllocs ?? []) as { id: string; job_id: string | null; hours: number | null }[];
+    const before = rows.reduce((s, r) => s + (Number(r.hours) || 0), 0);
+    if (before > workedHrs + 0.01) {
+      await scaleRecordedToWorked(supabase, input.id, rows, workedHrs);
+      for (const jid of new Set(rows.map((r) => r.job_id).filter(Boolean) as string[])) revalidatePath(`/jobs/${jid}`);
+      revalidatePath("/jobs");
+    }
   }
   return { ok: true };
 }
@@ -1038,11 +1087,13 @@ export async function deleteTimeEntry(id: string): Promise<ClockResult> {
 /** Copy a finished entry to a new one (same person/job/code/times) so a repeat
  *  day can be logged in one tap, then tweaked. Open entries can't be duplicated. */
 export async function duplicateTimeEntry(id: string): Promise<ClockResult> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  // STAFF ONLY. This is the one tech-reachable path that INSERTS a closed entry — and it
+  // copies rate_override — so an unguarded version let a member clone their own paid shift
+  // (or a supervisor-rate one) as many times as they liked. It's an office convenience
+  // anyway; the DB insert guard (0154) enforces the same rule at the write boundary.
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
 
   const { data: e, error: readErr } = await supabase
     .from("time_entries")

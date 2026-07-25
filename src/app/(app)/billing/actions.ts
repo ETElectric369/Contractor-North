@@ -9,7 +9,7 @@ import { pushInvoiceToQbo } from "@/lib/quickbooks";
 import { getOrgSettings } from "@/lib/org-settings";
 import { tzLocalHourUtc } from "@/lib/tz";
 import { requireStaff } from "@/lib/staff-guard";
-import { computeJobLaborBilling, customerLaborRateForJob, fetchJobLaborRows } from "@/lib/labor-billing";
+import { computeJobLaborBilling, customerLaborRateForJob, customerMaterialMarkupForJob, fetchJobLaborRows } from "@/lib/labor-billing";
 import { livePurchaseOrders } from "@/lib/job-progress-math";
 import { resolveDrawCredit, shouldBlockStandardImport, invoiceBalance, DRAW_KINDS, isDrawKind } from "@/lib/invoice-math";
 import { recalcInvoice } from "@/lib/invoice-recalc";
@@ -672,7 +672,10 @@ export async function createProgressReportInvoice(
   const stdBlocker = await standardBillingBlockerOnJob(supabase, jobId);
   if (stdBlocker) return standardBillingConflictError(stdBlocker);
   const settings = getOrgSettings((org as any)?.settings);
-  const markup = settings.material_markup_percent;
+  // Seed from the customer's pricing level (falling back to the org default) — the same
+  // resolver the manual import box and the work-to-date panel use, so a draw can't bill a
+  // level customer's materials at a different rate than a standard invoice would.
+  const markup = await customerMaterialMarkupForJob(supabase, jobId, settings.material_markup_percent);
   const dueDate = await defaultDueDateIso(supabase);
 
   const { data: inv, error } = await supabase
