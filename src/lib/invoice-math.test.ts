@@ -112,6 +112,17 @@ describe("groupInvoiceLines (progress-report labor/material breakdown)", () => {
     const g = groupInvoiceLines([{ description: "Less previous billings (deposit & prior draws)", line_total: -10000 }]);
     expect(g.credits.subtotal).toBe(-10000);
   });
+  it("itemized cost rows (raw product descriptions, no 'Materials — ' prefix) classify as materials via import_source", () => {
+    // The itemized costs import writes raw product lines. The public /i/<token> RPC must
+    // expose import_source (migration 0152) or these all fall to Other on the customer's copy.
+    const g = groupInvoiceLines([
+      { description: "Labor — Erik Taylor", line_total: 3250, import_source: "labor" },
+      { description: "1G WP BOX W/4 1/2 HUB BRONZE (RACO 53212) (2 ea)", line_total: 18.33, import_source: "costs" },
+      { description: "Supplies & tax — CED", line_total: 15.42, import_source: "costs" },
+    ]);
+    expect(g.materials.subtotal).toBeCloseTo(33.75, 2);
+    expect(g.other.lines.length).toBe(0);
+  });
   it("hasBreakdown is false for a plain manual invoice (no imported labor/materials)", () => {
     const g = groupInvoiceLines([{ description: "Service call", line_total: 200, import_source: null }]);
     expect(g.hasBreakdown).toBe(false);
