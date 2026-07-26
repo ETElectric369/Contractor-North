@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getStripe, billingEnabled } from "@/lib/stripe";
 import { createServiceClient } from "@/lib/supabase/server";
 import { invoiceBalance } from "@/lib/invoice-math";
+import { connectStateFromOrg, canAcceptPayments } from "@/lib/stripe-connect";
 
 export const runtime = "nodejs";
 
@@ -54,29 +55,47 @@ export async function GET(
 
   const { data: org } = await supabase
     .from("organizations")
-    .select("name")
+    .select("name, stripe_account_id, stripe_account_status, stripe_charges_enabled")
     .eq("id", inv.org_id)
     .maybeSingle();
 
+  // CONNECT (0161): the charge is created ON THE CONTRACTOR'S OWN Stripe account, so
+  // their customer's money goes to their bank — we never hold it. Refuse rather than
+  // fall back to the platform account: a silent fallback is exactly how a platform ends
+  // up holding other people's money.
+  const connect = connectStateFromOrg((org ?? {}) as any);
+  if (!canAcceptPayments(connect)) {
+    return new NextResponse(
+      "This contractor hasn't finished setting up online payments yet. Please pay by check or call them.",
+      { status: 503 },
+    );
+  }
+
   const stripe = getStripe();
-  const session = await stripe.checkout.sessions.create({
-    mode: "payment",
-    line_items: [
-      {
-        price_data: {
-          currency: "usd",
-          product_data: { name: `${org?.name ?? ""} Invoice ${inv.invoice_number}`.trim() },
-          unit_amount: Math.round(balance * 100),
+  const session = await stripe.checkout.sessions.create(
+    {
+      mode: "payment",
+      line_items: [
+        {
+          price_data: {
+            currency: "usd",
+            product_data: { name: `${org?.name ?? ""} Invoice ${inv.invoice_number}`.trim() },
+            unit_amount: Math.round(balance * 100),
+          },
+          quantity: 1,
         },
-        quantity: 1,
-      },
-    ],
-    customer_email: (inv as any).customers?.email ?? undefined,
-    success_url: `${site}/i/${token}?paid=1`,
-    cancel_url: `${site}/i/${token}`,
-    metadata: { kind: "invoice_payment", invoice_id: inv.id, org_id: inv.org_id },
-    payment_intent_data: { metadata: { invoice_id: inv.id } },
-  });
+      ],
+      customer_email: (inv as any).customers?.email ?? undefined,
+      success_url: `${site}/i/${token}?paid=1`,
+      cancel_url: `${site}/i/${token}`,
+      // org_id rides along because on a direct charge the webhook arrives with the
+      // CONNECTED account's context, not ours — this is how we know whose invoice it is.
+      metadata: { kind: "invoice_payment", invoice_id: inv.id, org_id: inv.org_id },
+      payment_intent_data: { metadata: { invoice_id: inv.id, org_id: inv.org_id } },
+    },
+    // THE line that makes it a direct charge.
+    { stripeAccount: connect.accountId! },
+  );
 
   return NextResponse.redirect(session.url!, { status: 303 });
 }

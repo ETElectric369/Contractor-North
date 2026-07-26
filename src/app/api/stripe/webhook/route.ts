@@ -3,6 +3,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
 import { formatCurrency } from "@/lib/utils";
 import { recalcInvoice } from "@/lib/invoice-recalc";
+import { accountUpdateFields } from "@/lib/stripe-connect";
 import type Stripe from "stripe";
 
 export const runtime = "nodejs";
@@ -104,11 +105,34 @@ export async function POST(req: Request) {
     }
   }
 
+  // CONNECT (0161): events for a DIRECT charge originate on the contractor's own
+  // account and arrive here with `event.account` set. The invoice-payment branch below
+  // handles them identically — the metadata we attached at checkout carries invoice_id
+  // and org_id, so nothing depends on which account the event came from. Subscription
+  // events are OURS (no event.account) and must never be read off a connected account.
+  const fromConnectedAccount = !!(event as { account?: string }).account;
+
   switch (event.type) {
+    // A contractor finished (or changed) their Stripe onboarding. Mirror the two facts
+    // the pay route trusts. Guarded to the connected account so a platform-level event
+    // can never flip a tenant's charging state.
+    case "account.updated": {
+      const account = event.data.object as Stripe.Account;
+      const { error } = await supabase
+        .from("organizations")
+        .update(accountUpdateFields(account))
+        .eq("stripe_account_id", account.id);
+      if (error) {
+        return new Response(`account.updated sync failed: ${error.message}`, { status: 500 });
+      }
+      break;
+    }
     case "customer.subscription.created":
     case "customer.subscription.updated":
     case "customer.subscription.deleted":
-      await syncSubscription(event.data.object as Stripe.Subscription);
+      // Our OWN billing only. A subscription living on a contractor's connected account
+      // is their business with their customers, not our paywall.
+      if (!fromConnectedAccount) await syncSubscription(event.data.object as Stripe.Subscription);
       break;
     case "checkout.session.completed": {
       const session = event.data.object as Stripe.Checkout.Session;
@@ -119,7 +143,7 @@ export async function POST(req: Request) {
           (session.amount_total ?? 0) / 100,
           event.id,
         );
-      } else if (session.subscription) {
+      } else if (session.subscription && !fromConnectedAccount) {
         const sub = await getStripe().subscriptions.retrieve(
           session.subscription as string,
         );

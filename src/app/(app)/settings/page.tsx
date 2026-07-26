@@ -40,7 +40,8 @@ import { translator } from "@/lib/i18n";
 import { billingEnabled } from "@/lib/stripe";
 import { qboConfigured } from "@/lib/quickbooks";
 import { trialDaysLeft } from "@/lib/subscription";
-import { startCheckout, openPortal } from "./billing-actions";
+import { startCheckout, openPortal, connectPayments, openPayoutsDashboard } from "./billing-actions";
+import { connectStateFromOrg, connectStatusLabel, canAcceptPayments } from "@/lib/stripe-connect";
 import { disconnectQuickbooks, getDocCounters } from "./actions";
 import type { Organization, Profile } from "@/lib/types";
 
@@ -226,6 +227,44 @@ export default async function SettingsPage({
               <Section title="Company details"><OrgSettingsForm org={org as Organization} /></Section>
               <Section title="Company logo">
                 <LogoUpload orgId={(org as Organization).id} current={(org as Organization).logo_url} />
+              </Section>
+
+              <Section title="Getting paid">
+                {/* CONNECT (0161): the contractor's OWN Stripe account. Their customers'
+                    money goes to their bank — Contractor North never holds it. */}
+                {(() => {
+                  const st = connectStateFromOrg(org as any);
+                  const s = connectStatusLabel(st);
+                  return (
+                    <>
+                      <div className="flex flex-wrap items-center gap-3">
+                        <Badge tone={s.tone === "green" ? "green" : s.tone === "amber" ? "amber" : "slate"}>{s.label}</Badge>
+                        <span className="text-sm text-slate-600">{s.detail}</span>
+                      </div>
+                      {billingEnabled ? (
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          {canAcceptPayments(st) ? (
+                            <form action={openPayoutsDashboard}>
+                              <Button variant="outline">View payouts</Button>
+                            </form>
+                          ) : (
+                            <form action={connectPayments}>
+                              <Button>{st.accountId ? "Finish setup" : "Set up card payments"}</Button>
+                            </form>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="mt-3 text-sm text-slate-400">
+                          Card payments aren&apos;t switched on for the platform yet.
+                        </p>
+                      )}
+                      <p className="mt-3 text-xs text-slate-400">
+                        Payments go straight from your customer to your bank. We never hold your money and take no cut —
+                        Stripe&apos;s processing fee is the only deduction.
+                      </p>
+                    </>
+                  );
+                })()}
               </Section>
             </div>
           ),
