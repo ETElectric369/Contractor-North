@@ -49,3 +49,13 @@ yarn-error.log*
 /Contractor_North_Subscriptions.xlsx
 /Tahoe_Deck_SEO_Source_of_Truth.pdf
 /ET_Electric_SEO_Source_of_Truth.pdf
+
+# Throwaway DB-inspection scripts written by audit subagents at the repo root.
+# These embed a connection string; one was swept into a commit by `git add -A`
+# (2026-07-25). Never let that happen again — the repo is PUBLIC.
+/.tmp-*.mjs
+/.tmp-*.cjs
+/.audit-*.js
+/.tokenlens-*.js
+/q_audit_tmp.cjs
+/*_tmp.cjs
