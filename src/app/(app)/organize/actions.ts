@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { requireStaff } from "@/lib/staff-guard";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
+import { modelFor, recordAiUsage } from "@/lib/ai-cost";
 import { listJobScopes } from "@/lib/analytics/job-profitability";
 import { OVERHEAD_CATEGORIES } from "./constants";
 
@@ -143,7 +144,9 @@ async function parseAiJson(client: ReturnType<typeof getAnthropic>, raw: string)
     /* fall through to one repair round-trip */
   }
   const fix = await client.messages.create({
-    model: DEFAULT_MODEL,
+    // Repairing malformed JSON needs no domain knowledge — pure mechanics, so it runs
+    // on the cheap model. The READING of a receipt (below) stays on the good one.
+    model: modelFor("classify"),
     max_tokens: 4096,
     system:
       "You repair malformed JSON. Output ONLY one valid, complete JSON object — no prose, no code fences. " +
@@ -257,6 +260,8 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
         },
       ],
     });
+    // METER (0162): receipt/document reads are a real cost centre, not just chat.
+    void recordAiUsage({ orgId: ctx.orgId, model: (msg as { model?: string }).model ?? DEFAULT_MODEL, surface: "organize", usage: msg.usage as never });
     const text = msg.content.find((b) => b.type === "text") as { text: string } | undefined;
     parsed = await parseAiJson(client, text?.text ?? "");
   } catch (e: any) {
@@ -503,6 +508,8 @@ In every "description", write inches as the word in (e.g. "6 in EMT", not 6") an
         },
       ],
     });
+    // METER (0162): receipt/document reads are a real cost centre, not just chat.
+    void recordAiUsage({ orgId: ctx.orgId, model: (msg as { model?: string }).model ?? DEFAULT_MODEL, surface: "organize", usage: msg.usage as never });
     const text = msg.content.find((b) => b.type === "text") as { text: string } | undefined;
     parsed = await parseAiJson(client, text?.text ?? "");
   } catch (e: any) {
@@ -812,7 +819,9 @@ export async function aiReviewItem(id: string): Promise<{ ok: boolean; message: 
   try {
     const client = getAnthropic();
     const msg = await client.messages.create({
-      model: DEFAULT_MODEL,
+      // Categorising one document into an action bucket, with a human review tray
+      // behind it — not the receipt-reading that becomes billable money.
+      model: modelFor("routine"),
       max_tokens: 500,
       system: `You triage one piece of paperwork for an electrical contractor and decide the single best action. Output ONLY a JSON object:
 {
@@ -834,6 +843,8 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
         },
       ],
     });
+    // METER (0162): receipt/document reads are a real cost centre, not just chat.
+    void recordAiUsage({ orgId: (item as { org_id?: string }).org_id, model: (msg as { model?: string }).model ?? DEFAULT_MODEL, surface: "organize", usage: msg.usage as never });
     const block = msg.content.find((b) => b.type === "text") as { text: string } | undefined;
     parsed = await parseAiJson(client, block?.text ?? "");
   } catch (e: any) {

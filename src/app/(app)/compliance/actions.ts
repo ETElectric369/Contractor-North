@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireStaff } from "@/lib/staff-guard";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
+import { modelFor, recordAiUsage } from "@/lib/ai-cost";
 import { INSURANCE_TYPES, COMPLIANCE_TYPES, AUDIT_TYPES } from "@/lib/compliance-types";
 
 export type Result = { ok: boolean; error?: string };
@@ -169,7 +170,9 @@ export async function importPolicyDoc(input: {
   try {
     const client = getAnthropic();
     const msg = await client.messages.create({
-      model: DEFAULT_MODEL,
+      // Structured extraction of dates/numbers from a document — no pricing judgment,
+      // and every field lands in a form the office reviews before it means anything.
+      model: modelFor("routine"),
       max_tokens: 1024,
       system: `You read a CONTRACTOR COMPANY DOCUMENT — an insurance policy or certificate, a bond, a contractor/business license, a certification, a permit, or an audit report — and extract its renewal-tracking details.
 
@@ -192,6 +195,8 @@ Rules: copy numbers and dates exactly as printed — never invent them. If the d
         },
       ],
     });
+    // METER (0162): receipt/document reads are a real cost centre, not just chat.
+    void recordAiUsage({ orgId: ctx.orgId, model: (msg as { model?: string }).model ?? DEFAULT_MODEL, surface: "compliance", usage: msg.usage as never });
     const text = msg.content.find((b) => b.type === "text") as { text: string } | undefined;
     parsed = JSON.parse(extractJsonObject(text?.text ?? ""));
   } catch {
@@ -342,7 +347,9 @@ export async function importFromCslb(licenseNumber: string): Promise<CslbImportR
   try {
     const client = getAnthropic();
     const msg = await client.messages.create({
-      model: DEFAULT_MODEL,
+      // Structured extraction of dates/numbers from a document — no pricing judgment,
+      // and every field lands in a form the office reviews before it means anything.
+      model: modelFor("routine"),
       max_tokens: 1024,
       system: `You read the plain text of a public CSLB (California Contractors State License Board) license-detail page and extract the record.
 
@@ -361,6 +368,8 @@ Respond with ONLY a JSON object (no prose):
 Rules: copy names, numbers, and dates EXACTLY as printed — never guess, estimate, or compute anything that is not on the page. Use null for anything not clearly stated.`,
       messages: [{ role: "user", content: `CSLB page text for license #${licNum}:\n\n${pageText}` }],
     });
+    // METER (0162): receipt/document reads are a real cost centre, not just chat.
+    void recordAiUsage({ orgId: ctx.orgId, model: (msg as { model?: string }).model ?? DEFAULT_MODEL, surface: "compliance", usage: msg.usage as never });
     const text = msg.content.find((b) => b.type === "text") as { text: string } | undefined;
     parsed = JSON.parse(extractJsonObject(text?.text ?? ""));
   } catch {

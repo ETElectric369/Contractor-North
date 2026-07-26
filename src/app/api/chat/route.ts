@@ -7,6 +7,8 @@ import {
   ASSISTANT_SYSTEM_PROMPT,
 } from "@/lib/anthropic";
 import { getOrgSettings } from "@/lib/org-settings";
+import { recordAiUsage, aiSpendExceeded } from "@/lib/ai-cost";
+import { rateLimited } from "@/lib/rate-limit";
 import { DATA_TOOLS, runDataTool, STAFF_ONLY_DATA_TOOLS } from "@/lib/assistant-tools";
 import { CALC_TOOLS, runCalc, CALC_TOOL_NAMES } from "@/lib/electrical-calc";
 import { agentWriteToolsForRole } from "@/lib/actions/agent-tools";
@@ -185,6 +187,31 @@ export async function POST(req: Request) {
     supabase.from("organizations").select("id, settings").limit(1).maybeSingle(),
   ]);
   const orgId = (org as { id?: string } | null)?.id ?? null;
+
+  // ── SPEND GUARDS (0162) ─────────────────────────────────────────────────────
+  // This route had NO rate limit at all, while the PUBLIC site-chat had one. A single
+  // message drives a multi-round agentic loop with web search — the most expensive
+  // thing the product does — so an unbounded loop, a stuck client, or an abusive
+  // tenant could spend real money without limit and without attribution.
+  //
+  // Two axes: per-USER burst (a runaway client or a leaning-on-the-button human) and
+  // per-ORG daily volume (the tenant as a whole). Both fail CLOSED — unlike the spend
+  // ceiling below, being unable to check a limiter should not mean "no limit".
+  if (await rateLimited(`nort:user:${user.id}`, 30, 300, { failClosed: true })) {
+    return new Response("Nort is catching up — give it a minute.", { status: 429 });
+  }
+  if (orgId && (await rateLimited(`nort:org:${orgId}`, 400, 86_400, { failClosed: true }))) {
+    return new Response("Your team has hit today's assistant limit. It resets tomorrow.", { status: 429 });
+  }
+  // The monthly dollar ceiling is an ABUSE stop, not a usage tier — set well above what
+  // a heavy legitimate user costs. It fails OPEN on error: a metering outage must never
+  // lock a contractor out of their own assistant mid-job.
+  if (await aiSpendExceeded(orgId)) {
+    return new Response(
+      "Nort has hit this month's usage ceiling for your company. Message us and we'll lift it.",
+      { status: 429 },
+    );
+  }
 
   // Phase E: the tier-1 write tools this role may use, generated from the registry. Every
   // call still goes through executeAction (role + audit + confirm/step-up gate).
@@ -532,6 +559,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
       let assistantReply = "";
       // Cache telemetry for the audit row — lets us verify hits from the DB (cache_read > 0).
       let cacheRead = 0;
+      let outputTokens = 0;
       let cacheWrite = 0;
       let inputUncached = 0;
       // Cap agent writes per request so a prompt-injection in tool-returned data can't
@@ -578,10 +606,14 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
           });
           const final = await turn.finalMessage();
           // Accumulate cache telemetry across rounds (usage fields are 0/undefined pre-caching).
-          const u = final.usage as unknown as { cache_read_input_tokens?: number; cache_creation_input_tokens?: number; input_tokens?: number };
+          const u = final.usage as unknown as { cache_read_input_tokens?: number; cache_creation_input_tokens?: number; input_tokens?: number; output_tokens?: number };
           cacheRead += u?.cache_read_input_tokens ?? 0;
           cacheWrite += u?.cache_creation_input_tokens ?? 0;
           inputUncached += u?.input_tokens ?? 0;
+          outputTokens += u?.output_tokens ?? 0;
+          // METER (0162): one row per org per day. Output tokens matter most here —
+          // they're 5x the input price, and an agentic loop emits them every round.
+          void recordAiUsage({ orgId, model: DEFAULT_MODEL, surface: "chat", usage: u });
           convo.push({ role: "assistant", content: final.content });
 
           // web_search runs server-side and can pause a long turn (stop_reason "pause_turn").
@@ -766,7 +798,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
               risk: 0,
               effect: "read",
               ok: true,
-              input_summary: { tools: [...toolsUsed], cache: { read: cacheRead, write: cacheWrite, uncached: inputUncached } },
+              input_summary: { tools: [...toolsUsed], cache: { read: cacheRead, write: cacheWrite, uncached: inputUncached }, output: outputTokens },
               source: "agent",
             });
           } catch {

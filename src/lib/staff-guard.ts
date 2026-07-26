@@ -18,7 +18,10 @@ export async function requireStaff() {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { error: "Not signed in." as const };
-  const { data: me } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
+  const { data: me } = await supabase.from("profiles").select("role, org_id").eq("id", user.id).maybeSingle();
   if (!me || !isStaffRole(me.role)) return { error: "This action is staff-only." as const };
-  return { supabase, userId: user.id };
+  // orgId comes back too: nearly every caller needs it (to org-scope an id-keyed write,
+  // or to attribute cost), and re-fetching the same profile row in each action was a
+  // repeated papercut that quietly encouraged unscoped queries.
+  return { supabase, userId: user.id, orgId: (me as { org_id?: string | null }).org_id ?? null };
 }
