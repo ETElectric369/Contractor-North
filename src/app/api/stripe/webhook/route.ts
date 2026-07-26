@@ -4,6 +4,7 @@ import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
 import { formatCurrency } from "@/lib/utils";
 import { recalcInvoice } from "@/lib/invoice-recalc";
 import { accountUpdateFields } from "@/lib/stripe-connect";
+import { tierForPriceId } from "@/lib/plans";
 import type Stripe from "stripe";
 
 export const runtime = "nodejs";
@@ -88,10 +89,16 @@ export async function POST(req: Request) {
     const orgId = sub.metadata?.org_id;
     const customerId =
       typeof sub.customer === "string" ? sub.customer : sub.customer.id;
+    // Resolve the plan from the PRICE ID, which is immutable. `price.nickname` is a
+    // free-text field an operator can edit in the Stripe dashboard — renaming it would
+    // have silently re-planned every org on it. Storing the price id too gives
+    // grandfathering: repricing creates a NEW id and existing orgs keep theirs.
+    const priceId = sub.items.data[0]?.price?.id ?? null;
     const update = {
       subscription_status: sub.status, // active, trialing, past_due, canceled…
       stripe_subscription_id: sub.id,
-      plan: sub.items.data[0]?.price?.nickname || "pro",
+      plan: tierForPriceId(priceId) ?? sub.items.data[0]?.price?.nickname ?? "crew",
+      stripe_price_id: priceId,
       current_period_end: new Date(sub.current_period_end * 1000).toISOString(),
     };
     // Match by org_id metadata if present, else by stripe_customer_id.
@@ -124,6 +131,31 @@ export async function POST(req: Request) {
         .eq("stripe_account_id", account.id);
       if (error) {
         return new Response(`account.updated sync failed: ${error.message}`, { status: 500 });
+      }
+      break;
+    }
+    // A card was declined. Stripe Smart Retries keep trying in the background; our job
+    // is to mirror the state (which starts the grace clock) and TELL the owner, because
+    // the failure is silent to them otherwise until the day access stops.
+    case "invoice.payment_failed": {
+      const inv = event.data.object as Stripe.Invoice;
+      if (!fromConnectedAccount && inv.subscription) {
+        const sub = await getStripe().subscriptions.retrieve(inv.subscription as string);
+        await syncSubscription(sub);
+        const customerId = typeof inv.customer === "string" ? inv.customer : inv.customer?.id;
+        const { data: org } = await supabase
+          .from("organizations")
+          .select("id")
+          .eq("stripe_customer_id", customerId ?? "")
+          .maybeSingle();
+        const orgId = (org as { id?: string } | null)?.id;
+        if (orgId) {
+          await sendPushToProfiles(await orgStaffIds(orgId), "invoice_paid", {
+            title: "Card declined",
+            body: "Your Contractor North payment didn't go through. Update your card to keep the crew working.",
+            url: "/settings",
+          });
+        }
       }
       break;
     }

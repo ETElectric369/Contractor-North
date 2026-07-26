@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { billingEnabled } from "@/lib/stripe";
 import { hasActiveAccess, isCompedOrg } from "@/lib/subscription";
 import { startCheckout } from "@/app/(app)/settings/billing-actions";
+import { PLANS, plansConfigured } from "@/lib/plans";
 import { signOut } from "@/app/login/actions";
 import { Button } from "@/components/ui/button";
 import type { Organization } from "@/lib/types";
@@ -45,7 +46,7 @@ export default async function SubscribePage({
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-brand to-brand-dark px-4">
-      <div className="w-full max-w-md">
+      <div className="w-full max-w-3xl">
         <div className="mb-8 text-center text-white">
           <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/15 backdrop-blur">
             <Zap className="h-7 w-7" />
@@ -64,11 +65,35 @@ export default async function SubscribePage({
           )}
 
           {isAdmin ? (
-            <form action={startCheckout}>
-              <Button type="submit" size="lg" className="w-full">
-                Subscribe now
-              </Button>
-            </form>
+            plansConfigured() ? (
+              <>
+                {/* EVERY tier ships the whole product. What changes is how much
+                    autonomous work Nort does — never features, never per-person. */}
+                <div className="grid gap-4 text-left sm:grid-cols-3">
+                  {PLANS.map((plan) => (
+                    <form key={plan.tier} action={startCheckout} className="flex flex-col rounded-xl border border-slate-200 p-5">
+                      <input type="hidden" name="tier" value={plan.tier} />
+                      <input type="hidden" name="cadence" value="monthly" />
+                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{plan.name}</div>
+                      <div className="mt-1 text-3xl font-bold tabular-nums text-slate-900">
+                        ${plan.monthly}
+                        <span className="text-sm font-medium text-slate-400">/mo</span>
+                      </div>
+                      <p className="mt-1 text-xs text-slate-500">{plan.blurb}</p>
+                      <p className="mt-3 flex-1 text-sm text-slate-600">{plan.autonomy}</p>
+                      <Button type="submit" className="mt-4 w-full">Choose {plan.name}</Button>
+                    </form>
+                  ))}
+                </div>
+                <p className="mt-5 text-xs text-slate-400">
+                  Every plan includes everything — unlimited crew, no per-person charge, and no cut of your work.
+                </p>
+              </>
+            ) : (
+              <form action={startCheckout}>
+                <Button type="submit" size="lg" className="w-full">Subscribe now</Button>
+              </form>
+            )
           ) : (
             <p className="text-sm text-slate-600">
               Ask your company owner to renew the subscription to regain access.

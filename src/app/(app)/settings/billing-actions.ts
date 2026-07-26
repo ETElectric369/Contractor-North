@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { getStripe, STRIPE_PRICE_ID } from "@/lib/stripe";
 import { accountUpdateFields } from "@/lib/stripe-connect";
+import { planByTier, priceIdFor, type PlanTier } from "@/lib/plans";
 
 function siteUrl() {
   return process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
@@ -36,13 +37,19 @@ async function loadOwnerOrg() {
   return { supabase, org };
 }
 
-export async function startCheckout() {
+export async function startCheckout(formData?: FormData) {
   const { supabase, org } = await loadOwnerOrg();
   let url: string | null = null;
   let errMsg: string | null = null;
 
-  if (!STRIPE_PRICE_ID) {
-    errMsg = "STRIPE_PRICE_ID is not configured.";
+  // Which tier + cadence did they pick? Falls back to the legacy single price so an
+  // install configured the old way keeps working.
+  const tier = String(formData?.get("tier") ?? "") as PlanTier;
+  const cadence = String(formData?.get("cadence") ?? "monthly") === "annual" ? "annual" : "monthly";
+  const priceId = (planByTier(tier) && priceIdFor(tier, cadence)) || STRIPE_PRICE_ID;
+
+  if (!priceId) {
+    errMsg = "No plan is configured yet.";
   } else {
     try {
       const stripe = getStripe();
@@ -63,7 +70,7 @@ export async function startCheckout() {
       const session = await stripe.checkout.sessions.create({
         mode: "subscription",
         customer: customerId,
-        line_items: [{ price: STRIPE_PRICE_ID, quantity: 1 }],
+        line_items: [{ price: priceId, quantity: 1 }],
         success_url: `${siteUrl()}/settings?billing=success`,
         cancel_url: `${siteUrl()}/settings?billing=cancelled`,
         metadata: { org_id: org.id },

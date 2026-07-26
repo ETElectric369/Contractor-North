@@ -5,7 +5,7 @@ import { Dock } from "@/components/app-shell/dock";
 import { Topbar } from "@/components/app-shell/topbar";
 import { CommandBar } from "@/components/command-bar";
 import { billingEnabled } from "@/lib/stripe";
-import { hasActiveAccess, isCompedOrg } from "@/lib/subscription";
+import { hasActiveAccess, isCompedOrg, graceDaysLeft } from "@/lib/subscription";
 import { getOrgSettings } from "@/lib/org-settings";
 import { getActionItemsCount } from "@/lib/action-items/query";
 import { reportError } from "@/lib/observe";
@@ -125,6 +125,12 @@ export default async function AppLayout({
     redirect("/subscribe");
   }
 
+  // Inside the grace window after a declined card: the crew keeps working, but the
+  // owner must SEE it — a silent countdown that ends in a locked-out morning is the
+  // worst possible version of this. Escalates as the days run down.
+  const graceLeft =
+    billingEnabled && org && !isCompedOrg(profile.org_id) ? graceDaysLeft(org as any) : 0;
+
   const branding = { name: org?.name ?? null, logo: org?.logo_url ?? null };
   // ONE per-org color source: the sea-glass tint. `brand` (the solid accent used by
   // bg-brand / text-brand across the app AND on documents) now DERIVES from the tint —
@@ -171,6 +177,16 @@ export default async function AppLayout({
       <Dock branding={branding} role={profile.role} badges={badges} />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Topbar profile={(profile as Profile) ?? null} lang={profile.language} branding={branding} />
+        {graceLeft > 0 && (
+          <div
+            className={`no-print px-4 py-2 text-center text-sm font-medium ${
+              graceLeft <= 3 ? "bg-red-600 text-white" : "bg-amber-100 text-amber-900"
+            }`}
+          >
+            Your card was declined — update it in Settings. The crew keeps working for{" "}
+            {graceLeft} more day{graceLeft === 1 ? "" : "s"}.
+          </div>
+        )}
         <main className="flex-1 overflow-y-auto bg-slate-50/70 p-4 pb-[calc(7.5rem+env(safe-area-inset-bottom))] shell:p-6 shell:pb-6">
           <Suspense fallback={null}>
             <SectionSubnav isStaff={isStaff} />
