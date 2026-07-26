@@ -28,6 +28,16 @@ async function collaboratorHome(
   return g?.length ? "/content" : null;
 }
 
+/** True when the signed-in profile has been deactivated. Read on the caller's own client:
+ *  profiles_read's `id = auth.uid()` disjunct still works for a deactivated user, which is
+ *  exactly the sliver of access 0158 deliberately leaves open. */
+async function isDeactivated(supabase: Awaited<ReturnType<typeof createClient>>): Promise<boolean> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return false;
+  const { data } = await supabase.from("profiles").select("active").eq("id", user.id).maybeSingle();
+  return (data as { active?: boolean } | null)?.active === false;
+}
+
 export async function login(formData: FormData) {
   const supabase = await createClient();
   const email = String(formData.get("email") ?? "");
@@ -36,6 +46,15 @@ export async function login(formData: FormData) {
   const { error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) {
     redirect(`/login?error=${encodeURIComponent(error.message)}`);
+  }
+
+  // A deactivated account must not get a session at all. Migration 0158 already denies it
+  // data, but without this they could sign in again after being cut and sit on a live
+  // token — and the credential itself is what an ex-employee still holds. Sign the new
+  // session straight back out and say so plainly.
+  if (await isDeactivated(supabase)) {
+    await supabase.auth.signOut();
+    redirect(`/login?error=${encodeURIComponent("This account has been deactivated. Contact your office.")}`);
   }
 
   // A RETURNING org-less collaborator belongs on /content (their grants may still be pending
@@ -165,6 +184,12 @@ export async function verifyLoginCode(formData: FormData) {
   if (!email || token.length < 6) redirect(`${back}&error=${enc("Enter the 6-digit code from your email.")}`);
   const { error } = await supabase.auth.verifyOtp({ email, token, type: "email" });
   if (error) redirect(`${back}&error=${enc(error.message)}`);
+  // Same deactivation gate as the password path — otherwise the 6-digit code is a way
+  // straight around it.
+  if (await isDeactivated(supabase)) {
+    await supabase.auth.signOut();
+    redirect(`/login?error=${enc("This account has been deactivated. Contact your office.")}`);
+  }
   // Same routing as password login: an org-less site collaborator belongs on /content.
   const dest = (await collaboratorHome(supabase)) ?? "/planner";
   revalidatePath("/", "layout");

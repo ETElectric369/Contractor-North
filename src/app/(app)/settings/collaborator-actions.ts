@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireStaff } from "@/lib/staff-guard";
 import { sendEmail } from "@/lib/email";
 import { rateLimited } from "@/lib/rate-limit";
+import { reportError } from "@/lib/observe";
 
 /**
  * External site/content collaborators — an org's staff invite an outside SEO/content pro to manage
@@ -74,9 +75,46 @@ export async function inviteSiteCollaborator(email: string): Promise<Result> {
 export async function revokeSiteCollaborator(id: string): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
-  const { data, error } = await ctx.supabase.from("site_collaborators").delete().eq("id", id).select("id");
+
+  // The caller's org — requireStaff doesn't carry it, and every id-keyed write here must
+  // be org-scoped so one tenant's staff can never revoke another tenant's collaborator.
+  const { data: meRow } = await ctx.supabase.from("profiles").select("org_id").eq("id", ctx.userId).maybeSingle();
+  const orgId = (meRow as { org_id?: string } | null)?.org_id;
+  if (!orgId) return { ok: false, error: "No organization on your account." };
+
+  // Read the grant BEFORE deleting it — the delete is what makes revocation instant and
+  // total (every door re-checks is_site_collaborator() live), but it also erases the fact
+  // that access ever existed. A revoked grant and a grant that was never created look
+  // identical afterwards, which is exactly what an audit can't accept.
+  const { data: grant } = await ctx.supabase
+    .from("site_collaborators")
+    .select("id, org_id, user_id, invited_email, created_at")
+    .eq("id", id)
+    .eq("org_id", orgId)
+    .maybeSingle();
+
+  const { data, error } = await ctx.supabase
+    .from("site_collaborators")
+    .delete()
+    .eq("id", id)
+    .eq("org_id", orgId)
+    .select("id");
   if (error) return { ok: false, error: error.message };
   if (!data?.length) return { ok: false, error: "That invite no longer exists." };
+
+  // Tombstone (0159): who had access, from when to when, cut by whom. Best-effort — the
+  // access is already gone; failing to write history must not un-revoke anyone.
+  if (grant) {
+    const { error: tErr } = await ctx.supabase.from("site_collaborator_revocations").insert({
+      org_id: grant.org_id,
+      email: grant.invited_email,
+      user_id: grant.user_id,
+      granted_at: grant.created_at,
+      revoked_by: ctx.userId,
+    });
+    if (tErr) reportError("revokeSiteCollaborator.tombstone", tErr, { collaboratorId: id });
+  }
+
   revalidatePath("/settings");
   return { ok: true };
 }

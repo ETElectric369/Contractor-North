@@ -618,8 +618,26 @@ export async function setMemberActive(id: string, active: boolean): Promise<Resu
   if (!target || target.org_id !== me.org_id) return { ok: false, error: "Member not found." };
   if (target.role === "owner" && !active) return { ok: false, error: "The owner can't be deactivated." };
 
-  const { error } = await supabase.from("profiles").update({ active }).eq("id", id);
+  const { error } = await supabase.from("profiles").update({ active, deactivated_at: active ? null : new Date().toISOString(), deactivated_by: active ? null : user.id }).eq("id", id);
   if (error) return { ok: false, error: error.message };
+
+  // KILL THE LIVE SESSION. Migration 0158 makes RLS itself deny a deactivated profile, so
+  // their token stops returning data immediately — but the token is still a valid
+  // credential until it expires, and leaving it alive means the person stays "signed in"
+  // to a shell that simply shows nothing. Revoking server-side ends it now and forces a
+  // fresh sign-in (which the login gate then refuses). Best-effort: the data boundary is
+  // already closed by RLS, so a missing service key must not fail the deactivation.
+  if (!active) {
+    try {
+      const { adminConfigured, createAdminClient } = await import("@/lib/supabase/admin");
+      if (!adminConfigured()) throw new Error("Service role key not configured.");
+      const admin = createAdminClient();
+      await admin.auth.admin.signOut(id, "global");
+    } catch (e) {
+      reportError("setMemberActive.signOut", e, { profileId: id });
+    }
+  }
+
   revalidatePath("/team");
   revalidatePath("/settings");
   revalidatePath("/planner"); // assignee pickers filter on active

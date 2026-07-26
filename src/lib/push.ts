@@ -31,7 +31,8 @@ export async function orgStaffIds(orgId: string | null | undefined): Promise<str
       .from("profiles")
       .select("id")
       .eq("org_id", orgId)
-      .in("role", STAFF_ROLES);
+      .in("role", STAFF_ROLES)
+      .eq("active", true); // a removed person's phone must stop buzzing with customer data
     return (data ?? []).map((p: any) => p.id);
   } catch {
     return [];
@@ -78,8 +79,13 @@ export async function sendPushToProfiles(
     if (!ids.length) return;
 
     const sb = createServiceClient();
-    const { data: profs } = await sb.from("profiles").select("id, push_prefs").in("id", ids);
+    // This path runs on the SERVICE client, which bypasses RLS entirely — so migration
+    // 0158's boundary doesn't apply here and `active` must be filtered explicitly. Without
+    // it, a fired employee's phone kept receiving job names, customer names and invoice
+    // amounts indefinitely: the one channel that reaches them without opening the app.
+    const { data: profs } = await sb.from("profiles").select("id, push_prefs, active").in("id", ids);
     const allowed = (profs ?? [])
+      .filter((p: any) => p.active !== false)
       .filter((p: any) => {
         const pref = (p.push_prefs ?? {})[kind];
         return pref === undefined ? DEFAULTS[kind] : !!pref;
