@@ -184,7 +184,13 @@ export function QuickCostButton({
       start(async () => {
         const docId = await attachReceipt(targetJob);
         if (!docId) return setError("The receipt didn't upload — try again.");
-        const res = await billJobReceipt(docId);
+        // Pass what the user actually stated — the AI reads the paper, but if they ticked
+        // "Already paid", chose a category, or set a date, those are facts, not guesses.
+        const res = await billJobReceipt(docId, {
+          paid,
+          category: category || null,
+          billDate: billDate || null,
+        });
         if (!res.ok) {
           // Reader failed (unreadable file) — fall back to the placeholder bill so the
           // cost isn't lost, with the receipt attached and linked for later.

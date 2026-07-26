@@ -420,7 +420,12 @@ function mimeFromName(name: string | null | undefined): string | null {
  * This is the bridge for receipts uploaded directly on a job (Costs → Receipts &
  * documents), which previously just stored a file and never became a cost.
  */
-export async function billJobReceipt(documentId: string): Promise<{
+export async function billJobReceipt(
+  documentId: string,
+  /** What the PERSON stated in the capture form. User attestation beats AI inference:
+   *  they were standing at the counter. The AI fills only what was left blank. */
+  stated?: { paid?: boolean; category?: string | null; billDate?: string | null },
+): Promise<{
   ok: boolean;
   error?: string;
   already?: boolean;
@@ -531,8 +536,8 @@ In every "description", write inches as the word in (e.g. "6 in EMT", not 6") an
       job_id: doc.job_id,
       supplier: vendor,
       amount,
-      bill_date: itemDate,
-      category: "Receipt",
+      bill_date: stated?.billDate || itemDate,
+      category: stated?.category || "Receipt",
       scope_category: scopeCategory, // job scope for budget-vs-actual (null → Uncategorized)
       notes: `Receipt recorded as cost: ${doc.name}`,
       created_by: ctx.userId,
@@ -542,7 +547,8 @@ In every "description", write inches as the word in (e.g. "6 in EMT", not 6") an
     // (CED "ON ACCT" transaction records — most of Erik's) are debts until the statement
     // is settled; stamping them paid silently hid real payables. Unknown = unpaid: a
     // wrongly-unpaid bill nags and gets corrected, a wrongly-paid one loses money.
-    parsed.payment === "paid_at_purchase" ? "paid" : "unpaid",
+    // The user's own "Already paid" checkbox wins when they ticked it — they were there.
+    stated?.paid ? "paid" : parsed.payment === "paid_at_purchase" ? "paid" : "unpaid",
   );
   if (!billId) return { ok: false, error: "Could not create the bill." };
 
@@ -553,9 +559,10 @@ In every "description", write inches as the word in (e.g. "6 in EMT", not 6") an
     summary: null,
     vendor,
     amount,
-    item_date: itemDate,
-    category: "Receipt",
+    item_date: stated?.billDate || itemDate,
+    category: stated?.category || "Receipt",
     confidence,
+    payment: stated?.paid ? "paid_at_purchase" : (parsed.payment ?? "unknown"),
     status: "filed",
     job_id: doc.job_id,
     document_id: documentId,

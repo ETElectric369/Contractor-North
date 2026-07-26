@@ -180,7 +180,12 @@ export function InvoiceDetail({
   // while an import/save is in flight (pending gate; re-arms when it clears), never on the
   // transient 0 a cleared field emits (0% requires the explicit button), and never once the
   // invoice has left draft (server re-checks regardless).
-  const costsImported = useRef(items.some((i) => i.import_source === "costs"));
+  // Derived from the CURRENT items on every render, not frozen at mount: if the office
+  // deletes every imported materials line (they're billing those separately), a later
+  // markup tweak must NOT silently resurrect them. A mount-time snapshot said "costs were
+  // imported once" forever, so the auto-reapply re-inserted the whole set — and wiped any
+  // hand-edited price on a row it had originally created.
+  const costsImported = items.some((i) => i.import_source === "costs");
   const markupDirty = useRef(false);
   function runImport(fn: (id: string) => Promise<{ ok: boolean; error?: string }>, label: string) {
     setImportMsg(null);
@@ -192,7 +197,6 @@ export function InvoiceDetail({
         setTimeout(() => setImportMsg(null), 5000);
         return;
       }
-      if (label === "Materials") costsImported.current = true;
       setImportMsg(`${label} imported.`);
       toast(`${label} imported`, "success");
       setTimeout(() => setImportMsg(null), 5000);
@@ -201,7 +205,7 @@ export function InvoiceDetail({
   }
 
   useEffect(() => {
-    if (!markupDirty.current || !costsImported.current || !isDraft || !(markup > 0)) return;
+    if (!markupDirty.current || !costsImported || !isDraft || !(markup > 0)) return;
     if (pending) return; // re-armed by the pending flip in deps when the in-flight work ends
     const t = setTimeout(() => {
       markupDirty.current = false;
@@ -209,7 +213,7 @@ export function InvoiceDetail({
     }, 700);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [markup, pending, isDraft]);
+  }, [markup, pending, isDraft, costsImported]);
 
   // edit-payment state
   const [payEditId, setPayEditId] = useState<string | null>(null);

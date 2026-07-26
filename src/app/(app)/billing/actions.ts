@@ -288,47 +288,27 @@ export async function addInvoiceItem(
   return { ok: true };
 }
 
-/** Next sort_order after the invoice's current items. */
-async function nextSortOrder(supabase: any, invoiceId: string): Promise<number> {
-  const { data } = await supabase
-    .from("invoice_items")
-    .select("sort_order")
-    .eq("invoice_id", invoiceId)
-    .order("sort_order", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  return (data?.sort_order ?? -1) + 1;
-}
-
-/** Replace this invoice's previously-imported rows for a given source with a
- *  fresh set, so re-importing REFRESHES the lines (current total) instead of
- *  duplicating them. Inserts the new rows before deleting the old ones, so a
- *  failed insert can't wipe them. Hand-entered rows (import_source null) are
- *  never touched. */
+/** Replace this invoice's previously-imported rows for a given source with a fresh set, so
+ *  re-importing REFRESHES the lines (current total) instead of duplicating them. Delegates
+ *  to the atomic, advisory-locked RPC (0156) so two overlapping imports can't both land.
+ *  Hand-entered rows (import_source null) and other sources are never touched. */
 async function replaceImportedItems(
   supabase: Awaited<ReturnType<typeof createClient>>,
   invoiceId: string,
   source: string,
   rows: Array<{ description: string; quantity: number; unit: string; unit_price: number }>,
 ): Promise<{ error?: string }> {
-  const { data: old } = await supabase
-    .from("invoice_items")
-    .select("id")
-    .eq("invoice_id", invoiceId)
-    .eq("import_source", source);
-  const oldIds = ((old ?? []) as { id: string }[]).map((r) => r.id);
-  let sort = await nextSortOrder(supabase, invoiceId);
-  const { error } = await supabase.from("invoice_items").insert(
-    rows.map((r) => ({ invoice_id: invoiceId, import_source: source, sort_order: sort++, ...r })),
-  );
+  // ONE atomic, advisory-locked statement (migration 0156). The old read-ids → insert →
+  // delete-those-ids sequence let two overlapping imports each delete only the rows THEY
+  // saw, leaving both sets behind and double-billing the draft — reproduced against prod
+  // ($236.66 for $118.33 of materials) before this replaced it. The RPC is SECURITY
+  // INVOKER, so RLS governs these writes exactly as it did statement-by-statement.
+  const { error } = await supabase.rpc("replace_imported_invoice_items", {
+    p_invoice_id: invoiceId,
+    p_source: source,
+    p_rows: rows,
+  });
   if (error) return { error: error.message };
-  if (oldIds.length) {
-    // Insert-then-delete (so a failed insert can't wipe the old lines). But if THIS
-    // delete fails, the old + new lines both remain — a double-billed import. Report
-    // it so the duplicate is caught instead of silently inflating the invoice.
-    const { error: delErr } = await supabase.from("invoice_items").delete().in("id", oldIds);
-    if (delErr) reportError("replaceImportedItems-delete", delErr, { invoiceId, source });
-  }
   return {};
 }
 

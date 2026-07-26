@@ -60,7 +60,13 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
       // Never measure the host itself — it's display:none while loading, so clientWidth
       // is 0 and every page rendered into a negative-width canvas (Erik's blank sheets).
       const containerW = Math.min(Math.max(window.innerWidth - 32, 280), 900);
-      const dpr = Math.min(Math.max(window.devicePixelRatio || 1, 2.5), 3); // high-res: these canvases ARE the print output
+      // These canvases ARE the print output, so resolution matters — but every page is
+      // retained at once, and at 3x a letter page is ~24 MB of bitmap. A 12-page material
+      // list blew past what an iOS PWA will hold and the tab reloaded mid-review. Budget
+      // the TOTAL pixels instead: full quality for a short doc, stepping down (never below
+      // 1.5x, which still prints cleanly) as the page count grows.
+      const HIGH = Math.min(Math.max(window.devicePixelRatio || 1, 2.5), 3);
+      const dpr = pdf.numPages <= 4 ? HIGH : pdf.numPages <= 10 ? 2 : 1.5;
       for (let n = 1; n <= pdf.numPages; n++) {
         const page = await pdf.getPage(n);
         if (seq !== renderSeq.current) return;
@@ -68,10 +74,15 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
         const scale = containerW / base.width;
         const vp = page.getViewport({ scale });
         const canvas = document.createElement("canvas");
-        canvas.width = Math.floor(vp.width * dpr);
-        canvas.height = Math.floor(vp.height * dpr);
-        canvas.style.width = `${Math.floor(vp.width)}px`;
-        canvas.style.height = `${Math.floor(vp.height)}px`;
+        // Derive height from the FLOORED width so the printed aspect ratio matches the PDF
+        // exactly. Flooring both independently made the canvas a hair taller than 11in,
+        // which chromium then pushed onto a second sheet — a blank sliver after every page.
+        const cssW = Math.floor(vp.width);
+        const cssH = Math.round((cssW * base.height) / base.width);
+        canvas.width = Math.floor(cssW * dpr);
+        canvas.height = Math.round((canvas.width * base.height) / base.width);
+        canvas.style.width = `${cssW}px`;
+        canvas.style.height = `${cssH}px`;
         canvas.className = "pdf-page-canvas mx-auto mb-6 block bg-white shadow-md";
         host.appendChild(canvas);
         const ctx = canvas.getContext("2d")!;
@@ -90,6 +101,21 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load]);
+
+  // Release the blob (and the retained page bitmaps) when the viewer goes away — a
+  // multi-megabyte PDF held by an object URL survives navigation otherwise.
+  const pagesHost = pagesRef;
+  useEffect(() => {
+    const host = pagesHost.current;
+    return () => {
+      setBlobUrl((old) => {
+        if (old) URL.revokeObjectURL(old);
+        return null;
+      });
+      if (host) host.innerHTML = "";
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function printPdf() {
     // Print THIS window's rendered pages (print CSS lays them one per sheet, and the

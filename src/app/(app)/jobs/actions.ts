@@ -70,13 +70,21 @@ export async function createInvoiceForJob(
       : { ok: true, id: existingStd.id, importWarning: `This job is already invoiced on ${existingStd.invoice_number} — opened it instead of creating a duplicate.` };
   }
 
-  const { data: quote } = await supabase
+  // WHICH quote is the contract? A DECLINED or EXPIRED quote is not one — the customer
+  // said no (or it lapsed) and the work, if it happened, is being billed T&M. Taking the
+  // newest quote regardless of status meant a rejected bid still suppressed the actuals
+  // import AND had its lines copied onto the invoice: the job would bill the price the
+  // customer refused and none of the hours actually worked. An ACCEPTED quote wins over a
+  // newer un-answered one, matching contractTotalFromQuotes' accepted-first rule.
+  const { data: quoteRows } = await supabase
     .from("quotes")
-    .select("id")
+    .select("id, status")
     .eq("job_id", jobId)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .order("created_at", { ascending: false });
+  const usableQuotes = ((quoteRows ?? []) as { id: string; status: string | null }[]).filter(
+    (q) => q.status !== "declined" && q.status !== "expired",
+  );
+  const quote = usableQuotes.find((q) => q.status === "accepted") ?? usableQuotes[0] ?? null;
 
   // THE contract-vs-actuals switch. FinishJobButton already initialised its toggles to
   // !hasQuote — this makes that rule structural, so the three entry points that pass no
