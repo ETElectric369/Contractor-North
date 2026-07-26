@@ -62,10 +62,24 @@ describe("accountUpdateFields — mirroring Stripe onto our columns", () => {
     ).toEqual({ stripe_account_status: "pending", stripe_charges_enabled: false });
   });
 
-  it("a disabled account is restricted", () => {
+  it("a disabled account with nothing left to do is restricted", () => {
     expect(
-      accountUpdateFields(acct({ charges_enabled: false, requirements: { disabled_reason: "requirements.past_due" } })),
+      accountUpdateFields(acct({ charges_enabled: false, requirements: { currently_due: [], disabled_reason: "rejected.fraud" } })),
     ).toEqual({ stripe_account_status: "restricted", stripe_charges_enabled: false });
+  });
+
+  it("a BRAND-NEW account is pending, not restricted — verified against a real sandbox account", () => {
+    // Stripe sets currently_due AND disabled_reason on a fresh Express account
+    // (observed: currently_due=12). Calling that "restricted" tells a contractor
+    // who just signed up that they were rejected.
+    expect(
+      accountUpdateFields(
+        acct({
+          charges_enabled: false,
+          requirements: { currently_due: ["business_profile.url", "external_account"], disabled_reason: "requirements.past_due" },
+        }),
+      ),
+    ).toEqual({ stripe_account_status: "pending", stripe_charges_enabled: false });
   });
 });
 

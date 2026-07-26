@@ -77,6 +77,11 @@ export function accountUpdateFields(account: Stripe.Account): {
   const charges = !!account.charges_enabled;
   const needs = account.requirements?.currently_due?.length ?? 0;
   const disabled = account.requirements?.disabled_reason;
-  const status = charges ? "active" : disabled ? "restricted" : needs > 0 ? "pending" : "pending";
+  // ORDER MATTERS. A brand-new account carries BOTH outstanding requirements and a
+  // disabled_reason (verified against a real sandbox account: currently_due=12,
+  // disabled_reason set). Checking disabled first labelled every fresh signup
+  // "restricted", which reads like Stripe rejected them rather than "you haven't
+  // finished yet". Outstanding requirements win: that's work the contractor can do.
+  const status = charges ? "active" : needs > 0 ? "pending" : disabled ? "restricted" : "pending";
   return { stripe_account_status: status, stripe_charges_enabled: charges };
 }
