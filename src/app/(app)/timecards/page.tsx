@@ -31,6 +31,8 @@ import { MarkReportReviewedButton } from "./mark-report-reviewed-button";
 import type { DailyReportSummary } from "../timeclock/actions";
 import type { JobCode } from "@/lib/types";
 import { jobLabel } from "@/lib/schedule-options";
+import { tolerateMissingColumns } from "@/lib/inspection/schema";
+import { comparePlanToActual, needsAttention as needsAttentionRows, explain } from "@/lib/plan-vs-actual";
 
 export const dynamic = "force-dynamic";
 
@@ -153,6 +155,41 @@ export default async function TimecardsPage({
     const inMs = new Date(e.clock_in).getTime();
     return inMs < todayStartMs || Date.now() - inMs > 12 * 3_600_000;
   });
+
+  /**
+   * PLAN vs ACTUAL for the week on screen. What the crew calendar said, against where the hours
+   * actually landed. This is only meaningful now that the calendar holds real rows instead of a
+   * suggestion that vanished on refresh — you cannot be wrong about a guess.
+   *
+   * Read tolerantly: the 0170 `kind` column is young, and a payroll review page must not go blank
+   * because one column isn't there yet.
+   */
+  const planRows = await tolerateMissingColumns<{ profile_id: string; work_date: string; job_id: string | null; kind: string }[]>(
+    () =>
+      supabase
+        .from("crew_day_assignments")
+        .select("profile_id, work_date, job_id, kind")
+        .gte("work_date", weekDayStrs[0])
+        .lte("work_date", weekDayStrs[6]),
+  );
+  const drift = needsAttentionRows(
+    comparePlanToActual(
+      (planRows ?? []).map((r) => ({
+        profileId: r.profile_id,
+        workDate: r.work_date,
+        jobId: r.job_id,
+        kind: (r.kind === "off" ? "off" : "job") as "job" | "off",
+      })),
+      (entries ?? []).map((e: any) => ({
+        profileId: e.profile_id,
+        workDate: todayStrInTz(tz, new Date(e.clock_in)),
+        jobId: e.job_id ?? null,
+        hours: e.clock_out ? hoursBetween(e.clock_in, e.clock_out) - (Number(e.lunch_minutes) || 0) / 60 : 0,
+      })),
+    ),
+  );
+  const nameById = new Map<string, string>(((members ?? []) as any[]).map((m) => [m.id, m.full_name ?? "Crew member"]));
+  const jobLabelById = new Map<string, string>(((jobs ?? []) as any[]).map((j) => [j.id, j.job_number ? `${j.job_number}` : (j.name ?? "job")]));
 
   // Group by tech. (The hours-per-job-code tally that lived here is gone —
   // Erik: analytics territory, clutter on a payroll review page.)
@@ -429,6 +466,37 @@ export default async function TimecardsPage({
 
       {/* Forgotten clock-outs inflate hours until someone closes them — surface
           them HERE, where payroll reviews, instead of waiting to be stumbled on. */}
+      {/* PLAN vs ACTUAL — where the hours went against where the calendar said they would.
+          NOT a discipline tool: a mismatch is nearly always a stale plan, not somebody lying — a
+          crew gets pulled to a callback, a job finishes early. The value is that the office sees
+          it on Friday rather than at invoicing, when the hours are already on the wrong job and
+          the customer is already looking at the number. */}
+      {drift.length > 0 && (
+        <Card className="mb-4">
+          <CardContent className="py-4">
+            <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-slate-900">
+              <AlertTriangle className="h-3.5 w-3.5 text-amber-500" /> Different from the plan
+            </h3>
+            <ul className="space-y-1 text-sm text-slate-600">
+              {drift.slice(0, 8).map((r) => (
+                <li key={`${r.profileId}|${r.workDate}`} className="flex flex-wrap items-baseline gap-x-2">
+                  <span className="text-xs tabular-nums text-slate-400">{formatDate(r.workDate)}</span>
+                  <span>
+                    {explain(r, (id) => jobLabelById.get(id) ?? "a job", nameById.get(r.profileId) ?? "Someone")}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            {drift.length > 8 && (
+              <p className="mt-1 text-xs text-slate-400">+{drift.length - 8} more this week.</p>
+            )}
+            <p className="mt-2 text-xs text-slate-400">
+              Usually the plan moved and nobody updated it. Worth a look before these hours go on an invoice.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
       {needsAttention.length > 0 && (
         <Card className="mb-4 border-amber-200 bg-amber-50/60">
           <CardContent className="py-4">

@@ -18,6 +18,7 @@ import {
 } from "./crew-plan";
 import { useAssignmentSaver, useCrewWeek, type PrevAssignment } from "./use-crew-week";
 import { TimeOffButton } from "./time-off-button";
+import { FillWeekButton } from "./fill-week-button";
 
 interface MemberRow {
   id: string;
@@ -98,6 +99,26 @@ export function CrewAssignments({
     return m;
   }, [rows, selectedDay]);
 
+  /**
+   * How many cells on THIS WEEK the schedule has an opinion about and nobody has decided yet.
+   * Counting across the week (not just the selected day) because the fill action writes the week —
+   * and a button whose number doesn't match what it does is the same untrustworthy thing the
+   * dashed pill was.
+   */
+  const suggestionCount = useMemo(() => {
+    const decided = new Set(rows.map((r) => `${r.profile_id}|${r.work_date}`));
+    let n = 0;
+    for (const m of members) {
+      for (const ds of days) {
+        // Past days are history, and the fill action skips them too — the count must agree.
+        if (ds < todayStr) continue;
+        if (decided.has(`${m.id}|${ds}`)) continue;
+        if (autoPlan[m.id]?.[ds]) n++;
+      }
+    }
+    return n;
+  }, [rows, members, days, autoPlan, todayStr]);
+
   if (!members.length) return null;
 
   return (
@@ -120,6 +141,12 @@ export function CrewAssignments({
           Pick a day, set each member&apos;s job and ★ crew leader. The day&apos;s assignment
           wins — Clock In lands on it automatically. Somebody away? Use Time off.
         </p>
+
+        {/* MAKE THE GUESS REAL rather than drawing it. Counts only cells where the schedule has an
+            opinion and nobody has decided yet — so it disappears the moment the week is planned. */}
+        <div className="mb-3">
+          <FillWeekButton weekOffset={weekOffset} suggestions={suggestionCount} />
+        </div>
 
         {/* Day strip: 7 org-week chips + week arrows. */}
         <div className="mb-3 flex items-center gap-1">
