@@ -18,13 +18,16 @@ const row = (over: Partial<KitPickerRow> = {}): KitPickerRow => ({
 });
 
 describe("kitItemsToPickerRows", () => {
-  it("pre-checks every item (open → Add keeps the one-tap import)", () => {
+  it("opens every item UNCHECKED — a kit is a template you pick from, not a dump", () => {
+    // Chris: "Don't auto select all items." Pre-checking everything meant unchecking a
+    // dozen rows on every estimate, and anything missed silently billed the customer
+    // for material never used. Opt in, not opt out.
     const rows = kitItemsToPickerRows([
       { id: "a", description: "Wire", quantity: 2, unit: "ft", unit_price: 1.5, sort_order: 0 },
       { id: "b", description: "Breaker", quantity: 1, unit: "ea", unit_price: 40, sort_order: 1 },
     ]);
     expect(rows).toHaveLength(2);
-    expect(rows.every((r) => r.checked)).toBe(true);
+    expect(rows.every((r) => r.checked)).toBe(false);
   });
 
   it("orders by sort_order regardless of input order", () => {
@@ -58,11 +61,11 @@ describe("kitItemsToPickerRows", () => {
         { id: "m", description: "Missing qty", quantity: missing, unit: "ea", unit_price: 5, sort_order: 0 },
       ]);
       expect(m.quantity).toBe(1);
-      expect(m.checked).toBe(true);
+      expect(m.checked).toBe(false); // opt-in (see above)
     }
   });
 
-  it("keeps an explicit qty 0 at 0 and opens the row UNCHECKED (the author zeroed it on the kit)", () => {
+  it("keeps an explicit qty 0 at 0 (and, like every row, opens unchecked)", () => {
     // The write path (kit-actions updateKitItems/addKitItem) persists 0 as a legal template
     // value; re-inflating it to 1 here silently re-billed the line on the next estimate.
     for (const zero of [0, "0" as unknown as string]) {

@@ -138,15 +138,19 @@ export function QuoteBuilder({
     [deckRateRows, levelMarkup, defaultMarkupPct],
   );
 
-  const plMatches = plQuery.trim()
-    ? priceItems
-        .filter((p) =>
-          [p.code, p.description, p.category].some((v) =>
-            (v ?? "").toLowerCase().includes(plQuery.trim().toLowerCase()),
-          ),
+  // BROWSE, don't guess. This used to return [] on an empty query, so opening the box
+  // showed nothing and you had to already know a keyword to find anything — Chris:
+  // "needs to show comprehensive list" / "see the list and select from it". An empty
+  // query now shows the whole price list (scrollable); typing filters it.
+  const plMatches = (() => {
+    const q = plQuery.trim().toLowerCase();
+    const pool = q
+      ? priceItems.filter((p) =>
+          [p.code, p.description, p.category].some((v) => (v ?? "").toLowerCase().includes(q)),
         )
-        .slice(0, 8)
-    : [];
+      : priceItems;
+    return pool.slice(0, q ? 25 : 200);
+  })();
 
   function addFromPrice(p: PriceItemLite) {
     const real = items.filter((i) => i.description.trim());
@@ -447,13 +451,13 @@ export function QuoteBuilder({
             {priceItems.length > 0 && (
               <div className="relative mb-3">
                 <Input
-                  placeholder="Add from Price List — search items…"
+                  placeholder="Add from Price List — tap to browse, or search…"
                   value={plQuery}
                   onChange={(e) => { setPlQuery(e.target.value); setPlOpen(true); }}
                   onFocus={() => setPlOpen(true)}
                   onBlur={() => setTimeout(() => setPlOpen(false), 150)}
                 />
-                {plOpen && plMatches.length > 0 && (
+                {plOpen && (
                   <ul className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
                     {plMatches.map((p) => (
                       <li key={p.id}>
@@ -471,6 +475,11 @@ export function QuoteBuilder({
                         </button>
                       </li>
                     ))}
+                    {plMatches.length === 0 && (
+                      <li className="px-3 py-2 text-sm text-slate-400">
+                        {priceItems.length === 0 ? "Your price list is empty." : "Nothing matches that."}
+                      </li>
+                    )}
                   </ul>
                 )}
               </div>

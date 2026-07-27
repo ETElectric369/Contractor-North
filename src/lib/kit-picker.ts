@@ -56,7 +56,11 @@ export function kitItemsToPickerRows(items: KitItemRaw[]): KitPickerRow[] {
         unit: it.unit || "ea",
         unit_price: Number(it.unit_price) || 0,
         sort_order: Number(it.sort_order) || 0,
-        checked: quantity !== 0,
+        // OPT IN, not opt out (Chris: "Don't auto select all items"). A kit is a
+        // TEMPLATE of what a job could need, not a bill of everything — pre-checking
+        // it all meant unchecking a dozen rows on every estimate, and anything missed
+        // silently billed the customer for material that was never used.
+        checked: false,
       };
     }),
   );
