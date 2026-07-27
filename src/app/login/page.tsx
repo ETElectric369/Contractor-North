@@ -5,6 +5,7 @@ import { APP_VERSION } from "@/lib/version";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { PasswordInput } from "@/components/ui/password-input";
+import { PurgePageCache } from "@/components/purge-page-cache";
 
 export default async function LoginPage({
   searchParams,
@@ -30,6 +31,10 @@ export default async function LoginPage({
       : "Welcome back.";
 
   return (
+    <>
+      {/* Nobody is signed in on this screen, so the offline page cache — which holds rendered
+          org data — gets cleared here. A handed-down crew phone can't be paged back into. */}
+      <PurgePageCache />
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-brand to-brand-dark px-4">
       <div className="w-full max-w-md">
         <div className="mb-8 text-center text-white">
@@ -143,6 +148,7 @@ export default async function LoginPage({
         <p className="mt-6 text-center text-xs text-white/60">Service · Integrity · Reliability</p>
       </div>
     </div>
+    </>
   );
 }
 

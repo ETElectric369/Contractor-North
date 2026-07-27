@@ -4,8 +4,11 @@
 // so a SW bug can't trap users on old code. We only cache hashed/immutable
 // static assets and an offline fallback page. API and auth requests are never
 // touched. Bump VERSION to invalidate the static cache.
-const VERSION = "cn-v577";
+const VERSION = "cn-v578";
 const STATIC_CACHE = `static-${VERSION}`;
+// Pages visited while online, kept so a dead zone shows the real page instead of /offline.
+// SEPARATE from the static cache because it holds ORG DATA and has to be purgeable on sign-out.
+const PAGE_CACHE = `pages-${VERSION}`;
 const PRECACHE = ["/offline", "/icon-192.png", "/icon-512.png", "/apple-touch-icon.png"];
 
 self.addEventListener("install", (event) => {
@@ -21,7 +24,9 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== STATIC_CACHE).map((k) => caches.delete(k))))
+      .then((keys) =>
+        Promise.all(keys.filter((k) => k !== STATIC_CACHE && k !== PAGE_CACHE).map((k) => caches.delete(k))),
+      )
       .then(() => self.clients.claim()),
   );
 });
@@ -41,11 +46,29 @@ self.addEventListener("fetch", (event) => {
   if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/auth/")) return;
 
   // Page navigations: network-first → cache → offline page. Never serve stale html.
+  //
+  // The cache arm was DEAD until now: nothing ever wrote a navigation into a cache, so
+  // `caches.match(req)` always missed and every offline navigation fell to /offline. A tech in a
+  // Chilcoot dead zone got the offline page for a job he'd had open ten minutes earlier. Now a
+  // successful navigation is copied into PAGE_CACHE, so the last-seen version of a page he
+  // actually visited is there when the signal isn't.
+  //
+  // Still network-FIRST, so nobody is ever served stale html when the network works.
   if (req.mode === "navigate") {
     event.respondWith(
-      fetch(req).catch(() =>
-        caches.match(req).then((cached) => cached || caches.match("/offline")),
-      ),
+      fetch(req)
+        .then((res) => {
+          // Only cache a real, complete page. An opaque/redirected/error response cached here
+          // would be served back as if it were the page.
+          if (res && res.ok && res.type === "basic" && !res.redirected) {
+            const copy = res.clone();
+            caches.open(PAGE_CACHE).then((c) => c.put(req, copy)).catch(() => {});
+          }
+          return res;
+        })
+        .catch(() =>
+          caches.match(req).then((cached) => cached || caches.match("/offline")),
+        ),
     );
     return;
   }
@@ -67,6 +90,15 @@ self.addEventListener("fetch", (event) => {
         return cached || network;
       }),
     );
+  }
+});
+
+// PURGE ON SIGN-OUT. PAGE_CACHE holds rendered pages, which means it holds one org's customers,
+// jobs and money. On a shared or handed-down device the next person must not be able to page back
+// into it, so signing out clears it. Static assets are impersonal and stay.
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "purge-pages") {
+    event.waitUntil(caches.delete(PAGE_CACHE));
   }
 });
 

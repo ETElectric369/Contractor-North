@@ -11,6 +11,7 @@ import { createProposalCore, cleanSlots } from "@/lib/appointments/proposal";
 import { endAfterStart } from "@/lib/appointments/times";
 import { APPOINTMENT_STATUSES, APPOINTMENT_TYPES } from "@/lib/statuses";
 import { coerceAnswers, parseInspectionSchema } from "@/lib/inspection/schema";
+import { runOnce } from "@/lib/offline/run-once";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 /** The browser-computed ISO if present; otherwise build the instant in the ORG
@@ -328,10 +329,28 @@ export async function saveInspectionAnswers(
   id: string,
   templateId: string | null,
   answers: Record<string, unknown>,
+  /** Offline-queue idempotency key (0167). Absent on the normal online path. */
+  clientOpId?: string,
 ): Promise<Result> {
   const ctx = await requireStaff(); // defense-in-depth (RLS also scopes the write)
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  const { data: { user } } = await supabase.auth.getUser();
+  const { data: prof } = user
+    ? await supabase.from("profiles").select("org_id").eq("id", user.id).maybeSingle()
+    : { data: null };
+  return runOnce(
+    { clientOpId, action: "inspection.answers", orgId: (prof as { org_id?: string } | null)?.org_id, profileId: user?.id },
+    () => saveInspectionAnswersInner(supabase, id, templateId, answers),
+  );
+}
+
+async function saveInspectionAnswersInner(
+  supabase: SupabaseClient,
+  id: string,
+  templateId: string | null,
+  answers: Record<string, unknown>,
+): Promise<Result> {
 
   let clean: Record<string, unknown> = {};
   if (templateId) {

@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
-import { Check, ClipboardList, Loader2 } from "lucide-react";
+import { useEffect, useMemo, useState, useTransition } from "react";
+import { Check, ClipboardList, CloudOff, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
@@ -13,6 +13,7 @@ import {
   type InspectionAnswers,
   type InspectionField,
 } from "@/lib/inspection/schema";
+import { enqueue, remove as removeQueued, registerReplayer, startAutoDrain } from "@/lib/offline/queue";
 import { saveInspectionAnswers } from "../actions";
 
 export type InspectionTemplate = { id: string; name: string; schema: unknown };
@@ -47,6 +48,7 @@ export function QuestionSheet({
   );
   const [answers, setAnswers] = useState<InspectionAnswers>(initialAnswers ?? {});
   const [saved, setSaved] = useState(false);
+  const [queued, setQueued] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
@@ -56,6 +58,19 @@ export function QuestionSheet({
   }, [templates, templateId]);
 
   const missing = useMemo(() => unansweredFields(fields, answers), [fields, answers]);
+
+  // Teach the queue how to replay this action, then drain whatever is waiting — on mount, when
+  // the connection returns, and when the app comes back to the foreground (a backgrounded phone
+  // regains signal without ever firing `online`).
+  useEffect(() => {
+    registerReplayer("inspection.answers", async (args, clientOpId) => {
+      const a = args as { appointmentId: string; templateId: string | null; answers: Record<string, unknown> };
+      return saveInspectionAnswers(a.appointmentId, a.templateId, a.answers, clientOpId);
+    });
+    return startAutoDrain((r) => {
+      if (r.remaining === 0) setQueued(false);
+    });
+  }, []);
 
   if (!templates.length) return null;
 
@@ -69,9 +84,37 @@ export function QuestionSheet({
       setError(null);
       // Coerce client-side too, so what's shown as saved matches what the server stored. The
       // server re-coerces against the template it re-reads — this is convenience, not the guard.
-      const res = await saveInspectionAnswers(appointmentId, templateId, coerceAnswers(fields, answers));
-      if (!res.ok) setError(res.error ?? "Couldn't save.");
-      else setSaved(true);
+      const clean = coerceAnswers(fields, answers);
+
+      /**
+       * QUEUE FIRST, THEN SEND (0167). An inspection happens in the exact places signal doesn't
+       * reach — a crawlspace, a mechanical room, the back of a property. Writing the intent to
+       * IndexedDB BEFORE attempting the network means a failed save is never a lost one: the
+       * op carries an idempotency key, runOnce makes the eventual replay exactly-once, and the
+       * queue drains itself when the connection returns.
+       */
+      const op = await enqueue(
+        "inspection.answers",
+        { appointmentId, templateId, answers: clean },
+        "Inspection answers",
+      );
+      try {
+        const res = await saveInspectionAnswers(appointmentId, templateId, clean, op.clientOpId);
+        if (res.ok) {
+          await removeQueued(op.clientOpId);
+          setSaved(true);
+          setQueued(false);
+        } else {
+          // A REJECTION is not a connectivity problem — replaying it would just fail again.
+          await removeQueued(op.clientOpId);
+          setError(res.error ?? "Couldn't save.");
+        }
+      } catch {
+        // Network. Leave it queued and say so plainly rather than showing a failure the user
+        // would respond to by retyping everything.
+        setQueued(true);
+        setSaved(false);
+      }
     });
 
   return (
@@ -151,6 +194,14 @@ export function QuestionSheet({
               {pending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : saved ? <Check className="mr-2 h-4 w-4" /> : null}
               {saved ? "Saved" : "Save answers"}
             </Button>
+            {/* Say it plainly. A tech who thinks a save failed retypes everything; a tech who
+                knows it's held will carry on and let it sync. */}
+            {queued && (
+              <p className="flex items-center gap-1.5 text-xs text-sky-400">
+                <CloudOff className="h-3.5 w-3.5" />
+                Held on this phone — it&rsquo;ll save itself when you&rsquo;re back in signal.
+              </p>
+            )}
             {/* WHAT'S STILL MISSING, computed from the sheet rather than guessed — the cheapest
                 moment to catch a gap is while you're still standing at the panel. */}
             {missing.length > 0 && (
