@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { hasActiveAccess, graceDaysLeft, PAST_DUE_GRACE_DAYS } from "./subscription";
-import { tierForPriceId, planByTier, PLANS } from "./plans";
+import { tierForPriceId, planByTier, PLANS, INCLUDED_EVERYWHERE, overFullEstimateAllowance } from "./plans";
 
 const daysFromNow = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString();
 
@@ -66,13 +66,55 @@ describe("the plan ladder", () => {
     for (const p of PLANS) expect(p.annual).toBeLessThan(p.monthly);
   });
 
-  it("every tier differs by AUTONOMY, never by withheld features", () => {
-    // The commitment is "every tier ships the whole product." If a tier ever starts
-    // describing itself by what it lacks, that promise has quietly broken.
+  /**
+   * GATE ON COST, NEVER ON LEVERAGE. These pin the promise itself, because pricing copy is
+   * exactly the kind of thing that drifts one word at a time until it means the opposite.
+   */
+  it("no tier describes itself by what it withholds", () => {
     for (const p of PLANS) {
-      expect(p.autonomy.length).toBeGreaterThan(0);
-      expect(p.autonomy.toLowerCase()).not.toMatch(/\bnot included\b|\bexcept\b|\bupgrade to\b/);
+      expect(p.included.length).toBeGreaterThan(0);
+      expect(p.included.toLowerCase()).not.toMatch(/\bnot included\b|\bexcept\b|\bupgrade to\b|\blocked\b/);
     }
+  });
+
+  it("tiers are never banded by HEADCOUNT — that's a seat tax in a different hat", () => {
+    // An earlier version read "Solo or just you and a helper" / "2–10 people" / "a real company
+    // with an office", three lines above a promise never to charge per seat.
+    const headcount = /\bsolo\b|\bhelper\b|\d+\s*[-–]\s*\d+\s*(people|users|seats)|\bper (seat|user|person)\b|\bcrew of\b/i;
+    for (const p of PLANS) {
+      expect(p.blurb).not.toMatch(headcount);
+      expect(p.included).not.toMatch(headcount);
+    }
+  });
+
+  it("no tier sells a wage metaphor it can't honour", () => {
+    // "Nort works mornings" / "Nort full-time" prices a unit nobody can check.
+    const wage = /\bpart-time\b|\bfull-time\b|\bworks mornings\b|\bhours? a day\b/i;
+    for (const p of PLANS) expect(p.included).not.toMatch(wage);
+  });
+
+  it("the metered unit is something a contractor already counts", () => {
+    // Tokens, credits and minutes are OUR units. Estimates are his.
+    for (const p of PLANS) {
+      if (p.fullEstimatesPerMonth !== null) expect(p.fullEstimatesPerMonth).toBeGreaterThan(0);
+      expect(p.included.toLowerCase()).not.toMatch(/token|credit|minute/);
+    }
+    // The allowance must actually rise with the price, or the ladder means nothing.
+    const caps = PLANS.map((p) => p.fullEstimatesPerMonth ?? Infinity);
+    expect(caps).toEqual([...caps].sort((a, b) => a - b));
+  });
+
+  it("running out NEVER blocks — the allowance only routes to a cheaper model", () => {
+    // A billing state must never become a work stoppage; same law as the past-due grace window.
+    expect(overFullEstimateAllowance("handyman", 19)).toBe(false);
+    expect(overFullEstimateAllowance("handyman", 20)).toBe(true); // "degrade now", not "refuse"
+    expect(overFullEstimateAllowance("company", 100_000)).toBe(false); // no cap to exceed
+    expect(overFullEstimateAllowance(null, 999)).toBe(false); // unknown plan never gets throttled
+  });
+
+  it("everything that costs us nothing per use is listed as included everywhere", () => {
+    expect(INCLUDED_EVERYWHERE.length).toBeGreaterThan(3);
+    expect(INCLUDED_EVERYWHERE.join(" ").toLowerCase()).toMatch(/never charge per person/);
   });
 
   it("an unknown price id resolves to no tier rather than guessing", () => {

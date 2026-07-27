@@ -1,20 +1,53 @@
 /**
- * THE PLAN LADDER (0.8) — one place that knows what tiers exist and what they cost.
+ * THE PLAN LADDER — one place that knows what tiers exist, what they cost, and WHY they differ.
  *
- * Two rules learned from the competitive research, both encoded here rather than in
- * a comment somewhere:
+ * ── THE PRINCIPLE ────────────────────────────────────────────────────────────────────────────
  *
- *  1. EVERY TIER SHIPS THE WHOLE PRODUCT. The tiers differ by how much AUTONOMOUS
- *     work Nort does in the background — never by withholding features, and never by
- *     charging per person. Add your whole crew; one price. Feature-gating and seat
- *     taxes are the two most-documented churn drivers in this category.
+ *   GATE ON COST, NEVER ON LEVERAGE.
  *
- *  2. THE PRICE ID IS AUTHORITATIVE, NOT THE NICKNAME. The webhook used to read
- *     `price.nickname`, which is a free-text field an operator can edit in the Stripe
- *     dashboard — rename it and every org's plan silently changes. Price ids are
- *     immutable, so a plan is resolved by id and stored by id. That also gives
- *     grandfathering for free: repricing means creating a NEW price, and existing
- *     orgs keep the id they signed up on until they're explicitly moved.
+ * Two kinds of thing can sit behind a higher price, and only one of them is honest.
+ *
+ *   - Things that cost us NOTHING per use — another person on the crew, more jobs, more invoices,
+ *     more customers, storage, any feature at all. Charging for these is pure leverage: the price
+ *     goes up because you're locked in, not because serving you got more expensive. That is the
+ *     extraction pattern this product exists as an alternative to, and it is the single
+ *     most-documented churn driver in the category. So: **included at every tier, permanently.**
+ *   - Things that cost REAL money every time they run — reading a plan set, a researched estimate,
+ *     a deep analysis. Those have a per-use bill attached, and pretending otherwise means either
+ *     eating a loss on heavy users or quietly rationing them. **These are what the tiers meter,
+ *     and we say so.**
+ *
+ * The test suite enforces the first half: no tier may describe itself by what it withholds.
+ *
+ * ── TWO THINGS THIS DELIBERATELY DOES NOT DO ────────────────────────────────────────────────
+ *
+ * 1. NO HEADCOUNT BANDING. An earlier version of this file described the tiers as "Solo or just
+ *    you and a helper" / "2–10 people" / "a real company with an office" — three lines above a
+ *    promise never to charge per seat. That is a seat tax wearing a different hat: it tells a
+ *    four-person crew they're on the wrong plan for a reason that costs us nothing. Tiers are
+ *    described by WORKLOAD — how much heavy lifting you do — which is the thing that actually
+ *    drives our cost.
+ *
+ * 2. NO WAGE METAPHOR. It also said "Nort part-time" / "Nort works mornings" / "Nort full-time".
+ *    That sells a unit we cannot honour: nobody can check whether an assistant "worked a morning",
+ *    and the moment a customer tries, the claim falls apart. The unit here is one a contractor
+ *    already counts — a full estimate — so "20 a month" means something he can verify against his
+ *    own week.
+ *
+ * ── NEVER CUT OFF OPERATIONS ────────────────────────────────────────────────────────────────
+ *
+ * Running out of the allowance does NOT lock the app, stop the crew, or disable a feature. The
+ * heavy work drops to a cheaper model and says so plainly. It gets simpler; it never disappears.
+ * Same shape as the past-due grace window in subscription.ts — a billing state must never become
+ * a work stoppage.
+ *
+ * ── THE PRICE ID IS AUTHORITATIVE, NOT THE NICKNAME ─────────────────────────────────────────
+ *
+ * The webhook used to read `price.nickname`, which is free text an operator can edit in the Stripe
+ * dashboard — rename it and every org's plan silently changes. Price ids are immutable, so a plan
+ * is resolved by id and stored by id. That also gives grandfathering for free: repricing means
+ * creating a NEW price, and existing orgs keep the id they signed up on until they're explicitly
+ * moved.
  */
 
 export type PlanTier = "handyman" | "crew" | "company";
@@ -25,9 +58,16 @@ export type PlanDef = {
   /** Dollars per month (annual shown as its monthly equivalent). */
   monthly: number;
   annual: number;
+  /** Who this fits, described by WORKLOAD — never by headcount. */
   blurb: string;
-  /** What Nort does unprompted at this tier — the ONLY axis that changes. */
-  autonomy: string;
+  /**
+   * The ONLY axis that changes between tiers: how much genuinely expensive work is included.
+   * Measured in full estimates — plan take-offs and researched estimates — because that's a unit
+   * a contractor already counts. `null` means "more than anyone reaches in practice".
+   */
+  fullEstimatesPerMonth: number | null;
+  /** How that reads on the pricing page. */
+  included: string;
 };
 
 export const PLANS: PlanDef[] = [
@@ -36,25 +76,42 @@ export const PLANS: PlanDef[] = [
     name: "Handyman",
     monthly: 59,
     annual: 47,
-    blurb: "Solo or just you and a helper.",
-    autonomy: "Nort part-time — ask him anything, and he keeps the books tidy in the background.",
+    blurb: "You quote a few jobs a month and want the paperwork to stop eating your evenings.",
+    fullEstimatesPerMonth: 20,
+    included: "20 full estimates a month — plan take-offs and researched pricing. Everything else, unlimited.",
   },
   {
     tier: "crew",
     name: "Crew",
     monthly: 129,
     annual: 103,
-    blurb: "A working crew, 2–10 people.",
-    autonomy: "Nort works mornings — chases overdue invoices, files receipts, writes your site content.",
+    blurb: "You're quoting constantly and the office work has turned into a second job.",
+    fullEstimatesPerMonth: 75,
+    included: "75 full estimates a month, so bidding is a daily habit rather than a budget. Everything else, unlimited.",
   },
   {
     tier: "company",
     name: "Company",
     monthly: 299,
     annual: 239,
-    blurb: "A real company with an office.",
-    autonomy: "Nort full-time — an office manager for $299, not $3,500.",
+    blurb: "Estimating and paperwork are somebody's whole job — or should be.",
+    fullEstimatesPerMonth: null,
+    included: "Estimates and plan reading without a number on them. Everything else, unlimited.",
   },
+];
+
+/**
+ * WHAT EVERY TIER SHIPS, at every price, forever. Kept as data rather than prose so the pricing
+ * page and the tests read the same list — and so adding a feature here is the default, while
+ * moving one into a tier would be a visible, deliberate edit.
+ */
+export const INCLUDED_EVERYWHERE: readonly string[] = [
+  "Your whole crew — we never charge per person",
+  "Every job, customer, quote, invoice and photo",
+  "The assistant, all day, for the everyday work",
+  "Your public website and lead capture",
+  "Taking card payments from your customers",
+  "Time tracking, scheduling and payroll export",
 ];
 
 export function planByTier(tier: string | null | undefined): PlanDef | null {
@@ -62,8 +119,8 @@ export function planByTier(tier: string | null | undefined): PlanDef | null {
 }
 
 /**
- * The Stripe price id for a tier + cadence, from env. Kept OUT of the code so test
- * and live prices differ without a deploy, and so repricing is a config change.
+ * The Stripe price id for a tier + cadence, from env. Kept OUT of the code so test and live prices
+ * differ without a deploy, and so repricing is a config change.
  *   STRIPE_PRICE_HANDYMAN_MONTHLY / _ANNUAL, STRIPE_PRICE_CREW_…, STRIPE_PRICE_COMPANY_…
  */
 export function priceIdFor(tier: PlanTier, cadence: "monthly" | "annual"): string | null {
@@ -71,8 +128,8 @@ export function priceIdFor(tier: PlanTier, cadence: "monthly" | "annual"): strin
   return process.env[key] || null;
 }
 
-/** Reverse lookup: which tier does this Stripe price id belong to? Used by the webhook
- *  so a plan is derived from an immutable id rather than an editable nickname. */
+/** Reverse lookup: which tier does this Stripe price id belong to? Used by the webhook so a plan
+ *  is derived from an immutable id rather than an editable nickname. */
 export function tierForPriceId(priceId: string | null | undefined): PlanTier | null {
   if (!priceId) return null;
   for (const p of PLANS) {
@@ -86,4 +143,14 @@ export function tierForPriceId(priceId: string | null | undefined): PlanTier | n
 /** True once at least one tier is configured — otherwise the picker has nothing to show. */
 export function plansConfigured(): boolean {
   return PLANS.some((p) => priceIdFor(p.tier, "monthly") || priceIdFor(p.tier, "annual"));
+}
+
+/**
+ * Has this org used up the month's heavy work? Used to decide whether to route an estimate to the
+ * cheaper model — NEVER to block one. Callers must degrade, not refuse.
+ */
+export function overFullEstimateAllowance(tier: string | null | undefined, usedThisMonth: number): boolean {
+  const plan = planByTier(tier);
+  if (!plan || plan.fullEstimatesPerMonth === null) return false;
+  return usedThisMonth >= plan.fullEstimatesPerMonth;
 }

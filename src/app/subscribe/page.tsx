@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { billingEnabled } from "@/lib/stripe";
 import { hasActiveAccess, isCompedOrg } from "@/lib/subscription";
 import { startCheckout } from "@/app/(app)/settings/billing-actions";
-import { PLANS, plansConfigured } from "@/lib/plans";
+import { PLANS, INCLUDED_EVERYWHERE, plansConfigured } from "@/lib/plans";
 import { signOut } from "@/app/login/actions";
 import { Button } from "@/components/ui/button";
 import type { Organization } from "@/lib/types";
@@ -67,8 +67,10 @@ export default async function SubscribePage({
           {isAdmin ? (
             plansConfigured() ? (
               <>
-                {/* EVERY tier ships the whole product. What changes is how much
-                    autonomous work Nort does — never features, never per-person. */}
+                {/* GATE ON COST, NEVER ON LEVERAGE. Every tier ships the whole product to the
+                    whole crew. What changes is how much genuinely expensive work is included —
+                    plan reading and researched estimates — because that's the only thing that
+                    actually costs more to serve. Never a feature, never a head count. */}
                 <div className="grid gap-4 text-left sm:grid-cols-3">
                   {PLANS.map((plan) => (
                     <form key={plan.tier} action={startCheckout} className="flex flex-col rounded-xl border border-slate-200 p-5">
@@ -80,14 +82,26 @@ export default async function SubscribePage({
                         <span className="text-sm font-medium text-slate-400">/mo</span>
                       </div>
                       <p className="mt-1 text-xs text-slate-500">{plan.blurb}</p>
-                      <p className="mt-3 flex-1 text-sm text-slate-600">{plan.autonomy}</p>
+                      <p className="mt-3 flex-1 text-sm text-slate-600">{plan.included}</p>
                       <Button type="submit" className="mt-4 w-full">Choose {plan.name}</Button>
                     </form>
                   ))}
                 </div>
-                <p className="mt-5 text-xs text-slate-400">
-                  Every plan includes everything — unlimited crew, no per-person charge, and no cut of your work.
-                </p>
+                <div className="mt-5 text-xs text-slate-400">
+                  <p className="font-medium text-slate-500">On every plan, at every price:</p>
+                  <ul className="mt-1 space-y-0.5">
+                    {INCLUDED_EVERYWHERE.map((line) => (
+                      <li key={line}>· {line}</li>
+                    ))}
+                  </ul>
+                  {/* Say the honest thing about the metered part rather than letting someone
+                      discover it. Running out never stops work — it gets simpler, not gone. */}
+                  <p className="mt-2">
+                    Reading plans and researching live prices costs us real money each time, so that&rsquo;s the
+                    one thing the plans count. Go past it and estimates keep working — they just get simpler
+                    until the month turns. Nothing locks, and your crew never stops.
+                  </p>
+                </div>
               </>
             ) : (
               <form action={startCheckout}>
