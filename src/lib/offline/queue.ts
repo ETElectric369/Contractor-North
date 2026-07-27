@@ -33,6 +33,16 @@ const DB_VERSION = 1;
 export type QueuedOp = {
   /** Minted once, reused on every retry — the whole idempotency story. */
   clientOpId: string;
+  /**
+   * WHO QUEUED IT. Without this, a shared shop phone files one person's work as another's: tech A
+   * queues a 7:02 punch with no signal, signs out, tech B signs in, the drain fires on mount, and
+   * clockIn resolves the actor from the CURRENT session — A's punch, A's GPS, on B's timecard,
+   * with the idempotency ledger recording B so the audit trail agrees with the wrong answer.
+   * Signing out clears the service-worker page cache but NOT IndexedDB, so the queue outlives the
+   * session that created it. An op belonging to someone else is skipped, never dropped — it is
+   * still A's work and it files when A signs back in.
+   */
+  ownerId: string | null;
   /** Registry key of the server action to replay. */
   action: string;
   args: unknown;
@@ -42,6 +52,14 @@ export type QueuedOp = {
   lastError?: string;
   /** Human-readable, for the "3 things waiting to sync" UI. */
   label: string;
+  /**
+   * Quarantined: the server REJECTED this on a replay (not a network failure), so retrying it
+   * will only fail again. It stays in the queue — nothing is ever deleted — but it no longer
+   * blocks everything behind it. Before this, one punch too old to file sat at the head of the
+   * queue forever and silently stopped every later punch and inspection sheet from syncing.
+   */
+  blocked?: boolean;
+  blockedReason?: string;
 };
 
 function newOpId(): string {
@@ -79,9 +97,10 @@ function tx<T>(mode: IDBTransactionMode, run: (s: IDBObjectStore) => IDBRequest<
 }
 
 /** Add an operation to the queue. Returns the op (its clientOpId is the idempotency key). */
-export async function enqueue(action: string, args: unknown, label: string): Promise<QueuedOp> {
+export async function enqueue(action: string, args: unknown, label: string, ownerId?: string | null): Promise<QueuedOp> {
   const op: QueuedOp = {
     clientOpId: newOpId(),
+    ownerId: ownerId ?? null,
     action,
     args,
     createdAt: new Date().toISOString(),
@@ -109,6 +128,18 @@ export async function remove(clientOpId: string): Promise<void> {
   }
 }
 
+export type DrainResult = { sent: number; failed: number; blocked: number; remaining: number };
+
+/** Park an op the server refused. Kept (never deleted) so the user can still see the work and
+ *  what happened to it — this is what a "waiting to sync" screen should render. */
+async function quarantine(op: QueuedOp, reason: string): Promise<void> {
+  try {
+    await tx("readwrite", (s) => s.put({ ...op, attempts: op.attempts + 1, blocked: true, blockedReason: reason, lastError: reason }));
+  } catch {
+    /* ignore */
+  }
+}
+
 async function noteFailure(op: QueuedOp, message: string): Promise<void> {
   try {
     await tx("readwrite", (s) => s.put({ ...op, attempts: op.attempts + 1, lastError: message }));
@@ -133,14 +164,22 @@ export function registerReplayer(action: string, fn: Replayer): void {
  *
  * Returns what happened so a caller can tell the user rather than syncing invisibly.
  */
-export async function drain(): Promise<{ sent: number; failed: number; remaining: number }> {
-  if (typeof navigator !== "undefined" && navigator.onLine === false) {
-    return { sent: 0, failed: 0, remaining: (await listPending()).length };
-  }
+export async function drain(currentUserId?: string | null): Promise<DrainResult> {
+  const summarize = async (sent: number, failed: number) => {
+    const rest = await listPending();
+    return { sent, failed, blocked: rest.filter((o) => o.blocked).length, remaining: rest.length };
+  };
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return summarize(0, 0);
+
   const pending = await listPending();
   let sent = 0;
   let failed = 0;
   for (const op of pending) {
+    // Already quarantined — skip, don't retry, don't block what's behind it.
+    if (op.blocked) continue;
+    // Someone else's work. Skip it silently and leave it for them; filing it under whoever
+    // happens to be signed in now is how one person's hours land on another's timecard.
+    if (currentUserId && op.ownerId && op.ownerId !== currentUserId) continue;
     const fn = replayers.get(op.action);
     if (!fn) {
       // An op queued by an older build whose action this build no longer knows. Leave it —
@@ -153,25 +192,31 @@ export async function drain(): Promise<{ sent: number; failed: number; remaining
         await remove(op.clientOpId);
         sent++;
       } else {
-        await noteFailure(op, res.error ?? "failed");
+        // A REJECTION, not a connectivity problem. Retrying is pointless and it must not become
+        // a permanent blockage — quarantine it and carry on with the rest.
+        await quarantine(op, res.error ?? "The server wouldn't accept it.");
         failed++;
-        break; // preserve order
       }
     } catch (e) {
+      // A real network failure. STOP here so ops replay in order — two edits to the same record
+      // must not land backwards — and try again on the next drain.
       await noteFailure(op, e instanceof Error ? e.message : "network");
       failed++;
       break;
     }
   }
-  return { sent, failed, remaining: (await listPending()).length };
+  return summarize(sent, failed);
 }
 
 /** Drain now, and again whenever the connection returns. Returns an unsubscribe. */
-export function startAutoDrain(onChange?: (r: { sent: number; failed: number; remaining: number }) => void): () => void {
+export function startAutoDrain(
+  onChange?: (r: DrainResult) => void,
+  currentUserId?: string | null,
+): () => void {
   let stopped = false;
   const run = () => {
     if (stopped) return;
-    drain().then((r) => {
+    drain(currentUserId).then((r) => {
       if (!stopped) onChange?.(r);
     });
   };

@@ -547,6 +547,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
               Columns split only when THIS row actually has the room. */}
           <div className="grid gap-3 @[42rem]:grid-cols-2">
           <MyDayClock
+            userId={user?.id ?? null}
             className="h-full"
             open={openEntry ? { id: openEntry.id, clock_in: openEntry.clock_in, notes: openEntry.notes ?? null } : null}
             jobLabel={currentJob ? jobLabel(currentJob) : null}
@@ -580,6 +581,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         </div>
       ) : (
         <MyDayClock
+            userId={user?.id ?? null}
           open={openEntry ? { id: openEntry.id, clock_in: openEntry.clock_in, notes: openEntry.notes ?? null } : null}
           jobLabel={currentJob ? jobLabel(currentJob) : null}
         />

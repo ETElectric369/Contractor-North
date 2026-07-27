@@ -35,10 +35,14 @@ const OFFLINE_MSG = "No connection — try again when you have bars.";
 export function MyDayClock({
   open,
   jobLabel,
+  userId,
   className = "mb-4",
 }: {
   open: { id: string; clock_in: string; notes: string | null } | null;
   jobLabel: string | null;
+  /** WHO is signed in. A queued punch is stamped with this and only ever replays for the same
+   *  person — a shared shop phone must never file one tech's hours onto another's timecard. */
+  userId: string | null;
   /** Layout hook: the staff top row grids the clock beside the leads card
    *  (pass "h-full"); the default keeps the tech full-width spacing. */
   className?: string;
@@ -55,10 +59,12 @@ export function MyDayClock({
       const a = args as Parameters<typeof clockIn>[0];
       return clockIn({ ...a, clock_in_at: null, clientOpId });
     });
+    // `remaining - blocked`: a quarantined op is parked, not pending, so it must not keep the
+    // "held on this phone" banner up forever.
     return startAutoDrain((r) => {
-      if (r.remaining === 0) setHeld(false);
-    });
-  }, []);
+      if (r.remaining - r.blocked === 0) setHeld(false);
+    }, userId);
+  }, [userId]);
 
   useEffect(() => {
     if (!open) return;
@@ -96,10 +102,15 @@ export function MyDayClock({
       const pressedAt = new Date().toISOString();
       // Job-less on purpose — clockIn resolves it server-side (today's assignment →
       // the org's only in-progress job → none; the office attaches it later).
-      const payload = { job_id: null, job_code: null, gps, offline_pressed_at: pressedAt };
-      const op = await enqueue("time.clockIn", payload, "Clock in");
+      // The QUEUED copy carries the press time (it may be filed hours from now). The LIVE attempt
+      // does NOT — the server's own clock is the authority when there's a connection, and sending
+      // a device timestamp on an online punch is what turned "keep my real time" into "roll the
+      // phone back 13 hours and tap Clock In" (0169). A device clock is only ever a fallback for
+      // a punch that genuinely couldn't be delivered.
+      const queued = { job_id: null, job_code: null, gps, offline_pressed_at: pressedAt };
+      const op = await enqueue("time.clockIn", queued, "Clock in", userId);
       try {
-        const res = await clockIn({ ...payload, clock_in_at: null, clientOpId: op.clientOpId });
+        const res = await clockIn({ job_id: null, job_code: null, gps, clock_in_at: null, clientOpId: op.clientOpId });
         await removeQueued(op.clientOpId);
         if (!res.ok) setErr(res.error ?? "Could not clock in.");
         else setHeld(false);

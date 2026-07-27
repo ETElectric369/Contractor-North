@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PurgePageCache } from "@/components/purge-page-cache";
 import { NO_INDEX } from "@/lib/no-index";
 import { Ban } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
@@ -21,6 +22,11 @@ export default async function AccountDeactivatedPage() {
   await supabase.auth.signOut();
 
   return (
+    <>
+      {/* THE session ends on THIS screen (signOut above), and it is the one moment we KNOW the
+          removed person is still online. Without this their cached pages — a whole org's customers,
+          jobs and money — stay readable on their phone after they've been let go. */}
+      <PurgePageCache />
     <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
       <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
         <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-50 text-red-600">
@@ -39,6 +45,7 @@ export default async function AccountDeactivatedPage() {
         </Link>
       </div>
     </div>
+    </>
   );
 }
 

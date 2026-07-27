@@ -36,8 +36,25 @@ describe("an offline punch keeps the time it was made", () => {
     }
   });
 
-  it("a full shift's wait is still accepted", () => {
-    expect(resolveOfflinePunchTime(agoIso(h(11)), NOW).ok).toBe(true);
+  it("a few hours in a dead zone is still accepted", () => {
+    // Derived from the constant so a policy change can't leave a stale literal asserting the
+    // opposite — which is exactly what happened when the bound moved 14h -> 4h.
+    expect(resolveOfflinePunchTime(agoIso(MAX_OFFLINE_PUNCH_AGE_MS - h(1)), NOW).ok).toBe(true);
+  });
+
+  /**
+   * THE ATTACK THIS BOUND EXISTS FOR (audit finding A, my bug, shipped in cn-v579).
+   *
+   * The tech anti-backdating clamp is bypassed for an offline punch. The client sent a device
+   * timestamp on EVERY punch, so rolling a phone's clock back and tapping Clock In through the
+   * ordinary UI produced a backdated shift — no console, no crafted request. Two things changed:
+   * the live punch no longer sends a device clock at all, and this bound came down to a half
+   * shift. The database (0169) is the real ceiling; this is the first of the two.
+   */
+  it("caps what a rolled-back phone clock can claim to half a shift", () => {
+    expect(MAX_OFFLINE_PUNCH_AGE_MS).toBeLessThanOrEqual(h(6));
+    // 13 hours was the original exploit figure. It must not survive.
+    expect(resolveOfflinePunchTime(agoIso(h(13)), NOW).ok).toBe(false);
   });
 });
 

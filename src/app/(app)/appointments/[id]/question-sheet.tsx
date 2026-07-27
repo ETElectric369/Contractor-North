@@ -35,11 +35,14 @@ export function QuestionSheet({
   templates,
   initialTemplateId,
   initialAnswers,
+  userId,
 }: {
   appointmentId: string;
   templates: InspectionTemplate[];
   initialTemplateId: string | null;
   initialAnswers: InspectionAnswers;
+  /** Who is signed in — a queued save only ever replays for the person who made it. */
+  userId: string | null;
 }) {
   // Default to the org's only sheet when there is exactly one — picking from a list of one is a
   // tap the inspector shouldn't have to make while standing on a ladder.
@@ -67,10 +70,11 @@ export function QuestionSheet({
       const a = args as { appointmentId: string; templateId: string | null; answers: Record<string, unknown> };
       return saveInspectionAnswers(a.appointmentId, a.templateId, a.answers, clientOpId);
     });
+    // `remaining - blocked`: a quarantined op is parked, not pending.
     return startAutoDrain((r) => {
-      if (r.remaining === 0) setQueued(false);
-    });
-  }, []);
+      if (r.remaining - r.blocked === 0) setQueued(false);
+    }, userId);
+  }, [userId]);
 
   if (!templates.length) return null;
 
@@ -97,6 +101,7 @@ export function QuestionSheet({
         "inspection.answers",
         { appointmentId, templateId, answers: clean },
         "Inspection answers",
+        userId,
       );
       try {
         const res = await saveInspectionAnswers(appointmentId, templateId, clean, op.clientOpId);

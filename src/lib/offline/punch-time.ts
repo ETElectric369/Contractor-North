@@ -20,7 +20,7 @@
  */
 
 /** A long day plus slack. Beyond this, the office enters it. */
-export const MAX_OFFLINE_PUNCH_AGE_MS = 14 * 60 * 60 * 1000;
+export const MAX_OFFLINE_PUNCH_AGE_MS = 4 * 60 * 60 * 1000;
 
 /** Small allowance for a device clock running slightly fast. */
 const FUTURE_SKEW_MS = 2 * 60 * 1000;

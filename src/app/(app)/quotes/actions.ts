@@ -9,7 +9,8 @@ import { subtotalTaxTotal } from "@/lib/invoice-math";
 import { QUOTE_STATUSES } from "@/lib/statuses";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { CALC_TOOLS, runCalc } from "@/lib/electrical-calc";
-import { recordAiUsage } from "@/lib/ai-cost";
+import { recordAiUsage, aiSpendExceeded, currentOrgId } from "@/lib/ai-cost";
+import { rateLimited } from "@/lib/rate-limit";
 import type Anthropic from "@anthropic-ai/sdk";
 import { getOrgSettings, accentHex } from "@/lib/org-settings";
 import { mapEstimatorLine, type DraftLineItem, type BookRow, type LadderPrice } from "@/lib/estimate/line-map";
@@ -986,11 +987,43 @@ function estimatorError(e: any) {
 }
 
 /** The estimator, from a free-text scope. */
+/**
+ * THE ESTIMATOR GATE (0169 audit, finding F).
+ *
+ * These two exports were the only ones in this file without `requireStaff()` — all sixteen
+ * siblings have it, including the far cheaper generateCircuitSchedule. And /quotes/new has no role
+ * check either, so a tech reached the estimator by typing the URL.
+ *
+ * Each call is the frontier model at max_tokens 8192 for up to three rounds, plus a 20 MB base64
+ * PDF on the plan path — this file's own comment calls it "the single most expensive operation in
+ * the product." Ungated it was two things at once: direct spend on our API key, and a CROSS-ROLE
+ * denial of service, because every round meters into the same ai_usage ledger the chat ceiling
+ * reads. One tech in a loop pushes the org past the ceiling and Nort 429s for the owner and the
+ * whole office, while the estimator itself never checked that ceiling and kept spending.
+ *
+ * No data leak, at least: price_list_read is staff-only (0056), so a tech's catalog came back
+ * empty and the CED net pricing never reached him.
+ */
+async function guardEstimator(): Promise<{ ok: true; orgId: string | null } | { ok: false; error: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error ?? "Only office staff can run the estimator." };
+  // Per-user, because the ceiling below is per-ORG and a runaway loop would otherwise burn the
+  // whole company's month before anyone noticed.
+  if (await rateLimited(`estimator:${ctx.userId}`, 10, 900, { failClosed: true }))
+    return { ok: false, error: "That's a lot of estimates in a row — give it a minute." };
+  const orgId = await currentOrgId();
+  if (await aiSpendExceeded(orgId))
+    return { ok: false, error: "Your company has reached this month's AI ceiling. It resets at the start of the month, or the office can raise it." };
+  return { ok: true, orgId };
+}
+
 export async function generateQuoteDraft(
   scope: string,
   markupPct?: number,
   laborRate?: number,
 ): Promise<{ ok: true; items: DraftLineItem[]; questions: string[] } | { ok: false; error: string }> {
+  const gate = await guardEstimator();
+  if (!gate.ok) return { ok: false, error: gate.error };
   if (!scope.trim()) return { ok: false, error: "Describe the work first." };
   try {
     return { ok: true, ...(await runEstimator(scope, markupPct, laborRate)) };
@@ -1010,6 +1043,10 @@ export async function generateQuoteDraft(
 export async function generateQuoteDraftFromPlan(
   formData: FormData,
 ): Promise<{ ok: true; items: DraftLineItem[]; questions: string[] } | { ok: false; error: string }> {
+  // Gate BEFORE the 20 MB file is read and base64'd — an ungated caller shouldn't be able to make
+  // the server do that work either.
+  const gate = await guardEstimator();
+  if (!gate.ok) return { ok: false, error: gate.error };
   try {
     const file = formData.get("file");
     if (!(file instanceof File) || file.size === 0) return { ok: false, error: "Choose a plan PDF to upload." };

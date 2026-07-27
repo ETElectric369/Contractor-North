@@ -31,6 +31,10 @@ export default async function AppointmentCapturePage({
 }) {
   const { id } = await params;
   const supabase = await createClient();
+  // Who's looking — stamped onto anything the inspection sheet queues offline, so a shared phone
+  // can never file one person's work under another's name.
+  const { data: { user: viewer } } = await supabase.auth.getUser();
+  const viewerId = viewer?.id ?? null;
 
   const [{ data: appt }, { data: org }, picker, sheets, inspection] = await Promise.all([
     supabase
@@ -149,6 +153,7 @@ export default async function AppointmentCapturePage({
           because a sheet only asks what its author thought of. */}
       <QuestionSheet
         appointmentId={a.id}
+        userId={viewerId}
         templates={sheets ?? []}
         initialTemplateId={inspection?.inspection_template_id ?? null}
         initialAnswers={(inspection?.inspection_answers ?? {}) as never}
