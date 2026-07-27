@@ -68,6 +68,7 @@ export default async function FormDetailPage({
             formId={form.id}
             name={form.name}
             description={form.description}
+            isInspection={!!(form as { is_inspection?: boolean }).is_inspection}
             fields={fields}
           />
           <DeleteFormButton formId={form.id} />

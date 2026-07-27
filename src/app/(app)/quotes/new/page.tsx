@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { BackLink } from "@/components/back-link";
 import { PageHeader } from "@/components/page-header";
 import { getOrgSettings } from "@/lib/org-settings";
+import { parseInspectionSchema, answersForEstimator, tolerateMissingColumns } from "@/lib/inspection/schema";
 import { DECK_ESTIMATE_CODES } from "@/lib/estimate/deck";
 import { NewInspectionButton } from "../../appointments/new-inspection-button";
 import { QuoteBuilder } from "./quote-builder";
@@ -36,8 +37,24 @@ export default async function NewQuotePage({
       | null
       | undefined;
     if (appt) {
+      // THE TYPED ANSWERS GO FIRST, and are labelled as MEASURED (0165). The inspector already
+      // stood in front of these numbers; making the estimator re-extract "85 ft" from a sentence
+      // is a re-derivation that can silently come back with a different number. Facts above prose.
+      // Read tolerantly — a deploy precedes its migration, and naming an absent column fails the
+      // whole query. Pre-migration this yields no measured block and the prose prefill is unchanged.
+      const insp = await tolerateMissingColumns<{ inspection_answers: unknown; forms: unknown }>(() =>
+        supabase
+          .from("appointments")
+          .select("inspection_answers, forms:inspection_template_id(schema)")
+          .eq("id", capture)
+          .maybeSingle(),
+      );
+      const rel = (insp as any)?.forms;
+      const schema = parseInspectionSchema((Array.isArray(rel) ? rel[0] : rel)?.schema);
+      const measured = answersForEstimator(schema, ((insp as any)?.inspection_answers ?? {}) as never);
       const parts = [
         `From site inspection — ${(appt as any).title}${(appt as any).location ? ` (${(appt as any).location})` : ""}`,
+        measured ? `MEASURED ON SITE (these are given — use them, don't re-derive them):\n${measured}` : "",
         cap?.notes?.trim() ? `Notes:\n${cap.notes.trim()}` : "",
         cap?.measurements?.trim() ? `Measurements:\n${cap.measurements.trim()}` : "",
         cap?.materials?.trim() ? `Materials needed:\n${cap.materials.trim()}` : "",

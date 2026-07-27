@@ -10,6 +10,8 @@ import { appointmentTypeLabel, isInspectionType } from "@/lib/statuses";
 import { getSchedulePickerOptions } from "@/lib/schedule-options";
 import { AppointmentButton, type ApptValue } from "../appointment-button";
 import { InspectionCapture, type CapturePhoto } from "./inspection-capture";
+import { QuestionSheet, type InspectionTemplate } from "./question-sheet";
+import { tolerateMissingColumns } from "@/lib/inspection/schema";
 import { MarkCompleteButton } from "./mark-complete-button";
 
 export const dynamic = "force-dynamic";
@@ -30,7 +32,7 @@ export default async function AppointmentCapturePage({
   const { id } = await params;
   const supabase = await createClient();
 
-  const [{ data: appt }, { data: org }, picker] = await Promise.all([
+  const [{ data: appt }, { data: org }, picker, sheets, inspection] = await Promise.all([
     supabase
       .from("appointments")
       .select(
@@ -42,6 +44,18 @@ export default async function AppointmentCapturePage({
     // Jobs/customers/staff option lists for the Edit-details modal (the same
     // SSOT helper the schedule's picker uses).
     getSchedulePickerOptions(supabase),
+    // The org's inspection sheets + this appointment's answers (0165). BOTH are read tolerantly:
+    // a deploy lands before its migration, and a select naming a column that doesn't exist yet
+    // fails the entire query rather than degrading. Pre-migration, the sheet is simply absent and
+    // the rest of the page — notes, photos, edit, mark-complete — still works.
+    // Per-trade questions are DATA (deck questions for the deck company, panel questions for the
+    // electrician), which is what keeps a typed inspection from needing a code module per trade.
+    tolerateMissingColumns<InspectionTemplate[]>(() =>
+      supabase.from("forms").select("id, name, schema").eq("is_inspection", true).order("name"),
+    ),
+    tolerateMissingColumns<{ inspection_template_id: string | null; inspection_answers: unknown }>(() =>
+      supabase.from("appointments").select("inspection_template_id, inspection_answers").eq("id", id).maybeSingle(),
+    ),
   ]);
   if (!appt) notFound();
 
@@ -129,6 +143,16 @@ export default async function AppointmentCapturePage({
         </div>
         {a.notes && <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{a.notes}</p>}
       </div>
+
+      {/* THE TYPED HALF, above the prose. Measurements captured as numbers here don't have to be
+          re-extracted from a sentence by the estimator later — but the free-text boxes below stay,
+          because a sheet only asks what its author thought of. */}
+      <QuestionSheet
+        appointmentId={a.id}
+        templates={sheets ?? []}
+        initialTemplateId={inspection?.inspection_template_id ?? null}
+        initialAnswers={(inspection?.inspection_answers ?? {}) as never}
+      />
 
       <InspectionCapture
         appointmentId={a.id}

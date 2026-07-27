@@ -44,6 +44,7 @@ interface FormEditorProps {
   formId?: string;
   initialName?: string;
   initialDescription?: string;
+  initialIsInspection?: boolean;
   initialFields?: FieldRow[];
 }
 
@@ -54,11 +55,13 @@ export function FormEditor({
   formId,
   initialName = "",
   initialDescription = "",
+  initialIsInspection = false,
   initialFields,
 }: FormEditorProps) {
   const isEdit = Boolean(formId);
   const [name, setName] = useState(initialName);
   const [description, setDescription] = useState(initialDescription);
+  const [isInspection, setIsInspection] = useState(initialIsInspection);
   const [fields, setFields] = useState<FieldRow[]>(
     initialFields ?? [{ label: "", type: "text", options: "" }],
   );
@@ -74,8 +77,8 @@ export function FormEditor({
     setError(null);
     start(async () => {
       const res = isEdit
-        ? await updateForm(formId!, { name, description, fields })
-        : await createForm({ name, description, fields });
+        ? await updateForm(formId!, { name, description, is_inspection: isInspection, fields })
+        : await createForm({ name, description, is_inspection: isInspection, fields });
       if (!res.ok) {
         setError(res.error ?? "Could not save form.");
         return;
@@ -127,6 +130,26 @@ export function FormEditor({
             onChange={(e) => setDescription(e.target.value)}
           />
         </div>
+
+        {/* THE PER-TRADE SHEET (0165). Marking a form as an inspection sheet makes it selectable
+            on an appointment, and its answers land as TYPED values the estimator can use as-is
+            rather than re-extracting them from the inspector's prose. Questions are data, so a
+            new trade is a form someone types — not a module someone writes. */}
+        <label className="flex items-start gap-2 rounded-lg border border-white/10 p-3 text-sm">
+          <input
+            type="checkbox"
+            className="mt-0.5 h-4 w-4"
+            checked={isInspection}
+            onChange={(e) => setIsInspection(e.target.checked)}
+          />
+          <span>
+            <span className="font-medium">Use as an inspection sheet</span>
+            <span className="mt-0.5 block text-xs text-slate-400">
+              Adds these questions to the inspection page so measurements are captured as numbers and carry
+              straight into an estimate.
+            </span>
+          </span>
+        </label>
 
         <div>
           <div className="mb-1.5 flex items-center justify-between">

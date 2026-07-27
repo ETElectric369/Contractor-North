@@ -10,6 +10,7 @@ import { tzDateTimeUtc, todayStrInTz } from "@/lib/tz";
 import { createProposalCore, cleanSlots } from "@/lib/appointments/proposal";
 import { endAfterStart } from "@/lib/appointments/times";
 import { APPOINTMENT_STATUSES, APPOINTMENT_TYPES } from "@/lib/statuses";
+import { coerceAnswers, parseInspectionSchema } from "@/lib/inspection/schema";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 /** The browser-computed ISO if present; otherwise build the instant in the ORG
@@ -311,6 +312,55 @@ export async function saveAppointmentCapture(
   if (!data?.length) return { ok: false, error: "Appointment not found." };
   revalidatePath("/schedule");
   revalidatePath(`/appointments/${id}`);
+  return { ok: true, id };
+}
+
+/**
+ * SAVE THE TYPED INSPECTION SHEET (0165). Answers are stored beside the prose capture, never
+ * inside it — a typed answer buried in a free-text bag stops being typed.
+ *
+ * Every value is coerced against the template's OWN schema, which is re-read from the database
+ * rather than trusted from the client. That closes both halves of the hole: a number field can
+ * only hold a number (or null — never a silent 0), and a key the template doesn't declare is
+ * dropped instead of being written as arbitrary jsonb onto the appointment row.
+ */
+export async function saveInspectionAnswers(
+  id: string,
+  templateId: string | null,
+  answers: Record<string, unknown>,
+): Promise<Result> {
+  const ctx = await requireStaff(); // defense-in-depth (RLS also scopes the write)
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+
+  let clean: Record<string, unknown> = {};
+  if (templateId) {
+    // RLS confines this read to the caller's org, so a template id from another tenant simply
+    // doesn't resolve — the schema we validate against is always one this org owns.
+    const { data: form } = await supabase
+      .from("forms")
+      .select("schema, is_inspection")
+      .eq("id", templateId)
+      .maybeSingle();
+    if (!form) return { ok: false, error: "That inspection sheet no longer exists." };
+    if (!(form as { is_inspection?: boolean }).is_inspection)
+      return { ok: false, error: "That form isn't an inspection sheet." };
+    clean = coerceAnswers(parseInspectionSchema((form as { schema?: unknown }).schema), answers);
+  }
+
+  const { data, error } = await supabase
+    .from("appointments")
+    .update({
+      inspection_template_id: templateId,
+      inspection_answers: clean,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .select("id");
+  if (error) return { ok: false, error: error.message };
+  if (!data?.length) return { ok: false, error: "Appointment not found." };
+  revalidatePath(`/appointments/${id}`);
+  revalidatePath("/inspections");
   return { ok: true, id };
 }
 

@@ -10,11 +10,13 @@ export function EditFormButton({
   formId,
   name,
   description,
+  isInspection,
   fields,
 }: {
   formId: string;
   name: string;
   description: string | null;
+  isInspection: boolean;
   fields: FormField[];
 }) {
   const [open, setOpen] = useState(false);
@@ -36,6 +38,7 @@ export function EditFormButton({
         formId={formId}
         initialName={name}
         initialDescription={description ?? ""}
+        initialIsInspection={isInspection}
         initialFields={fieldsToRows(fields)}
       />
     </>

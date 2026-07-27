@@ -26,6 +26,9 @@ function slug(label: string, idx: number) {
 export async function createForm(input: {
   name: string;
   description: string;
+  /** Marks this form as an INSPECTION SHEET (0165) — selectable on an appointment, and the
+   *  source of the typed answers the estimator reads instead of re-parsing prose. */
+  is_inspection?: boolean;
   fields: { label: string; type: FieldType; options?: string }[];
 }): Promise<Result> {
   const supabase = await createClient();
@@ -56,6 +59,7 @@ export async function createForm(input: {
     .insert({
       name,
       description: input.description.trim() || null,
+      is_inspection: !!input.is_inspection,
       schema,
       created_by: user.id,
     })
@@ -72,6 +76,7 @@ export async function updateForm(
   input: {
     name: string;
     description: string;
+    is_inspection?: boolean;
     fields: { label: string; type: FieldType; options?: string }[];
   },
 ): Promise<Result> {
@@ -102,6 +107,7 @@ export async function updateForm(
     .update({
       name,
       description: input.description.trim() || null,
+      is_inspection: !!input.is_inspection,
       schema,
     })
     .eq("id", id);
