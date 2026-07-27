@@ -127,7 +127,7 @@ export function PriceListManager({ items }: { items: PriceItem[] }) {
         {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-6">
           <div><Label htmlFor="pl-code">Code</Label><Input id="pl-code" value={code} onChange={(e) => setCode(e.target.value)} /></div>
-          <div className="col-span-2"><Label htmlFor="pl-desc">Description *</Label><Input id="pl-desc" value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="e.g. 12/2 Romex (250ft)" /></div>
+          <div className="col-span-2"><Label htmlFor="pl-desc">Description *</Label><Input id="pl-desc" value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="e.g. how you'd say it at the supply house" /></div>
           <div><Label htmlFor="pl-cat">Category</Label><Input id="pl-cat" value={category} onChange={(e) => setCategory(e.target.value)} /></div>
           <div><Label htmlFor="pl-buy">Buy $</Label><NumberInput id="pl-buy" value={buy} onValueChange={setBuy} /></div>
           <div><Label htmlFor="pl-mk">Markup %</Label><NumberInput id="pl-mk" value={markup} onValueChange={setMarkup} /></div>

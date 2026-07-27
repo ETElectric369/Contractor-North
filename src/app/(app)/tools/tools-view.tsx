@@ -752,7 +752,26 @@ const TOOLS: Tool[] = [
   { id: "unit-convert", name: "Unit converter", pkg: "Field", desc: "Length, area, volume, weight, temp", icon: ArrowRightLeft, render: () => <UnitConverter /> },
 ];
 
-export function ToolsView() {
+/**
+ * WHICH PACKAGES THIS TRADE STARTS ON.
+ *
+ * Ten of the twenty-four tools are electrical. A deck builder opened this page and 40% of it was
+ * wire sizing, conduit fill and GFCI lookups — the same "your app is showing me the electrician's
+ * app" complaint as the inspection page.
+ *
+ * Trade-specific packages are HIDDEN, not removed: "Show every tool" brings them straight back,
+ * because a deck builder genuinely might want a voltage-drop figure for a lighting run, and
+ * silently deleting a capability is worse than showing one too many.
+ */
+function packagesForTrade(trade: string): Pkg[] {
+  const t = trade.toLowerCase();
+  const universal: Pkg[] = ["Estimating", "Money", "Field"];
+  return /electric|sparky/.test(t) ? ["Electrical", ...universal] : universal;
+}
+
+export function ToolsView({ trade = "" }: { trade?: string }) {
+  const mine = useMemo(() => new Set(packagesForTrade(trade)), [trade]);
+  const [showAll, setShowAll] = useState(false);
   const [pkg, setPkg] = useState<"All" | Pkg>("All");
   const [q, setQ] = useState("");
   const [open, setOpen] = useState<Set<string>>(() => new Set());
@@ -761,12 +780,16 @@ export function ToolsView() {
     const query = q.trim().toLowerCase();
     return TOOLS.filter(
       (t) =>
+        (showAll || mine.has(t.pkg)) &&
         (pkg === "All" || t.pkg === pkg) &&
         (!query || t.name.toLowerCase().includes(query) || t.desc.toLowerCase().includes(query) || t.pkg.toLowerCase().includes(query)),
     );
-  }, [pkg, q]);
+  }, [pkg, q, showAll, mine]);
 
-  const chips: ("All" | Pkg)[] = ["All", "Electrical", "Estimating", "Money", "Field"];
+  const chips: ("All" | Pkg)[] = (["All", "Electrical", "Estimating", "Money", "Field"] as const).filter(
+    (p) => p === "All" || showAll || mine.has(p),
+  ) as ("All" | Pkg)[];
+  const hiddenCount = TOOLS.filter((t) => !mine.has(t.pkg)).length;
   const toggle = (id: string) =>
     setOpen((o) => {
       const n = new Set(o);
@@ -782,9 +805,10 @@ export function ToolsView() {
         <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search tools — voltage, concrete, margin…" className="pl-9" />
       </div>
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {chips.map((p) => {
-          const count = p === "All" ? TOOLS.length : TOOLS.filter((t) => t.pkg === p).length;
+          const pool = showAll ? TOOLS : TOOLS.filter((t) => mine.has(t.pkg));
+          const count = p === "All" ? pool.length : pool.filter((t) => t.pkg === p).length;
           const active = pkg === p;
           return (
             <button
@@ -797,6 +821,16 @@ export function ToolsView() {
             </button>
           );
         })}
+        {/* Trade-hidden packages are one tap away, never gone. A deck builder shouldn't wade
+            through wire-size calculators to reach board feet — but he might want one someday. */}
+        {hiddenCount > 0 && (
+          <button
+            onClick={() => { setShowAll((v) => !v); setPkg("All"); }}
+            className="ml-auto rounded-full px-3 py-1.5 text-xs font-medium text-slate-500 underline-offset-2 hover:underline"
+          >
+            {showAll ? "Show fewer" : `Show every tool (+${hiddenCount})`}
+          </button>
+        )}
       </div>
 
       <div className="space-y-2.5">

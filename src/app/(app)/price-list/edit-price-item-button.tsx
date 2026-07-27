@@ -98,7 +98,7 @@ export function EditPriceItemButton({ item }: { item: PriceItem }) {
             </div>
             <div className="col-span-2">
               <Label htmlFor="epi-desc">Description *</Label>
-              <Input id="epi-desc" value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="e.g. 12/2 Romex (250ft)" />
+              <Input id="epi-desc" value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="e.g. how you'd say it at the supply house" />
             </div>
             <div className="col-span-2">
               <Label htmlFor="epi-supplier">Supplier</Label>

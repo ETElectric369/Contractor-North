@@ -42,7 +42,7 @@ export function PaidPrices() {
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="e.g. 200A panel, romex 12-2, EV charger"
+            placeholder="search what you've bought before"
             className="pl-9"
           />
         </div>

@@ -18,21 +18,34 @@ export interface CapturePhoto {
 
 type Field = "notes" | "measurements" | "materials";
 
+/**
+ * TRADE-NEUTRAL ON PURPOSE (0165).
+ *
+ * These placeholders used to be hardcoded electrician examples — "Panel is a 100A Zinsco, attic
+ * access over the garage" — so a deck builder walking a job got asked about a Zinsco panel. That
+ * was a real complaint from the second tenant on day one, and it would repeat for every trade
+ * after him.
+ *
+ * The trade-specific questions now live in the typed inspection sheet ABOVE these boxes, where
+ * they are DATA (per-org rows) rather than code. That leaves these three for what they were
+ * always actually good at: the thing nobody thought to put on the sheet. So the prompts ask for
+ * that, in words that fit any trade.
+ */
 const FIELDS: { key: Field; label: string; placeholder: string }[] = [
   {
     key: "notes",
     label: "Notes",
-    placeholder: "Panel is a 100A Zinsco, attic access over the garage, homeowner wants the hot tub circuit…",
+    placeholder: "What you noticed that the questions above didn't ask about — condition, access, what the customer said they want…",
   },
   {
     key: "measurements",
     label: "Measurements",
-    placeholder: "Run from panel to detached garage ≈ 85 ft, kitchen wall 14 ft, ceiling height 9 ft…",
+    placeholder: "Anything you measured that isn't already in the sheet above…",
   },
   {
     key: "materials",
     label: "Materials needed",
-    placeholder: "200A panel, 2× 20A AFCI breakers, 250 ft 12/2 NM, weatherhead…",
+    placeholder: "What this job will need — parts, quantities, anything you'll have to order…",
   },
 ];
 
