@@ -101,6 +101,50 @@ describe("the price book's unit governs", () => {
   });
 });
 
+describe("the server-side ladder overrides a guessed price", () => {
+  const laddered = new Map([
+    ["200a panel", { buy_price: 331.86, sell_price: 398.23, unit: "ea", code: "PN4060", source: "book" as const, flagged: false, note: "book" }],
+    ["romex 12-2", { buy_price: 150, sell_price: 180, unit: null, code: null, source: "paid" as const, flagged: true, note: "Last paid $150 at CED — confirm." }],
+  ]);
+
+  it("a book price found server-side replaces the model's web guess", () => {
+    // The real incident: the panel WAS in the book at $331.86 and the model quoted $200.
+    const l = mapEstimatorLine(
+      { kind: "material", description: "200a panel", quantity: 1, unit: "ea", unit_cost: 200 },
+      ctx({ laddered }),
+    );
+    expect(l.unit_price).toBe(398.23);
+    expect(l.description).toContain("[PN4060]");
+    expect(l.flag).toBeUndefined();
+  });
+
+  it("a purchase-history price is used but keeps its confirm flag", () => {
+    const l = mapEstimatorLine(
+      { kind: "material", description: "Romex 12-2", quantity: 2, unit_cost: 210 },
+      ctx({ laddered }),
+    );
+    expect(l.unit_price).toBe(180);
+    expect(l.flag).toMatch(/confirm/i);
+  });
+
+  it("a catalog code the model DID resolve still wins over the ladder", () => {
+    const l = mapEstimatorLine(
+      { kind: "material", description: "200a panel", catalog: "4SBOX", quantity: 1, unit: "ea" },
+      ctx({ laddered }),
+    );
+    expect(l.unit_price).toBe(3.52);
+  });
+
+  it("with nothing on file the model's researched estimate stands, flagged", () => {
+    const l = mapEstimatorLine(
+      { kind: "material", description: "obscure part", quantity: 1, unit_cost: 42 },
+      ctx({ laddered, orgDefaultPct: 25 }),
+    );
+    expect(l.unit_price).toBe(52.5);
+    expect(l.flag).toMatch(/home depot/i);
+  });
+});
+
 describe("junk from the model never becomes a silent zero-dollar line", () => {
   it("missing quantity defaults to 1, not 0", () => {
     expect(mapEstimatorLine({ kind: "material", catalog: "4SBOX" }, ctx()).quantity).toBe(1);

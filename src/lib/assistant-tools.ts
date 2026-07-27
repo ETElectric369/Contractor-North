@@ -10,6 +10,8 @@ import { aggregatePayrollEntries, payRateForEntry } from "@/lib/payroll-math";
 import { summarizeMileage } from "@/lib/mileage-math";
 import { searchPaidPrices } from "@/lib/pricing/learned-prices";
 import { effectiveMarkupPct } from "@/lib/pricing/markup";
+import { searchPriceBook } from "@/lib/pricing/price-book-search";
+import { priceMaterial } from "@/lib/pricing/price-material";
 import { getJobFinancials, getJobBudgetVsActual, listJobProfitability, listProfitByType } from "@/lib/analytics/job-profitability";
 import { getArAging, getRevenueTrend, getQuoteStats, getCustomerValue } from "@/lib/analytics/money-metrics";
 import { getHoursBreakdown } from "@/lib/analytics/time-breakdown";
@@ -181,6 +183,19 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
         search: { type: "string", description: "Text to match against item description, part code, or category." },
         limit: { type: "integer", description: "Max rows (default 15, max 40)." },
       },
+    },
+  },
+  {
+    name: "price_material",
+    description:
+      "PRICE ONE MATERIAL — runs the company's whole sourcing ladder in one call and returns the number to put on the line. Use this for EVERY material on an estimate or quote instead of calling search_price_list and lookup_my_price yourself: it checks the price book, then what they've actually paid on their own bills, applies the correct markup (including the customer's pricing level if you pass customer_id), and tells you the source. If it comes back needs_web_price, THEN use web_search for a current price, apply the markup_pct_used it gave you, and say the line is an estimate. Never do the markup arithmetic yourself — this returns sell_price already computed. If `flagged` is true, say so when you read the line back.",
+    input_schema: {
+      type: "object",
+      properties: {
+        description: { type: "string", description: "The material, as a person would say it: '200a outdoor panel', '12-2 romex', 'EV charger'." },
+        customer_id: { type: "string", description: "The customer this is being quoted to, if known — applies their pricing level instead of the default markup." },
+      },
+      required: ["description"],
     },
   },
   {
@@ -539,6 +554,10 @@ export const STAFF_ONLY_DATA_TOOLS = new Set<string>([
   "customer_value", // lifetime collected per customer (revenue)
   "hours_breakdown", // crew hours by job + cost code (labor)
   "lookup_my_price", // what the company paid for materials (buy-side cost from their bills)
+  // price_material runs the ladder THROUGH lookup_my_price's data source, so leaving it open would
+  // be a straight bypass of that gate — a tech could read the company's paid costs by asking for a
+  // quote line instead of asking for a cost.
+  "price_material",
   "get_bill", // supplier bill + its cost breakdown
   "get_purchase_order", // vendor PO + costs (unit_cost is buy-side pricing)
   "list_kits", // saved quote-bundle pricing
@@ -1653,102 +1672,68 @@ export async function runDataTool(
 
       case "search_price_list": {
         const lim = clampLimit(input.limit, 15);
-        const raw = String(input.search ?? "").trim().slice(0, 80);
         // The org default markup — the last fallback in THE markup rule, so a net-cost import
         // (every item markup_pct = 0) can't make Nort quote the company's real cost as a sell.
         const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
         const orgDefaultPct = getOrgSettings((org as any)?.settings).default_markup_pct;
-        const baseQuery = () =>
-          supabase
-            .from("price_list_items")
-            .select("code, description, category, unit, buy_price, markup_pct, supplier")
-            .eq("archived", false)
-            .order("description")
-            .limit(lim);
-        const shape = (rows: any[]) =>
-          rows.map((r: any) => ({
-            code: r.code,
-            description: r.description,
-            category: r.category,
-            unit: r.unit,
-            buy_price: money(r.buy_price), // the company's REAL net cost — what the estimator prices from
-            markup_pct: Number(r.markup_pct) || 0, // the ITEM's book-default markup
-            // Sell at the effective DEFAULT markup (item markup > 0 → org default — the shared
-            // effectiveMarkupPct chain, same as quote-builder markupFor / runEstimator). A
-            // CUSTOMER's pricing-level markup still overrides it, so a leveled customer's real
-            // sell differs — the tool description tells Nort to check the level before quoting.
-            default_sell_price: money(
-              Number(r.buy_price) * (1 + effectiveMarkupPct({ itemPct: Number(r.markup_pct), orgDefaultPct }) / 100),
-            ),
-            supplier: r.supplier,
-          }));
-
-        if (!raw) {
-          const { data, error } = await baseQuery();
-          if (error) throw error;
-          return JSON.stringify({ count: data?.length ?? 0, items: shape(data ?? []) });
-        }
-
-        // FUZZY LADDER — one call must find the part however it was phrased. The $331.86
-        // panel (PN4060L1200C) Nort web-guessed at $200 WAS in the book; the single
-        // whole-phrase ilike just missed it, so Nort gave up and searched the web. Try
-        // progressively looser strategies and stop at the first hit — mirrors the
-        // exact-code → last-token → normalized-description ladder of findPl in
-        // materials/actions.ts. Word queries go through sanitize() (strips the ,()%*
-        // that break a PostgREST .or()); the book is small, so a few queries are cheap.
-        const s = sanitize(raw);
-        const words = raw
-          .split(/\s+/)
-          .map((w) => sanitize(w))
-          .filter((w) => w.length >= 2);
-        const lastToken = words.length > 1 ? words[words.length - 1] : null;
-        const strategies: { how: string; run: () => any }[] = [
-          // 1. the exact catalog code ("PN4060L1200C"), case-insensitive
-          { how: "exact code", run: () => baseQuery().ilike("code", escapeLike(raw)) },
-          // 2. the query somewhere inside a code (partial/prefixed part numbers)
-          { how: "code contains", run: () => baseQuery().ilike("code", `%${escapeLike(raw)}%`) },
-          // 3. the whole phrase anywhere in description / code / category (the old behavior)
-          {
-            how: "phrase",
-            run: () => (s ? baseQuery().or(`description.ilike.%${s}%,code.ilike.%${s}%,category.ilike.%${s}%`) : null),
-          },
-          // 4. EVERY significant word in the description, any order ("outdoor 200a panel"
-          //    hits "Panel, 200A main breaker, outdoor")
-          {
-            how: "all words in description",
-            run: () =>
-              words.length > 1 ? words.reduce((q: any, w: string) => q.ilike("description", `%${w}%`), baseQuery()) : null,
-          },
-          // 5. the LAST token against code — the findPl idiom ("RACO 936" → code 936)
-          { how: "last token as code", run: () => (lastToken ? baseQuery().ilike("code", `%${lastToken}%`) : null) },
-          // 6. ANY significant word in description or code — the widest net before giving up
-          {
-            how: "any word",
-            run: () => {
-              const parts = words.flatMap((w) => [`description.ilike.%${w}%`, `code.ilike.%${w}%`]);
-              return parts.length ? baseQuery().or(parts.join(",")) : null;
-            },
-          },
-        ];
-        for (const st of strategies) {
-          const q = st.run();
-          if (!q) continue;
-          const { data, error } = await q;
-          if (error) throw error;
-          if (data?.length) {
-            return JSON.stringify({
-              count: data.length,
-              matched_by: st.how,
-              items: shape(data),
-              note: "Book matches are this company's REAL prices — use them over any web figure, and keep the [CODE] tag on the quote line.",
-            });
-          }
+        // THE LADDER LIVES IN @/lib/pricing/price-book-search, shared with price_material, so both
+        // tools find the same part. Two lookups with two search implementations is how one part
+        // ends up with two prices on two quotes.
+        const { matched_by, rows } = await searchPriceBook(supabase, String(input.search ?? ""), lim);
+        const items = rows.map((r) => ({
+          code: r.code,
+          description: r.description,
+          category: r.category,
+          unit: r.unit,
+          buy_price: money(r.buy_price), // the company's REAL net cost — what the estimator prices from
+          markup_pct: Number(r.markup_pct) || 0, // the ITEM's book-default markup
+          // Sell at the effective DEFAULT markup (item markup > 0 → org default). A CUSTOMER's
+          // pricing-level markup still overrides it — use price_material to get that applied for you.
+          default_sell_price: money(
+            Number(r.buy_price) * (1 + effectiveMarkupPct({ itemPct: Number(r.markup_pct), orgDefaultPct }) / 100),
+          ),
+          supplier: r.supplier,
+        }));
+        if (!items.length) {
+          return JSON.stringify({
+            count: 0,
+            items: [],
+            note: "No price-book match (tried exact code, partial code, the whole phrase, and word-by-word) — the item genuinely isn't in the book. Only now fall back to lookup_my_price or web pricing, and FLAG that line as an estimate to confirm.",
+          });
         }
         return JSON.stringify({
-          count: 0,
-          items: [],
-          note: "No price-book match (tried exact code, partial code, the whole phrase, and word-by-word) — the item genuinely isn't in the book. Only now fall back to lookup_my_price or web pricing, and FLAG that line as an estimate to confirm.",
+          count: items.length,
+          ...(matched_by ? { matched_by } : {}),
+          items,
+          note: "Book matches are this company's REAL prices — use them over any web figure, and keep the [CODE] tag on the quote line. For a QUOTE LINE prefer price_material, which applies the customer's markup for you.",
         });
+      }
+
+      case "price_material": {
+        const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+        const orgDefaultPct = getOrgSettings((org as any)?.settings).default_markup_pct;
+        // The customer's pricing level, resolved HERE rather than asked of the model. The old flow
+        // told Nort to "check the customer's pricing level before quoting a sell price" — in-head
+        // arithmetic on the customer's money, which is the one thing a model must never own.
+        let levelPct: number | null = null;
+        const custId = String(input.customer_id ?? "").trim();
+        if (custId) {
+          const { data: cust } = await supabase
+            .from("customers")
+            .select("pricing_level_id, pricing_levels(markup_pct)")
+            .eq("id", custId)
+            .maybeSingle();
+          const lvl = (cust as any)?.pricing_levels;
+          const row = Array.isArray(lvl) ? lvl[0] : lvl;
+          const pct = Number(row?.markup_pct);
+          if (Number.isFinite(pct) && pct > 0) levelPct = pct;
+        }
+        const priced = await priceMaterial(supabase as any, {
+          description: String(input.description ?? ""),
+          levelPct,
+          orgDefaultPct,
+        });
+        return JSON.stringify(priced);
       }
 
       case "lookup_my_price": {

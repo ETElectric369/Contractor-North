@@ -12,7 +12,8 @@ import { CALC_TOOLS, runCalc } from "@/lib/electrical-calc";
 import { recordAiUsage } from "@/lib/ai-cost";
 import type Anthropic from "@anthropic-ai/sdk";
 import { getOrgSettings, accentHex } from "@/lib/org-settings";
-import { mapEstimatorLine, type DraftLineItem, type BookRow } from "@/lib/estimate/line-map";
+import { mapEstimatorLine, type DraftLineItem, type BookRow, type LadderPrice } from "@/lib/estimate/line-map";
+import { priceMaterial } from "@/lib/pricing/price-material";
 import { sendEmail, renderQuoteNoticeEmail, ownerBcc } from "@/lib/email";
 import { sendSms } from "@/lib/sms";
 import { createWorkOrderFromQuote } from "../work-orders/actions";
@@ -925,6 +926,41 @@ async function runEstimator(
   const questions = Array.isArray(parsed.questions)
     ? parsed.questions.map((q) => String(q).trim()).filter(Boolean)
     : [];
+  /**
+   * THE LADDER RUNS ON EVERY UNRESOLVED LINE, in code. The model returns a catalog code when it
+   * recognises one; when it doesn't, it used to hand back an invented `unit_cost` and we took it.
+   * But "not in the book" and "didn't think to look" produce identical JSON, and only one of them
+   * justifies a guessed price. So every material line without a resolved code now goes through the
+   * same book → paid-history ladder the assistant uses, server-side, before anything is priced.
+   * Bounded and parallel: a dense plan take-off can return dozens of lines, and this must not turn
+   * one estimate into a hundred serial round trips.
+   */
+  const LADDER_CAP = 30;
+  const unresolved = raw
+    .filter((i) => i.kind !== "labor")
+    .filter((i) => !(i.catalog && byCode.has(String(i.catalog).trim().toUpperCase())))
+    .map((i) => String(i.description ?? "").trim())
+    .filter(Boolean);
+  const uniqueDescs = [...new Set(unresolved.map((d) => d.toLowerCase()))].slice(0, LADDER_CAP);
+  const laddered = new Map<string, LadderPrice>();
+  await Promise.all(
+    uniqueDescs.map(async (d) => {
+      try {
+        const p = await priceMaterial(supabase as never, {
+          description: d,
+          levelPct: markupPct ?? null,
+          orgDefaultPct: orgS.default_markup_pct,
+        });
+        // Only a REAL find replaces the model's number. A "none" result means the ladder agrees
+        // there's nothing on file, and the model's researched estimate is the best we have.
+        if (p.source !== "none") laddered.set(d, p);
+      } catch {
+        // A lookup failure must never cost the contractor their draft — fall through to the
+        // model's number, which is what would have happened anyway.
+      }
+    }),
+  );
+
   // The per-line pricing rules live in @/lib/estimate/line-map as a PURE function, so the two
   // money bugs that used to hide in this closure (the echoed labor rate, the book-vs-model unit)
   // are covered by tests instead of by review.
@@ -934,6 +970,7 @@ async function runEstimator(
       byCode: byCode as Map<string, BookRow>,
       levelPct: markupPct ?? null,
       orgDefaultPct: orgS.default_markup_pct,
+      laddered,
     }),
   );
   return { items, questions };

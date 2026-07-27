@@ -52,6 +52,17 @@ export type EstimatorRawItem = {
   unit_cost?: unknown;
 };
 
+/** What the sourcing ladder found for a line the model couldn't tie to a catalog code. */
+export type LadderPrice = {
+  buy_price: number | null;
+  sell_price: number | null;
+  unit: string | null;
+  code: string | null;
+  source: "book" | "paid" | "none";
+  flagged: boolean;
+  note: string;
+};
+
 export type LineMapContext = {
   /** The company/customer bill rate, already resolved. Authoritative whenever it is > 0. */
   rate: number;
@@ -61,6 +72,13 @@ export type LineMapContext = {
   levelPct: number | null;
   /** Org default markup. */
   orgDefaultPct: number;
+  /**
+   * Ladder results for lines the model did NOT resolve to a catalog code, keyed by lowercased
+   * description. The model gets ONE chance to name a code; after that the app looks the part up
+   * itself rather than accepting a guessed price, because "I couldn't find it in the book" and
+   * "I didn't think to look" produce the same JSON.
+   */
+  laddered?: Map<string, LadderPrice>;
 };
 
 const sell = (cost: number, pct: number) => Math.round(cost * (1 + pct / 100) * 100) / 100;
@@ -84,6 +102,22 @@ export function mapEstimatorLine(i: EstimatorRawItem, ctx: LineMapContext): Draf
 
   const cat = i.catalog ? String(i.catalog).trim() : null;
   const pl = cat ? ctx.byCode.get(cat.toUpperCase()) ?? null : null;
+  const desc = String(i.description ?? "").trim();
+
+  // THE LADDER, for anything the model didn't tie to a catalog code. It already ran server-side,
+  // so a real book or purchase-history price replaces the model's guess outright — including its
+  // markup, which the ladder computed with the customer's level in hand.
+  const found = !pl ? ctx.laddered?.get(desc.toLowerCase()) : undefined;
+  if (found && found.sell_price != null && found.buy_price != null) {
+    return {
+      description: found.code ? `${desc || found.code} [${found.code}]` : desc,
+      quantity: Number(i.quantity) || 1,
+      unit: found.unit || (i.unit ? String(i.unit).trim() : "") || "ea",
+      unit_price: found.sell_price,
+      flag: found.flagged ? found.note : undefined,
+    };
+  }
+
   const cost = pl ? Number(pl.buy_price) || 0 : Number(i.unit_cost) || 0;
 
   // Markup, per item: customer level → the book item's own markup → org default. (An off-book
