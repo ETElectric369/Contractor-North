@@ -8,6 +8,7 @@ import { createNotifications } from "@/lib/notifications";
 import { subtotalTaxTotal } from "@/lib/invoice-math";
 import { QUOTE_STATUSES } from "@/lib/statuses";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
+import { recordAiUsage } from "@/lib/ai-cost";
 import { getOrgSettings, accentHex } from "@/lib/org-settings";
 import { effectiveMarkupPct } from "@/lib/pricing/markup";
 import { sendEmail, renderQuoteNoticeEmail, ownerBcc } from "@/lib/email";
@@ -818,7 +819,7 @@ async function runEstimator(
 ): Promise<{ items: DraftLineItem[]; questions: string[] }> {
   const supabase = await createClient();
   const [{ data: org }, { data: book }] = await Promise.all([
-    supabase.from("organizations").select("settings").limit(1).maybeSingle(),
+    supabase.from("organizations").select("id, settings").limit(1).maybeSingle(),
     supabase
       .from("price_list_items")
       .select("code, description, buy_price, markup_pct, unit, category")
@@ -834,22 +835,56 @@ async function runEstimator(
     .join("\n");
   const byCode = new Map(rows.filter((b) => b.code).map((b) => [String(b.code).toUpperCase(), b]));
 
+  // TRADE-NEUTRAL. This prompt opened "You are an estimator for an electrical contractor"
+  // and ordered NEC calculations — so when Chris finished a DECK inspection and tapped
+  // estimate, his deck was priced by an electrician who was told to size conduit. The org's
+  // estimating_mode already distinguishes a catalog shop (bids from its own price book) from
+  // a research shop (web-priced + trade calcs); the chat route has branched on it since
+  // cn-v80. runEstimator never did.
+  const catalogMode = orgS.estimating_mode === "catalog";
+  const trade = orgS.trade_label?.trim() || "contractor";
+
   const client = getAnthropic();
   const msg = await client.messages.create({
     model: DEFAULT_MODEL,
     max_tokens: 8192, // headroom: a dense plan take-off can run long — don't truncate mid-JSON
 
-    system:
-      "You are an estimator for an electrical contractor. Draft quote line items for the scope, pricing materials from the contractor's OWN PRICE BOOK (their real net cost) — never invent market prices. " +
-      `LABOR: ${rate > 0 ? `$${rate}/hr` : "a realistic US electrical rate"}; estimate crew-hours realistically (one or more labor lines). ` +
-      "MATERIALS: pick items from the PRICE BOOK below where they fit — return the EXACT catalog code and the book cost. Calculate quantities per NEC (wire size, box/conduit fill, breaker/feeder, loads) — don't eyeball. " +
-      'If a needed material is NOT in the price book, still include it, estimate a typical HOME DEPOT retail price, and mark source "home_depot". ' +
-      'Respond with ONLY a JSON OBJECT: {"items": [ ... ], "questions": [ ... ]}. ' +
-      'Each entry in "items": {"description": string, "quantity": number, "unit": "ea|ft|hr|lot", "kind": "material"|"labor", "catalog": string|null, "unit_cost": number, "source": "book"|"home_depot"} (labor: kind="labor", source="book", unit_cost=hourly rate). ' +
-      '"questions" = a short list of plain-English things the contractor should REVIEW before sending: ambiguous counts, plan callouts that imply EXTRA scope (e.g. data/TV outlets often need a home-run Cat6 to a central data box — confirm the count and where it feeds), owner decisions (EV location, fixture selection), or anything low-confidence. Be specific. No prose outside the JSON.' +
-      (playbook ? `\n\nCompany notes (apply on top; the price book + calc'd quantities govern):\n${playbook}` : "") +
-      `\n\nPRICE BOOK (code | description | unit | cost${rows.some((b) => b.category) ? " | category" : ""}):\n${catalog || "(price book is empty — estimate Home Depot prices and flag every material)"}`,
+    system: [
+      {
+        type: "text" as const,
+        text:
+          `You are an estimator for a ${trade}. Draft quote line items for the scope, pricing materials from the contractor's OWN PRICE BOOK (their real net cost) — never invent market prices. ` +
+          `LABOR: ${rate > 0 ? `$${rate}/hr` : "a realistic US rate for this trade"}; estimate crew-hours realistically (one or more labor lines). ` +
+          "MATERIALS: pick items from the PRICE BOOK below where they fit — return the EXACT catalog code and the book cost. " +
+          (catalogMode
+            ? "QUANTITIES: compute from the measurements given — areas = length × width, linear feet, counts. Do NOT apply trade calculations that don't fit this work. "
+            : "QUANTITIES: calculate per the governing code for this trade (for electrical: NEC wire size, box/conduit fill, breaker/feeder, loads) — don't eyeball. ") +
+          'If a needed material is NOT in the price book, still include it, estimate a typical retail price, and mark source "home_depot". ' +
+          'Respond with ONLY a JSON OBJECT: {"items": [ ... ], "questions": [ ... ]}. ' +
+          'Each entry in "items": {"description": string, "quantity": number, "unit": "ea|ft|hr|lot", "kind": "material"|"labor", "catalog": string|null, "unit_cost": number, "source": "book"|"home_depot"} (labor: kind="labor", source="book", unit_cost=hourly rate). ' +
+          '"questions" = a short list of plain-English things the contractor should REVIEW before sending: ambiguous counts, callouts that imply EXTRA scope, owner decisions, or anything low-confidence. Be specific. No prose outside the JSON.' +
+          (playbook ? `\n\nCompany notes (apply on top; the price book + calc'd quantities govern):\n${playbook}` : ""),
+      },
+      {
+        // THE PRICE BOOK IS CACHED. It is byte-stable per org between catalog edits and was
+        // being re-billed at full input price on every single estimate — and Erik is about to
+        // import his real CED net pricing, which multiplies that book several times over.
+        // A cache read is ~10% of input, so repeat estimates stop paying for the catalog.
+        type: "text" as const,
+        text: `PRICE BOOK (code | description | unit | cost${rows.some((b) => b.category) ? " | category" : ""}):\n${catalog || "(price book is empty — estimate retail prices and flag every material)"}`,
+        cache_control: { type: "ephemeral" as const },
+      },
+    ],
     messages: [{ role: "user", content }],
+  });
+
+  // METER IT (0162). This is the single most expensive operation in the product and it was
+  // absent from the ledger — you cannot choose a price from a record that omits your biggest cost.
+  void recordAiUsage({
+    orgId: (org as { id?: string } | null)?.id,
+    model: DEFAULT_MODEL,
+    surface: "estimator",
+    usage: msg.usage as never,
   });
 
   const text = msg.content
@@ -977,7 +1012,7 @@ export async function generateCircuitSchedule(
 
   const { data: quote } = await supabase
     .from("quotes")
-    .select("id, title, description")
+    .select("id, title, description, org_id")
     .eq("id", quoteId)
     .maybeSingle();
   if (!quote) return { ok: false, error: "Estimate not found." };
@@ -1001,6 +1036,7 @@ export async function generateCircuitSchedule(
         'ckt = circuit position ("1","2"…). wire = e.g. "12/2","14/2","10/3","6/3". breaker = e.g. "20A","2P 30A","2P 50A". load = a short note (room/appliance or estimated VA). Number circuits sequentially, matching the breaker counts in the line items. No prose outside the JSON array.',
       messages: [{ role: "user", content: `Estimate: ${quote.title ?? ""}\n${(quote as any).description ?? ""}\n\nLine items:\n${lines}` }],
     });
+    void recordAiUsage({ orgId: (quote as { org_id?: string }).org_id, model: DEFAULT_MODEL, surface: "circuit-schedule", usage: msg.usage as never });
     const text = msg.content
       .filter((b) => b.type === "text")
       .map((b) => (b as { text: string }).text)

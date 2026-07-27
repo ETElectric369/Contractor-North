@@ -46,6 +46,13 @@ export interface OrgSettings {
    *  kits at their own prices, quantities from the customer's measurements (deck/carpentry
    *  & any preset-price shop). The quote_playbook holds the company's specific scoping script. */
   estimating_mode: "research" | "catalog";
+  /** What this company DOES, in the words a person would use: "deck builder",
+   *  "electrical contractor", "plumber". Drives the estimator's opening line and the
+   *  assistant's self-description. Before this existed, every org's estimator was told
+   *  it worked for an electrical contractor — so a deck inspection came back priced by
+   *  an electrician who'd been instructed to calculate conduit fill per NEC. Empty
+   *  falls back to the neutral "contractor". */
+  trade_label: string;
   /** Employee handbook text (simple #/## headings + paragraphs). */
   employee_handbook: string;
 
@@ -199,6 +206,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   material_buffer_percent: 10,
   quote_playbook: "",
   estimating_mode: "research",
+  trade_label: "",
   employee_handbook: "",
   work_day_start: "08:00",
   work_day_end: "17:00",

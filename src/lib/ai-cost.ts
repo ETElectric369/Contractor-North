@@ -103,6 +103,22 @@ export async function recordAiUsage(args: {
   }
 }
 
+/** The caller's org id, for metering a call from a server action that doesn't already
+ *  have one to hand. Returns null rather than throwing — an unattributable call should
+ *  go unrecorded, never break the feature it was measuring. */
+export async function currentOrgId(): Promise<string | null> {
+  try {
+    const { createClient } = await import("@/lib/supabase/server");
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return null;
+    const { data } = await supabase.from("profiles").select("org_id").eq("id", user.id).maybeSingle();
+    return (data as { org_id?: string } | null)?.org_id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** Monthly ceiling per org, in dollars. Generous by design — this is an abuse stop,
  *  not a usage tier. A normal heavy user should never come near it. */
 export const MONTHLY_AI_CEILING_USD = Number(process.env.AI_MONTHLY_CEILING_USD || 150);

@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getOrgSettings } from "@/lib/org-settings";
 import { effectiveMarkupPct } from "@/lib/pricing/markup";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
+import { recordAiUsage, currentOrgId } from "@/lib/ai-cost";
 import { visibleJobIdOrNull } from "@/lib/job-visibility";
 
 export interface DraftMaterial {
@@ -424,7 +425,7 @@ function parseDraftArray(raw: string): unknown[] {
   }
 }
 
-/** Ask Claude to build an electrical material take-off from a scope of work. */
+/** Ask Claude to build a material take-off from a scope of work. */
 export async function generateMaterialDraft(
   scope: string,
 ): Promise<{ ok: true; items: DraftMaterial[] } | { ok: false; error: string }> {
@@ -436,7 +437,7 @@ export async function generateMaterialDraft(
       model: DEFAULT_MODEL,
       max_tokens: 2000,
       system:
-        'You are a material estimator for an electrical contractor (CED supply). Given a scope of work, output a JSON array of material take-off items. Each item: {"description": string, "part_number": string|null, "quantity": number, "unit": string (ea/ft/box/roll/lot), "vendor": string|null, "est_cost": number|null (per-unit USD, rough)}. Include wire, conduit, fittings, breakers, devices, boxes, etc. as appropriate. Respond with ONLY the JSON array — no prose, no code fences.',
+        'You are a material estimator for a trade contractor. Given a scope of work, output a JSON array of material take-off items. Each item: {"description": string, "part_number": string|null, "quantity": number, "unit": string (ea/ft/box/roll/lot), "vendor": string|null, "est_cost": number|null (per-unit USD, rough)}. Include wire, conduit, fittings, breakers, devices, boxes, etc. as appropriate. Respond with ONLY the JSON array — no prose, no code fences.',
       // Prefill the assistant turn with "[" so the model is forced to begin the
       // JSON array immediately (no preamble, no ```json fence). We prepend it back
       // before parsing. This eliminates the "No JSON array in response" failures.
@@ -445,6 +446,7 @@ export async function generateMaterialDraft(
         { role: "assistant", content: "[" },
       ],
     });
+    void recordAiUsage({ orgId: await currentOrgId(), model: DEFAULT_MODEL, surface: "materials", usage: msg.usage as never });
 
     const block = msg.content.find((b) => b.type === "text") as
       | { text: string }
