@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { getPosition } from "@/lib/geo";
 import type { GeoPoint } from "@/lib/types";
+import { enqueue, remove as removeQueued, registerReplayer, startAutoDrain } from "@/lib/offline/queue";
 import { clockIn, clockOut } from "../timeclock/actions";
 
 /** Best-effort on-gesture GPS with a short cap (the timeclock panel's race pattern):
@@ -44,9 +45,21 @@ export function MyDayClock({
 }) {
   const [now, setNow] = useState(() => Date.now());
   const [err, setErr] = useState<string | null>(null);
+  const [held, setHeld] = useState(false);
   const [pending, start] = useTransition();
 
   // Tick once a second only while on the clock.
+  // Replay a held punch the moment the connection returns (or the app is reopened).
+  useEffect(() => {
+    registerReplayer("time.clockIn", async (args, clientOpId) => {
+      const a = args as Parameters<typeof clockIn>[0];
+      return clockIn({ ...a, clock_in_at: null, clientOpId });
+    });
+    return startAutoDrain((r) => {
+      if (r.remaining === 0) setHeld(false);
+    });
+  }, []);
+
   useEffect(() => {
     if (!open) return;
     setNow(Date.now());
@@ -60,17 +73,40 @@ export function MyDayClock({
     return `${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
   };
 
+  /**
+   * CLOCK-IN SURVIVES A DEAD ZONE (0167/0168).
+   *
+   * A punch is queued to the device BEFORE the network is tried, carrying the moment the button
+   * was pressed. When the phone reconnects, the shift is filed at 7:02 — not at whatever time the
+   * signal came back. Without this, arriving at a Chilcoot site with no bars simply lost the
+   * morning, and the old copy here said so out loud: "try again when you have bars."
+   *
+   * Clock-OUT is deliberately still online-only, and the asymmetry is the point: a failed clock-out
+   * leaves the shift OPEN, which the auto-clock-out and the office reconcile already catch. A
+   * failed clock-IN loses the start of the day with nothing to catch it. Queuing clock-out too
+   * needs a local open-shift model (there's no entry id to reference until the clock-in syncs) —
+   * that's a real feature, not a line of code, so it isn't smuggled in here.
+   */
   function doClockIn() {
     setErr(null);
     start(async () => {
       const gps = await getGps(2500);
+      // The instant they TAPPED. Everything downstream treats this as the truth of when work
+      // started; the server bounds and labels it (resolveOfflinePunchTime).
+      const pressedAt = new Date().toISOString();
+      // Job-less on purpose — clockIn resolves it server-side (today's assignment →
+      // the org's only in-progress job → none; the office attaches it later).
+      const payload = { job_id: null, job_code: null, gps, offline_pressed_at: pressedAt };
+      const op = await enqueue("time.clockIn", payload, "Clock in");
       try {
-        // Job-less on purpose — clockIn resolves it server-side (today's assignment →
-        // the org's only in-progress job → none; the office attaches it later).
-        const res = await clockIn({ job_id: null, job_code: null, gps, clock_in_at: null });
+        const res = await clockIn({ ...payload, clock_in_at: null, clientOpId: op.clientOpId });
+        await removeQueued(op.clientOpId);
         if (!res.ok) setErr(res.error ?? "Could not clock in.");
+        else setHeld(false);
       } catch {
-        setErr(OFFLINE_MSG);
+        // Network only. The punch is on the phone with its real time — say that instead of
+        // telling someone standing in a dead zone to try again when they have bars.
+        setHeld(true);
       }
     });
   }
@@ -132,6 +168,13 @@ export function MyDayClock({
             </>
           )}
           {err && <div className="mt-1 text-xs text-red-600">{err}</div>}
+          {/* Not an error. The punch is saved on the phone WITH the time it was made — a tech who
+              knows that carries on working instead of standing around retrying. */}
+          {held && !err && (
+            <div className="mt-1 text-xs text-sky-600">
+              Clocked in — saved on your phone at the right time, and it&rsquo;ll file itself when you have signal.
+            </div>
+          )}
         </div>
         {open ? (
           <Button variant="destructive" size="lg" onClick={doClockOut} disabled={pending} className="ml-auto shrink-0">

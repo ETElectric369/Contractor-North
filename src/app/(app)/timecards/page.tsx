@@ -596,6 +596,15 @@ export default async function TimecardsPage({
                           {e.source === "manual" && (
                             <Badge tone="amber" className="ml-1">manual</Badge>
                           )}
+                          {/* DISCLOSURE IS THE GUARD (0168). An offline punch's start time came
+                              from the phone, not the server clock — nothing can prove it was made
+                              live rather than backdated, so the card says where it came from and
+                              lets the office judge. */}
+                          {e.source === "offline" && (
+                            <Badge tone="blue" className="ml-1" title="Punched with no signal — time came from the phone">
+                              offline
+                            </Badge>
+                          )}
                           {e.lunch_minutes > 0 && (
                             <span className="ml-2 text-xs text-slate-400">
                               lunch {e.lunch_minutes}m

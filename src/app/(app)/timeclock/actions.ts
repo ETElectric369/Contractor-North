@@ -8,6 +8,8 @@ import { requireStaff } from "@/lib/staff-guard";
 import { ACTIVE_JOB_STATUSES, pickJobScheduledToday } from "@/lib/job-status";
 import { hoursBetween } from "@/lib/utils";
 import { autoLunchMinutes } from "@/lib/lunch-rule";
+import { resolveOfflinePunchTime } from "@/lib/offline/punch-time";
+import { runOnce } from "@/lib/offline/run-once";
 import { getOrgSettings } from "@/lib/org-settings";
 import { tzDateTimeUtc, todayBoundsInTz } from "@/lib/tz";
 import { createNotifications } from "@/lib/notifications";
@@ -100,12 +102,49 @@ export async function clockIn(input: {
   job_code: string | null;
   gps: GeoPoint | null;
   clock_in_at?: string | null; // optional backdated start (e.g. forgot to clock in)
+  /** Offline queue (0167/0168): when the user actually PRESSED the button. Set only by a replay
+   *  from the device queue; see resolveOfflinePunchTime for why it's bounded and labelled. */
+  offline_pressed_at?: string | null;
+  /** Offline queue idempotency key — makes a retried punch exactly-once. */
+  clientOpId?: string;
 }): Promise<ClockResult> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
+
+  /**
+   * EXACTLY-ONCE (0167). The DB's one_open_entry index already stops a second OPEN shift, but it
+   * reports that as "You're already clocked in." — which is a confusing lie to show someone whose
+   * punch actually landed, and it tells the queue the op was rejected. runOnce makes the replay a
+   * genuine no-op that returns the original result.
+   */
+  const { data: profRow } = await supabase.from("profiles").select("org_id").eq("id", user.id).maybeSingle();
+  return runOnce(
+    {
+      clientOpId: input.clientOpId,
+      action: "time.clockIn",
+      orgId: (profRow as { org_id?: string } | null)?.org_id,
+      profileId: user.id,
+    },
+    () => clockInInner(supabase, user.id, input),
+  );
+}
+
+async function clockInInner(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  input: {
+    job_id: string | null;
+    job_code: string | null;
+    gps: GeoPoint | null;
+    clock_in_at?: string | null;
+    offline_pressed_at?: string | null;
+    clientOpId?: string;
+  },
+): Promise<ClockResult> {
+  const user = { id: userId };
 
   // Role decides how far the start time may move. STAFF (owner/admin/office) can
   // backdate freely (forgot to clock in). A TECH/field employee can only round the
@@ -126,6 +165,26 @@ export async function clockIn(input: {
     jobId = await resolveTechJobToday(supabase, user.id);
   }
 
+  /**
+   * OFFLINE PUNCH (0168). A tech taps clock-in at 7:02 in a dead zone and the phone reconnects at
+   * 11:00. The tech clamp below would round that to ~10:30 and cost him four hours — it exists to
+   * stop BACKDATING, and a punch that was made live and merely delivered late is not backdating.
+   *
+   * Nothing can prove which of the two it is; the device asserts both. So the offline path is
+   * BOUNDED (older than a long day → refused, with the office named) and DISCLOSED (source
+   * 'offline', visible on the timecard) rather than pretending to verify. A refusal here loses
+   * nothing: the queue keeps the punch and shows it as still waiting.
+   */
+  let offlinePunch = false;
+  if (input.offline_pressed_at) {
+    const verdict = resolveOfflinePunchTime(input.offline_pressed_at);
+    if (!verdict.ok) return { ok: false, error: verdict.reason };
+    if (verdict.offline) {
+      offlinePunch = true;
+      input = { ...input, clock_in_at: verdict.iso };
+    }
+  }
+
   // Start time — never into the future (small skew), floored 31 days back so a
   // fat-fingered year can't create a monstrous open shift. For a tech the value is
   // additionally clamped to [floor-to-30-min(now), now] so it can only round back.
@@ -135,7 +194,10 @@ export async function clockIn(input: {
     const d = new Date(input.clock_in_at);
     let ms = d.getTime();
     if (!isNaN(ms)) {
-      if (!isStaff) {
+      // The tech round-back clamp is the ANTI-BACKDATING guard. An offline punch already went
+      // through resolveOfflinePunchTime, which bounds it and marks it — applying the clamp on top
+      // would delete exactly the hours the queue exists to preserve.
+      if (!isStaff && !offlinePunch) {
         const now = Date.now();
         const floor30 = now - (now % 1_800_000); // last :00/:30 boundary
         ms = Math.min(Math.max(ms, floor30), now + 60_000);
@@ -155,7 +217,9 @@ export async function clockIn(input: {
     gps_in: input.gps,
     clock_in: clockInIso,
     status: "open",
-    source: backdated ? "manual" : input.gps ? "app" : "manual",
+    // 'offline' outranks the others: it says the SERVER CLOCK wasn't the authority for this time,
+    // which is the fact the office needs when reading the card.
+    source: offlinePunch ? "offline" : backdated ? "manual" : input.gps ? "app" : "manual",
   });
 
   if (error) {
