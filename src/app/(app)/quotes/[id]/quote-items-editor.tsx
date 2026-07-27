@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { AddLineItems, type PriceItemLite } from "@/components/add-line-items";
+import { effectiveMarkupPct } from "@/lib/pricing/markup";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2, Pencil, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -14,7 +16,19 @@ import type { Quote, QuoteLineItem } from "@/lib/types";
 import { addQuoteItem, updateQuoteItem, deleteQuoteItem, updateQuoteMeta } from "../actions";
 
 /** Editable line items + totals + header details for a saved quote. */
-export function QuoteItemsEditor({ quote, items }: { quote: Quote; items: QuoteLineItem[] }) {
+export function QuoteItemsEditor({
+  quote,
+  items,
+  priceItems = [],
+  kits = [],
+  defaultMarkupPct = 0,
+}: {
+  quote: Quote;
+  items: QuoteLineItem[];
+  priceItems?: PriceItemLite[];
+  kits?: { id: string; name: string; kit_items: unknown[] }[];
+  defaultMarkupPct?: number;
+}) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const refresh = () => router.refresh();
@@ -172,8 +186,29 @@ export function QuoteItemsEditor({ quote, items }: { quote: Quote; items: QuoteL
         </ul>
 
         <div className="space-y-2 border-t border-slate-100 bg-slate-50/60 p-3">
+          {/* THE SAME PICKER THE COMPOSER HAS. Adding a line to a SAVED estimate used to mean
+              typing it, price and all, from memory — on the surface where you're most likely to be
+              adjusting a real quote in front of a customer. */}
+          <AddLineItems
+            priceItems={priceItems}
+            kits={kits as never}
+            markupFor={(p) => effectiveMarkupPct({ itemPct: p.markup_pct, orgDefaultPct: defaultMarkupPct })}
+            onAdd={(lines) =>
+              start(async () => {
+                for (const l of lines) {
+                  await addQuoteItem(quote.id, {
+                    description: l.description,
+                    quantity: l.quantity,
+                    unit: l.unit,
+                    unit_price: l.unit_price,
+                  });
+                }
+                refresh();
+              })
+            }
+          />
           <Input
-            placeholder="Add a line item…"
+            placeholder="Or type one…"
             value={desc}
             onChange={(e) => setDesc(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && addItem()}

@@ -22,7 +22,7 @@ import {
   type DraftLineItem,
 } from "../actions";
 import { DeckGeneratorPanel } from "./deck-generator-panel";
-import { KitPickerModal, type KitForPicker } from "./kit-picker-modal";
+import { AddLineItems } from "@/components/add-line-items";
 
 interface CustomerOption {
   id: string;
@@ -46,7 +46,7 @@ interface TaxRateLite {
   rate: number;
   is_default: boolean;
 }
-type KitLite = KitForPicker;
+type KitLite = { id: string; name: string; kit_items: unknown[] };
 
 const blankItem = (): DraftLineItem => ({
   description: "",
@@ -117,8 +117,6 @@ export function QuoteBuilder({
     return d.toISOString().slice(0, 10);
   });
   const [items, setItems] = useState<DraftLineItem[]>([blankItem()]);
-  const [plQuery, setPlQuery] = useState("");
-  const [plOpen, setPlOpen] = useState(false);
 
   // Resolve the markup via THE one rule (effectiveMarkupPct): the selected customer's
   // pricing-level markup → the item's own markup when > 0 → the org default → 0.
@@ -147,35 +145,11 @@ export function QuoteBuilder({
   // showed nothing and you had to already know a keyword to find anything — Chris:
   // "needs to show comprehensive list" / "see the list and select from it". An empty
   // query now shows the whole price list (scrollable); typing filters it.
-  const plMatches = (() => {
-    const q = plQuery.trim().toLowerCase();
-    const pool = q
-      ? priceItems.filter((p) =>
-          [p.code, p.description, p.category].some((v) => (v ?? "").toLowerCase().includes(q)),
-        )
-      : priceItems;
-    return pool.slice(0, q ? 25 : 200);
-  })();
 
-  function addFromPrice(p: PriceItemLite) {
-    const real = items.filter((i) => i.description.trim());
-    setItems([
-      ...real,
-      {
-        description: p.code ? `${p.code} — ${p.description}` : p.description,
-        quantity: 1,
-        unit: p.unit || "ea",
-        unit_price: Number(sellPrice(p.buy_price, markupFor(p)).toFixed(2)),
-      },
-    ]);
-    setPlQuery("");
-    setPlOpen(false);
-  }
 
   // Picking a kit opens the Kit Picker (all items pre-checked — one confirm keeps the old
   // one-tap feel) instead of dumping every kit line onto the quote. The picker maps the
   // selection to lines tagged with the kit's name (collapsible groups, same as before).
-  const [pickerKit, setPickerKit] = useState<KitLite | null>(null);
 
   // The deck generator and the Kit Picker both drop their lines in (tagged with a group),
   // keeping any real lines already entered — the one append rule.
@@ -453,68 +427,16 @@ export function QuoteBuilder({
               </Button>
             </div>
 
-            {priceItems.length > 0 && (
-              <div className="relative mb-3">
-                <Input
-                  placeholder="Add from Price List — tap to browse, or search…"
-                  value={plQuery}
-                  onChange={(e) => { setPlQuery(e.target.value); setPlOpen(true); }}
-                  onFocus={() => setPlOpen(true)}
-                  onBlur={() => setTimeout(() => setPlOpen(false), 150)}
-                />
-                {plOpen && (
-                  <ul className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
-                    {plMatches.map((p) => (
-                      <li key={p.id}>
-                        <button
-                          type="button"
-                          onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => addFromPrice(p)}
-                          className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-slate-50"
-                        >
-                          <span className="min-w-0 truncate">
-                            {p.code && <span className="mr-1 font-mono text-xs text-slate-400">{p.code}</span>}
-                            {p.description}
-                          </span>
-                          <span className="shrink-0 text-slate-600">{formatCurrency(sellPrice(p.buy_price, markupFor(p)))}</span>
-                        </button>
-                      </li>
-                    ))}
-                    {plMatches.length === 0 && (
-                      <li className="px-3 py-2 text-sm text-slate-400">
-                        {priceItems.length === 0 ? "Your price list is empty." : "Nothing matches that."}
-                      </li>
-                    )}
-                  </ul>
-                )}
-              </div>
-            )}
-
-            {/* PICK A CATEGORY, THEN PICK FROM THE LIST — the filed complaint was "Not intuitive,
-                see the list and select from it", and the reason was this control: a <Select> whose
-                only visible text was "+ Add from a kit…", sitting directly under a search box, so
-                it read as one more form field — and on iOS it opened the native wheel instead of a
-                list. The picker behind it was always the multi-select list being asked for; it was
-                the DOOR that was hidden. Buttons name the categories out loud. */}
-            {kits.length > 0 && (
-              <div className="mb-3">
-                <p className="mb-1.5 text-xs font-medium text-slate-500">Add from a list</p>
-                <div className="flex flex-wrap gap-2">
-                  {kits.map((k) => (
-                    <button
-                      key={k.id}
-                      type="button"
-                      onClick={() => setPickerKit(k)}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:border-brand hover:text-brand"
-                    >
-                      <ListPlus className="h-3.5 w-3.5" />
-                      {k.name}
-                      <span className="text-xs font-normal text-slate-400">{k.kit_items?.length ?? 0}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
+            {/* ONE PICKER, THREE SURFACES. This was inline markup here and nowhere else, which is
+                why the saved-estimate editor and the invoice editor each grew their own thinner
+                copy — and why the browse-on-empty fix reached one of them and not the others. */}
+            <AddLineItems
+              priceItems={priceItems}
+              kits={kits as never}
+              markupFor={markupFor as never}
+              measured={measured}
+              onAdd={addGeneratedLines}
+            />
 
             <div className="space-y-2">
               {grouped.map(({ group, entries }) => {
@@ -576,17 +498,6 @@ export function QuoteBuilder({
           </CardContent>
         </Card>
 
-        {pickerKit && (
-          <KitPickerModal
-            kit={pickerKit}
-            measured={measured}
-            onClose={() => setPickerKit(null)}
-            onAdd={(lines) => {
-              addGeneratedLines(lines);
-              setPickerKit(null);
-            }}
-          />
-        )}
       </div>
 
       {/* Sidebar: details + totals */}

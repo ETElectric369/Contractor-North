@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { StatusControl } from "./status-control";
+import { getOrgSettings } from "@/lib/org-settings";
 import { QuoteItemsEditor } from "./quote-items-editor";
 import { CircuitScheduleCard } from "./circuit-schedule-card";
 import { CustomerSelect } from "./customer-select";
@@ -51,11 +52,30 @@ export default async function QuoteDetailPage({
   // Has this quote already been turned into these records? (Drives idempotent UI:
   // the map shows "View …" instead of minting a duplicate.) Plus the org's
   // customers so the attached customer can be changed inline.
-  const [{ data: existingInv }, { data: existingWo }, { data: existingMl }, { data: customers }] = await Promise.all([
+  const [{ data: existingInv }, { data: existingWo }, { data: existingMl }, { data: customers }, { data: priceItems }, { data: kits }, { data: orgRow }] = await Promise.all([
     supabase.from("invoices").select("id").eq("quote_id", id).limit(1).maybeSingle(),
     supabase.from("work_orders").select("id").eq("quote_id", id).limit(1).maybeSingle(),
     supabase.from("material_lists").select("id").eq("quote_id", id).limit(1).maybeSingle(),
     supabase.from("customers").select("id, name, company_name").order("name"),
+    // THE SAME CATALOG THE COMPOSER GETS. A saved estimate used to offer only a bare
+    // "Add a line item…" text box — no price list, no kits — so the one place you're most likely
+    // to be adjusting a real quote was the one place you had to type prices from memory.
+    supabase
+      .from("price_list_items")
+      .select("id, code, description, category, unit, buy_price, markup_pct")
+      .eq("archived", false)
+      .order("description")
+      .limit(2000),
+    (async () => {
+      const base = "id, description, quantity, unit, unit_price, sort_order";
+      const withSizing = await supabase
+        .from("kits")
+        .select(`id, name, kit_items(${base}, qty_per_sqft, qty_per_lf, qty_min, qty_round)`)
+        .order("name");
+      if (!withSizing.error) return withSizing;
+      return supabase.from("kits").select(`id, name, kit_items(${base})`).order("name");
+    })(),
+    supabase.from("organizations").select("settings").limit(1).maybeSingle(),
   ]);
 
   // The quote's seek door: what it can BECOME (idempotent conversion nodes —
@@ -138,7 +158,13 @@ export default async function QuoteDetailPage({
         </CardContent>
       </Card>
 
-      <QuoteItemsEditor quote={q} items={lineItems} />
+      <QuoteItemsEditor
+        quote={q}
+        items={lineItems}
+        priceItems={(priceItems ?? []) as never}
+        kits={(kits ?? []) as never}
+        defaultMarkupPct={getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).default_markup_pct}
+      />
       <CircuitScheduleCard quoteId={q.id} initial={(q.circuits ?? []) as any} />
     </div>
   );

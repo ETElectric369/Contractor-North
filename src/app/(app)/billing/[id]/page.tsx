@@ -45,7 +45,7 @@ export default async function InvoicePage({
   // draft, so only pay for those lookups then.
   const isDraft = inv.status === "draft";
 
-  const [{ data: items }, { data: payments }, { data: priceItems }, { data: taxRates }, { data: org }, { data: customers }, { data: jobs }] =
+  const [{ data: items }, { data: payments }, { data: priceItems }, { data: kits }, { data: taxRates }, { data: org }, { data: customers }, { data: jobs }] =
     await Promise.all([
       supabase
         .from("invoice_items")
@@ -55,10 +55,22 @@ export default async function InvoicePage({
       supabase.from("payments").select("*").eq("invoice_id", id).order("paid_at", { ascending: false }),
       supabase
         .from("price_list_items")
-        .select("id, code, description, unit, buy_price, markup_pct")
+        // `category` rides along so the shared picker can match on it, exactly as the composer does.
+        .select("id, code, description, category, unit, buy_price, markup_pct")
         .eq("archived", false)
         .order("description")
         .limit(2000),
+      // Kits too — the invoice editor never offered them, so a line that exists as a saved list
+      // had to be typed by hand here.
+      (async () => {
+        const base = "id, description, quantity, unit, unit_price, sort_order";
+        const withSizing = await supabase
+          .from("kits")
+          .select(`id, name, kit_items(${base}, qty_per_sqft, qty_per_lf, qty_min, qty_round)`)
+          .order("name");
+        if (!withSizing.error) return withSizing;
+        return supabase.from("kits").select(`id, name, kit_items(${base})`).order("name");
+      })(),
       supabase.from("tax_rates").select("id, name, rate, is_default").order("created_at"),
       supabase.from("organizations").select("settings").limit(1).maybeSingle(),
       isDraft
@@ -190,6 +202,7 @@ export default async function InvoicePage({
         items={(items ?? []) as InvoiceItem[]}
         payments={(payments ?? []) as Payment[]}
         priceItems={(priceItems ?? []) as any}
+        kits={(kits ?? []) as any}
         taxRates={(taxRates ?? []) as any}
         paymentMethods={paymentMethods}
         materialMarkup={(inv as any).customers?.pricing_levels?.markup_pct ?? orgSettings.material_markup_percent}

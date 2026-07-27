@@ -32,6 +32,7 @@ import {
   deletePayment,
 } from "../actions";
 import { effectiveMarkupPct } from "@/lib/pricing/markup";
+import { AddLineItems } from "@/components/add-line-items";
 
 interface PriceItemLite { id: string; code: string | null; description: string; unit: string; buy_price: number; markup_pct: number; }
 interface TaxRateLite { id: string; name: string; rate: number; is_default: boolean; }
@@ -56,6 +57,7 @@ export function InvoiceDetail({
   items,
   payments,
   priceItems = [],
+  kits = [],
   taxRates = [],
   paymentMethods = [],
   materialMarkup = 0,
@@ -68,6 +70,7 @@ export function InvoiceDetail({
   items: InvoiceItem[];
   payments: Payment[];
   priceItems?: PriceItemLite[];
+  kits?: { id: string; name: string; kit_items: unknown[] }[];
   taxRates?: TaxRateLite[];
   paymentMethods?: string[];
   materialMarkup?: number;
@@ -163,8 +166,6 @@ export function InvoiceDetail({
   const [qty, setQty] = useState(1);
   const [unit, setUnit] = useState("ea");
   const [price, setPrice] = useState(0);
-  const [plQuery, setPlQuery] = useState("");
-  const [plOpen, setPlOpen] = useState(false);
 
   // payment state
   const [payAmount, setPayAmount] = useState(balance > 0 ? balance : 0);
@@ -249,23 +250,6 @@ export function InvoiceDetail({
     });
   }
 
-  const plMatches = plQuery.trim()
-    ? priceItems.filter((p) => [p.code, p.description].some((v) => (v ?? "").toLowerCase().includes(plQuery.trim().toLowerCase()))).slice(0, 6)
-    : [];
-  function addFromPrice(p: PriceItemLite) {
-    start(async () => {
-      const res = await addInvoiceItem(invoice.id, {
-        description: p.code ? `${p.code} — ${p.description}` : p.description,
-        quantity: 1,
-        unit: p.unit || "ea",
-        unit_price: Number(sellPrice(p.buy_price, effectiveMarkupPct({ levelPct: levelMarkupPct, itemPct: p.markup_pct, orgDefaultPct: defaultMarkupPct })).toFixed(2)),
-      });
-      if (!res?.ok) { toast(res?.error ?? "Couldn't add the line item — try again.", "error"); return; }
-      setPlQuery("");
-      setPlOpen(false);
-      refresh();
-    });
-  }
   const [payNote, setPayNote] = useState("");
   const [payDate, setPayDate] = useState("");
   const [payError, setPayError] = useState<string | null>(null);
@@ -438,37 +422,35 @@ export function InvoiceDetail({
           </Select>
         </div>
 
-        {priceItems.length > 0 && (
-          <div className="relative">
-            <Input
-              placeholder="Add from Price List — search items…"
-              value={plQuery}
-              onChange={(e) => { setPlQuery(e.target.value); setPlOpen(true); }}
-              onFocus={() => setPlOpen(true)}
-              onBlur={() => setTimeout(() => setPlOpen(false), 150)}
-            />
-            {plOpen && plMatches.length > 0 && (
-              <ul className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
-                {plMatches.map((p) => (
-                  <li key={p.id}>
-                    <button
-                      type="button"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => addFromPrice(p)}
-                      className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-slate-50"
-                    >
-                      <span className="min-w-0 truncate">
-                        {p.code && <span className="mr-1 font-mono text-xs text-slate-400">{p.code}</span>}
-                        {p.description}
-                      </span>
-                      <span className="shrink-0 text-slate-600">{formatCurrency(sellPrice(p.buy_price, effectiveMarkupPct({ levelPct: levelMarkupPct, itemPct: p.markup_pct, orgDefaultPct: defaultMarkupPct })))}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
+        {/* THE SAME PICKER AS THE COMPOSER. This surface had its own thinner copy: it returned
+            NOTHING on an empty query (so you had to guess a search term against a catalog you
+            couldn't see) and capped at 6 rows where the composer shows 200 — and it never offered
+            kits at all. That divergence is exactly what "different options for new invoice vs edit
+            invoice" meant, and it is why a browse-on-empty fix reached one surface and not this one. */}
+        <AddLineItems
+          priceItems={priceItems}
+          kits={kits as never}
+          markupFor={(p) =>
+            effectiveMarkupPct({ levelPct: levelMarkupPct, itemPct: p.markup_pct, orgDefaultPct: defaultMarkupPct })
+          }
+          onAdd={(lines) =>
+            start(async () => {
+              for (const l of lines) {
+                const res = await addInvoiceItem(invoice.id, {
+                  description: l.description,
+                  quantity: l.quantity,
+                  unit: l.unit,
+                  unit_price: l.unit_price,
+                });
+                if (!res?.ok) {
+                  toast(res?.error ?? "Couldn't add the line item — try again.", "error");
+                  return;
+                }
+              }
+              refresh();
+            })
+          }
+        />
 
         {/* Re-import is hidden on deposit/progress/final DRAWS: a draw is itemized
             at creation with a frozen "Less previous billings" credit, so a manual
