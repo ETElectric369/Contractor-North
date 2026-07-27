@@ -13,6 +13,7 @@ import { InspectionCapture, type CapturePhoto } from "./inspection-capture";
 import { QuestionSheet, type InspectionTemplate } from "./question-sheet";
 import { tolerateMissingColumns } from "@/lib/inspection/schema";
 import { MarkCompleteButton } from "./mark-complete-button";
+import { ApptQuickActions } from "../appointment-status";
 
 export const dynamic = "force-dynamic";
 
@@ -116,6 +117,9 @@ export default async function AppointmentCapturePage({
           </Badge>
           {a.status === "proposed" && <Badge tone="amber">pending pick</Badge>}
           {a.status === "completed" && <Badge tone="green">done</Badge>}
+          {/* A cancelled appointment showed NO chip at all, so the page looked identical to a
+              live one — which is half of why "can't cancel inspection" reads as broken. */}
+          {a.status === "cancelled" && <Badge tone="slate">cancelled</Badge>}
           {/* Status affordance: flips scheduled/proposed → completed so the Inspections
               tab's buckets work (a captured walk-through stops reading as "upcoming"). */}
           {(a.status === "scheduled" || a.status === "proposed") && (
@@ -123,6 +127,12 @@ export default async function AppointmentCapturePage({
               id={a.id}
               label={isInspectionType(a.type) ? "Mark inspection complete" : "Mark complete"}
             />
+          )}
+          {/* CANCEL — the filed bug. This page offered only "Mark complete" (a lie, if it never
+              happened) and Delete (which destroys the capture and photos with it). The verb
+              already existed and was wired up on the calendar row only; it belongs here too. */}
+          {(a.status === "scheduled" || a.status === "proposed") && (
+            <ApptQuickActions id={a.id} status={a.status} title={a.title ?? "this appointment"} />
           )}
           {/* Edit details — the shared appointment modal, prefilled (Erik 7/15:
               "need a way to edit inspection/appointment details"). */}

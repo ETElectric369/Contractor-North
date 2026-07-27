@@ -263,7 +263,7 @@ export function InspectionCapture({
           </div>
           {photos.length === 0 ? (
             <p className="rounded-lg bg-slate-50 px-3 py-3 text-center text-xs text-slate-400">
-              No photos yet — panel label, attic access, the run path.
+              No photos yet — whatever you'd want to look at again from the office.
             </p>
           ) : (
             <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">

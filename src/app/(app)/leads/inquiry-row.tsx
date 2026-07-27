@@ -110,7 +110,7 @@ export function InquiryRow({
               <Globe className="mr-1 inline h-3 w-3" />web
             </Badge>
           )}
-          {inquiry.source === "tahoe_deck" && (
+          {(inquiry.source === "tahoe_deck" || inquiry.source === "deck_configurator") && (
             <Badge tone="slate">
               <Globe className="mr-1 inline h-3 w-3" />deck site
             </Badge>
@@ -134,20 +134,24 @@ export function InquiryRow({
         {inquiry.message && <p className="mt-1.5 text-sm text-slate-600">{inquiry.message}</p>}
       </div>
 
-      <div className="flex flex-wrap items-end gap-2">
-        <div className="text-right">
+      {/* THE SCRUNCH FIX. This cluster had no responsive rule below `lg`, so on a phone the
+          fixed-width controls (w-36 / w-32) and their right-aligned micro-labels crushed together
+          against the left edge. Below lg each control now takes the full width with a left-aligned
+          label; at lg and up the original compact right-aligned row is unchanged. */}
+      <div className="flex w-full flex-wrap items-end gap-2 lg:w-auto">
+        <div className="flex-1 basis-32 lg:flex-none lg:text-right">
           <label className="mb-0.5 block text-[10px] uppercase tracking-wide text-slate-400">Follow up</label>
           <div className="flex items-center gap-1">
-            <Input type="date" value={followUp} onChange={(e) => setFollowUp(e.target.value)} className="h-8 w-36 text-xs" />
+            <Input type="date" value={followUp} onChange={(e) => setFollowUp(e.target.value)} className="h-8 w-full text-xs lg:w-36" />
             {overdue && <Badge tone="red">overdue</Badge>}
           </div>
         </div>
-        <div className="text-right">
+        <div className="flex-1 basis-32 lg:flex-none lg:text-right">
           <label className="mb-0.5 block text-[10px] uppercase tracking-wide text-slate-400">Status</label>
           <Select
             value={inquiry.status}
             disabled={pending}
-            className="h-8 w-32 text-xs"
+            className="h-8 w-full text-xs lg:w-32"
             onChange={(e) => changeStatus(e.target.value)}
           >
             {INQUIRY_STATUSES.map((s) => (

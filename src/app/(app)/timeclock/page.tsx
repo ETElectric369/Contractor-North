@@ -68,8 +68,13 @@ export default async function TimeclockPage() {
       // customers(name) feeds the codes-off job identity label (customer · address).
       .select("id, job_number, name, address, city, state, zip, code_template_id, customers(name)")
       .in("status", ACTIVE_JOB_STATUSES)
-      .order("created_at", { ascending: false })
-      .limit(50),
+      .order("created_at", { ascending: false }),
+      // NO LIMIT. This was .limit(50) ordered newest-first, so it dropped the OLDEST still-active
+      // jobs — exactly the long-running ones a crew is most likely to be clocking into. That is
+      // the "Not all are listed" report, and it also explains the nameless "Assigned job" option
+      // on the crew board: the board infers a job the dropdown can't name. The sibling query below
+      // reads the same ACTIVE_JOB_STATUSES set with no limit, which is the tell that the cap was
+      // incidental rather than intended.
     supabase
       .from("time_entries")
       // The job label fields ride along for the tech's read-only "My timecard" card

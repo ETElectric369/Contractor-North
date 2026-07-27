@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
+import Link from "next/link";
 import { Check, ClipboardList, CloudOff, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -76,7 +77,25 @@ export function QuestionSheet({
     }, userId);
   }, [userId]);
 
-  if (!templates.length) return null;
+  // NEVER RENDER AS NOTHING. This used to `return null`, which is how the whole per-trade
+  // inspection feature was invisible in production: the engine shipped, no org had a sheet, and
+  // the component silently vanished — so from the field it looked like nothing had been built.
+  // An empty state that says where to go is the difference between "not set up" and "not there".
+  if (!templates.length) {
+    return (
+      <Card className="p-4">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <ClipboardList className="h-4 w-4 text-slate-400" />
+          Inspection sheet
+        </div>
+        <p className="mt-1 text-sm text-slate-400">
+          No question sheet for your trade yet — build one in{" "}
+          <Link href="/forms" className="text-brand underline-offset-2 hover:underline">Forms</Link>{" "}
+          and tick &ldquo;Use as an inspection sheet&rdquo;. Measurements captured there carry straight into an estimate.
+        </p>
+      </Card>
+    );
+  }
 
   const set = (key: string, value: unknown) => {
     setAnswers((a) => ({ ...a, [key]: value as never }));
