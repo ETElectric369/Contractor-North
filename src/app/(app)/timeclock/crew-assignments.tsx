@@ -17,6 +17,7 @@ import {
   type SetCrewDayAssignment,
 } from "./crew-plan";
 import { useAssignmentSaver, useCrewWeek, type PrevAssignment } from "./use-crew-week";
+import { TimeOffButton } from "./time-off-button";
 
 interface MemberRow {
   id: string;
@@ -106,13 +107,18 @@ export function CrewAssignments({
           <h3 className="flex min-w-0 items-center gap-2 text-sm font-semibold text-slate-900">
             <Users className="h-4 w-4 shrink-0 text-slate-400" /> Crew assignments
           </h3>
-          <span className="shrink-0 text-xs font-medium text-slate-500">
-            {weekOffset === 0 ? "This week" : weekRangeLabel(days)}
-          </span>
+          <div className="flex shrink-0 items-center gap-2">
+            {/* One action for a whole stretch. Marking somebody off day by day is eleven edits for
+                one fact, and taking them off jobs instead destroys the roster. */}
+            <TimeOffButton members={members} />
+            <span className="text-xs font-medium text-slate-500">
+              {weekOffset === 0 ? "This week" : weekRangeLabel(days)}
+            </span>
+          </div>
         </div>
         <p className="mb-3 text-xs text-slate-500">
           Pick a day, set each member&apos;s job and ★ crew leader. The day&apos;s assignment
-          wins — Clock In lands on it automatically.
+          wins — Clock In lands on it automatically. Somebody away? Use Time off.
         </p>
 
         {/* Day strip: 7 org-week chips + week arrows. */}

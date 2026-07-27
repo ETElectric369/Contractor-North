@@ -267,3 +267,93 @@ export async function listWeekAssignments(weekOffset = 0): Promise<WeekAssignmen
   });
   return { ok: true, days, rows };
 }
+
+/**
+ * MARK SOMEBODY OFF FOR A RANGE OF DAYS — vacation, sick leave, a long weekend.
+ *
+ * This is the shape the need actually has. A man out until the 7th is ONE fact about a PERSON, not
+ * eleven facts about jobs — and the alternative the app offered was to strip him from every job's
+ * roster and re-add him, from memory, on every job, when he gets back. So: one action, N day rows,
+ * and `jobs.assigned_to` is never touched. He hasn't left the crew; he just isn't there.
+ *
+ * Writes only WEEKDAYS by default, because a Saturday nobody was working doesn't need a record
+ * saying so — and rows that say nothing make the ones that do say something harder to see.
+ */
+export async function setCrewOffRange(input: {
+  profileId: string;
+  fromDate: string; // YYYY-MM-DD, org-local, inclusive
+  toDate: string;   // inclusive
+  reason?: "vacation" | "sick" | "other" | null;
+  includeWeekends?: boolean;
+}): Promise<CrewActionResult & { days?: number }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const { profileId, fromDate, toDate } = input;
+
+  if (!profileId) return { ok: false, error: "Pick a crew member." };
+  if (!isYmd(fromDate) || !isYmd(toDate)) return { ok: false, error: "I couldn't read those dates." };
+  if (toDate < fromDate) return { ok: false, error: "The last day is before the first one." };
+
+  // A bounded span. Anything longer isn't a vacation, it's a leave of absence, and that should be
+  // a deliberate conversation rather than 400 silent rows.
+  const days: string[] = [];
+  for (let d = new Date(`${fromDate}T00:00:00Z`); ; d.setUTCDate(d.getUTCDate() + 1)) {
+    const ds = d.toISOString().slice(0, 10);
+    if (ds > toDate) break;
+    if (days.length > 120) return { ok: false, error: "That's over four months — set it in shorter stretches." };
+    const dow = d.getUTCDay();
+    if (!input.includeWeekends && (dow === 0 || dow === 6)) continue;
+    days.push(ds);
+  }
+  if (!days.length) return { ok: false, error: "No working days in that range." };
+
+  const { data: member } = await supabase.from("profiles").select("id, org_id").eq("id", profileId).maybeSingle();
+  if (!member) return { ok: false, error: "Member not found." };
+
+  // One upsert for the whole span — a partial write would leave somebody half on vacation, which
+  // is worse than a clean failure because nothing on screen would say so.
+  const { error } = await supabase.from("crew_day_assignments").upsert(
+    days.map((work_date) => ({
+      org_id: (member as { org_id?: string }).org_id ?? null,
+      profile_id: profileId,
+      work_date,
+      job_id: null,
+      kind: "off",
+      off_reason: input.reason ?? "vacation",
+      is_crew_lead: false,
+      created_by: ctx.userId,
+    })),
+    { onConflict: "profile_id,work_date" },
+  );
+  if (error) return { ok: false, error: error.message };
+
+  revalidatePath("/timeclock");
+  revalidatePath("/planner");
+  revalidatePath("/schedule");
+  return { ok: true, days: days.length };
+}
+
+/** Undo a range — put those days back to "nothing planned" so the board can plan them again. */
+export async function clearCrewOffRange(input: {
+  profileId: string;
+  fromDate: string;
+  toDate: string;
+}): Promise<CrewActionResult> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  if (!isYmd(input.fromDate) || !isYmd(input.toDate)) return { ok: false, error: "I couldn't read those dates." };
+  // Only OFF rows are cleared — a real job pinned inside the range is a plan somebody made, and
+  // cancelling a vacation must never quietly delete it.
+  const { error } = await ctx.supabase
+    .from("crew_day_assignments")
+    .delete()
+    .eq("profile_id", input.profileId)
+    .eq("kind", "off")
+    .gte("work_date", input.fromDate)
+    .lte("work_date", input.toDate);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/timeclock");
+  revalidatePath("/planner");
+  return { ok: true };
+}
