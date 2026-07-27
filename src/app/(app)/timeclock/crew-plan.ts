@@ -51,6 +51,16 @@ export type SetCrewDayAssignment = (input: {
   workDate: string;
   jobId: string | null;
   isCrewLead: boolean;
+  /**
+   * WHAT A NULL jobId MEANS (0170). It used to mean only one thing — delete the row — and that
+   * was the bug: deleting hands the cell back to a guess that can never say "nobody", so a
+   * cleared day filled itself straight back in.
+   *   "forget" — drop the plan; the board suggests again (the old behaviour).
+   *   "off"    — deliberately not on a job (vacation, sick). Beats every guess, and the tech's
+   *              own Clock In lands job-less instead of on a stale roster job.
+   */
+  clear?: "forget" | "off";
+  offReason?: "vacation" | "sick" | "other" | null;
 }) => Promise<CrewActionResult>;
 
 /** The listWeekAssignments server action — rows for the org week `weekOffset`

@@ -105,7 +105,15 @@ export function pickMemberCurrentJob<T extends TodayJobPick>(
   dayEnd: Date,
   /** Tier 0: the member's crew_day_assignments.job_id for the org-local today (if any). */
   assignedJobId?: string | null,
+  /**
+   * Tier 0b (0170): the day carries an explicit OFF row — vacation, sick, a day off. This
+   * SHORT-CIRCUITS every tier below. Without it there is no answer of "nobody": the fallbacks end
+   * in a catch-all that returns the newest job the member is rostered on, so clearing a day just
+   * put the same job back one refresh later. That was the whole of "can't unassign Brian".
+   */
+  isOff?: boolean,
 ): T | null {
+  if (isOff) return null;
   if (assignedJobId) {
     const assigned = jobs.find((j) => j.id === assignedJobId);
     if (assigned) return assigned;

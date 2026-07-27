@@ -93,3 +93,31 @@ describe("pickMemberCurrentJob tier 0 (crew day-assignment precedence)", () => {
     }
   });
 });
+
+/**
+ * "CAN'T UNASSIGN BRIAN FROM ANY JOB HE IS ON VACATION" (0170).
+ *
+ * The old "— No job —" deleted the day row, which handed the cell straight back to THIS function —
+ * and its last line is a catch-all that returns the newest job the member is rostered on. Brian is
+ * still on the roster (correctly — he hasn't left the crew), so it always found something and the
+ * same job reappeared one refresh later. The control that looked like unassign was a no-op.
+ */
+describe("an explicit day OFF beats every guess", () => {
+  it("returns nobody, even though the member is rostered on live jobs", () => {
+    expect(pickMemberCurrentJob([inProgress, scheduledToday], new Set(), dayStart, dayEnd, null, true)).toBeNull();
+  });
+
+  it("beats a pinned day assignment too — OFF is the more specific decision", () => {
+    expect(pickMemberCurrentJob([inProgress, scheduledToday], new Set(), dayStart, dayEnd, "prog", true)).toBeNull();
+  });
+
+  it("beats today's schedule", () => {
+    expect(pickMemberCurrentJob([scheduledToday], new Set(["sched"]), dayStart, dayEnd, null, true)).toBeNull();
+  });
+
+  it("NOT off still behaves exactly as before — this must not change the normal day", () => {
+    // The regression that would matter most: making every cell empty.
+    expect(pickMemberCurrentJob([inProgress, scheduledToday], new Set(), dayStart, dayEnd, null, false)?.id).toBe("sched");
+    expect(pickMemberCurrentJob([inProgress, scheduledToday], new Set(), dayStart, dayEnd)?.id).toBe("sched");
+  });
+});

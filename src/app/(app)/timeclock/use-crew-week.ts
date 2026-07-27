@@ -127,10 +127,14 @@ export function useAssignmentSaver({
   async function save(
     profileId: string,
     workDate: string,
+    /** A job id, null to forget the plan (board goes back to suggesting), or the sentinel
+     *  "__off__" for a deliberate day off — the three things the cell can actually mean. */
     jobId: string | null,
     isCrewLead: boolean,
     prev: PrevAssignment,
   ) {
+    const off = jobId === "__off__";
+    const realJobId = off ? null : jobId;
     const key = `${profileId}|${workDate}`;
     setBusyKey(key);
     setError(null);
@@ -139,13 +143,21 @@ export function useAssignmentSaver({
         rs,
         profileId,
         workDate,
-        jobId
-          ? { job_id: jobId, is_crew_lead: isCrewLead, job: jobsById.get(jobId) ?? null }
+        realJobId
+          ? { job_id: realJobId, is_crew_lead: isCrewLead, job: jobsById.get(realJobId) ?? null }
           : null,
       ),
     );
     try {
-      const res = await setCrewDayAssignment({ profileId, workDate, jobId, isCrewLead });
+      const res = await setCrewDayAssignment({
+        profileId,
+        workDate,
+        jobId: realJobId,
+        isCrewLead,
+        // "off" writes a row that beats every guess; "forget" deletes and lets the board suggest
+        // again. Collapsing these two was the whole of "can't unassign Brian".
+        clear: off ? "off" : "forget",
+      });
       if (!res.ok) {
         setRows((rs) => patchWeekRows(rs, profileId, workDate, prev));
         setError(res.error ?? "Could not update the assignment.");

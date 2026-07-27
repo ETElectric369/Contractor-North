@@ -132,6 +132,10 @@ export default async function TimeclockPage() {
   // inferred-current pick below. (The planner UI's own rows — incl. the ★ lead
   // checkboxes — seed from listWeekAssignments, not from this map.)
   const dayAssignments: Record<string, string> = {};
+  // Who is explicitly OFF today (0170) — vacation, sick, a day off. This is what finally lets a
+  // cell be empty ON PURPOSE: without it the board falls back to a guess that can never say
+  // "nobody", so clearing a day just put the same job back.
+  const offToday = new Set<string>();
   if (isStaff && crewJobs.length) {
     const { dayStart, dayEnd } = todayBoundsInTz(orgSettings.timezone);
     const [{ data: segRows }, dayRes] = await Promise.all([
@@ -148,11 +152,12 @@ export default async function TimeclockPage() {
       // never de-board the page (the 0128 crew_lead precedent).
       supabase
         .from("crew_day_assignments")
-        .select("profile_id, job_id")
+        .select("profile_id, job_id, kind")
         .eq("work_date", todayStr),
     ]);
     for (const r of ((dayRes.data ?? []) as { profile_id: string; job_id: string }[])) {
-      dayAssignments[r.profile_id] = r.job_id;
+      if ((r as { kind?: string }).kind === "off") offToday.add(r.profile_id);
+      else if (r.job_id) dayAssignments[r.profile_id] = r.job_id;
     }
     const segWeek = (segRows ?? []) as { job_id: string; start_date: string; end_date: string }[];
     const segToday = new Set(
@@ -182,7 +187,7 @@ export default async function TimeclockPage() {
         const dayJob = crewJobs.find((j) => j.id === dayJobId);
         if (dayJob) mine.unshift(dayJob);
       }
-      const pick = pickMemberCurrentJob(mine, segToday, dayStart, dayEnd, dayJobId);
+      const pick = pickMemberCurrentJob(mine, segToday, dayStart, dayEnd, dayJobId, offToday.has(m.id));
       const plan: Record<string, string> = {};
       if (pick) plan[todayStr] = pick.id;
       // FUTURE days only — no hints on past days (a past-day hint would read as

@@ -71,6 +71,16 @@ export async function setCrewDayAssignment(input: {
   workDate: string; // YYYY-MM-DD, org-local
   jobId: string | null;
   isCrewLead?: boolean;
+  /**
+   * WHAT "no job" MEANS (0170). Absence used to mean two opposite things at once, which is the
+   * whole bug behind "can't unassign Brian":
+   *   "clear"  — forget the plan for this day. The row is deleted and the board goes back to
+   *              GUESSING, which is what it did before and what made the old "— No job —" a no-op.
+   *   "off"    — he is deliberately not on a job (vacation, sick, day off). Writes a row that
+   *              short-circuits every guess, so the cell reads OFF and stays OFF.
+   */
+  clear?: "forget" | "off";
+  offReason?: "vacation" | "sick" | "other" | null;
 }): Promise<CrewActionResult> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -83,6 +93,33 @@ export async function setCrewDayAssignment(input: {
   // CLEAR — jobId null wipes the member's row for that day. RLS org-scopes the
   // delete; removals are silent by design (the notifyJobCrewAdded doctrine).
   if (!jobId) {
+    // OFF is a RECORD, not an absence. Deleting the row hands the cell straight back to the
+    // inference — which cannot return "nobody", because the member is still on the job's roster —
+    // so the same job reappeared one refresh later. Writing an explicit off row is what finally
+    // lets a day be empty on purpose. Deliberately leaves jobs.assigned_to alone: a man on
+    // vacation has not left the crew, and stripping the roster would mean re-adding him by hand,
+    // from memory, on every job, next Monday.
+    if (input.clear === "off") {
+      const { data: me } = await supabase.from("profiles").select("org_id").eq("id", ctx.userId).maybeSingle();
+      const { error } = await supabase.from("crew_day_assignments").upsert(
+        {
+          org_id: (me as { org_id?: string } | null)?.org_id ?? null,
+          profile_id: profileId,
+          work_date: workDate,
+          job_id: null,
+          kind: "off",
+          off_reason: input.offReason ?? null,
+          is_crew_lead: false,
+          created_by: ctx.userId,
+        },
+        { onConflict: "profile_id,work_date" },
+      );
+      if (error) return { ok: false, error: error.message };
+      revalidatePath("/timeclock");
+      revalidatePath("/planner");
+      return { ok: true };
+    }
+    // "forget" — drop the plan and let the board suggest again. Same behaviour as before 0170.
     const { error } = await supabase
       .from("crew_day_assignments")
       .delete()
@@ -141,6 +178,10 @@ export async function setCrewDayAssignment(input: {
       profile_id: profileId,
       work_date: workDate,
       job_id: jobId,
+      // Pinning a job must also clear a prior OFF for that day — otherwise the upsert would leave
+      // kind='off' beside a job_id, which the 0170 shape constraint (rightly) refuses.
+      kind: "job",
+      off_reason: null,
       is_crew_lead: !!input.isCrewLead,
       created_by: ctx.userId,
       updated_at: new Date().toISOString(),

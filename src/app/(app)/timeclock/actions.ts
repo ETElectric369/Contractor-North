@@ -50,11 +50,24 @@ async function resolveTechJobToday(supabase: SupabaseClient, uid: string): Promi
     // migration 0139 lands: the select errors → data null → next tier.
     const { data: dayRow } = await supabase
       .from("crew_day_assignments")
-      .select("job_id")
+      .select("job_id, kind")
       .eq("profile_id", uid)
       .eq("work_date", todayStr)
       .maybeSingle();
-    const dayJobId = (dayRow as { job_id?: string } | null)?.job_id ?? null;
+    const day = dayRow as { job_id?: string | null; kind?: string } | null;
+    /**
+     * OFF FAILS CLOSED (0170) — and this is the half that actually costs money.
+     *
+     * The office marks Brian off for the week. Without this line the resolver falls straight
+     * through to tier 1, which reads `jobs.assigned_to` — the ROSTER, which still (correctly)
+     * contains him — so his phone would punch onto the very job the office thought it had taken
+     * him off, and that job_id lands in time_entries, which is what the job gets COSTED from.
+     *
+     * A deliberate "not on a job today" must beat every guess below it. The day row wins; a
+     * job-less punch is the honest outcome and the office attaches it later if it was a mistake.
+     */
+    if (day?.kind === "off") return null;
+    const dayJobId = day?.job_id ?? null;
     if (dayJobId) {
       const { data: dayJob } = await supabase
         .from("jobs")

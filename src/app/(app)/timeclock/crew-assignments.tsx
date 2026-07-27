@@ -198,19 +198,24 @@ export function CrewAssignments({
                   className="h-9 min-w-0 flex-1"
                   aria-label={`Job for ${m.full_name ?? "member"} on ${selectedDay}`}
                 >
-                  <option value="">— No job —</option>
+                  {/* THE OLD "— No job —" WAS A VISIBLE NO-OP: it deleted the row, which handed
+                      the cell back to a guess that can never say "nobody", so the same job
+                      reappeared one refresh later. Absence meant two opposite things. Now it's
+                      two options, because they ARE two decisions. */}
+                  <option value="">— Not set (suggest) —</option>
+                  <option value="__off__">— Off (vacation / not working) —</option>
                   {jobs.map((j) => (
                     <option key={j.id} value={j.id}>
                       {assignmentJobLabel(j, jobCodesEnabled)}
                     </option>
                   ))}
                   {/* A planned job that later left the active list still shows
-                      truthfully instead of rendering as "— No job —". */}
+                      truthfully instead of vanishing into "not set". */}
                   {value && !jobsById.has(value) && (
                     <option value={value}>
                       {explicit?.job
                         ? assignmentJobLabel(explicit.job, jobCodesEnabled)
-                        : "Assigned job"}
+                        : "Job (no longer listed)"}
                     </option>
                   )}
                 </Select>
@@ -218,12 +223,15 @@ export function CrewAssignments({
                   <span
                     title={
                       selectedDay === todayStr
-                        ? "No day assignment yet — this is the board's best guess from today's schedule and active jobs. Pin a job (or tap ★) so Clock In uses it for sure."
-                        : "No day assignment yet — the schedule puts them here. Pick a job (or tap ★) to pin it for the day."
+                        ? "Nobody has set this — it's the board's guess from today's schedule. Pick the job to make it stick, or mark them Off."
+                        : "Nobody has set this — the schedule puts them here. Pick the job to pin it for the day."
                     }
                     className="shrink-0 rounded border border-dashed border-slate-300 bg-slate-50 px-1 py-px text-[9px] font-semibold uppercase tracking-wide text-slate-500"
                   >
-                    auto
+                    {/* "auto" read as "the app is handling it", which is the exact opposite of the
+                        truth — NOTHING is handled until somebody sets it. The owner's "i didnt
+                        know what that did" was the word doing the misleading. */}
+                    ? suggested
                   </span>
                 )}
                 <label
