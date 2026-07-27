@@ -77,7 +77,7 @@ const DECK_TOOL = {
   input_schema: {
     type: "object",
     properties: {
-      projectType: { type: "string", enum: ["new_deck", "full_replacement", "resurface", "railing", "stairs", "extension", "repair", "staining", "unsure"] },
+      projectType: { type: "string", enum: ["new_deck", "full_replacement", "resurface", "railing", "stairs", "extension", "repair", "staining", "unsure"], description: "REQUIRED — a resurface costs a fraction of a new build, so ask rather than assume. Use \"unsure\" only if they genuinely don't know." },
       material: { type: "string", enum: ["wood", "composite"] },
       lengthFt: { type: "number", description: "deck length in feet" },
       widthFt: { type: "number", description: "deck width/depth in feet" },
@@ -93,7 +93,7 @@ const DECK_TOOL = {
       sliderDoors: { type: "number" },
       trpa: { type: "boolean", description: "property is in the Lake Tahoe / TRPA basin" },
     },
-    required: ["lengthFt", "widthFt"],
+    required: ["projectType", "lengthFt", "widthFt"],
   },
 } as unknown as Anthropic.Tool;
 
@@ -103,9 +103,16 @@ const DECK_TOOL = {
 // unauthenticated endpoint — every search costs money. Only attached for research-mode orgs.
 const WEB_SEARCH_TOOL = { type: "web_search_20250305", name: "web_search", max_uses: 3 } as unknown as Anthropic.Tool;
 
-const clampNum = (x: unknown, lo: number, hi: number): number => {
+// Clamping keeps a hostile or fat-fingered number from reaching the engine, but a SILENT clamp
+// manufactures a confident wrong answer: "2000 x 1500" (a typo, or feet-vs-inches) became 500×500
+// and quoted 250,000 sq ft as if the visitor had asked for it. Record every clamp so the estimate
+// can say it happened instead of pretending the number was theirs.
+const clampNum = (x: unknown, lo: number, hi: number, onClamp?: (n: number, to: number) => void): number => {
   const n = Number(x);
-  return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : 0;
+  if (!Number.isFinite(n)) return 0;
+  const c = Math.min(hi, Math.max(lo, n));
+  if (c !== n) onClamp?.(n, c);
+  return c;
 };
 
 // A visitor's uploaded photos arrive as URLs (minted by /api/site-chat/upload). Only URLs from
@@ -128,29 +135,47 @@ type DeckEstimateResult = ReturnType<typeof computeDeckEstimate>;
 
 function deckEstimate(input: unknown, deckRates: Record<string, number>): { summary: string; est: DeckEstimateResult } {
   const a = (input ?? {}) as Record<string, unknown>;
+  const warnings: string[] = [];
+  const num = (key: string, lo: number, hi: number) =>
+    clampNum(a[key], lo, hi, (given, to) => warnings.push(`${key} was ${given}, outside the ${lo}–${hi} range this engine accepts; treated as ${to}. Confirm the measurement with the customer before quoting.`));
+
+  // PROJECT TYPE IS NOT ASSUMED. It used to default to "new_deck" — the most expensive branch in
+  // the engine — so a resurface the model forgot to label was billed as a full build, roughly 2.5×
+  // over. It's now required in the tool schema; if it still doesn't arrive we fall back to the
+  // CHEAPEST reading and say so, because guessing high at a stranger on a public website is the
+  // one direction that costs the company the job and its reputation at the same time.
+  const KNOWN = ["new_deck", "full_replacement", "resurface", "railing", "stairs", "extension", "repair", "staining", "unsure"];
+  const givenType = typeof a.projectType === "string" ? a.projectType.trim() : "";
+  const projectType = KNOWN.includes(givenType) ? givenType : "unsure";
+  if (!KNOWN.includes(givenType)) {
+    warnings.push(`No project type was given${givenType ? ` ("${givenType}" isn't one this engine knows)` : ""}, so this is NOT priced as a new build. ASK whether it's a new deck, a full replacement, a resurface, or repair, then call this again — the difference is large.`);
+  }
+
   const answers: DeckAnswers = {
-    projectType: String(a.projectType ?? "new_deck"),
+    projectType,
     material: a.material === "composite" ? "composite" : "wood",
-    lengthFt: clampNum(a.lengthFt, 0, 500),
-    widthFt: clampNum(a.widthFt, 0, 500),
-    heightFt: clampNum(a.heightFt, 0, 200),
-    railingLf: a.railingLf == null ? null : clampNum(a.railingLf, 0, 5000),
-    stairFlights: Math.round(clampNum(a.stairFlights, 0, 10)),
-    stairSteps: Math.round(clampNum(a.stairSteps, 0, 100)),
+    lengthFt: num("lengthFt", 0, 500),
+    widthFt: num("widthFt", 0, 500),
+    heightFt: num("heightFt", 0, 200),
+    railingLf: a.railingLf == null ? null : num("railingLf", 0, 5000),
+    stairFlights: Math.round(num("stairFlights", 0, 10)),
+    stairSteps: Math.round(num("stairSteps", 0, 100)),
     stairRailing: !!a.stairRailing,
-    stairRailingLf: clampNum(a.stairRailingLf, 0, 1000),
+    stairRailingLf: num("stairRailingLf", 0, 1000),
     shape: a.shape === "irregular" ? "irregular" : "rectangle",
     wrapAround: !!a.wrapAround,
-    manDoors: Math.round(clampNum(a.manDoors, 0, 20)),
-    sliderDoors: Math.round(clampNum(a.sliderDoors, 0, 20)),
+    manDoors: Math.round(num("manDoors", 0, 20)),
+    sliderDoors: Math.round(num("sliderDoors", 0, 20)),
     trpa: !!a.trpa,
   };
   const est = computeDeckEstimate(answers, (code) => deckRates[code] ?? 0);
   const summary = JSON.stringify({
     total: est.total,
     area: est.area,
+    project_type: projectType,
     lines: est.lines.map((l) => ({ item: l.description, qty: l.quantity, unit: l.unit, amount: Math.round(l.quantity * l.unit_price) })),
     assumptions: est.assumptions,
+    ...(warnings.length ? { warnings } : {}),
   });
   return { summary, est };
 }

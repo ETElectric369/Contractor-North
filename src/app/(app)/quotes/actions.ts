@@ -8,9 +8,11 @@ import { createNotifications } from "@/lib/notifications";
 import { subtotalTaxTotal } from "@/lib/invoice-math";
 import { QUOTE_STATUSES } from "@/lib/statuses";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
+import { CALC_TOOLS, runCalc } from "@/lib/electrical-calc";
 import { recordAiUsage } from "@/lib/ai-cost";
+import type Anthropic from "@anthropic-ai/sdk";
 import { getOrgSettings, accentHex } from "@/lib/org-settings";
-import { effectiveMarkupPct } from "@/lib/pricing/markup";
+import { mapEstimatorLine, type DraftLineItem, type BookRow } from "@/lib/estimate/line-map";
 import { sendEmail, renderQuoteNoticeEmail, ownerBcc } from "@/lib/email";
 import { sendSms } from "@/lib/sms";
 import { createWorkOrderFromQuote } from "../work-orders/actions";
@@ -127,18 +129,9 @@ export async function emailQuote(
   return { ok: true };
 }
 
-export interface DraftLineItem {
-  description: string;
-  quantity: number;
-  unit: string;
-  unit_price: number;
-  /** Optional group this line belongs to (a kit/"job code group" like Stairs, Decking) — a
-   *  build-time organizer so the estimate reads as collapsible groups. Not persisted yet. */
-  group?: string;
-  /** Set when the estimator priced this line from a FALLBACK (Home Depot / rough estimate) instead
-   *  of the price book — surfaced in the builder so you confirm the number. Build-time only. */
-  flag?: string;
-}
+/** Re-exported so the existing importers (quote builder, kit picker, deck panel) don't move.
+ *  The definition lives with the pricing rules in @/lib/estimate/line-map. */
+export type { DraftLineItem } from "@/lib/estimate/line-map";
 
 export interface SaveQuoteInput {
   customer_id: string | null;
@@ -845,11 +838,7 @@ async function runEstimator(
   const trade = orgS.trade_label?.trim() || "contractor";
 
   const client = getAnthropic();
-  const msg = await client.messages.create({
-    model: DEFAULT_MODEL,
-    max_tokens: 8192, // headroom: a dense plan take-off can run long — don't truncate mid-JSON
-
-    system: [
+  const system: Anthropic.MessageCreateParams["system"] = [
       {
         type: "text" as const,
         text:
@@ -858,7 +847,7 @@ async function runEstimator(
           "MATERIALS: pick items from the PRICE BOOK below where they fit — return the EXACT catalog code and the book cost. " +
           (catalogMode
             ? "QUANTITIES: compute from the measurements given — areas = length × width, linear feet, counts. Do NOT apply trade calculations that don't fit this work. "
-            : "QUANTITIES: calculate per the governing code for this trade (for electrical: NEC wire size, box/conduit fill, breaker/feeder, loads) — don't eyeball. ") +
+            : "QUANTITIES: calculate per the governing code for this trade — don't eyeball. For anything the CALCULATOR TOOLS cover (wire size, voltage drop, conduit fill, box fill) CALL THE TOOL instead of working the tables from memory; they return the exact NEC answer plus the code rule behind it. Reasoning a table in your head is where wrong numbers come from. ") +
           'If a needed material is NOT in the price book, still include it, estimate a typical retail price, and mark source "home_depot". ' +
           'Respond with ONLY a JSON OBJECT: {"items": [ ... ], "questions": [ ... ]}. ' +
           'Each entry in "items": {"description": string, "quantity": number, "unit": "ea|ft|hr|lot", "kind": "material"|"labor", "catalog": string|null, "unit_cost": number, "source": "book"|"home_depot"} (labor: kind="labor", source="book", unit_cost=hourly rate). ' +
@@ -874,18 +863,56 @@ async function runEstimator(
         text: `PRICE BOOK (code | description | unit | cost${rows.some((b) => b.category) ? " | category" : ""}):\n${catalog || "(price book is empty — estimate retail prices and flag every material)"}`,
         cache_control: { type: "ephemeral" as const },
       },
-    ],
-    messages: [{ role: "user", content }],
-  });
+  ];
 
-  // METER IT (0162). This is the single most expensive operation in the product and it was
-  // absent from the ledger — you cannot choose a price from a record that omits your biggest cost.
-  void recordAiUsage({
-    orgId: (org as { id?: string } | null)?.id,
-    model: DEFAULT_MODEL,
-    surface: "estimator",
-    usage: msg.usage as never,
-  });
+  /**
+   * THE CALCULATORS ARE NOW REACHABLE. This call passed no `tools` array at all, so the estimator
+   * — the one surface whose entire job is producing numbers — worked the NEC tables from memory
+   * while four exact, tested calculators sat in the codebase unused. They're pure lookups: no
+   * writes, no side effects, nothing to confirm, so the loop can run them without asking.
+   *
+   * Bounded at 3 rounds. Research-mode estimates need a handful of calls (wire size, then drop on
+   * the long run); a bound means a model that gets stuck in a calculation loop still returns an
+   * estimate instead of burning the org's shared daily budget. Catalog orgs (deck, carpentry) get
+   * no calculators at all — an electrical tool array is noise on a deck bid and costs tokens.
+   */
+  const tools = catalogMode ? undefined : (CALC_TOOLS as unknown as Anthropic.Tool[]);
+  const convo: Anthropic.MessageParam[] = [{ role: "user", content }];
+  let msg!: Anthropic.Message;
+  const LAST_ROUND = 2;
+  for (let round = 0; round <= LAST_ROUND; round++) {
+    msg = await client.messages.create({
+      model: DEFAULT_MODEL,
+      max_tokens: 8192, // headroom: a dense plan take-off can run long — don't truncate mid-JSON
+      system,
+      // On the FINAL round the tools come off, so the model has no choice but to answer. Otherwise
+      // an estimate that spends its whole budget calculating exits the loop mid-tool-call with no
+      // text to parse — the contractor gets an error instead of a draft, which is the worst
+      // outcome of the three.
+      ...(tools && round < LAST_ROUND ? { tools } : {}),
+      messages: convo,
+    });
+    // METER EVERY ROUND (0162). This is the single most expensive operation in the product and it
+    // was absent from the ledger — you cannot choose a price from a record that omits your biggest
+    // cost. Metering only the last round would undercount an estimate that used its calculators.
+    void recordAiUsage({
+      orgId: (org as { id?: string } | null)?.id,
+      model: DEFAULT_MODEL,
+      surface: "estimator",
+      usage: msg.usage as never,
+    });
+    const calls = msg.content.filter((b) => b.type === "tool_use") as Anthropic.ToolUseBlock[];
+    if (!calls.length) break;
+    convo.push({ role: "assistant", content: msg.content });
+    convo.push({
+      role: "user",
+      content: calls.map((c) => ({
+        type: "tool_result" as const,
+        tool_use_id: c.id,
+        content: runCalc(c.name, c.input),
+      })),
+    });
+  }
 
   const text = msg.content
     .filter((b) => b.type === "text")
@@ -898,36 +925,17 @@ async function runEstimator(
   const questions = Array.isArray(parsed.questions)
     ? parsed.questions.map((q) => String(q).trim()).filter(Boolean)
     : [];
-  const sell = (cost: number, pct: number) => Math.round(cost * (1 + pct / 100) * 100) / 100;
-  const items: DraftLineItem[] = raw.map((i) => {
-    const kind = i.kind === "labor" ? "labor" : "material";
-    if (kind === "labor") {
-      return {
-        description: String(i.description ?? "Labor"),
-        quantity: Number(i.quantity) || 1,
-        unit: "hr",
-        unit_price: Number(i.unit_cost) || rate || 0,
-      };
-    }
-    const cat = i.catalog ? String(i.catalog).trim() : null;
-    const pl = cat ? byCode.get(cat.toUpperCase()) : null;
-    const cost = pl ? Number(pl.buy_price) : Number(i.unit_cost) || 0;
-    // THE markup rule, per item: customer level → the book item's own markup → org default.
-    // (An off-book Home Depot line has no item markup, so it's level → org default.)
-    const pct = effectiveMarkupPct({
+  // The per-line pricing rules live in @/lib/estimate/line-map as a PURE function, so the two
+  // money bugs that used to hide in this closure (the echoed labor rate, the book-vs-model unit)
+  // are covered by tests instead of by review.
+  const items: DraftLineItem[] = raw.map((i) =>
+    mapEstimatorLine(i, {
+      rate,
+      byCode: byCode as Map<string, BookRow>,
       levelPct: markupPct ?? null,
-      itemPct: pl ? Number(pl.markup_pct) : 0,
       orgDefaultPct: orgS.default_markup_pct,
-    });
-    const base = String(i.description ?? pl?.description ?? "");
-    return {
-      description: pl ? `${base} [${pl.code}]` : base, // book items carry [CODE] so the CED order sheet resolves them
-      quantity: Number(i.quantity) || 1,
-      unit: String(i.unit ?? pl?.unit ?? "ea"),
-      unit_price: sell(cost, pct),
-      flag: pl ? undefined : "est · Home Depot — confirm",
-    };
-  });
+    }),
+  );
   return { items, questions };
 }
 
