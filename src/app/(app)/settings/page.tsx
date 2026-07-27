@@ -3,7 +3,8 @@ import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { User, Building2, Globe, Wallet, CalendarDays, Plug } from "lucide-react";
+import Link from "next/link";
+import { User, Building2, Globe, Wallet, CalendarDays, Plug, Layers, Tags } from "lucide-react";
 import { SettingsSubnav } from "./settings-subnav";
 import { getOrgSettings, accentHex, orgPublicBaseUrl } from "@/lib/org-settings";
 import { renderReadyBlocks } from "@/lib/public-pages";
@@ -227,6 +228,40 @@ export default async function SettingsPage({
               <Section title="Company details"><OrgSettingsForm org={org as Organization} /></Section>
               <Section title="Company logo">
                 <LogoUpload orgId={(org as Organization).id} current={(org as Organization).logo_url} />
+              </Section>
+
+              {/* WHERE THE CATALOG LIVES. Kits and the price list are edited on their own page,
+                  which is the right home for them — but Settings is where an owner LOOKS for
+                  "set up how my pricing works", and it had no outbound link to anywhere. Two
+                  cards, so the thing he's hunting for is one tap from where he went looking. */}
+              <Section title="Pricing & catalog">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Link
+                    href="/price-list?tab=kits"
+                    className="rounded-xl border border-slate-200 p-4 transition hover:border-brand"
+                  >
+                    <div className="flex items-center gap-2 font-medium text-slate-800">
+                      <Layers className="h-4 w-4 text-slate-400" />
+                      Kits &amp; job lists
+                    </div>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Build the lists you pick from when you write an estimate — and set which lines size
+                      themselves from the measurements taken on a walk-through.
+                    </p>
+                  </Link>
+                  <Link
+                    href="/price-list"
+                    className="rounded-xl border border-slate-200 p-4 transition hover:border-brand"
+                  >
+                    <div className="flex items-center gap-2 font-medium text-slate-800">
+                      <Tags className="h-4 w-4 text-slate-400" />
+                      Price list
+                    </div>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Your real costs and markups, item by item. Everything you quote prices from here first.
+                    </p>
+                  </Link>
+                </div>
               </Section>
 
               <Section title="Getting paid">

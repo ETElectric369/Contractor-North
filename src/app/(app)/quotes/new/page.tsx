@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { BackLink } from "@/components/back-link";
 import { PageHeader } from "@/components/page-header";
 import { getOrgSettings } from "@/lib/org-settings";
-import { parseInspectionSchema, answersForEstimator, tolerateMissingColumns } from "@/lib/inspection/schema";
+import { parseInspectionSchema, answersForEstimator, measurementsFromAnswers, tolerateMissingColumns } from "@/lib/inspection/schema";
 import { DECK_ESTIMATE_CODES } from "@/lib/estimate/deck";
 import { NewInspectionButton } from "../../appointments/new-inspection-button";
 import { QuoteBuilder } from "./quote-builder";
@@ -24,6 +24,9 @@ export default async function NewQuotePage({
   // DELIBERATELY not carried into the prefill — only notes/measurements/materials;
   // they stay on the appointment's capture page (signed URLs, private bucket).
   let initialScope: string | undefined;
+  // Square/linear feet from the walk-through, handed to the kit picker so its sizing boxes open
+  // with the numbers the inspector already took.
+  let measured: { sqft: number | null; linearFt: number | null } | undefined;
   let captureInquiryId: string | undefined;
   let captureApptId: string | undefined; // verified appointment id — saveQuote stamps the write-up backlink on it
   if (capture) {
@@ -51,10 +54,12 @@ export default async function NewQuotePage({
       );
       const rel = (insp as any)?.forms;
       const schema = parseInspectionSchema((Array.isArray(rel) ? rel[0] : rel)?.schema);
-      const measured = answersForEstimator(schema, ((insp as any)?.inspection_answers ?? {}) as never);
+      const answers = ((insp as any)?.inspection_answers ?? {}) as never;
+      const measuredText = answersForEstimator(schema, answers);
+      measured = measurementsFromAnswers(schema, answers);
       const parts = [
         `From site inspection — ${(appt as any).title}${(appt as any).location ? ` (${(appt as any).location})` : ""}`,
-        measured ? `MEASURED ON SITE (these are given — use them, don't re-derive them):\n${measured}` : "",
+        measuredText ? `MEASURED ON SITE (these are given — use them, don't re-derive them):\n${measuredText}` : "",
         cap?.notes?.trim() ? `Notes:\n${cap.notes.trim()}` : "",
         cap?.measurements?.trim() ? `Measurements:\n${cap.measurements.trim()}` : "",
         cap?.materials?.trim() ? `Materials needed:\n${cap.materials.trim()}` : "",
@@ -126,6 +131,7 @@ export default async function NewQuotePage({
         {!capture && <NewInspectionButton inquiryId={inquiry} size="sm" variant="outline" />}
       </PageHeader>
       <QuoteBuilder
+        measured={measured}
         customers={(customers ?? []).map((c: any) => ({
           id: c.id,
           name: c.name,

@@ -30,8 +30,12 @@ export function KitPickerModal({
   kit,
   onClose,
   onAdd,
+  measured,
 }: {
   kit: KitForPicker;
+  /** What the walk-through already measured — prefilled so the sizing boxes open with the real
+   *  numbers rather than zeros. Typing a measurement a second time is how the two copies drift. */
+  measured?: { sqft?: number | null; linearFt?: number | null };
   onClose: () => void;
   onAdd: (lines: DraftLineItem[]) => void;
 }) {
@@ -48,8 +52,8 @@ export function KitPickerModal({
    * it did before.
    */
   const parametric = useMemo(() => kitIsParametric(kit.kit_items as ParametricKitItem[]), [kit.kit_items]);
-  const [sqft, setSqft] = useState<number>(0);
-  const [linearFt, setLinearFt] = useState<number>(0);
+  const [sqft, setSqft] = useState<number>(Number(measured?.sqft) || 0);
+  const [linearFt, setLinearFt] = useState<number>(Number(measured?.linearFt) || 0);
 
   const sizeToJob = () => {
     const computed = kitQuantities(kit.kit_items as ParametricKitItem[], { sqft, linearFt });
@@ -103,7 +107,10 @@ export function KitPickerModal({
         {parametric && (
           <div className="rounded-lg border border-brand/30 bg-brand/5 p-3">
             <p className="mb-2 text-xs font-medium text-slate-600">
-              This kit sizes itself. Enter the job&rsquo;s measurements and the quantities fill in.
+              This list sizes itself.{" "}
+              {measured?.sqft || measured?.linearFt
+                ? "Taken from the walk-through — change them if the job did."
+                : "Enter the job\u2019s measurements and the quantities fill in."}
             </p>
             <div className="flex flex-wrap items-end gap-2">
               <div className="w-28">

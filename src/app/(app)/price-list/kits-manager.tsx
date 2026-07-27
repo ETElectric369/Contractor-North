@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2, Package, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input, Label } from "@/components/ui/input";
+import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Card } from "@/components/ui/card";
 import { Modal, ModalActions } from "@/components/ui/modal";
@@ -13,7 +13,11 @@ import { effectiveMarkupPct } from "@/lib/pricing/markup";
 import { createKit, updateKit, deleteKit, addKitItem, updateKitItem, deleteKitItem } from "./kit-actions";
 import { ImportKitsButton } from "./import-kits-button";
 
-interface KitItem { id: string; description: string; quantity: number; unit: string; unit_price: number; }
+interface KitItem {
+  id: string; description: string; quantity: number; unit: string; unit_price: number;
+  // 0166 sizing — present once the migration has run, absent on an older row.
+  qty_per_sqft?: number | null; qty_per_lf?: number | null; qty_min?: number | null; qty_round?: string | null;
+}
 interface Kit { id: string; name: string; category: string | null; kit_items: KitItem[]; }
 interface PriceItem { id: string; code: string | null; description: string; category?: string | null; unit: string; buy_price: number; markup_pct: number; }
 
@@ -126,6 +130,11 @@ function EditItemModal({ item, onClose }: { item: KitItem; onClose: () => void }
   const [qty, setQty] = useState(Number(item.quantity));
   const [unit, setUnit] = useState(item.unit);
   const [price, setPrice] = useState(Number(item.unit_price));
+  // SIZING (0166). "" means no coefficient — a flat quantity, exactly as every kit behaves today.
+  const [perSqft, setPerSqft] = useState<number | "">(item.qty_per_sqft ?? "");
+  const [perLf, setPerLf] = useState<number | "">(item.qty_per_lf ?? "");
+  const [qtyMin, setQtyMin] = useState<number | "">(item.qty_min ?? "");
+  const [rounding, setRounding] = useState(item.qty_round ?? "up");
   const [err, setErr] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
@@ -133,7 +142,13 @@ function EditItemModal({ item, onClose }: { item: KitItem; onClose: () => void }
     if (!desc.trim()) return;
     setErr(null);
     start(async () => {
-      const res = await updateKitItem(item.id, { description: desc, quantity: qty, unit, unit_price: price });
+      const res = await updateKitItem(item.id, {
+        description: desc, quantity: qty, unit, unit_price: price,
+        qty_per_sqft: perSqft === "" ? null : Number(perSqft),
+        qty_per_lf: perLf === "" ? null : Number(perLf),
+        qty_min: qtyMin === "" ? null : Number(qtyMin),
+        qty_round: rounding || null,
+      });
       if (!res.ok) { setErr(res.error ?? "Could not save line."); return; }
       router.refresh();
       onClose();
@@ -155,6 +170,35 @@ function EditItemModal({ item, onClose }: { item: KitItem; onClose: () => void }
           <div><Label htmlFor="ei-unit">Unit</Label><Input id="ei-unit" value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="ea" /></div>
           <div><Label htmlFor="ei-price">Unit price</Label><NumberInput id="ei-price" placeholder="$" value={price} onValueChange={setPrice} /></div>
         </div>
+
+        {/* SIZE THIS LINE FROM THE JOB (0166) — the link between a walk-through and an estimate.
+            A line that knows it needs so-much per square foot fills its own quantity in from the
+            measurements, instead of somebody working it out on a phone. Left blank, the line keeps
+            its flat quantity, which is how every existing kit already behaves. */}
+        <details className="rounded-lg border border-slate-200 p-3">
+          <summary className="cursor-pointer text-sm font-medium text-slate-700">
+            Size this line from the job
+            {(perSqft !== "" || perLf !== "") && <span className="ml-2 text-xs font-normal text-brand">on</span>}
+          </summary>
+          <p className="mt-2 text-xs text-slate-500">
+            Leave blank for a fixed quantity. Fill one in and this line works out its own quantity from the
+            measurements taken on the walk-through.
+          </p>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <div><Label htmlFor="ei-sqft">Per square foot</Label><NumberInput id="ei-sqft" placeholder="e.g. 1" value={perSqft as number} onValueChange={setPerSqft} /></div>
+            <div><Label htmlFor="ei-lf">Per linear foot</Label><NumberInput id="ei-lf" placeholder="e.g. 3" value={perLf as number} onValueChange={setPerLf} /></div>
+            <div><Label htmlFor="ei-min">Never fewer than</Label><NumberInput id="ei-min" placeholder="—" value={qtyMin as number} onValueChange={setQtyMin} /></div>
+            <div>
+              <Label htmlFor="ei-round">Rounding</Label>
+              <Select id="ei-round" value={rounding} onChange={(e) => setRounding(e.target.value)}>
+                <option value="up">Round up (whole units)</option>
+                <option value="nearest">Nearest</option>
+                <option value="none">Exact — no rounding</option>
+              </Select>
+            </div>
+          </div>
+        </details>
+
         {err && <p className="text-sm text-red-600">{err}</p>}
       </div>
     </Modal>

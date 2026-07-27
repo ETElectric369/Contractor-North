@@ -20,7 +20,7 @@ const NAV_ALIASES: Record<string, string[]> = {
   "/analytics": ["reports", "reporting", "kpi", "dashboard", "numbers", "profit"],
   "/recurring": ["subscription", "repeat invoice", "auto invoice"],
   "/petty-cash": ["cash", "reimbursement"],
-  "/price-list": ["pricing", "rates", "catalog"],
+  "/price-list": ["pricing", "rates", "catalog", "kit", "kits", "price book", "materials list", "line items"],
   "/leads": ["prospects", "inquiries", "pipeline"],
   "/quotes": ["estimate", "proposal", "bid"],
   "/crm": ["customers", "clients", "people", "contact"],

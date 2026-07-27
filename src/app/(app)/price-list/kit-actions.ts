@@ -184,7 +184,18 @@ export async function updateKitItems(
 
 export async function updateKitItem(
   id: string,
-  input: { description: string; quantity?: number; unit?: string; unit_price?: number },
+  input: {
+    description: string;
+    quantity?: number;
+    unit?: string;
+    unit_price?: number;
+    /** 0166 SIZING. Null clears it — a line that used to size itself and now shouldn't must be
+     *  able to go back to a flat quantity, so these are written even when blank. */
+    qty_per_sqft?: number | null;
+    qty_per_lf?: number | null;
+    qty_min?: number | null;
+    qty_round?: string | null;
+  },
 ): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -201,6 +212,10 @@ export async function updateKitItem(
       quantity: input.quantity ?? 1,
       unit: input.unit?.trim() || "ea",
       unit_price: input.unit_price ?? 0,
+      ...(input.qty_per_sqft !== undefined ? { qty_per_sqft: input.qty_per_sqft || null } : {}),
+      ...(input.qty_per_lf !== undefined ? { qty_per_lf: input.qty_per_lf || null } : {}),
+      ...(input.qty_min !== undefined ? { qty_min: input.qty_min || null } : {}),
+      ...(input.qty_round !== undefined ? { qty_round: input.qty_round || null } : {}),
     })
     .eq("id", id);
   if (error) return { ok: false, error: error.message };

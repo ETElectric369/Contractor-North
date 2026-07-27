@@ -17,10 +17,18 @@ export default async function PriceListPage() {
       .eq("archived", false)
       .order("description")
       .limit(2000),
-    supabase
-      .from("kits")
-      .select("id, name, category, kit_items(id, description, quantity, unit, unit_price, sort_order)")
-      .order("name"),
+    // Sizing columns (0166) are requested FIRST and the query RETRIED without them — a deploy
+    // lands before its migration, and naming an absent column fails the whole query rather than
+    // degrading, which would empty the kits tab entirely until the migration ran.
+    (async () => {
+      const base = "id, description, quantity, unit, unit_price, sort_order";
+      const withSizing = await supabase
+        .from("kits")
+        .select(`id, name, category, kit_items(${base}, qty_per_sqft, qty_per_lf, qty_min, qty_round)`)
+        .order("name");
+      if (!withSizing.error) return withSizing;
+      return supabase.from("kits").select(`id, name, category, kit_items(${base})`).order("name");
+    })(),
     // default_markup_pct rides to the kit builder so a kit line picked from the book prices
     // through THE markup rule (item → org default), not the item's raw markup alone.
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),

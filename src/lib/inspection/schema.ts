@@ -148,3 +148,51 @@ export function answersForEstimator(fields: InspectionField[], answers: Inspecti
     .filter(Boolean);
   return lines.length ? lines.join("\n") : "";
 }
+
+/**
+ * THE MEASUREMENTS A KIT CAN SIZE ITSELF FROM.
+ *
+ * Pulls square feet and linear feet out of a walk-through's typed answers so the estimate's kit
+ * picker opens with the real numbers already in it. This is the join that makes the whole typed
+ * sheet worth filling in: the inspector measures once, on site, and nobody retypes it later from
+ * a paragraph — which is exactly where two copies of one number start to disagree.
+ *
+ * Deliberately forgiving about field NAMES, because the sheet is per-org DATA and every trade will
+ * key it differently. It looks for what a field MEANS (length × width, or an explicit area /
+ * perimeter / railing run) rather than demanding one blessed schema, so a template someone types
+ * themselves still works without a code change.
+ */
+export function measurementsFromAnswers(
+  fields: InspectionField[],
+  answers: InspectionAnswers,
+): { sqft: number | null; linearFt: number | null } {
+  const num = (key: string): number | null => {
+    const v = answers[key];
+    return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null;
+  };
+  // Match on the LABEL as well as the key — an org-authored sheet may use either.
+  const find = (re: RegExp): number | null => {
+    for (const f of fields) {
+      if (f.type !== "number") continue;
+      if (re.test(f.key) || re.test(f.label.toLowerCase())) {
+        const v = num(f.key);
+        if (v !== null) return v;
+      }
+    }
+    return null;
+  };
+
+  const explicitArea = find(/sq_?ft|square feet|\barea\b/);
+  const length = find(/^length|length_ft|\blength\b/);
+  const width = find(/^width|width_ft|\bwidth\b|depth/);
+  // An explicit area wins; otherwise derive it, but only when BOTH sides were actually measured —
+  // half a rectangle is not an area, and treating a missing width as 1 would quietly under-size
+  // every line in the kit.
+  const sqft = explicitArea ?? (length !== null && width !== null ? length * width : null);
+
+  const explicitLf = find(/lf$|linear|railing|perimeter|_lf/);
+  // Fall back to the footprint's perimeter, which is what railing actually runs along.
+  const linearFt = explicitLf ?? (length !== null && width !== null ? 2 * (length + width) : null);
+
+  return { sqft, linearFt };
+}

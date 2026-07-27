@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseInspectionSchema, coerceAnswers, unansweredFields, answersForEstimator, type InspectionField } from "./schema";
+import { parseInspectionSchema, coerceAnswers, unansweredFields, answersForEstimator, measurementsFromAnswers, type InspectionField } from "./schema";
 
 const fields: InspectionField[] = [
   { key: "run_ft", label: "Run from panel", type: "number" },
@@ -99,3 +99,62 @@ describe("the estimator receives labelled facts, not prose to re-parse", () => {
     expect(answersForEstimator(fields, coerceAnswers(fields, {}))).toBe("");
   });
 });
+
+/**
+ * THE JOIN between a walk-through and a priced line. If this returns a wrong number, every
+ * coefficient line in the kit is wrong by the same factor and the estimate looks perfectly
+ * plausible — which is the failure mode that actually reaches a customer.
+ */
+describe("measurements a kit can size itself from", () => {
+  const deck: InspectionField[] = [
+    { key: "length_ft", label: "Length (ft)", type: "number" },
+    { key: "width_ft", label: "Width / depth (ft)", type: "number" },
+    { key: "railing_lf", label: "Railing (linear ft)", type: "number" },
+    { key: "notes", label: "Notes", type: "textarea" },
+  ];
+
+  it("derives area from length x width", () => {
+    const a = coerceAnswers(deck, { length_ft: 20, width_ft: 15 });
+    expect(measurementsFromAnswers(deck, a).sqft).toBe(300);
+  });
+
+  it("uses the measured railing run when there is one", () => {
+    const a = coerceAnswers(deck, { length_ft: 20, width_ft: 15, railing_lf: 46 });
+    expect(measurementsFromAnswers(deck, a).linearFt).toBe(46);
+  });
+
+  it("falls back to the footprint's perimeter for linear feet", () => {
+    // Railing runs along the edge, so the perimeter is the honest default when nobody measured it.
+    const a = coerceAnswers(deck, { length_ft: 20, width_ft: 15 });
+    expect(measurementsFromAnswers(deck, a).linearFt).toBe(70);
+  });
+
+  it("HALF a rectangle is not an area — one missing side yields null, never a guess", () => {
+    // Treating a missing width as 1 would under-size every coefficient line in the kit, quietly.
+    const a = coerceAnswers(deck, { length_ft: 20 });
+    expect(measurementsFromAnswers(deck, a).sqft).toBeNull();
+  });
+
+  it("an explicit area beats the derived one", () => {
+    const withArea: InspectionField[] = [...deck, { key: "deck_sqft", label: "Deck area (sq ft)", type: "number" }];
+    const a = coerceAnswers(withArea, { length_ft: 20, width_ft: 15, deck_sqft: 260 });
+    expect(measurementsFromAnswers(withArea, a).sqft).toBe(260);
+  });
+
+  it("nothing measured yields nulls, not zeros", () => {
+    // A zero would size every line to zero and read as a real, free estimate.
+    const m = measurementsFromAnswers(deck, coerceAnswers(deck, {}));
+    expect(m.sqft).toBeNull();
+    expect(m.linearFt).toBeNull();
+  });
+
+  it("works on a sheet somebody typed themselves, with different keys", () => {
+    // The sheet is per-org DATA — it must not require one blessed schema to be useful.
+    const custom: InspectionField[] = [
+      { key: "how_long", label: "Length of the deck in feet", type: "number" },
+      { key: "how_wide", label: "Width in feet", type: "number" },
+    ];
+    const m = measurementsFromAnswers(custom, coerceAnswers(custom, { how_long: 10, how_wide: 12 }));
+    expect(m.sqft).toBe(120);
+  });
+})

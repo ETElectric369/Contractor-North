@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Sparkles, Loader2, ChevronDown, ChevronRight, Undo2, FileUp } from "lucide-react";
+import { Plus, Trash2, Sparkles, Loader2, ChevronDown, ChevronRight, Undo2, FileUp, ListPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
@@ -71,8 +71,13 @@ export function QuoteBuilder({
   defaultMarkupPct = 0,
   deckRateRows,
   showDeckGenerator = false,
+  measured,
 }: {
   customers: CustomerOption[];
+  /** Measurements the inspector already took on the walk-through (?capture=). They prefill the
+   *  kit picker's sizing boxes, so nobody types a number twice — which is the whole reason the
+   *  inspection sheet asks for them as NUMBERS instead of prose. */
+  measured?: { sqft?: number | null; linearFt?: number | null };
   preselected?: string;
   /** When launched from a job, the quote attaches to it. */
   jobId?: string;
@@ -485,21 +490,29 @@ export function QuoteBuilder({
               </div>
             )}
 
+            {/* PICK A CATEGORY, THEN PICK FROM THE LIST — the filed complaint was "Not intuitive,
+                see the list and select from it", and the reason was this control: a <Select> whose
+                only visible text was "+ Add from a kit…", sitting directly under a search box, so
+                it read as one more form field — and on iOS it opened the native wheel instead of a
+                list. The picker behind it was always the multi-select list being asked for; it was
+                the DOOR that was hidden. Buttons name the categories out loud. */}
             {kits.length > 0 && (
               <div className="mb-3">
-                <Select
-                  value=""
-                  onChange={(e) => {
-                    const k = kits.find((x) => x.id === e.target.value);
-                    if (k) setPickerKit(k);
-                    e.target.value = "";
-                  }}
-                >
-                  <option value="">+ Add from a kit…</option>
+                <p className="mb-1.5 text-xs font-medium text-slate-500">Add from a list</p>
+                <div className="flex flex-wrap gap-2">
                   {kits.map((k) => (
-                    <option key={k.id} value={k.id}>{k.name}</option>
+                    <button
+                      key={k.id}
+                      type="button"
+                      onClick={() => setPickerKit(k)}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:border-brand hover:text-brand"
+                    >
+                      <ListPlus className="h-3.5 w-3.5" />
+                      {k.name}
+                      <span className="text-xs font-normal text-slate-400">{k.kit_items?.length ?? 0}</span>
+                    </button>
                   ))}
-                </Select>
+                </div>
               </div>
             )}
 
@@ -566,6 +579,7 @@ export function QuoteBuilder({
         {pickerKit && (
           <KitPickerModal
             kit={pickerKit}
+            measured={measured}
             onClose={() => setPickerKit(null)}
             onAdd={(lines) => {
               addGeneratedLines(lines);
