@@ -9,6 +9,7 @@ import {
 import { Card } from "@/components/ui/card";
 import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
+import { wireSizeForLoad, ampacityAt, type WiringMethod } from "@/lib/electrical-calc";
 
 /* ── NEC reference tables ─────────────────────────────────────────────── */
 /* Circular mils per AWG/kcmil size (NEC chapter 9 table 8). */
@@ -30,17 +31,9 @@ const CONDUIT_FILL: Record<string, Record<string, number>> = {
   "PVC Sch 40": { '1/2"': 0.114, '3/4"': 0.203, '1"': 0.333, '1-1/4"': 0.581, '1-1/2"': 0.794, '2"': 1.316, '2-1/2"': 1.878, '3"': 2.907, '4"': 5.022 },
   EMT: { '1/2"': 0.122, '3/4"': 0.213, '1"': 0.346, '1-1/4"': 0.598, '1-1/2"': 0.814, '2"': 1.342, '2-1/2"': 2.343, '3"': 3.538, '4"': 5.901 },
 };
-/* Ampacity, 75°C copper / aluminum (NEC 310.16). */
-const AMPACITY_CU: Record<string, number> = {
-  "14": 20, "12": 25, "10": 35, "8": 50, "6": 65, "4": 85, "3": 100, "2": 115,
-  "1": 130, "1/0": 150, "2/0": 175, "3/0": 200, "4/0": 230, "250": 255,
-  "300": 285, "350": 310, "500": 380,
-};
-const AMPACITY_AL: Record<string, number> = {
-  "12": 20, "10": 35, "8": 40, "6": 50, "4": 65, "3": 75, "2": 90, "1": 100,
-  "1/0": 120, "2/0": 135, "3/0": 155, "4/0": 180, "250": 205, "300": 230,
-  "350": 250, "500": 310,
-};
+/* Ampacity tables live in @/lib/electrical-calc and are IMPORTED, never copied. They were
+ * duplicated here once; the copies drifted, and both carried the same two NEC errors (no 60°C
+ * column for NM cable, and a 90°C aluminum value sitting in a 75°C table). One table, one fix. */
 // Smallest→largest in AWG/kcmil order. NOT Object.keys(CMIL) — that sorts the integer-string
 // keys numerically (1,2,3,…,12,14, then kcmil), so .find() returned #1 AWG for nearly every load.
 const SIZES = ["14", "12", "10", "8", "6", "4", "3", "2", "1", "1/0", "2/0", "3/0", "4/0", "250", "300", "350", "500"].filter((s) => s in CMIL);
@@ -118,31 +111,41 @@ function WireSize() {
   const [feet, setFeet] = useState(100);
   const [metal, setMetal] = useState<"cu" | "al">("cu");
   const [maxPct, setMaxPct] = useState(3);
-  const amp = metal === "cu" ? AMPACITY_CU : AMPACITY_AL;
+  const [method, setMethod] = useState<WiringMethod>("nm");
   const k = metal === "cu" ? 12.9 : 21.2;
-  const pick = SIZES.find((s) => {
-    const a = amp[s];
-    if (!a || a < amps) return false;
+  // CODE MINIMUM FIRST — the right ampacity column for the wiring method, plus the NEC 240.4(D)
+  // small-conductor cap — and only THEN upsize for voltage drop. That's the order an electrician
+  // actually works in, and voltage drop can only ever push the answer bigger, never smaller.
+  const codeMin = wireSizeForLoad({ amps, metal, method });
+  const minSize = "size_awg" in codeMin ? codeMin.size_awg : null;
+  const minIdx = minSize ? SIZES.indexOf(minSize) : -1;
+  const pick = minIdx < 0 ? undefined : SIZES.slice(minIdx).find((s) => {
     const vd = (2 * k * amps * feet) / CMIL[s];
     return volts > 0 && (vd / volts) * 100 <= maxPct;
   });
-  const detail = pick ? { vd: (2 * k * amps * feet) / CMIL[pick], pct: ((2 * k * amps * feet) / CMIL[pick] / volts) * 100, amp: amp[pick] } : null;
+  const col: string = (codeMin as { ampacity_column?: string }).ampacity_column ?? "75°C";
+  const detail = pick
+    ? { vd: (2 * k * amps * feet) / CMIL[pick], pct: ((2 * k * amps * feet) / CMIL[pick] / volts) * 100, amp: ampacityAt(metal, col.startsWith("60") ? "60" : "75", pick) }
+    : null;
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-        <Field label="Amps (load)"><NumberInput value={amps} onValueChange={setAmps} /></Field>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <Field label="Amps (circuit)"><NumberInput value={amps} onValueChange={setAmps} /></Field>
         <Field label="Volts"><NumberInput value={volts} onValueChange={setVolts} /></Field>
         <Field label="One-way feet"><NumberInput value={feet} onValueChange={setFeet} /></Field>
+        <Field label="Wiring method"><Select value={method} onChange={(e) => setMethod(e.target.value as WiringMethod)}><option value="nm">NM-B (Romex)</option><option value="uf">UF (direct burial)</option><option value="raceway">Conduit (THHN)</option></Select></Field>
         <Field label="Metal"><Select value={metal} onChange={(e) => setMetal(e.target.value as "cu" | "al")}><option value="cu">Copper</option><option value="al">Aluminum</option></Select></Field>
         <Field label="Max drop %"><Select value={String(maxPct)} onChange={(e) => setMaxPct(Number(e.target.value))}><option value="3">3% (branch)</option><option value="5">5% (feeder)</option></Select></Field>
       </div>
       <Result tone={pick ? "green" : "red"}>
         {pick && detail ? (
-          <>Use <strong>{pick} AWG/kcmil {metal === "cu" ? "copper" : "aluminum"}</strong> — ampacity {detail.amp} A (75°C), drop {detail.vd.toFixed(2)} V ({detail.pct.toFixed(2)}%) at {feet} ft.</>
+          <>Use <strong>{pick} AWG/kcmil {metal === "cu" ? "copper" : "aluminum"}</strong> — ampacity {detail.amp} A ({col}), drop {detail.vd.toFixed(2)} V ({detail.pct.toFixed(2)}%) at {feet} ft.
+            {pick !== minSize && <> Code minimum is {minSize}; upsized for voltage drop.</>}</>
         ) : (
           <>No single conductor up to 500 kcmil meets that — parallel runs or shorten the distance.</>
         )}
       </Result>
+      {"basis" in codeMin && <p className="text-xs text-slate-400">{codeMin.basis}</p>}
     </div>
   );
 }
@@ -577,10 +580,16 @@ function Derating() {
   const [metal, setMetal] = useState<"cu" | "al">("cu");
   const [ambF, setAmbF] = useState(86);
   const [count, setCount] = useState(3);
-  const base = (metal === "cu" ? AMPACITY_CU : AMPACITY_AL)[size] ?? 0;
+  // Derating starts from the conductor's own insulation rating (THHN/THWN-2 = 90°C), which is what
+  // NEC 310.15 adjusts; the 75°C figure is the TERMINATION limit the result gets clamped to.
+  const base = ampacityAt(metal, "90", size);
+  const termLimit = ampacityAt(metal, "75", size);
   const tf = ambientFactor(ambF);
   const bf = bundleFactor(count);
-  const derated = base * tf * bf;
+  // Adjust the 90°C insulation rating, then CLAMP to the 75°C termination limit — the adjusted
+  // ampacity may be used for derating but never to exceed what the lugs are rated for (110.14(C)).
+  const adjusted = base * tf * bf;
+  const derated = Math.min(adjusted, termLimit);
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -590,9 +599,10 @@ function Derating() {
         <Field label="# current-carrying"><NumberInput value={count} onValueChange={setCount} /></Field>
       </div>
       <Result tone={derated < base ? "amber" : "green"}>
-        Base {base} A (75°C) × temp {tf} × bundling {bf} = <strong>{derated.toFixed(1)} A</strong> usable
+        Base {base} A (90°C) × temp {tf} × bundling {bf} = {adjusted.toFixed(1)} A → <strong>{derated.toFixed(1)} A</strong> usable
+        {derated < adjusted && <> (capped at the {termLimit} A 75°C termination limit)</>}
       </Result>
-      <p className="text-xs text-slate-400">Ambient correction NEC 310.15(B)(1) (86°F = 1.0); bundling 310.15(C)(1) for 4+ current-carrying conductors.</p>
+      <p className="text-xs text-slate-400">Adjust from the 90°C column, then clamp to the termination rating — NEC 310.15(B)(1) ambient (86°F = 1.0), 310.15(C)(1) bundling for 4+ current-carrying conductors, 110.14(C) terminations.</p>
     </div>
   );
 }
