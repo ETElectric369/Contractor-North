@@ -82,7 +82,10 @@ export default async function SubscribePage({
                         <span className="text-sm font-medium text-slate-400">/mo</span>
                       </div>
                       <p className="mt-1 text-xs text-slate-500">{plan.blurb}</p>
-                      <p className="mt-3 flex-1 text-sm text-slate-600">{plan.included}</p>
+                      <p className="mt-3 text-sm text-slate-600">{plan.included}</p>
+                      {/* The second axis, and the honest one: our TIME. It scales with a
+                          customer's size without ever counting their people. */}
+                      <p className="mt-2 flex-1 text-sm text-slate-500">{plan.support}</p>
                       <Button type="submit" className="mt-4 w-full">Choose {plan.name}</Button>
                     </form>
                   ))}

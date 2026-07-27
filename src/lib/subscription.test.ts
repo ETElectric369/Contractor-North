@@ -84,13 +84,18 @@ describe("the plan ladder", () => {
     for (const p of PLANS) {
       expect(p.blurb).not.toMatch(headcount);
       expect(p.included).not.toMatch(headcount);
+      // The support line is the tier axis MOST tempted to say "for teams of 5+".
+      expect(p.support).not.toMatch(headcount);
     }
   });
 
   it("no tier sells a wage metaphor it can't honour", () => {
     // "Nort works mornings" / "Nort full-time" prices a unit nobody can check.
     const wage = /\bpart-time\b|\bfull-time\b|\bworks mornings\b|\bhours? a day\b/i;
-    for (const p of PLANS) expect(p.included).not.toMatch(wage);
+    for (const p of PLANS) {
+      expect(p.included).not.toMatch(wage);
+      expect(p.support).not.toMatch(wage);
+    }
   });
 
   it("the metered unit is something a contractor already counts", () => {
@@ -106,10 +111,27 @@ describe("the plan ladder", () => {
 
   it("running out NEVER blocks — the allowance only routes to a cheaper model", () => {
     // A billing state must never become a work stoppage; same law as the past-due grace window.
-    expect(overFullEstimateAllowance("handyman", 19)).toBe(false);
-    expect(overFullEstimateAllowance("handyman", 20)).toBe(true); // "degrade now", not "refuse"
+    // Derived from the plan, not hardcoded — the cap moved from 20 to 40 and a literal here went
+    // stale silently, which is the same class of bug as pricing copy drifting.
+    const cap = PLANS[0].fullEstimatesPerMonth!;
+    expect(overFullEstimateAllowance("handyman", cap - 1)).toBe(false);
+    expect(overFullEstimateAllowance("handyman", cap)).toBe(true); // "degrade now", not "refuse"
     expect(overFullEstimateAllowance("company", 100_000)).toBe(false); // no cap to exceed
     expect(overFullEstimateAllowance(null, 999)).toBe(false); // unknown plan never gets throttled
+  });
+
+  it("the caps sit near real economics, not near segmentation", () => {
+    // A full estimate costs ~$0.55; a $59 plan has ~$55 of room, so break-even is ~89. A cap far
+    // below that is segmentation wearing a cost costume — the exact thing the file forbids.
+    const entry = PLANS[0];
+    expect(entry.fullEstimatesPerMonth).not.toBeNull();
+    expect(entry.fullEstimatesPerMonth!).toBeGreaterThanOrEqual(35);
+  });
+
+  it("every tier states what OUR time buys, the one honest size-linked cost", () => {
+    for (const p of PLANS) expect(p.support.length).toBeGreaterThan(10);
+    // And it must actually differ, or it isn't an axis.
+    expect(new Set(PLANS.map((p) => p.support)).size).toBe(PLANS.length);
   });
 
   it("everything that costs us nothing per use is listed as included everywhere", () => {

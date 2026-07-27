@@ -3,11 +3,10 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { createClient } from "@/lib/supabase/server";
 import {
   getAnthropic,
-  DEFAULT_MODEL,
   ASSISTANT_SYSTEM_PROMPT,
 } from "@/lib/anthropic";
 import { getOrgSettings } from "@/lib/org-settings";
-import { recordAiUsage, aiSpendExceeded } from "@/lib/ai-cost";
+import { recordAiUsage, aiSpendExceeded, modelFor } from "@/lib/ai-cost";
 import { rateLimited } from "@/lib/rate-limit";
 import { DATA_TOOLS, runDataTool, STAFF_ONLY_DATA_TOOLS } from "@/lib/assistant-tools";
 import { CALC_TOOLS, runCalc, CALC_TOOL_NAMES } from "@/lib/electrical-calc";
@@ -228,6 +227,27 @@ export async function POST(req: Request) {
     ...STAFF_ONLY_DATA_TOOLS]);
   const isStaffCaller = isStaffRole(role ?? "");
   const dataTools = isStaffCaller ? DATA_TOOLS : DATA_TOOLS.filter((t) => !STAFF_ONLY_READ.has(t.name));
+
+  /**
+   * WHICH MODEL RUNS THIS CONVERSATION — the routing that modelFor() was built for in cn-v568 and
+   * then never wired to. Everything ran on the flagship model, including "what's my day".
+   *
+   * The split is by ROLE, because the role already decides the surface and the surface already
+   * decides the difficulty. Measured, not assumed:
+   *
+   *   STAFF  55 read tools + writes + the full playbook ≈ 28,000 tokens of preamble. This is where
+   *          estimating, quoting and money live — the work the product is actually judged on — so
+   *          it stays on the reasoning model. Downgrading it to save tokens would be a false
+   *          economy: one wrong estimate costs a contractor more than a year of the difference.
+   *   TECH   11 read tools ≈ 2,350 tokens. Clock in, what's on today, my tasks, who's on site.
+   *          Lookups and tier-1 writes, with the money tools filtered out above — nothing here
+   *          needs a frontier model, and a smaller model on a 12x smaller preamble is both cheaper
+   *          AND faster, which is what matters to someone holding a phone on a ladder.
+   *
+   * Both are env-overridable (ANTHROPIC_MODEL / ANTHROPIC_MODEL_ROUTINE) so the mix can be tuned
+   * without a deploy.
+   */
+  const model = isStaffCaller ? modelFor("reasoning") : modelFor("routine");
   const orgS = getOrgSettings((org as any)?.settings);
   const playbook = orgS.quote_playbook?.trim();
   const catalogMode = orgS.estimating_mode === "catalog";
@@ -569,7 +589,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
       try {
         for (let round = 0; round < MAX_ROUNDS; round++) {
           const turn = client.messages.stream({
-            model: DEFAULT_MODEL,
+            model,
             max_tokens: 2048,
             // TWO system blocks: the big STABLE core carries the cache breakpoint (covers tools too —
             // tools render before system, so one marker here caches both); the per-request/session
@@ -613,7 +633,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
           outputTokens += u?.output_tokens ?? 0;
           // METER (0162): one row per org per day. Output tokens matter most here —
           // they're 5x the input price, and an agentic loop emits them every round.
-          void recordAiUsage({ orgId, model: DEFAULT_MODEL, surface: "chat", usage: u });
+          void recordAiUsage({ orgId, model, surface: isStaffCaller ? "chat" : "chat:field", usage: u });
           convo.push({ role: "assistant", content: final.content });
 
           // web_search runs server-side and can pause a long turn (stop_reason "pause_turn").

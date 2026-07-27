@@ -59,6 +59,15 @@ describe("modelFor — reasoning keeps the good model, everything else gets rout
     const u = { input_tokens: 100_000, output_tokens: 10_000 };
     expect(costOf(modelFor("classify"), u)).toBeLessThan(costOf(modelFor("routine"), u));
   });
+
+  it("ROUTINE is genuinely cheaper than reasoning, not merely different", () => {
+    // The chat route now hands a FIELD TECH the routine model (11 tools, ~7k preamble, lookups
+    // and punches — no estimating). "not equal" was the only guard, and two differently-named
+    // models at the same price would have made that routing free of any benefit while looking
+    // like it worked.
+    const u = { input_tokens: 100_000, output_tokens: 10_000 };
+    expect(costOf(modelFor("routine"), u)).toBeLessThan(costOf(modelFor("reasoning"), u));
+  });
 });
 
 describe("the ceiling is an abuse stop, not a usage tier", () => {

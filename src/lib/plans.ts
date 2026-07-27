@@ -61,12 +61,26 @@ export type PlanDef = {
   /** Who this fits, described by WORKLOAD — never by headcount. */
   blurb: string;
   /**
-   * The ONLY axis that changes between tiers: how much genuinely expensive work is included.
-   * Measured in full estimates — plan take-offs and researched estimates — because that's a unit
-   * a contractor already counts. `null` means "more than anyone reaches in practice".
+   * AXIS 1 — COMPUTE. How much genuinely expensive work is included, in full estimates (plan
+   * take-offs and researched pricing), because that's a unit a contractor already counts.
+   * `null` means "more than anyone reaches in practice".
+   *
+   * These caps are set near the REAL economics, not where segmentation would like them. Measured:
+   * a full estimate costs ~$0.55, so a $59 plan breaks even around 89 of them. An earlier version
+   * of this file capped that tier at 20 — which is not cost recovery, it's segmentation wearing a
+   * cost costume, and it fails the principle at the top of this file. 40/month is two full
+   * researched estimates every working day: a genuine fair-use line almost nobody touches, with
+   * ~46% margin even for the person who does.
    */
   fullEstimatesPerMonth: number | null;
-  /** How that reads on the pricing page. */
+  /**
+   * AXIS 2 — OUR TIME. Support and setup are real cost that scales with a customer's size and has
+   * NOTHING to do with leverage: a twenty-person company genuinely needs more of us than a solo
+   * operator does. This is the honest reason a bigger business pays more, in a way that charging
+   * for their fourth employee never is.
+   */
+  support: string;
+  /** How the compute allowance reads on the pricing page. */
   included: string;
 };
 
@@ -77,8 +91,9 @@ export const PLANS: PlanDef[] = [
     monthly: 59,
     annual: 47,
     blurb: "You quote a few jobs a month and want the paperwork to stop eating your evenings.",
-    fullEstimatesPerMonth: 20,
-    included: "20 full estimates a month — plan take-offs and researched pricing. Everything else, unlimited.",
+    fullEstimatesPerMonth: 40,
+    included: "40 full estimates a month — plan take-offs and researched pricing. Everything else, unlimited.",
+    support: "Help by email, and the app set up to run itself.",
   },
   {
     tier: "crew",
@@ -86,8 +101,9 @@ export const PLANS: PlanDef[] = [
     monthly: 129,
     annual: 103,
     blurb: "You're quoting constantly and the office work has turned into a second job.",
-    fullEstimatesPerMonth: 75,
-    included: "75 full estimates a month, so bidding is a daily habit rather than a budget. Everything else, unlimited.",
+    fullEstimatesPerMonth: 120,
+    included: "120 full estimates a month, so bidding is a daily habit rather than a budget. Everything else, unlimited.",
+    support: "We set it up with you — your price book imported, your inspection sheets written — and answer the same day.",
   },
   {
     tier: "company",
@@ -97,6 +113,7 @@ export const PLANS: PlanDef[] = [
     blurb: "Estimating and paperwork are somebody's whole job — or should be.",
     fullEstimatesPerMonth: null,
     included: "Estimates and plan reading without a number on them. Everything else, unlimited.",
+    support: "Someone who knows your business: templates built for your trade, and a review of the numbers every quarter.",
   },
 ];
 
