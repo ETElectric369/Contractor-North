@@ -167,27 +167,52 @@ export function wireSizeForLoad(p: {
 /** Smallest conduit (per type) that holds the given conductors at 40% fill. conductors: [{size, count}]. */
 export function conduitFill(p: { conductors: { size_awg: string; count: number }[]; conduit_type?: string }) {
   const type = p.conduit_type && CONDUIT_FILL[p.conduit_type] ? p.conduit_type : "EMT";
+  let count = 0;
   let area = 0;
   for (const c of p.conductors) {
+    count += Math.max(0, Number(c.count) || 0);
     const a = THHN_AREA[c.size_awg];
     if (!a) return { error: `Unknown wire size "${c.size_awg}".` };
     area += a * (c.count || 0);
   }
-  const sizes = CONDUIT_FILL[type];
-  const fit = Object.keys(sizes).find((trade) => sizes[trade] >= area);
+  /**
+   * THE FILL LIMIT DEPENDS ON THE CONDUCTOR COUNT (NEC ch.9 table 1) — it is not always 40%.
+   * This calculator only ever applied 40%, which is right for three or more conductors and WRONG
+   * for the two cases below it: a two-wire run is limited to 31%, so 40% under-sizes the pipe and
+   * the estimate buys conduit that won't pass; a single conductor is allowed 53%, so 40% oversizes
+   * it and the customer pays for pipe they don't need. Both errors are quiet.
+   */
+  const limit = count === 1 ? 0.53 : count === 2 ? 0.31 : 0.4;
+  const sizes = CONDUIT_FILL[type]; // tabulated at 40%, so recover the raw internal area
+  const usable = (trade: string) => (sizes[trade] / 0.4) * limit;
+  const fit = Object.keys(sizes).find((trade) => usable(trade) >= area);
+  const pct = Math.round(limit * 100);
   return {
     conduit_type: type,
+    conductor_count: count,
+    fill_limit_percent: pct,
     total_conductor_area_in2: Math.round(area * 1000) / 1000,
     recommended_size: fit ?? null,
     fill_percent_at_recommended: fit ? Math.round((area / (sizes[fit] / 0.4)) * 100) : null,
-    note: fit ? `${fit} ${type} fits at ≤40% fill.` : `Needs larger than ${Object.keys(sizes).slice(-1)[0]} ${type}.`,
+    note: fit
+      ? `${fit} ${type} fits at ≤${pct}% fill (NEC ch.9 table 1: ${count === 1 ? "one conductor 53%" : count === 2 ? "two conductors 31%" : "over two conductors 40%"}).`
+      : `Needs larger than ${Object.keys(sizes).slice(-1)[0]} ${type} at the ${pct}% limit.`,
   };
 }
 
 /** Box fill: required in³ + the smallest standard box that holds it (NEC 314.16). devices each = 2×. */
 export function boxFill(p: { wire_size_awg: string; conductors: number; devices?: number; has_grounds?: boolean; has_clamps?: boolean }) {
   const per = BOX_VOL[p.wire_size_awg];
-  if (!per) return { error: `Box-fill volume not listed for ${p.wire_size_awg} (use 14–6 AWG).` };
+  // An ERROR here is the worst outcome, because it sends the model straight back to reasoning the
+  // table from memory — the exact failure this tool exists to prevent. NEC 314.16(B) genuinely
+  // stops at 6 AWG; above that the box is sized by 314.28 pull-box rules, which are a different
+  // calculation. So SAY that, and say what to do instead, rather than returning a bare failure.
+  if (!per)
+    return {
+      error: `NEC 314.16 volume allowances only cover 14–6 AWG; ${p.wire_size_awg} is outside the table.`,
+      guidance:
+        "Conductors larger than 6 AWG are not sized by box fill — a junction or pull box for them is sized by NEC 314.28 (straight pulls: 8× the largest raceway; angle/U pulls: 6×). Do NOT estimate a standard device box for this. Ask the user, or size the pull box by 314.28.",
+    };
   const units = (p.conductors || 0) + (p.devices ?? 0) * 2 + (p.has_grounds ? 1 : 0) + (p.has_clamps ? 1 : 0);
   const required = Math.round(units * per * 100) / 100;
   const box = STD_BOXES.find((b) => b.vol >= required);

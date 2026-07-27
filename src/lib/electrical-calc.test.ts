@@ -117,6 +117,41 @@ describe("electrical-calc", () => {
   it("conduit fill: 3× #12 THHN → 1/2\" EMT", () => {
     const r = conduitFill({ conductors: [{ size_awg: "12", count: 3 }], conduit_type: "EMT" }) as any;
     expect(r.recommended_size).toBe('1/2"');
+    expect(r.fill_limit_percent).toBe(40);
+  });
+
+  /**
+   * The fill limit is NOT always 40% (NEC ch.9 table 1). Applying 40% to a two-wire run undersizes
+   * the pipe — the estimate buys conduit that won't pass inspection — and applying it to a single
+   * conductor oversizes it, so the customer pays for pipe they don't need. Both were silent.
+   */
+  describe("fill limit varies with the conductor count", () => {
+    it("two conductors are limited to 31%, not 40%", () => {
+      const r = conduitFill({ conductors: [{ size_awg: "12", count: 2 }], conduit_type: "EMT" }) as any;
+      expect(r.fill_limit_percent).toBe(31);
+      expect(r.note).toMatch(/two conductors 31%/);
+    });
+    it("a single conductor is allowed 53%", () => {
+      const r = conduitFill({ conductors: [{ size_awg: "4", count: 1 }], conduit_type: "EMT" }) as any;
+      expect(r.fill_limit_percent).toBe(53);
+    });
+    it("the tighter 31% limit really does push to a bigger pipe", () => {
+      // 2× 3/0 THHN = 0.5358 in². 1-1/4" EMT usable: 40% → 0.598 (fits), 31% → 0.463 (doesn't).
+      const two = conduitFill({ conductors: [{ size_awg: "3/0", count: 2 }], conduit_type: "EMT" }) as any;
+      expect(two.recommended_size).toBe('1-1/2"');
+    });
+    it("over two conductors stays at 40%", () => {
+      const r = conduitFill({ conductors: [{ size_awg: "12", count: 4 }], conduit_type: "EMT" }) as any;
+      expect(r.fill_limit_percent).toBe(40);
+    });
+  });
+
+  it("box fill above 6 AWG explains 314.28 instead of just failing", () => {
+    // A bare error sends the model back to reasoning the table from memory — the exact failure
+    // these tools exist to prevent.
+    const r = boxFill({ wire_size_awg: "2", conductors: 3 }) as any;
+    expect(r.error).toMatch(/314.16/);
+    expect(r.guidance).toMatch(/314.28/);
   });
   it("conduit fill: 9× #10 THHN needs a bigger conduit than 1/2\"", () => {
     const r = conduitFill({ conductors: [{ size_awg: "10", count: 9 }], conduit_type: "EMT" }) as any;

@@ -12,6 +12,7 @@ import {
   type KitPickerRow,
   type KitItemRaw,
 } from "@/lib/kit-picker";
+import { kitIsParametric, kitQuantities, type ParametricKitItem } from "@/lib/estimate/parametric-kit";
 import type { DraftLineItem } from "../actions";
 
 export interface KitForPicker {
@@ -36,6 +37,31 @@ export function KitPickerModal({
 }) {
   const [rows, setRows] = useState<KitPickerRow[]>(() => kitItemsToPickerRows(kit.kit_items));
   const [err] = useState<string | null>(null);
+
+  /**
+   * PARAMETRIC KITS (0166). When a kit's lines carry per-sq-ft / per-linear-foot coefficients, the
+   * kit stops being a fixed shopping list and becomes the trade's quantity rule expressed as data.
+   * Type the two measurements and every coefficient line sizes itself — the same arithmetic
+   * lib/estimate/deck.ts does in code, without a module per trade.
+   *
+   * Only shown for kits that actually have coefficients; a flat kit looks and behaves exactly as
+   * it did before.
+   */
+  const parametric = useMemo(() => kitIsParametric(kit.kit_items as ParametricKitItem[]), [kit.kit_items]);
+  const [sqft, setSqft] = useState<number>(0);
+  const [linearFt, setLinearFt] = useState<number>(0);
+
+  const sizeToJob = () => {
+    const computed = kitQuantities(kit.kit_items as ParametricKitItem[], { sqft, linearFt });
+    setRows((prev) =>
+      prev.map((r, i) => {
+        const c = computed[i];
+        // Sizing sets the quantity and TICKS the line, because a line the measurements produced is
+        // one this job needs. Lines the coefficients couldn't size are left exactly as they were.
+        return c && c.parametric ? { ...r, quantity: c.quantity, checked: true } : r;
+      }),
+    );
+  };
 
   const patchRow = (idx: number, patch: Partial<KitPickerRow>) =>
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
@@ -73,6 +99,32 @@ export function KitPickerModal({
           Tick the lines this estimate needs. Qty and price edits apply to THIS estimate only —
           the kit itself is unchanged.
         </p>
+
+        {parametric && (
+          <div className="rounded-lg border border-brand/30 bg-brand/5 p-3">
+            <p className="mb-2 text-xs font-medium text-slate-600">
+              This kit sizes itself. Enter the job&rsquo;s measurements and the quantities fill in.
+            </p>
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="w-28">
+                <label className="mb-1 block text-[11px] text-slate-500" htmlFor="kit-sqft">Square feet</label>
+                <NumberInput id="kit-sqft" value={sqft} onValueChange={setSqft} />
+              </div>
+              <div className="w-28">
+                <label className="mb-1 block text-[11px] text-slate-500" htmlFor="kit-lf">Linear feet</label>
+                <NumberInput id="kit-lf" value={linearFt} onValueChange={setLinearFt} />
+              </div>
+              <button
+                type="button"
+                onClick={sizeToJob}
+                disabled={sqft <= 0 && linearFt <= 0}
+                className="h-10 rounded-lg bg-brand px-3 text-sm font-medium text-white disabled:opacity-40"
+              >
+                Size to job
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Select all / none */}
         <label className="flex items-center gap-2 text-sm text-slate-600">

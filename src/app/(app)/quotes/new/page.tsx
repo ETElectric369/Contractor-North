@@ -74,11 +74,19 @@ export default async function NewQuotePage({
         .order("description")
         .limit(2000),
       supabase.from("tax_rates").select("id, name, rate, is_default").order("created_at"),
-      supabase
-        .from("kits")
-        // kit_items ids ride along so the Kit Picker can write edits back to the kit.
-        .select("id, name, kit_items(id, description, quantity, unit, unit_price, sort_order)")
-        .order("name"),
+      // kit_items ids ride along so the Kit Picker can write edits back to the kit. The 0166
+      // coefficient columns are requested FIRST and the query retried without them if they aren't
+      // there yet — a deploy precedes its migration, and naming an absent column fails the whole
+      // query rather than degrading, which would empty the kit picker until the migration landed.
+      (async () => {
+        const cols = "id, description, quantity, unit, unit_price, sort_order";
+        const withCoeffs = await supabase
+          .from("kits")
+          .select(`id, name, kit_items(${cols}, qty_per_sqft, qty_per_lf, qty_min, qty_round)`)
+          .order("name");
+        if (!withCoeffs.error) return withCoeffs;
+        return supabase.from("kits").select(`id, name, kit_items(${cols})`).order("name");
+      })(),
       supabase.from("organizations").select("settings").limit(1).maybeSingle(),
     ]);
   const settings = getOrgSettings((org as any)?.settings);
