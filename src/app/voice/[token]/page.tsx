@@ -20,11 +20,17 @@ export default async function VoicePortalPage({ params }: { params: Promise<{ to
   const sb = createServiceClient();
   const { data: invite } = await sb
     .from("voice_invites")
-    .select("invitee_name, purpose, consented_at, completed_at")
+    .select("invitee_name, purpose, consented_at, completed_at, revoked_at, expires_at")
     .eq("token", t)
     .limit(1)
     .maybeSingle();
-  if (!invite) notFound();
+  // A withdrawn or lapsed invitation is simply not there. 404 rather than an explanation —
+  // the token is the only thing identifying this page, and confirming that a token was once
+  // valid tells a stranger more than it tells the invitee (0172).
+  const inv = invite as { revoked_at: string | null; expires_at: string | null } | null;
+  if (!inv) notFound();
+  if (inv.revoked_at) notFound();
+  if (inv.expires_at && new Date(inv.expires_at).getTime() < Date.now()) notFound();
 
   return (
     <VoiceRecorder

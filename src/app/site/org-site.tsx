@@ -31,7 +31,10 @@ export function orgSiteMetadata(org: PublicOrg): Metadata {
     title,
     description,
     icons: orgIcons(org), // the automatic per-tenant favicon — the org's own logo, resized
-    openGraph: { title, description, type: "website", images: hero ? [hero] : [] },
+    // og:url was present on every inner page and missing on the homepage — the one page most
+    // likely to be shared. It must be the org's canonical base, not the request host, or a share
+    // from the free subdomain would advertise that host as the page's identity.
+    openGraph: { title, description, type: "website", url: orgPublicBaseUrl(s), images: hero ? [hero] : [] },
     twitter: { card: "summary_large_image", title, description, images: hero ? [hero] : [] },
   };
 }

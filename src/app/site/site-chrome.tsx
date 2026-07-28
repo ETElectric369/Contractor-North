@@ -239,7 +239,10 @@ export function SiteFooter({ chrome }: { chrome: SiteChrome }) {
       </div>
       <div className="border-t border-white/10">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-2 px-4 py-5 text-xs text-slate-500 sm:flex-row">
-          <span>© {org.name}. All rights reserved.</span>
+          {/* Year included: a copyright line with no year reads as an abandoned site to a
+              visitor, and it is the first thing a stranger checks for "are these people still
+              in business". Computed at render — the pages are dynamic, so it stays current. */}
+          <span>© {new Date().getFullYear()} {org.name}. All rights reserved.</span>
           <span className="flex items-center gap-4">
             <Link href="/login" className="hover:text-slate-300">Team login</Link>
             <span>Powered by Contractor North</span>

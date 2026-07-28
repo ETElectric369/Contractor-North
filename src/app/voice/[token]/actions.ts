@@ -23,11 +23,21 @@ async function resolveInvite(token: string) {
   const sb = createServiceClient();
   const { data } = await sb
     .from("voice_invites")
-    .select("id, org_id, invitee_name")
+    .select("id, org_id, invitee_name, revoked_at, expires_at")
     .eq("token", t)
     .limit(1)
     .maybeSingle();
-  return data as { id: string; org_id: string; invitee_name: string } | null;
+  const row = data as
+    | { id: string; org_id: string; invitee_name: string; revoked_at: string | null; expires_at: string | null }
+    | null;
+  if (!row) return null;
+  // THE off switch (0172). Every action in this file resolves through here, so refusing a
+  // withdrawn or lapsed invitation once covers consent, upload and completion together — the
+  // reason this stayed one function. Treated as "no such invite", the same as a bad token:
+  // saying "this expired" would confirm the token to whoever is holding it.
+  if (row.revoked_at) return null;
+  if (row.expires_at && new Date(row.expires_at).getTime() < Date.now()) return null;
+  return row;
 }
 
 /** Record the invitee's typed signature + timestamp against the consent text version. */
