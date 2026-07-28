@@ -1,10 +1,9 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { headers } from "next/headers";
 import { Phone, Mail, MapPin, Zap } from "lucide-react";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { accentHex, getOrgSettings } from "@/lib/org-settings";
-import { mayServeOrgOnHost } from "@/lib/public-host";
+import { assertOrgServable } from "@/lib/serve-org";
 import { NO_INDEX } from "@/lib/no-index";
 import { InquiryForm } from "./inquiry-form";
 
@@ -55,9 +54,9 @@ export default async function InquirePage({ params, searchParams }: { params: Pr
     .maybeSingle();
   const orgSettings = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings);
   // WRONG-HOST LEAK: the org id comes from the URL and was never compared to the host, so
-  // tahoedeck.com/inquire/<ET's org id> returned 200 carrying ET's phone, email, Chilcoot and
-  // C-10 licence number — one contractor's contact details soliciting leads on the other's domain.
-  if (!mayServeOrgOnHost(orgSettings, (await headers()).get("host"))) notFound();
+  // <other-tenant>.com/inquire/<this org id> returned 200 carrying this contractor's phone,
+  // email, town and licence number — one business soliciting leads on another's domain.
+  await assertOrgServable(orgSettings);
   const rawCalendly = orgSettings.calendly_url;
   const calendlyUrl = /^https:\/\//i.test(rawCalendly) ? rawCalendly : "";
 

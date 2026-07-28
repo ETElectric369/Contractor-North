@@ -28,11 +28,28 @@ describe("who may serve whose pages", () => {
     expect(mayServeOrgOnHost(DECK, "et-electric.contractornorth.com")).toBe(false);
   });
 
-  it("app hosts may render any org — that is what preview and internal tools need", () => {
-    for (const h of ["app.contractornorth.com", "contractor-north.vercel.app", "localhost", "127.0.0.1"]) {
-      expect(mayServeOrgOnHost(DECK, h)).toBe(true);
-      expect(mayServeOrgOnHost(ET, h)).toBe(true);
+  it("an app host renders another tenant ONLY to a signed-in human", () => {
+    // Returning true here unconditionally made app.contractornorth.com an enumerable customer
+    // directory: guess a handle, get that tenant's whole site, signed out. Live before the fix:
+    //   GET https://app.contractornorth.com/site/tahoe-deck  -> 200  <title>TAHOE DECK …
+    for (const h of ["app.contractornorth.com", "contractor-north.vercel.app", "localhost"]) {
+      expect(mayServeOrgOnHost(DECK, h, false)).toBe(false); // anonymous → nothing
+      expect(mayServeOrgOnHost(DECK, h, true)).toBe(true); // signed in → preview works
     }
+  });
+
+  it("a tenant's OWN host stays public — signed in or not", () => {
+    // The whole point of a marketing site and a public lead form. This must never need a session.
+    expect(mayServeOrgOnHost(ET, "etelectricity.com", false)).toBe(true);
+    expect(mayServeOrgOnHost(DECK, "tahoedeck.com", false)).toBe(true);
+    expect(mayServeOrgOnHost(DECK, "tahoe-deck.contractornorth.com", false)).toBe(true);
+  });
+
+  it("a session does NOT unlock the other tenant's domain", () => {
+    // Being signed in is only ever an app-host allowance. It can never make one tenant's content
+    // legitimate on another tenant's domain.
+    expect(mayServeOrgOnHost(DECK, "etelectricity.com", true)).toBe(false);
+    expect(mayServeOrgOnHost(ET, "tahoedeck.com", true)).toBe(false);
   });
 
   it("host comparison ignores port, case and a trailing dot", () => {
@@ -41,10 +58,13 @@ describe("who may serve whose pages", () => {
     expect(orgOwnsHost(ET, "etelectricity.com.")).toBe(true); // trailing-dot FQDN is the same host
   });
 
-  it("an org with no domain configured is served nowhere but an app host", () => {
+  it("an org with no domain configured is served nowhere at all until someone signs in", () => {
+    // A brand-new tenant mid-onboarding owns no host yet. It must not be reachable anonymously
+    // anywhere — including on the app host, where it would otherwise be part of the directory.
     const bare = { custom_domain: "", public_handle: "" };
     expect(orgOwnsHost(bare, "etelectricity.com")).toBe(false);
-    expect(mayServeOrgOnHost(bare, "app.contractornorth.com")).toBe(true);
+    expect(mayServeOrgOnHost(bare, "app.contractornorth.com", false)).toBe(false);
+    expect(mayServeOrgOnHost(bare, "app.contractornorth.com", true)).toBe(true);
   });
 });
 

@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { headers } from "next/headers";
-import { mayServeOrgOnHost } from "@/lib/public-host";
+import { assertOrgServable, orgIsServable } from "@/lib/serve-org";
 import { createServiceClient } from "@/lib/supabase/server";
 import { accentHex, orgPublicBaseUrl } from "@/lib/org-settings";
 import { getPublicOrgByHandle } from "@/lib/public-org";
@@ -27,7 +26,7 @@ export async function generateMetadata({ params }: { params: Promise<{ handle: s
   const org = await getPublicOrgByHandle(handle);
   if (!org) return {}; // the page itself 404s
   if (org.settings.estimating_mode !== "catalog") return {}; // ditto — non-catalog orgs 404 below
-  if (!mayServeOrgOnHost(org.settings, (await headers()).get("host"))) return {}; // wrong host → 404 below
+  if (!(await orgIsServable(org.settings))) return {}; // wrong host → the page 404s below
   const s = org.settings;
   const title = s.splash_headline || `${org.name} — Deck Estimate`;
   const description = s.splash_tagline || "Answer a few quick questions for an instant ballpark.";
@@ -62,10 +61,11 @@ export default async function EstimatePage({ params }: { params: Promise<{ handl
   // breaking one.
   if (org.settings.estimating_mode !== "catalog") notFound();
   // WRONG-HOST LEAK: the handle comes from the URL and was never compared to the host, so this
-  // page answered 200 on SEVEN hosts, including the other tenant's domain — Chris's configurator
-  // and his deck pricing on Erik's C-10 electrical site, fully crawlable (robots.txt has no
-  // /estimate rule). The canonical was correct, which held the index together and hid it.
-  if (!mayServeOrgOnHost(org.settings, (await headers()).get("host"))) notFound();
+  // page answered 200 on SEVEN hosts, including the other tenant's domain — one contractor's
+  // configurator and pricing on the other's, fully crawlable. The canonical was correct, which
+  // held the search index together and is exactly why it stayed invisible. One call, packaged
+  // whole in lib/serve-org, so there is no half of this a route can forget.
+  await assertOrgServable(org.settings);
 
   const settings = org.settings;
   const brand = accentHex(settings.glass_tint);

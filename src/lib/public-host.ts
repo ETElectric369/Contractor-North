@@ -82,11 +82,28 @@ export function orgOwnsHost(
 
 /**
  * THE gate for an org-scoped public route. True when this host may render this org.
- * App hosts may render any org — that is what makes draft preview and internal tooling work.
+ *
+ * A tenant's own host serves that tenant to ANYONE — that is the whole point of a public
+ * marketing site and a public lead form.
+ *
+ * The APP host is different, and the first version of this function got it wrong by returning
+ * true for any app host unconditionally. That made app.contractornorth.com an ENUMERABLE TENANT
+ * DIRECTORY: guess a handle, get that customer's whole site, signed out.
+ *     GET https://app.contractornorth.com/site/tahoe-deck   -> 200  <title>TAHOE DECK …
+ *     GET https://app.contractornorth.com/site/et-electric  -> 200  <title>ET Electric …
+ * Between two brothers that is a convenience. For a product sold to strangers it is a customer
+ * list anyone can walk. The app host renders other tenants only for PREVIEW and internal
+ * tooling, and both of those have a signed-in human behind them — so it now requires a session.
+ *
+ * `hasSession` must come from a VALIDATED session (supabase.auth.getUser()), never from the mere
+ * presence of a cookie — an earlier guard here tested a cookie NAME and was defeated by
+ * `curl -H 'Cookie: sb-x-auth-token=garbage'`.
  */
 export function mayServeOrgOnHost(
   settings: { custom_domain?: string | null; public_handle?: string | null } | null | undefined,
   rawHost: string | null | undefined,
+  hasSession = false,
 ): boolean {
-  return isAppHostname(rawHost) || orgOwnsHost(settings, rawHost);
+  if (orgOwnsHost(settings, rawHost)) return true;
+  return isAppHostname(rawHost) && hasSession;
 }
