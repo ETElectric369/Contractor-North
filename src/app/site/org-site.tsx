@@ -227,11 +227,27 @@ export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg;
     ...(hero ? { image: socialImage(hero) } : {}),
     ...(area ? { areaServed: area } : {}),
     priceRange: "$$",
-    // Address comes ONLY from the explicit public_city/public_state settings (set to match the
-    // GBP listing) — never from the org record, whose city is a business/mailing address that
-    // must not leak to the public web. Unset = no address block; areaServed + geo still bind.
-    ...(s.public_city
-      ? { address: { "@type": "PostalAddress", addressLocality: s.public_city, addressRegion: s.public_state || org.state, addressCountry: "US" } }
+    // THE ADDRESS RULE, and it is not "never publish one". Whether a business publishes a street
+    // address is the BUSINESS'S call: a contractor with a shop or a yard wants a full address on
+    // the web and in their Google listing, and a one-truck operator working out of the house must
+    // not. So this emits EXACTLY what the owner typed into the public_* fields and nothing else,
+    // at whatever level of detail they chose — street, or just city/state, or nothing at all.
+    //
+    // What is absolute is the SEPARATION: organizations.address_line1/city/state/zip is the
+    // mailing/billing address used on invoices and internally, and it is never a source here at
+    // any level of detail. (An earlier version fell back to `org.state` when public_state was
+    // blank — a small leak of exactly the kind this comment claimed to prevent.)
+    ...(s.public_address || s.public_city
+      ? {
+          address: {
+            "@type": "PostalAddress",
+            ...(s.public_address ? { streetAddress: s.public_address } : {}),
+            ...(s.public_city ? { addressLocality: s.public_city } : {}),
+            ...(s.public_state ? { addressRegion: s.public_state } : {}),
+            ...(s.public_zip ? { postalCode: s.public_zip } : {}),
+            addressCountry: "US",
+          },
+        }
       : {}),
     ...(geo ? { geo: { "@type": "GeoCoordinates", latitude: geo.lat, longitude: geo.lng } } : {}),
     ...(gbpUrl ? { hasMap: gbpUrl } : {}),

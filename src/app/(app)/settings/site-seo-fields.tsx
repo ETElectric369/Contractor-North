@@ -17,8 +17,10 @@ export function SiteSeoFields({ settings, orgId }: { settings: OrgSettings; orgI
   const [gbp, setGbp] = useState(settings.google_business_url ?? "");
   const gbpVerdict = classifyMapUrl(gbp);
   const [area, setArea] = useState(settings.service_area ?? "");
+  const [pubAddr, setPubAddr] = useState(settings.public_address ?? "");
   const [pubCity, setPubCity] = useState(settings.public_city ?? "");
   const [pubState, setPubState] = useState(settings.public_state ?? "");
+  const [pubZip, setPubZip] = useState(settings.public_zip ?? "");
   const [ig, setIg] = useState(settings.social_instagram ?? "");
   const [theme, setTheme] = useState<OrgSettings["site_theme"]>(settings.site_theme ?? "classic");
   const [specHead, setSpecHead] = useState(settings.specialty_headline ?? "");
@@ -32,8 +34,10 @@ export function SiteSeoFields({ settings, orgId }: { settings: OrgSettings; orgI
   const [saved, setSaved] = useState({
     gbp: settings.google_business_url ?? "",
     area: settings.service_area ?? "",
+    pubAddr: settings.public_address ?? "",
     pubCity: settings.public_city ?? "",
     pubState: settings.public_state ?? "",
+    pubZip: settings.public_zip ?? "",
     ig: settings.social_instagram ?? "",
     theme: settings.site_theme ?? "classic",
     specHead: settings.specialty_headline ?? "",
@@ -47,8 +51,10 @@ export function SiteSeoFields({ settings, orgId }: { settings: OrgSettings; orgI
       const next = {
         gbp: gbp.trim(),
         area: area.trim(),
+        pubAddr: pubAddr.trim(),
         pubCity: pubCity.trim(),
         pubState: pubState.trim().toUpperCase().slice(0, 2),
+        pubZip: pubZip.trim(),
         ig: ig.replace(/^@/, "").trim(),
         theme,
         specHead: specHead.trim(),
@@ -59,6 +65,8 @@ export function SiteSeoFields({ settings, orgId }: { settings: OrgSettings; orgI
       if (next.area !== saved.area) patch.service_area = next.area;
       if (next.pubCity !== saved.pubCity) patch.public_city = next.pubCity;
       if (next.pubState !== saved.pubState) patch.public_state = next.pubState;
+      if (next.pubAddr !== saved.pubAddr) patch.public_address = next.pubAddr;
+      if (next.pubZip !== saved.pubZip) patch.public_zip = next.pubZip;
       if (next.ig !== saved.ig) patch.social_instagram = next.ig;
       if (next.theme !== saved.theme) patch.site_theme = next.theme;
       if (next.specHead !== saved.specHead) patch.specialty_headline = next.specHead;
@@ -114,22 +122,41 @@ export function SiteSeoFields({ settings, orgId }: { settings: OrgSettings; orgI
         <Label htmlFor="seo-area">Service area</Label>
         <Input id="seo-area" value={area} onChange={(e) => setArea(e.target.value)} placeholder="e.g. Truckee & North Tahoe" />
       </div>
-      {/* Staff-only (collaborators can't write these keys): the PUBLIC address for search
-          listings. Kept separate from the business address on purpose — that one never
-          appears on the public site. */}
+      {/* Staff-only (collaborators can't write these keys). Whether to publish an address, and how
+          much of one, is the OWNER'S decision — a shop or a yard is worth listing in full; a truck
+          run out of the house is not. These fields are the only source for anything public, and
+          the business address in Settings → Company is never published at any level of detail. */}
       {!orgId && (
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-3 rounded-lg border border-slate-200 p-3">
           <div>
-            <Label htmlFor="seo-pub-city">Public city (search listings)</Label>
-            <Input id="seo-pub-city" value={pubCity} onChange={(e) => setPubCity(e.target.value)} placeholder="Match your Google Business Profile" />
-            <p className="mt-1 text-xs text-slate-400">
-              Shown to search engines as your location. Your business address in Settings stays private. Blank = no city listed.
+            <Label htmlFor="seo-pub-addr">Public address (optional)</Label>
+            <Input id="seo-pub-addr" value={pubAddr} onChange={(e) => setPubAddr(e.target.value)} placeholder="e.g. 1200 Donner Pass Rd — leave blank if you work out of your home" />
+            <p className="mt-1 text-xs text-slate-500">
+              Fill this in <strong>only</strong> if you have a shop, yard or office you want customers
+              to find. Publishing a full address helps local search when the address is real and matches
+              your Google listing. Leave it blank and only the city and state below are published.
             </p>
           </div>
-          <div>
-            <Label htmlFor="seo-pub-state">Public state</Label>
-            <Input id="seo-pub-state" value={pubState} onChange={(e) => setPubState(e.target.value)} placeholder="CA" maxLength={2} className="max-w-[6rem]" />
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="sm:col-span-2">
+              <Label htmlFor="seo-pub-city">Public city</Label>
+              <Input id="seo-pub-city" value={pubCity} onChange={(e) => setPubCity(e.target.value)} placeholder="Match your Google Business Profile" />
+            </div>
+            <div className="grid grid-cols-2 gap-3 sm:col-span-1">
+              <div>
+                <Label htmlFor="seo-pub-state">State</Label>
+                <Input id="seo-pub-state" value={pubState} onChange={(e) => setPubState(e.target.value)} placeholder="CA" maxLength={2} />
+              </div>
+              <div>
+                <Label htmlFor="seo-pub-zip">ZIP</Label>
+                <Input id="seo-pub-zip" value={pubZip} onChange={(e) => setPubZip(e.target.value)} placeholder="96161" maxLength={10} />
+              </div>
+            </div>
           </div>
+          <p className="text-xs text-slate-500">
+            Only what you type here is published. Your business address in Settings &rarr; Company is
+            used for invoices and stays private — it is never a fallback for any of these.
+          </p>
         </div>
       )}
       <div className="grid gap-3 sm:grid-cols-2">

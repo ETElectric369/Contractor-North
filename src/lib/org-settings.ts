@@ -153,8 +153,19 @@ export interface OrgSettings {
    *  business-record address (invoices, payroll) is often a home base the owner does NOT want
    *  on the public web, and it must never leak there. Unset = no address in the schema at all
    *  (areaServed + geo still emit). Staff-only — not in the collaborator whitelist. */
+  /** PUBLICATION IS THE BUSINESS'S CALL, not the platform's. Plenty of contractors have a shop
+   *  or a yard and want a full address on the web and in their Google listing; plenty work out of
+   *  a truck and must not publish where they sleep. So the rule is not "never publish an address"
+   *  — it is "publish EXACTLY what the owner typed into these fields, and nothing else."
+   *
+   *  These are deliberately SEPARATE from organizations.address_line1/city/state/zip, which are
+   *  the mailing/billing address used on invoices and internally. That record is never a source
+   *  for anything public, at any level of detail — that separation is the actual guarantee, and
+   *  it holds whether the owner publishes a full street address or nothing at all. */
+  public_address: string;
   public_city: string;
   public_state: string;
+  public_zip: string;
   /** Public-site layout theme. Same data, different presentation so two orgs on the platform
    *  don't look identical: "classic" = full-bleed photo hero w/ dark overlay (the original);
    *  "bold" = saturated brand color-block hero with the photo as a framed card (contractor punch);
@@ -242,8 +253,10 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   specialty_blurb: "",
   service_area: "",
   show_doc_numbers: true,
+  public_address: "",
   public_city: "",
   public_state: "",
+  public_zip: "",
   site_theme: "classic",
   social_instagram: "",
   custom_domain: "",
