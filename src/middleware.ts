@@ -1,7 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
 import { CONTENT_ROOTS } from "@/lib/site-content-roots";
-import { pageSlugFromPath, isLegacyCmsPath } from "@/lib/site-reserved";
+import { pageSlugFromPath, isLegacyCmsPath, isReservedSlug, legacyAliasTarget } from "@/lib/site-reserved";
+import { isDeadReservedHost } from "@/lib/public-host";
 
 // The platform's own domain. A subdomain of it is a free org site: <handle>.SITES_DOMAIN.
 // Any OTHER host pointed at us is a custom domain, resolved by hostname in /site/by-domain.
@@ -24,7 +25,10 @@ const EXTRA_APP_HOSTS = new Set(
 // CONTENT_ROOTS). The catch-all does the DB lookup and redirects home on a miss, so middleware
 // stays DB-free. Custom builder PAGES are handled separately (root-level slugs, see pageSlugFromPath).
 function isContentPath(pathname: string): boolean {
-  const p = pathname.replace(/\/+$/, "") || "/";
+  // Lowercased: pageSlugFromPath lowercases, so /About worked while /BLOG/<post> fell through to
+  // the auth guard and 307'd to a login screen. Two spellings of the same URL must not get two
+  // different answers, and CONTENT_ROOTS are all lowercase.
+  const p = pathname.toLowerCase().replace(/\/+$/, "") || "/";
   return CONTENT_ROOTS.some((root) => p === `/${root}` || p.startsWith(`/${root}/`));
 }
 
@@ -40,13 +44,15 @@ function isAppHost(host: string): boolean {
   return EXTRA_APP_HOSTS.has(host);
 }
 
-/** Does this request carry a Supabase session cookie? A cheap, DB-free "is anyone signed in at
- *  all" test — NOT authorization. Used only to let a signed-in editor keep reaching draft-preview
- *  URLs on a tenant host; every real permission check still happens in the route. Supabase names
- *  its cookies `sb-<project-ref>-auth-token(.N)`. */
-function hasSession(request: NextRequest): boolean {
-  return request.cookies.getAll().some((c) => c.name.startsWith("sb-") && c.name.includes("auth-token"));
-}
+/* A `hasSession` cookie-presence check used to exempt "signed-in" requests from the /site/ block.
+ * It was defeated in one line:
+ *     curl -H 'Cookie: sb-x-auth-token=garbage' https://etelectricity.com/site/tahoe-deck
+ *       -> 200, 136 KB, <title>TAHOE DECK …</title>
+ * It tested that a cookie NAME existed and never validated it, so any scraper could send that
+ * header and get the other tenant's entire site back. The law it broke is one this codebase
+ * already knew: a control its subject can switch off isn't a control. /site/ is now app-host-only
+ * with no exemption, and the editor's preview links are absolute to the app host instead.
+ */
 
 /** Old-CMS file URLs (/about.html, /index.php, /default.asp). pageSlugFromPath rejects anything
  *  with a dot as an asset, and the legacy-prefix rule only catches MULTI-segment paths — so these
@@ -66,6 +72,15 @@ export async function middleware(request: NextRequest) {
     return new NextResponse("Not found", { status: 404 });
   }
 
+  // The lockdown 404s the apex and www — but the *.contractornorth.com wildcard also answers on
+  // api/admin/staging/mail/dev/preview, and each of those was serving its own indexable copy of
+  // the app landing page, with "Allow: /" robots and a sitemap advertising ITSELF:
+  //     https://admin.contractornorth.com/sitemap.xml -> <loc>https://admin.contractornorth.com/</loc>
+  // They are reserved precisely because they name no org, so they should answer like the apex.
+  if (isDeadReservedHost(host)) {
+    return new NextResponse("Not found", { status: 404 });
+  }
+
   const onOrgSite = host && !isAppHost(host);
 
   // TENANT-HOST LEAK (SEO audit, 2026-07-27): /site/<handle> is the app's INTERNAL namespace — the
@@ -81,16 +96,13 @@ export async function middleware(request: NextRequest) {
   // domain. The public URLs of a tenant site are the ROOT-level ones; /site/* only ever needs to be
   // reachable on the app host.
   //
-  // A rewrite does not re-enter middleware, so this cannot break the rewrites just below that
-  // TARGET these same routes. Signed-in requests are exempt so the settings draft-preview links
-  // (`/site/<handle>/p/<slug>?preview=1`, relative — so they inherit whatever host the editor is
-  // logged into) keep working; a crawler never carries a session cookie.
-  // Case-insensitive: /SITE/tahoe-deck served no content either way (the route match is
-  // case-sensitive too), but it fell through to the auth guard and answered with a LOGIN PAGE on
-  // the marketing domain — the same complaint as the dotted legacy URLs below. Same URL, same 404.
-  if (onOrgSite && request.nextUrl.pathname.toLowerCase().startsWith("/site/") && !hasSession(request)) {
-    return new NextResponse("Not found", { status: 404 });
-  }
+  // A rewrite does not re-enter middleware, so none of this touches the rewrites just below that
+  // TARGET these same routes — the real public pages never reach it.
+  //
+  // The BLOCK ITSELF now lives in updateSession (lib/supabase/middleware.ts), after getUser(), so
+  // it tests a VALIDATED session instead of the presence of a cookie name. See the note above
+  // `LEGACY_FILE_EXT`. That placement also keeps draft preview working for a real editor on
+  // whichever host they happen to be signed in to.
 
   // RSS (SEO wave 2026-07-24): /blog/rss.xml (+ the common /feed and /rss.xml spellings) on an
   // org host serve the per-org feed. Must run BEFORE the content rewrite — "blog/rss.xml" would
@@ -160,6 +172,20 @@ export async function middleware(request: NextRequest) {
     }
   }
 
+  // Legacy sitemap/index aliases (/sitemap_index.xml, /wp-sitemap.xml, /sitemap, /index, /rss).
+  // Every one of these was reaching the auth guard and answering with a login page — including the
+  // Yoast sitemap URL, which is about the most-crawled legacy path there is. Send them to the real
+  // resource instead. Runs BEFORE the file-extension rule so .xml aliases win.
+  if (onOrgSite) {
+    const alias = legacyAliasTarget(request.nextUrl.pathname);
+    if (alias) {
+      const url = request.nextUrl.clone();
+      url.pathname = alias;
+      url.search = "";
+      return NextResponse.redirect(url, 301);
+    }
+  }
+
   // Single-segment old-CMS FILE URLs (/about.html, /index.php). See LEGACY_FILE_EXT above: these
   // used to reach the auth guard and 307 to /login. If the bare name matches a real page slug we
   // send them there (/about.html -> /about); otherwise home, matching the legacy-slug policy. 301
@@ -205,7 +231,7 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  return updateSession(request);
+  return updateSession(request, !!onOrgSite);
 }
 
 export const config = {

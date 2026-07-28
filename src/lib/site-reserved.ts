@@ -83,7 +83,32 @@ const LEGACY_EXACT = new Set([
 ]);
 const LEGACY_PREFIX = ["/shop/", "/store/", "/products", "/product/", "/gallery/", "/portfolio/", "/services/"];
 export function isLegacyCmsPath(pathname: string): boolean {
-  const p = pathname.replace(/\/+$/, "") || "/"; // tolerate a trailing slash
+  // Lowercased for the same reason as isContentPath: /Services and /services are one URL, and a
+  // case-sensitive test sent one of them to the auth guard and a login screen.
+  const lower = pathname.toLowerCase();
+  const p = lower.replace(/\/+$/, "") || "/"; // tolerate a trailing slash
   if (LEGACY_EXACT.has(p)) return true;
-  return LEGACY_PREFIX.some((pre) => pathname.startsWith(pre));
+  return LEGACY_PREFIX.some((pre) => lower.startsWith(pre));
+}
+
+/**
+ * Old-CMS URLs that name a SITEMAP or an index page. These are the most-crawled legacy URLs in
+ * existence and every one of them was dead-ending at a login screen: /sitemap_index.xml is what
+ * Yoast published for a decade, and /index is the classic index-page URL. Mapped to the real
+ * thing rather than 404'd, because a crawler asking for a sitemap should be given the sitemap.
+ */
+const LEGACY_ALIASES: ReadonlyMap<string, string> = new Map([
+  ["/sitemap_index.xml", "/sitemap.xml"],
+  ["/wp-sitemap.xml", "/sitemap.xml"],
+  ["/sitemap-index.xml", "/sitemap.xml"],
+  ["/sitemap", "/sitemap.xml"],
+  ["/index", "/"],
+  ["/homepage", "/"],
+  ["/rss", "/blog/rss.xml"],
+]);
+
+/** The destination for a legacy alias, or null when the path isn't one. */
+export function legacyAliasTarget(pathname: string): string | null {
+  const p = pathname.toLowerCase().replace(/\/+$/, "") || "/";
+  return LEGACY_ALIASES.get(p) ?? null;
 }

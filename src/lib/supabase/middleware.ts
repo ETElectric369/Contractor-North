@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { isReservedSlug } from "@/lib/site-reserved";
 
 const PUBLIC_PATHS = [
   "/login",
@@ -46,7 +47,7 @@ const PUBLIC_PATHS = [
  * Refreshes the Supabase auth session on every request and redirects
  * unauthenticated users to /login (except for public paths).
  */
-export async function updateSession(request: NextRequest) {
+export async function updateSession(request: NextRequest, onOrgSite = false) {
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -78,6 +79,24 @@ export async function updateSession(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
 
+  // THE /site/ CROSS-TENANT BLOCK. /site/<handle> is the platform's INTERNAL namespace — the target
+  // middleware rewrites into — and the route behind it resolves the org from the URL SEGMENT, never
+  // from Host. Unblocked on a tenant domain it served each contractor's entire site on the other's:
+  //     GET https://etelectricity.com/site/tahoe-deck  -> 200  <title>TAHOE DECK …
+  //
+  // It sits HERE, below getUser(), on purpose. The first version of this guard lived up in
+  // middleware.ts and exempted "signed-in" requests by checking that a cookie NAMED sb-*-auth-token
+  // existed. That was defeated in one line — `curl -H 'Cookie: sb-x-auth-token=garbage'` returned
+  // 136 KB of the other tenant's site — because a cookie's NAME proves nothing. `user` here is a
+  // validated session, so the same intent (let a real editor preview drafts on whatever host they
+  // are signed in to; show everyone else nothing) now actually holds.
+  //
+  // Checked explicitly rather than by removing "/site/" from PUBLIC_PATHS, because the app host
+  // must keep serving these routes signed-out for nothing — they are also the rewrite targets.
+  if (onOrgSite && pathname.toLowerCase().startsWith("/site/") && !user) {
+    return new NextResponse("Not found", { status: 404 });
+  }
+
   if (!user && !isPublic && pathname !== "/") {
     // An API route (fetched via fetch()) must get a clean 401 — NOT a 307 to /login, which
     // the browser would follow and hand the caller the login PAGE's HTML (e.g. the chat
@@ -85,6 +104,26 @@ export async function updateSession(request: NextRequest) {
     if (pathname.startsWith("/api/")) {
       return new NextResponse("Your session expired — please sign in again.", { status: 401 });
     }
+
+    // SOFT-404 CLASS. This is the catch-all for everything middleware.ts didn't classify, and on
+    // a CONTRACTOR'S MARKETING DOMAIN it was answering every dead deep link with a login screen:
+    //     tahoedeck.com/foo/bar  ->  307  ->  /login?next=%2Ffoo%2Fbar   (a 200 page)
+    //     etelectricity.com/.env ->  307  ->  /login?next=%2F.env
+    // Reproduced with a Googlebot user-agent. Nothing leaks and /login is noindex + Disallow'd,
+    // but no dead URL on either site could ever be DROPPED by Google, because none of them ever
+    // answered 404 — and a person following a stale link landed on a login form.
+    //
+    // The fix has to keep one real behaviour: crew bookmark the company site and sign in from it,
+    // so a genuine app route must still offer the login page. A reserved first segment IS an app
+    // route (RESERVED_SLUGS is the same list that stops a builder page shadowing one). Anything
+    // else on an org host is simply not a URL this site has — so say so.
+    if (onOrgSite) {
+      const first = pathname.split("/").filter(Boolean)[0] ?? "";
+      if (!isReservedSlug(first)) {
+        return new NextResponse("Not found", { status: 404 });
+      }
+    }
+
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("next", pathname);

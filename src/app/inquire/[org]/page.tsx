@@ -1,10 +1,36 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { headers } from "next/headers";
 import { Phone, Mail, MapPin, Zap } from "lucide-react";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { accentHex, getOrgSettings } from "@/lib/org-settings";
+import { mayServeOrgOnHost } from "@/lib/public-host";
+import { NO_INDEX } from "@/lib/no-index";
 import { InquiryForm } from "./inquiry-form";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * This route had NO generateMetadata at all, so it inherited the root layout's SaaS metadata:
+ *     GET https://etelectricity.com/inquire/<org-id>
+ *       -> 200, <title>Contractor North</title>, no canonical, no robots meta
+ * …while the body carried ET's headline, service bullets, phone, email and C-10 licence number.
+ * A 200 with real homepage content and NO canonical on four hosts is the textbook shape for
+ * Google's "Duplicate without user-selected canonical" — the message on Search Console.
+ *
+ * noindex rather than a canonical: this is a lead-capture form reached from a QR code, a business
+ * card or a shared link. It has no business ranking, and it must not compete with the homepage
+ * whose copy it repeats. A real title so anyone who does land here (or shares it) sees the
+ * contractor's name and not the software vendor's.
+ */
+export async function generateMetadata({ params }: { params: Promise<{ org: string }> }): Promise<Metadata> {
+  const { org } = await params;
+  const supabase = await createClient();
+  const { data } = await supabase.rpc("public_org", { p_org: org });
+  const o = (data ?? null) as { name?: string } | null;
+  if (!o?.name) return { robots: NO_INDEX };
+  return { title: `Request a quote — ${o.name}`, robots: NO_INDEX };
+}
 
 export default async function InquirePage({ params, searchParams }: { params: Promise<{ org: string }>; searchParams?: Promise<{ ref?: string }> }) {
   const { org } = await params;
@@ -27,7 +53,12 @@ export default async function InquirePage({ params, searchParams }: { params: Pr
     .select("settings")
     .eq("id", org)
     .maybeSingle();
-  const rawCalendly = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).calendly_url;
+  const orgSettings = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings);
+  // WRONG-HOST LEAK: the org id comes from the URL and was never compared to the host, so
+  // tahoedeck.com/inquire/<ET's org id> returned 200 carrying ET's phone, email, Chilcoot and
+  // C-10 licence number — one contractor's contact details soliciting leads on the other's domain.
+  if (!mayServeOrgOnHost(orgSettings, (await headers()).get("host"))) notFound();
+  const rawCalendly = orgSettings.calendly_url;
   const calendlyUrl = /^https:\/\//i.test(rawCalendly) ? rawCalendly : "";
 
   const brand = accentHex((o as { glass_tint?: string } | null)?.glass_tint);

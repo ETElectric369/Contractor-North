@@ -43,6 +43,7 @@ Disallow: /voice/
 Disallow: /print/
 Disallow: /site/
 Disallow: /offline
+Disallow: /inquire/
 
 Sitemap: ${proto}://${host}/sitemap.xml
 `;
