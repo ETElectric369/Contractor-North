@@ -10,8 +10,32 @@ export type PickerOption = { id: string; label: string; address?: string | null 
 /** THE job display label — "J-0012 · Panel swap". The one shape every job dropdown,
  *  chip and toast uses (toJobOptions builds its option labels with it too), so the
  *  label can't drift per surface. Client-safe (pure). */
-export const jobLabel = (j: { job_number?: string | null; name?: string | null }): string =>
-  `${j.job_number} · ${j.name}`;
+/**
+ * THE job label — used on 52 surfaces, so this one function decides how a job reads everywhere.
+ *
+ * It used to lead with the number: "J-030 · 13631 Northwoods — Garage Subpanel". Both owners
+ * navigate by ADDRESS, and in a picker or a pill the number ate the width the address needed —
+ * "J-030 · 13631 Northwoods — Garag". Erik: "he needs all these labels to be the job name (address
+ * number and street) not J-xxx on all the windows, thats what we see the most guiding us, and it
+ * doesnt work for me either."
+ *
+ * So the NAME leads and stands alone. The number still exists — it's on documents, it's
+ * searchable, and it's the fallback for a job that was never named — it just stops being the first
+ * thing you read on a screen where you're looking for a house.
+ */
+export const jobLabel = (j: { job_number?: string | null; name?: string | null }): string => {
+  const name = (j.name ?? "").trim();
+  const num = (j.job_number ?? "").trim();
+  return name || num || "Job";
+};
+
+/** Number AND name, for the surfaces that genuinely need the reference: printed documents, the
+ *  invoice/quote header, an export somebody reconciles against. Never a picker. */
+export const jobLabelWithNumber = (j: { job_number?: string | null; name?: string | null }): string => {
+  const name = (j.name ?? "").trim();
+  const num = (j.job_number ?? "").trim();
+  return num && name ? `${num} · ${name}` : name || num || "Job";
+};
 
 /** The CODES-OFF job identity label — "Smith · 123 Main St" (customer · street address).
  *  Orgs that turn timeclock_job_codes off identify work by whose house the crew is at,

@@ -150,7 +150,6 @@ export default async function NewQuotePage({
         quoteExpiryDays={expiryDays}
         defaultMarkupPct={settings.default_markup_pct}
         deckRateRows={deckRateRows}
-        showDeckGenerator={catalogMode}
       />
     </div>
   );

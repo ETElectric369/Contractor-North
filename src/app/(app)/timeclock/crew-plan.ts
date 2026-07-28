@@ -25,7 +25,10 @@ export interface CrewJobOpt {
 export interface CrewAssignmentRow {
   profile_id: string;
   work_date: string; // "YYYY-MM-DD" (org-local day)
-  job_id: string;
+  /** null on an OFF day — deliberately not on a job (0170). */
+  job_id: string | null;
+  /** 'job' = on that job. 'off' = away (vacation/sick). NO ROW = nobody has decided. */
+  kind?: "job" | "off";
   is_crew_lead: boolean;
   job?: CrewJobOpt | null;
 }
@@ -139,7 +142,9 @@ export function shortJobTag(
   codesOn: boolean,
 ): string {
   if (!j) return "Job";
-  if (codesOn) return j.job_number || j.name || "Job";
+  // NAME FIRST here too — a pill is the smallest space on screen, so it must carry the thing
+  // people actually steer by. The number is the fallback for an unnamed job, not the headline.
+  if (codesOn) return (j.name ?? "").trim() || j.job_number || "Job";
   return (
     (j.customer_name ?? "").trim() ||
     (j.address ?? "").trim() ||
@@ -184,7 +189,7 @@ export function patchWeekRows(
   rows: CrewAssignmentRow[],
   profileId: string,
   workDate: string,
-  next: { job_id: string; is_crew_lead: boolean; job?: CrewJobOpt | null } | null,
+  next: { job_id: string | null; kind?: "job" | "off"; is_crew_lead: boolean; job?: CrewJobOpt | null } | null,
 ): CrewAssignmentRow[] {
   const rest = rows.filter(
     (r) => !(r.profile_id === profileId && r.work_date === workDate),

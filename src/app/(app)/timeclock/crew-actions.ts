@@ -31,7 +31,9 @@ export type CrewActionResult = { ok: boolean; error?: string };
 export type CrewDayAssignmentRow = {
   profile_id: string;
   work_date: string; // YYYY-MM-DD (org-local day)
-  job_id: string;
+  /** null on an OFF row (0170) — a day somebody is deliberately away names no job. */
+  job_id: string | null;
+  kind?: "job" | "off";
   is_crew_lead: boolean;
   job: {
     id: string;
@@ -235,7 +237,7 @@ export async function listWeekAssignments(weekOffset = 0): Promise<WeekAssignmen
 
   const { data, error } = await supabase
     .from("crew_day_assignments")
-    .select("profile_id, work_date, job_id, is_crew_lead, job:job_id(id, job_number, name, address, customers(name))")
+    .select("profile_id, work_date, job_id, kind, is_crew_lead, job:job_id(id, job_number, name, address, customers(name))")
     .gte("work_date", days[0])
     .lte("work_date", days[6])
     .order("work_date", { ascending: true });
@@ -254,7 +256,8 @@ export async function listWeekAssignments(weekOffset = 0): Promise<WeekAssignmen
     return {
       profile_id: r.profile_id as string,
       work_date: r.work_date as string,
-      job_id: r.job_id as string,
+      job_id: (r.job_id ?? null) as string | null,
+      kind: (r.kind === "off" ? "off" : "job") as "job" | "off",
       is_crew_lead: !!r.is_crew_lead,
       job: j
         ? {
@@ -360,97 +363,3 @@ export async function clearCrewOffRange(input: {
   return { ok: true };
 }
 
-/**
- * FILL THE WEEK FROM THE SCHEDULE — turn the guess into a decision.
- *
- * THE PROBLEM WITH THE OLD PILL: the board drew a dashed "suggested job" chip in the same slot it
- * draws real assignments. Nothing was saved. Erik's "i didn't know what that did" was exactly
- * right, because it did nothing — it was the app having an OPINION where it shows FACTS, and the
- * opinion vanished on refresh. Worse, it made the plan un-comparable: you cannot diff the schedule
- * against the timecards when half the schedule was never written down.
- *
- * THE RULE THIS IMPLEMENTS:
- *
- *   Never SHOW a guess. Offer to MAKE the guess real, then show what's real.
- *
- * So this materialises the suggestion into ordinary rows the office can then edit, reassign or
- * clear like any other. Afterwards every cell on the board is a decision somebody made.
- *
- * NEVER OVERWRITES. An existing row — a pinned job OR an OFF day — is a decision, and a bulk
- * convenience must not walk over one. Only genuinely empty days are filled, and only where the
- * schedule actually puts that person somewhere.
- */
-export async function fillWeekFromSchedule(input: {
-  weekOffset?: number;
-  /** Limit to one person (the per-member "fill mine" affordance). */
-  profileId?: string;
-}): Promise<CrewActionResult & { filled?: number }> {
-  const ctx = await requireStaff();
-  if ("error" in ctx) return { ok: false, error: ctx.error };
-  const supabase = ctx.supabase;
-
-  const offset = Math.max(-52, Math.min(52, Math.trunc(Number(input.weekOffset) || 0)));
-  const { data: org } = await supabase.from("organizations").select("id, settings").limit(1).maybeSingle();
-  const settings = getOrgSettings((org as { settings?: unknown } | null)?.settings);
-  const orgId = (org as { id?: string } | null)?.id ?? null;
-  const days = weekDayStrs(todayStrInTz(settings.timezone), settings.week_start, offset);
-  const todayStr = todayStrInTz(settings.timezone);
-
-  const [{ data: members }, { data: jobRows }, { data: existing }] = await Promise.all([
-    supabase.from("profiles").select("id").eq("active", true),
-    supabase
-      .from("jobs")
-      .select("id, scheduled_start, assigned_to")
-      .in("status", ACTIVE_JOB_STATUSES),
-    supabase
-      .from("crew_day_assignments")
-      .select("profile_id, work_date")
-      .gte("work_date", days[0])
-      .lte("work_date", days[6]),
-  ]);
-
-  const jobs = ((jobRows ?? []) as { id: string; scheduled_start: string | null; assigned_to: string[] | null }[]);
-  const { data: segs } = await supabase
-    .from("job_schedule_segments")
-    .select("job_id, start_date, end_date")
-    .lte("start_date", days[6])
-    .gte("end_date", days[0]);
-  const segsByJob = new Map<string, { start: string; end: string }[]>();
-  for (const sg of (segs ?? []) as { job_id: string; start_date: string; end_date: string }[]) {
-    const list = segsByJob.get(sg.job_id) ?? [];
-    list.push({ start: sg.start_date, end: sg.end_date });
-    segsByJob.set(sg.job_id, list);
-  }
-  const schedDayByJob = new Map<string, string | null>(
-    jobs.map((j) => [j.id, j.scheduled_start ? todayStrInTz(settings.timezone, new Date(j.scheduled_start)) : null]),
-  );
-
-  // Any existing row — job OR off — makes that (person, day) untouchable.
-  const taken = new Set(
-    ((existing ?? []) as { profile_id: string; work_date: string }[]).map((r) => `${r.profile_id}|${r.work_date}`),
-  );
-
-  const toWrite: { org_id: string | null; profile_id: string; work_date: string; job_id: string; kind: string; created_by: string }[] = [];
-  for (const m of (members ?? []) as { id: string }[]) {
-    if (input.profileId && m.id !== input.profileId) continue;
-    const mine = jobs.filter((j) => (j.assigned_to ?? []).includes(m.id));
-    if (!mine.length) continue;
-    for (const ds of days) {
-      // PAST DAYS ARE HISTORY, not a plan. Writing one would assert somebody was somewhere, and
-      // that is the timecards' truth to tell, not the planner's.
-      if (ds < todayStr) continue;
-      if (taken.has(`${m.id}|${ds}`)) continue;
-      const pick = pickScheduledJobForDay(mine, ds, segsByJob, schedDayByJob);
-      if (!pick) continue;
-      toWrite.push({ org_id: orgId, profile_id: m.id, work_date: ds, job_id: pick.id, kind: "job", created_by: ctx.userId });
-    }
-  }
-
-  if (!toWrite.length) return { ok: true, filled: 0 };
-  const { error } = await supabase.from("crew_day_assignments").upsert(toWrite, { onConflict: "profile_id,work_date" });
-  if (error) return { ok: false, error: error.message };
-
-  revalidatePath("/timeclock");
-  revalidatePath("/planner");
-  return { ok: true, filled: toWrite.length };
-}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { TimeOffButton } from "./time-off-button";
 import { ChevronLeft, ChevronRight, Loader2, Star, X } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Select } from "@/components/ui/input";
@@ -30,7 +31,8 @@ interface MemberRow {
  * the page's isStaff branch): the org week as columns (week_start honored,
  * arrows page ±1 week), active members as rows, each cell the member's
  * assigned job for that day — a short-label pill in the member's /timecards
- * color, ★ = crew leader. A cell with NO explicit row shows the `autoPlan`
+ * color, ★ = crew leader. An EMPTY cell means nobody has decided yet — the grid never
+ * guesses, because a truthful blank beats a confident suggestion that saves nothing.
  * inference as a muted DASHED pill instead of blank (today = the job a
  * board's best guess (schedule + active jobs — NOT a promise about what a job-less
  * Clock In resolves to: resolveTechJobToday's fallback tiers differ), future days = the
@@ -50,7 +52,6 @@ export function CrewWeekGrid({
   members,
   jobs,
   weekRows,
-  autoPlan = {},
   tz,
   weekStart,
   jobCodesEnabled = true,
@@ -63,7 +64,6 @@ export function CrewWeekGrid({
    *  weeks load through listWeekAssignments). */
   weekRows: CrewAssignmentRow[];
   /** memberId → dayStr → inferred jobId for the current week (see CrewAutoPlan). */
-  autoPlan?: CrewAutoPlan;
   tz: string;
   weekStart: "sunday" | "monday";
   /** Org setting timeclock_job_codes — false labels jobs customer · address. */
@@ -110,10 +110,11 @@ export function CrewWeekGrid({
   return (
     <Card className="mt-6 overflow-hidden">
       <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-2.5">
-        <span className="text-sm font-semibold text-slate-900">Crew week</span>
+        <span className="text-sm font-semibold text-slate-900">Crew</span>
         <span className="hidden text-xs text-slate-400 sm:inline">
-          who&apos;s planned where · ★ leads · dashed = auto
+          tap a day to put someone on a job · ★ leads
         </span>
+        <TimeOffButton members={members} />
         <span className="ml-auto flex shrink-0 items-center gap-1.5">
           {loading && <Loader2 className="h-4 w-4 animate-spin text-slate-400" />}
           <button
@@ -179,29 +180,35 @@ export function CrewWeekGrid({
                 const row = byKey.get(`${m.id}|${ds}`);
                 const isSel = sel?.profileId === m.id && sel?.dayStr === ds;
                 const isToday = ds === todayStr;
-                // No explicit row → the day's inference, rendered as a muted
-                // dashed pill (needs its label from the active options list —
-                // an unlabelable hint is skipped, not shown as "Job").
-                const hintId = !row ? autoPlan[m.id]?.[ds] : undefined;
-                const hintJob = hintId ? (jobsById.get(hintId) ?? null) : null;
+                // NO SUGGESTIONS (cn-v590). An empty cell means nobody has decided — which is
+                // TRUE, and a truthful blank beats a confident guess. The board used to draw the
+                // schedule's opinion here in a dashed pill that saved nothing and vanished on
+                // refresh; it made the grid unreadable ("is that planned or not?") and made
+                // plan-vs-actual impossible, because you cannot be wrong about a guess.
                 return (
                   <button
                     key={ds}
                     type="button"
                     onClick={() => setSel(isSel ? null : { profileId: m.id, dayStr: ds })}
                     title={
-                      row?.job
-                        ? `${m.full_name ?? "Member"} · ${dayTag(ds)}: ${assignmentJobLabel(row.job, jobCodesEnabled)}${row.is_crew_lead ? " · crew lead" : ""}`
-                        : hintJob
-                          ? `${m.full_name ?? "Member"} · ${dayTag(ds)}: ${assignmentJobLabel(hintJob, jobCodesEnabled)} — auto (${isToday ? "best guess from schedule + active jobs" : "from the schedule"}), not pinned. Tap to pin so Clock In uses it.`
-                          : `Assign ${m.full_name ?? "member"} · ${dayTag(ds)}`
+                      row?.kind === "off"
+                        ? `${m.full_name ?? "Member"} · ${dayTag(ds)}: off`
+                        : row?.job
+                          ? `${m.full_name ?? "Member"} · ${dayTag(ds)}: ${assignmentJobLabel(row.job, jobCodesEnabled)}${row.is_crew_lead ? " · crew lead" : ""}`
+                          : `Tap to put ${m.full_name ?? "someone"} on a job · ${dayTag(ds)}`
                     }
                     aria-label={`${m.full_name ?? "Member"}, ${dayTag(ds)}`}
                     className={`group min-h-[34px] min-w-0 flex-1 p-0.5 text-left ${colBorder} ${
                       isToday ? "bg-brand-light/15" : ""
                     } ${isSel ? "ring-2 ring-inset ring-brand" : ""} hover:bg-slate-50`}
                   >
-                    {row ? (
+                    {row?.kind === "off" ? (
+                      // A day somebody is deliberately away. Grey and plain — it is a real
+                      // decision, so it must not look like an empty cell, but it isn't work.
+                      <span className="flex items-center justify-center rounded-md bg-slate-100 px-1 py-0.5 text-[10px] font-semibold uppercase leading-tight tracking-wide text-slate-500">
+                        off
+                      </span>
+                    ) : row ? (
                       <span
                         className={`flex items-center gap-0.5 rounded-md border px-1 py-0.5 text-[10px] font-medium leading-tight shadow-sm ${pillColorForPerson(m.id).pill}`}
                       >
@@ -210,14 +217,6 @@ export function CrewWeekGrid({
                         )}
                         <span className="truncate">
                           {shortJobTag(row.job, jobCodesEnabled)}
-                        </span>
-                      </span>
-                    ) : hintJob ? (
-                      // Muted + dashed + slate (never the member's color): an
-                      // inference must read differently from a pinned plan.
-                      <span className="flex items-center rounded-md border border-dashed border-slate-300 bg-slate-50/70 px-1 py-0.5 text-[10px] font-medium leading-tight text-slate-500">
-                        <span className="truncate">
-                          {shortJobTag(hintJob, jobCodesEnabled)}
                         </span>
                       </span>
                     ) : (
@@ -255,15 +254,19 @@ export function CrewWeekGrid({
             className="h-9 min-w-[160px] flex-1"
             aria-label={`Job for ${selMember?.full_name ?? "member"} on ${sel.dayStr}`}
           >
-            <option value="">— No job —</option>
+            {/* Two decisions, not one ambiguous blank: forget the plan, or say they're away. */}
+            <option value="">— Not set —</option>
+            <option value="__off__">— Off (vacation / not working) —</option>
             {jobs.map((j) => (
               <option key={j.id} value={j.id}>
                 {assignmentJobLabel(j, jobCodesEnabled)}
               </option>
             ))}
-            {selRow && !jobsById.has(selRow.job_id) && (
+            {/* A pinned job that has since left the active list — say so, rather than letting the
+                cell silently read as unset. An OFF row names no job, so it isn't this case. */}
+            {selRow?.job_id && !jobsById.has(selRow.job_id) && (
               <option value={selRow.job_id}>
-                {selRow.job ? assignmentJobLabel(selRow.job, jobCodesEnabled) : "Assigned job"}
+                {selRow.job ? assignmentJobLabel(selRow.job, jobCodesEnabled) : "Job (no longer listed)"}
               </option>
             )}
           </Select>

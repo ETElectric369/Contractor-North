@@ -9,7 +9,6 @@ import { Badge } from "@/components/ui/badge";
 import { TimeclockPanel } from "./timeclock-panel";
 import { AutoClockoutPrompt } from "./auto-clockout-prompt";
 import { autoClockoutPromptState } from "./close-math";
-import { CrewAssignments } from "./crew-assignments";
 import { listWeekAssignments, setCrewDayAssignment } from "./crew-actions";
 import { CrewWeekGrid } from "./crew-week-grid";
 import { pickScheduledJobForDay, type CrewAutoPlan } from "./crew-plan";
@@ -121,85 +120,19 @@ export default async function TimeclockPage() {
   // The current org week's 7 day-strings — bounds for the schedule read that
   // feeds the planner's muted "auto" hints below (today + future days only).
   const thisWeekDays = weekDayStrs(todayStr, orgSettings.week_start, 0);
-  // memberId → dayStr → inferred jobId for the CURRENT week: today = the full
-  // pickMemberCurrentJob inference (the BOARD's pick — its tier-2/3 fallbacks are
-  // member-scoped, unlike resolveTechJobToday's org-single-in-progress tier 2, so this
-  // is a best guess, not a promise about the punch; a pinned row makes them agree),
-  // future days = schedule-only. Both planner surfaces show these as muted
-  // "auto"; an explicit crew_day_assignments row always wins.
-  const autoPlan: CrewAutoPlan = {};
-  // Today's day-assignment JOB per member — the tier-0 source for the board's
-  // inferred-current pick below. (The planner UI's own rows — incl. the ★ lead
-  // checkboxes — seed from listWeekAssignments, not from this map.)
-  const dayAssignments: Record<string, string> = {};
-  // Who is explicitly OFF today (0170) — vacation, sick, a day off. This is what finally lets a
-  // cell be empty ON PURPOSE: without it the board falls back to a guess that can never say
-  // "nobody", so clearing a day just put the same job back.
-  const offToday = new Set<string>();
-  if (isStaff && crewJobs.length) {
-    const { dayStart, dayEnd } = todayBoundsInTz(orgSettings.timezone);
-    const [{ data: segRows }, dayRes] = await Promise.all([
-      supabase
-        .from("job_schedule_segments")
-        // The WHOLE current org week, not just today (same single batched read,
-        // wider bounds): today's rows feed the segToday pick, the rest feed the
-        // future-day schedule hints.
-        .select("job_id, start_date, end_date")
-        .in("job_id", crewJobs.map((j) => j.id))
-        .lte("start_date", thisWeekDays[6])
-        .gte("end_date", thisWeekDays[0]),
-      // Fails soft (empty) until migration 0139 lands — an unknown table must
-      // never de-board the page (the 0128 crew_lead precedent).
-      supabase
-        .from("crew_day_assignments")
-        .select("profile_id, job_id, kind")
-        .eq("work_date", todayStr),
-    ]);
-    for (const r of ((dayRes.data ?? []) as { profile_id: string; job_id: string }[])) {
-      if ((r as { kind?: string }).kind === "off") offToday.add(r.profile_id);
-      else if (r.job_id) dayAssignments[r.profile_id] = r.job_id;
-    }
-    const segWeek = (segRows ?? []) as { job_id: string; start_date: string; end_date: string }[];
-    const segToday = new Set(
-      segWeek.filter((s) => s.start_date <= todayStr && s.end_date >= todayStr).map((s) => s.job_id),
-    );
-    const segsByJob = new Map<string, { start: string; end: string }[]>();
-    for (const s of segWeek) {
-      const list = segsByJob.get(s.job_id) ?? [];
-      list.push({ start: s.start_date, end: s.end_date });
-      segsByJob.set(s.job_id, list);
-    }
-    // Each job's scheduled_start as an org-local day string, for segment-less
-    // jobs' hints (tz resolved HERE so the pick helper stays pure).
-    const schedDayByJob = new Map<string, string | null>(
-      crewJobs.map((j) => [
-        j.id,
-        j.scheduled_start ? todayStrInTz(orgSettings.timezone, new Date(j.scheduled_start)) : null,
-      ]),
-    );
-    for (const m of members ?? []) {
-      const mine = crewJobs.filter((cj) => (cj.assigned_to ?? []).includes(m.id));
-      // Tier-0 lookup searches the FULL active set, not just the member's
-      // assigned jobs — the day-assignment wins even if the additive
-      // write-through hasn't put them on jobs.assigned_to (yet).
-      const dayJobId = dayAssignments[m.id] ?? null;
-      if (dayJobId && !mine.some((j) => j.id === dayJobId)) {
-        const dayJob = crewJobs.find((j) => j.id === dayJobId);
-        if (dayJob) mine.unshift(dayJob);
-      }
-      const pick = pickMemberCurrentJob(mine, segToday, dayStart, dayEnd, dayJobId, offToday.has(m.id));
-      const plan: Record<string, string> = {};
-      if (pick) plan[todayStr] = pick.id;
-      // FUTURE days only — no hints on past days (a past-day hint would read as
-      // "was there", which is /timecards' time-entry truth to tell).
-      for (const ds of thisWeekDays) {
-        if (ds <= todayStr) continue;
-        const sched = pickScheduledJobForDay(mine, ds, segsByJob, schedDayByJob);
-        if (sched) plan[ds] = sched.id;
-      }
-      if (Object.keys(plan).length) autoPlan[m.id] = plan;
-    }
-  }
+  /**
+   * NO SUGGESTED ASSIGNMENTS (cn-v590). This used to infer a job per member per day and draw it on
+   * the board as a dashed pill. Erik: "honestly i dont think we should suggest crew assignments,
+   * theres too much complication going on here and its confusing with the pills and suggestions."
+   *
+   * He's right, and it was never worth what it cost. It saved nothing, vanished on refresh, made
+   * every cell ambiguous — planned, or guessed? — and made plan-vs-actual impossible, because you
+   * cannot diff reality against an opinion. An EMPTY cell means nobody has decided, which is TRUE,
+   * and a truthful blank beats a confident guess.
+   *
+   * The crew calendar is the single source of truth for who works which job on which day, and
+   * everything on it is now a decision somebody made.
+   */
 
   // The week grid's data (staff render) — the same read the grid's client paging
   // uses (listWeekAssignments, offset 0 = this week), called server-side so the
@@ -215,8 +148,9 @@ export default async function TimeclockPage() {
     codes: j.code_template_id ? tmplMap.get(j.code_template_id) : undefined,
   }));
 
-  // The crew day-planner's shared prop bundle (staff only) — the SAME data feeds
-  // the day-picker board (right column) and the CrewWeekGrid (under the clock):
+  // The crew calendar's props (staff only). ONE surface now — the day-picker board that used to
+  // sit in the right column was a second way to edit the same rows, which is exactly the
+  // "too much complication" the owner named. Two controls for one fact is the complication.
   // current-week rows server-fetched above, week paging + saves through the
   // crew-actions pair, labels per the org's codes flag.
   const crewPlan = isStaff
@@ -230,7 +164,6 @@ export default async function TimeclockPage() {
           customer_name: (j.customer_name ?? null) as string | null,
         })),
         weekRows: weekAssignments?.rows ?? [],
-        autoPlan,
         tz: orgSettings.timezone,
         weekStart: orgSettings.week_start,
         jobCodesEnabled: jobCodesOn,
@@ -580,7 +513,6 @@ export default async function TimeclockPage() {
           {/* The office's day-planner board — day strip + per-member job/★-lead lines.
               A day row here WINS: the tech's job-less Clock In resolves to it (with
               autoPlan as the inferred fallback, shown as "auto"). Staff only. */}
-          {crewPlan && <CrewAssignments {...crewPlan} />}
           <Card>
             <CardContent className="py-5">
               <h3 className="mb-3 text-sm font-semibold text-slate-900">

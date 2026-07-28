@@ -73,8 +73,11 @@ describe("shortJobTag", () => {
     address: "123 Main St",
     customer_name: "Smith",
   };
-  it("codes on → the job number (matching the /timecards pills)", () => {
-    expect(shortJobTag(job, true)).toBe("J-0042");
+  it("codes on → the job NAME, because that's what people steer by", () => {
+    // Was the job number. A pill is the smallest space on screen, so it must carry the address —
+    // "13631 Northwoods", not "J-030". The number is the fallback for an unnamed job.
+    expect(shortJobTag(job, true)).toBe("Panel swap");
+    expect(shortJobTag({ job_number: "J-0042", name: null }, true)).toBe("J-0042");
   });
   it("codes off → the customer, then the address, then name", () => {
     expect(shortJobTag(job, false)).toBe("Smith");

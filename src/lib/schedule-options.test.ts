@@ -18,10 +18,14 @@ describe("jobSiteLabel — the codes-off customer · address identity", () => {
     expect(jobSiteLabel({ ...job, customer_name: "  " })).toBe("123 Main St"); // whitespace ≠ a name
   });
 
-  it("falls back to the number · name jobLabel when the job has neither part", () => {
+  it("falls back to jobLabel when the job has neither part", () => {
     const bare = { job_number: "J-0012", name: "Panel swap" };
     expect(jobSiteLabel(bare)).toBe(jobLabel(bare));
-    expect(jobSiteLabel({ ...bare, address: "", customer_name: null })).toBe("J-0012 · Panel swap");
+    // jobLabel now leads with the NAME (cn-v590) — both owners navigate by address, and the
+    // number ate the width the address needed. jobSiteLabel still agrees with it on a bare job.
+    expect(jobSiteLabel({ ...bare, address: "", customer_name: null })).toBe("Panel swap");
+    // The number is the LAST resort — an unnamed job still has to label itself somehow.
+    expect(jobSiteLabel({ job_number: "J-0012", name: null, address: "", customer_name: null })).toBe("J-0012");
   });
 });
 

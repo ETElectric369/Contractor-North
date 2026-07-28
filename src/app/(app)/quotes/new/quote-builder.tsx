@@ -21,7 +21,6 @@ import {
   generateQuoteDraftFromPlan,
   type DraftLineItem,
 } from "../actions";
-import { DeckGeneratorPanel } from "./deck-generator-panel";
 import { AddLineItems } from "@/components/add-line-items";
 
 interface CustomerOption {
@@ -70,7 +69,6 @@ export function QuoteBuilder({
   quoteExpiryDays = 30,
   defaultMarkupPct = 0,
   deckRateRows,
-  showDeckGenerator = false,
   measured,
 }: {
   customers: CustomerOption[];
@@ -98,7 +96,6 @@ export function QuoteBuilder({
   /** Deck price-code rows (catalog orgs), NEWEST-FIRST — priced here client-side through THE
    *  markup rule so generator lines re-price with the selected customer, like the hand-picker. */
   deckRateRows?: DeckRateRow[];
-  showDeckGenerator?: boolean;
 }) {
   const router = useRouter();
   const defaultRate = taxRates.find((t) => t.is_default);
@@ -409,9 +406,6 @@ export function QuoteBuilder({
         )}
 
         {/* Deck generator (catalog orgs) — dimensions in, priced deck lines dropped in. */}
-        {showDeckGenerator && deckRates && (
-          <DeckGeneratorPanel rates={deckRates} onDrop={addGeneratedLines} />
-        )}
 
         {/* Line items */}
         <Card>

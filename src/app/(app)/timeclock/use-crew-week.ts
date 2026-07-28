@@ -22,7 +22,9 @@ import {
 
 /** A row's previous explicit value, for per-row rollback (null = no row). */
 export type PrevAssignment = {
-  job_id: string;
+  /** null on an OFF row (0170) — a day somebody is deliberately away names no job. */
+  job_id: string | null;
+  kind?: "job" | "off";
   is_crew_lead: boolean;
   job?: CrewJobOpt | null;
 } | null;
