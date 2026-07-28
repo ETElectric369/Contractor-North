@@ -169,9 +169,30 @@ Every other image on the site is served through the transform endpoint with a `s
 Content-Length: 127,284 bytes  (127 KB)
 ```
 
-…rendering into a 36-pixel-tall slot, twice per page (header and footer), on every public page. Through the same transform at the displayed size it is **13,098 bytes** — roughly a 10× reduction, verified by fetching both.
+…rendering into a 36-pixel-tall slot, twice per page (header and footer), on every public page.
 
-**Fixed:** the logo now goes through the same helper as the hero and portfolio images.
+**Fixed and measured after deploy:** the same logo now serves in **3,243 bytes** — a 39× reduction, roughly 248 KB saved from every public page load.
+
+The logo now goes through the same transform helper as the hero and portfolio images.
+
+### 4.7 Post-deploy verification
+
+Every fix above was re-checked against production after deployment:
+
+| Check | Before | After |
+|---|---|---|
+| `etelectricity.com/site/tahoe-deck` | 200 (Tahoe Deck's site) | **404** |
+| `tahoedeck.com/site/et-electric` | 200 (ET Electric's site) | **404** |
+| `etelectricity.com/site/et-electric`, `/site/by-domain` | 200 (duplicate copies) | **404** |
+| `/offline` robots meta | *(none)* | **`noindex, nofollow, noarchive, nocache`** |
+| `etelectricity.com/estimate/et-electric` | 200 (deck configurator) | **404** |
+| `tahoedeck.com/estimate/tahoe-deck` | 200 | **200** *(correctly unaffected)* |
+| `/about.html` | 307 → `/login` | **301 → `/about`, final 200** |
+| `/index.html` | 307 → `/login` | **301 → `/`** |
+| Logo transfer size | 127,284 bytes | **3,243 bytes** |
+| robots.txt | — | **`Disallow: /site/`, `Disallow: /offline`** |
+
+**No regressions.** All nine real pages still return 200 with unchanged, correct canonicals; tahoedeck.com still serves normally; and the 13 article-merge redirects on tahoedeck.com still fire in one hop to a 200.
 
 ---
 
