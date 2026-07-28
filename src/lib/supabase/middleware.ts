@@ -93,7 +93,16 @@ export async function updateSession(request: NextRequest, onOrgSite = false) {
   //
   // Checked explicitly rather than by removing "/site/" from PUBLIC_PATHS, because the app host
   // must keep serving these routes signed-out for nothing — they are also the rewrite targets.
-  if (onOrgSite && pathname.toLowerCase().startsWith("/site/") && !user) {
+  // EVERY host, not just tenant hosts. Scoping this to `onOrgSite` left the app host serving the
+  // whole /site/ tree — six route files, the largest public surface — to anyone signed out:
+  //     GET https://app.contractornorth.com/site/tahoe-deck  -> 200  <title>TAHOE DECK …
+  // Guess a handle, get that customer's site. /estimate and /inquire got the same treatment via
+  // lib/serve-org; this is the equivalent for /site/, done here because it covers all six routes
+  // at the one place they share instead of six places that can drift.
+  //
+  // Safe for the public pages: middleware REWRITES root-level tenant URLs into /site/**, and a
+  // rewrite does not re-enter middleware — so tahoedeck.com/about never reaches this line.
+  if (pathname.toLowerCase().startsWith("/site/") && !user) {
     return new NextResponse("Not found", { status: 404 });
   }
 
