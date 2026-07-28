@@ -85,7 +85,10 @@ export async function middleware(request: NextRequest) {
   // TARGET these same routes. Signed-in requests are exempt so the settings draft-preview links
   // (`/site/<handle>/p/<slug>?preview=1`, relative — so they inherit whatever host the editor is
   // logged into) keep working; a crawler never carries a session cookie.
-  if (onOrgSite && request.nextUrl.pathname.startsWith("/site/") && !hasSession(request)) {
+  // Case-insensitive: /SITE/tahoe-deck served no content either way (the route match is
+  // case-sensitive too), but it fell through to the auth guard and answered with a LOGIN PAGE on
+  // the marketing domain — the same complaint as the dotted legacy URLs below. Same URL, same 404.
+  if (onOrgSite && request.nextUrl.pathname.toLowerCase().startsWith("/site/") && !hasSession(request)) {
     return new NextResponse("Not found", { status: 404 });
   }
 

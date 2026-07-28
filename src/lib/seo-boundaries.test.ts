@@ -83,7 +83,7 @@ describe("the /site/ namespace is app-host-only", () => {
   // deck site on Erik's electrical domain (and the mirror image on tahoedeck.com). The route
   // resolves the org from the URL SEGMENT and never compares it to Host.
   const blockedOnTenantHost = (path: string, signedIn = false) =>
-    path.startsWith("/site/") && !signedIn;
+    path.toLowerCase().startsWith("/site/") && !signedIn;
 
   it("blocks the cross-tenant leak and the duplicate copies of the host's own site", () => {
     expect(blockedOnTenantHost("/site/tahoe-deck")).toBe(true);
@@ -96,6 +96,14 @@ describe("the /site/ namespace is app-host-only", () => {
     for (const p of ["/", "/about", "/panel-upgrades", "/blog", "/blog/some-post"]) {
       expect(blockedOnTenantHost(p)).toBe(false);
     }
+  });
+
+  it("is case-insensitive — /SITE/ must 404 like /site/, not fall through to a login page", () => {
+    // The route match is case-sensitive too, so /SITE/tahoe-deck never served content — but it
+    // reached the auth guard and answered with a LOGIN PAGE on the marketing domain. Same URL,
+    // same answer, whatever the crawler capitalised.
+    expect(blockedOnTenantHost("/SITE/tahoe-deck")).toBe(true);
+    expect(blockedOnTenantHost("/Site/Tahoe-Deck")).toBe(true);
   });
 
   it("lets a signed-in editor through, so draft preview keeps working", () => {
