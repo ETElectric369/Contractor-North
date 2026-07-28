@@ -40,6 +40,21 @@ function isAppHost(host: string): boolean {
   return EXTRA_APP_HOSTS.has(host);
 }
 
+/** Does this request carry a Supabase session cookie? A cheap, DB-free "is anyone signed in at
+ *  all" test — NOT authorization. Used only to let a signed-in editor keep reaching draft-preview
+ *  URLs on a tenant host; every real permission check still happens in the route. Supabase names
+ *  its cookies `sb-<project-ref>-auth-token(.N)`. */
+function hasSession(request: NextRequest): boolean {
+  return request.cookies.getAll().some((c) => c.name.startsWith("sb-") && c.name.includes("auth-token"));
+}
+
+/** Old-CMS file URLs (/about.html, /index.php, /default.asp). pageSlugFromPath rejects anything
+ *  with a dot as an asset, and the legacy-prefix rule only catches MULTI-segment paths — so these
+ *  fell all the way through to the app's auth guard and 307'd to /login, putting a login screen on
+ *  a contractor's marketing domain for a URL that is simply gone. Strip the extension so
+ *  /about.html can land on the real /about; otherwise it's a stale bookmark → home. */
+const LEGACY_FILE_EXT = /\.(html?|php|aspx?|jsp|cgi|cfm)$/i;
+
 export async function middleware(request: NextRequest) {
   const host = (request.headers.get("host") || "").toLowerCase().split(":")[0];
 
@@ -52,6 +67,27 @@ export async function middleware(request: NextRequest) {
   }
 
   const onOrgSite = host && !isAppHost(host);
+
+  // TENANT-HOST LEAK (SEO audit, 2026-07-27): /site/<handle> is the app's INTERNAL namespace — the
+  // target middleware rewrites into. It was never blocked on a tenant's own domain, and the route
+  // resolves the org from the URL SEGMENT, not from Host. So every org's whole site answered 200 on
+  // every other org's domain:
+  //     GET https://etelectricity.com/site/tahoe-deck  -> 200, <title>TAHOE DECK …
+  //     GET https://tahoedeck.com/site/et-electric     -> 200, <title>ET Electric …
+  // plus two extra copies of the host's OWN site (/site/<own-handle> and /site/by-domain).
+  //
+  // The canonical tags were right the whole time, which is why nothing collapsed — but a canonical
+  // is a hint, and it does nothing about a 200 or about Chris's phone number answering on Erik's
+  // domain. The public URLs of a tenant site are the ROOT-level ones; /site/* only ever needs to be
+  // reachable on the app host.
+  //
+  // A rewrite does not re-enter middleware, so this cannot break the rewrites just below that
+  // TARGET these same routes. Signed-in requests are exempt so the settings draft-preview links
+  // (`/site/<handle>/p/<slug>?preview=1`, relative — so they inherit whatever host the editor is
+  // logged into) keep working; a crawler never carries a session cookie.
+  if (onOrgSite && request.nextUrl.pathname.startsWith("/site/") && !hasSession(request)) {
+    return new NextResponse("Not found", { status: 404 });
+  }
 
   // RSS (SEO wave 2026-07-24): /blog/rss.xml (+ the common /feed and /rss.xml spellings) on an
   // org host serve the per-org feed. Must run BEFORE the content rewrite — "blog/rss.xml" would
@@ -118,6 +154,22 @@ export async function middleware(request: NextRequest) {
         url.pathname = `/site/by-domain/p/${slug}`;
         return NextResponse.rewrite(url);
       }
+    }
+  }
+
+  // Single-segment old-CMS FILE URLs (/about.html, /index.php). See LEGACY_FILE_EXT above: these
+  // used to reach the auth guard and 307 to /login. If the bare name matches a real page slug we
+  // send them there (/about.html -> /about); otherwise home, matching the legacy-slug policy. 301
+  // because a file extension is not a shape this site will ever serve.
+  if (onOrgSite) {
+    const p = request.nextUrl.pathname.replace(/\/+$/, "");
+    if (LEGACY_FILE_EXT.test(p) && !p.slice(1).includes("/")) {
+      const bare = p.replace(LEGACY_FILE_EXT, "");
+      const slug = pageSlugFromPath(bare);
+      const url = request.nextUrl.clone();
+      url.pathname = slug ? `/${slug}` : "/";
+      url.search = "";
+      return NextResponse.redirect(url, 301);
     }
   }
 

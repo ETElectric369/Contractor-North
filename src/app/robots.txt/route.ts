@@ -41,6 +41,8 @@ Disallow: /portal/
 Disallow: /pick/
 Disallow: /voice/
 Disallow: /print/
+Disallow: /site/
+Disallow: /offline
 
 Sitemap: ${proto}://${host}/sitemap.xml
 `;

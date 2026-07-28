@@ -24,6 +24,7 @@ export async function generateMetadata({ params }: { params: Promise<{ handle: s
   const { handle } = await params;
   const org = await getPublicOrgByHandle(handle);
   if (!org) return {}; // the page itself 404s
+  if (org.settings.estimating_mode !== "catalog") return {}; // ditto — non-catalog orgs 404 below
   const s = org.settings;
   const title = s.splash_headline || `${org.name} — Deck Estimate`;
   const description = s.splash_tagline || "Answer a few quick questions for an instant ballpark.";
@@ -49,6 +50,14 @@ export default async function EstimatePage({ params }: { params: Promise<{ handl
   const { handle } = await params;
   const org = await getPublicOrgByHandle(handle);
   if (!org) notFound();
+  // This route is the DECK configurator — it is deck-specific by construction (DECK_ESTIMATE_CODES
+  // above). It answered 200 for EVERY org, so etelectricity.com/estimate/et-electric was a live
+  // page asking a C-10 electrician's customers to choose "New deck / Resurface / Railing only",
+  // under the homepage's meta description byte-for-byte. Same gate the sitemap already uses
+  // (sitemap.xml/route.ts:71) and the header CTA already uses (site-chrome.tsx:68), so the three
+  // cannot drift. Nothing links here for a non-catalog org, so this removes a page rather than
+  // breaking one.
+  if (org.settings.estimating_mode !== "catalog") notFound();
 
   const settings = org.settings;
   const brand = accentHex(settings.glass_tint);

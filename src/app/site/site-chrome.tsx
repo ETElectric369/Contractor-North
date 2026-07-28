@@ -5,6 +5,16 @@ import type { PublicOrg } from "@/lib/public-org";
 import { navPageLinks, pageSlugFromHref, sectionAnchor, type SiteNavLink } from "@/lib/site-nav";
 import { renderReadyBlocks, getNavPages } from "@/lib/public-pages";
 import { getPublicPosts } from "@/lib/public-posts";
+import { sizedImage } from "@/lib/site-image";
+
+/**
+ * The logo was the ONE image on the public site still served straight from storage while every
+ * hero and portfolio shot went through the transformer: 127 KB of JPEG rendering into a 36px-tall
+ * slot, twice per page (header + footer), on every public page. Through the same transform at the
+ * size it's actually displayed it's ~13 KB. Widths are 2x the CSS height for retina.
+ */
+const LOGO_HEADER_W = 160;
+const LOGO_FOOTER_W = 200;
 
 /**
  * The org site's shared CHROME — the sticky header (logo home, section nav, builder-page links,
@@ -100,7 +110,7 @@ export function SiteHeader({
     <>
       {org.logo_url && (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={org.logo_url} alt={org.name} className="h-9 w-auto" />
+        <img src={sizedImage(org.logo_url, LOGO_HEADER_W)} alt={org.name} className="h-9 w-auto" />
       )}
       {(!org.logo_url || showName) && (
         <span className="text-lg font-extrabold tracking-tight">{org.name}</span>
@@ -203,7 +213,7 @@ export function SiteFooter({ chrome }: { chrome: SiteChrome }) {
         <div>
           {org.logo_url && (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={org.logo_url} alt={org.name} className="h-10 w-auto brightness-0 invert" />
+            <img src={sizedImage(org.logo_url, LOGO_FOOTER_W)} alt={org.name} className="h-10 w-auto brightness-0 invert" />
           )}
           {(!org.logo_url || showName) && (
             <span className={`text-xl font-extrabold text-white ${org.logo_url ? "mt-2 block" : ""}`}>{org.name}</span>

@@ -267,6 +267,40 @@ export function parseGeoFromMapUrl(url: string | null | undefined): { lat: numbe
   return { lat, lng };
 }
 
+/**
+ * Grade a pasted Google Business Profile link — because the settings form used to show a green
+ * "Linked to your Google Business Profile" check for ANY non-empty string, and ET Electric's field
+ * held a personalized Google SEARCH url:
+ *   https://www.google.com/search?q=ET+Electric&hl=en&mat=<session-token>&authuser=1&dlnr=1
+ * That matches neither coordinate pattern, so parseGeoFromMapUrl returned null and the homepage
+ * silently shipped no `geo` block at all — while Tahoe Deck, on the identical code, shipped one.
+ * The site→listing binding the whole local-SEO story rests on was simply not being made, and the
+ * green check said it was. A `search?` URL also can't resolve to a place entity for anyone, and it
+ * is a live customer-facing link in the footer, carrying Erik's own session token.
+ *
+ * Returns the state so the form can say which of these it is instead of claiming success.
+ */
+export type MapUrlVerdict = "empty" | "ok" | "no-coords" | "personalized-search" | "not-google";
+
+export function classifyMapUrl(url: string | null | undefined): MapUrlVerdict {
+  const u = String(url ?? "").trim();
+  if (!u) return "empty";
+  let host: string;
+  try {
+    host = new URL(u).hostname.toLowerCase();
+  } catch {
+    return "not-google";
+  }
+  const isGoogle = /(^|\.)google\.[a-z.]+$/.test(host) || host === "maps.app.goo.gl" || host === "goo.gl";
+  if (!isGoogle) return "not-google";
+  // A /search? URL is never a place link, however many params it carries.
+  if (/\/search\b/.test(u) || /[?&]q=/.test(u)) return "personalized-search";
+  if (parseGeoFromMapUrl(u)) return "ok";
+  // A share short-link (maps.app.goo.gl) or a bare ?cid= carries no coordinates in the string but
+  // IS a real place link — it resolves server-side at Google. Valid, just without a geo block.
+  return "no-coords";
+}
+
 /** The scheduler's all-day work window as "HH:MM" strings, read from the RAW
  *  stored settings (not the merged defaults): the Settings form displays
  *  08:00–17:00 as its defaults, but an org that never SAVED a window keeps the

@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Check } from "lucide-react";
+import { Check, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
-import type { OrgSettings } from "@/lib/org-settings";
+import { classifyMapUrl, type OrgSettings } from "@/lib/org-settings";
 import { updateOrgSettings } from "./actions";
 
 /**
@@ -15,6 +15,7 @@ import { updateOrgSettings } from "./actions";
  */
 export function SiteSeoFields({ settings, orgId }: { settings: OrgSettings; orgId?: string }) {
   const [gbp, setGbp] = useState(settings.google_business_url ?? "");
+  const gbpVerdict = classifyMapUrl(gbp);
   const [area, setArea] = useState(settings.service_area ?? "");
   const [pubCity, setPubCity] = useState(settings.public_city ?? "");
   const [pubState, setPubState] = useState(settings.public_state ?? "");
@@ -77,12 +78,35 @@ export function SiteSeoFields({ settings, orgId }: { settings: OrgSettings; orgI
       <div>
         <Label htmlFor="seo-gbp">Google Business Profile link</Label>
         <Input id="seo-gbp" value={gbp} onChange={(e) => setGbp(e.target.value)} placeholder="Paste the Google Maps link to your listing" />
-        {gbp.trim() !== "" ? (
+        {gbpVerdict === "ok" && (
           <p className="mt-1 flex items-start gap-1 text-xs font-medium text-green-700">
             <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            Linked to your Google Business Profile — this feeds Google&apos;s structured data on every page.
+            Linked, with map coordinates — this feeds Google&apos;s structured data on every page.
           </p>
-        ) : (
+        )}
+        {gbpVerdict === "no-coords" && (
+          <p className="mt-1 flex items-start gap-1 text-xs font-medium text-green-700">
+            <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            Linked. For the stronger signal, paste the full Maps link instead of the short one — it
+            carries your pin&apos;s coordinates.
+          </p>
+        )}
+        {gbpVerdict === "personalized-search" && (
+          <p className="mt-1 flex items-start gap-1 text-xs font-medium text-amber-700">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            That&apos;s a Google <em>search</em> link, not your listing — Google can&apos;t match it to your
+            business, so no coordinates are published. Open your listing in Google Maps → Share →
+            Copy link. (A link containing <code>authuser=</code> is personal to you and shows a
+            stale page to customers.)
+          </p>
+        )}
+        {gbpVerdict === "not-google" && (
+          <p className="mt-1 flex items-start gap-1 text-xs font-medium text-amber-700">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            That doesn&apos;t look like a Google link. Open your listing in Google Maps → Share → Copy link.
+          </p>
+        )}
+        {gbpVerdict === "empty" && (
           <p className="mt-1 text-xs text-slate-400">The local-SEO anchor — it ties this site to your Google listing so they rank as one business.</p>
         )}
       </div>
