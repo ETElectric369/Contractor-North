@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2, Pencil, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -174,21 +174,36 @@ export function InvoiceDetail({
   // import state
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const [markup, setMarkup] = useState(materialMarkup); // material markup % for the costs import
-  // Once a costs import exists (this session OR from a previous one — the items carry their
-  // import_source), changing the % RE-RUNS the import automatically (debounced) — Erik changed
-  // the number and rightly expected the imported prices to move. Guard rails from the
-  // adversarial review: fires only on USER edits (dirty ref — never on mount/refresh), never
-  // while an import/save is in flight (pending gate; re-arms when it clears), never on the
-  // transient 0 a cleared field emits (0% requires the explicit button), and never once the
-  // invoice has left draft (server re-checks regardless).
-  // Derived from the CURRENT items on every render, not frozen at mount: if the office
-  // deletes every imported materials line (they're billing those separately), a later
-  // markup tweak must NOT silently resurrect them. A mount-time snapshot said "costs were
-  // imported once" forever, so the auto-reapply re-inserted the whole set — and wiped any
-  // hand-edited price on a row it had originally created.
+  // The % now applies ONLY when an import button is deliberately tapped — see the block below
+  // where the auto-reapply used to live. It seeds from the customer's pricing level, or the org
+  // default when they have none, which is NOT necessarily what this invoice's existing lines
+  // were billed at: treat the box as "what the next import will use", never as a readout.
   const costsImported = items.some((i) => i.import_source === "costs");
-  const markupDirty = useRef(false);
-  function runImport(fn: (id: string) => Promise<{ ok: boolean; error?: string }>, label: string) {
+  /**
+   * Every import here is a DELETE-AND-REBUILD of its own line group (the 0156 RPC deletes by
+   * import_source, then re-inserts from the job's current state). So it is never additive and it
+   * never preserves a hand-edit — and on a real invoice that meant one tap could move the total
+   * by thousands with nothing but a green "imported" toast to show for it.
+   *
+   * `replacing` is how many lines are about to be destroyed, said out loud before it happens.
+   * The number is what makes this a decision instead of a surprise: "30 lines" reads very
+   * differently from "Materials imported."
+   */
+  function runImport(
+    fn: (id: string) => Promise<{ ok: boolean; error?: string }>,
+    label: string,
+    replacing = 0,
+  ) {
+    if (replacing > 0) {
+      const ok = confirm(
+        `Re-import ${label.toLowerCase()}?\n\n` +
+          `This REPLACES the ${replacing} ${label.toLowerCase()} line${replacing === 1 ? "" : "s"} ` +
+          `already on ${invoice.invoice_number} with whatever the job holds right now — ` +
+          `any price you edited by hand is overwritten, and anything added to the job since is pulled in.\n\n` +
+          `Current total: ${formatCurrency(Number(invoice.total))}`,
+      );
+      if (!ok) return;
+    }
     setImportMsg(null);
     start(async () => {
       const res = await fn(invoice.id);
@@ -205,16 +220,22 @@ export function InvoiceDetail({
     });
   }
 
-  useEffect(() => {
-    if (!markupDirty.current || !costsImported || !isDraft || !(markup > 0)) return;
-    if (pending) return; // re-armed by the pending flip in deps when the in-flight work ends
-    const t = setTimeout(() => {
-      markupDirty.current = false;
-      runImport((id) => importCostsIntoInvoice(id, markup), "Materials");
-    }, 700);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [markup, pending, isDraft, costsImported]);
+  /* REMOVED: a debounced effect that re-ran the FULL materials import 700ms after the markup
+   * field changed. Two things made it dangerous rather than convenient:
+   *
+   *   1. importCostsIntoInvoice is a DELETE-AND-REBUILD, not a re-price — the RPC (migration
+   *      0156) deletes every import_source='costs' row and re-inserts from the job's CURRENT
+   *      state. So the "convenience" silently discarded any hand-edit on those lines and pulled
+   *      in anything added to the job since.
+   *   2. The markup box is seeded from the customer's pricing level, or failing that the ORG
+   *      DEFAULT (page.tsx: `pricing_levels?.markup_pct ?? orgSettings.material_markup_percent`)
+   *      — NOT from what this invoice's lines were actually billed at. On INV-050 the customer
+   *      has no pricing level, so the box reads 25% over 30 lines that were not billed at 25%.
+   *
+   * Together: touch the field, wait 700ms, and a customer's invoice silently re-prices with no
+   * confirm and no undo. That is the "force feeding" — it doesn't need a button press at all.
+   * The markup now applies only when an import button is deliberately tapped.
+   */
 
   // edit-payment state
   const [payEditId, setPayEditId] = useState<string | null>(null);
@@ -479,19 +500,19 @@ export function InvoiceDetail({
           !isDrawKind((invoice as any).invoice_kind) && (
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50/60 px-3 py-2.5">
             <span className="text-xs font-medium text-slate-500">Import:</span>
-            <Button size="sm" variant="outline" onClick={() => runImport(importQuoteItemsIntoInvoice, "Estimate items")} disabled={pending}>
+            <Button size="sm" variant="outline" onClick={() => runImport(importQuoteItemsIntoInvoice, "Estimate items", items.filter((i) => i.import_source === "quote").length)} disabled={pending}>
               From Estimate
             </Button>
             {invoice.job_id && (
               <>
-                <Button size="sm" variant="outline" onClick={() => runImport(importLaborIntoInvoice, "Labor")} disabled={pending}>
+                <Button size="sm" variant="outline" onClick={() => runImport(importLaborIntoInvoice, "Labor", items.filter((i) => i.import_source === "labor").length)} disabled={pending}>
                   Labor From Timecards
                 </Button>
                 <div className="flex items-center gap-1.5">
-                  <Button size="sm" variant="outline" onClick={() => runImport((id) => importCostsIntoInvoice(id, markup), "Materials")} disabled={pending}>
+                  <Button size="sm" variant="outline" onClick={() => runImport((id) => importCostsIntoInvoice(id, markup), "Materials", items.filter((i) => i.import_source === "costs").length)} disabled={pending}>
                     Materials From Costs
                   </Button>
-                  <NumberInput value={markup} onValueChange={(v) => { markupDirty.current = true; setMarkup(v); }} className="h-8 w-14 text-center text-sm" aria-label="Material markup percent" />
+                  <NumberInput value={markup} onValueChange={(v) => setMarkup(v)} className="h-8 w-14 text-center text-sm" aria-label="Material markup percent" />
                   <span className="text-xs text-slate-400">% markup</span>
                 </div>
               </>
