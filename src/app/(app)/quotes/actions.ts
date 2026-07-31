@@ -12,7 +12,7 @@ import { CALC_TOOLS, runCalc } from "@/lib/electrical-calc";
 import { recordAiUsage, aiSpendExceeded, currentOrgId } from "@/lib/ai-cost";
 import { rateLimited } from "@/lib/rate-limit";
 import type Anthropic from "@anthropic-ai/sdk";
-import { getOrgSettings, accentHex } from "@/lib/org-settings";
+import { getOrgSettings, accentHex, orgDocUrl } from "@/lib/org-settings";
 import { mapEstimatorLine, type DraftLineItem, type BookRow, type LadderPrice } from "@/lib/estimate/line-map";
 import { priceMaterial } from "@/lib/pricing/price-material";
 import { sendEmail, renderQuoteNoticeEmail, ownerBcc } from "@/lib/email";
@@ -24,9 +24,8 @@ import { visibleCustomerIdOrNull } from "@/lib/job-visibility";
 import { docLabel, type QuoteDocType } from "@/lib/doc-label";
 import type { QuoteCircuit } from "@/lib/types";
 
-function publicQuoteLink(token: string) {
-  return `${process.env.NEXT_PUBLIC_SITE_URL || ""}/q/${token}`;
-}
+/* Built from the ORG's settings, not NEXT_PUBLIC_SITE_URL — see orgDocUrl in lib/org-settings.
+   Both callers below already fetch the org row, so this costs no extra query. */
 
 export async function setQuoteType(id: string, docType: "estimate" | "quote") {
   const ctx = await requireStaff();
@@ -58,7 +57,7 @@ export async function textQuote(
 
   const label = docLabel(quote as { doc_type?: string | null });
   const { data: org } = await supabase.from("organizations").select("name, settings").maybeSingle();
-  const link = publicQuoteLink((quote as any).public_token);
+  const link = orgDocUrl(getOrgSettings((org as any)?.settings), "q", (quote as any).public_token);
   const body = `${org?.name ?? "Your contractor"}: ${label} ${quote.quote_number} ($${Number(quote.total).toFixed(2)}). View: ${link}`;
 
   const sent = await sendSms(customer.phone, body, (org as any)?.settings?.sms_from_number);
@@ -87,13 +86,14 @@ export async function emailQuote(
   const customer = (quote as any).customers;
   if (!customer?.email)
     return { ok: false, error: "This customer has no email address." };
-  const link = publicQuoteLink((quote as any).public_token);
   const label = docLabel(quote as { doc_type?: string | null });
 
   const { data: org } = await supabase
     .from("organizations")
     .select("name, phone, email, settings")
     .maybeSingle();
+  // After the org fetch, because the link is built from the org's own domain now.
+  const link = orgDocUrl(getOrgSettings((org as any)?.settings), "q", (quote as any).public_token);
 
   // Link-only notice (no re-rendered line-item table): the canonical document
   // lives at the /q link, so the email can never drift from the print/portal

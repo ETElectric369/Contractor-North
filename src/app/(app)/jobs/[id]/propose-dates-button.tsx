@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useOrgPublicBase } from "@/components/use-org-public-base";
 import { useRouter } from "next/navigation";
 import { CalendarPlus, Copy, MessageSquare, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -55,7 +56,8 @@ export function ProposeDatesButton({
   const [token, setToken] = useState<string | null>(pendingProposal?.token ?? null);
   const [copied, setCopied] = useState(false);
 
-  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  // The BUSINESS's domain, not the browser's — see useOrgPublicBase.
+  const origin = useOrgPublicBase();
   const link = token && origin ? `${origin}/pick/${token}` : null;
   const smsBody = link
     ? encodeURIComponent(`Hi! Pick a day that works for your electrical work and we'll lock it in: ${link}`)

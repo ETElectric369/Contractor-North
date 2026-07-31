@@ -49,3 +49,27 @@ export async function getShareLink(): Promise<{
     tradeLabel: settings.trade_label || undefined,
   };
 }
+
+/**
+ * The signed-in user's org's PUBLIC base URL ("https://etelectricity.com").
+ *
+ * Exists because four client components were building customer-facing links from
+ * `window.location.origin` — the STAFF member's host, baked into the CUSTOMER's message. That is
+ * non-deterministic as well as wrong: the same "pick a time" button produced app.contractornorth.com,
+ * a vercel.app preview, or localhost depending on where the office happened to be signed in, so one
+ * customer's text and their email could carry two different domains for the same appointment.
+ *
+ * A customer-facing URL is never derived from the browser. Ask the server whose it is.
+ */
+export async function orgPublicBase(): Promise<string> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return "";
+  const { data: prof } = await supabase.from("profiles").select("org_id").eq("id", user.id).maybeSingle();
+  const orgId = (prof as { org_id?: string } | null)?.org_id;
+  if (!orgId) return "";
+  const { data: org } = await supabase.from("organizations").select("settings").eq("id", orgId).maybeSingle();
+  return orgPublicBaseUrl(getOrgSettings((org as { settings?: unknown } | null)?.settings));
+}

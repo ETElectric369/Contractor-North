@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireStaff } from "@/lib/staff-guard";
-import { getOrgSettings, accentHex } from "@/lib/org-settings";
+import { getOrgSettings, accentHex, orgDocUrl } from "@/lib/org-settings";
 import { scheduleStatus, contractTotalFromQuotes, type Milestone } from "@/lib/payment-schedule-math";
 import { buildContractBody } from "@/lib/contract-body";
 import { sendEmail, renderReminderEmail, ownerBcc } from "@/lib/email";
@@ -10,9 +10,9 @@ import { formatDate, formatCityStateZip } from "@/lib/utils";
 
 type Result = { ok: boolean; error?: string; id?: string };
 
-function contractLink(token: string) {
-  return `${process.env.NEXT_PUBLIC_SITE_URL || ""}/c/${token}`;
-}
+/* See orgDocUrl in lib/org-settings — a contract's "Review & sign" link must be on the
+   contractor's own domain. A homeowner about to e-sign is the worst possible moment to show
+   them a company name they have never heard of. */
 
 const csz = (x: { city?: string | null; state?: string | null; zip?: string | null } | null | undefined) =>
   formatCityStateZip(x?.city, x?.state, x?.zip);
@@ -154,7 +154,7 @@ export async function sendContract(id: string): Promise<Result> {
   if (!customer?.email) return { ok: false, error: "This customer has no email address." };
 
   const { data: org } = await supabase.from("organizations").select("name, phone, email, settings").maybeSingle();
-  const link = contractLink((c as any).public_token);
+  const link = orgDocUrl(getOrgSettings((org as any)?.settings), "c", (c as any).public_token);
   const html = renderReminderEmail({
     company: { name: org?.name ?? "Contractor North", brand: accentHex(getOrgSettings((org as any)?.settings).glass_tint), phone: org?.phone, email: org?.email },
     customerName: customer.name,

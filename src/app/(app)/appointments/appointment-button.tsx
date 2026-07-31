@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useOrgPublicBase } from "@/components/use-org-public-base";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { Plus, Pencil, Copy, Check, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -300,7 +301,8 @@ export function AppointmentButton({
     });
   }
 
-  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  // The BUSINESS's domain, not the browser's — see useOrgPublicBase.
+  const origin = useOrgPublicBase();
   const pickLink = linkToken && origin ? `${origin}/pick/${linkToken}` : null;
 
   async function copyLink() {

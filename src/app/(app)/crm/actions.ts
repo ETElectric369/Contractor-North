@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { formatPhone, formatState, formatZip, titleCase } from "@/lib/utils";
 import { requireStaff } from "@/lib/staff-guard";
 import { sendEmail, renderReminderEmail, ownerBcc } from "@/lib/email";
-import { getOrgSettings, accentHex } from "@/lib/org-settings";
+import { getOrgSettings, accentHex, orgDocUrl } from "@/lib/org-settings";
 import { findDuplicateGroups, type DupCustomer, type DupGroup } from "@/lib/crm/duplicates";
 import { visibleCustomerIdOrNull } from "@/lib/job-visibility";
 
@@ -40,9 +40,8 @@ export async function emailPortalLink(customerId: string): Promise<ActionResult>
   if (!c.email) return { ok: false, error: "This customer has no email address." };
 
   const { data: org } = await supabase.from("organizations").select("name, phone, email, settings").maybeSingle();
-  // Always an absolute origin so the emailed link is clickable even if the env var is unset.
-  const site = process.env.NEXT_PUBLIC_SITE_URL || "https://contractor-north.vercel.app";
-  const link = `${site}/portal/${c.portal_token}`;
+  // The customer's portal, on the contractor's own domain — see orgDocUrl in lib/org-settings.
+  const link = orgDocUrl(getOrgSettings((org as any)?.settings), "portal", c.portal_token!);
   const html = renderReminderEmail({
     company: { name: org?.name ?? "Contractor North", brand: accentHex(getOrgSettings((org as any)?.settings).glass_tint), phone: org?.phone, email: org?.email },
     customerName: c.name,

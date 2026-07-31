@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { LayoutDashboard, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { orgPublicBase } from "@/app/(app)/share-actions";
 import { emailPortalLink } from "../actions";
 
 /** Staff control on a customer: email them their passwordless portal link, or copy it. */
@@ -26,11 +27,16 @@ export function PortalLinkButton({
     });
   }
   function copyIt() {
-    const link = `${window.location.origin}/portal/${portalToken}`;
-    navigator.clipboard?.writeText(link).then(
-      () => setMsg("Link copied ✓"),
-      () => setMsg(link),
-    );
+    // The link is asked of the SERVER, not read off window.location — the customer's portal lives
+    // on the business's own domain, not on whichever host the office is signed in to today.
+    start(async () => {
+      const base = await orgPublicBase();
+      const link = `${base}/portal/${portalToken}`;
+      navigator.clipboard?.writeText(link).then(
+        () => setMsg("Link copied ✓"),
+        () => setMsg(link),
+      );
+    });
   }
 
   return (

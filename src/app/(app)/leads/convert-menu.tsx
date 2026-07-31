@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useOrgPublicBase } from "@/components/use-org-public-base";
 import { useRouter } from "next/navigation";
 import { CalendarPlus, Check, Copy, FileText, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -104,7 +105,8 @@ export function ConvertMenu({
     setLink(null);
   }
 
-  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  // The BUSINESS's domain, not the browser's — see useOrgPublicBase.
+  const origin = useOrgPublicBase();
   const pickLink = link && origin ? `${origin}/pick/${link.token}` : null;
   const smsBody = `Hi! Pick a time for your site visit and we'll lock it in: ${pickLink}`;
 

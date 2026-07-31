@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getOrgSettings, orgPublicBaseUrl } from "@/lib/org-settings";
 import { getStripe, billingEnabled } from "@/lib/stripe";
 import { createServiceClient } from "@/lib/supabase/server";
 import { invoiceBalance } from "@/lib/invoice-math";
@@ -17,7 +18,6 @@ export async function GET(
   { params }: { params: Promise<{ token: string }> },
 ) {
   const { token } = await params;
-  const site = process.env.NEXT_PUBLIC_SITE_URL || "";
 
   if (!billingEnabled) {
     return new NextResponse(
@@ -40,6 +40,18 @@ export async function GET(
     .maybeSingle();
   if (!inv) return new NextResponse("Invoice not found.", { status: 404 });
 
+  // The org is fetched HERE, above the early redirects, because every URL below has to be built
+  // on the CONTRACTOR'S own domain. It used to come from NEXT_PUBLIC_SITE_URL, so a customer who
+  // opened their invoice on the contractor's site, tapped Pay, and paid, landed back on the
+  // software vendor's domain — three hosts in one payment, the last one a company they have never
+  // heard of, on the screen that confirms money left their account.
+  const { data: org } = await supabase
+    .from("organizations")
+    .select("name, settings, stripe_account_id, stripe_account_status, stripe_charges_enabled")
+    .eq("id", inv.org_id)
+    .maybeSingle();
+  const site = orgPublicBaseUrl(getOrgSettings((org as { settings?: unknown } | null)?.settings));
+
   // A VOID invoice's old email link stays live forever; a customer paying it hands us cash
   // the ledger then hides (recalc keeps status void, Collected and AR both exclude void), so
   // real money would sit with no entry and no tracked refund. A DRAFT isn't a bill yet — the
@@ -52,12 +64,6 @@ export async function GET(
   if (balance <= 0) {
     return NextResponse.redirect(`${site}/i/${token}?paid=1`, { status: 303 });
   }
-
-  const { data: org } = await supabase
-    .from("organizations")
-    .select("name, stripe_account_id, stripe_account_status, stripe_charges_enabled")
-    .eq("id", inv.org_id)
-    .maybeSingle();
 
   // CONNECT (0161): the charge is created ON THE CONTRACTOR'S OWN Stripe account, so
   // their customer's money goes to their bank — we never hold it. Refuse rather than

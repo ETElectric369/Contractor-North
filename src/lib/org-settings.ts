@@ -394,6 +394,25 @@ export function accentHex(glassTintHex?: string | null): string {
  *   3. a platform fallback (NEXT_PUBLIC_SITE_URL, then the Vercel URL) for an org with neither.
  * No trailing slash. (App routes like /i/<token> resolve on the org's custom domain too.)
  */
+/**
+ * A customer-facing document URL on the org's OWN domain — "https://etelectricity.com/i/<token>".
+ *
+ * THE RULE: every URL that lands in a customer's hand comes from here. It was written four
+ * separate times and three were wrong — invoice EMAIL used orgPublicBaseUrl while the invoice
+ * TEXT, quotes, contracts and the portal used NEXT_PUBLIC_SITE_URL, so the same document sent two
+ * ways pointed at two different domains and only one of them was the business the customer hired.
+ * Four more client files used `window.location.origin`, which is worse than wrong because it is
+ * non-deterministic: the customer's link became whatever host the STAFF MEMBER was signed in on.
+ *
+ * Pure on purpose — it takes settings the caller already has, so it costs no query and can be
+ * tested without a database.
+ */
+export type DocPrefix = "i" | "q" | "c" | "portal" | "pick" | "inquire" | "estimate";
+
+export function orgDocUrl(settings: OrgSettings, prefix: DocPrefix, token: string): string {
+  return `${orgPublicBaseUrl(settings)}/${prefix}/${token}`;
+}
+
 export function orgPublicBaseUrl(settings: OrgSettings): string {
   const domain = (settings.custom_domain || "").trim().replace(/^https?:\/\//, "").replace(/\/+$/, "");
   if (domain) return `https://${domain}`;
