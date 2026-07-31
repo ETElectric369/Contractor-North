@@ -174,6 +174,12 @@ export async function emailInvoice(
 
 export type Result = { ok: boolean; error?: string; id?: string };
 
+/** What an import actually did (migration 0175), so the UI can say it plainly instead of
+ *  "imported" — the ambiguity of that one word is most of why the old behaviour felt like
+ *  force-feeding. `kept_edited` is the number the office cares about: their negotiated prices. */
+export type ImportStats = { inserted: number; updated: number; kept_edited: number; removed: number };
+type ImportResult = Result & { empty?: boolean; stats?: ImportStats };
+
 /** Default invoice due date = today (in the org tz) + the org's net terms, stamped to
  *  NOON in the org tz (same convention as setInvoiceDueDate / payment dates). Without a
  *  due date the Overdue tracker never fires, so EVERY creation path stamps one. Net terms
@@ -347,28 +353,40 @@ export async function addInvoiceItem(
  *  re-importing REFRESHES the lines (current total) instead of duplicating them. Delegates
  *  to the atomic, advisory-locked RPC (0156) so two overlapping imports can't both land.
  *  Hand-entered rows (import_source null) and other sources are never touched. */
-async function replaceImportedItems(
+/** An imported line, carrying the stable identity of the thing it represents. */
+type ImportRow = { import_key: string; description: string; quantity: number; unit: string; unit_price: number };
+
+/**
+ * ADDITIVE import (migration 0175). Matches incoming rows against what is already on the
+ * invoice BY KEY, so one call can refresh, append and leave-alone independently:
+ *
+ *   new key                       -> appended   (the work that accrued since — the whole point)
+ *   existing key, never edited    -> refreshed in place, keeping its sort_order
+ *   existing key, edited by hand  -> LEFT ALONE (a negotiated price is not the importer's to touch)
+ *   key deleted from this invoice -> never comes back (tombstoned in dismissed_import_keys)
+ *   key gone from the source      -> removed, unless it was edited
+ *
+ * This replaces a delete-and-rebuild that had no key at all, so "import only the new time and
+ * materials" was not merely unimplemented — there was nothing to match on. Still advisory-locked
+ * per (invoice, source) and still SECURITY INVOKER, so RLS governs the writes exactly as before.
+ */
+async function upsertImportedItems(
   supabase: Awaited<ReturnType<typeof createClient>>,
   invoiceId: string,
   source: string,
-  rows: Array<{ description: string; quantity: number; unit: string; unit_price: number }>,
-): Promise<{ error?: string }> {
-  // ONE atomic, advisory-locked statement (migration 0156). The old read-ids → insert →
-  // delete-those-ids sequence let two overlapping imports each delete only the rows THEY
-  // saw, leaving both sets behind and double-billing the draft — reproduced against prod
-  // ($236.66 for $118.33 of materials) before this replaced it. The RPC is SECURITY
-  // INVOKER, so RLS governs these writes exactly as it did statement-by-statement.
-  const { error } = await supabase.rpc("replace_imported_invoice_items", {
+  rows: ImportRow[],
+): Promise<{ error?: string; stats?: { inserted: number; updated: number; kept_edited: number; removed: number } }> {
+  const { data, error } = await supabase.rpc("upsert_imported_invoice_items", {
     p_invoice_id: invoiceId,
     p_source: source,
     p_rows: rows,
   });
   if (error) return { error: error.message };
-  return {};
+  return { stats: (data ?? undefined) as never };
 }
 
 /** Import the linked job's quote line items into this invoice (idempotent). */
-export async function importQuoteItemsIntoInvoice(invoiceId: string): Promise<Result> {
+export async function importQuoteItemsIntoInvoice(invoiceId: string): Promise<ImportResult> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -400,16 +418,17 @@ export async function importQuoteItemsIntoInvoice(invoiceId: string): Promise<Re
 
   const { data: items } = await supabase
     .from("quote_line_items")
-    .select("description, quantity, unit, unit_price")
+    .select("id, description, quantity, unit, unit_price")
     .eq("quote_id", quoteId)
     .order("sort_order");
   if (!items?.length) return { ok: false, error: "The quote has no line items." };
 
-  const rep = await replaceImportedItems(
+  const rep = await upsertImportedItems(
     supabase,
     invoiceId,
     "quote",
     items.map((it: any) => ({
+      import_key: `quote:${it.id}`,
       description: it.description,
       quantity: Number(it.quantity),
       unit: it.unit,
@@ -419,7 +438,10 @@ export async function importQuoteItemsIntoInvoice(invoiceId: string): Promise<Re
   if (rep.error) return { ok: false, error: rep.error };
   await recalcInvoice(supabase, invoiceId);
   revalidateMoney(invoiceId);
-  return { ok: true };
+  // Report what actually happened. "3 added, 2 updated, 5 of your edited lines left alone" is a
+  // different sentence from "Materials imported", and it is the one that tells the office whether
+  // their negotiated prices survived.
+  return { ok: true, stats: rep.stats };
 }
 
 // ── H4: one billing path per job ────────────────────────────────────────────
@@ -508,7 +530,7 @@ async function billedOnAnotherStandardInvoice(
   return null;
 }
 
-export async function importLaborIntoInvoice(invoiceId: string): Promise<Result & { empty?: boolean }> {
+export async function importLaborIntoInvoice(invoiceId: string): Promise<ImportResult> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -545,11 +567,15 @@ export async function importLaborIntoInvoice(invoiceId: string): Promise<Result 
   const { lines } = computeJobLaborBilling(labor.jobEntries, labor.jobAllocs, defaultRate, levelRate);
   if (lines.length === 0) return { ok: false, error: "No billable hours on this job yet.", empty: true };
 
-  const rep = await replaceImportedItems(
+  const rep = await upsertImportedItems(
     supabase,
     invoiceId,
     "labor",
     lines.map((l) => ({
+      // Keyed by PERSON: the importer aggregates a job's time per head, so "Erik" is one
+      // line whose hours grow. Re-importing refreshes it — unless the office negotiated
+      // the number, in which case `edited` protects it and a NEW person still appends.
+      import_key: `labor:${l.personId}`,
       description: `Labor — ${l.name}`,
       quantity: l.quantity,
       unit: "hr",
@@ -559,13 +585,16 @@ export async function importLaborIntoInvoice(invoiceId: string): Promise<Result 
   if (rep.error) return { ok: false, error: rep.error };
   await recalcInvoice(supabase, invoiceId);
   revalidateMoney(invoiceId);
-  return { ok: true };
+  // Report what actually happened. "3 added, 2 updated, 5 of your edited lines left alone" is a
+  // different sentence from "Materials imported", and it is the one that tells the office whether
+  // their negotiated prices survived.
+  return { ok: true, stats: rep.stats };
 }
 
 /** Import materials from the job's costs: purchase orders + supplier bills,
  *  marked up by `markupPercent` (so they bill at sell price, not cost — the
  *  contractor doesn't do the math by hand). Each line stays editable after. */
-export async function importCostsIntoInvoice(invoiceId: string, markupPercent = 0): Promise<Result & { empty?: boolean }> {
+export async function importCostsIntoInvoice(invoiceId: string, markupPercent = 0): Promise<ImportResult> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -596,7 +625,7 @@ export async function importCostsIntoInvoice(invoiceId: string, markupPercent = 
   const { data: blis } = billIds.length
     ? await supabase
         .from("bill_line_items")
-        .select("bill_id, description, quantity, unit_price, amount, category, sort_order")
+        .select("id, bill_id, description, quantity, unit_price, amount, category, sort_order")
         .in("bill_id", billIds)
         .order("sort_order")
     : { data: [] as any[] };
@@ -609,12 +638,12 @@ export async function importCostsIntoInvoice(invoiceId: string, markupPercent = 
   // Mark up cost → sell price. Markup is NOT shown on the line (customers don't
   // see your margin); only the price reflects it.
   const mark = (cost: number) => Math.round(cost * (1 + (Number(markupPercent) || 0) / 100) * 100) / 100;
-  const rows: { description: string; quantity: number; unit: string; unit_price: number }[] = [];
+  const rows: ImportRow[] = [];
   // Bill only LIVE purchase orders (the one shared rule): a draft/cancelled order was
   // never a real cost, and a PO whose supplier bill has arrived is superseded by that
   // bill — otherwise one CED delivery goes out on the invoice as two material charges.
   for (const p of livePurchaseOrders((pos ?? []) as any[], (bills ?? []) as any[])) {
-    if (Number(p.total) > 0) rows.push({ description: `Materials — ${p.vendor} (PO ${p.po_number})`, quantity: 1, unit: "lot", unit_price: mark(Number(p.total)) });
+    if (Number(p.total) > 0) rows.push({ import_key: `po:${p.id}`, description: `Materials — ${p.vendor} (PO ${p.po_number})`, quantity: 1, unit: "lot", unit_price: mark(Number(p.total)) });
   }
   // ── THE ANCHOR INVARIANT (adversarial-review fix, 7/24) ──────────────────────────────
   // Each bill's itemized rows must sum to EXACTLY mark(bill.amount) — the same figure the
@@ -648,30 +677,33 @@ export async function importCostsIntoInvoice(invoiceId: string, markupPercent = 
       const desc = String(l.description || "Materials").slice(0, 300);
       const unitExact = qty > 0 ? Math.round((sell / qty) * 100) / 100 : sell;
       if (qty > 0 && Number.isInteger(qty) && Math.round(unitExact * qty * 100) / 100 === sell) {
-        billRows.push({ description: desc, quantity: qty, unit: "ea", unit_price: unitExact });
+        billRows.push({ import_key: `bli:${l.id}`, description: desc, quantity: qty, unit: "ea", unit_price: unitExact });
         emitted = Math.round((emitted + unitExact * qty) * 100) / 100;
       } else {
-        billRows.push({ description: qty > 1 ? `${desc} (${qty} ea)` : desc, quantity: 1, unit: "ea", unit_price: sell });
+        billRows.push({ import_key: `bli:${l.id}`, description: qty > 1 ? `${desc} (${qty} ea)` : desc, quantity: 1, unit: "ea", unit_price: sell });
         emitted = Math.round((emitted + sell) * 100) / 100;
       }
     }
     const remainder = Math.round((target - emitted) * 100) / 100;
     if (!billRows.length) {
-      rows.push({ description: `Materials — ${b.supplier}${b.bill_number ? ` (bill #${b.bill_number})` : ""}`, quantity: 1, unit: "lot", unit_price: target });
+      rows.push({ import_key: `bill:${b.id}`, description: `Materials — ${b.supplier}${b.bill_number ? ` (bill #${b.bill_number})` : ""}`, quantity: 1, unit: "lot", unit_price: target });
       continue;
     }
     if (Math.abs(remainder) >= 0.01) {
-      billRows.push({ description: `Supplies & tax — ${b.supplier}`, quantity: 1, unit: "ea", unit_price: remainder });
+      billRows.push({ import_key: `bill:${b.id}:remainder`, description: `Supplies & tax — ${b.supplier}`, quantity: 1, unit: "ea", unit_price: remainder });
     }
     rows.push(...billRows);
   }
   if (!rows.length) return { ok: false, error: "No purchase orders or bills on this job yet.", empty: true };
 
-  const rep = await replaceImportedItems(supabase, invoiceId, "costs", rows);
+  const rep = await upsertImportedItems(supabase, invoiceId, "costs", rows);
   if (rep.error) return { ok: false, error: rep.error };
   await recalcInvoice(supabase, invoiceId);
   revalidateMoney(invoiceId);
-  return { ok: true };
+  // Report what actually happened. "3 added, 2 updated, 5 of your edited lines left alone" is a
+  // different sentence from "Materials imported", and it is the one that tells the office whether
+  // their negotiated prices survived.
+  return { ok: true, stats: rep.stats };
 }
 
 /** Create a progress/final DRAW that doubles as a progress report: itemizes all

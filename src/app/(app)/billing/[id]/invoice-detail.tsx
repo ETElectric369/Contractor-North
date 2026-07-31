@@ -213,8 +213,20 @@ export function InvoiceDetail({
         setTimeout(() => setImportMsg(null), 5000);
         return;
       }
-      setImportMsg(`${label} imported.`);
-      toast(`${label} imported`, "success");
+      // Say what actually happened. An import that left five negotiated lines alone and added
+      // two new ones is a very different event from "imported", and the office needs to know
+      // which — that ambiguity is what made the old behaviour feel like force-feeding.
+      const st = (res as { stats?: { inserted: number; updated: number; kept_edited: number; removed: number } }).stats;
+      const said = st
+        ? [
+            st.inserted ? `${st.inserted} added` : "",
+            st.updated ? `${st.updated} updated` : "",
+            st.kept_edited ? `${st.kept_edited} of your edits kept` : "",
+            st.removed ? `${st.removed} removed` : "",
+          ].filter(Boolean).join(" · ") || "nothing changed"
+        : "";
+      setImportMsg(said ? `${label}: ${said}.` : `${label} imported.`);
+      toast(said ? `${label} — ${said}` : `${label} imported`, "success");
       setTimeout(() => setImportMsg(null), 5000);
       refresh();
     });
