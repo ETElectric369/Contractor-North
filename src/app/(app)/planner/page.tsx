@@ -342,7 +342,12 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       // Fall back to the linked job's address so the Navigate button appears on a
       // job appointment that has no explicit location (bug: NAV missing on appts).
       address: a.location ?? a.jobs?.address ?? null,
-      href: a.job_id ? `/jobs/${a.job_id}` : `/schedule?view=day&date=${todayStr}`,
+      // ALWAYS the appointment. This used to fall back to the schedule grid when there was no
+      // job — but a pre-sale inspection has no job by design (verified in prod: ET 1 of 8,
+      // Tahoe Deck 0 of 20), so the fallback fired almost every time and tapping today's
+      // inspection dumped you on the grid you were just looking at. /appointments/<id> is the
+      // hub: capture, photos, the question sheet, navigate, start estimate.
+      href: `/appointments/${a.id}`,
       apptType: a.type,
       appt: {
         id: a.id,
@@ -431,7 +436,12 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         title: a.title,
         sub: a.location ?? null,
         address: a.location ?? null,
-        href: a.job_id ? `/jobs/${a.job_id}` : `/schedule?view=day&date=${todayStr}`,
+        // ALWAYS the appointment. This used to fall back to the schedule grid when there was no
+      // job — but a pre-sale inspection has no job by design (verified in prod: ET 1 of 8,
+      // Tahoe Deck 0 of 20), so the fallback fired almost every time and tapping today's
+      // inspection dumped you on the grid you were just looking at. /appointments/<id> is the
+      // hub: capture, photos, the question sheet, navigate, start estimate.
+      href: `/appointments/${a.id}`,
         apptType: a.type,
       })),
     ]

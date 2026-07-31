@@ -663,7 +663,9 @@ export default async function JobDetailPage({
       content: (
         <div className="space-y-3">
           <div className="flex justify-end">
-            <AppointmentButton jobs={apptJobOpts} customers={apptCustOpts} staff={apptStaffOpts} />
+            {/* Defaults matter: booked from the Miller job, it must land ON the Miller job. Without
+                these the component opened blank and the appointment was never linked back. */}
+            <AppointmentButton jobs={apptJobOpts} customers={apptCustOpts} staff={apptStaffOpts} defaultJobId={job.id} defaultCustomerId={job.customer_id ?? undefined} />
           </div>
           <Card className="overflow-hidden">
             <ul className="divide-y divide-slate-100">

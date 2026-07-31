@@ -29,10 +29,15 @@ export default async function NewQuotePage({
   let measured: { sqft: number | null; linearFt: number | null } | undefined;
   let captureInquiryId: string | undefined;
   let captureApptId: string | undefined; // verified appointment id — saveQuote stamps the write-up backlink on it
+  // The inspection already knows WHOSE house this is. Without carrying these through, a repeat
+  // customer's walk-through wrote up into a blank estimate and you re-picked them from the full
+  // contact list standing in their yard.
+  let captureCustomerId: string | undefined;
+  let captureJobId: string | undefined;
   if (capture) {
     const { data: appt } = await supabase
       .from("appointments")
-      .select("id, title, location, inquiry_id, capture")
+      .select("id, title, location, inquiry_id, capture, customer_id, job_id")
       .eq("id", capture)
       .maybeSingle();
     const cap = (appt as any)?.capture as
@@ -67,6 +72,8 @@ export default async function NewQuotePage({
       if (parts.length > 1) initialScope = parts.join("\n\n");
       captureInquiryId = (appt as any).inquiry_id ?? undefined;
       captureApptId = (appt as any).id;
+      captureCustomerId = (appt as any).customer_id ?? undefined;
+      captureJobId = (appt as any).job_id ?? undefined;
     }
   }
   const [{ data: customers }, { data: priceItems }, { data: taxRates }, { data: kits }, { data: org }] =
@@ -139,8 +146,8 @@ export default async function NewQuotePage({
           level_markup: c.pricing_levels?.markup_pct ?? null,
           level_rate: c.pricing_levels?.labor_rate ?? null,
         }))}
-        preselected={customer}
-        jobId={job}
+        preselected={customer ?? captureCustomerId}
+        jobId={job ?? captureJobId}
         inquiryId={inquiry ?? captureInquiryId}
         captureId={captureApptId}
         initialScope={initialScope}
