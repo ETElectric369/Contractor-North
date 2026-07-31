@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { deliverInvoiceEmail } from "@/lib/invoice-email";
 import { sendSms } from "@/lib/sms";
 import { pushInvoiceToQbo } from "@/lib/quickbooks";
-import { getOrgSettings } from "@/lib/org-settings";
+import { getOrgSettings, orgPublicBaseUrl } from "@/lib/org-settings";
 import { tzLocalHourUtc } from "@/lib/tz";
 import { requireStaff } from "@/lib/staff-guard";
 import { computeJobLaborBilling, customerLaborRateForJob, customerMaterialMarkupForJob, fetchJobLaborRows } from "@/lib/labor-billing";
@@ -71,8 +71,63 @@ export async function sendInvoiceToQuickbooks(
   return { ok: res.ok, error: res.error };
 }
 
-function publicInvoiceLink(token: string) {
-  return `${process.env.NEXT_PUBLIC_SITE_URL || ""}/i/${token}`;
+/**
+ * The customer-facing link for an invoice, on the CONTRACTOR'S OWN domain.
+ *
+ * This used to be built from NEXT_PUBLIC_SITE_URL — the platform's host — so a texted invoice
+ * sent the customer to the software vendor's domain while the same invoice emailed from
+ * lib/invoice-email.ts (which uses orgPublicBaseUrl) sent them to the contractor's. Two links to
+ * the same document on two different domains, and the wrong one is the one that doesn't look
+ * like the business the customer just hired.
+ */
+async function publicInvoiceLink(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string | null | undefined,
+  token: string,
+): Promise<string> {
+  const { data: org } = orgId
+    ? await supabase.from("organizations").select("settings").eq("id", orgId).maybeSingle()
+    : { data: null };
+  const base = orgPublicBaseUrl(getOrgSettings((org as { settings?: unknown } | null)?.settings));
+  return `${base}/i/${token}`;
+}
+
+/**
+ * SHARE SHEET payload for an invoice — the thing that was missing entirely.
+ *
+ * Erik went to send Jackie an invoice, found no Share button, and fell back to the iOS share
+ * sheet from /print/pdf-preview. iOS shares the PAGE, so she received the root layout's metadata:
+ * the title "Contractor North", the description "AI-powered field service platform for
+ * contractors — CRM, quoting, scheduling…", and a link to app.contractornorth.com that is not in
+ * PUBLIC_PATHS and therefore shows her a login screen. His software vendor's sales pitch and a
+ * door she can't open. Nothing of hers leaked — but nothing useful arrived either.
+ *
+ * So the app has to own the payload rather than letting the OS guess it. Same wording as the SMS
+ * (textInvoice, below) on purpose: one message, whichever way it goes out.
+ */
+export async function invoiceShareText(
+  id: string,
+): Promise<{ ok: boolean; error?: string; title?: string; text?: string; url?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { data: invoice } = await ctx.supabase
+    .from("invoices")
+    .select("invoice_number, total, amount_paid, public_token, org_id, organizations(name)")
+    .eq("id", id)
+    .maybeSingle();
+  if (!invoice) return { ok: false, error: "Invoice not found." };
+  const token = (invoice as { public_token?: string | null }).public_token;
+  if (!token) return { ok: false, error: "This invoice has no customer link yet." };
+
+  const who = (invoice as { organizations?: { name?: string } }).organizations?.name ?? "Your contractor";
+  const balance = invoiceBalance(invoice.total, invoice.amount_paid);
+  const url = await publicInvoiceLink(ctx.supabase, (invoice as { org_id?: string }).org_id, token);
+  return {
+    ok: true,
+    title: `Invoice ${invoice.invoice_number} — ${who}`,
+    text: `${who}: Invoice ${invoice.invoice_number}, balance ${formatCurrency(balance)}. View/pay:`,
+    url,
+  };
 }
 
 export async function textInvoice(
@@ -83,7 +138,7 @@ export async function textInvoice(
   const supabase = ctx.supabase;
   const { data: invoice } = await supabase
     .from("invoices")
-    .select("invoice_number, total, amount_paid, status, public_token, customers(name, phone)")
+    .select("invoice_number, total, amount_paid, status, public_token, org_id, customers(name, phone)")
     .eq("id", id)
     .maybeSingle();
   if (!invoice) return { ok: false, error: "Invoice not found." };
@@ -93,7 +148,7 @@ export async function textInvoice(
 
   const { data: org } = await supabase.from("organizations").select("name, settings").maybeSingle();
   const balance = invoiceBalance(invoice.total, invoice.amount_paid);
-  const link = publicInvoiceLink((invoice as any).public_token);
+  const link = await publicInvoiceLink(supabase, (invoice as any).org_id, (invoice as any).public_token);
   const body = `${org?.name ?? "Your contractor"}: Invoice ${invoice.invoice_number}, balance $${balance.toFixed(2)}. View/pay: ${link}`;
 
   const sent = await sendSms(customer.phone, body, (org as any)?.settings?.sms_from_number);

@@ -10,10 +10,11 @@ import { Badge, statusTone } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { InvoiceDetail } from "./invoice-detail";
 import { CreditButton } from "./credit-button";
+import { ShareDocButton } from "@/components/share-doc-button";
 import { EmailButton } from "@/components/email-button";
 import { SectionActionsMenu } from "@/components/section-actions-menu";
 import { invoiceSectionTree } from "@/lib/nav-tree";
-import { deleteInvoice } from "../actions";
+import { deleteInvoice, invoiceShareText } from "../actions";
 import { getOrgSettings } from "@/lib/org-settings";
 import { jobProgressFinancials, receivedBeforeThisInvoice } from "@/lib/job-financials";
 import { invoiceBalance, isDrawKind } from "@/lib/invoice-math";
@@ -145,6 +146,11 @@ export default async function InvoicePage({
             customerName={inv.customers?.name ?? null}
             amount={Number(inv.total)}
           />
+          {/* Text it, AirDrop it, WhatsApp it — the way a contractor in a driveway actually sends
+              things. Sends the customer's own token link on this business's domain; before this
+              existed the only path was the OS share sheet on the PDF preview, which shipped the
+              app's marketing blurb and a login URL. */}
+          <ShareDocButton load={invoiceShareText.bind(null, inv.id)} />
           {/* Record payment — THE gloves-on invoice verb — jumps to the existing
               form (right column, several screens down at 375px). Like the in-body
               form it only exists once the invoice has left draft. */}

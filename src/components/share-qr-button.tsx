@@ -17,7 +17,7 @@ import { getShareLink } from "@/app/(app)/share-actions";
 export function ShareQrButton() {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [link, setLink] = useState<{ url: string; qr: string } | null>(null);
+  const [link, setLink] = useState<{ url: string; qr: string; orgName?: string; tradeLabel?: string } | null>(null);
   const toast = useToast();
 
   const launch = async () => {
@@ -27,7 +27,7 @@ export function ShareQrButton() {
     try {
       const res = await getShareLink();
       if (res.error || !res.url) toast(res.error || "Couldn't build your link.", "error");
-      else setLink({ url: res.url, qr: res.qr });
+      else setLink({ url: res.url, qr: res.qr, orgName: res.orgName, tradeLabel: res.tradeLabel });
     } finally {
       setBusy(false);
     }
@@ -38,7 +38,14 @@ export function ShareQrButton() {
     // Native share sheet where available (iOS PWA has it); clipboard as the fallback.
     try {
       if (navigator.share) {
-        await navigator.share({ title: "Request an estimate", text: "Need electrical work? Request an estimate here:", url: link.url });
+        // Written from the COMPANY's own name and trade. This line was hardcoded to "Need
+        // electrical work?" — so on a multi-tenant product a deck company's crew was handing
+        // strangers a card asking about electrical work.
+        const who = link.orgName ?? "us";
+        const blurb = link.tradeLabel
+          ? `Need a ${link.tradeLabel}? Get a free estimate from ${who}:`
+          : `Get a free estimate from ${who}:`;
+        await navigator.share({ title: `Request an estimate — ${who}`, text: blurb, url: link.url });
         return;
       }
     } catch {
