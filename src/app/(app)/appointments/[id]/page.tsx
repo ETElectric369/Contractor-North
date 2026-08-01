@@ -158,17 +158,6 @@ export default async function AppointmentCapturePage({
         {a.notes && <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{a.notes}</p>}
       </div>
 
-      {/* THE TYPED HALF, above the prose. Measurements captured as numbers here don't have to be
-          re-extracted from a sentence by the estimator later — but the free-text boxes below stay,
-          because a sheet only asks what its author thought of. */}
-      <QuestionSheet
-        appointmentId={a.id}
-        userId={viewerId}
-        templates={sheets ?? []}
-        initialTemplateId={inspection?.inspection_template_id ?? null}
-        initialAnswers={(inspection?.inspection_answers ?? {}) as never}
-      />
-
       <InspectionCapture
         appointmentId={a.id}
         orgId={a.org_id}
@@ -179,6 +168,21 @@ export default async function AppointmentCapturePage({
           materials: capture.materials ?? "",
         }}
         initialPhotos={photos}
+      />
+
+      {/* THE TYPED SHEET, now BELOW the prose. It used to sit above, which put ten controls
+          between a man standing at a job and the Notes box — and the evidence says that wall
+          worked: of 28 inspections in production, 27 carried no typed answers at all. Notes and
+          photos are what actually get captured in a truck, so they come first. The sheet now
+          fragments to the two-to-four questions this job type has, so it is short by the time
+          you reach it — and it still exists because a measurement typed as a number never has
+          to be re-extracted from a sentence by the estimator. */}
+      <QuestionSheet
+        appointmentId={a.id}
+        userId={viewerId}
+        templates={sheets ?? []}
+        initialTemplateId={inspection?.inspection_template_id ?? null}
+        initialAnswers={(inspection?.inspection_answers ?? {}) as never}
       />
     </div>
   );

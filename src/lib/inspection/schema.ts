@@ -18,11 +18,31 @@
 
 export type InspectionFieldType = "text" | "textarea" | "checkbox" | "number" | "select";
 
+/**
+ * "Only show this when ___ is one of ___." The tenant's OWN judgment, stored as data.
+ *
+ * This is what lets one sheet serve every kind of job the trade does without asking ten questions
+ * for all of them. It is deliberately a RULE THE AUTHOR WRITES, not a model deciding what to ask:
+ * it resolves instantly, works with no signal in a crawlspace, and gives the same answer twice.
+ * The model's job is elsewhere — turning dictation into typed answers, and noticing what the
+ * template's author never thought to ask.
+ */
+export interface InspectionShowIf {
+  /** The key of an EARLIER field (usually the router, e.g. work_type). */
+  key: string;
+  /** Show when that field's answer is one of these. */
+  in: string[];
+}
+
 export interface InspectionField {
   key: string;
   label: string;
   type: InspectionFieldType;
   options?: string[];
+  showIf?: InspectionShowIf;
+  /** Marks a field as something MEASURED on site rather than context. Measured answers are the
+   *  ones a kit can size itself from, and the ones the estimator must treat as given. */
+  measured?: boolean;
 }
 
 /** A stored answer. Narrow on purpose — anything richer belongs in the prose capture. */
@@ -43,6 +63,12 @@ export function parseInspectionSchema(raw: unknown): InspectionField[] {
     const type = String(f.type ?? "text") as InspectionFieldType;
     if (!["text", "textarea", "checkbox", "number", "select"].includes(type)) continue;
     seen.add(key);
+    // showIf is dropped unless it is fully formed — a half-written rule that silently means
+    // "always show" is better than one that silently means "never show", because a field nobody
+    // can reach is a question nobody knows they were supposed to answer.
+    const rawShow = f.showIf as Record<string, unknown> | undefined;
+    const showKey = rawShow ? String(rawShow.key ?? "").trim() : "";
+    const showIn = rawShow && Array.isArray(rawShow.in) ? rawShow.in.map((x) => String(x)).filter(Boolean) : [];
     out.push({
       key,
       label,
@@ -50,6 +76,8 @@ export function parseInspectionSchema(raw: unknown): InspectionField[] {
       ...(type === "select" && Array.isArray(f.options)
         ? { options: f.options.map((o) => String(o)).filter(Boolean) }
         : {}),
+      ...(showKey && showIn.length ? { showIf: { key: showKey, in: showIn } } : {}),
+      ...(f.measured === true ? { measured: true } : {}),
     });
   }
   return out;
@@ -123,9 +151,46 @@ export async function tolerateMissingColumns<T>(
   }
 }
 
-/** Questions with no answer yet — the "what am I still missing" list, computed not guessed. */
-export function unansweredFields(fields: InspectionField[], answers: InspectionAnswers): InspectionField[] {
+/**
+ * THE FIELDS THAT APPLY RIGHT NOW, given what has been answered so far.
+ *
+ * This is the whole "fragment into the simplest next questions" idea, and it needs no model: a
+ * field with no rule always applies; a field with a rule applies only when its router answer
+ * matches. Tap "Troubleshoot" and two controls remain out of ten.
+ *
+ * Resolved in ONE pass in declaration order, so a rule may only reference a field ABOVE it. That
+ * is a deliberate limit rather than an oversight — chained visibility (A reveals B reveals C)
+ * makes it possible for an author to write a cycle they cannot see, and a question that can never
+ * be reached is worse than one asked needlessly.
+ */
+export function visibleFields(fields: InspectionField[], answers: InspectionAnswers): InspectionField[] {
   return fields.filter((f) => {
+    if (!f.showIf) return true;
+    const v = answers[f.showIf.key];
+    if (v === undefined || v === null || v === "") return false;
+    return f.showIf.in.includes(String(v));
+  });
+}
+
+/**
+ * Null out answers to fields that are no longer visible.
+ *
+ * Without this, switching the router after answering strands the old answers in the row — and they
+ * would ride into the estimate as facts. Someone starts down "Service/panel", answers the panel
+ * questions, realises it is actually a lighting job and switches: the panel brand must not still be
+ * sitting there telling the estimator to price a panel.
+ */
+export function clearHiddenAnswers(fields: InspectionField[], answers: InspectionAnswers): InspectionAnswers {
+  const visible = new Set(visibleFields(fields, answers).map((f) => f.key));
+  const out: InspectionAnswers = {};
+  for (const f of fields) out[f.key] = visible.has(f.key) ? (answers[f.key] ?? null) : null;
+  return out;
+}
+
+/** Questions with no answer yet — the "what am I still missing" list, computed not guessed.
+ *  Counts only what APPLIES: a hidden field is not an open question. */
+export function unansweredFields(fields: InspectionField[], answers: InspectionAnswers): InspectionField[] {
+  return visibleFields(fields, answers).filter((f) => {
     const v = answers[f.key];
     // An unchecked checkbox is a real answer ("no"), not a gap.
     if (f.type === "checkbox") return v === undefined;
@@ -138,7 +203,10 @@ export function unansweredFields(fields: InspectionField[], answers: InspectionA
  * the free-text notes, so the model treats them as GIVEN rather than as something to re-derive.
  */
 export function answersForEstimator(fields: InspectionField[], answers: InspectionAnswers): string {
-  const lines = fields
+  // Visible only: a hidden field's answer is stale by definition (see clearHiddenAnswers), and a
+  // stale measurement handed to the estimator as a given is exactly the failure this file exists
+  // to prevent.
+  const lines = visibleFields(fields, answers)
     .map((f) => {
       const v = answers[f.key];
       if (v === undefined || v === null || v === "") return null;
@@ -166,6 +234,7 @@ export function measurementsFromAnswers(
   fields: InspectionField[],
   answers: InspectionAnswers,
 ): { sqft: number | null; linearFt: number | null } {
+  fields = visibleFields(fields, answers); // never size a kit off a question that no longer applies
   const num = (key: string): number | null => {
     const v = answers[key];
     return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null;

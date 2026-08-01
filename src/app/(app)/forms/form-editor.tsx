@@ -12,11 +12,16 @@ import {
   type FieldType,
   type FormField,
 } from "./actions";
+import { slugifyFieldKey } from "@/lib/form-field-key";
 
 export interface FieldRow {
   label: string;
   type: FieldType;
   options: string;
+  /** "only show when <showIfKey> is one of <showIfIn>" — the tenant's own branching, as data.
+   *  Empty key = always show. Held as strings here because this is a form. */
+  showIfKey?: string;
+  showIfIn?: string;
 }
 
 const TYPES: { value: FieldType; label: string }[] = [
@@ -34,6 +39,8 @@ export function fieldsToRows(fields: FormField[]): FieldRow[] {
     label: f.label,
     type: f.type,
     options: f.options?.join(", ") ?? "",
+    showIfKey: (f as { showIf?: { key?: string } }).showIf?.key ?? "",
+    showIfIn: ((f as { showIf?: { in?: string[] } }).showIf?.in ?? []).join(", "),
   }));
 }
 
@@ -203,6 +210,38 @@ export function FormEditor({
                     value={f.options}
                     onChange={(e) => updateField(i, { options: e.target.value })}
                   />
+                )}
+                {/* ONLY SHOW WHEN — the branching, owned by whoever knows the trade. This is what
+                    turns one long sheet into the two or three questions a given job actually has:
+                    put the "what kind of work" dropdown first, then point every other field at it.
+                    A field can only depend on one ABOVE it, so there is no way to author a loop. */}
+                {i > 0 && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                    <span className="shrink-0">Only show when</span>
+                    <Select
+                      className="w-40"
+                      value={f.showIfKey ?? ""}
+                      onChange={(e) => updateField(i, { showIfKey: e.target.value })}
+                    >
+                      <option value="">always show</option>
+                      {fields.slice(0, i).filter((p) => p.label.trim()).map((p, pi) => (
+                        <option key={pi} value={slugifyFieldKey(p.label)}>
+                          {p.label}
+                        </option>
+                      ))}
+                    </Select>
+                    {f.showIfKey ? (
+                      <>
+                        <span className="shrink-0">is one of</span>
+                        <Input
+                          className="min-w-[12rem] flex-1"
+                          placeholder="e.g. Service / panel, EV charger"
+                          value={f.showIfIn ?? ""}
+                          onChange={(e) => updateField(i, { showIfIn: e.target.value })}
+                        />
+                      </>
+                    ) : null}
+                  </div>
                 )}
               </div>
             ))}

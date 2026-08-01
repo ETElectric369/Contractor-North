@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
+import { slugifyFieldKey } from "@/lib/form-field-key";
 
 export type Result = { ok: boolean; error?: string; id?: string };
 
@@ -13,14 +14,22 @@ export interface FormField {
   label: string;
   type: FieldType;
   options?: string[];
+  /** "only show when <key> is one of <in>" — the tenant's own branching, stored as data so a new
+   *  trade is a form someone types rather than a module someone writes. */
+  showIf?: { key: string; in: string[] };
 }
 
 function slug(label: string, idx: number) {
-  const base = label
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-  return base || `field_${idx}`;
+  return slugifyFieldKey(label) || `field_${idx}`;
+}
+
+/** Turn the editor's two text boxes into a stored rule, dropping anything half-written — a rule
+ *  with no key or no values must mean "always show", never "never show": a field nobody can reach
+ *  is a question nobody knows they were meant to answer. */
+function showIfFrom(f: { showIfKey?: string; showIfIn?: string }): { showIf: { key: string; in: string[] } } | Record<string, never> {
+  const key = (f.showIfKey ?? "").trim();
+  const list = (f.showIfIn ?? "").split(",").map((o) => o.trim()).filter(Boolean);
+  return key && list.length ? { showIf: { key, in: list } } : {};
 }
 
 export async function createForm(input: {
@@ -29,7 +38,7 @@ export async function createForm(input: {
   /** Marks this form as an INSPECTION SHEET (0165) — selectable on an appointment, and the
    *  source of the typed answers the estimator reads instead of re-parsing prose. */
   is_inspection?: boolean;
-  fields: { label: string; type: FieldType; options?: string }[];
+  fields: { label: string; type: FieldType; options?: string; showIfKey?: string; showIfIn?: string }[];
 }): Promise<Result> {
   const supabase = await createClient();
   const {
@@ -49,6 +58,7 @@ export async function createForm(input: {
       ...(f.type === "select" && f.options
         ? { options: f.options.split(",").map((o) => o.trim()).filter(Boolean) }
         : {}),
+      ...showIfFrom(f),
     }));
 
   if (schema.length === 0)
@@ -77,7 +87,7 @@ export async function updateForm(
     name: string;
     description: string;
     is_inspection?: boolean;
-    fields: { label: string; type: FieldType; options?: string }[];
+    fields: { label: string; type: FieldType; options?: string; showIfKey?: string; showIfIn?: string }[];
   },
 ): Promise<Result> {
   const ctx = await requireStaff();
@@ -96,6 +106,7 @@ export async function updateForm(
       ...(f.type === "select" && f.options
         ? { options: f.options.split(",").map((o) => o.trim()).filter(Boolean) }
         : {}),
+      ...showIfFrom(f),
     }));
 
   if (schema.length === 0)

@@ -10,7 +10,7 @@ import { tzDateTimeUtc, todayStrInTz } from "@/lib/tz";
 import { createProposalCore, cleanSlots } from "@/lib/appointments/proposal";
 import { endAfterStart } from "@/lib/appointments/times";
 import { APPOINTMENT_STATUSES, APPOINTMENT_TYPES } from "@/lib/statuses";
-import { coerceAnswers, parseInspectionSchema } from "@/lib/inspection/schema";
+import { coerceAnswers, parseInspectionSchema, clearHiddenAnswers } from "@/lib/inspection/schema";
 import { runOnce } from "@/lib/offline/run-once";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -364,7 +364,13 @@ async function saveInspectionAnswersInner(
     if (!form) return { ok: false, error: "That inspection sheet no longer exists." };
     if (!(form as { is_inspection?: boolean }).is_inspection)
       return { ok: false, error: "That form isn't an inspection sheet." };
-    clean = coerceAnswers(parseInspectionSchema((form as { schema?: unknown }).schema), answers);
+    // Coerce, THEN drop anything the visibility rules hide. Both halves matter and for different
+    // reasons: coerce is the type contract, clearHidden is the truth contract. The client already
+    // clears on change, but this row is writable through RLS directly — a payload could set
+    // panel_brand on a lighting job and the estimator would read it as a fact. Enforce it where
+    // the write lands, not only where the form is.
+    const sheetFields = parseInspectionSchema((form as { schema?: unknown }).schema);
+    clean = clearHiddenAnswers(sheetFields, coerceAnswers(sheetFields, answers));
   }
 
   const { data, error } = await supabase

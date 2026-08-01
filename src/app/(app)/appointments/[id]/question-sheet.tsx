@@ -11,6 +11,8 @@ import {
   coerceAnswers,
   parseInspectionSchema,
   unansweredFields,
+  visibleFields,
+  clearHiddenAnswers,
   type InspectionAnswers,
   type InspectionField,
 } from "@/lib/inspection/schema";
@@ -61,7 +63,12 @@ export function QuestionSheet({
     return t ? parseInspectionSchema(t.schema) : [];
   }, [templates, templateId]);
 
+  // FRAGMENT INTO THE QUESTIONS THAT APPLY. A field with no rule always shows; one with a rule
+  // shows only when its router answer matches. Ten controls become two or four, and the Notes box
+  // is reachable without scrolling past questions this job will never have.
+  const shown = useMemo(() => visibleFields(fields, answers), [fields, answers]);
   const missing = useMemo(() => unansweredFields(fields, answers), [fields, answers]);
+
 
   // Teach the queue how to replay this action, then drain whatever is waiting — on mount, when
   // the connection returns, and when the app comes back to the foreground (a backgrounded phone
@@ -98,7 +105,10 @@ export function QuestionSheet({
   }
 
   const set = (key: string, value: unknown) => {
-    setAnswers((a) => ({ ...a, [key]: value as never }));
+    // Answer, then drop anything that answer just hid. Without this, switching the router after
+    // answering strands the old answers in the row and they ride into the estimate as facts — a
+    // panel brand quietly telling the estimator to price a panel on a lighting job.
+    setAnswers((a) => clearHiddenAnswers(fields, { ...a, [key]: value as never }));
     setSaved(false);
   };
 
@@ -175,7 +185,7 @@ export function QuestionSheet({
       ) : (
         <>
           <div className="grid gap-3 sm:grid-cols-2">
-            {fields.map((f) => (
+            {shown.map((f) => (
               <div key={f.key} className={f.type === "textarea" ? "sm:col-span-2" : undefined}>
                 <Label htmlFor={`isp-${f.key}`}>{f.label}</Label>
                 {f.type === "number" ? (
