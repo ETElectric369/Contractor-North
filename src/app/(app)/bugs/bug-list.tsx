@@ -35,11 +35,77 @@ export function BugList({ initial }: { initial: BugReport[] }) {
     }
   }
 
-  const shown = reports.filter((r) => tab === "all" || statusOf(r) === tab);
+  // Only a platform admin ever gets a tenant name back (0176's platform_org_label returns null
+  // to everyone else), so this whole layer simply doesn't appear for an ordinary owner.
+  const tenants = [...new Set(reports.map((r) => r.org).filter(Boolean))] as string[];
+  const crossTenant = tenants.length > 1;
+  const [orgFilter, setOrgFilter] = useState<string>("");
+
+  /**
+   * THE COMPARISON, and the reason a second tester is worth having: a page that two unrelated
+   * contractors both trip over is a PRODUCT bug. A page only one trips over may just be that
+   * person's workflow. From inside a single tenant those look identical.
+   */
+  const sharedPages = (() => {
+    if (!crossTenant) return [] as { page: string; orgs: string[]; open: number }[];
+    const byPage = new Map<string, { orgs: Set<string>; open: number }>();
+    for (const r of reports) {
+      if (!r.page || !r.org) continue;
+      const key = r.page.replace(/\/[0-9a-f]{8}-[^/]*/g, "/…");
+      const e = byPage.get(key) ?? { orgs: new Set<string>(), open: 0 };
+      e.orgs.add(r.org);
+      if (statusOf(r) === "open") e.open += 1;
+      byPage.set(key, e);
+    }
+    return [...byPage.entries()]
+      .filter(([, e]) => e.orgs.size > 1 && e.open > 0)
+      .map(([page, e]) => ({ page, orgs: [...e.orgs], open: e.open }))
+      .sort((a, b) => b.open - a.open)
+      .slice(0, 6);
+  })();
+
+  const shown = reports
+    .filter((r) => tab === "all" || statusOf(r) === tab)
+    .filter((r) => !orgFilter || r.org === orgFilter);
   const openCount = reports.filter((r) => statusOf(r) === "open").length;
 
   return (
     <div>
+      {crossTenant && (
+        <>
+          <div className="mb-3 flex flex-wrap items-center gap-1.5">
+            <span className="mr-1 text-xs font-medium uppercase tracking-wide text-slate-400">Tenant</span>
+            {["", ...tenants].map((t) => (
+              <button
+                key={t || "all"}
+                onClick={() => setOrgFilter(t)}
+                className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
+                  orgFilter === t ? "seaglass-active" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                <span className="relative z-10">{t || "All tenants"}</span>
+              </button>
+            ))}
+          </div>
+          {sharedPages.length > 0 && (
+            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50/60 p-3">
+              <div className="text-xs font-semibold uppercase tracking-wide text-amber-800">
+                Hit by more than one tenant — likely product, not workflow
+              </div>
+              <ul className="mt-1.5 space-y-1">
+                {sharedPages.map((p) => (
+                  <li key={p.page} className="flex items-baseline gap-2 text-sm text-amber-900">
+                    <span className="font-mono text-xs">{p.page}</span>
+                    <span className="text-xs text-amber-700">
+                      {p.open} open · {p.orgs.join(", ")}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </>
+      )}
       <div className="mb-3 flex gap-1.5">
         {TABS.map((t) => (
           <button
@@ -72,6 +138,7 @@ export function BugList({ initial }: { initial: BugReport[] }) {
                 <div className="min-w-0">
                   <div className={`text-sm ${st !== "open" ? "text-slate-400 line-through" : "text-slate-800"}`}>{r.note}</div>
                   <div className="mt-0.5 truncate text-xs text-slate-400">
+                    {r.org ? `${r.org} · ` : ""}
                     {r.page ?? ""}
                     {r.reporter ? ` · ${r.reporter}` : ""}
                     {r.created_at ? ` · ${formatDate(r.created_at)}` : ""}

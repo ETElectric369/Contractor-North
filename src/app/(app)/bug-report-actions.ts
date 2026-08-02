@@ -12,6 +12,11 @@ export type BugReport = {
   created_at: string;
   reporter: string | null;
   screenshot_path: string | null;
+  /** WHICH TENANT filed it. Null for everyone except a platform admin running the beta —
+   *  and it is the whole point of the cross-tenant view: "both of them hit this" is a
+   *  product bug, "only he hits this" may just be his workflow. You cannot tell those
+   *  apart without the name. */
+  org: string | null;
 };
 
 /** File a bug report (any org member, or an external site collaborator from /content).
@@ -70,9 +75,9 @@ export async function listBugReports(): Promise<BugReport[]> {
   const supabase = ctx.supabase;
   const { data } = await supabase
     .from("bug_reports")
-    .select("id, note, page, status, created_at, screenshot_path, reported_by, profiles:reported_by(full_name)")
+    .select("id, note, page, status, created_at, screenshot_path, reported_by, org_id, profiles:reported_by(full_name)")
     .order("created_at", { ascending: false })
-    .limit(30);
+    .limit(200);
   const rows = (data ?? []) as any[];
 
   // Collaborator reporters: their profile (org_id NULL) is INVISIBLE under profiles RLS —
@@ -103,6 +108,18 @@ export async function listBugReports(): Promise<BugReport[]> {
     }
   }
 
+  // Tenant labels, for a platform admin only. platform_org_label (0176) returns the NAME and
+  // nothing else, and returns null to everyone else — so an ordinary owner calling this gets
+  // no signal about who else exists. One round trip for the distinct orgs on the page.
+  const orgIds = [...new Set(rows.map((r) => r.org_id).filter(Boolean))] as string[];
+  const orgNames = new Map<string, string>();
+  if (orgIds.length > 1) {
+    for (const id of orgIds) {
+      const { data: label } = await supabase.rpc("platform_org_label", { p_org: id });
+      if (label) orgNames.set(id, label as string);
+    }
+  }
+
   return rows.map((r) => ({
     id: r.id,
     note: r.note,
@@ -111,6 +128,7 @@ export async function listBugReports(): Promise<BugReport[]> {
     created_at: r.created_at,
     reporter: r.profiles?.full_name ?? collabNames.get(r.reported_by) ?? null,
     screenshot_path: r.screenshot_path ?? null,
+    org: orgNames.get(r.org_id) ?? null,
   }));
 }
 
