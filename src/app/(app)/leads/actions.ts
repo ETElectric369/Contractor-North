@@ -71,31 +71,42 @@ export async function createInquiry(formData: FormData): Promise<Result> {
   if (!name && (fields.phone || fields.message)) name = fields.phone ?? "Unknown caller";
   if (!name) return { ok: false, error: "Add a name, phone, or note to save the lead." };
 
+  // A NEW LEAD IS A LEAD, NOT A BOOKING.
+  //
+  // This used to insert an appointments row — "Follow up: <name>", tomorrow at 9am — for every
+  // lead created, so it would "land on the calendar instead of slipping through the cracks".
+  // The intent was right and the mechanism was wrong. Nobody made that appointment with a
+  // customer, so nobody ever completes it: five of them are sitting in production right now,
+  // every one still status='scheduled', the oldest from Jul 20.
+  //
+  // Worse, it is indistinguishable from real work. Erik created ONE lead and did ONE
+  // walk-through for Sarah Cain, and the system showed him three appointment rows — his
+  // cancelled phone attempt, his completed one, and this phantom — all looking alike:
+  // "i had a lead sarah cain and started an inspection and theres only one string and all this
+  // other stuff is recorded and im completely confused by it."
+  //
+  // `inquiries.next_follow_up_at` already IS the follow-up list: /leads orders by it and the
+  // Needs-action inbox feeds off it. So the lead carries its own date, and the calendar keeps
+  // meaning "things I agreed to be somewhere for".
+  const tz = await orgTimezone(supabase);
   const { data, error } = await supabase
     .from("inquiries")
-    .insert({ name, ...fields, source: "manual", status: "new", created_by: ctx.userId })
+    .insert({
+      name,
+      ...fields,
+      source: "manual",
+      status: "new",
+      next_follow_up_at: ymdAddDays(todayStrInTz(tz), 1),
+      created_by: ctx.userId,
+    })
     .select("id")
     .single();
   if (error) return { ok: false, error: error.message };
 
-  // A new lead auto-books a follow-up / site-visit appointment (tomorrow 9am) so
-  // it lands on the calendar instead of slipping through the cracks. 9 AM is
-  // built in the ORG timezone — the old server-local `setHours(9)` stored 9 AM
-  // UTC, which rendered as 2 AM Pacific on the calendar.
-  const tz = await orgTimezone(supabase);
-  const followUpIso = tzDateTimeUtc(ymdAddDays(todayStrInTz(tz), 1), "09:00", tz);
-  await supabase.from("appointments").insert({
-    type: "appointment",
-    title: `Follow up: ${name}`,
-    starts_at: followUpIso,
-    location: fields.address,
-    notes: fields.message ?? fields.notes,
-    inquiry_id: data.id, // provenance: this follow-up traces back to the lead
-    created_by: ctx.userId,
-  });
-
   revalidatePath("/leads");
-  revalidatePath("/schedule");
+  // /schedule no longer needs waking: a new lead doesn't put anything on the calendar any more.
+  // My Day does — the Needs-action inbox feeds off inquiries and their follow-up date.
+  revalidatePath("/planner");
   return { ok: true, id: data.id };
 }
 
