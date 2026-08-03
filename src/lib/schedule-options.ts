@@ -55,7 +55,14 @@ export const jobSiteLabel = (j: {
 export const toJobOptions = (rows: any[] | null | undefined): PickerOption[] =>
   (rows ?? []).map((j) => ({ id: j.id, label: jobLabel(j), address: j.address ?? null }));
 export const toCustomerOptions = (rows: any[] | null | undefined): PickerOption[] =>
-  (rows ?? []).map((c) => ({ id: c.id, label: c.name }));
+  // `address` rides along ONLY when the query fetched the parts (listNewJobCustomerOptions).
+  // Optional by design: the plain pickers keep shipping two columns, and a surface that wants
+  // the site-address prefill just asks for the richer query — see getSchedulePickerOptions.
+  (rows ?? []).map((c) => ({
+    id: c.id,
+    label: c.name,
+    ...(c.address !== undefined ? { address: formatFullAddress(c.address, c.city, c.state, c.zip) || null } : {}),
+  }));
 export const toStaffOptions = (rows: any[] | null | undefined): PickerOption[] =>
   (rows ?? []).map((s) => ({ id: s.id, label: s.full_name ?? "Unnamed" }));
 
@@ -109,7 +116,9 @@ export function addressPrefillOnCustomerPick(
 export async function getSchedulePickerOptions(supabase: SupabaseClient) {
   const [{ data: jobs }, { data: customers }, { data: staff }] = await Promise.all([
     supabase.from("jobs").select("id, job_number, name, address").order("created_at", { ascending: false }).limit(200),
-    listCustomerOptions(supabase),
+    // The richer query: an appointment IS a place you have to drive to, so its picker needs the
+    // address the same way the new-job form does. Bounded by the org's own customer count.
+    listNewJobCustomerOptions(supabase),
     listActiveTechs(supabase),
   ]);
   return {

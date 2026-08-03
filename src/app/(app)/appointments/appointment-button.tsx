@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { addressPrefillOnCustomerPick } from "@/lib/schedule-options";
 import { useOrgPublicBase } from "@/components/use-org-public-base";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { Plus, Pencil, Copy, Check, MessageSquare } from "lucide-react";
@@ -175,8 +176,9 @@ export function AppointmentButton({
       job_id: appointment?.job_id ?? defaultJobId ?? "",
       new_customer_name: "",
       new_customer_phone: "",
-      // Location from the job address when we have a job context (customer Opt carries no address).
-      location: appointment?.location ?? ctxJob?.address ?? "",
+      // Location from the job address when mounted from a job; picking a customer fills it too
+      // (the option carries the address now — see the customer onChange below).
+      location: appointment?.location ?? ctxJob?.address ?? ctxCust?.address ?? "",
       notes: appointment?.notes ?? "",
     };
   };
@@ -485,7 +487,18 @@ export function AppointmentButton({
                 id="ap-cust"
                 name="customer_id"
                 value={form.customer_id}
-                onChange={(e) => patch({ customer_id: e.target.value })}
+                onChange={(e) => {
+                  // PICKING A CUSTOMER FILLS IN WHERE THEY ARE — the same move the new-job form
+                  // has always made, using the same two helpers. This form simply never called
+                  // them, so the address sat one dropdown away and got typed by hand instead.
+                  // addressPrefillOnCustomerPick only writes while the box is empty or still
+                  // holds the PREVIOUS pick's prefill, so anything typed is never clobbered.
+                  const next = e.target.value;
+                  const prev = customers.find((c) => c.id === form.customer_id)?.address ?? "";
+                  const now = customers.find((c) => c.id === next)?.address ?? "";
+                  const filled = addressPrefillOnCustomerPick(form.location, prev, now);
+                  patch({ customer_id: next, ...(filled !== null ? { location: filled } : {}) });
+                }}
               >
                 <option value="">—</option>
                 {customers.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}

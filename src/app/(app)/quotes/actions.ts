@@ -714,12 +714,55 @@ export async function createJobFromQuote(
   // Deferred-customer estimate won → create/link the Contact now, before the job (so the job gets it).
   const resolvedCustomerId = await materializeQuoteCustomer(supabase, q, ctx.userId);
 
+  /**
+   * THE JOB INHERITS ITS ADDRESS. It used to be born with none — this insert named five fields and
+   * address was not one of them, even though materializeQuoteCustomer had just run one line above
+   * holding the customer's full address. Thirteen of twenty jobs in production have a NULL city.
+   *
+   * Erik: "nothing collected the pertinent initial data like address which names the everything
+   * from lead to invoice." This is the far end of that: the address is captured properly exactly
+   * once, on the lead, and then every stage downstream re-derives it or does without.
+   *
+   * ORDER MATTERS — most specific first. The LEAD's address is the one somebody typed about THIS
+   * job (and it is Places-resolved into four real columns). The customer's is their address on
+   * file, which for a landlord or a property manager is very often not where the work is. Falling
+   * back to it is right; preferring it would be how a crew gets sent to the wrong house.
+   */
+  const inheritedAddress = await (async () => {
+    if (q.inquiry_id) {
+      const { data: inq } = await supabase
+        .from("inquiries")
+        .select("address, city, state, zip")
+        .eq("id", q.inquiry_id)
+        .maybeSingle();
+      if (inq?.address) return inq;
+    }
+    const custId = resolvedCustomerId ?? q.customer_id;
+    if (custId) {
+      const { data: cust } = await supabase
+        .from("customers")
+        .select("address, city, state, zip")
+        .eq("id", custId)
+        .maybeSingle();
+      if (cust?.address) return cust;
+    }
+    return null;
+  })();
+
   const { data: job, error } = await supabase
     .from("jobs")
     .insert({
       customer_id: resolvedCustomerId ?? q.customer_id,
       inquiry_id: q.inquiry_id ?? null, // carry the lead provenance forward: lead → quote → job
       name: q.title || `Job from ${q.quote_number}`,
+      ...(inheritedAddress
+        ? {
+            address: inheritedAddress.address,
+            city: inheritedAddress.city,
+            state: inheritedAddress.state,
+            zip: inheritedAddress.zip,
+          }
+        : {}),
       // Born to_be_scheduled (lifecycle rework): the estimate is won but no dates exist yet —
       // the schedule promotion (advanceToScheduled) flips it to scheduled when a date lands.
       // The public accept path (accept_public_quote, migration 0127) does the same.
