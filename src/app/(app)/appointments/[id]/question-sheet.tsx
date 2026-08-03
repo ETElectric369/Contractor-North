@@ -2,9 +2,11 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Check, ClipboardList, CloudOff, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { createStarterInspectionSheet } from "../../forms/actions";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import {
@@ -57,6 +59,10 @@ export function QuestionSheet({
   const [queued, setQueued] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  // Seeding the org its first sheet from the empty state — see the !templates.length branch.
+  const [seedError, setSeedError] = useState<string | null>(null);
+  const [seeding, startSeed] = useTransition();
+  const router = useRouter();
 
   const fields = useMemo<InspectionField[]>(() => {
     const t = templates.find((x) => x.id === templateId);
@@ -95,10 +101,35 @@ export function QuestionSheet({
           <ClipboardList className="h-4 w-4 text-slate-400" />
           Inspection sheet
         </div>
-        <p className="mt-1 text-sm text-slate-400">
-          No question sheet for your trade yet — build one in{" "}
-          <Link href="/forms" className="text-brand underline-offset-2 hover:underline">Forms</Link>{" "}
-          and tick &ldquo;Use as an inspection sheet&rdquo;. Measurements captured there carry straight into an estimate.
+        {/* Telling someone to go author a form from scratch, while they are standing at a job,
+            is the same as having no sheet — which is exactly how this shipped and why no org
+            ever had one. One tap now, edit it later. */}
+        <p className="mt-1 text-sm text-slate-500">
+          You don&rsquo;t have a set of walk-through questions yet. Start with the ones for your trade —
+          one question at a time, and only what applies to the job in front of you.
+        </p>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <Button
+            type="button"
+            disabled={seeding}
+            onClick={() =>
+              startSeed(async () => {
+                const r = await createStarterInspectionSheet();
+                if (!r.ok) setSeedError(r.error ?? "Couldn't set that up.");
+                else router.refresh();
+              })
+            }
+          >
+            {seeding ? <><Loader2 className="h-4 w-4 animate-spin" /> Setting up…</> : "Set up my questions"}
+          </Button>
+          <Link href="/forms" className="text-sm text-slate-500 underline-offset-2 hover:underline">
+            or build my own
+          </Link>
+        </div>
+        {seedError && <p className="mt-2 text-sm text-rose-600">{seedError}</p>}
+        <p className="mt-3 text-xs text-slate-400">
+          They&rsquo;re yours to change — edit them any time in Forms. Anything you measure here carries
+          straight into an estimate.
         </p>
       </Card>
     );
