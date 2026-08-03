@@ -6,8 +6,7 @@ import { INSPECTION_TYPES } from "@/lib/statuses";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { invoiceBalance } from "@/lib/invoice-math";
 import { lienStatus } from "@/lib/lien-math";
-import { formatCurrency, formatDateShort, DEFAULT_TIMEZONE } from "@/lib/utils";
-import { todayStrInTz } from "@/lib/tz";
+import { formatCurrency, formatDateShort } from "@/lib/utils";
 import {
   NEEDS_RETURN_DAYS,
   daysAgoStr,
@@ -375,13 +374,11 @@ export async function getActionItems(ctx: {
       when: a.starts_at,
       urgency: 0,
       done: false,
-      // Open the appointment where it lives: the job's Appointments tab, else the
-      // schedule day drill for its date — not the job overview / bare calendar.
-      href: a.job_id
-        ? `/jobs/${a.job_id}?tab=appointments`
-        : a.starts_at
-          ? `/schedule?view=day&date=${todayStrInTz(DEFAULT_TIMEZONE, new Date(a.starts_at))}`
-          : "/schedule",
+      // "When I click on something I wanted to open that thing not the calendar."
+      // cn-v601 fixed this on the My Day AGENDA and missed the Needs-action inbox on the
+      // very same screen — tapping an inspection here still dumped you on the calendar
+      // grid to hunt for the row you just tapped. Open the appointment itself.
+      href: `/appointments/${a.id}`,
       affordances: AFFORDANCES.appointment,
     });
   }

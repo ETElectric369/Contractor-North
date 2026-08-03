@@ -18,6 +18,14 @@ export interface CapturePhoto {
 
 type Field = "notes" | "measurements" | "materials";
 
+/** Attachments are stored as bare storage paths, so the KIND has to be read off the name.
+ *  Anything not a known image extension is treated as a document — the safe default, since
+ *  guessing "image" wrong renders a broken tile while guessing "document" wrong costs a tap. */
+const isImagePath = (p: string) => /\.(jpe?g|png|gif|webp|heic|heif|avif|bmp)$/i.test(p);
+
+/** The uploaded name, minus the org/appointment prefix and the timestamp the uploader adds. */
+const fileLabel = (p: string) => (p.split("/").pop() ?? p).replace(/^\d{10,}-/, "");
+
 /**
  * TRADE-NEUTRAL ON PURPOSE (0165).
  *
@@ -146,7 +154,10 @@ export function InspectionCapture({
       const supabase = createClient();
       const added: CapturePhoto[] = [];
       for (const raw of files) {
-        const file = await prepareImageForUpload(raw);
+        // "I cannot upload the inspection report as .pdf" — everything used to be forced
+        // through the image re-encoder, which mangles a document. An image still gets
+        // downscaled for the truck's connection; anything else uploads untouched.
+        const file = raw.type.startsWith("image/") ? await prepareImageForUpload(raw) : raw;
         const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
         const path = `${orgId}/appointments/${appointmentId}/${Date.now()}-${safe}`;
         const { error: upErr } = await supabase.storage.from("documents").upload(path, file, { upsert: false });
@@ -244,7 +255,9 @@ export function InspectionCapture({
           <div className="mb-1.5 flex items-center justify-between">
             <Label className="mb-0">Photos</Label>
             <div className="flex gap-2">
-              <input ref={fileRef} type="file" multiple accept="image/*" className="hidden" onChange={onFiles} />
+              {/* The picker takes documents too — a PDF inspection report, a spec sheet, a
+                  permit. The camera input below stays image-only on purpose. */}
+              <input ref={fileRef} type="file" multiple accept="image/*,application/pdf" className="hidden" onChange={onFiles} />
               <input ref={captureRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onFiles} />
               <Button
                 type="button"
@@ -269,12 +282,28 @@ export function InspectionCapture({
             <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
               {photos.map((p) => (
                 <div key={p.path} className="group relative aspect-square overflow-hidden rounded-lg bg-slate-100">
-                  <button type="button" onClick={() => p.url && setViewing(p)} className="h-full w-full">
-                    {p.url && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={p.url} alt="Inspection photo" className="h-full w-full object-cover" />
-                    )}
-                  </button>
+                  {isImagePath(p.path) ? (
+                    <button type="button" onClick={() => p.url && setViewing(p)} className="h-full w-full">
+                      {p.url && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={p.url} alt="Inspection photo" className="h-full w-full object-cover" />
+                      )}
+                    </button>
+                  ) : (
+                    // A document has no thumbnail — showing it as an <img> renders a broken
+                    // tile. Name + icon, opening in a new tab from the signed URL.
+                    <a
+                      href={p.url ?? "#"}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex h-full w-full flex-col items-center justify-center gap-1 p-2 text-center"
+                    >
+                      <FileText className="h-6 w-6 shrink-0 text-slate-400" />
+                      <span className="line-clamp-2 break-all text-[10px] leading-tight text-slate-500">
+                        {fileLabel(p.path)}
+                      </span>
+                    </a>
+                  )}
                   <button
                     type="button"
                     onClick={() => removePhoto(p)}

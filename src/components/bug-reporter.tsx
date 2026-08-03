@@ -113,6 +113,10 @@ export function BugReporter({ orgId, collaborator = false }: { orgId: string; co
       shotRef.current = null;
       setSent(true);
       setNote("");
+      // "Klose bug report box when report is sent" — every other send path in the app
+      // closes its own sheet. The beat before closing is deliberate: the green "Sent"
+      // is the only proof it went, and at 60mph an instant vanish reads as a crash.
+      setTimeout(() => setOpen(false), 1200);
       if (!collaborator) listBugReports().then(setReports).catch(() => {});
     });
   }
