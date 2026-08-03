@@ -2,6 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { mergeCaptureSections, type CapturePatch } from "@/lib/inspection/capture";
+import { formatFullAddress } from "@/lib/utils";
+import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { emptyToNull } from "@/lib/forms";
 import { pushCalendarItem, deleteCalendarItem } from "@/lib/calendar-sync";
 import { requireStaff } from "@/lib/staff-guard";
@@ -277,6 +279,164 @@ export interface AppointmentCapture {
   measurements?: string;
   materials?: string;
   photos?: string[];
+}
+
+/** One thing a visit can be FOR. A lead, a customer and a job are three tables and one idea. */
+export type LinkTarget = {
+  kind: "lead" | "customer" | "job";
+  id: string;
+  name: string;
+  address: string | null;
+  /** A quiet second line — status, job number, phone. */
+  sub: string | null;
+};
+
+/**
+ * WHAT IS THIS VISIT FOR — one search across three tables.
+ *
+ * Erik: "if there is a lead to pick or match to the inspection then yes it should fill whatever
+ * data it has naturally, if i start an inspection yes i should be able to connect it to something
+ * that exists, fragment first, simplicity rules."
+ *
+ * ONE control, not three. Three pickers labelled Lead / Customer / Job would make the person
+ * classify the thing before they can find it — and at a job the honest answer is usually "it's the
+ * Cain place", not "it is an inquiry record". So: type a name or an address, get everything that
+ * matches, pick it, done. The KIND is an outcome of the pick, not a question asked first.
+ *
+ * This is also the fix for the real cause of orphaned inspections: only 2 of 7 doors that create
+ * one can set `inquiry_id` at all, so 10 of 13 in production link to nothing and nothing
+ * downstream can inherit anything.
+ */
+export async function searchLinkTargets(q: string): Promise<LinkTarget[]> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return [];
+  const supabase = ctx.supabase;
+  const term = q.trim();
+  if (term.length < 2) return [];
+  const like = `%${term}%`;
+
+  // RLS scopes all three to the caller's org.
+  const [leads, customers, jobs] = await Promise.all([
+    supabase
+      .from("inquiries")
+      .select("id, name, address, city, state, zip, status, converted_at")
+      .or(`name.ilike.${like},address.ilike.${like}`)
+      .is("converted_at", null)
+      .limit(6),
+    supabase
+      .from("customers")
+      .select("id, name, address, city, state, zip, phone")
+      .or(`name.ilike.${like},address.ilike.${like}`)
+      .limit(6),
+    supabase
+      .from("jobs")
+      .select("id, job_number, name, address, city, state, zip, status")
+      .or(`name.ilike.${like},address.ilike.${like}`)
+      .in("status", ACTIVE_JOB_STATUSES)
+      .limit(6),
+  ]);
+
+  const full = (r: { address?: string | null; city?: string | null; state?: string | null; zip?: string | null }) =>
+    formatFullAddress(r.address ?? null, r.city ?? null, r.state ?? null, r.zip ?? null) || null;
+
+  return [
+    // Leads first: an open lead is the freshest context and the one most likely to be the reason
+    // somebody is standing at the address right now.
+    ...(leads.data ?? []).map((r: any) => ({
+      kind: "lead" as const, id: r.id, name: r.name, address: full(r), sub: `Lead · ${r.status}`,
+    })),
+    ...(customers.data ?? []).map((r: any) => ({
+      kind: "customer" as const, id: r.id, name: r.name, address: full(r), sub: r.phone ? `Customer · ${r.phone}` : "Customer",
+    })),
+    ...(jobs.data ?? []).map((r: any) => ({
+      kind: "job" as const, id: r.id, name: r.name ?? r.job_number, address: full(r), sub: `Job · ${r.job_number}`,
+    })),
+  ];
+}
+
+/**
+ * Link a visit to what it's for, and INHERIT WHAT THAT THING ALREADY KNOWS.
+ *
+ * "it should fill whatever data it has naturally." Address fills only when the visit has none —
+ * a value typed on site is the one somebody is standing in front of, and must never be overwritten
+ * by a record's older idea of where the work is.
+ *
+ * Linking a lead also carries its customer when it has one, so the chain doesn't break at the
+ * first hop.
+ */
+export async function linkAppointmentTo(
+  id: string,
+  kind: "lead" | "customer" | "job",
+  targetId: string,
+): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+
+  const { data: appt } = await supabase
+    .from("appointments")
+    .select("id, title, location")
+    .eq("id", id)
+    .maybeSingle();
+  if (!appt) return { ok: false, error: "Appointment not found." };
+
+  const patch: Record<string, unknown> = {};
+  let name = "";
+  let address: string | null = null;
+
+  if (kind === "lead") {
+    const { data: r } = await supabase
+      .from("inquiries")
+      .select("id, name, address, city, state, zip, customer_id")
+      .eq("id", targetId)
+      .maybeSingle();
+    if (!r) return { ok: false, error: "Lead not found." };
+    patch.inquiry_id = r.id;
+    if (r.customer_id) patch.customer_id = r.customer_id;
+    name = r.name;
+    address = formatFullAddress(r.address, r.city, r.state, r.zip) || null;
+  } else if (kind === "customer") {
+    const { data: r } = await supabase
+      .from("customers")
+      .select("id, name, address, city, state, zip")
+      .eq("id", targetId)
+      .maybeSingle();
+    if (!r) return { ok: false, error: "Customer not found." };
+    patch.customer_id = r.id;
+    name = r.name;
+    address = formatFullAddress(r.address, r.city, r.state, r.zip) || null;
+  } else {
+    const { data: r } = await supabase
+      .from("jobs")
+      .select("id, job_number, name, address, city, state, zip, customer_id")
+      .eq("id", targetId)
+      .maybeSingle();
+    if (!r) return { ok: false, error: "Job not found." };
+    patch.job_id = r.id;
+    if (r.customer_id) patch.customer_id = r.customer_id;
+    name = r.name ?? r.job_number;
+    address = formatFullAddress(r.address, r.city, r.state, r.zip) || null;
+  }
+
+  // FILL, NEVER OVERWRITE — the same law the inspector's Nort channel obeys.
+  if (address && !String(appt.location ?? "").trim()) patch.location = address;
+  const STOCK = ["site inspection", "inspection", "final inspection", "appointment", ""];
+  if (name && STOCK.includes(String(appt.title ?? "").trim().toLowerCase())) {
+    patch.title = `Site inspection: ${name}`;
+  }
+
+  const { error } = await supabase
+    .from("appointments")
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) return { ok: false, error: error.message };
+
+  revalidatePath("/schedule");
+  revalidatePath("/planner");
+  revalidatePath("/inspections");
+  revalidatePath("/leads");
+  revalidatePath(`/appointments/${id}`);
+  return { ok: true, id };
 }
 
 /**

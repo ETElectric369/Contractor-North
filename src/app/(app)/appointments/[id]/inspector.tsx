@@ -29,6 +29,7 @@ import {
 } from "@/lib/inspection/capture";
 import { createStarterInspectionSheet } from "../../forms/actions";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
+import { LinkPicker } from "./link-picker";
 import { saveInspectionAnswers, saveInspectionCapture, setAppointmentPlace } from "../actions";
 
 /** A numeric field that can be EMPTY. Deliberately not NumberInput: its value is a `number` and
@@ -94,6 +95,7 @@ export function Inspector({
   userId,
   estimateHref,
   initialLocation,
+  linked,
 }: {
   appointmentId: string;
   templates: InspectionTemplate[];
@@ -107,6 +109,8 @@ export function Inspector({
   estimateHref: string;
   /** appointments.location — the address, which is the fact that names everything downstream. */
   initialLocation: string;
+  /** What this visit is already connected to — a lead, a customer or a job. */
+  linked: { kind: "lead" | "customer" | "job"; name: string } | null;
 }) {
   const router = useRouter();
   const stored = useMemo(() => parseInspectorCapture(initialCapture), [initialCapture]);
@@ -337,6 +341,8 @@ export function Inspector({
             }}
           />
         </div>
+
+        <LinkPicker appointmentId={appointmentId} linked={linked} seed={place} />
 
         {noSheet ? (
           <div className="mt-3">

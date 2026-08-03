@@ -186,6 +186,15 @@ export default async function AppointmentCapturePage({
         initialCapture={capture}
         initialPhotos={photos}
         initialLocation={a.location ?? ""}
+        linked={
+          a.inquiry_id && a.inquiries?.name
+            ? { kind: "lead" as const, name: a.inquiries.name }
+            : a.customer_id && a.customers?.name
+              ? { kind: "customer" as const, name: a.customers.name }
+              : a.job_id
+                ? { kind: "job" as const, name: "This job" }
+                : null
+        }
         estimateHref={`/quotes/new?capture=${a.id}${a.inquiry_id ? `&inquiry=${a.inquiry_id}` : ""}`}
       />
     </div>
