@@ -167,14 +167,21 @@ export function Inspector({
   }
   function schedule() {
     if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(flush, 900);
+    // Wrapped, not passed by reference: setTimeout hands the callback its timer id, which would
+    // arrive as `explicit` and make every autosave claim to be a deliberate press.
+    timer.current = setTimeout(() => flush(), 900);
   }
-  function flush() {
+  function flush(explicit = false) {
     const patch = capturePatchRef.current;
     const wantAnswers = answersDirty.current;
     capturePatchRef.current = {};
     answersDirty.current = false;
-    if (!Object.keys(patch).length && !wantAnswers) return;
+    if (!Object.keys(patch).length && !wantAnswers) {
+      // Pressing Save when everything is already written must still ANSWER. Silence reads as a
+      // dead button, and the whole point of the press is to be told the work is safe.
+      if (explicit) setSavedAt(Date.now());
+      return;
+    }
     start(async () => {
       setError(null);
       if (Object.keys(patch).length) {
@@ -560,13 +567,39 @@ export function Inspector({
             readiness.measures ? `${readiness.measures} measurements` : null,
             readiness.photos ? `${readiness.photos} photos` : null,
           ].filter(Boolean).join(" · ")}
-          <span className="ml-2 text-slate-400">
-            {pending ? "saving…" : error ? <span className="text-rose-600"><CloudOff className="mr-1 inline h-3 w-3" />{error}</span> : savedAt ? "saved" : ""}
+          <span className="ml-2">
+            {pending ? (
+              <span className="text-slate-400">saving…</span>
+            ) : error ? (
+              <span className="text-rose-600"><CloudOff className="mr-1 inline h-3 w-3" />{error}</span>
+            ) : savedAt ? (
+              <span className="font-medium text-emerald-700"><Check className="mr-0.5 inline h-3 w-3" />Saved</span>
+            ) : null}
           </span>
         </div>
-        <Link href={estimateHref}>
-          <Button type="button">Start the estimate</Button>
-        </Link>
+        <div className="flex items-center gap-2">
+          {/* THE SAVE BUTTON IS BACK, and autosave stays underneath it.
+              Erik: "when i start and complete an inspection and im not ready to start the estimate
+              i want to be able to save it and the save button is gone."
+              I removed it because a capture persists itself, and that reasoning was wrong: autosave
+              protects the DATA, it does not tell a person they are DONE. Walking away from a job
+              needs an act — something to press that answers "did that stick?" before you get in the
+              truck. So this flushes anything still in the debounce and says so out loud. */}
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={pending}
+            onClick={() => {
+              if (timer.current) clearTimeout(timer.current);
+              flush(true);
+            }}
+          >
+            {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</> : <><Check className="h-4 w-4" /> Save</>}
+          </Button>
+          <Link href={estimateHref}>
+            <Button type="button">Start the estimate</Button>
+          </Link>
+        </div>
       </div>
 
       {viewing?.url && <MediaLightbox url={viewing.url} name={fileLabel(viewing.path)} onClose={() => setViewing(null)} />}
