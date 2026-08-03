@@ -280,6 +280,56 @@ export interface AppointmentCapture {
 }
 
 /**
+ * WHERE THE VISIT IS — settable from the inspector itself.
+ *
+ * "nothing collected the pertinent initial data like address which names the everything from lead
+ * to invoice, i dont want to have to be digging around to enter the most simple and pertinent
+ * data." The capture surface had no address control anywhere in it, and the only way to set one
+ * was the Edit Details modal. So in 4 of 13 production inspections the address was typed into the
+ * TITLE instead — and then typed again, differently, into Location.
+ *
+ * Also retitles a record still carrying the stock "Site inspection", because a list of six rows
+ * all reading "Site inspection" is a list of nothing. Only the stock title is replaced: anything a
+ * person named themselves is theirs.
+ */
+export async function setAppointmentPlace(
+  id: string,
+  location: string,
+): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+
+  const clean = location.trim().slice(0, 500);
+  const { data: existing } = await supabase
+    .from("appointments")
+    .select("title, type")
+    .eq("id", id)
+    .maybeSingle();
+
+  // The stock titles the create paths hand out. A title a human chose is never touched.
+  const STOCK = ["site inspection", "inspection", "final inspection", "appointment", ""];
+  const isStock = STOCK.includes(String(existing?.title ?? "").trim().toLowerCase());
+
+  const { data, error } = await supabase
+    .from("appointments")
+    .update({
+      location: clean || null,
+      ...(clean && isStock ? { title: clean } : {}),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .select("id, title");
+  if (error) return { ok: false, error: error.message };
+  if (!data?.length) return { ok: false, error: "Appointment not found." };
+  revalidatePath("/schedule");
+  revalidatePath("/planner");
+  revalidatePath("/inspections");
+  revalidatePath(`/appointments/${id}`);
+  return { ok: true, id };
+}
+
+/**
  * THE ONE WRITER for an inspection's field capture.
  *
  * Takes a PATCH — only the sections that changed — and merges. Never a full snapshot, for two

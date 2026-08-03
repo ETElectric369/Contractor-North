@@ -127,7 +127,18 @@ export default async function InspectionsPage({
             description="Inspections land here once they're written up into an estimate (or cancelled)."
           />
         ) : (
-          <Section title="Completed & written up" rows={filed} tz={tz} />
+          // A CANCELLED VISIT IS NOT COMPLETED WORK. Both land in `filed` (correctly — they are
+          // both settled), but rendering them under one heading reading "Completed & written up"
+          // told Erik a walk-through he cancelled had been written up into an estimate. Same
+          // rows, two honest headings.
+          <>
+            {filed.some((r) => r.status !== "cancelled") && (
+              <Section title="Completed & written up" rows={filed.filter((r) => r.status !== "cancelled")} tz={tz} />
+            )}
+            {filed.some((r) => r.status === "cancelled") && (
+              <Section title="Cancelled" rows={filed.filter((r) => r.status === "cancelled")} tz={tz} />
+            )}
+          </>
         )
       ) : toWriteUp.length === 0 && upcoming.length === 0 ? (
         <EmptyState

@@ -109,10 +109,18 @@ export async function getActionItems(ctx: {
           .limit(50)
       : empty,
     // Appointments that have started but aren't completed yet.
+    //
+    // WITH A FLOOR. This had no lower bound, so a booking nobody ever closed out nagged forever:
+    // 11 stale rows in TAHOE DECK, oldest from Jul 8, and 4 in ET Electric — a permanent count on
+    // the badge that no amount of work could clear. That is exactly what the badge invariant
+    // forbids (types.ts): no count may be the length of an unbounded set. Two weeks is the window
+    // in which "you didn't mark this done" is still a useful nudge; past that it is furniture, and
+    // the appointment is still findable on the schedule and in /inspections.
     supabase
       .from("appointments")
       .select("id, type, title, starts_at, status, job_id, assigned_to")
       .eq("status", "scheduled")
+      .gte("starts_at", `${daysAgoStr(todayStr, 14)}T00:00:00`)
       .lte("starts_at", endOfToday)
       .order("starts_at", { ascending: true })
       .limit(50),

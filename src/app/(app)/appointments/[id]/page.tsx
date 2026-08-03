@@ -12,6 +12,8 @@ import { getSchedulePickerOptions } from "@/lib/schedule-options";
 import { AppointmentButton, type ApptValue } from "../appointment-button";
 import { tolerateMissingColumns } from "@/lib/inspection/schema";
 import { MarkCompleteButton } from "./mark-complete-button";
+import { DeleteEmptyInspectionButton } from "./delete-empty-button";
+import { hasCaptureData } from "@/lib/inspections";
 import { ApptQuickActions } from "../appointment-status";
 
 export const dynamic = "force-dynamic";
@@ -127,6 +129,17 @@ export default async function AppointmentCapturePage({
               label={isInspectionType(a.type) ? "Mark inspection complete" : "Mark complete"}
             />
           )}
+          {/* DELETE, for a visit that never happened. Erik cancelled one at 01:08 and made
+              another at 01:10 because the ✗ he tapped said "Cancel" and left the row on his
+              screen. Offered ONLY when nothing was captured — see delete-empty-button.tsx for
+              why a walk-through with real data stays behind Edit Details. */}
+          {!hasCaptureData(a.capture) &&
+            !(inspection?.inspection_answers && JSON.stringify(inspection.inspection_answers) !== "{}") && (
+              <DeleteEmptyInspectionButton
+                id={a.id}
+                afterHref={dayStr ? `/schedule?view=day&date=${dayStr}` : "/schedule"}
+              />
+            )}
           {/* CANCEL — the filed bug. This page offered only "Mark complete" (a lie, if it never
               happened) and Delete (which destroys the capture and photos with it). The verb
               already existed and was wired up on the calendar row only; it belongs here too. */}
@@ -172,6 +185,7 @@ export default async function AppointmentCapturePage({
         initialAnswers={(inspection?.inspection_answers ?? {}) as never}
         initialCapture={capture}
         initialPhotos={photos}
+        initialLocation={a.location ?? ""}
         estimateHref={`/quotes/new?capture=${a.id}${a.inquiry_id ? `&inquiry=${a.inquiry_id}` : ""}`}
       />
     </div>

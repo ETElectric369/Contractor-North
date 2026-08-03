@@ -28,7 +28,8 @@ import {
   type CaptureMeasure,
 } from "@/lib/inspection/capture";
 import { createStarterInspectionSheet } from "../../forms/actions";
-import { saveInspectionAnswers, saveInspectionCapture } from "../actions";
+import { AddressAutocomplete } from "@/components/address-autocomplete";
+import { saveInspectionAnswers, saveInspectionCapture, setAppointmentPlace } from "../actions";
 
 /** A numeric field that can be EMPTY. Deliberately not NumberInput: its value is a `number` and
  *  it renders 0 as blank, so "I didn't count it" and "zero of them" become the same stored value —
@@ -92,6 +93,7 @@ export function Inspector({
   orgId,
   userId,
   estimateHref,
+  initialLocation,
 }: {
   appointmentId: string;
   templates: InspectionTemplate[];
@@ -103,6 +105,8 @@ export function Inspector({
   userId: string | null;
   /** Where "Start the estimate" goes — built by the page so the capture/lead ids ride along. */
   estimateHref: string;
+  /** appointments.location — the address, which is the fact that names everything downstream. */
+  initialLocation: string;
 }) {
   const router = useRouter();
   const stored = useMemo(() => parseInspectorCapture(initialCapture), [initialCapture]);
@@ -118,6 +122,7 @@ export function Inspector({
   const [proseMeasurements, setProseMeasurements] = useState(stored.measurements);
   const [photos, setPhotos] = useState<CapturePhoto[]>(initialPhotos);
 
+  const [place, setPlace] = useState(initialLocation);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -176,7 +181,8 @@ export function Inspector({
     const wantAnswers = answersDirty.current;
     capturePatchRef.current = {};
     answersDirty.current = false;
-    if (!Object.keys(patch).length && !wantAnswers) {
+    const placeDirty = place.trim() !== initialLocation.trim();
+    if (!Object.keys(patch).length && !wantAnswers && !placeDirty) {
       // Pressing Save when everything is already written must still ANSWER. Silence reads as a
       // dead button, and the whole point of the press is to be told the work is safe.
       if (explicit) setSavedAt(Date.now());
@@ -187,6 +193,10 @@ export function Inspector({
       if (Object.keys(patch).length) {
         const r = await saveInspectionCapture(appointmentId, patch as never);
         if (!r.ok) return setError(r.error ?? "Couldn't save.");
+      }
+      if (place.trim() !== initialLocation.trim()) {
+        const r = await setAppointmentPlace(appointmentId, place);
+        if (!r.ok) return setError(r.error ?? "Couldn't save the address.");
       }
       if (wantAnswers) {
         const r = await saveInspectionAnswers(appointmentId, templateId, coerceAnswers(fields, answers) as never);
@@ -305,6 +315,27 @@ export function Inspector({
               ))}
             </Select>
           )}
+        </div>
+
+        {/* WHERE. First control on the surface, above the first question, because this is the
+            fact that names the lead, the estimate, the job and the invoice — and because typing
+            it into the title (which is what 4 of 13 real inspections did) was the only way to
+            record it before. Saves on resolve/blur, and renames a stock-titled record so a list
+            of visits stops reading "Site inspection" six times. */}
+        <div className="mt-3">
+          <Label className="mb-1.5">Where</Label>
+          <AddressAutocomplete
+            defaultValue={initialLocation}
+            placeholder="Job address"
+            onTextChange={(v) => { setPlace(v); schedule(); }}
+            onResolved={(parts) => {
+              // `formatted` is the full one-line address — appointments.location is a single
+              // text column, so the whole thing is what belongs in it.
+              const line = parts.formatted || parts.line1 || "";
+              setPlace(line);
+              if (line && line !== initialLocation) start(async () => { await setAppointmentPlace(appointmentId, line); router.refresh(); });
+            }}
+          />
         </div>
 
         {noSheet ? (
