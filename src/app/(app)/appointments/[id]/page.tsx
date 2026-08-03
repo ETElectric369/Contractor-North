@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { Inspector, type CapturePhoto, type InspectionTemplate } from "./inspector";
 import { MapPin } from "lucide-react";
 import { BackLink } from "@/components/back-link";
 import { createClient } from "@/lib/supabase/server";
@@ -9,8 +10,6 @@ import { NavLink } from "@/components/nav-link";
 import { appointmentTypeLabel, isInspectionType } from "@/lib/statuses";
 import { getSchedulePickerOptions } from "@/lib/schedule-options";
 import { AppointmentButton, type ApptValue } from "../appointment-button";
-import { InspectionCapture, type CapturePhoto } from "./inspection-capture";
-import { QuestionSheet, type InspectionTemplate } from "./question-sheet";
 import { tolerateMissingColumns } from "@/lib/inspection/schema";
 import { MarkCompleteButton } from "./mark-complete-button";
 import { ApptQuickActions } from "../appointment-status";
@@ -158,31 +157,22 @@ export default async function AppointmentCapturePage({
         {a.notes && <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{a.notes}</p>}
       </div>
 
-      <InspectionCapture
+      {/* ONE SURFACE. This used to be two components stacked — a three-textarea capture card and,
+          below it, a separate typed question sheet with its own Save button and placeholders that
+          referred to "the questions above" while the questions were below. Erik: "it should all be
+          one smart thing that starts with the appointed questions and fragments from those first".
+          Nothing was dropped in the merge: the prose boxes, the photos and the typed sheet are all
+          still here, reordered so the ask comes first and everything captured reads as one list. */}
+      <Inspector
         appointmentId={a.id}
         orgId={a.org_id}
-        inquiryId={a.inquiry_id ?? null}
-        initial={{
-          notes: capture.notes ?? "",
-          measurements: capture.measurements ?? "",
-          materials: capture.materials ?? "",
-        }}
-        initialPhotos={photos}
-      />
-
-      {/* THE TYPED SHEET, now BELOW the prose. It used to sit above, which put ten controls
-          between a man standing at a job and the Notes box — and the evidence says that wall
-          worked: of 28 inspections in production, 27 carried no typed answers at all. Notes and
-          photos are what actually get captured in a truck, so they come first. The sheet now
-          fragments to the two-to-four questions this job type has, so it is short by the time
-          you reach it — and it still exists because a measurement typed as a number never has
-          to be re-extracted from a sentence by the estimator. */}
-      <QuestionSheet
-        appointmentId={a.id}
         userId={viewerId}
         templates={sheets ?? []}
         initialTemplateId={inspection?.inspection_template_id ?? null}
         initialAnswers={(inspection?.inspection_answers ?? {}) as never}
+        initialCapture={capture}
+        initialPhotos={photos}
+        estimateHref={`/quotes/new?capture=${a.id}${a.inquiry_id ? `&inquiry=${a.inquiry_id}` : ""}`}
       />
     </div>
   );

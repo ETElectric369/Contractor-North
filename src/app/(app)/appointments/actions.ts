@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { mergeCaptureSections, type CapturePatch } from "@/lib/inspection/capture";
 import { emptyToNull } from "@/lib/forms";
 import { pushCalendarItem, deleteCalendarItem } from "@/lib/calendar-sync";
 import { requireStaff } from "@/lib/staff-guard";
@@ -278,9 +279,27 @@ export interface AppointmentCapture {
   photos?: string[];
 }
 
-export async function saveAppointmentCapture(
+/**
+ * THE ONE WRITER for an inspection's field capture.
+ *
+ * Takes a PATCH — only the sections that changed — and merges. Never a full snapshot, for two
+ * reasons that have both actually bitten this app:
+ *
+ *  1. THE ROLLOUT WINDOW. This runs as a home-screen PWA whose bundle can be hours stale. The
+ *     previous version of this function rebuilt the stored object from a fixed four-key whitelist,
+ *     so any key it didn't know about was destroyed. The moment `items` and `measures` exist, a
+ *     save from one cached tab would silently delete a materials list somebody typed. A patch
+ *     cannot express "delete the sections I didn't mention", which is exactly the property needed.
+ *  2. OFFLINE REPLAY. An op queued in a crawlspace and replayed two hours later must not resurrect
+ *     stale notes just because it carried a materials change.
+ *
+ * `quote_id` is rescued unconditionally: it is stamped by a DIFFERENT writer (saveQuote), so any
+ * writer that rebuilds without it silently un-files a written-up inspection off /inspections and
+ * off the My Day money item.
+ */
+export async function saveInspectionCapture(
   id: string,
-  capture: AppointmentCapture,
+  patch: CapturePatch,
 ): Promise<Result> {
   // TODO(contested): requireStaff here vs the capture PAGE rendering for any org member —
   // a tech doing the walk-through can upload photos but every Save fails; decide whether
@@ -289,31 +308,43 @@ export async function saveAppointmentCapture(
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
 
-  const clean: Record<string, unknown> = {
-    notes: String(capture?.notes ?? "").trim().slice(0, 8000),
-    measurements: String(capture?.measurements ?? "").trim().slice(0, 8000),
-    materials: String(capture?.materials ?? "").trim().slice(0, 8000),
-    photos: (Array.isArray(capture?.photos) ? capture.photos : [])
-      .filter((p): p is string => typeof p === "string" && p.length > 0 && p.length < 2000)
-      .slice(0, 60),
-  };
-
-  // Preserve the write-up backlink saveQuote stamped (capture.quote_id — how a lead-less
-  // inspection files on /inspections): a later field-notes edit must not wipe it.
   const { data: existing } = await supabase.from("appointments").select("capture").eq("id", id).maybeSingle();
-  const prevQuoteId = (existing?.capture as { quote_id?: unknown } | null)?.quote_id;
-  if (typeof prevQuoteId === "string" && prevQuoteId) clean.quote_id = prevQuoteId;
+  // mergeCaptureSections re-parses, so clamping, the never-a-silent-zero quantity law, orphan
+  // photo_meta dropping and flag-stripping all apply to whatever the client sent.
+  const merged = mergeCaptureSections(existing?.capture ?? null, patch);
 
   const { data, error } = await supabase
     .from("appointments")
-    .update({ capture: clean, updated_at: new Date().toISOString() })
+    .update({ capture: merged, updated_at: new Date().toISOString() })
     .eq("id", id)
     .select("id");
   if (error) return { ok: false, error: error.message };
   if (!data?.length) return { ok: false, error: "Appointment not found." };
   revalidatePath("/schedule");
+  revalidatePath("/planner");
+  revalidatePath("/inspections");
   revalidatePath(`/appointments/${id}`);
   return { ok: true, id };
+}
+
+/**
+ * The legacy four-key entry point, kept as a THIN MERGING WRAPPER.
+ *
+ * A cached bundle keeps calling this for hours after any deploy, and an op queued offline before
+ * the deploy replays into it. It must land on the merging writer, never on the old whitelist —
+ * that is the whole rollout guard, and it is why this shipped in the same commit that deleted the
+ * component which used to call it.
+ */
+export async function saveAppointmentCapture(
+  id: string,
+  capture: AppointmentCapture,
+): Promise<Result> {
+  return saveInspectionCapture(id, {
+    notes: String(capture?.notes ?? "").trim(),
+    measurements: String(capture?.measurements ?? "").trim(),
+    materials: String(capture?.materials ?? "").trim(),
+    photos: Array.isArray(capture?.photos) ? capture.photos : [],
+  });
 }
 
 /**
