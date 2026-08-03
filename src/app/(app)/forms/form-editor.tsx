@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import {
   type FormField,
 } from "./actions";
 import { slugifyFieldKey } from "@/lib/form-field-key";
+import { lintInspectionSheet } from "@/lib/inspection/lint";
 
 export interface FieldRow {
   label: string;
@@ -80,6 +81,35 @@ export function FormEditor({
     setFields((prev) => prev.map((f, idx) => (idx === i ? { ...f, ...patch } : f)));
   }
 
+  /**
+   * Check the sheet AS IT IS BEING EDITED. TAHOE DECK authored a rule against "Deck replacement"
+   * when the choice actually read "Full replacement". Six questions then never rendered on six of
+   * eight job types, silently, for months — one of twenty inspections there has any answers on it
+   * at all. Nothing looked wrong, which is exactly why a person can't be expected to catch it and
+   * the editor has to.
+   *
+   * Advisory only — it never blocks Save. A half-built sheet mid-edit is normal, and a validator
+   * that refuses to save is a validator people learn to route around.
+   */
+  const problems = useMemo(() => {
+    if (!isInspection) return [];
+    return lintInspectionSheet(
+      fields
+        .filter((f) => f.label.trim())
+        .map((f, i) => ({
+          key: slugifyFieldKey(f.label) || `field_${i}`,
+          label: f.label.trim(),
+          type: f.type,
+          ...(f.type === "select" && f.options
+            ? { options: f.options.split(",").map((o) => o.trim()).filter(Boolean) }
+            : {}),
+          ...(f.showIfKey && f.showIfIn
+            ? { showIf: { key: f.showIfKey, in: f.showIfIn.split(",").map((v) => v.trim()).filter(Boolean) } }
+            : {}),
+        })),
+    );
+  }, [isInspection, fields]);
+
   function onSave() {
     setError(null);
     start(async () => {
@@ -118,6 +148,23 @@ export function FormEditor({
         {error && (
           <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
             {error}
+          </div>
+        )}
+        {problems.length > 0 && (
+          <div className="space-y-1.5">
+            {problems.map((p, i) => (
+              <div
+                key={i}
+                className={
+                  p.severe
+                    ? "rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900"
+                    : "rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600"
+                }
+              >
+                {p.severe && <span className="font-semibold">Won&rsquo;t show up: </span>}
+                {p.message}
+              </div>
+            ))}
           </div>
         )}
         <div>
