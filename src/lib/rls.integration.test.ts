@@ -83,8 +83,16 @@ d("RLS multi-tenant isolation invariant", () => {
     //                      service role (Erik's approvals, createEmployee/importCrew pre-approve).
     //                      Client-invisible BY DESIGN — this was the "CI: All jobs have failed"
     //                      email flood from cn-v493 onward.
+    //   platform_admins  — who may read bug reports ACROSS tenants, for running the beta
+    //                      (migration 0176). Read ONLY by the SECURITY DEFINER helpers
+    //                      is_platform_admin() and platform_org_label(); written only by the
+    //                      service role. It CANNOT be a profiles.role check: roles are set by
+    //                      org owners inside their own org, so a role-based platform admin
+    //                      would be self-grantable by every customer. Client-invisible BY
+    //                      DESIGN — a table that grants cross-tenant reach must not be
+    //                      enumerable by the tenants it reaches across.
     // The invariant catches a table ACCIDENTALLY left policy-less; these are deliberate.
-    const SERVER_ONLY = new Set(["rate_limits", "error_events", "signup_allowlist"]);
+    const SERVER_ONLY = new Set(["rate_limits", "error_events", "signup_allowlist", "platform_admins"]);
     const { rows } = await client.query(`
       select c.relname as tbl
       from pg_class c join pg_namespace n on n.oid=c.relnamespace
