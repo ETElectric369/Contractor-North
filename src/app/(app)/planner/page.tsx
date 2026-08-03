@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { splitAgenda } from "@/lib/agenda-split";
 import { isInspectionType, appointmentTypeLabel } from "@/lib/statuses";
 import { isStaffRole } from "@/lib/actions/perms";
 import { redirect } from "next/navigation";
@@ -60,7 +61,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     supabase.from("jobs").select("id, job_number, name, status, address, scheduled_start, customers(name)").gte("scheduled_start", dayStart.toISOString()).lt("scheduled_start", dayEnd.toISOString()).order("scheduled_start"),
     // Multi-range jobs whose segment covers today.
     supabase.from("job_schedule_segments").select("job_id, jobs(id, job_number, name, status, address, customers(name))").lte("start_date", todayStr).gte("end_date", todayStr),
-    supabase.from("appointments").select("id, type, title, starts_at, ends_at, location, notes, status, job_id, customer_id, assigned_to, jobs(address)").gte("starts_at", dayStart.toISOString()).lt("starts_at", dayEnd.toISOString()).neq("status", "cancelled").order("starts_at"),
+    supabase.from("appointments").select("id, type, title, starts_at, ends_at, location, notes, status, job_id, customer_id, assigned_to, jobs(address)").gte("starts_at", dayStart.toISOString()).lt("starts_at", dayEnd.toISOString()).not("status", "in", "(cancelled,completed)").order("starts_at"),
     // The open entry, regardless of when it started (overnight shift, etc.). The job
     // on THIS entry is the "Now" hero — scoped to the caller, not the org's latest
     // in_progress job (which could be a coworker's site across town).
@@ -363,15 +364,13 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       } satisfies ApptValue,
     })),
   ];
-  const nowMs = Date.now();
-  const timedAgenda = agenda.filter((i) => i.time).sort((a, b) => (a.time as string).localeCompare(b.time as string));
-  const untimedAgenda = agenda.filter((i) => !i.time);
-  const futureAgenda = timedAgenda.filter((i) => new Date(i.time as string).getTime() > nowMs);
-  const nextAgenda = futureAgenda.slice(0, 2);
-  // Everything else for the day — including jobs scheduled EARLIER today, which were being
-  // dropped entirely — in time order, plus untimed items.
-  const nextSet = new Set(nextAgenda);
-  const laterAgenda = [...timedAgenda.filter((i) => !nextSet.has(i)), ...untimedAgenda];
+  // Earlier / Next / Later, decided by the clock — see lib/agenda-split.ts for why this
+  // rule lives in a tested function and not in filters here.
+  const {
+    earlier: earlierAgenda,
+    next: nextAgenda,
+    later: laterAgenda,
+  } = splitAgenda(agenda, new Date());
 
   // Week view (techs only — staff were redirected above): the agenda widened to a
   // week (Sun–Sat), grouped by day, paged via ?week=. Sunday-start is the DISPLAY
@@ -758,10 +757,16 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
             </div>
           )}
 
-          {nextAgenda.length === 0 && laterAgenda.length === 0 ? (
+          {nextAgenda.length === 0 && laterAgenda.length === 0 && earlierAgenda.length === 0 ? (
             empty(currentJob ? "Nothing else on the schedule today." : "Nothing left on the schedule today.")
           ) : (
             <>
+              {earlierAgenda.length > 0 && (
+                <>
+                  <div className="bg-slate-50/70 px-5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Earlier today</div>
+                  <ul className="divide-y divide-slate-100">{agendaRows(earlierAgenda)}</ul>
+                </>
+              )}
               {nextAgenda.length > 0 && (
                 <>
                   <div className="bg-slate-50/70 px-5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-brand">Next</div>

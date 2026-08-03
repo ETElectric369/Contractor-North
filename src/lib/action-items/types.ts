@@ -25,6 +25,7 @@ export type ActionKind =
   | "job_to_schedule" // a job with no date yet
   | "inquiry" // a new/uncontacted lead
   | "appointment" // a scheduled appt awaiting completion
+  | "inspection_writeup" // a walk-through that HAPPENED and has no estimate yet — the visit is spent, the money is not
   | "organize" // a capture (receipt/note/doc) needing a filing decision
   | "invoice_overdue" // a sent/partial invoice past its due date (A/R)
   | "quote_awaiting" // a sent quote/estimate gone quiet or nearing its valid-until
@@ -64,6 +65,10 @@ export const KIND_STREAM: Record<ActionKind, Stream> = {
   job_to_schedule: "today",
   inquiry: "leads",
   appointment: "today",
+  // Erik: "all the inspections i've completed ... already happened and need to be actioned for
+  // estimates." Same species as invoice_draft — the work is done and nobody has asked for the
+  // money yet — so it belongs in the money stream, not on the calendar it already left.
+  inspection_writeup: "money",
   organize: "waiting",
   invoice_overdue: "money",
   quote_awaiting: "money",
@@ -109,6 +114,7 @@ export const KIND_META: Record<ActionKind, { label: string; tone: "slate" | "blu
   job_to_schedule: { label: "To schedule", tone: "amber" },
   inquiry: { label: "Lead", tone: "green" },
   appointment: { label: "Appointment", tone: "blue" },
+  inspection_writeup: { label: "Write up the estimate", tone: "green" },
   organize: { label: "To file", tone: "slate" },
   invoice_overdue: { label: "Overdue invoice", tone: "amber" },
   quote_awaiting: { label: "Awaiting reply", tone: "green" },
@@ -135,6 +141,9 @@ export const AFFORDANCES: Record<ActionKind, Affordance[]> = {
   job_to_schedule: ["schedule", "assign", "open"],
   inquiry: ["do", "schedule", "convert", "snooze", "dismiss", "open"],
   appointment: ["do", "dismiss", "open"],
+  // One verb on purpose: the href opens the estimate builder already prefilled with the
+  // walk-through. A "do" here would mark it handled without the estimate existing.
+  inspection_writeup: ["open"],
   organize: ["dismiss", "open"],
   // Money/legal items drill into their own surface to act (record a payment, serve a
   // notice, chase a signature) — no generic "do"/"dismiss" that would mislabel them.

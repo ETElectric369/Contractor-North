@@ -1,6 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import type { ActionItem, ActionKind } from "./types";
 import { AFFORDANCES, KIND_STREAM } from "./types";
+import { bucketInspections } from "@/lib/inspections";
+import { INSPECTION_TYPES } from "@/lib/statuses";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { invoiceBalance } from "@/lib/invoice-math";
 import { lienStatus } from "@/lib/lien-math";
@@ -78,7 +80,7 @@ export async function getActionItems(ctx: {
 
   const empty = Promise.resolve({ data: [] as any[] });
 
-  const [jobsR, inqR, apptR, orgR, invR, quoteR, acceptedR, draftR, conR, lienR, bugR, openTimeR, recentTimeR, matJobsR, matSegR] = await Promise.all([
+  const [jobsR, inqR, apptR, orgR, invR, quoteR, acceptedR, draftR, conR, lienR, bugR, openTimeR, recentTimeR, matJobsR, matSegR, inspR, inspQuoteR] = await Promise.all([
     // Unscheduled jobs — staff only (the "resting place" for things needing a date).
     // EVERY still-in-flight dateless job, not just estimate/scheduled: an in_progress
     // or on_hold job whose date was cleared must not vanish from every scheduling
@@ -234,6 +236,24 @@ export async function getActionItems(ctx: {
           .gte("end_date", todayStr)
           .limit(50)
       : empty,
+    // ── Walk-throughs that HAPPENED and have no estimate — staff only ───────────
+    // The visit is the expensive part and it is already spent; until it becomes an
+    // estimate it earns nothing. This existed on exactly one screen (/inspections,
+    // two taps deep under Sales) and on none of the surfaces a person actually opens.
+    // 60 days back: older than that and it is a cold lead, not today's work.
+    isStaff
+      ? supabase
+          .from("appointments")
+          .select("id, type, title, status, starts_at, capture, inquiry_id, job_id, customers(name), inquiries(name)")
+          .in("type", [...INSPECTION_TYPES])
+          .gte("starts_at", daysAgoStr(todayStr, 60))
+          .lte("starts_at", endOfToday)
+          .order("starts_at", { ascending: false })
+          .limit(100)
+      : empty,
+    // The "written up" signal — an estimate linked to the lead, the job, or (for a
+    // lead-less Inspect-now) the capture's own quote id.
+    isStaff ? supabase.from("quotes").select("id, inquiry_id, job_id").limit(2000) : empty,
   ]);
 
   // Built without `stream`, stamped once at the return from KIND_STREAM — one
@@ -304,8 +324,48 @@ export async function getActionItems(ctx: {
     });
   }
 
+  // Ids claimed by the write-up feeder below, so the plain "Appointment" feeder cannot ALSO
+  // emit them. A past visit that still says status=scheduled but has field notes on it counts
+  // as HAPPENED (bucketInspections) — without this it would show twice on My Day, once as a
+  // calendar row and once as the write-up, which is the double-map the nav doctrine forbids.
+  const writeUpApptIds = new Set<string>();
+
+  // A finished walk-through, waiting to become money. bucketInspections is the SAME
+  // function /inspections uses — "done but not written up" is one definition in one
+  // place, so the inbox and the list can never disagree about what is outstanding.
+  {
+    const qs = (inspQuoteR.data ?? []) as any[];
+    const { toWriteUp } = bucketInspections(
+      (inspR.data ?? []) as any[],
+      new Set(qs.map((q) => q.inquiry_id).filter(Boolean)),
+      new Set(qs.map((q) => q.job_id).filter(Boolean)),
+      new Date(),
+      new Set(qs.map((q) => q.id).filter(Boolean)),
+    );
+    for (const a of toWriteUp) {
+      const who = (a as any).customers?.name ?? (a as any).inquiries?.name ?? null;
+      items.push({
+        id: a.id,
+        kind: "inspection_writeup",
+        title: a.title || "Site inspection",
+        subtitle: who,
+        who: null,
+        // The DAY IT HAPPENED, not a due date — an inbox row that reads "Jul 28" is
+        // telling you how long this has been sitting, which is the whole pressure.
+        when: a.starts_at ?? null,
+        // Oldest-first via the sort below; a walk-through going stale is the loss.
+        urgency: 1,
+        done: false,
+        href: `/quotes/new?capture=${a.id}${a.inquiry_id ? `&inquiry=${a.inquiry_id}` : ""}`,
+        affordances: AFFORDANCES.inspection_writeup,
+      });
+      writeUpApptIds.add(a.id);
+    }
+  }
+
   for (const a of (apptR.data ?? []) as any[]) {
     if (!isStaff && a.assigned_to !== userId) continue;
+    if (writeUpApptIds.has(a.id)) continue; // already surfaced as "Write up the estimate"
     items.push({
       id: a.id,
       kind: "appointment",
