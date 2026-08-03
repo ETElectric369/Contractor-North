@@ -1,5 +1,6 @@
 import { UserPlus } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { INSPECTION_TYPES } from "@/lib/statuses";
 import { listCustomerOptions } from "@/lib/schedule-options";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
@@ -33,6 +34,36 @@ export default async function InquiriesPage({
       .order("created_at", { ascending: false }),
     listCustomerOptions(supabase),
   ]);
+
+  /**
+   * WHICH LEADS HAVE ALREADY BEEN WALKED.
+   *
+   * Erik: "the sarah cain lead was already converted to an inspection but still shows up as a
+   * new lead." Staying OPEN is correct and deliberate — leads/actions.ts documents inspection as
+   * exempt from converting, so an inspected lead can still go on to become an estimate. What was
+   * wrong is that her row looked IDENTICAL to a lead nobody had touched: three inspections, one
+   * of them completed with a full capture, and not a mark on the list to say so.
+   *
+   * So this is a display fix, not a status change. Counts only — the row says what happened, the
+   * status keeps meaning what it has always meant.
+   */
+  const leadIds = (inqData ?? []).map((i: { id: string }) => i.id);
+  const { data: inspRows } = leadIds.length
+    ? await supabase
+        .from("appointments")
+        .select("inquiry_id, status")
+        .in("inquiry_id", leadIds)
+        .in("type", [...INSPECTION_TYPES])
+        .neq("status", "cancelled")
+        .limit(500)
+    : { data: [] as { inquiry_id: string; status: string }[] };
+  const inspectionState = new Map<string, { done: number; upcoming: number }>();
+  for (const r of (inspRows ?? []) as { inquiry_id: string; status: string }[]) {
+    const cur = inspectionState.get(r.inquiry_id) ?? { done: 0, upcoming: 0 };
+    if (r.status === "completed") cur.done += 1;
+    else cur.upcoming += 1;
+    inspectionState.set(r.inquiry_id, cur);
+  }
 
   const inquiries = (inqData ?? []) as Inquiry[];
   const customers = (custData ?? []) as { id: string; name: string }[];
@@ -87,7 +118,13 @@ export default async function InquiriesPage({
         <Card>
           <ul className="divide-y divide-slate-100">
             {rows.map((i) => (
-              <InquiryRow key={i.id} inquiry={i} customers={customers} focused={i.id === focus} />
+              <InquiryRow
+                key={i.id}
+                inquiry={i}
+                customers={customers}
+                focused={i.id === focus}
+                inspections={inspectionState.get(i.id) ?? null}
+              />
             ))}
           </ul>
         </Card>

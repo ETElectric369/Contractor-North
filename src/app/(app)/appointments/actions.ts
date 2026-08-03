@@ -155,6 +155,13 @@ export async function createInspectionNow(
     id: string;
     name: string;
     address: string | null;
+    // BREAK 1 in the audit's address spine: this used to fetch the street line ALONE and write it
+    // into `location`, so a Places-resolved four-column address became one string — and the city,
+    // state and zip were not merely flattened, they were never even read. 0177 gave appointments
+    // those same four columns, so the whole address carries through now.
+    city: string | null;
+    state: string | null;
+    zip: string | null;
     message: string | null;
     notes: string | null;
     customer_id: string | null;
@@ -163,7 +170,7 @@ export async function createInspectionNow(
   if (opts.inquiryId) {
     const { data } = await supabase
       .from("inquiries")
-      .select("id, name, address, message, notes, customer_id")
+      .select("id, name, address, city, state, zip, message, notes, customer_id")
       .eq("id", opts.inquiryId)
       .maybeSingle();
     if (!data) return { ok: false, error: "Lead not found." };
@@ -177,7 +184,12 @@ export async function createInspectionNow(
       title: inq ? `Site inspection: ${inq.name}` : "Site inspection",
       starts_at: new Date().toISOString(), // now — an instant is an instant in any tz
       status: "scheduled", // NOT completed: the capture (or "Mark inspection complete") finishes it
-      location: inq?.address ?? null,
+      // The WHOLE address, not just the street line — and the parts alongside it, so nothing
+      // downstream has to re-parse a string to learn which city the work is in.
+      location: formatFullAddress(inq?.address ?? null, inq?.city ?? null, inq?.state ?? null, inq?.zip ?? null) || inq?.address || null,
+      city: inq?.city ?? null,
+      state: inq?.state ?? null,
+      zip: inq?.zip ?? null,
       notes: inq?.message ?? inq?.notes ?? null,
       customer_id: inq?.customer_id ?? null, // deferred-customer doctrine: no contact row before the win
       inquiry_id: inq?.id ?? null,
@@ -383,6 +395,9 @@ export async function linkAppointmentTo(
   const patch: Record<string, unknown> = {};
   let name = "";
   let address: string | null = null;
+  // The structured parts of whatever we linked to — carried through so the visit inherits a
+  // real address rather than a string somebody has to re-parse later (0177).
+  let parts: { city: string | null; state: string | null; zip: string | null } | null = null;
 
   if (kind === "lead") {
     const { data: r } = await supabase
@@ -395,6 +410,9 @@ export async function linkAppointmentTo(
     if (r.customer_id) patch.customer_id = r.customer_id;
     name = r.name;
     address = formatFullAddress(r.address, r.city, r.state, r.zip) || null;
+    parts = { city: r.city ?? null, state: r.state ?? null, zip: r.zip ?? null };
+    parts = { city: r.city ?? null, state: r.state ?? null, zip: r.zip ?? null };
+    parts = { city: r.city ?? null, state: r.state ?? null, zip: r.zip ?? null };
   } else if (kind === "customer") {
     const { data: r } = await supabase
       .from("customers")
@@ -419,7 +437,10 @@ export async function linkAppointmentTo(
   }
 
   // FILL, NEVER OVERWRITE — the same law the inspector's Nort channel obeys.
-  if (address && !String(appt.location ?? "").trim()) patch.location = address;
+  if (address && !String(appt.location ?? "").trim()) {
+    patch.location = address;
+    if (parts) Object.assign(patch, parts);
+  }
   const STOCK = ["site inspection", "inspection", "final inspection", "appointment", ""];
   if (name && STOCK.includes(String(appt.title ?? "").trim().toLowerCase())) {
     patch.title = `Site inspection: ${name}`;
@@ -455,6 +476,10 @@ export async function linkAppointmentTo(
 export async function setAppointmentPlace(
   id: string,
   location: string,
+  /** The resolved parts, when the address came from autocomplete rather than the keyboard.
+   *  Absent for typed input — and absent is honest: guessing a city from a typed line is how
+   *  a wrong address gets onto a record, and a wrong one is worse than a blank one (0177). */
+  parts?: { city?: string | null; state?: string | null; zip?: string | null },
 ): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -475,6 +500,11 @@ export async function setAppointmentPlace(
     .from("appointments")
     .update({
       location: clean || null,
+      // Only written when they were actually RESOLVED. A typed address leaves them alone
+      // rather than stamping a guess over a previously-resolved city.
+      ...(parts?.city !== undefined ? { city: parts.city || null } : {}),
+      ...(parts?.state !== undefined ? { state: parts.state || null } : {}),
+      ...(parts?.zip !== undefined ? { zip: parts.zip || null } : {}),
       ...(clean && isStock ? { title: clean } : {}),
       updated_at: new Date().toISOString(),
     })

@@ -337,7 +337,13 @@ export function Inspector({
               // text column, so the whole thing is what belongs in it.
               const line = parts.formatted || parts.line1 || "";
               setPlace(line);
-              if (line && line !== initialLocation) start(async () => { await setAppointmentPlace(appointmentId, line); router.refresh(); });
+              // Resolved from autocomplete → the PARTS ride along (0177), so the city is stored
+              // rather than left to be guessed out of a string later.
+              if (line && line !== initialLocation)
+                start(async () => {
+                  await setAppointmentPlace(appointmentId, line, { city: parts.city, state: parts.state, zip: parts.zip });
+                  router.refresh();
+                });
             }}
           />
         </div>

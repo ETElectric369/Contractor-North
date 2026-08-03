@@ -33,12 +33,17 @@ export function InquiryRow({
   inquiry,
   customers,
   focused = false,
+  inspections = null,
 }: {
   inquiry: Inquiry;
   customers: { id: string; name: string }[];
   /** True when My Day (or an estimate backlink) deep-linked to this exact lead —
       scroll it into view and flash a highlight so the eye lands on the right row. */
   focused?: boolean;
+  /** Walk-throughs on this lead. A lead with a completed inspection is CORRECTLY still open —
+   *  inspection is exempt from converting, so it can still become an estimate — but the row used
+   *  to look identical to one nobody had touched. This is what it takes to tell them apart. */
+  inspections?: { done: number; upcoming: number } | null;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -91,6 +96,17 @@ export function InquiryRow({
           <span className="font-medium text-slate-900">{inquiry.name}</span>
           {inquiry.company_name && <span className="text-xs text-slate-400">{inquiry.company_name}</span>}
           <Badge tone={INQUIRY_STATUS_TONE[inquiry.status] ?? "slate"}>{inquiry.status}</Badge>
+          {/* "the sarah cain lead was already converted to an inspection but still shows up as a
+              new lead." Staying open is right — an inspected lead can still become an estimate,
+              so inspection is deliberately exempt from converting. But the row said nothing about
+              a walk-through that had already happened, which is what made it read as untouched.
+              A count, not a status: what the badge says is true and stays true. */}
+          {!!inspections?.done && (
+            <Badge tone="green">
+              {inspections.done === 1 ? "inspected" : `inspected ×${inspections.done}`}
+            </Badge>
+          )}
+          {!inspections?.done && !!inspections?.upcoming && <Badge tone="blue">inspection booked</Badge>}
           {/* Triage — the A/B/C readiness bucket and the big-job site-visit gate come from
               /api/inbound/lead (Tahoe Deck); the site-visit flag ALSO lights when a customer
               taps "Request a site visit" on a public surface (publicScheduleInspection).
