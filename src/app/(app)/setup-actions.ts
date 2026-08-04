@@ -6,6 +6,7 @@ import { runHear, type HearRun } from "@/lib/playbook/hear-run";
 import { coerceByPlaybook } from "@/lib/playbook/answers";
 import { applyFills, clearInapplicable } from "@/lib/playbook/resolve";
 import { CONVERSE_SYSTEM, conversePrompt, fallbackSay, parseSpoken } from "@/lib/onboarding/converse";
+import { asRegister, clampHumor, toneDirective } from "@/lib/nort/tone";
 import { playbookForForm } from "@/lib/playbook/parse";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { getOrgSettings } from "@/lib/org-settings";
@@ -49,6 +50,17 @@ export async function talkSetup(needKey: string | null, answers: Answers, said: 
 
   const known = coerceByPlaybook(SETUP_PLAYBOOK, answers);
   const need = needKey ? SETUP_PLAYBOOK.needs.find((n) => n.key === needKey) : undefined;
+  // HOW THIS PERSON WANTS TO BE TALKED TO (0183). The tour is where somebody meets Nort, so it is
+  // the last place he should sound like a form — and the first place a joke needs landing.
+  const { data: me } = await supabase
+    .from("profiles")
+    .select("nort_humor, nort_register")
+    .eq("id", user.id)
+    .maybeSingle();
+  const tone = toneDirective(
+    clampHumor((me as { nort_humor?: unknown } | null)?.nort_humor),
+    asRegister((me as { nort_register?: unknown } | null)?.nort_register),
+  );
   const first = typeof known.full_name === "string" ? known.full_name.trim().split(/\s+/)[0] : "";
 
   // No model configured is not a dead end — the boxes still work, and Nort still says something.
@@ -60,7 +72,10 @@ export async function talkSetup(needKey: string | null, answers: Answers, said: 
     const resp = await getAnthropic().messages.create({
       model: DEFAULT_MODEL,
       max_tokens: 1200,
-      system: [{ type: "text", text: CONVERSE_SYSTEM, cache_control: { type: "ephemeral" } }],
+      system: [
+        { type: "text", text: CONVERSE_SYSTEM, cache_control: { type: "ephemeral" } },
+        { type: "text", text: tone },
+      ],
       messages: [{ role: "user", content: conversePrompt(need, known, text, first) }],
     });
     raw = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("\n").trim();

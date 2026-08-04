@@ -37,6 +37,8 @@ import { QuotePlaybookForm } from "./quote-playbook-form";
 import { AvatarUpload } from "./avatar-upload";
 import { CodeTemplatesManager } from "./code-templates-manager";
 import { PasskeyManager } from "./passkey-manager";
+import { NortTone } from "./nort-tone";
+import { asRegister, clampHumor } from "@/lib/nort/tone";
 import { listPasskeys } from "./passkey-actions";
 import { gcalConfigured, connectionNeedsReauth } from "@/lib/google-calendar";
 import { GcalCard } from "./gcal-card";
@@ -200,6 +202,14 @@ export default async function SettingsPage({
     icon: User,
     content: (
       <div className="space-y-6">
+        {/* HOW NORT TALKS TO YOU (0183) — under "You", not under the company, because register is
+            personal: the same org holds somebody in a truck and somebody at a desk. */}
+        <Section title="How Nort talks to you">
+          <NortTone
+            humor={clampHumor((profile as any)?.nort_humor)}
+            register={asRegister((profile as any)?.nort_register)}
+          />
+        </Section>
         <Section title="Your profile">
           <div className="flex flex-wrap items-center gap-5">
             <AvatarUpload

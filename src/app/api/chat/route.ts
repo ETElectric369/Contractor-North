@@ -1,5 +1,6 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { isStaffRole } from "@/lib/actions/perms";
+import { asRegister, clampHumor, toneDirective } from "@/lib/nort/tone";
 import { createClient } from "@/lib/supabase/server";
 import {
   getAnthropic,
@@ -182,7 +183,7 @@ export async function POST(req: Request) {
 
   // Respond in the user's preferred language + follow the org's quoting playbook.
   const [{ data: prof }, { data: org }] = await Promise.all([
-    supabase.from("profiles").select("language, role").eq("id", user.id).maybeSingle(),
+    supabase.from("profiles").select("language, role, nort_humor, nort_register").eq("id", user.id).maybeSingle(),
     supabase.from("organizations").select("id, settings").limit(1).maybeSingle(),
   ]);
   const orgId = (org as { id?: string } | null)?.id ?? null;
@@ -260,6 +261,13 @@ export async function POST(req: Request) {
   // before (stable → memory → voice → recall), so zero behavior change; but the volatile tail can no
   // longer bust the big cached prefix, so the cache finally HITS on repeat requests + agentic rounds.
   let volatilePrompt = "";
+  // HOW THIS PERSON WANTS TO BE TALKED TO (0183). PER-PERSON, so it belongs in the VOLATILE block —
+  // putting it in the cached prefix would key the cache per user instead of per org/role and throw
+  // away the hit rate the split above exists to protect.
+  volatilePrompt += `\n\n${toneDirective(
+    clampHumor((prof as { nort_humor?: unknown } | null)?.nort_humor),
+    asRegister((prof as { nort_register?: unknown } | null)?.nort_register),
+  )}`;
   // THE ESTIMATING METHOD — mode-aware. "catalog" companies (deck/carpentry & preset-price
   // shops) bid from their OWN price list + kits, quantities from the customer's measurements,
   // NO web research. "research" (default, electrical) prices materials by LIVE market research
