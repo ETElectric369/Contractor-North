@@ -129,17 +129,34 @@ async function ensureCustomer(conn: QboConnection, customer: any): Promise<strin
   return id;
 }
 
-/** Push a Contractor North invoice into QuickBooks Online. */
+/**
+ * Push a Contractor North invoice into QuickBooks Online.
+ *
+ * `orgId` IS THE TENANT BOUNDARY AND IT IS REQUIRED. This reads on a SERVICE client, so RLS never
+ * runs — the caller's org has to be carried in and applied by hand. It wasn't: the action proved
+ * the caller was staff SOMEWHERE, fetched their org id, and then threw it away. Tahoe Deck office
+ * staff naming an ET Electric invoice uuid would have had ET's OAuth tokens read and refreshed, a
+ * customer and an invoice CREATED INSIDE ET'S QUICKBOOKS BOOKS, qbo_id written back onto ET's
+ * rows, and the raw QBO response for ET's realm handed back to them.
+ *
+ * Same law as every other service-client read: [[tenant-isolation-root-cause]] — a rule applied at
+ * one read path is a convention, not a boundary. A service client has no boundary but this line.
+ */
 export async function pushInvoiceToQbo(
   invoiceId: string,
+  orgId: string,
 ): Promise<{ ok: boolean; error?: string; qbo_id?: string }> {
   const supabase = createServiceClient();
+  if (!orgId) return { ok: false, error: "Missing organization." };
 
   const { data: inv } = await supabase
     .from("invoices")
     .select("*, customers(id, name, qbo_id)")
     .eq("id", invoiceId)
+    .eq("org_id", orgId)
     .maybeSingle();
+  // Not found and not-yours are deliberately the same answer — a distinct "not yours" confirms the
+  // uuid exists in another tenant, which is itself a leak.
   if (!inv) return { ok: false, error: "Invoice not found." };
   if (!inv.customers) return { ok: false, error: "Invoice has no customer." };
 

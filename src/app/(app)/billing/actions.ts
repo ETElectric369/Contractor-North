@@ -66,7 +66,12 @@ export async function sendInvoiceToQuickbooks(
 ): Promise<{ ok: boolean; error?: string }> {
   const ctx = await requireStaff(); // was duplicated inline auth — use the one guard
   if ("error" in ctx) return { ok: false, error: ctx.error };
-  const res = await pushInvoiceToQbo(id);
+  // ctx.orgId was resolved and then DISCARDED here, which is what let a staff member of any tenant
+  // push an invoice belonging to another one straight into that tenant's QuickBooks. It is
+  // nullable on the guard's type, and a null org must REFUSE rather than fall through to an
+  // unscoped read — that is the exact shape of the hole this closes.
+  if (!ctx.orgId) return { ok: false, error: "No organization on your account." };
+  const res = await pushInvoiceToQbo(id, ctx.orgId);
   if (res.ok) revalidateMoney(id);
   return { ok: res.ok, error: res.error };
 }

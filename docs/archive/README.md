@@ -4,8 +4,31 @@ Work that was written, worked, and was superseded before it shipped. Kept becaus
 reusable even when the code isn't — Erik: "If any setup file could help us in the future then
 archive it."
 
-Nothing in here is compiled, imported, or tested. It is reference material. If you take something
-out of here, take the reasoning and rewrite the code against whatever the app looks like now.
+## READ THIS BEFORE TAKING ANYTHING
+
+**"Worth stealing" means AN IDEA, for building something NEW. It never means restoring a file.**
+
+Nothing in here is maintained. It was correct against an app that no longer exists, and every day
+it drifts further. Copying a function out of here into `src/` is how a fixed bug comes back — see
+the regressions law: *a regression is never just an instance, it is a mechanism.* Re-introducing
+retired code IS the mechanism.
+
+**So: read it, take the reasoning, and write fresh code against whatever the app looks like today.**
+
+Four things keep this directory inert, and all four are verified:
+
+1. **Nothing imports it.** Not from `src/`, not from `tests/`.
+2. **The `@/*` alias cannot reach it** — it maps to `./src/*` only, so `@/lib/onboarding/setup-steps`
+   no longer resolves to anything.
+3. **It is never bundled.** Next builds from the import graph rooted in `src/app`; unreferenced
+   files outside it are not compiled into anything that ships.
+4. **Its tests never run.** Vitest's `include` is `src/**/*.test.ts` and `tests/**/*.test.ts`.
+
+And a fifth, added when this was written: `tsconfig.json` now **excludes `docs`**. Its `include` was
+`**/*.ts`, which reached in here — so a type this archive mentions changing shape would have failed
+`tsc` and broken CI over deliberately dead code. That pressure is exactly what makes somebody
+either delete the archive or, worse, "fix" it until it compiles — quietly turning a historical
+record into a maintained file nobody is testing.
 
 ## setup-steps.ts / setup-steps.test.ts
 
