@@ -383,7 +383,28 @@ export function Inspector({
             Walk-through
           </div>
           {templates.length > 1 && (
-            <Select value={templateId ?? ""} onChange={(e) => setTemplateId(e.target.value || null)} className="max-w-[10rem]">
+            <Select
+              value={templateId ?? ""}
+              className="max-w-[10rem]"
+              onChange={(e) => {
+                const next = e.target.value || null;
+                if (next === templateId) return;
+                // SWITCHING SHEETS IS DESTRUCTIVE, and it used to be destructive SILENTLY: the
+                // pick lived in client state only, so the next autosave wrote the OLD template id
+                // with answers coerced against the NEW playbook — every key nulled, the previous
+                // sheet's answers gone, and nothing on screen saying so. Now it says what it does,
+                // clears deliberately (those answers belong to questions that no longer exist),
+                // and persists the choice so the two can't disagree again.
+                const hasAnswers = Object.values(answers).some(
+                  (v) => v !== null && v !== undefined && v !== "" && !(Array.isArray(v) && !v.length),
+                );
+                if (hasAnswers && !confirm("Switching to a different set of questions clears the answers you've given — they belong to the other sheet. Switch anyway?"))
+                  return;
+                setTemplateId(next);
+                setAnswers({});
+                queueAnswers();
+              }}
+            >
               <option value="">Pick a sheet…</option>
               {templates.map((t) => (
                 <option key={t.id} value={t.id}>{t.name}</option>
