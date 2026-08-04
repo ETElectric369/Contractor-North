@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { GraduationCap } from "lucide-react";
+import { unlockAudio } from "@/lib/tts";
 import { Modal } from "@/components/ui/modal";
 import { SetupInterview } from "@/components/setup-interview";
 import { TourDriver } from "@/components/tour/tour-driver";
@@ -46,7 +47,14 @@ export function SetupButton({
       <button
         type="button"
         data-tour="setup"
-        onClick={() => setMode("tour")}
+        onClick={() => {
+          // UNLOCK AUDIO INSIDE THE TAP. iOS only lets a gesture-touched element play sound
+          // afterwards, and the tour's first line is spoken from an effect AFTER the driver mounts
+          // — which is outside the gesture. Without this, Nort is silent on an iPhone for the whole
+          // first step, on the one screen whose entire job is proving he talks.
+          unlockAudio();
+          setMode("tour");
+        }}
         title={onboarded ? "Take the walk-through again" : "Start here — Nort will show you around"}
         aria-label={onboarded ? "Take the walk-through again" : "Start here, Nort will show you around"}
         className={
