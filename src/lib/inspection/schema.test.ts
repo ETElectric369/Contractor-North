@@ -74,12 +74,23 @@ describe("the schema parser survives bad data", () => {
 describe("what's still missing is computed, not guessed", () => {
   it("lists only genuinely unanswered questions", () => {
     const answers = coerceAnswers(fields, { run_ft: 85, panel_amps: "200A" });
-    // coerce fills every declared key, so an explicit null is the gap signal.
-    expect(unansweredFields(fields, answers).map((f) => f.key)).toEqual(["notes"]);
+    // coerce fills every declared key, so an explicit null is the gap signal — INCLUDING for a
+    // checkbox nobody has touched. This assertion used to read ["notes"] alone, which encoded the
+    // permit bug: an unasked checkbox counted as answered, and coerce wrote `false` behind it.
+    expect(unansweredFields(fields, answers).map((f) => f.key)).toEqual(["attic_access", "notes"]);
+  });
+
+  it("SILENCE IS NOT 'NO' — an untouched checkbox coerces to null, never false", () => {
+    // The failure this prevents, observed in the field: "i did notice the permit spot was gone."
+    // On 13125 Moraine Rd the app stored NO PERMIT on a job the homeowner is permitting for
+    // occupancy — which means inspected before cover, a rough-in hold point and a second trip.
+    // Coercing silence to `false` doesn't lose an answer, it invents the more expensive one.
+    expect(coerceAnswers(fields, {}).attic_access).toBeNull();
   });
 
   it("an UNCHECKED checkbox is an answer ('no'), not a gap", () => {
     const answers = coerceAnswers(fields, { attic_access: false });
+    expect(answers.attic_access).toBe(false); // a decision, not silence
     expect(unansweredFields(fields, answers).map((f) => f.key)).not.toContain("attic_access");
   });
 });

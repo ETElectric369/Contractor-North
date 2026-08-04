@@ -95,6 +95,26 @@ describe('"still open" counts only what applies', () => {
     const open = unansweredFields(SHEET, { work_type: "Troubleshoot", permit: false }).map((f) => f.key);
     expect(open).toEqual([]);
   });
+
+  it("THE PERMIT BUG: a checkbox nulled by clearHiddenAnswers is still UNANSWERED", () => {
+    // clearHiddenAnswers writes a key for EVERY field on every keystroke, so after the first tap
+    // anywhere on the sheet nothing is `undefined` any more. The checkbox rule tested only for
+    // `undefined`, so every checkbox silently counted as answered the instant the sheet was
+    // touched — and left the still-open list having never been asked.
+    //
+    // On 13125 Moraine Rd — a storage room being converted to living space — that recorded
+    // `permit` as unchecked, i.e. NO PERMIT, on a job pulling one for occupancy.
+    const afterOneTap = clearHiddenAnswers(SHEET, { work_type: "Troubleshoot" });
+    expect(afterOneTap.permit).toBeNull(); // this is what the app actually holds
+    expect(unansweredFields(SHEET, afterOneTap).map((f) => f.key)).toContain("permit");
+  });
+
+  it("...and answering it for real still clears it", () => {
+    // The fix must not swing the other way: false is a decision, null is silence.
+    const answered = clearHiddenAnswers(SHEET, { work_type: "Troubleshoot", permit: false });
+    expect(answered.permit).toBe(false);
+    expect(unansweredFields(SHEET, answered).map((f) => f.key)).not.toContain("permit");
+  });
 });
 
 describe("the typed contract still holds — this is the part that must NOT become dynamic", () => {

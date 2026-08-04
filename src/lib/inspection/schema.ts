@@ -113,7 +113,19 @@ export function coerceAnswers(fields: InspectionField[], input: unknown): Inspec
         break;
       }
       case "checkbox":
-        out[f.key] = v === true || v === "true" || v === "on" || v === 1 || v === "1";
+        // SILENCE IS NOT "NO". An absent key means the question was never answered, and coercing
+        // that to `false` doesn't lose the answer — it INVENTS one, and stores the more dangerous
+        // of the two. Same law as the number case directly above: no digits means no answer, not
+        // zero.
+        //
+        // Erik, from the field: "i did notice the permit spot was gone." It was. The question left
+        // his screen the instant he tapped anything (see unansweredFields), and this line then
+        // wrote `false` behind it — recording NO PERMIT on 13125 Moraine Rd, a storage room being
+        // converted to living space. His own correction sharpens why that mattered: he isn't the
+        // one pulling it. The homeowner is pulling an occupancy permit, which means the work gets
+        // INSPECTED BEFORE COVER — a rough-in hold point and a second trip. Stored as "no", that
+        // whole second trip disappears from the estimate.
+        out[f.key] = v === undefined || v === null ? null : v === true || v === "true" || v === "on" || v === 1 || v === "1";
         break;
       case "select": {
         const s = String(v);
@@ -192,8 +204,17 @@ export function clearHiddenAnswers(fields: InspectionField[], answers: Inspectio
 export function unansweredFields(fields: InspectionField[], answers: InspectionAnswers): InspectionField[] {
   return visibleFields(fields, answers).filter((f) => {
     const v = answers[f.key];
-    // An unchecked checkbox is a real answer ("no"), not a gap.
-    if (f.type === "checkbox") return v === undefined;
+    // An unchecked checkbox is a real answer ("no"), not a gap — but ONLY when a person actually
+    // unchecked it. `false` is that answer; `null` is "never touched".
+    //
+    // THE BUG THIS LINE CARRIED: clearHiddenAnswers (:186) writes a key for EVERY field on every
+    // keystroke — `answers[key] ?? null` — so after the first tap anywhere on the sheet no key is
+    // `undefined` any more. This test therefore went false for every checkbox the instant the
+    // sheet was touched, and the question silently left the still-open list having never been
+    // asked. On a real job (13125 Moraine Rd, a storage room being converted to living space) it
+    // ate `permit` — recorded as unchecked, i.e. NO PERMIT, on a job pulling one for occupancy.
+    // The two most consequential facts on the job, gone without a mark on the screen.
+    if (f.type === "checkbox") return v === undefined || v === null;
     return v === undefined || v === null || v === "";
   });
 }
