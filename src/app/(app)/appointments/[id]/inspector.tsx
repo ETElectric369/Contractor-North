@@ -25,7 +25,8 @@ import {
 import { createStarterInspectionSheet } from "../../forms/actions";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { LinkPicker } from "./link-picker";
-import { TellNort } from "./tell-nort";
+import { TellNort } from "@/components/tell-nort";
+import { hearIntoPlaybook } from "../hear-actions";
 import { saveInspectionAnswers, saveInspectionCapture, setAppointmentPlace } from "../actions";
 
 /** A numeric field that can be EMPTY. Deliberately not NumberInput: its value is a `number` and
@@ -424,7 +425,7 @@ export function Inspector({
             order it happens on a job: he talks first, and what's left over is what gets asked. */}
         {!noSheet && (
           <TellNort
-            appointmentId={appointmentId}
+            hear={(a, said) => hearIntoPlaybook(appointmentId, a, said)}
             answers={answers}
             hint={ask[0]?.ask}
             onFilled={(next, filled, note) => {

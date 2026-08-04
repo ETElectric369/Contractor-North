@@ -4,7 +4,7 @@ import { useRef, useState, useTransition } from "react";
 import { Loader2, Mic, Sparkles, Square, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
-import { hearIntoPlaybook } from "../hear-actions";
+import type { HearRun } from "@/lib/playbook/hear-run";
 import type { Answers } from "@/lib/playbook/types";
 
 /**
@@ -26,16 +26,22 @@ import type { Answers } from "@/lib/playbook/types";
  * still his — see hear-actions.
  */
 export function TellNort({
-  appointmentId,
+  hear,
   answers,
   onFilled,
   hint,
+  label = "Just tell Nort",
+  placeholder = "Two new circuits, one for lights one for outlets, finished room they're converting from storage…",
 }: {
-  appointmentId: string;
+  /** The server action for THIS surface. One component, one extraction path, many targets —
+   *  a surface contributes a target and a projection, never an assistant of its own. */
+  hear: (answers: Answers, transcript: string) => Promise<HearRun>;
   answers: Answers;
   onFilled: (next: Answers, filled: string[], note: string) => void;
   /** What the first question is, so the prompt says something true rather than "describe the job". */
   hint?: string;
+  label?: string;
+  placeholder?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
@@ -103,7 +109,7 @@ export function TellNort({
     if (!said) return;
     start(async () => {
       setErr(null);
-      const r = await hearIntoPlaybook(appointmentId, answers, said);
+      const r = await hear(answers, said);
       if (!r.ok) return setErr(r.error);
       onFilled(r.answers, r.filled, r.note);
       setText("");
@@ -132,7 +138,7 @@ export function TellNort({
           }}
           className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 text-sm font-medium text-slate-600 active:bg-slate-50"
         >
-          <Sparkles className="h-4 w-4 text-brand" /> Just tell Nort
+          <Sparkles className="h-4 w-4 text-brand" /> {label}
         </button>
         {said && <p className="mt-1.5 text-xs leading-snug text-emerald-700">{said}</p>}
       </div>
@@ -153,7 +159,7 @@ export function TellNort({
         rows={4}
         autoFocus
         value={text}
-        placeholder="Two new circuits, one for lights one for outlets, finished room they're converting from storage…"
+        placeholder={placeholder}
         onChange={(e) => setText(e.target.value)}
       />
 
