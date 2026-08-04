@@ -139,11 +139,24 @@ export function TourDriver({
 
       {need && (
         <div className="mt-3 rounded-lg bg-slate-50 p-3">
-          {answered ? (
-            <p className="flex items-center gap-1.5 text-sm font-medium text-emerald-700">
-              <Check className="h-4 w-4" /> {need.label}: {String(known)}
+          {/* THE TALK BUTTON IS ALWAYS HERE, answered or not.
+              This hid it. Erik's profile already carries his name, his trade, his town and his
+              rate — so every step showed a green tick and there was NO Talk button anywhere in the
+              entire tour. He said: "i cant press the talk button anywhere to start saying my name."
+              Which is the same mistake as the vanishing setup card, one layer in: I read "we
+              already know this" as "there is nothing to do here", when the whole point of the step
+              is MEETING NORT. Pressing Talk and hearing it come back is the lesson; the answer is
+              a by-product. What is known shows above the mic, and saying it again replaces it. */}
+          {answered && (
+            <p className="mb-2 flex items-center gap-1.5 text-sm text-emerald-700">
+              <Check className="h-4 w-4 shrink-0" />
+              <span>
+                <span className="font-medium">{need.label}:</span> {String(known)}
+                <span className="text-slate-400"> — say it again to change it</span>
+              </span>
             </p>
-          ) : (
+          )}
+          {
             <>
               <div className="flex items-center gap-2">
                 <Button
@@ -183,7 +196,7 @@ export function TourDriver({
                 </Button>
               </form>
             </>
-          )}
+          }
           {(note || dictation.error) && (
             <p className={`mt-2 text-xs ${dictation.error ? "text-rose-600" : "text-slate-500"}`}>
               {dictation.error ?? note}

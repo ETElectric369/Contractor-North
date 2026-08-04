@@ -57,12 +57,14 @@ export const TOUR: TourStep[] = [
     anchor: "nort",
     route: "/planner",
     title: "This is Nort",
+    // "Press Talk" has to say WHICH Talk — the lit-up button behind the card is the real Nort and
+    // the overlay deliberately doesn't take clicks mid-step, so pointing at it without saying
+    // "down here" sends people tapping a button that can't respond.
     say:
-      "Hi — I'm Nort. That button is me, and I'm on every screen in here. " +
-      "Press Talk and tell me your name and what you do, the way you'd tell a person. " +
-      "You can type it instead if you'd rather; I'm not fussy.",
+      "Hi — I'm Nort. That button up there is me, and I'm on every screen in here. " +
+      "Press the Talk button down here and tell me your name and what you do, the way you'd tell " +
+      "a person. Type it instead if you'd rather — I'm not fussy.",
     ask: "full_name",
-    next: "Skip talking, I'll type",
   },
   {
     key: "trade",
