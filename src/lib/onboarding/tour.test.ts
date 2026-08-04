@@ -3,8 +3,8 @@ import { TOUR, sayOf, tourIndex, type TourCtx } from "./tour";
 import { SETUP_PLAYBOOK } from "./setup-playbook";
 
 /** Somebody Nort has never met, and somebody he has. Lines that change must work for both. */
-const STRANGER: TourCtx = { first: "", trade: "", city: "", returning: false };
-const KNOWN: TourCtx = { first: "Erik", trade: "electrical contractor", city: "Truckee", returning: true };
+const STRANGER: TourCtx = { first: "", trade: "", city: "", rate: "", returning: false };
+const KNOWN: TourCtx = { first: "Erik", trade: "electrical contractor", city: "Truckee", rate: "$145", returning: true };
 const spoken = (c: TourCtx) => TOUR.map((s) => sayOf(s.say, c));
 
 /**
@@ -120,6 +120,24 @@ describe("well-formed", () => {
 
   it("it is a tour, not an epic — this gets taken standing in a truck", () => {
     expect(TOUR.length).toBeLessThanOrEqual(20);
+  });
+
+  it("THE LOOP CLOSES BOTH WAYS — he says back what he knows, and what he is for", () => {
+    // Erik: "Nort gets to know me and i get to know Nort … he needs me to know he exists and for
+    // me to know that he knows that i know he knows." Every question before this one is Nort
+    // learning HIM; a loop that only runs one way is a form.
+    const recap = TOUR.find((s) => s.key === "recap")!;
+    const known = sayOf(recap.say, KNOWN);
+    expect(known).toContain("Erik");
+    expect(known).toContain("Truckee");
+    expect(known).toContain("$145");
+    // ...and his own half: what he does, and the promise about numbers.
+    expect(known.toLowerCase()).toContain("every screen");
+    expect(known.toLowerCase()).toContain("make a number up");
+    // A stranger gets the same handshake without dangling commas where facts should be.
+    const cold = sayOf(recap.say, STRANGER);
+    expect(cold).not.toContain("undefined");
+    expect(cold.toLowerCase()).toContain("every screen");
   });
 
   it("resume is total: an unknown or missing key starts at the beginning", () => {

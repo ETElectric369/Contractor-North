@@ -5,12 +5,13 @@ import { usePathname, useRouter } from "next/navigation";
 import { ArrowRight, Check, Loader2, Mic, Square, Volume2, VolumeX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { looseNumber } from "@/lib/inspection/capture";
 import { TourSpotlight } from "./tour-spotlight";
 import { useDictation } from "@/lib/use-dictation";
 import { TOUR, sayOf, type TourCtx } from "@/lib/onboarding/tour";
 import { SETUP_PLAYBOOK } from "@/lib/onboarding/setup-playbook";
 import { speakSmart, stopSpeaking, unlockAudio } from "@/lib/tts";
-import { hearSetup, saveSetup } from "@/app/(app)/setup-actions";
+import { saveSetup, talkSetup } from "@/app/(app)/setup-actions";
 import type { Answers } from "@/lib/playbook/types";
 
 /**
@@ -59,6 +60,8 @@ export function TourDriver({
   const [muted, setMuted] = useState(() => typeof window !== "undefined" && sessionStorage.getItem(MUTE) === "1");
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  // What Nort just SAID back — shown as speech, not as a status line.
+  const [reply, setReply] = useState<string | null>(null);
   const savedRef = useRef(false);
   // The auto-advance fires from inside a callback that closed over an older render, so it reads
   // the step and the mute flag from refs rather than from a stale closure.
@@ -73,6 +76,7 @@ export function TourDriver({
     first: str("full_name").split(/\s+/)[0] ?? "",
     trade: str("trade"),
     city: str("city"),
+    rate: typeof answers.labor_rate === "number" && answers.labor_rate > 0 ? `$${answers.labor_rate}` : "",
     returning,
   };
 
@@ -118,54 +122,29 @@ export function TourDriver({
       if (!said.trim()) return;
       setBusy(true);
       setNote(null);
-      // ANSWERING THE QUESTION IN FRONT OF YOU IS A HAND, AND IT WINS.
-      //
-      // Erik pressed Talk on step one, said his name, and got "didn't catch anything I could use".
-      // It heard him perfectly. applyFills holds FILL HOLES, NEVER OVERWRITE A HAND — and his
-      // profile already carried "Erik Taylor", so the fill was refused as an overwrite. The card
-      // said "say it again to change it" while the code forbade exactly that.
-      //
-      // The law is right; the hole was in the wrong place. Somebody deliberately re-answering THIS
-      // question is not a model overwriting a person — it IS the person. So blank this one need
-      // first and let the answer land. Every OTHER answer stays protected, which is the part that
-      // actually needed protecting: a rambling sentence must still not stomp on four other fields.
-      const target = step.ask ? { ...answers, [step.ask]: null } : answers;
-      const r = await hearSetup(target, said);
+      // A TURN OF CONVERSATION, not a parse. Erik said "Hello. That works. What's next?" and was
+      // told his words couldn't be turned into an answer — correct as extraction, wrong as
+      // behaviour, because what is being taught in that moment is that Nort is somebody you can
+      // talk to. talkSetup replies to what was actually said AND fills what it can, through the
+      // same gate as ever.
+      const r = await talkSetup(step.ask ?? null, answers, said);
       setBusy(false);
       if (!r.ok) return setNote(r.error);
       setAnswers(r.answers);
       setTyped("");
-      if (!r.filled.length)
-        // Say what it HEARD. "Didn't catch anything" reads as a broken mic when the mic was fine,
-        // and sends somebody off chasing a permissions problem they don't have.
-        return setNote(`Heard "${said}" — but I couldn't turn that into an answer for this one. Try again, or type it.`);
+      setReply(r.say);
+      if (!mutedRef.current && r.say) speakSmart(r.say);
 
-      // ── THE WALL, AND WHY IT WAS ONE ────────────────────────────────────────────────────────
-      // Erik: "proceed conversing without this wall inbetween questions."
-      // You spoke, and then: silence, a line of grey text, and a Next button to go find. Nothing
-      // in that is a conversation — it is a form that happens to have a microphone. A person who
-      // answers a question gets acknowledged and then asked the next one, so that is what happens:
-      // Nort says he got it, by name, and moves on by himself. Answering IS the advance.
-      // CONFIRM WHAT IT STORED, NOT THAT IT STORED SOMETHING. Erik: "nort continues to confirm my
-      // answers are correct (in this case its important)". "Got it" is a receipt for a transaction
-      // nobody saw. Reading the VALUE back is the only version somebody can catch a mistake in —
-      // and on a job site the thing most likely to be misheard is the number that becomes money.
-      const heardName = typeof r.answers.full_name === "string" ? r.answers.full_name.trim().split(/\s+/)[0] : "";
+      // MOVE ON ONLY WHEN THIS QUESTION IS ACTUALLY ANSWERED. Advancing on any reply would carry
+      // somebody past a question they only chatted about; staying put after they answered is the
+      // wall. Nothing filled = Nort has just asked again, in smaller words, and we wait.
       const landed = step.ask ? r.answers[step.ask] : null;
-      const value = Array.isArray(landed) ? landed.join(", ") : landed === null || landed === undefined ? "" : String(landed);
-      setNote(`Got it — ${r.filled.join(", ")}.`);
-      if (!mutedRef.current)
-        speakSmart(
-          value
-            ? `Got it${heardName ? `, ${heardName}` : ""} — ${value}. Say it again if that's not right.`
-            : "Got it.",
-        );
-      // Sized to the read-back, not to a two-word grunt: the next question must not start talking
-      // over the confirmation somebody is meant to be checking. Roughly speaking pace, floored so
-      // a one-word answer still gets a beat.
-      advance.current = setTimeout(() => void go(iRef.current + 1), Math.min(6000, 1600 + value.length * 55));
+      const ok = landed !== null && landed !== undefined && String(landed).trim() !== "";
+      if (ok) {
+        const words = r.say.length;
+        advance.current = setTimeout(() => void go(iRef.current + 1), Math.min(9000, 1800 + words * 55));
+      }
     },
-    // `go` is stable enough for this purpose and pulling it in would re-arm the mic every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [answers, step.ask],
   );
@@ -198,6 +177,7 @@ export function TourDriver({
     // Leaving the last question → save what was said.
     if (TOUR[i].ask && !TOUR[to]?.ask) await commit();
     setNote(null);
+    setReply(null);
     setI(Math.max(0, to));
   };
 
@@ -223,13 +203,31 @@ export function TourDriver({
               is MEETING NORT. Pressing Talk and hearing it come back is the lesson; the answer is
               a by-product. What is known shows above the mic, and saying it again replaces it. */}
           {answered && (
-            <p className="mb-2 flex items-center gap-1.5 text-sm text-emerald-700">
-              <Check className="h-4 w-4 shrink-0" />
-              <span>
-                <span className="font-medium">{need.label}:</span> {String(known)}
-                <span className="text-slate-400"> — say it again to change it</span>
-              </span>
-            </p>
+            <div className="mb-3">
+              <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+                <Check className="h-3.5 w-3.5 shrink-0" /> {need.label} — check the spelling
+              </label>
+              {/* EDITABLE, MIDSTREAM. Erik: "the availability to edit it midstream to make absolute
+                  sure every bit of information is accurate, spelled correctly, understood
+                  correctly." Speech-to-text mangles surnames and town names more than anything
+                  else, and this exact string goes on every estimate this company ever sends. A
+                  read-only tick would have made it somebody's job to notice later. */}
+              {need.slot?.type === "number" ? (
+                <div className="flex items-center gap-2">
+                  <Input
+                    inputMode="decimal"
+                    value={typeof known === "number" ? String(known) : ""}
+                    onChange={(e) => setAnswers((a) => ({ ...a, [step.ask!]: looseNumber(e.target.value) }))}
+                  />
+                  <span className="shrink-0 text-sm text-slate-500">{need.slot.unit}</span>
+                </div>
+              ) : (
+                <Input
+                  value={typeof known === "string" ? known : String(known ?? "")}
+                  onChange={(e) => setAnswers((a) => ({ ...a, [step.ask!]: e.target.value }))}
+                />
+              )}
+            </div>
           )}
           {
             <>
@@ -272,6 +270,11 @@ export function TourDriver({
               </form>
             </>
           }
+          {reply && (
+            <p className="mt-2 rounded-lg bg-brand-light px-3 py-2 text-sm leading-relaxed text-slate-700">
+              {reply}
+            </p>
+          )}
           {(note || dictation.error) && (
             <p className={`mt-2 text-xs ${dictation.error ? "text-rose-600" : "text-slate-500"}`}>
               {dictation.error ?? note}

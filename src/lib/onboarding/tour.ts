@@ -53,6 +53,8 @@ export interface TourCtx {
   first: string;
   trade: string;
   city: string;
+  /** Their hourly rate, already formatted, or "" — so a line can say it back to them. */
+  rate: string;
   /** They have finished the tour before; this is a revisit, not an introduction. */
   returning: boolean;
 }
@@ -132,6 +134,36 @@ export const TOUR: TourStep[] = [
       "It's a starting point an estimate uses so you're not doing the maths; " +
       "you change it per job and per customer whenever you like.",
     ask: "labor_rate",
+  },
+
+  // ── 1b. THE HANDSHAKE. Both directions, out loud. ──────────────────────────────────────────
+  //
+  // Erik: "Nort gets to know me and i get to know Nort, what he can and where everything i need to
+  // use is located and how … Nort needs me to know he exists and for me to know that he knows that
+  // i know he knows, know what i mean?"
+  //
+  // Yes. Every question so far has been NORT learning HIM. Nothing yet has closed the loop the
+  // other way, and a loop that only runs one way is a form. So he stops, says back everything he
+  // now holds — in the person's own terms, so a wrong one is obvious and fixable — and then says
+  // what he is FOR. That is the moment the two of them are working off the same picture, and
+  // everything after it lands differently because of it.
+  {
+    key: "recap",
+    anchor: "nort",
+    title: "So — here's you, and here's me",
+    say: (c) => {
+      const bits = [c.first, c.trade, c.city ? `out of ${c.city}` : "", c.rate ? `at ${c.rate} an hour` : ""]
+        .filter(Boolean)
+        .join(", ");
+      return (
+        (bits ? `Right. I've got you as ${bits}. If any of that's wrong, go back a step and say it again — ` : "Right. ") +
+        "everything I know about you is something you told me, and you can change all of it later.\n\n" +
+        "Now my half. I'm on every screen, and I'm most useful on a job: press Talk, say the whole " +
+        "job the way you'd say it to a person, and I'll fill in the questions from what you said. " +
+        "I write your estimates, I look things up, and I'll tell you when I'm not sure. " +
+        "What I won't do is make a number up — if you didn't say it, I ask."
+      );
+    },
   },
 
   // ── 2. THE WHY LINE. The part nobody figures out unaided. ──────────────────────────────────

@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { runHear, type HearRun } from "@/lib/playbook/hear-run";
 import { coerceByPlaybook } from "@/lib/playbook/answers";
+import { applyFills, clearInapplicable } from "@/lib/playbook/resolve";
+import { CONVERSE_SYSTEM, conversePrompt, fallbackSay, parseSpoken } from "@/lib/onboarding/converse";
 import { playbookForForm } from "@/lib/playbook/parse";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { getOrgSettings } from "@/lib/org-settings";
@@ -18,6 +20,69 @@ type Result = { ok: true; seededSheet: boolean } | { ok: false; error: string };
 export type DraftResult =
   | { ok: true; formId: string; needs: Need[]; wasDrafted: boolean }
   | { ok: false; error: string };
+
+export type TalkResult =
+  | { ok: true; say: string; answers: Answers; filled: string[] }
+  | { ok: false; error: string };
+
+/**
+ * A TURN OF CONVERSATION during setup — Nort replies AND fills, in one call.
+ *
+ * Erik: "we are looking for an interactive dialogue not a dictation based response then frozen …
+ * walked through and talked through like a 5 year old kid because thats how they are going to
+ * learn." He said "Hello. That works. What's next?" and was told his words couldn't be turned into
+ * an answer. Correct as extraction, wrong as behaviour: the thing being taught in that moment is
+ * that Nort is somebody you can talk to, and an error message teaches the opposite.
+ *
+ * THE GATE IS UNCHANGED. Whatever the model proposes still goes through applyFills — the
+ * provenance rule, and FILL HOLES NEVER OVERWRITE A HAND — and then through coerceByPlaybook, so
+ * a friendlier voice buys exactly zero extra trust. Only the REPLY is new.
+ */
+export async function talkSetup(needKey: string | null, answers: Answers, said: string): Promise<TalkResult> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Sign in first." };
+
+  const text = String(said ?? "").trim();
+  if (!text) return { ok: false, error: "Nothing to go on yet." };
+  if (text.length > 4000) return { ok: false, error: "That's a lot at once — break it up a bit." };
+
+  const known = coerceByPlaybook(SETUP_PLAYBOOK, answers);
+  const need = needKey ? SETUP_PLAYBOOK.needs.find((n) => n.key === needKey) : undefined;
+  const first = typeof known.full_name === "string" ? known.full_name.trim().split(/\s+/)[0] : "";
+
+  // No model configured is not a dead end — the boxes still work, and Nort still says something.
+  if (!process.env.ANTHROPIC_API_KEY)
+    return { ok: true, say: fallbackSay(need, false, first), answers: known, filled: [] };
+
+  let raw = "";
+  try {
+    const resp = await getAnthropic().messages.create({
+      model: DEFAULT_MODEL,
+      max_tokens: 1200,
+      system: [{ type: "text", text: CONVERSE_SYSTEM, cache_control: { type: "ephemeral" } }],
+      messages: [{ role: "user", content: conversePrompt(need, known, text, first) }],
+    });
+    raw = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("\n").trim();
+  } catch {
+    // A model that is down must not become an error message about a model being down.
+    return { ok: true, say: fallbackSay(need, false, first), answers: known, filled: [] };
+  }
+
+  const spoken = parseSpoken(raw);
+  // SAME GATE AS EVER: provenance, no overwriting a hand, no undeclared keys.
+  const { answers: next, rejected } = applyFills(SETUP_PLAYBOOK, known, spoken.fills, text);
+  const filled = spoken.fills
+    .filter((f) => !rejected.includes(f))
+    .map((f) => SETUP_PLAYBOOK.needs.find((n) => n.key === f.key)?.label ?? f.key);
+
+  return {
+    ok: true,
+    say: spoken.say || fallbackSay(need, filled.length > 0, first),
+    answers: clearInapplicable(SETUP_PLAYBOOK, coerceByPlaybook(SETUP_PLAYBOOK, next)),
+    filled,
+  };
+}
 
 /** Setting a company up is the same shape as walking a job — same playbook, same extraction. */
 export async function hearSetup(answers: Answers, transcript: string): Promise<HearRun> {
