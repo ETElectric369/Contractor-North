@@ -59,6 +59,17 @@ export type Clause =
   | { key: string; in: string[] } // membership — matches a scalar OR any member of a multi-select
   | { key: string; known: true }; // just needs any answer at all
 
+/**
+ * The five feeders. Which of them a need serves — and it is genuinely PLURAL.
+ *
+ * "Is anybody pulling a permit, and for what?" feeds WHY (the reason the room is being
+ * reclassified), WHEN (a rough-inspection hold point before cover — an entire second
+ * mobilisation) and WHAT (AFCI, receptacle spacing, smoke/CO). A singular field would erase
+ * exactly the property that makes WHY worth building: the multiplier IS a need with more than
+ * one tag.
+ */
+export type Dimension = "who" | "what" | "where" | "when" | "why";
+
 export interface Need {
   key: string;
   /** The cold renderer's label. Short. */
@@ -86,6 +97,32 @@ export interface Need {
   measured?: boolean;
   /** Answerable from a picture. */
   photo?: boolean;
+
+  /**
+   * WHICH OF THE FIVE THIS SERVES. Plural — see Dimension.
+   *
+   * Not taxonomy. Three mechanical payoffs:
+   *  1. THE TAG IS THE SOCKET. A `where` answer writes the four address columns; `when` writes a
+   *     schedule segment; `who` writes a link. An untagged need can only ever produce prose —
+   *     which is precisely the fate of every WHY this app has ever recorded.
+   *  2. IT LETS A NEED BE PRE-RESOLVED INSTEAD OF ASKED. See `resolvedFrom`.
+   *  3. ORDERING FOR FREE. WHERE and WHO are knowable at first contact, WHAT needs a visit, WHEN
+   *     needs WHAT, and WHY gates all of them because it changes WHAT's quantities. Tags sort the
+   *     ask-list; nobody has to model edges.
+   */
+  feeds?: Dimension[];
+
+  /**
+   * A path on the record that may ALREADY answer this — "inquiry.address", "appointment.starts_at".
+   *
+   * This is the actual Moraine Rd failure, stated as a field. The sheet did not ask a wrong
+   * question; it asked its whole list regardless of the nine facts Erik had already said out loud.
+   * A need with a resolvedFrom is checked against what is known BEFORE it is rendered, and only
+   * the genuinely unresolved ones reach the screen.
+   *
+   * That is the entire difference between a form and an assistant, and it is one field.
+   */
+  resolvedFrom?: string;
 }
 
 export interface Playbook {
