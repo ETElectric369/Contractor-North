@@ -7,7 +7,9 @@ import { GlobalAssistant } from "@/components/global-assistant";
 import { GlobalQuickAdd } from "@/components/global-quick-add";
 import { NotificationBell } from "@/components/app-shell/notification-bell";
 import { AccountMenu } from "@/components/account-menu";
+import { SetupButton } from "@/components/setup-button";
 import { hasInAppHistory } from "@/components/back-link";
+import type { Answers } from "@/lib/playbook/types";
 import type { Profile } from "@/lib/types";
 
 /**
@@ -20,10 +22,14 @@ export function Topbar({
   profile,
   lang,
   branding,
+  setup,
 }: {
   profile: Profile | null;
   lang?: string;
   branding?: { name: string | null; logo: string | null };
+  /** What the company has and hasn't said about itself, in the setup playbook's keys. Comes from
+   *  the layout, which already reads org settings for branding — so the door costs no extra query. */
+  setup?: Answers;
 }) {
   const router = useRouter();
   // Staff = owner/admin/office — the same rule the layout uses (it already
@@ -68,6 +74,11 @@ export function Topbar({
       <div className="flex items-center gap-2 sm:gap-3">
         {/* ONE assistant — voice + chat + actions — reachable from every screen. */}
         <GlobalAssistant />
+        {/* THE INTERVIEW, beside the speak button, on every screen (cn-v633). It used to be a card
+            on My Day that hid itself once setup was done — correct for a card, wrong for this:
+            the moment somebody wants to change what they said, the thing they used has evaporated.
+            Loud while it matters, quiet forever after, never gone. */}
+        {setup && <SetupButton initial={setup} isStaff={isStaff} />}
         <GlobalQuickAdd placement="topbar" isStaff={isStaff} />
         <button
           onClick={() => window.dispatchEvent(new Event("cn:command"))}

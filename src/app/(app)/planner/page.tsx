@@ -25,7 +25,6 @@ import { AppointmentButton, type ApptValue } from "../appointments/appointment-b
 import { JobMoveButton, ApptMoveButton } from "./agenda-move";
 import { NewTaskBox } from "../tasks/tasks-view";
 import { QuickCostButton } from "@/components/quick-cost-button";
-import { SetupCard } from "./setup-card";
 
 export const dynamic = "force-dynamic";
 
@@ -245,18 +244,6 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
 
   const org = orgRow;
   const orgLocation = formatCityStateZip((org as any)?.city, (org as any)?.state, (org as any)?.zip) || null;
-
-  // WHAT THE COMPANY STILL HASN'T SAID ABOUT ITSELF. Read straight off settings into the setup
-  // playbook's keys, so the card and the resolver agree by construction rather than by a second
-  // checklist that drifts. Everything answered → the card returns null and nobody sees it.
-  const s = getOrgSettings((org as any)?.settings);
-  const setupInitial = {
-    full_name: (me as any)?.full_name ?? null,
-    trade: s.trade_label || null,
-    city: s.public_city || null,
-    service_area: s.service_area || null,
-    labor_rate: s.default_labor_rate > 0 ? s.default_labor_rate : null,
-  };
   // Simple, deep, spiritual — timeless wisdom (public-domain sources + universal proverbs),
   // grounding for a crew starting the day. Rotated by day-of-YEAR so it advances every day
   // instead of repeating on the same date each month.
@@ -557,16 +544,6 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         />
       </div>
       <p className="mb-4 text-sm italic text-slate-400">&ldquo;{dailyQuote}&rdquo;</p>
-
-      {/* THE INTERVIEW, above everything, until there's nothing left to ask. The first outside
-          tenant landed here with no trade, no town and no rate — a generic walk-through, a weather
-          widget that threw, and an estimator that couldn't price labour. None of it explained.
-          It renders nothing once the answers are in, so it can never become furniture. */}
-      {isStaff && (
-        <div className="mb-4">
-          <SetupCard initial={setupInitial} />
-        </div>
-      )}
 
       {/* TOP ROW (Erik 7/15) — staff get a 2-col split (stacked on the phone):
           the MINIMAL clock (cn-v502) LEFT, the open-leads snapshot RIGHT — the

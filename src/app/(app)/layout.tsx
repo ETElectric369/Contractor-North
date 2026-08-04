@@ -132,6 +132,15 @@ export default async function AppLayout({
     billingEnabled && org && !isCompedOrg(profile.org_id) ? graceDaysLeft(org as any) : 0;
 
   const branding = { name: org?.name ?? null, logo: org?.logo_url ?? null };
+  // WHAT THE COMPANY STILL HASN'T SAID ABOUT ITSELF, in the setup playbook's own keys — read off
+  // the settings this layout already loaded, so the always-there interview door costs no query.
+  const setup = {
+    full_name: profile.full_name ?? null,
+    trade: settings.trade_label || null,
+    city: settings.public_city || null,
+    service_area: settings.service_area || null,
+    labor_rate: settings.default_labor_rate > 0 ? settings.default_labor_rate : null,
+  };
   // ONE per-org color source: the sea-glass tint. `brand` (the solid accent used by
   // bg-brand / text-brand across the app AND on documents) now DERIVES from the tint —
   // there is no separate company blue anymore. Ink = the strong fill (matches the CTA
@@ -176,7 +185,7 @@ export default async function AppLayout({
     >
       <Dock branding={branding} role={profile.role} badges={badges} />
       <div className="flex flex-1 flex-col overflow-hidden">
-        <Topbar profile={(profile as Profile) ?? null} lang={profile.language} branding={branding} />
+        <Topbar profile={(profile as Profile) ?? null} lang={profile.language} branding={branding} setup={setup} />
         {graceLeft > 0 && (
           <div
             className={`no-print px-4 py-2 text-center text-sm font-medium ${
