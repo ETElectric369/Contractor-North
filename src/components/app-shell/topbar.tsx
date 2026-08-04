@@ -76,16 +76,19 @@ export function Topbar({
 
       <div className="flex items-center gap-2 sm:gap-3">
         {/* ONE assistant — voice + chat + actions — reachable from every screen. */}
-        <GlobalAssistant />
+        {/* data-tour anchors: the spotlight finds these by attribute at step time. A wrapper span
+            rather than a prop on each component — no component has to know a tour exists. */}
+        <span data-tour="nort" className="inline-flex"><GlobalAssistant /></span>
         {/* THE INTERVIEW, beside the speak button, on every screen (cn-v633). It used to be a card
             on My Day that hid itself once setup was done — correct for a card, wrong for this:
             the moment somebody wants to change what they said, the thing they used has evaporated.
             Loud while it matters, quiet forever after, never gone. */}
         {setup && <SetupButton initial={setup} isStaff={isStaff} onboarded={!!onboarded} />}
-        <GlobalQuickAdd placement="topbar" isStaff={isStaff} />
+        <span data-tour="quickadd" className="inline-flex"><GlobalQuickAdd placement="topbar" isStaff={isStaff} /></span>
         <button
           onClick={() => window.dispatchEvent(new Event("cn:command"))}
           className="flex items-center gap-2 rounded-lg border border-slate-200 px-2.5 py-2 text-slate-500 hover:bg-slate-50 sm:px-3"
+          data-tour="search"
           title="Search & commands (⌘K)"
           aria-label="Search and commands"
         >
@@ -94,10 +97,10 @@ export function Topbar({
           <span className="hidden rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-400 md:inline">⌘K</span>
         </button>
         {/* The in-app bell — the always-works notification channel (push-independent). */}
-        <NotificationBell />
+        <span data-tour="bell" className="inline-flex"><NotificationBell /></span>
         {/* The account seek door — always visible, far right: Sign out, language,
             estimate QR. See account-menu.tsx for THE MODAL RULE it hosts. */}
-        <AccountMenu profile={profile} lang={lang} />
+        <span data-tour="account" className="inline-flex"><AccountMenu profile={profile} lang={lang} /></span>
       </div>
     </header>
   );

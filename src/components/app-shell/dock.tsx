@@ -56,7 +56,7 @@ function DockInner({ branding, role, badges }: DockProps) {
     <>
       {/* ── DESKTOP (shell:): the left icon rail + an inside-left nav column for the section's pages ── */}
       <div className="hidden h-full shell:flex">
-        <aside className="glass relative z-[70] flex h-full w-[84px] flex-col items-center gap-1 border-r border-white/40 py-3">
+        <aside data-tour="dock" className="glass relative z-[70] flex h-full w-[84px] flex-col items-center gap-1 border-r border-white/40 py-3">
           <Link href="/planner" className="mb-1 flex h-11 w-11 items-center justify-center rounded-2xl" aria-label={branding?.name ?? "Home"} title={branding?.name ?? "Contractor North"}>
             {logo ? (
               // eslint-disable-next-line @next/next/no-img-element

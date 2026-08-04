@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowRight, Check, ClipboardList, Loader2, Sparkles } from "lucide-react";
@@ -45,12 +45,17 @@ type Step = 1 | 2 | 3;
 export function SetupInterview({
   initial,
   onSaved,
+  startAt = 1,
 }: {
   initial: Answers;
   onSaved?: () => void;
+  /** Where to open. The TOUR already asks the company questions out loud and already explains what
+   *  a why line is, so it hands off at 2 — straight to the draft it just promised. Opening at 1
+   *  after that would ask everything twice, which is how a tutorial teaches people to skip. */
+  startAt?: Step;
 }) {
   const router = useRouter();
-  const [step, setStep] = useState<Step>(1);
+  const [step, setStep] = useState<Step>(startAt);
   const [answers, setAnswers] = useState<Answers>(initial);
   const [dirty, setDirty] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -61,6 +66,21 @@ export function SetupInterview({
   const [formId, setFormId] = useState<string | null>(null);
   const [needs, setNeeds] = useState<Need[] | null>(null);
   const [wasDrafted, setWasDrafted] = useState(false);
+  const drafting = useRef(false);
+
+  // ENTERING AT STEP 2 (straight off the tour) has to fetch its own draft — the transition that
+  // normally does it was never taken. Guarded so React's double-invoke in dev can't ask twice.
+  useEffect(() => {
+    if (startAt !== 2 || needs || drafting.current) return;
+    drafting.current = true;
+    start(async () => {
+      const d = await draftMyPlaybook();
+      if (!d.ok) return setErr(d.error);
+      setFormId(d.formId);
+      setNeeds(d.needs);
+      setWasDrafted(d.wasDrafted);
+    });
+  }, [startAt, needs, start]);
 
   const open = missingNeeds(SETUP_PLAYBOOK, answers);
   const total = SETUP_PLAYBOOK.needs.length;
