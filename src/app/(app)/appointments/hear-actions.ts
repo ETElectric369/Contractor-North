@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { playbookForForm } from "@/lib/playbook/parse";
 import { coerceByPlaybook } from "@/lib/playbook/answers";
+import { clearInapplicable } from "@/lib/playbook/resolve";
 import { applyHeard, hearRequest, parseHeard, HEAR_SYSTEM } from "@/lib/playbook/hear";
 import type { Answers } from "@/lib/playbook/types";
 
@@ -62,6 +63,7 @@ export async function hearIntoPlaybook(
   if (!form) return { ok: false, error: "That walk-through no longer exists." };
 
   const pb = playbookForForm(form as { schema?: unknown; playbook?: unknown });
+  if (!pb.needs.length) return { ok: false, error: "That walk-through has no questions in it yet." };
   // Coerce what the client thinks it has BEFORE reasoning about it, so a tampered payload can't
   // pass off an unanswered need as answered (which would suppress a question) or vice versa.
   const known = coerceByPlaybook(pb, answers);
@@ -86,7 +88,15 @@ export async function hearIntoPlaybook(
   }
 
   const applied = applyHeard(pb, known, said, parseHeard(text));
-  // Coerce again on the way out: applyFills honours the provenance gate but the VALUE still has to
-  // satisfy the slot — an option outside the list, a number that isn't one. Same contract as a tap.
-  return { ok: true, answers: coerceByPlaybook(pb, applied.answers), filled: applied.filled, note: applied.note };
+  // Coerce, THEN clear — in that order, and it matters. applyFills honours the provenance gate but
+  // the VALUE still has to satisfy the slot (an option outside the list, a number that isn't one),
+  // and coercing can null the very answer a downstream gate was resolved against. Clearing last
+  // means what comes back is consistent with itself: same contract as a tap, same order as the
+  // save path.
+  return {
+    ok: true,
+    answers: clearInapplicable(pb, coerceByPlaybook(pb, applied.answers)),
+    filled: applied.filled,
+    note: applied.note,
+  };
 }
