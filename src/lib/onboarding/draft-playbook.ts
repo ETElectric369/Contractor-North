@@ -60,7 +60,16 @@ export function draftRequest(pb: Playbook, about: string): string {
   return `ABOUT HIM:\n${about}\n\nHIS QUESTIONS:\n${lines.join("\n")}`;
 }
 
-/** Merge drafted prose onto the real playbook. Structure is never taken from the model. */
+/**
+ * Merge drafted prose onto the real playbook. Structure is never taken from the model.
+ *
+ * AND A WHY SOMEBODY ALREADY WROTE IS NEVER OVERWRITTEN — enforced here, in code, not asked for in
+ * the prompt. Same law as the provenance gate and as applyFills: FILL HOLES, NEVER OVERWRITE A
+ * HAND. Erik's own playbook carries fifteen long why lines written from his own words; a
+ * walk-through that quietly reworded them would destroy the exact thing this whole build exists to
+ * capture, and he'd have to read fifteen paragraphs closely to notice. Blank lines get drafted;
+ * written ones get read, which is training enough.
+ */
 export function applyDraft(pb: Playbook, raw: unknown): Playbook {
   const src = (raw as { needs?: unknown } | null)?.needs;
   const byKey = new Map<string, { ask?: string; why?: string }>();
@@ -80,7 +89,15 @@ export function applyDraft(pb: Playbook, raw: unknown): Playbook {
   return {
     needs: pb.needs.map((n) => {
       const d = byKey.get(n.key);
-      return { ...n, ...(d?.ask ? { ask: d.ask } : {}), ...(d?.why ? { why: d.why } : {}) };
+      const mine = !!n.why?.trim();
+      return {
+        ...n,
+        // An ask they already wrote is theirs too — only a mechanical one (a label with a question
+        // mark bolted on) is worth replacing, and a need with a real why is a need they've been
+        // through. Leave the whole thing alone.
+        ...(d?.ask && !mine ? { ask: d.ask } : {}),
+        ...(d?.why && !mine ? { why: d.why } : {}),
+      };
     }),
   };
 }

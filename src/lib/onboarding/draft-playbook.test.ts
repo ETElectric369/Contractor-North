@@ -75,6 +75,28 @@ describe("STRUCTURE IS NEVER TAKEN FROM THE MODEL — only prose", () => {
     expect(untouched.ask).toBe(before.ask);
   });
 
+  it("FILL HOLES, NEVER OVERWRITE A HAND — a why somebody wrote is untouchable", () => {
+    // Erik's own playbook carries fifteen long why lines in his own words. A walk-through that
+    // quietly reworded them would destroy the exact thing this build exists to capture, and he'd
+    // have to read fifteen paragraphs closely to notice. Enforced in code, not asked for in the
+    // prompt — same law as the provenance gate.
+    const his: Playbook = {
+      needs: [{ key: "feed", label: "Feed", ask: "Subpanel, or home runs?", why: "The fork itself. Everything is downstream of it." }],
+    };
+    const after = applyDraft(his, {
+      needs: [{ key: "feed", ask: "How will power be distributed?", why: "Determines the electrical distribution strategy." }],
+    });
+    expect(after.needs[0].why).toBe(his.needs[0].why);
+    expect(after.needs[0].ask).toBe(his.needs[0].ask);
+  });
+
+  it("...but a BLANK one gets drafted, which is the whole point", () => {
+    const blank: Playbook = { needs: [{ key: "feed", label: "Feed", ask: "Feed?" }] };
+    const after = applyDraft(blank, { needs: [{ key: "feed", ask: "Subpanel, or home runs?", why: "The fork." }] });
+    expect(after.needs[0].why).toBe("The fork.");
+    expect(after.needs[0].ask).toBe("Subpanel, or home runs?");
+  });
+
   it("garbage in leaves the playbook exactly as it was", () => {
     for (const junk of [null, undefined, "nope", {}, { needs: "x" }, { needs: [1, null] }])
       expect(applyDraft(ELECTRICAL, junk)).toEqual(ELECTRICAL);
