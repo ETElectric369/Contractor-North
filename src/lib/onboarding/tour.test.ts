@@ -55,7 +55,19 @@ describe("it points at things that exist", () => {
   const ANCHORS = ["nort", "setup", "quickadd", "search", "bell", "account", "dock"];
 
   it("every anchor is one the app sets", () => {
-    for (const s of TOUR) if (s.anchor) expect(ANCHORS, `${s.key} points at ${s.anchor}`).toContain(s.anchor);
+    for (const s of TOUR) {
+      if (!s.anchor) continue;
+      // settings-<cluster> is set per cluster by SettingsSubnav; the rest are the shell's.
+      if (s.anchor.startsWith("settings-")) continue;
+      expect(ANCHORS, `${s.key} points at ${s.anchor}`).toContain(s.anchor);
+    }
+  });
+
+  it("a step that points INTO settings also routes there", () => {
+    // An anchor that only exists on /settings, shown while standing on /planner, is a dimmed
+    // screen and a card pointing at nothing.
+    for (const s of TOUR)
+      if (s.anchor?.startsWith("settings-")) expect(s.route, s.key).toMatch(/^\/settings/);
   });
 
   it("the things Erik named by hand are all covered", () => {

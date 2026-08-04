@@ -174,14 +174,27 @@ export const TOUR: TourStep[] = [
       "Under your account: signing out, language, and your estimate QR code — " +
       "the one you put on the truck or a business card so a customer can send you a job themselves.",
   },
+  // WALK THEM THERE, don't describe it. Erik asked "how does the nav work and where are the
+  // settings and my qr code and all the things" — pointing at the nav rail while talking about
+  // Settings answers none of that. These two steps put him ON the page, looking at the thing.
   {
     key: "settings",
-    anchor: "dock",
-    title: "Settings, and your Playbook",
+    route: "/settings",
+    title: "Settings — the whole business",
     say:
-      "Settings holds the business — money, scheduling, your website. " +
-      "And there's a Playbook section: that's where your questions and your why lines live, " +
-      "and you can change any of them any time your mind changes.",
+      "This is Settings. Everything about the business is on this one page behind those sections — " +
+      "money and tax, scheduling, your website, the connections to Google and the rest. " +
+      "You don't have to remember any of it; it's all in the one place.",
+  },
+  {
+    key: "playbook-tab",
+    route: "/settings?tab=playbook",
+    anchor: "settings-playbook",
+    title: "And this is your Playbook",
+    say:
+      "That's the one to remember. Every question I'll ask you on a job is in here, with its why " +
+      "line, and you can rewrite, reorder or delete any of them whenever your mind changes. " +
+      "This is yours, not mine — I just do what it says.",
   },
 
   // ── 4. THE JOB. What this is all for. ──────────────────────────────────────────────────────
@@ -204,6 +217,7 @@ export const TOUR: TourStep[] = [
   },
   {
     key: "done",
+    route: "/planner",
     anchor: "setup",
     title: "That's it",
     say:

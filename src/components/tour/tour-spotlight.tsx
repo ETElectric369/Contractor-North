@@ -55,13 +55,21 @@ export function TourSpotlight({
       return;
     }
     let raf = 0;
+    // THE FIRST *VISIBLE* MATCH, not the first match. One name can have two elements — the dock
+    // is a rail on a computer and a bar at the bottom of a phone, and whichever one isn't in play
+    // is `hidden`, i.e. present in the DOM at zero size. querySelector found that one, measured
+    // nothing, and gave up: on a phone the nav step pointed at empty air.
+    const findVisible = () => {
+      const all = Array.from(document.querySelectorAll<HTMLElement>(`[data-tour="${anchor}"]`));
+      return all.find((el) => {
+        const r = el.getBoundingClientRect();
+        return r.width >= 2 && r.height >= 2;
+      });
+    };
     const measure = () => {
-      const el = document.querySelector<HTMLElement>(`[data-tour="${anchor}"]`);
+      const el = findVisible();
       if (!el) return setRect(null);
       const r = el.getBoundingClientRect();
-      // A zero-size box is an element that is present but hidden (a `hidden md:inline` label, a
-      // collapsed dock). Treat it as absent rather than spotlighting a point.
-      if (r.width < 2 || r.height < 2) return setRect(null);
       setRect({ top: r.top - PAD, left: r.left - PAD, width: r.width + PAD * 2, height: r.height + PAD * 2 });
     };
     const loop = () => {
@@ -69,7 +77,7 @@ export function TourSpotlight({
       raf = requestAnimationFrame(loop);
     };
     // Scroll it into view first — a spotlight on something off-screen is a dimmed screen.
-    document.querySelector<HTMLElement>(`[data-tour="${anchor}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" });
+    findVisible()?.scrollIntoView({ block: "center", behavior: "smooth" });
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
   }, [anchor]);

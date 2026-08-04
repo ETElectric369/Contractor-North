@@ -93,6 +93,10 @@ export function SettingsSubnav({
           return (
             <Link
               key={c.id}
+              // The tour walks somebody to /settings and points at THIS — the cluster their
+              // questions and why lines live in. Naming it per-cluster keeps the anchor honest
+              // if the order changes.
+              data-tour={`settings-${c.id}`}
               href={href(c.id)}
               scroll={false}
               className={`inline-flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors ${

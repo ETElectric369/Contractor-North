@@ -67,9 +67,11 @@ export function TourDriver({
     sessionStorage.setItem(KEY, String(i));
   }, [i]);
 
-  // Walk them to the right screen before pointing at something on it.
+  // Walk them to the right screen before pointing at something on it. Compare on the PATH only —
+  // usePathname() drops the query, so testing against "/settings?tab=playbook" is never equal and
+  // would push on every render, forever.
   useEffect(() => {
-    if (step.route && pathname !== step.route) router.push(step.route);
+    if (step.route && pathname !== step.route.split("?")[0]) router.push(step.route);
   }, [step.route, pathname, router]);
 
   // SPEAK THE STEP. Re-speaks whenever the step changes; stops the moment it doesn't.
@@ -87,14 +89,32 @@ export function TourDriver({
       if (!said.trim()) return;
       setBusy(true);
       setNote(null);
-      const r = await hearSetup(answers, said);
+      // ANSWERING THE QUESTION IN FRONT OF YOU IS A HAND, AND IT WINS.
+      //
+      // Erik pressed Talk on step one, said his name, and got "didn't catch anything I could use".
+      // It heard him perfectly. applyFills holds FILL HOLES, NEVER OVERWRITE A HAND — and his
+      // profile already carried "Erik Taylor", so the fill was refused as an overwrite. The card
+      // said "say it again to change it" while the code forbade exactly that.
+      //
+      // The law is right; the hole was in the wrong place. Somebody deliberately re-answering THIS
+      // question is not a model overwriting a person — it IS the person. So blank this one need
+      // first and let the answer land. Every OTHER answer stays protected, which is the part that
+      // actually needed protecting: a rambling sentence must still not stomp on four other fields.
+      const target = step.ask ? { ...answers, [step.ask]: null } : answers;
+      const r = await hearSetup(target, said);
       setBusy(false);
       if (!r.ok) return setNote(r.error);
       setAnswers(r.answers);
       setTyped("");
-      setNote(r.filled.length ? `Got it — ${r.filled.join(", ")}.` : "Didn't catch anything I could use. Try again, or type it.");
+      setNote(
+        r.filled.length
+          ? `Got it — ${r.filled.join(", ")}.`
+          : // Say what it HEARD. "Didn't catch anything" reads as a broken mic when the mic was
+            // fine, and sends somebody off chasing a permissions problem they don't have.
+            `Heard "${said}" — but I couldn't turn that into an answer for this one. Try again, or type it.`,
+      );
     },
-    [answers],
+    [answers, step.ask],
   );
 
   const dictation = useDictation(fill);

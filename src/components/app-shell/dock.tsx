@@ -137,6 +137,9 @@ function DockInner({ branding, role, badges }: DockProps) {
 
       {/* ── MOBILE (below shell:): the same section tiles, pinned to the bottom as a glass bar ── */}
       <nav
+        // The tour points at "dock" — on a phone THIS is the dock, not the desktop rail above.
+        // Both carry the anchor; the spotlight picks whichever is actually visible.
+        data-tour="dock"
         // transform:translateZ(0) keeps the bar from drifting during iOS momentum scroll.
         style={{ transform: "translateZ(0)", WebkitBackfaceVisibility: "hidden" }}
         // Cap the home-indicator inset so a big safe-area on some iPhones doesn't
