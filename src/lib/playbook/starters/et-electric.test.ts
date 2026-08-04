@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { ET_ELECTRIC } from "./et-electric";
-import { applicableNeeds, clearInapplicable, holdingNeeds, isClosed, isOpen, missingNeeds } from "../resolve";
+import { applicableNeeds, clearInapplicable, holdingNeeds, isClosed, isOpen, missingNeeds, splitAsk } from "../resolve";
 
 /**
  * THE ACCEPTANCE TEST IS ERIK'S OWN JOB — 13125 Moraine Rd, said in one breath, unprompted:
@@ -15,10 +15,25 @@ import { applicableNeeds, clearInapplicable, holdingNeeds, isClosed, isOpen, mis
 describe("it opens with one question", () => {
   it("nothing applies before the work is named", () => {
     const first = applicableNeeds(ET_ELECTRIC, {});
-    expect(first.map((n) => n.key)).toEqual(["work", "permitted", "gotcha"]);
-    // Only ONE of them is a control. The other two are open — they render nothing until answered,
-    // so the screen shows a single question. That is "available is not visible" in the data.
+    expect(first.map((n) => n.key)).toEqual(["work", "permitted", "gotcha", "materials_known"]);
+    // Only ONE of them is a control. The rest are open — a sentence, not a box.
     expect(first.filter((n) => !isOpen(n)).map((n) => n.key)).toEqual(["work"]);
+  });
+
+  it("WHAT IS ACTUALLY ON SCREEN: two questions, and the rest are chips", () => {
+    // "available is not visible", in the data. `work` shows because it has a control. `permitted`
+    // shows despite having none, because it is a HOLD — don't let me price without it. The other
+    // two are sentences nobody has reached for yet, so each is one named tap away instead of an
+    // empty box sitting between him and the work.
+    const { ask, reach } = splitAsk(ET_ELECTRIC, {});
+    expect(ask.map((n) => n.key)).toEqual(["work", "permitted"]);
+    expect(reach.map((n) => n.key)).toEqual(["gotcha", "materials_known"]);
+  });
+
+  it("and reaching for one puts it up top, never locked away", () => {
+    const { ask, reach } = splitAsk(ET_ELECTRIC, {}, new Set(["gotcha"]));
+    expect(ask.map((n) => n.key)).toContain("gotcha");
+    expect(reach.map((n) => n.key)).toEqual(["materials_known"]);
   });
 });
 
@@ -44,6 +59,55 @@ describe("the storage room, turn by turn", () => {
   it("the next question is THE FORK, and it is the only new one", () => {
     // "Ask me the fork. Don't ask me for its outputs."
     expect(missingNeeds(ET_ELECTRIC, heard).map((n) => n.key)).toContain("feed");
+  });
+
+  /**
+   * THE ACCEPTANCE TEST — the WHOLE paragraph, every fact he volunteered without being asked:
+   *
+   *   "2 new circuits one for lights and one for outlets installed new in a finished room with
+   *    sheetrock and paint made originally for storage but now converting to living space
+   *    requiring four 6" recessed cans connected in the ceiling requiring holes to be drilled in
+   *    sheetrock to get wire into place and 2 outlets on each of 3 walls accessible from below by
+   *    cutting the outlet holes in sheetrock then drilling down to feed wire from one to another
+   *    all the way around connecting to a snap on breaker siemens style, 100 ft of 12.2 romex and
+   *    40' of 14/2 romex"
+   *
+   * The shipped sheet answered that by asking him for the panel brand.
+   */
+  const said = {
+    ...heard,
+    walls: "Finished",
+    device_count: 6, // "2 outlets on each of 3 walls"
+    access: "From below — cut and drill",
+    panel_condition: "Siemens snap-on, two slots open",
+    materials_known: "100 ft of 12-2, 40 ft of 14-2",
+  };
+
+  it("nothing he said is asked back at him — not one of it", () => {
+    const still = missingNeeds(ET_ELECTRIC, said).map((n) => n.key);
+    for (const k of Object.keys(said)) expect(still, k).not.toContain(k);
+  });
+
+  it("...and nothing he said is quietly THROWN AWAY either", () => {
+    // The subtler half, and a bug this playbook actually had: `materials_known` used to wait on
+    // the feed, so the wire list he volunteers in his opening breath got nulled by
+    // clearInapplicable before anybody picked one. A need that can be satisfied before its gate
+    // must not have a gate.
+    const kept = clearInapplicable(ET_ELECTRIC, said);
+    for (const [k, v] of Object.entries(said)) expect(kept[k], k).toEqual(v);
+  });
+
+  it("what's left is the fork, the conclusion it leads to, and two numbers he didn't say", () => {
+    // feed          the decision he makes standing in front of the customer
+    // wiring_method a conclusion, and it only became askable once walls AND permit were both known
+    // length_ft     the tape he hasn't pulled
+    // ceiling_ft    ladder or lift
+    expect(splitAsk(ET_ELECTRIC, said).ask.map((n) => n.key)).toEqual([
+      "feed",
+      "wiring_method",
+      "length_ft",
+      "ceiling_ft",
+    ]);
   });
 
   it("and the run length does NOT exist yet", () => {
@@ -105,7 +169,12 @@ describe("the two facts he must not price without", () => {
 describe("this playbook is OPEN, and that is correct for him", () => {
   it("it holds sentences no control can carry", () => {
     expect(isClosed(ET_ELECTRIC, {})).toBe(false);
-    expect(ET_ELECTRIC.needs.filter(isOpen).map((n) => n.key)).toEqual(["power_source", "permitted", "gotcha"]);
+    expect(ET_ELECTRIC.needs.filter(isOpen).map((n) => n.key)).toEqual([
+      "power_source",
+      "permitted",
+      "gotcha",
+      "materials_known",
+    ]);
   });
 
   it("every open need still carries a real question", () => {

@@ -4,7 +4,8 @@ import { PageHeader } from "@/components/page-header";
 import { getOrgSettings } from "@/lib/org-settings";
 import { measurementsFromAnswers, tolerateMissingColumns } from "@/lib/inspection/schema";
 import { factsForEstimator } from "@/lib/playbook/answers";
-import { playbookFromSheet, sheetFromPlaybook } from "@/lib/playbook/from-sheet";
+import { sheetFromPlaybook } from "@/lib/playbook/from-sheet";
+import { playbookForForm } from "@/lib/playbook/parse";
 import { DECK_ESTIMATE_CODES } from "@/lib/estimate/deck";
 import { NewInspectionButton } from "../../appointments/new-inspection-button";
 import { QuoteBuilder } from "./quote-builder";
@@ -55,7 +56,7 @@ export default async function NewQuotePage({
       const insp = await tolerateMissingColumns<{ inspection_answers: unknown; forms: unknown }>(() =>
         supabase
           .from("appointments")
-          .select("inspection_answers, forms:inspection_template_id(schema)")
+          .select("inspection_answers, forms:inspection_template_id(schema, playbook)")
           .eq("id", capture)
           .maybeSingle(),
       );
@@ -63,7 +64,7 @@ export default async function NewQuotePage({
       // Read through the PLAYBOOK, the same resolver the inspector wrote through (cn-v628). Read
       // through the raw sheet instead and a checkbox-turned-select answer of "No" prints as "yes",
       // because the sheet's checkbox branch only asks whether the value is truthy — and "No" is.
-      const pb = playbookFromSheet((Array.isArray(rel) ? rel[0] : rel)?.schema);
+      const pb = playbookForForm(Array.isArray(rel) ? rel[0] : rel);
       const answers = ((insp as any)?.inspection_answers ?? {}) as never;
       const measuredText = factsForEstimator(pb, answers);
       // Kit sizing still reads the sheet shape; every measured need is a number slot, so the

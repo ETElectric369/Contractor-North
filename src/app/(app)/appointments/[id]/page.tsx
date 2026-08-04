@@ -57,7 +57,7 @@ export default async function AppointmentCapturePage({
     // Per-trade questions are DATA (deck questions for the deck company, panel questions for the
     // electrician), which is what keeps a typed inspection from needing a code module per trade.
     tolerateMissingColumns<InspectionTemplate[]>(() =>
-      supabase.from("forms").select("id, name, schema").eq("is_inspection", true).order("name"),
+      supabase.from("forms").select("id, name, schema, playbook").eq("is_inspection", true).order("name"),
     ),
     tolerateMissingColumns<{ inspection_template_id: string | null; inspection_answers: unknown }>(() =>
       supabase.from("appointments").select("inspection_template_id, inspection_answers").eq("id", id).maybeSingle(),

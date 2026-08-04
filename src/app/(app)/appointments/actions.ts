@@ -14,7 +14,7 @@ import { createProposalCore, cleanSlots } from "@/lib/appointments/proposal";
 import { endAfterStart } from "@/lib/appointments/times";
 import { APPOINTMENT_STATUSES, APPOINTMENT_TYPES } from "@/lib/statuses";
 import { coerceByPlaybook } from "@/lib/playbook/answers";
-import { playbookFromSheet } from "@/lib/playbook/from-sheet";
+import { playbookForForm } from "@/lib/playbook/parse";
 import { clearInapplicable } from "@/lib/playbook/resolve";
 import { runOnce } from "@/lib/offline/run-once";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -631,7 +631,7 @@ async function saveInspectionAnswersInner(
     // doesn't resolve — the schema we validate against is always one this org owns.
     const { data: form } = await supabase
       .from("forms")
-      .select("schema, is_inspection")
+      .select("schema, is_inspection, playbook")
       .eq("id", templateId)
       .maybeSingle();
     if (!form) return { ok: false, error: "That inspection sheet no longer exists." };
@@ -648,7 +648,7 @@ async function saveInspectionAnswersInner(
     // two-option select in the playbook, so the answer on the wire is "Yes" or "No" — and "No" fed
     // back through the sheet's checkbox branch is a non-empty string, i.e. `true`. A job with no
     // permit, stored as permitted. One renderer, one coercer.
-    const pb = playbookFromSheet((form as { schema?: unknown }).schema);
+    const pb = playbookForForm(form as { schema?: unknown; playbook?: unknown });
     clean = clearInapplicable(pb, coerceByPlaybook(pb, answers));
   }
 

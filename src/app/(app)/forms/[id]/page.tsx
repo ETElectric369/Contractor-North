@@ -75,6 +75,18 @@ export default async function FormDetailPage({
         </div>
       </div>
 
+      {/* A SHEET EDITOR THAT SILENTLY DOES NOTHING IS WORSE THAN NO EDITOR. Once this form has a
+          playbook (0179) the inspector asks from the playbook, so editing the fields here would
+          look like it worked and change nothing on a job site. Say where the real edit lives. */}
+      {(form as { playbook?: unknown }).playbook ? (
+        <div className="mb-6 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <span>This walk-through is a playbook now — the questions below are a copy of its closed half.</span>
+          <Link href="/settings?tab=playbook" className="font-medium underline underline-offset-2">
+            Edit it in Settings &rarr; Playbook
+          </Link>
+        </div>
+      ) : null}
+
       <div className="grid gap-6 lg:grid-cols-5">
         <div className="lg:col-span-3">
           <Card>

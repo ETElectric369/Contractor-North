@@ -4,7 +4,11 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { User, Building2, Globe, Wallet, CalendarDays, Plug, Layers, Tags } from "lucide-react";
+import { User, Building2, Globe, Wallet, CalendarDays, Plug, Layers, Tags, ClipboardList } from "lucide-react";
+import { tolerateMissingColumns } from "@/lib/inspection/schema";
+import { parsePlaybook, playbookForForm } from "@/lib/playbook/parse";
+import { PLAYBOOK_STARTERS } from "@/lib/playbook/starters";
+import { PlaybookManager } from "./playbook-manager";
 import { SettingsSubnav } from "./settings-subnav";
 import { getOrgSettings, accentHex, orgPublicBaseUrl } from "@/lib/org-settings";
 import { renderReadyBlocks } from "@/lib/public-pages";
@@ -172,6 +176,23 @@ export default async function SettingsPage({
 
   const passkeys = await listPasskeys();
 
+  // THE PLAYBOOK — the questions this company's own inspector asks, and why each one exists.
+  // Read tolerantly: `playbook` is 0179 and a deploy lands before its migration, and a select
+  // naming a column that doesn't exist yet fails the whole query rather than degrading.
+  const inspectionForms = isStaff
+    ? await tolerateMissingColumns<{ id: string; name: string; schema: unknown; playbook: unknown }[]>(() =>
+        supabase.from("forms").select("id, name, schema, playbook").eq("is_inspection", true).order("name"),
+      )
+    : null;
+  const playbookForms = (inspectionForms ?? []).map((f) => ({
+    id: f.id,
+    name: f.name,
+    // Converted from the sheet when there is no playbook yet, so the editor always opens on the
+    // real current questions rather than an empty page somebody has to guess at.
+    needs: playbookForForm(f).needs,
+    owned: parsePlaybook(f.playbook).needs.length > 0,
+  }));
+
   // ── "You" — everything personal (profile, notifications, language, security). ─────────
   const youTab = {
     id: "you",
@@ -304,6 +325,32 @@ export default async function SettingsPage({
             </div>
           ),
         },
+        // "Playbook" — the questions this company's own walk-through asks, and WHY each one is
+        // worth asking. Second in the list on purpose: it is the one thing here that changes what
+        // happens on a job site, and there has never been anywhere in this app to read it.
+        {
+          id: "playbook",
+          label: "Playbook",
+          icon: ClipboardList,
+          content: (
+            <div className="space-y-6">
+              <Section title="What your walk-through asks">
+                <p className="mb-4 text-sm text-slate-500">
+                  These are the questions your inspector asks on site, in order, and the reason each one exists.
+                  A question only shows when it applies — and one that&rsquo;s already been answered, out loud or
+                  from the lead, never gets asked at all.
+                </p>
+                <PlaybookManager
+                  forms={playbookForms}
+                  starters={PLAYBOOK_STARTERS.map((s) => ({ key: s.key, label: s.label, blurb: s.blurb }))}
+                />
+              </Section>
+              <Section title="How Nort writes an estimate">
+                <QuotePlaybookForm settings={settings} />
+              </Section>
+            </div>
+          ),
+        },
         // "Website" — the whole public-site surface in ONE place, separate from company identity:
         // address/domain/style, the homepage hero + copy, portfolio, reviews, articles, custom pages,
         // the printable lead link/QR, and the external SEO/content editor seats. Staff-only (this
@@ -400,7 +447,9 @@ export default async function SettingsPage({
           content: (
             <div className="space-y-6">
               <Section title="Tax, pricing & financial defaults"><TaxRatesManager taxRates={(taxRates ?? []) as any} pricingLevels={(pricingLevels ?? []) as any} settings={settings} /></Section>
-              <Section title="How we quote (AI playbook)"><QuotePlaybookForm settings={settings} /></Section>
+              {/* "How we quote" moved to the Playbook cluster — it is the same idea one step
+                  later (what you ask on site → how the estimate gets written), and having two
+                  things called a playbook in two different clusters was the confusion. */}
               <Section title="Payment methods"><PaymentMethods settings={settings} /></Section>
               <Section title="Estimate & invoice defaults"><DocumentSettings settings={settings} /></Section>
               <Section title="Numbering">

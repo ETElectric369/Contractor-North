@@ -55,6 +55,33 @@ export function missingNeeds(pb: Playbook, answers: Answers): Need[] {
 export const holdingNeeds = (pb: Playbook, answers: Answers) => missingNeeds(pb, answers).filter((n) => n.hold);
 
 /**
+ * WHAT GOES ON SCREEN NOW, and what is one tap away. AVAILABLE IS NOT VISIBLE.
+ *
+ * Erik: "it wasnt so much the measurements box in the way it was the subquestions that didnt guide
+ * me… my eye left with the measurements box becuase it stuck out permanent right there."
+ *
+ * A need with a CONTROL is a question you answer by tapping, so it shows. A need with no control is
+ * a sentence somebody has to say — Nort phrases it and hears it, and until then an empty box for it
+ * is furniture standing between him and the work. Those become a named chip instead.
+ *
+ * ONE EXCEPTION, and it is the entire point of the flag: a HOLD always shows, control or not.
+ * "Don't let me price without this" cannot be something you have to go looking for.
+ *
+ * `reached` is whatever has been tapped open — nothing is ever locked away, only quiet.
+ */
+export function splitAsk(
+  pb: Playbook,
+  answers: Answers,
+  reached: ReadonlySet<string> = new Set(),
+): { ask: Need[]; reach: Need[] } {
+  const missing = missingNeeds(pb, answers);
+  return {
+    ask: missing.filter((n) => n.slot || n.hold || reached.has(n.key)),
+    reach: missing.filter((n) => !n.slot && !n.hold && !reached.has(n.key)),
+  };
+}
+
+/**
  * THE DIAL, and it is derived rather than declared.
  *
  * A playbook is CLOSED when every need that currently applies has a typed control. Chris's is

@@ -11,8 +11,8 @@ import { MediaLightbox } from "@/components/media-lightbox";
 import { createClient } from "@/lib/supabase/client";
 import { prepareImageForUpload } from "@/lib/image-prep";
 import { coerceByPlaybook } from "@/lib/playbook/answers";
-import { playbookFromSheet } from "@/lib/playbook/from-sheet";
-import { applicableNeeds, clearInapplicable, missingNeeds } from "@/lib/playbook/resolve";
+import { playbookForForm } from "@/lib/playbook/parse";
+import { applicableNeeds, clearInapplicable, missingNeeds, splitAsk } from "@/lib/playbook/resolve";
 import type { Answers, AnswerValue, Need, Playbook } from "@/lib/playbook/types";
 import {
   captureId,
@@ -56,7 +56,9 @@ export interface CapturePhoto {
   path: string;
   url: string | null;
 }
-export type InspectionTemplate = { id: string; name: string; schema: unknown };
+/** `playbook` (0179) is what it asks; `schema` is the older, smaller way of saying the same thing
+ *  and is what every form still carries. See playbookForForm — one wins, and it is never both. */
+export type InspectionTemplate = { id: string; name: string; schema: unknown; playbook?: unknown };
 
 /**
  * ONE SMART INSPECTOR.
@@ -174,10 +176,10 @@ export function Inspector({
   const fileRef = useRef<HTMLInputElement>(null);
   const captureRef = useRef<HTMLInputElement>(null);
 
-  const playbook = useMemo<Playbook>(() => {
-    const t = templates.find((x) => x.id === templateId);
-    return t ? playbookFromSheet(t.schema) : { needs: [] };
-  }, [templates, templateId]);
+  const playbook = useMemo<Playbook>(
+    () => playbookForForm(templates.find((x) => x.id === templateId)),
+    [templates, templateId],
+  );
 
   // THE ASK is what applies AND is still unanswered. The moment you answer something it leaves
   // the top and shows up below — the top of the screen is never a list of things you've done.
@@ -186,6 +188,8 @@ export function Inspector({
     const stillOpen = new Set(open.map((n) => n.key));
     return applicableNeeds(playbook, answers).filter((n) => !stillOpen.has(n.key));
   }, [playbook, answers, open]);
+  // What's on screen now vs what's one tap away — see splitAsk. `open` stays the honest count.
+  const { ask, reach } = useMemo(() => splitAsk(playbook, answers, opened), [playbook, answers, opened]);
 
   const readiness = inspectorReadiness({
     ...stored,
@@ -444,7 +448,14 @@ export function Inspector({
           </p>
         ) : (
           <div className="mt-3 space-y-4">
-            {open.map((n) => (
+            {/* AVAILABLE IS NOT VISIBLE, applied to the questions themselves.
+                An OPEN need (no control) is a sentence Nort is meant to phrase and hear, so it
+                renders nothing until it is reached for — otherwise "anything that'll bite us?"
+                is an empty box sitting between him and the work, which is the exact complaint:
+                "my eye left with the measurements box becuase it stuck out permanent right there."
+                ONE EXCEPTION, and it is the whole point of the flag: a HOLD always shows. "Don't
+                let me price without this" cannot be a thing you have to go looking for. */}
+            {ask.map((n) => (
               <div key={n.key}>
                 {/* THE SENTENCE, not the heading. His sheet had a field called "Panel" — he typed
                     2 into it and then 2 again into the next box, because a heading transmits
@@ -691,6 +702,10 @@ export function Inspector({
             he isn't using yet is a word, not a container. */}
         {(() => {
           const hidden = [
+            // The open questions that aren't holds ride in the SAME row as the capture sections,
+            // because they are the same kind of thing: something you can reach for, named, not a
+            // box announcing itself. Tap one and its question opens upstairs with the rest.
+            ...reach.map((n) => ({ k: n.key, label: n.label, on: () => open1(n.key) })),
             { k: "measures", label: "Measurement", on: () => { open1("measures"); setMeasures((m) => [...m, { id: captureId(), label: "", value: null, unit: "" }]); } },
             { k: "items", label: "Material", on: () => { open1("items"); setItems((i) => [...i, { id: captureId(), description: "", quantity: null, unit: "ea" }]); } },
             { k: "notes", label: "Note", on: () => open1("notes") },

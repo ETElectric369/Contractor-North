@@ -197,9 +197,13 @@ export const ET_ELECTRIC: Playbook = {
       key: "materials_known",
       label: "Wire and parts",
       ask: "What are you putting in it?",
-      slot: { type: "text", long: true },
+      // OPEN, and UNGATED. Both on purpose, and the second one is a bug this playbook had:
+      // gating it on the feed meant a wire list he volunteered in his opening breath — which he
+      // does constantly — got NULLED by clearInapplicable the moment it was written, because the
+      // feed hadn't been picked yet. A need that can be satisfied before its gate must not have
+      // one. Open because "100 ft of 12-2 and 40 of 14-2, snap-on Siemens" is a sentence, so it
+      // stays a chip until he reaches for it rather than an empty paragraph box on every job.
       feeds: ["what"],
-      when: [{ key: "feed", known: true }],
       why:
         "Half the time I already know: '100 ft of 12-2 and 40 of 14-2, snap-on Siemens.' When I say it, take it and " +
         "stop asking. When I don't, that's when the price book earns its keep — but don't make me dictate a takeoff " +
