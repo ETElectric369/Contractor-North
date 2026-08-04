@@ -40,15 +40,30 @@ export async function savePlaybook(formId: string, needs: unknown): Promise<Resu
   const pb = parsePlaybook({ needs });
   if (!pb.needs.length) return { ok: false, error: "A playbook needs at least one question." };
 
-  // KEEP `schema` IN STEP. Anything still reading the old shape — the lint, an export, a reader
-  // written before 0179 — must not go on describing a playbook that has moved on. The projection
-  // drops what a sheet cannot say (open needs, second clauses), which is exactly what the sheet
-  // could never say in the first place.
-  const { error } = await ctx.supabase
+  // THE FIRST SAVE MUST NOT EAT THE SHEET SOMEBODY AUTHORED BY HAND.
+  //
+  // This wrote `{playbook, schema: sheetFromPlaybook(pb)}` in one statement, and nothing anywhere
+  // keeps a copy of the old schema — there is no history table on `forms`. So Chris opening
+  // Settings → Playbook on TAHOE DECK's hand-built deck sheet and pressing "Start from: Electrical"
+  // out of curiosity destroyed it permanently, and "Back to the plain sheet" then handed him
+  // Erik's electrical questions as though they were his.
+  //
+  // So: keep `schema` in step ONLY once this form is already playbook-backed (its schema is
+  // by then a projection of the playbook, and letting it drift would leave every pre-0179 reader
+  // describing questions that have moved on). While `playbook` is still null, the schema is the
+  // original and it is left exactly where it is — which is what makes clearPlaybook a real way
+  // back rather than a promise of one.
+  const { data: before } = await ctx.supabase.from("forms").select("playbook").eq("id", formId).maybeSingle();
+  const alreadyPlaybook = parsePlaybook((before as { playbook?: unknown } | null)?.playbook).needs.length > 0;
+
+  const { data: wrote, error } = await ctx.supabase
     .from("forms")
-    .update({ playbook: pb, schema: sheetFromPlaybook(pb) })
-    .eq("id", formId);
+    .update(alreadyPlaybook ? { playbook: pb, schema: sheetFromPlaybook(pb) } : { playbook: pb })
+    .eq("id", formId)
+    .select("id");
   if (error) return { ok: false, error: error.message };
+  // A zero-row update is a 204, not an error — never let a blocked write report success.
+  if (!wrote?.length) return { ok: false, error: "That didn't save — check your access and try again." };
   revalidatePath("/settings");
   revalidatePath("/appointments", "layout");
   return { ok: true };
@@ -69,16 +84,23 @@ export async function installPlaybookStarter(formId: string, starterKey: string)
  * The undo, and it is a real one rather than a promise of one — a way back is the difference
  * between trying something and committing to it.
  *
- * What you get back is the sheet, which savePlaybook has been keeping in step: every question that
- * has a control, its choices, its rules, in order. What it cannot hold is the part a sheet never
- * could — the open questions, the second conditions, and the whys — so this is a way back to a
- * SHEET, not a way back in time. The button says so.
+ * What you get back is the sheet this form had BEFORE it became a playbook — savePlaybook leaves
+ * the original alone until a playbook already exists, precisely so this button has something real
+ * to return to. Once the form is playbook-backed the schema tracks it, so from then on you get the
+ * closed half of your own playbook: every question that has a control, its choices, its rules, in
+ * order. What a sheet can never hold is the open questions, the second conditions, and the whys —
+ * so this is a way back to a SHEET, not a way back in time. The button says so.
  */
 export async function clearPlaybook(formId: string): Promise<Result> {
   const ctx = await staff();
   if (!ctx.ok) return { ok: false, error: ctx.error };
-  const { error } = await ctx.supabase.from("forms").update({ playbook: null }).eq("id", formId);
+  const { data: wrote, error } = await ctx.supabase
+    .from("forms")
+    .update({ playbook: null })
+    .eq("id", formId)
+    .select("id");
   if (error) return { ok: false, error: error.message };
+  if (!wrote?.length) return { ok: false, error: "That didn't save — check your access and try again." };
   revalidatePath("/settings");
   revalidatePath("/appointments", "layout");
   return { ok: true };

@@ -849,11 +849,24 @@ export async function updateOrgSettings(
     .single();
   const merged = { ...(org?.settings ?? {}), ...safe };
 
-  const { error } = await ctx.supabase
+  // .select() SO A ZERO-ROW WRITE CANNOT REPORT SUCCESS.
+  //
+  // The app's `isStaff` is owner/admin/OFFICE. The RLS policy `organizations_update` is
+  // owner/admin only. An office manager therefore matched zero rows, PostgREST returned no error
+  // (a zero-row UPDATE is a 204, not a failure), and this said `ok: true`. Alexa Peters is office:
+  // she could change TAHOE DECK's default labor rate and markups, watch the button go green, and
+  // have nothing saved — with no way to tell the difference from a real save.
+  //
+  // This does NOT decide who should be allowed to edit org settings; that is a policy question
+  // and it is Erik's. It only stops the app lying about whether the write happened.
+  const { data: wrote, error } = await ctx.supabase
     .from("organizations")
     .update({ settings: merged })
-    .eq("id", ctx.orgId);
+    .eq("id", ctx.orgId)
+    .select("id");
   if (error) return { ok: false, error: error.message };
+  if (!wrote?.length)
+    return { ok: false, error: "That didn't save — your role can't change company settings. Ask an owner or admin." };
   revalidatePath("/settings");
   revalidatePath("/", "layout");
   return { ok: true };

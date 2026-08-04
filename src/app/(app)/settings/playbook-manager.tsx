@@ -491,7 +491,10 @@ export function PlaybookManager({
             disabled={pending}
             title={s.blurb}
             onClick={() => {
-              if (!confirm(`Replace these ${needs.length} questions with the ${s.label} starter?`)) return;
+              // A starter REPLACES everything. Say so plainly — the first version of this
+              // destroyed a hand-authored sheet with no way back, and a soft "replace?" is not
+              // the same warning as "this is gone".
+              if (!confirm(`Replace all ${needs.length} of your questions with the ${s.label} starter?\n\nYour current questions and why lines are overwritten.`)) return;
               run(() => installPlaybookStarter(form.id, s.key), "Starter loaded — now make it yours.");
             }}
           >
