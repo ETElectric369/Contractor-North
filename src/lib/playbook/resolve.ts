@@ -23,6 +23,10 @@ export function isAnswered(v: AnswerValue | undefined): boolean {
 
 function clauseHolds(c: Clause, answers: Answers): boolean {
   const v = answers[c.key];
+  // ASK IT ONLY IF WE COULDN'T WORK IT OUT. The one clause that holds on ABSENCE, so a question
+  // whose answer is derivable stays quiet while the inputs are there and reappears the moment
+  // they aren't. Checked before the isAnswered guard, because absence is the whole point of it.
+  if ("unknown" in c) return !isAnswered(v);
   if (!isAnswered(v)) return false;
   if ("known" in c) return true;
   // MULTI-SELECT MATTERS HERE. Erik's job was outlets AND lights — a router that only holds one

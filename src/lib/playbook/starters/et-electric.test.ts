@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { ET_ELECTRIC } from "./et-electric";
-import { applicableNeeds, holdingNeeds, isClosed, isOpen, missingNeeds } from "../resolve";
+import { applicableNeeds, clearInapplicable, holdingNeeds, isClosed, isOpen, missingNeeds } from "../resolve";
 
 /**
  * THE ACCEPTANCE TEST IS ERIK'S OWN JOB — 13125 Moraine Rd, said in one breath, unprompted:
@@ -60,9 +60,27 @@ describe("the storage room, turn by turn", () => {
     expect(missingNeeds(ET_ELECTRIC, { ...withFeed, walls: "Finished" }).map((n) => n.key)).toContain("wiring_method");
   });
 
-  it("he is never asked to count outlets", () => {
-    // 210.52(A): the count comes out of wall feet. "ask me the room and show me the count."
-    expect(ET_ELECTRIC.needs.map((n) => n.key)).not.toContain("device_count");
+  it("DERIVE IT, OR ELSE ASK IT — the outlet count", () => {
+    // Erik's correction, and it is the sharper rule: "i dont necessarily want it to never ask me
+    // an outlet count, thats important and if it cant be resolved from the info then its an
+    // appropriate question." The law is not "never ask X", it is DON'T ASK WHAT IS ALREADY
+    // RESOLVED. 210.52(A) gets the count off wall feet — but only if somebody walked it.
+    const noTape = { work: ["Add circuits"] };
+    expect(missingNeeds(ET_ELECTRIC, noTape).map((n) => n.key)).toContain("device_count");
+
+    // Room measured → it is arithmetic, and the question goes away on its own.
+    const measured = { ...noTape, length_ft: 16 };
+    expect(missingNeeds(ET_ELECTRIC, measured).map((n) => n.key)).not.toContain("device_count");
+  });
+
+  it("...and a guessed count is nulled the moment the room IS measured", () => {
+    // The derived value wins, and it wins without anybody choosing — otherwise a phone-call guess
+    // outlives the tape measure and rides into the price as if it had been counted.
+    const guessed = { work: ["Add circuits"], device_count: 6 };
+    expect(clearInapplicable(ET_ELECTRIC, { ...guessed, length_ft: 16 }).device_count).toBeNull();
+  });
+
+  it("fixture count is never asked — that one really is derived", () => {
     expect(ET_ELECTRIC.needs.map((n) => n.key)).not.toContain("fixture_count");
   });
 

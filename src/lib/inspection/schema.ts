@@ -46,7 +46,16 @@ export interface InspectionField {
 }
 
 /** A stored answer. Narrow on purpose — anything richer belongs in the prose capture. */
-export type InspectionAnswer = string | number | boolean | null;
+/**
+ * A stored answer.
+ *
+ * `string[]` is the multi-select case, and it is the one the storage room needed: Erik's job was
+ * "2 new circuits one for lights and one for outlets" — outlets AND lights, both true at once. A
+ * router that can only hold one value is the reason the sheet then asked him panel questions about
+ * a circuits job. Everything else is unchanged, and a single-valued answer is still a scalar, so
+ * every sheet written before this keeps storing exactly what it stored.
+ */
+export type InspectionAnswer = string | number | boolean | string[] | null;
 export type InspectionAnswers = Record<string, InspectionAnswer>;
 
 /** Parse a `forms.schema` jsonb into fields, dropping anything malformed rather than throwing. */
@@ -128,6 +137,18 @@ export function coerceAnswers(fields: InspectionField[], input: unknown): Inspec
         out[f.key] = v === undefined || v === null ? null : v === true || v === "true" || v === "on" || v === 1 || v === "1";
         break;
       case "select": {
+        // MULTI-SELECT. Erik's job was outlets AND lights; a router holding one value is why the
+        // sheet then asked panel questions about a circuits job. Each member is validated against
+        // the option list exactly as a scalar is, so a stale template or a tampered payload can no
+        // more smuggle a value in through an array than through a string.
+        if (Array.isArray(v)) {
+          const picked = v.map(String).filter((x) => f.options?.includes(x));
+          // An empty array is NOT an answer — same law as "" and null. Otherwise deselecting the
+          // last chip would read as answered-with-nothing and the question would leave the screen,
+          // which is precisely how the permit vanished (cn-v617).
+          out[f.key] = picked.length ? picked : null;
+          break;
+        }
         const s = String(v);
         // An option outside the list is a stale template or a tampered payload — refuse it rather
         // than storing a value no downstream branch handles.
@@ -180,6 +201,10 @@ export function visibleFields(fields: InspectionField[], answers: InspectionAnsw
     if (!f.showIf) return true;
     const v = answers[f.showIf.key];
     if (v === undefined || v === null || v === "") return false;
+    // A MULTI-SELECT ROUTER MATCHES ON ANY MEMBER. String(["a","b"]) is "a,b", which matches
+    // nothing — so without this a job that is outlets AND lights would reveal neither branch,
+    // which is worse than the single-select it replaced.
+    if (Array.isArray(v)) return v.length > 0 && v.some((x) => f.showIf!.in.includes(String(x)));
     return f.showIf.in.includes(String(v));
   });
 }

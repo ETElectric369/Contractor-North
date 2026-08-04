@@ -57,7 +57,23 @@ export type NeedSlot =
 /** One condition. ALL of a need's clauses must hold for it to apply. */
 export type Clause =
   | { key: string; in: string[] } // membership — matches a scalar OR any member of a multi-select
-  | { key: string; known: true }; // just needs any answer at all
+  | { key: string; known: true } // just needs any answer at all
+  /**
+   * The NEGATIVE, and it is what makes "derive it, or else ask it" expressible.
+   *
+   * Erik: "i dont necessarily want it to never ask me an outlet count, thats important and if it
+   * cant be resolved from the info then its an appropriate question."
+   *
+   * That corrects a rule I wrote too absolutely. The law was never "never ask X" — it is DON'T ASK
+   * WHAT IS ALREADY RESOLVED. A receptacle count derived from wall feet under 210.52(A) should not
+   * be asked. The same count with no room dimensions on the record is a perfectly fair question,
+   * and refusing to ask it just loses the number.
+   *
+   * So a need can be gated on another being ABSENT: ask the count only when the room wasn't
+   * measured. The moment the measurements arrive it stops applying, and clearInapplicable nulls
+   * what was guessed — the derived value wins, and it wins without anybody choosing.
+   */
+  | { key: string; unknown: true };
 
 /**
  * The five feeders. Which of them a need serves — and it is genuinely PLURAL.

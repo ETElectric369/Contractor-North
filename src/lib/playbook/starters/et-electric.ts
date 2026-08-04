@@ -127,9 +127,10 @@ export const ET_ELECTRIC: Playbook = {
       feeds: ["what"],
       when: [{ key: "work", in: ["Add circuits", "Lighting", "Remodel / rough-in"] }],
       why:
-        "NEVER ask me how many outlets. Under 210.52(A) no point along a wall is more than 6 ft from a receptacle, " +
-        "so the count comes out of the wall feet — ask me the room and show me the count. On the storage room that's " +
-        "3 walls and a roll-up, which changes the answer, and it's arithmetic either way, not a question.",
+        "Under 210.52(A) no point along a wall is more than 6 ft from a receptacle, so the count comes out of the " +
+        "wall feet — ask me the room and show me the count. On the storage room that's 3 walls and a roll-up, which " +
+        "changes the answer, and it's arithmetic, not a question. But only when I've given you the room: if I haven't, " +
+        "the count is a fair thing to ask.",
     },
     {
       key: "width_ft",
@@ -150,6 +151,24 @@ export const ET_ELECTRIC: Playbook = {
       feeds: ["what"],
       when: [{ key: "work", in: ["Lighting", "Remodel / rough-in"] }],
       why: "Drives can spacing and whether I'm on a ladder or a lift. Ten feet is a different day than eight.",
+    },
+    {
+      key: "device_count",
+      label: "How many outlets",
+      ask: "How many outlets are we putting in?",
+      slot: { type: "number" },
+      measured: true,
+      feeds: ["what"],
+      // ASK IT ONLY IF I DIDN'T GIVE YOU THE ROOM. Erik: "i dont necessarily want it to never ask
+      // me an outlet count, thats important and if it cant be resolved from the info then its an
+      // appropriate question." Measure the room and it's arithmetic; skip the tape and it's a
+      // question — and the moment the dimensions arrive this stops applying and the derived count
+      // wins, with clearInapplicable nulling whatever was guessed.
+      when: [{ key: "work", in: ["Add circuits", "Remodel / rough-in"] }, { key: "length_ft", unknown: true }],
+      why:
+        "Second choice, not the first. If I've walked it with a tape you already have the count off wall feet and " +
+        "asking is noise. If I haven't — quoting off a phone call, or the room's full of somebody's storage — then " +
+        "my number is the best number there is and you should take it.",
     },
     {
       key: "panel_condition",
