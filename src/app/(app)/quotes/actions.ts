@@ -705,7 +705,10 @@ export async function createJobFromQuote(
 
   const { data: q } = await supabase
     .from("quotes")
-    .select("id, job_id, customer_id, title, quote_number, inquiry_id")
+    // address/city/state/zip (0177) so the job can inherit the site typed on the ESTIMATE. A
+    // column you don't select is a column you can't inherit — the specific way the address kept
+    // dying at every stage, and it is a `select` list every time, never a missing column.
+    .select("id, job_id, customer_id, title, quote_number, inquiry_id, address, city, state, zip")
     .eq("id", quoteId)
     .maybeSingle();
   if (!q) return { ok: false, error: "Quote not found." };
@@ -729,6 +732,15 @@ export async function createJobFromQuote(
    * back to it is right; preferring it would be how a crew gets sent to the wrong house.
    */
   const inheritedAddress = await (async () => {
+    // THE ESTIMATE'S OWN SITE ADDRESS WINS. 0177 gave quotes the four columns; this function was
+    // written one migration earlier and still started at the lead, so an address typed on the
+    // ESTIMATE would have been silently outranked by the lead's older one. Nothing writes
+    // quotes.address yet, which is the only reason it isn't already a live bug — and exactly why
+    // it is worth closing before the field appears on the form rather than after.
+    //
+    // Precedence is most-specific-first throughout: the estimate is about THIS job, the lead was
+    // about this job, the customer is a person who may own several buildings.
+    if (q.address) return { address: q.address, city: q.city, state: q.state, zip: q.zip };
     if (q.inquiry_id) {
       const { data: inq } = await supabase
         .from("inquiries")
