@@ -6,6 +6,7 @@ import { requireStaff } from "@/lib/staff-guard";
 import { slugifyFieldKey } from "@/lib/form-field-key";
 import { getOrgSettings } from "@/lib/org-settings";
 import { starterSchemaJson, starterSheet, starterTradeFor } from "@/lib/inspection/starter-sheets";
+import { severeSheetProblems } from "@/lib/inspection/lint";
 
 export type Result = { ok: boolean; error?: string; id?: string };
 
@@ -65,6 +66,28 @@ export async function createForm(input: {
 
   if (schema.length === 0)
     return { ok: false, error: "Add at least one field." };
+
+  /**
+   * THE WRITE BOUNDARY. The editor already shows every problem as advice while you type
+   * (cn-v608), and advice is right for SHAPE — a half-built sheet mid-edit is normal, and a
+   * validator that refuses to save is one people route around.
+   *
+   * But a SEVERE problem is different in kind: a rule whose value isn't one of the router's
+   * choices, or that names a question which doesn't exist, means the question NEVER RENDERS. That
+   * is not a matter of taste. TAHOE DECK carried six of them for months — "Deck replacement" where
+   * the choice read "Full replacement" — and on six of eight job types the railing footage, stair
+   * counts and door counts silently did not appear. One of twenty inspections there has any
+   * answers on it at all.
+   *
+   * A rule applied at one path is a convention, not a rule. The editor is one path; this is the
+   * other, and it's the one an import, a script or a stale client also has to come through.
+   */
+  const severe = input.is_inspection ? severeSheetProblems(schema) : [];
+  if (severe.length)
+    return {
+      ok: false,
+      error: `${severe[0].message}${severe.length > 1 ? ` (+${severe.length - 1} more)` : ""}`,
+    };
 
   const { data, error } = await supabase
     .from("forms")
@@ -169,6 +192,17 @@ export async function updateForm(
 
   if (schema.length === 0)
     return { ok: false, error: "Add at least one field." };
+
+  // Same guard as createForm, and this is the path that actually matters: a broken sheet is far
+  // more often EDITED into existence than authored that way in one go. TAHOE DECK's six dead
+  // rules almost certainly arrived by someone renaming a router option and leaving the rules
+  // pointing at the old wording — which is a save, not a create.
+  const severe = input.is_inspection ? severeSheetProblems(schema) : [];
+  if (severe.length)
+    return {
+      ok: false,
+      error: `${severe[0].message}${severe.length > 1 ? ` (+${severe.length - 1} more)` : ""}`,
+    };
 
   // RLS isolates by org; the id match scopes the update to this form.
   const { error } = await supabase
