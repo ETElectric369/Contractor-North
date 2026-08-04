@@ -126,6 +126,23 @@ export function Inspector({
   const [proseMeasurements, setProseMeasurements] = useState(stored.measurements);
   const [photos, setPhotos] = useState<CapturePhoto[]>(initialPhotos);
 
+  /**
+   * AVAILABLE IS NOT VISIBLE.
+   *
+   * Erik: "it wasnt so much the measurements box in the way it was the subquestions that didnt
+   * guide me… when i clicked kind of work i like that responsiveness but my eye left with the
+   * measurements box becuase it stuck out permanent right there."
+   *
+   * I read "nothing gets ruled out" as "everything is always on screen", and those are not the
+   * same instruction. Five empty labelled boxes announcing capabilities he wasn't using yet sat
+   * between him and the one thing he wanted to do. Nothing is removed — a section appears the
+   * moment it HAS something, or the moment he reaches for it, and until then it is one word in a
+   * row of chips.
+   */
+  const [opened, setOpened] = useState<Set<string>>(new Set());
+  const shows = (key: string, hasContent: boolean) => hasContent || opened.has(key);
+  const open1 = (key: string) => setOpened((s) => new Set(s).add(key));
+
   const [place, setPlace] = useState(initialLocation);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -405,8 +422,9 @@ export function Inspector({
           </div>
         )}
 
-        {/* MEASUREMENTS — always available, never ruled out. Typed rows for what a kit can size
-            itself from, plus the prose box for the shape a number can't hold. */}
+        {/* MEASUREMENTS — still always available, now not always VISIBLE. Typed rows for what a
+            kit can size itself from, plus the prose box for the shape a number can't hold. */}
+        {shows("measures", measures.length > 0 || !!proseMeasurements.trim()) && (
         <div>
           <SectionLabel>Measurements</SectionLabel>
           <div className="mt-2 space-y-2">
@@ -468,8 +486,10 @@ export function Inspector({
             />
           </div>
         </div>
+        )}
 
-        {/* MATERIALS — a list you or Nort can add to, PLUS the paragraph box. Both, always. */}
+        {/* MATERIALS — a list you or Nort can add to, PLUS the paragraph box. Both, still. */}
+        {shows("items", items.length > 0 || !!materials.trim()) && (
         <div>
           <SectionLabel>Materials</SectionLabel>
           <div className="mt-2 space-y-2">
@@ -530,8 +550,12 @@ export function Inspector({
             />
           </div>
         </div>
+        )}
 
-        {/* PHOTOS */}
+        {/* PHOTOS — DELIBERATELY ALWAYS VISIBLE, unlike the others. "i exited stage left and took
+            some pictures like i normally do to look at later" — the camera is the one thing that
+            gets reached for on every job whether the rest of this screen helps or not. Hiding it
+            behind a chip would be tidiness at the cost of the single most-used control. */}
         <div>
           <div className="flex items-center justify-between">
             <SectionLabel>Photos &amp; documents</SectionLabel>
@@ -585,19 +609,48 @@ export function Inspector({
         </div>
 
         {/* NOTES — the escape hatch. The sentence nobody's template anticipated. */}
-        <div>
-          <SectionLabel>Notes</SectionLabel>
-          <Textarea
-            rows={3}
-            className="mt-2"
-            value={notes}
-            placeholder="Anything the questions didn't cover."
-            onChange={(e) => {
-              setNotes(e.target.value);
-              queueCapture({ notes: e.target.value });
-            }}
-          />
-        </div>
+        {shows("notes", !!notes.trim()) && (
+          <div>
+            <SectionLabel>Notes</SectionLabel>
+            <Textarea
+              rows={3}
+              className="mt-2"
+              value={notes}
+              placeholder="Anything the questions didn't cover."
+              onChange={(e) => {
+                setNotes(e.target.value);
+                queueCapture({ notes: e.target.value });
+              }}
+            />
+          </div>
+        )}
+
+        {/* THE ONE ROW THAT REPLACES FOUR EMPTY BOXES. Nothing is ruled out — everything is one
+            tap away and says so. This is the whole "available is not visible" change: a capability
+            he isn't using yet is a word, not a container. */}
+        {(() => {
+          const hidden = [
+            { k: "measures", label: "Measurement", on: () => { open1("measures"); setMeasures((m) => [...m, { id: captureId(), label: "", value: null, unit: "" }]); } },
+            { k: "items", label: "Material", on: () => { open1("items"); setItems((i) => [...i, { id: captureId(), description: "", quantity: null, unit: "ea" }]); } },
+            { k: "notes", label: "Note", on: () => open1("notes") },
+          ].filter((x) => !shows(x.k, false));
+          if (!hidden.length) return null;
+          return (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[11px] uppercase tracking-wide text-slate-400">Add</span>
+              {hidden.map((h) => (
+                <button
+                  key={h.k}
+                  type="button"
+                  onClick={h.on}
+                  className="flex min-h-[36px] items-center gap-1 rounded-full border border-dashed border-slate-300 px-3 text-sm text-slate-500 active:bg-slate-50"
+                >
+                  <Plus className="h-3.5 w-3.5" /> {h.label}
+                </button>
+              ))}
+            </div>
+          );
+        })()}
       </div>
 
       {/* ── THE BAR ───────────────────────────────────────────────────────────────────────── */}
