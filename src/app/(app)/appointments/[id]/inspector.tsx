@@ -25,6 +25,7 @@ import {
 import { createStarterInspectionSheet } from "../../forms/actions";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { LinkPicker } from "./link-picker";
+import { TellNort } from "./tell-nort";
 import { saveInspectionAnswers, saveInspectionCapture, setAppointmentPlace } from "../actions";
 
 /** A numeric field that can be EMPTY. Deliberately not NumberInput: its value is a `number` and
@@ -418,6 +419,32 @@ export function Inspector({
         </div>
 
         <LinkPicker appointmentId={appointmentId} linked={linked} seed={place} />
+
+        {/* SAY IT, OR TAP IT — the same boxes either way. Above the questions because that is the
+            order it happens on a job: he talks first, and what's left over is what gets asked. */}
+        {!noSheet && (
+          <TellNort
+            appointmentId={appointmentId}
+            answers={answers}
+            hint={ask[0]?.ask}
+            onFilled={(next, filled, note) => {
+              setAnswers(next);
+              queueAnswers();
+              if (filled.length) setSavedAt(null);
+              // WHAT IT COULDN'T PLACE GOES IN THE NOTES, VERBATIM, and the box opens so he sees
+              // it land. Losing the one sentence nobody's template anticipated is the failure this
+              // whole capture exists to prevent.
+              if (note) {
+                open1("notes");
+                setNotes((n) => {
+                  const merged = n.trim() ? `${n.trim()}\n${note}` : note;
+                  queueCapture({ notes: merged });
+                  return merged;
+                });
+              }
+            }}
+          />
+        )}
 
         {noSheet ? (
           <div className="mt-3">
