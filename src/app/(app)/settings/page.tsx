@@ -549,10 +549,17 @@ export default async function SettingsPage({
   const navClusters = clusters.map((c) => ({ id: c.id, label: c.label }));
 
   return (
-    <div className="mx-auto max-w-3xl">
+    // Wider than max-w-3xl now: the sidebar takes a column of its own, so the content column
+    // keeps roughly the reading width it had rather than being squeezed by the nav.
+    <div className="mx-auto max-w-5xl">
       <PageHeader title="Settings" description="Configure every part of your business." />
-      <SettingsSubnav clusters={navClusters} activeTab={active.id} />
-      <div>{active.content}</div>
+      {/* Two columns on desktop, stacked on a phone (the subnav renders its own slide-over
+          there). `items-start` so the sticky sidebar can actually stick instead of being
+          stretched to the content's full height by the default `stretch`. */}
+      <div className="shell:flex shell:items-start shell:gap-6">
+        <SettingsSubnav clusters={navClusters} activeTab={active.id} />
+        <div className="min-w-0 flex-1">{active.content}</div>
+      </div>
     </div>
   );
 }

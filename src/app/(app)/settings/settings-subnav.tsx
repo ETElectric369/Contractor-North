@@ -77,7 +77,15 @@ export function SettingsSubnav({
       <SectionSheet group={group} items={items} activeHref={activeHref} />
 
       {/* Desktop: a compact top pill row (the dock rail already owns the left column). */}
-      <div className="mb-5 hidden gap-1.5 border-b border-slate-200 pb-3 shell:flex">
+      {/* DESKTOP: A REAL LEFT SIDEBAR, not a pill row.
+          Erik: "i really dont like scrolling down a page to find something in the middle" and
+          "break down the settings page into a sub nav side bar like the rest".
+          A horizontal strip has to stay short to fit, which is exactly the pressure that kept
+          thirty sections crammed into six clusters — the nav shape was capping how many honest
+          groups there could be. A vertical column has room, so clusters can multiply until each
+          one is a thing you can name, and it stays on screen while you read rather than scrolling
+          away above you. */}
+      <div className="mb-5 hidden w-52 shrink-0 flex-col gap-1 self-start shell:sticky shell:top-4 shell:flex">
         {clusters.map((c) => {
           const active = c.id === current;
           const Icon = CLUSTER_ICONS[c.id] ?? Settings;
@@ -86,10 +94,10 @@ export function SettingsSubnav({
               key={c.id}
               href={href(c.id)}
               scroll={false}
-              className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors ${
+              className={`inline-flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors ${
                 active
                   ? "seaglass-active"
-                  : "border border-slate-200 bg-white text-slate-600 hover:text-[color:rgb(var(--glass-ink))]"
+                  : "border border-transparent text-slate-600 hover:bg-white hover:text-[color:rgb(var(--glass-ink))]"
               }`}
             >
               <Icon className="relative z-10 h-4 w-4" />
