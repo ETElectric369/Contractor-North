@@ -34,6 +34,34 @@
  * does, and a wall of JSX with the copy baked into it is a wall nobody edits.
  */
 
+/**
+ * WHO NORT IS TALKING TO. A tour that introduces itself to somebody it already knows is a form
+ * wearing a friendly voice.
+ *
+ * Erik: "i think there should be an element of nort beginning to get to know you a person and
+ * recognize your name if youve already input it and proceed conversing without this wall inbetween
+ * questions."
+ *
+ * He is right, and the reason it matters is his own: "a lot of contractors are not smart and thats
+ * why we are doing what we are doing to make it simple for everyone." Somebody who is not sure they
+ * belong in a piece of software reads "tell me your name" — from a thing that plainly has their
+ * name on the screen behind it — as proof it is not really listening. Being recognised is what
+ * makes it safe to talk to.
+ */
+export interface TourCtx {
+  /** First name, or "" — Nort uses it the way a person would: sometimes, not every sentence. */
+  first: string;
+  trade: string;
+  city: string;
+  /** They have finished the tour before; this is a revisit, not an introduction. */
+  returning: boolean;
+}
+
+/** A line, or a line that knows who it is talking to. */
+export type Line = string | ((c: TourCtx) => string);
+
+export const sayOf = (l: Line, c: TourCtx): string => (typeof l === "function" ? l(c) : l);
+
 export interface TourStep {
   key: string;
   /** `data-tour` value of the element to spotlight. Absent = a centred card with no arrow. */
@@ -42,8 +70,9 @@ export interface TourStep {
   route?: string;
   /** The heading on the card. Short. */
   title: string;
-  /** WHAT NORT SAYS — spoken aloud and shown as text. Write it to be heard, not read. */
-  say: string;
+  /** WHAT NORT SAYS — spoken aloud and shown as text. Write it to be heard, not read.
+   *  A function when it should change for somebody he already knows. */
+  say: Line;
   /** A SETUP_PLAYBOOK key this step is trying to learn. Answering by voice or typing fills it. */
   ask?: string;
   /** Label for the advance button when "Next" is too bland. */
@@ -60,18 +89,24 @@ export const TOUR: TourStep[] = [
     // "Press Talk" has to say WHICH Talk — the lit-up button behind the card is the real Nort and
     // the overlay deliberately doesn't take clicks mid-step, so pointing at it without saying
     // "down here" sends people tapping a button that can't respond.
-    say:
-      "Hi — I'm Nort. That button up there is me, and I'm on every screen in here. " +
-      "Press the Talk button down here and tell me your name and what you do, the way you'd tell " +
-      "a person. Type it instead if you'd rather — I'm not fussy.",
+    say: (c) =>
+      c.first
+        ? `Hey ${c.first} — I'm Nort. That button up there is me, and I'm on every screen in here. ` +
+          `I've already got you as ${c.first}${c.trade ? `, ${c.trade}` : ""}${c.city ? ` out of ${c.city}` : ""}. ` +
+          `Press the Talk button down here and say hello, just so you can hear how this works. ` +
+          `Say a different name and I'll take that instead.`
+        : "Hi — I'm Nort. That button up there is me, and I'm on every screen in here. " +
+          "Press the Talk button down here and tell me your name and what you do, the way you'd tell " +
+          "a person. Type it instead if you'd rather — I'm not fussy.",
     ask: "full_name",
   },
   {
     key: "trade",
     anchor: "nort",
     title: "What you do",
-    say:
-      "Good to meet you. Now the one that matters most — what trade are you in? " +
+    say: (c) =>
+      (c.trade ? `Right — I've got you as ${c.trade}. ` : "Good to meet you. ") +
+      "Now the one that matters most — what trade are you in? " +
       "If you sub most of it out, say that. 'General contractor, I sub out electrical and plumbing' " +
       "tells me more than picking one word off a list. " +
       "This is the answer that builds your job codes, the questions I'll ask you on site, " +
@@ -82,7 +117,8 @@ export const TOUR: TourStep[] = [
     key: "where",
     anchor: "nort",
     title: "Where you work",
-    say:
+    say: (c) =>
+      (c.city ? `And you're out of ${c.city}. ` : "") +
       "Where are you working out of, and how far do you go? " +
       "The town puts the weather on your day, and the area is what your public page tells customers.",
     ask: "city",

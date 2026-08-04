@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { TOUR, tourIndex } from "./tour";
+import { TOUR, sayOf, tourIndex, type TourCtx } from "./tour";
 import { SETUP_PLAYBOOK } from "./setup-playbook";
+
+/** Somebody Nort has never met, and somebody he has. Lines that change must work for both. */
+const STRANGER: TourCtx = { first: "", trade: "", city: "", returning: false };
+const KNOWN: TourCtx = { first: "Erik", trade: "electrical contractor", city: "Truckee", returning: true };
+const spoken = (c: TourCtx) => TOUR.map((s) => sayOf(s.say, c));
 
 /**
  * The tour is DATA, so it can be wrong in the ways data is wrong: a typo'd key makes a step
@@ -29,7 +34,7 @@ describe("every question the tour asks is a real one", () => {
 });
 
 describe("the why-line lesson is actually in here", () => {
-  const said = TOUR.map((s) => `${s.title} ${s.say}`).join(" ").toLowerCase();
+  const said = spoken(STRANGER).join(" ").toLowerCase();
 
   it("says what a why line IS, shows one, and says how to write it", () => {
     // "i didnt even know what a why line really meant until you showed me" — the whole reason the
@@ -40,13 +45,13 @@ describe("the why-line lesson is actually in here", () => {
 
   it("the example is a REAL one, not a description of one", () => {
     // An abstract "explain your reasoning" teaches nothing. The example carries a concrete cost.
-    const ex = TOUR.find((s) => s.key === "why-example")!.say.toLowerCase();
+    const ex = sayOf(TOUR.find((s) => s.key === "why-example")!.say, STRANGER).toLowerCase();
     expect(ex).toContain("permit");
     expect(ex).toContain("second trip");
   });
 
   it("and it promises the draft that comes next, so the hand-off isn't a surprise", () => {
-    expect(TOUR.find((s) => s.key === "why-how")!.say.toLowerCase()).toContain("draft");
+    expect(sayOf(TOUR.find((s) => s.key === "why-how")!.say, STRANGER).toLowerCase()).toContain("draft");
   });
 });
 
@@ -75,7 +80,7 @@ describe("it points at things that exist", () => {
     // code and all the things"
     const anchored = TOUR.map((s) => s.anchor);
     for (const a of ["nort", "dock", "account"]) expect(anchored).toContain(a);
-    const said = TOUR.map((s) => s.say).join(" ").toLowerCase();
+    const said = spoken(STRANGER).join(" ").toLowerCase();
     expect(said).toContain("qr code");
     expect(said).toContain("settings");
   });
@@ -87,10 +92,29 @@ describe("well-formed", () => {
     expect(new Set(keys).size).toBe(keys.length);
   });
 
-  it("nothing is mute or nameless", () => {
-    for (const s of TOUR) {
-      expect(s.title.trim().length, s.key).toBeGreaterThan(2);
-      expect(s.say.trim().length, s.key).toBeGreaterThan(40);
+  it("nothing is mute or nameless, for a stranger OR for somebody he knows", () => {
+    for (const c of [STRANGER, KNOWN])
+      for (const s of TOUR) {
+        expect(s.title.trim().length, s.key).toBeGreaterThan(2);
+        expect(sayOf(s.say, c).trim().length, s.key).toBeGreaterThan(40);
+      }
+  });
+
+  it("HE USES YOUR NAME WHEN HE HAS IT, and doesn't ask for it back", () => {
+    // Erik: "nort beginning to get to know you a person and recognize your name if youve already
+    // input it". A thing that says "tell me your name" with the name on screen behind it reads as
+    // not really listening — which is exactly the reader who is least sure they belong here.
+    const hello = sayOf(TOUR[0].say, KNOWN);
+    expect(hello).toContain("Erik");
+    expect(hello.toLowerCase()).not.toContain("tell me your name");
+    // ...and a stranger still gets asked.
+    expect(sayOf(TOUR[0].say, STRANGER).toLowerCase()).toContain("tell me your name");
+  });
+
+  it("no line leaves a hole when he knows nothing — no 'out of undefined'", () => {
+    for (const t of spoken(STRANGER)) {
+      expect(t).not.toContain("undefined");
+      expect(t).not.toMatch(/\s,|\s\./); // a dangling comma or stop where a value was meant to go
     }
   });
 

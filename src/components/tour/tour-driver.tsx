@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { TourSpotlight } from "./tour-spotlight";
 import { useDictation } from "@/lib/use-dictation";
-import { TOUR } from "@/lib/onboarding/tour";
+import { TOUR, sayOf, type TourCtx } from "@/lib/onboarding/tour";
 import { SETUP_PLAYBOOK } from "@/lib/onboarding/setup-playbook";
 import { speakSmart, stopSpeaking, unlockAudio } from "@/lib/tts";
 import { hearSetup, saveSetup } from "@/app/(app)/setup-actions";
@@ -36,9 +36,12 @@ const MUTE = "cn.tour.muted";
 
 export function TourDriver({
   initial,
+  returning = false,
   onClose,
 }: {
   initial: Answers;
+  /** They've finished before — this is a revisit, not an introduction. */
+  returning?: boolean;
   /** `completed` distinguishes reaching the end from bailing out — the caller hands a finisher
    *  straight to the why-line draft the tour just promised, and hands a quitter nothing. */
   onClose: (completed: boolean) => void;
@@ -57,15 +60,37 @@ export function TourDriver({
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const savedRef = useRef(false);
+  // The auto-advance fires from inside a callback that closed over an older render, so it reads
+  // the step and the mute flag from refs rather than from a stale closure.
+  const iRef = useRef(0);
+  const mutedRef = useRef(false);
+  const advance = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // WHO NORT IS TALKING TO, rebuilt from what he currently knows — so the moment somebody says
+  // their name, every later line is already using it.
+  const str = (k: string) => (typeof answers[k] === "string" ? (answers[k] as string).trim() : "");
+  const ctx: TourCtx = {
+    first: str("full_name").split(/\s+/)[0] ?? "",
+    trade: str("trade"),
+    city: str("city"),
+    returning,
+  };
 
   const step = TOUR[i];
+  const line = sayOf(step.say, ctx);
   const need = step.ask ? SETUP_PLAYBOOK.needs.find((n) => n.key === step.ask) : undefined;
   const known = step.ask ? answers[step.ask] : undefined;
   const answered = known !== null && known !== undefined && String(known).trim() !== "";
 
   useEffect(() => {
     sessionStorage.setItem(KEY, String(i));
+    iRef.current = i;
   }, [i]);
+  useEffect(() => {
+    mutedRef.current = muted;
+  }, [muted]);
+  // A pending advance must never fire into a tour that has been closed or stepped past by hand.
+  useEffect(() => () => { if (advance.current) clearTimeout(advance.current); }, []);
 
   // Walk them to the right screen before pointing at something on it. Compare on the PATH only —
   // usePathname() drops the query, so testing against "/settings?tab=playbook" is never equal and
@@ -78,9 +103,13 @@ export function TourDriver({
   useEffect(() => {
     if (muted) return;
     stopSpeaking();
-    speakSmart(step.say);
+    speakSmart(line);
     return () => stopSpeaking();
-  }, [i, muted, step.say]);
+    // Deliberately keyed on the STEP, not on `line` — `line` changes the instant an answer lands,
+    // and re-speaking the whole card over somebody who just finished talking is the opposite of a
+    // conversation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [i, muted]);
 
   useEffect(() => () => stopSpeaking(), []);
 
@@ -106,14 +135,38 @@ export function TourDriver({
       if (!r.ok) return setNote(r.error);
       setAnswers(r.answers);
       setTyped("");
-      setNote(
-        r.filled.length
-          ? `Got it — ${r.filled.join(", ")}.`
-          : // Say what it HEARD. "Didn't catch anything" reads as a broken mic when the mic was
-            // fine, and sends somebody off chasing a permissions problem they don't have.
-            `Heard "${said}" — but I couldn't turn that into an answer for this one. Try again, or type it.`,
-      );
+      if (!r.filled.length)
+        // Say what it HEARD. "Didn't catch anything" reads as a broken mic when the mic was fine,
+        // and sends somebody off chasing a permissions problem they don't have.
+        return setNote(`Heard "${said}" — but I couldn't turn that into an answer for this one. Try again, or type it.`);
+
+      // ── THE WALL, AND WHY IT WAS ONE ────────────────────────────────────────────────────────
+      // Erik: "proceed conversing without this wall inbetween questions."
+      // You spoke, and then: silence, a line of grey text, and a Next button to go find. Nothing
+      // in that is a conversation — it is a form that happens to have a microphone. A person who
+      // answers a question gets acknowledged and then asked the next one, so that is what happens:
+      // Nort says he got it, by name, and moves on by himself. Answering IS the advance.
+      // CONFIRM WHAT IT STORED, NOT THAT IT STORED SOMETHING. Erik: "nort continues to confirm my
+      // answers are correct (in this case its important)". "Got it" is a receipt for a transaction
+      // nobody saw. Reading the VALUE back is the only version somebody can catch a mistake in —
+      // and on a job site the thing most likely to be misheard is the number that becomes money.
+      const heardName = typeof r.answers.full_name === "string" ? r.answers.full_name.trim().split(/\s+/)[0] : "";
+      const landed = step.ask ? r.answers[step.ask] : null;
+      const value = Array.isArray(landed) ? landed.join(", ") : landed === null || landed === undefined ? "" : String(landed);
+      setNote(`Got it — ${r.filled.join(", ")}.`);
+      if (!mutedRef.current)
+        speakSmart(
+          value
+            ? `Got it${heardName ? `, ${heardName}` : ""} — ${value}. Say it again if that's not right.`
+            : "Got it.",
+        );
+      // Sized to the read-back, not to a two-word grunt: the next question must not start talking
+      // over the confirmation somebody is meant to be checking. Roughly speaking pace, floored so
+      // a one-word answer still gets a beat.
+      advance.current = setTimeout(() => void go(iRef.current + 1), Math.min(6000, 1600 + value.length * 55));
     },
+    // `go` is stable enough for this purpose and pulling it in would re-arm the mic every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [answers, step.ask],
   );
 
@@ -129,6 +182,8 @@ export function TourDriver({
   }, [answers, router]);
 
   const go = async (to: number) => {
+    if (advance.current) clearTimeout(advance.current);
+    advance.current = null;
     stopSpeaking();
     if (to >= TOUR.length) {
       setBusy(true);
@@ -155,7 +210,7 @@ export function TourDriver({
 
   return (
     <TourSpotlight anchor={step.anchor} title={step.title} onExit={exit} step={i + 1} total={TOUR.length}>
-      <p className="text-sm leading-relaxed text-slate-600">{step.say}</p>
+      <p className="text-sm leading-relaxed text-slate-600">{line}</p>
 
       {need && (
         <div className="mt-3 rounded-lg bg-slate-50 p-3">
@@ -248,7 +303,7 @@ export function TourDriver({
             if (next) stopSpeaking();
             else {
               unlockAudio();
-              speakSmart(step.say);
+              speakSmart(line);
             }
           }}
           aria-label={muted ? "Let Nort speak" : "Mute Nort"}

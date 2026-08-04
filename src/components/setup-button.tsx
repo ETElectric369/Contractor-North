@@ -77,6 +77,7 @@ export function SetupButton({
       {mode === "tour" && (
         <TourDriver
           initial={initial}
+          returning={onboarded}
           onClose={(completed) => setMode(completed ? "questions" : null)}
         />
       )}
