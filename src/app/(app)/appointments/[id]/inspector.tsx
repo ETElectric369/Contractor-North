@@ -10,15 +10,10 @@ import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { MediaLightbox } from "@/components/media-lightbox";
 import { createClient } from "@/lib/supabase/client";
 import { prepareImageForUpload } from "@/lib/image-prep";
-import {
-  clearHiddenAnswers,
-  coerceAnswers,
-  parseInspectionSchema,
-  unansweredFields,
-  visibleFields,
-  type InspectionAnswers,
-  type InspectionField,
-} from "@/lib/inspection/schema";
+import { coerceByPlaybook } from "@/lib/playbook/answers";
+import { playbookFromSheet } from "@/lib/playbook/from-sheet";
+import { applicableNeeds, clearInapplicable, missingNeeds } from "@/lib/playbook/resolve";
+import type { Answers, AnswerValue, Need, Playbook } from "@/lib/playbook/types";
 import {
   captureId,
   inspectorReadiness,
@@ -45,6 +40,17 @@ function NumBox({ value, onValue, className }: { value: number | null; onValue: 
     />
   );
 }
+
+/** Which chips are lit, whatever shape the answer is stored in.
+ *  The boolean case is the OLD checkbox renderer's value: a sheet checkbox is a two-option select
+ *  in the playbook, so `true` must still light "Yes" rather than quietly lighting nothing. */
+const chosen = (v: AnswerValue | undefined): string[] => {
+  if (v === true) return ["Yes"];
+  if (v === false) return ["No"];
+  if (Array.isArray(v)) return v.map(String);
+  if (v === null || v === undefined || v === "") return [];
+  return [String(v)];
+};
 
 export interface CapturePhoto {
   path: string;
@@ -83,6 +89,21 @@ export type InspectionTemplate = { id: string; name: string; schema: unknown };
  * IT SAVES ITSELF. A capture is not a document you decide to commit — you are in a crawlspace and
  * it should just persist. Debounced, patch-only (see saveInspectionCapture for why never a
  * snapshot), and answers and capture are separate columns so they save independently.
+ *
+ * ── WHAT IT RENDERS FROM (cn-v628) ──────────────────────────────────────────────────────────
+ *
+ * A PLAYBOOK, not a sheet. The stored `forms.schema` is unchanged — playbookFromSheet converts it
+ * on the way in — but everything on screen now comes from lib/playbook/resolve, which is the same
+ * resolver the interview will speak through. That is the whole reason for the swap: the cold path
+ * and the warm path can no longer disagree about what is still missing.
+ *
+ * Three things it buys immediately, all of which failed Erik at 13125 Moraine Rd:
+ *   - the LABEL IS A SENTENCE (`need.ask`). His sheet had a field called "Panel"; he typed 2 into
+ *     it and then 2 again into the next box, because a heading transmits nothing about the answer.
+ *   - MULTI-SELECT. His job was outlets AND lights. A router that holds one value is why the sheet
+ *     then asked him panel questions about a circuits job.
+ *   - `when` IS A CONJUNCTION and clearing ITERATES. A rule can wait for two facts, and switching
+ *     the work type drops the whole branch below it — not just its first level.
  */
 export function Inspector({
   appointmentId,
@@ -100,7 +121,7 @@ export function Inspector({
   appointmentId: string;
   templates: InspectionTemplate[];
   initialTemplateId: string | null;
-  initialAnswers: InspectionAnswers;
+  initialAnswers: Answers;
   initialCapture: unknown;
   initialPhotos: CapturePhoto[];
   orgId: string;
@@ -118,7 +139,7 @@ export function Inspector({
   const [templateId, setTemplateId] = useState<string | null>(
     initialTemplateId ?? (templates.length === 1 ? templates[0].id : null),
   );
-  const [answers, setAnswers] = useState<InspectionAnswers>(initialAnswers ?? {});
+  const [answers, setAnswers] = useState<Answers>(initialAnswers ?? {});
   const [items, setItems] = useState<CaptureItem[]>(stored.items ?? []);
   const [measures, setMeasures] = useState<CaptureMeasure[]>(stored.measures ?? []);
   const [notes, setNotes] = useState(stored.notes);
@@ -153,18 +174,18 @@ export function Inspector({
   const fileRef = useRef<HTMLInputElement>(null);
   const captureRef = useRef<HTMLInputElement>(null);
 
-  const fields = useMemo<InspectionField[]>(() => {
+  const playbook = useMemo<Playbook>(() => {
     const t = templates.find((x) => x.id === templateId);
-    return t ? parseInspectionSchema(t.schema) : [];
+    return t ? playbookFromSheet(t.schema) : { needs: [] };
   }, [templates, templateId]);
 
   // THE ASK is what applies AND is still unanswered. The moment you answer something it leaves
   // the top and shows up below — the top of the screen is never a list of things you've done.
-  const open = useMemo(() => unansweredFields(fields, answers), [fields, answers]);
-  const answered = useMemo(
-    () => visibleFields(fields, answers).filter((f) => !open.some((o) => o.key === f.key)),
-    [fields, answers, open],
-  );
+  const open = useMemo(() => missingNeeds(playbook, answers), [playbook, answers]);
+  const answered = useMemo(() => {
+    const stillOpen = new Set(open.map((n) => n.key));
+    return applicableNeeds(playbook, answers).filter((n) => !stillOpen.has(n.key));
+  }, [playbook, answers, open]);
 
   const readiness = inspectorReadiness({
     ...stored,
@@ -220,7 +241,7 @@ export function Inspector({
         if (!r.ok) return setError(r.error ?? "Couldn't save the address.");
       }
       if (wantAnswers) {
-        const r = await saveInspectionAnswers(appointmentId, templateId, coerceAnswers(fields, answers) as never);
+        const r = await saveInspectionAnswers(appointmentId, templateId, coerceByPlaybook(playbook, answers) as never);
         if (!r.ok) return setError(r.error ?? "Couldn't save.");
       }
       setSavedAt(Date.now());
@@ -229,10 +250,12 @@ export function Inspector({
   // A tab closing mid-debounce must not eat the last thing typed.
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
-  const setAnswer = (key: string, value: unknown) => {
-    // Answer, then drop anything that answer just hid — a stale panel brand must not ride into a
-    // lighting estimate as a fact.
-    setAnswers((a) => clearHiddenAnswers(fields, { ...a, [key]: value as never }));
+  const setAnswer = (key: string, value: AnswerValue) => {
+    // Answer, then drop anything that answer just made inapplicable — a stale panel brand must not
+    // ride into a lighting estimate as a fact. Iterates to a fixed point, which is the part the
+    // sheet's one-pass clear could not do: work → power_source → feed → run_ft is four levels, and
+    // one pass leaves an abandoned branch's measurement alive all the way into a price.
+    setAnswers((a) => clearInapplicable(playbook, { ...a, [key]: value }));
     queueAnswers();
   };
 
@@ -282,41 +305,66 @@ export function Inspector({
   const isImage = (p: string) => /\.(jpe?g|png|gif|webp|heic|heif|avif|bmp)$/i.test(p);
   const fileLabel = (p: string) => (p.split("/").pop() ?? p).replace(/^\d{10,}-/, "");
 
-  const control = (f: InspectionField) => {
-    const v = answers[f.key];
-    if (f.type === "select")
+  const control = (n: Need) => {
+    const v = answers[n.key];
+
+    // AN OPEN NEED — no slot, so no typed control can hold it. A box, because he types it himself
+    // and Nort fills it in for him; that is the same instruction in both directions, and a
+    // question with nowhere to put the answer is a dead end whichever way it got asked.
+    if (!n.slot)
+      return (
+        <Textarea rows={2} value={typeof v === "string" ? v : ""} onChange={(e) => setAnswer(n.key, e.target.value)} />
+      );
+
+    if (n.slot.type === "select") {
+      const { options, multi } = n.slot;
+      const picked = chosen(v);
       return (
         // Chips, not a dropdown: a select on a phone costs a tap to open, a scroll, and a tap to
         // choose. Chips cost one tap and you can read every option at a glance in daylight.
         <div className="flex flex-wrap gap-2">
-          {(f.options ?? []).map((o) => (
-            <button
-              key={o}
-              type="button"
-              onClick={() => setAnswer(f.key, v === o ? null : o)}
-              className={
-                v === o
-                  ? "min-h-[44px] rounded-full border border-brand bg-brand px-4 text-sm font-medium text-white"
-                  : "min-h-[44px] rounded-full border border-slate-300 bg-white px-4 text-sm text-slate-700 active:bg-slate-50"
-              }
-            >
-              {o}
-            </button>
-          ))}
+          {options.map((o) => {
+            const on = picked.includes(o);
+            return (
+              <button
+                key={o}
+                type="button"
+                onClick={() => {
+                  if (!multi) return setAnswer(n.key, on ? null : o);
+                  // MULTI. "2 new circuits one for lights and one for outlets" — outlets AND
+                  // lights, both true at once. Deselecting the last one is null, not [], because
+                  // an empty array reads as answered-with-nothing and the question would leave
+                  // the screen having never been answered.
+                  const next = on ? picked.filter((x) => x !== o) : [...picked, o];
+                  setAnswer(n.key, next.length ? next : null);
+                }}
+                className={
+                  on
+                    ? "min-h-[44px] rounded-full border border-brand bg-brand px-4 text-sm font-medium text-white"
+                    : "min-h-[44px] rounded-full border border-slate-300 bg-white px-4 text-sm text-slate-700 active:bg-slate-50"
+                }
+              >
+                {o}
+              </button>
+            );
+          })}
         </div>
       );
-    if (f.type === "checkbox")
+    }
+
+    if (n.slot.type === "number")
       return (
-        <label className="flex min-h-[44px] items-center gap-2 text-sm text-slate-700">
-          <input type="checkbox" checked={v === true} onChange={(e) => setAnswer(f.key, e.target.checked)} className="h-5 w-5" />
-          Yes
-        </label>
+        <div className="flex items-center gap-2">
+          <NumBox value={typeof v === "number" ? v : null} onValue={(x) => setAnswer(n.key, x)} />
+          {n.slot.unit && <span className="shrink-0 text-sm text-slate-500">{n.slot.unit}</span>}
+        </div>
       );
-    if (f.type === "number")
-      return <NumBox value={typeof v === "number" ? v : null} onValue={(n) => setAnswer(f.key, n)} />;
-    if (f.type === "textarea")
-      return <Textarea rows={2} value={typeof v === "string" ? v : ""} onChange={(e) => setAnswer(f.key, e.target.value)} />;
-    return <Input value={typeof v === "string" ? v : ""} onChange={(e) => setAnswer(f.key, e.target.value)} />;
+
+    return n.slot.long ? (
+      <Textarea rows={2} value={typeof v === "string" ? v : ""} onChange={(e) => setAnswer(n.key, e.target.value)} />
+    ) : (
+      <Input value={typeof v === "string" ? v : ""} onChange={(e) => setAnswer(n.key, e.target.value)} />
+    );
   };
 
   return (
@@ -396,10 +444,21 @@ export function Inspector({
           </p>
         ) : (
           <div className="mt-3 space-y-4">
-            {open.map((f) => (
-              <div key={f.key}>
-                <Label className="mb-1.5">{f.label}</Label>
-                {control(f)}
+            {open.map((n) => (
+              <div key={n.key}>
+                {/* THE SENTENCE, not the heading. His sheet had a field called "Panel" — he typed
+                    2 into it and then 2 again into the next box, because a heading transmits
+                    nothing about the answer it wants. */}
+                <Label className="mb-1">{n.ask}</Label>
+                {n.hold && (
+                  <span className="mb-1.5 ml-2 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
+                    before you price it
+                  </span>
+                )}
+                {/* HIS OWN REASON, on his own screen. Two lines, because the why is the fuel and
+                    the fuel is what makes a question feel like guidance instead of a form. */}
+                {n.why && <p className="mb-1.5 line-clamp-2 text-xs leading-snug text-slate-500">{n.why}</p>}
+                {control(n)}
               </div>
             ))}
           </div>
@@ -412,10 +471,12 @@ export function Inspector({
           <div>
             <SectionLabel>Answered</SectionLabel>
             <div className="mt-2 space-y-3">
-              {answered.map((f) => (
-                <div key={f.key} className="rounded-lg bg-slate-50 p-3">
-                  <div className="text-[11px] uppercase tracking-wide text-slate-400">{f.label}</div>
-                  <div className="mt-1.5">{control(f)}</div>
+              {answered.map((n) => (
+                <div key={n.key} className="rounded-lg bg-slate-50 p-3">
+                  {/* The SHORT label down here — the sentence did its job upstairs; a recap of
+                      twelve full questions is a wall. */}
+                  <div className="text-[11px] uppercase tracking-wide text-slate-400">{n.label}</div>
+                  <div className="mt-1.5">{control(n)}</div>
                 </div>
               ))}
             </div>

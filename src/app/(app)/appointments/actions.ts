@@ -13,7 +13,9 @@ import { tzDateTimeUtc, todayStrInTz } from "@/lib/tz";
 import { createProposalCore, cleanSlots } from "@/lib/appointments/proposal";
 import { endAfterStart } from "@/lib/appointments/times";
 import { APPOINTMENT_STATUSES, APPOINTMENT_TYPES } from "@/lib/statuses";
-import { coerceAnswers, parseInspectionSchema, clearHiddenAnswers } from "@/lib/inspection/schema";
+import { coerceByPlaybook } from "@/lib/playbook/answers";
+import { playbookFromSheet } from "@/lib/playbook/from-sheet";
+import { clearInapplicable } from "@/lib/playbook/resolve";
 import { runOnce } from "@/lib/offline/run-once";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -635,13 +637,19 @@ async function saveInspectionAnswersInner(
     if (!form) return { ok: false, error: "That inspection sheet no longer exists." };
     if (!(form as { is_inspection?: boolean }).is_inspection)
       return { ok: false, error: "That form isn't an inspection sheet." };
-    // Coerce, THEN drop anything the visibility rules hide. Both halves matter and for different
-    // reasons: coerce is the type contract, clearHidden is the truth contract. The client already
+    // Coerce, THEN drop anything the rules make inapplicable. Both halves matter and for different
+    // reasons: coerce is the type contract, clearing is the truth contract. The client already
     // clears on change, but this row is writable through RLS directly — a payload could set
     // panel_brand on a lighting job and the estimator would read it as a fact. Enforce it where
     // the write lands, not only where the form is.
-    const sheetFields = parseInspectionSchema((form as { schema?: unknown }).schema);
-    clean = clearHiddenAnswers(sheetFields, coerceAnswers(sheetFields, answers));
+    //
+    // THROUGH THE PLAYBOOK (cn-v628), which is what the inspector renders from. Coercing against
+    // the raw sheet here would split the truth exactly where it hurts: a sheet checkbox is a
+    // two-option select in the playbook, so the answer on the wire is "Yes" or "No" — and "No" fed
+    // back through the sheet's checkbox branch is a non-empty string, i.e. `true`. A job with no
+    // permit, stored as permitted. One renderer, one coercer.
+    const pb = playbookFromSheet((form as { schema?: unknown }).schema);
+    clean = clearInapplicable(pb, coerceByPlaybook(pb, answers));
   }
 
   const { data, error } = await supabase

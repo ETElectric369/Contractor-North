@@ -2,7 +2,9 @@ import { createClient } from "@/lib/supabase/server";
 import { BackLink } from "@/components/back-link";
 import { PageHeader } from "@/components/page-header";
 import { getOrgSettings } from "@/lib/org-settings";
-import { parseInspectionSchema, answersForEstimator, measurementsFromAnswers, tolerateMissingColumns } from "@/lib/inspection/schema";
+import { measurementsFromAnswers, tolerateMissingColumns } from "@/lib/inspection/schema";
+import { factsForEstimator } from "@/lib/playbook/answers";
+import { playbookFromSheet, sheetFromPlaybook } from "@/lib/playbook/from-sheet";
 import { DECK_ESTIMATE_CODES } from "@/lib/estimate/deck";
 import { NewInspectionButton } from "../../appointments/new-inspection-button";
 import { QuoteBuilder } from "./quote-builder";
@@ -58,10 +60,15 @@ export default async function NewQuotePage({
           .maybeSingle(),
       );
       const rel = (insp as any)?.forms;
-      const schema = parseInspectionSchema((Array.isArray(rel) ? rel[0] : rel)?.schema);
+      // Read through the PLAYBOOK, the same resolver the inspector wrote through (cn-v628). Read
+      // through the raw sheet instead and a checkbox-turned-select answer of "No" prints as "yes",
+      // because the sheet's checkbox branch only asks whether the value is truthy — and "No" is.
+      const pb = playbookFromSheet((Array.isArray(rel) ? rel[0] : rel)?.schema);
       const answers = ((insp as any)?.inspection_answers ?? {}) as never;
-      const measuredText = answersForEstimator(schema, answers);
-      measured = measurementsFromAnswers(schema, answers);
+      const measuredText = factsForEstimator(pb, answers);
+      // Kit sizing still reads the sheet shape; every measured need is a number slot, so the
+      // projection back down loses nothing that sizes anything.
+      measured = measurementsFromAnswers(sheetFromPlaybook(pb), answers);
       const parts = [
         `From site inspection — ${(appt as any).title}${(appt as any).location ? ` (${(appt as any).location})` : ""}`,
         measuredText ? `MEASURED ON SITE (these are given — use them, don't re-derive them):\n${measuredText}` : "",
