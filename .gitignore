@@ -59,3 +59,23 @@ yarn-error.log*
 /.tokenlens-*.js
 /q_audit_tmp.cjs
 /*_tmp.cjs
+
+# ── THROWAWAY SCRIPTS: ALLOWLIST THE REPO ROOT, DO NOT DENYLIST NAMES ─────────
+# The rules above were a denylist of filename patterns (/.tmp-*.mjs, /.audit-*.js…).
+# A denylist of names cannot hold: `.iso2.mjs` was sitting in this repo root and
+# `git check-ignore` confirmed it was NOT ignored, so `git add -A` would have committed it.
+# These scripts build a Postgres connection string from CN_PW at runtime — committing one
+# to a public repo is a credential leak with a filename typo as its only cause.
+#
+# So: ignore EVERY loose script at the repo root, then un-ignore the handful that belong.
+# A new throwaway is safe by default; a real one has to be named on purpose.
+/*.mjs
+/*.cjs
+/*.js
+!/next.config.js
+!/next.config.mjs
+!/postcss.config.js
+!/postcss.config.mjs
+!/tailwind.config.js
+!/eslint.config.js
+!/eslint.config.mjs
