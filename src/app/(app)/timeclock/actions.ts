@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { isStaffRole } from "@/lib/actions/perms";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { visibleJobIdOrNull } from "@/lib/job-visibility";
 import { requireStaff } from "@/lib/staff-guard";
 import { ACTIVE_JOB_STATUSES, pickJobScheduledToday } from "@/lib/job-status";
@@ -245,16 +245,38 @@ async function clockInInner(
   }
 
   // Clocking into a job means work has started — promote it to in_progress.
-  // Only from pre-work states (never un-complete/-cancel a finished job), and
-  // never let a blocked update (e.g. RLS) fail the clock-in itself.
+  //
+  // ON THE SERVICE CLIENT, AND THAT IS THE POINT. `jobs_write` requires is_org_staff(), so on the
+  // caller's client this was a zero-row update for every TECH — i.e. for exactly the people who
+  // clock into jobs. The comment above it ("never let a blocked update fail the clock-in") had
+  // quietly become "this never works for the crew": Brian starts at 7am, the job sits in
+  // to_be_scheduled all day, and the office's board is wrong about what is actually being worked.
+  //
+  // Scoped by hand, because a service client has no RLS to fall back on:
+  //   · this exact job id, which the caller just clocked into (visibleJobIdOrNull vetted it above)
+  //   · that job's org must be the caller's org
+  //   · only from a pre-work status — never un-complete or un-cancel a finished job
+  // It writes ONE column on ONE row, and it is the same promotion the office's own clock-in did.
   if (jobId) {
-    await supabase
-      .from("jobs")
-      .update({ status: "in_progress" })
-      .eq("id", jobId)
-      // Promote any not-yet-finished job to in_progress on clock-in (never un-complete a
-      // finished/cancelled one). Was a literal carrying dead 'quoted'/'lead' (non-job statuses).
-      .in("status", ACTIVE_JOB_STATUSES.filter((s) => s !== "in_progress"));
+    try {
+      // THE AUTHORIZATION IS THIS READ, on the caller's OWN client. If RLS won't show them the
+      // job, there is no org id and nothing is promoted — so the service write below can only ever
+      // touch a job this person could already see, in their own org.
+      const { data: jobRow } = await supabase.from("jobs").select("org_id").eq("id", jobId).maybeSingle();
+      const jobOrg = (jobRow as { org_id?: string } | null)?.org_id;
+      if (!jobOrg) throw new Error("not visible");
+      const admin = createServiceClient();
+      await admin
+        .from("jobs")
+        .update({ status: "in_progress" })
+        .eq("id", jobId)
+        .eq("org_id", jobOrg)
+        // Promote any not-yet-finished job to in_progress on clock-in (never un-complete a
+        // finished/cancelled one). Was a literal carrying dead 'quoted'/'lead' (non-job statuses).
+        .in("status", ACTIVE_JOB_STATUSES.filter((s) => s !== "in_progress"));
+    } catch {
+      // Still never let this fail the clock-in — the punch is the thing that must land.
+    }
     revalidatePath(`/jobs/${jobId}`);
     revalidatePath("/jobs");
   }

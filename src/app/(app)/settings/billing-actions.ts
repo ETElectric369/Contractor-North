@@ -61,10 +61,23 @@ export async function startCheckout(formData?: FormData) {
           metadata: { org_id: org.id },
         });
         customerId = customer.id;
-        await supabase
+        // SERVICE CLIENT, AND CHECKED. This is the ONLY writer of stripe_customer_id in the repo,
+        // and 0161 pins that column against every signed-in role — so on the user's client it was
+        // a silent 403 (bare await, no error captured) and the column stayed NULL on every org
+        // forever. Consequences, all of them invisible: a paying subscriber pressing Manage
+        // Billing is told "No billing account yet — subscribe first"; every checkout mints ANOTHER
+        // orphan Stripe customer; and invoice.payment_failed can't resolve the org, so the
+        // card-declined push has never fired for anybody. The correct pattern is 80 lines below
+        // in this same file (connectPayments).
+        const admin = createServiceClient();
+        const { error: linkErr } = await admin
           .from("organizations")
           .update({ stripe_customer_id: customerId })
           .eq("id", org.id);
+        // Do NOT continue to checkout if the link didn't land — an unlinked customer is exactly
+        // how the orphans were minted, one per attempt. This function is a FORM ACTION and must
+        // resolve to void, so it signals the way its siblings do: through billing_error.
+        if (linkErr) throw new Error(`link-customer: ${linkErr.message}`);
       }
 
       const session = await stripe.checkout.sessions.create({

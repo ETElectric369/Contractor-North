@@ -1,5 +1,8 @@
 "use server";
 
+import { headers } from "next/headers";
+import { clientIp, rateLimited } from "@/lib/rate-limit";
+
 /**
  * PUBLIC "request a site visit" — the app's FIRST unauthenticated schedule-adjacent
  * write, so it mirrors submitEstimateLead's rigor end to end:
@@ -80,6 +83,17 @@ export async function publicScheduleInspection(
   const address = clampStr(input?.address, 300);
   const message = clampStr(input?.message, 2000);
 
+  // ── THE RATE LIMIT THIS DOOR NEVER HAD ────────────────────────────────────────────────────
+  // Every sibling public door limits (site/actions.ts contact form, the estimate lead form) and
+  // this one — a service-client write that fans out a notification AND a push to every office
+  // phone on each call — did not. The 24h dedup below suppresses only the extra INSERT, never the
+  // notify, and it reads just the newest rows, so past a busy day even the INSERT fires again.
+  // Anyone with a tenant's public handle or org uuid (both are URL path segments) could have run
+  // every office phone flat.
+  const ip = clientIp(await headers());
+  if (await rateLimited(`inspect:${ip}`, 5, 60))
+    return { ok: false, error: "Too many requests — please try again in a moment." };
+
   const supabase = createServiceClient();
 
   // Server-side org resolution — by handle (configurator) or by uuid (inquiry splash).
@@ -103,6 +117,11 @@ export async function publicScheduleInspection(
   }
   if (!org) return { ok: false, error: "Scheduling isn't available right now — please call us." };
   const orgId = org.id;
+  // The per-IP key alone fails open against rotating addresses; the estimate door carries a daily
+  // per-org ceiling for that reason and so does this one. A real contractor never sees it — fifty
+  // site-visit requests in a day for one company is not a good week, it is somebody hammering.
+  if (await rateLimited(`inspect-org:${orgId}`, 50, 86400))
+    return { ok: false, error: "Too many requests — please try again later." };
   const settings = getOrgSettings(org.settings);
   const tz = settings.timezone;
 
