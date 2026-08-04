@@ -4,7 +4,7 @@
 // so a SW bug can't trap users on old code. We only cache hashed/immutable
 // static assets and an offline fallback page. API and auth requests are never
 // touched. Bump VERSION to invalidate the static cache.
-const VERSION = "cn-v643";
+const VERSION = "cn-v644";
 const STATIC_CACHE = `static-${VERSION}`;
 // Pages visited while online, kept so a dead zone shows the real page instead of /offline.
 // SEPARATE from the static cache because it holds ORG DATA and has to be purgeable on sign-out.

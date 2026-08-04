@@ -11,6 +11,7 @@ import { SETUP_PLAYBOOK } from "@/lib/onboarding/setup-playbook";
 import { missingNeeds } from "@/lib/playbook/resolve";
 import { looseNumber } from "@/lib/inspection/capture";
 import { savePlaybook } from "@/app/(app)/settings/playbook-actions";
+import { explainWhy } from "@/lib/onboarding/draft-playbook";
 import { draftMyPlaybook, finishOnboarding, hearSetup, saveSetup } from "@/app/(app)/setup-actions";
 import type { Answers, AnswerValue, Need } from "@/lib/playbook/types";
 
@@ -65,8 +66,8 @@ export function SetupInterview({
   // Step 2 state — the drafted questions, and whether a model actually wrote them.
   const [formId, setFormId] = useState<string | null>(null);
   const [needs, setNeeds] = useState<Need[] | null>(null);
-  const [wasDrafted, setWasDrafted] = useState(false);
   const drafting = useRef(false);
+  const [whyAt, setWhyAt] = useState(0);
 
   // ENTERING AT STEP 2 (straight off the tour) has to fetch its own draft — the transition that
   // normally does it was never taken. Guarded so React's double-invoke in dev can't ask twice.
@@ -78,7 +79,6 @@ export function SetupInterview({
       if (!d.ok) return setErr(d.error);
       setFormId(d.formId);
       setNeeds(d.needs);
-      setWasDrafted(d.wasDrafted);
     });
   }, [startAt, needs, start]);
 
@@ -112,7 +112,6 @@ export function SetupInterview({
       if (!d.ok) return d.error;
       setFormId(d.formId);
       setNeeds(d.needs);
-      setWasDrafted(d.wasDrafted);
       setStep(2);
       return null;
     });
@@ -219,44 +218,73 @@ export function SetupInterview({
       {step === 2 && (
         <>
           <h4 className="text-sm font-semibold text-slate-900">The questions you&rsquo;ll be asked on site</h4>
-          <p className="mt-0.5 text-sm text-slate-500">
-            {wasDrafted ? (
-              <>
-                Nort wrote these from what you just told it. <strong className="font-medium text-slate-700">They&rsquo;re a draft — cut
-                what&rsquo;s wrong.</strong> The <em>why</em> is the part that matters: it&rsquo;s what a wrong answer costs you, and
-                it&rsquo;s what Nort reads to know when a question is even worth asking.
-              </>
-            ) : (
-              <>These are the questions your walk-through asks. The <em>why</em> is what a wrong answer costs you — write it
-              in your own words, and Nort uses it to decide when the question is worth asking.</>
-            )}
-          </p>
+          {/* ONE AT A TIME, WITH NORT TALKING THROUGH EACH.
+              Erik: "explain every little step of the why files as we go through it together because
+              people aint gonna get it i guarantee it." Fifteen textareas in a column is a form, and
+              a form about an idea somebody hasn't met yet teaches nothing. By the third or fourth
+              the shape is obvious — which is the moment they can write their own, and the only
+              definition of "taught" that matters here. */}
+          {!needs?.length ? (
+            <p className="mt-3 flex items-center gap-2 text-sm text-slate-500">
+              <Loader2 className="h-4 w-4 animate-spin" /> Writing you a first draft…
+            </p>
+          ) : (
+            (() => {
+              const n = needs[Math.min(whyAt, needs.length - 1)];
+              const i = Math.min(whyAt, needs.length - 1);
+              return (
+                <>
+                  <div className="mt-1 flex items-center gap-2 text-xs text-slate-400">
+                    <span className="tabular-nums">
+                      {i + 1} of {needs.length}
+                    </span>
+                    <span className="h-1 flex-1 rounded-full bg-slate-200">
+                      <span className="block h-1 rounded-full bg-brand" style={{ width: `${((i + 1) / needs.length) * 100}%` }} />
+                    </span>
+                  </div>
 
-          <div className="mt-4 space-y-4">
-            {(needs ?? []).map((n, i) => (
-              <div key={n.key} className="rounded-lg border border-slate-200 p-3">
-                <Label className="mb-1">The question</Label>
-                <Input value={n.ask} onChange={(e) => editNeed(i, { ask: e.target.value })} />
-                <Label className="mb-1 mt-3">Why you ask it</Label>
-                <Textarea
-                  rows={3}
-                  value={n.why ?? ""}
-                  placeholder="What does it cost you when this is wrong or missing?"
-                  onChange={(e) => editNeed(i, { why: e.target.value || undefined })}
-                />
-              </div>
-            ))}
-          </div>
+                  <p className="mt-3 text-sm leading-relaxed text-slate-600">{explainWhy(n, i, needs.length)}</p>
 
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <Button type="button" disabled={pending} onClick={toWhere}>
-              {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</> : <>Save &amp; finish <ArrowRight className="h-4 w-4" /></>}
-            </Button>
-            <button type="button" onClick={() => setStep(3)} className="text-sm text-slate-500 underline-offset-2 hover:underline">
-              Skip for now
-            </button>
-            {err && <span className="text-sm text-rose-600">{err}</span>}
-          </div>
+                  <div className="mt-4 rounded-lg border border-slate-200 p-3">
+                    <Label className="mb-1">The question</Label>
+                    <Input value={n.ask} onChange={(e) => editNeed(i, { ask: e.target.value })} />
+                    <Label className="mb-1 mt-3">Why you ask it — in your words</Label>
+                    <Textarea
+                      rows={4}
+                      value={n.why ?? ""}
+                      placeholder="What does it cost you when this is wrong or missing?"
+                      onChange={(e) => editNeed(i, { why: e.target.value || undefined })}
+                    />
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
+                    <Button type="button" disabled={pending} onClick={() => (i + 1 < needs.length ? setWhyAt(i + 1) : toWhere())}>
+                      {pending ? (
+                        <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</>
+                      ) : i + 1 < needs.length ? (
+                        <>That one&rsquo;s right <ArrowRight className="h-4 w-4" /></>
+                      ) : (
+                        <>Save them all <ArrowRight className="h-4 w-4" /></>
+                      )}
+                    </Button>
+                    {i > 0 && (
+                      <button type="button" onClick={() => setWhyAt(i - 1)} className="text-sm text-slate-500 underline-offset-2 hover:underline">
+                        Back
+                      </button>
+                    )}
+                    <span className="flex-1" />
+                    {/* AN ESCAPE THAT ISN'T A LOSS. Somebody who has got the idea by number four
+                        shouldn't be marched through eleven more — the rest are saved as drafted and
+                        Settings → Playbook is where they live. */}
+                    <button type="button" disabled={pending} onClick={toWhere} className="text-sm text-slate-500 underline-offset-2 hover:underline">
+                      I&rsquo;ve got it — save the rest
+                    </button>
+                  </div>
+                </>
+              );
+            })()
+          )}
+          {err && <p className="mt-3 text-sm text-rose-600">{err}</p>}
         </>
       )}
 

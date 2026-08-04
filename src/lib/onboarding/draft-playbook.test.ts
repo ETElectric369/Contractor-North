@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { aboutFromSetup, applyDraft, draftRequest } from "./draft-playbook";
+import { aboutFromSetup, applyDraft, draftRequest, explainWhy } from "./draft-playbook";
 import { playbookFromSheet } from "@/lib/playbook/from-sheet";
 import { starterSchemaJson } from "@/lib/inspection/starter-sheets";
 import { applicableNeeds } from "@/lib/playbook/resolve";
@@ -100,5 +100,36 @@ describe("STRUCTURE IS NEVER TAKEN FROM THE MODEL — only prose", () => {
   it("garbage in leaves the playbook exactly as it was", () => {
     for (const junk of [null, undefined, "nope", {}, { needs: "x" }, { needs: [1, null] }])
       expect(applyDraft(ELECTRICAL, junk)).toEqual(ELECTRICAL);
+  });
+});
+
+describe("walking one why line, out loud", () => {
+  const n = { key: "permitted", label: "Permit", ask: "Is anybody pulling a permit, and what for?", why: "It's a second trip.", hold: true };
+
+  it("says the question, the drafted reason, and what to do about it", () => {
+    const t = explainWhy(n, 0, 6);
+    expect(t).toContain("Is anybody pulling a permit");
+    expect(t).toContain("It's a second trip.");
+    expect(t.toLowerCase()).toContain("change it");
+  });
+
+  it("the FIRST one explains the format; later ones don't repeat the lecture", () => {
+    // Teaching by repetition is how people learn to skip. Say it once, then trust them.
+    expect(explainWhy(n, 0, 6).length).toBeGreaterThan(explainWhy(n, 3, 6).length);
+    expect(explainWhy(n, 0, 6)).toContain("one at a time");
+    expect(explainWhy(n, 3, 6)).not.toContain("one at a time");
+  });
+
+  it("flags the two that carry consequences", () => {
+    expect(explainWhy(n, 1, 6)).toContain("shouldn't price without");
+    expect(explainWhy({ ...n, hold: undefined, measured: true }, 1, 6)).toContain("goes straight into a price");
+  });
+
+  it("a blank why says it's blank rather than pretending there's a reason", () => {
+    expect(explainWhy({ ...n, why: undefined }, 1, 6)).toContain("no reason written");
+  });
+
+  it("and it always ends somewhere — last one says so", () => {
+    expect(explainWhy(n, 5, 6)).toContain("Last one");
   });
 });

@@ -1,4 +1,4 @@
-import type { Playbook } from "@/lib/playbook/types";
+import type { Need, Playbook } from "@/lib/playbook/types";
 
 /**
  * DRAFTING SOMEBODY'S WHY LINES SO THEY HAVE SOMETHING TO ARGUE WITH.
@@ -100,6 +100,36 @@ export function applyDraft(pb: Playbook, raw: unknown): Playbook {
       };
     }),
   };
+}
+
+/**
+ * WHAT NORT SAYS ABOUT ONE WHY LINE, standing on it, out loud.
+ *
+ * Erik: "explain every little step of the why files as we go through it together because people
+ * aint gonna get it i guarantee it."
+ *
+ * A list of fifteen textareas teaches nobody anything — it is a form, and a form about an idea
+ * somebody has not met yet is worse than no form. So the walk is one at a time, and each one says
+ * the same three things in order: WHAT this question is for, WHAT the drafted reason claims, and
+ * WHAT to do about it. By the third or fourth the shape is obvious, which is the point at which
+ * somebody can write their own — and that is the only definition of "taught" that matters here.
+ */
+export function explainWhy(n: Need, i: number, total: number): string {
+  const first = i === 0;
+  const opener = first
+    ? "Right — here's the first one, and I'll do these one at a time so it's clear what you're looking at. "
+    : i === total - 1
+      ? "Last one. "
+      : "";
+  const measured = n.measured ? " This one's a number that goes straight into a price, so it's worth being fussy about." : "";
+  const held = n.hold ? " I've got this marked as something you shouldn't price without." : "";
+  const drafted = n.why?.trim()
+    ? `The reason I've written down is: ${n.why.trim()}`
+    : "There's no reason written on this one yet, so it's a blank for you to fill.";
+  const close = first
+    ? " If that's not why YOU ask it, change it — your words beat mine every time, and the closer it is to how you'd say it out loud, the better I get at knowing when to ask."
+    : " Change it if it's not your reason.";
+  return `${opener}The question is "${n.ask}"${measured}${held} ${drafted}${close}`;
 }
 
 /** What he told the setup interview, as a paragraph the drafter can read. */
