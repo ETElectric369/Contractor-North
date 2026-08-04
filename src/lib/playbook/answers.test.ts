@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { answerText, coerceByPlaybook, coerceNeed, factsForEstimator } from "./answers";
 import { playbookFromSheet } from "./from-sheet";
+import { looseNumber } from "@/lib/inspection/capture";
 import { ET_ELECTRIC } from "./starters/et-electric";
 import type { Need, Playbook } from "./types";
 
@@ -20,6 +21,16 @@ describe("numbers — no digits means no answer, never zero", () => {
 
   it.each(["a while", "", "  ", null, undefined])("%s → null", (input) => {
     expect(coerceNeed(n, input)).toBeNull();
+  });
+
+  it("ONE PARSER, shared with the box he types into — two parsers is two answers", () => {
+    // Stripping every non-digit made "16 and 20" into 1620 and "$85-95/hr" into 8595, while the
+    // client's own box read the same strings as 16 and 85. A number that means one thing on screen
+    // and another in the row is the worst kind of wrong: nothing looks broken.
+    expect(coerceNeed(n, "16 and 20")).toBe(looseNumber("16 and 20"));
+    expect(coerceNeed(n, "16 and 20")).toBe(16);
+    expect(coerceNeed(n, "$85-95/hr")).toBe(85);
+    expect(coerceNeed(n, "12 x 16")).toBe(12);
   });
 });
 

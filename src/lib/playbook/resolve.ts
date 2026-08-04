@@ -163,7 +163,18 @@ export function numbersIn(text: string): number[] {
  * that wall": no number in it, so nothing is invented and the box comes back.
  */
 export function acceptFill(need: Need, f: Fill, transcript: string): "accept" | "reject" {
-  if (!need.measured) return "accept"; // context, not a calculator input
+  // EVERY NUMBER IS GATED, not just the ones somebody remembered to tick `measured` on.
+  //
+  // Keying this on the flag alone made the gate OPT-IN, and the opt-in leaks two ways.
+  // measurementsFromAnswers matches number fields by key/label regex with no `measured` filter, so
+  // an unflagged number named "length" still sizes a kit and still becomes a priced quantity. And
+  // the /forms editor rebuilds forms.schema from {key,label,type,options,showIf} — it drops
+  // `measured` off every number field it touches, so the first time anybody edits a starter sheet
+  // the flag silently comes off and the gate silently opens.
+  //
+  // A number slot IS a calculator input. Treat it as one and the flag becomes an annotation
+  // rather than a load-bearing switch.
+  if (!need.measured && need.slot?.type !== "number") return "accept"; // context, not a number
   if (typeof f.value !== "number") return "reject";
   if (!f.heard || !transcript.includes(f.heard)) return "reject";
   return numbersIn(f.heard).includes(f.value) ? "accept" : "reject";

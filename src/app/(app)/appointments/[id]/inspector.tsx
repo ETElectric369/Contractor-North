@@ -425,7 +425,7 @@ export function Inspector({
             order it happens on a job: he talks first, and what's left over is what gets asked. */}
         {!noSheet && (
           <TellNort
-            hear={(a, said) => hearIntoPlaybook(appointmentId, a, said)}
+            hear={(a, said) => hearIntoPlaybook(appointmentId, templateId, a, said)}
             answers={answers}
             hint={ask[0]?.ask}
             onFilled={(next, filled, note) => {

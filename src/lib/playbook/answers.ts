@@ -1,3 +1,4 @@
+import { looseNumber } from "@/lib/inspection/capture";
 import { applicableNeeds } from "./resolve";
 import type { Answers, AnswerValue, Need, Playbook } from "./types";
 
@@ -29,15 +30,13 @@ export function coerceNeed(n: Need, v: unknown): AnswerValue {
   }
 
   switch (n.slot.type) {
-    case "number": {
-      // What a person actually types on a phone: "85 ft", "1,200", " 9.5 ".
-      const stripped = String(v).replace(/[^0-9.\-]/g, "");
-      // Test the STRIPPED string for emptiness first: "a while" strips to "" and Number("") is 0,
-      // which would store a silent zero-foot run that reads as a real measurement all the way to a
-      // customer's price.
-      const num = stripped === "" ? NaN : Number(stripped);
-      return Number.isFinite(num) ? num : null;
-    }
+    case "number":
+      // ONE NUMBER PARSER, shared with the box he types into (looseNumber). Two parsers is two
+      // answers: stripping every non-digit turned "16 and 20" into 1620 and "$85–95/hr" into 8595,
+      // while the client's box read the same strings as 16 and 85. A number that means one thing
+      // on screen and another in the row is the worst kind of wrong, because nothing looks broken.
+      // looseNumber also holds the law that matters here: no digits means null, never 0.
+      return looseNumber(v);
     case "select": {
       const opts = n.slot.options;
       const multi = !!n.slot.multi;

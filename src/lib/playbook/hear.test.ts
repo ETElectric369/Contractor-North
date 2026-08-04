@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { applyHeard, hearRequest, parseHeard } from "./hear";
 import { ET_ELECTRIC } from "./starters/et-electric";
 import { missingNeeds } from "./resolve";
+import type { Playbook } from "./types";
 
 /**
  * THE PARAGRAPH, verbatim, exactly as he said it — the whole reason any of this exists.
@@ -157,6 +158,24 @@ describe("the two rules the model does not get to bend", () => {
       parseHeard(JSON.stringify({ fills: [{ key: "length_ft", value: 16, heard: "16 feet across" }] })),
     );
     expect(out.answers.length_ft).toBeNull();
+  });
+
+  it("EVERY NUMBER IS GATED — not just the ones flagged `measured`", () => {
+    // The gate used to be opt-in, and the opt-in leaked two ways. measurementsFromAnswers matches
+    // number fields by key/label regex with NO measured filter, so an unflagged "length" still
+    // sizes a kit and still becomes a priced quantity. And the /forms editor rebuilds schema from
+    // {key,label,type,options,showIf} — it drops `measured` off every number field it touches, so
+    // the first edit of a starter sheet silently opened the gate.
+    const pb: Playbook = {
+      needs: [{ key: "outlet_count", label: "Outlets", ask: "How many?", slot: { type: "number" } }], // NO measured
+    };
+    const out = applyHeard(
+      pb,
+      {},
+      "sixteen by twenty room, three walls",
+      parseHeard(JSON.stringify({ fills: [{ key: "outlet_count", value: 12 }] })), // no `heard` at all
+    );
+    expect(out.answers.outlet_count).toBeNull();
   });
 
   it("FILL HOLES, NEVER OVERWRITE A HAND", () => {
