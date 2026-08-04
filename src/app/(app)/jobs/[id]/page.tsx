@@ -52,6 +52,7 @@ import { NewChangeOrderButton } from "../../change-orders/new-co-button";
 import { CoStatusControl } from "../../change-orders/co-status-control";
 import { CoRowActions } from "../../change-orders/co-row-actions";
 import { ItemEditor } from "../../materials/[id]/item-editor";
+import { NeedMaterials } from "../../materials/need-materials";
 import { AppointmentButton, type ApptValue } from "../../appointments/appointment-button";
 import { NewPoButton } from "../../purchasing/new-po-button";
 import { EditCustomerButton } from "../../crm/[id]/edit-customer-button";
@@ -792,7 +793,32 @@ export default async function JobDetailPage({
               />
             </div>
           )}
-          <ItemEditor listId={canonicalList?.id ?? null} jobId={j.id} items={(canonicalItems ?? []) as any} />
+          {/* A TECH GETS THE LIST READ-ONLY AND A WAY TO ASK. The editor's six writes all need
+              is_org_staff() at the policy, so rendering it for a tech was six buttons that
+              silently did nothing — Erik: "if a tech on a job says he needs materials for that
+              job, it should show up as an alert for the boss." */}
+          {viewerIsStaff ? (
+            <ItemEditor listId={canonicalList?.id ?? null} jobId={j.id} items={(canonicalItems ?? []) as any} />
+          ) : (
+            <div className="space-y-3">
+              {(canonicalItems ?? []).length > 0 && (
+                <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+                  {((canonicalItems ?? []) as any[]).map((it) => (
+                    <li key={it.id} className="flex items-center gap-2 px-3 py-2 text-sm">
+                      <span className={it.purchased ? "text-slate-400 line-through" : "text-slate-700"}>
+                        {it.description}
+                      </span>
+                      <span className="ml-auto shrink-0 text-xs text-slate-400">
+                        {it.quantity ?? ""} {it.unit ?? ""}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {/* He still needs to SEE the list, or he'll ask for something that's already in the van. */}
+              <NeedMaterials jobId={j.id} />
+            </div>
+          )}
           {(jobLists ?? []).length > 1 && (
             <div className="text-right">
               <Link

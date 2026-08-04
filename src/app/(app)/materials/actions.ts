@@ -7,6 +7,11 @@ import { effectiveMarkupPct } from "@/lib/pricing/markup";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { recordAiUsage, currentOrgId } from "@/lib/ai-cost";
 import { visibleJobIdOrNull } from "@/lib/job-visibility";
+import { isStaffRole } from "@/lib/actions/perms";
+import { createNotifications } from "@/lib/notifications";
+import { sendPushToProfiles } from "@/lib/push";
+import { createTask } from "@/app/(app)/tasks/actions";
+import { jobLabel } from "@/lib/schedule-options";
 
 export interface DraftMaterial {
   description: string;
@@ -471,4 +476,88 @@ export async function generateMaterialDraft(
         : `AI generation failed: ${e?.message ?? "unknown error"}`,
     };
   }
+}
+
+/**
+ * A TECH ASKS FOR MATERIALS, AND IT LANDS ON THE BOSS'S DESK.
+ *
+ * Erik, deciding the Materials question: *"If I tech on a job, it says he needs materials for that
+ * job, it should show up as an alert for the boss."*
+ *
+ * Better than either option I put to him. The audit found the six Materials writes silently failing
+ * for techs — `material_list_items_write` needs is_org_staff(), the editor rendered for everybody,
+ * and a zero-row update reads as success — so Brian could tick "purchased" and watch it spring back
+ * with no message. The two obvious fixes were both wrong: widening the policy hands the office's
+ * priced take-off to the crew, and hiding the tab leaves a man on site who needs conduit with
+ * nowhere to say so.
+ *
+ * This is the third thing. The list stays the office's. The tech gets the one verb he actually
+ * wants — I NEED THIS — and it becomes a real, assignable item with the job attached, plus a push,
+ * because a request nobody sees is the same as no request.
+ *
+ * NO ROLE GATE ON PURPOSE: asking is not writing. It creates a task, which every member may already
+ * do, and touches nothing on the list itself.
+ */
+export async function requestMaterials(jobId: string, what: string): Promise<Result> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Sign in first." };
+  const text = String(what ?? "").trim();
+  if (!text) return { ok: false, error: "Say what you need." };
+  if (text.length > 2000) return { ok: false, error: "That's a lot — trim it down a bit." };
+
+  // RLS scopes both: a job id from another tenant simply doesn't resolve.
+  const { data: job } = await supabase
+    .from("jobs")
+    .select("id, org_id, job_number, name")
+    .eq("id", jobId)
+    .maybeSingle();
+  if (!job) return { ok: false, error: "That job no longer exists." };
+
+  const { data: me } = await supabase.from("profiles").select("full_name").eq("id", user.id).maybeSingle();
+  const who = (me as { full_name?: string } | null)?.full_name?.trim() || "A crew member";
+  const label = jobLabel(job as { job_number?: string | null; name?: string | null });
+
+  // A TASK, not a bespoke table. It already lands in Needs Action and My Day, it already carries a
+  // job, and it is already something the office can assign, schedule and tick off. Unassigned so it
+  // reads as the office's to pick up — the same shape as any other staff capture.
+  const t = await createTask({
+    title: `Materials needed — ${label}`,
+    job_id: jobId,
+    priority: 1,
+    notes: `${who} on site: ${text}`,
+    category: "Materials",
+  });
+  if (!t.ok) return { ok: false, error: t.error };
+
+  // AND TELL SOMEBODY. A request sitting in a list nobody opened is the same as no request — he is
+  // standing at a job without the part.
+  const { data: staff } = await supabase
+    .from("profiles")
+    .select("id, role")
+    .neq("id", user.id)
+    .eq("active", true);
+  const bosses = (staff ?? [])
+    .filter((p) => isStaffRole((p as { role?: string }).role ?? ""))
+    .map((p) => (p as { id: string }).id);
+  if (bosses.length) {
+    await createNotifications((job as { org_id?: string }).org_id, bosses, {
+      type: "general",
+      title: `Materials needed — ${label}`,
+      body: `${who}: ${text.slice(0, 140)}`,
+      url: `/jobs/${jobId}`,
+    });
+    // "assigned" is the kind for "something landed that is yours to deal with", which is exactly
+    // what this is — and it means the request respects each boss's own push toggle.
+    await sendPushToProfiles(bosses, "assigned", {
+      title: `Materials needed — ${label}`,
+      body: `${who}: ${text.slice(0, 140)}`,
+      url: `/jobs/${jobId}`,
+    }).catch(() => {});
+  }
+
+  revalidatePath(`/jobs/${jobId}`);
+  revalidatePath("/planner");
+  revalidatePath("/tasks");
+  return { ok: true };
 }
