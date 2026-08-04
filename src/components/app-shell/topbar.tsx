@@ -23,6 +23,7 @@ export function Topbar({
   lang,
   branding,
   setup,
+  onboarded,
 }: {
   profile: Profile | null;
   lang?: string;
@@ -30,6 +31,8 @@ export function Topbar({
   /** What the company has and hasn't said about itself, in the setup playbook's keys. Comes from
    *  the layout, which already reads org settings for branding — so the door costs no extra query. */
   setup?: Answers;
+  /** profiles.onboarded_at (0180) — has THIS PERSON been walked through, not "are the fields full". */
+  onboarded?: boolean;
 }) {
   const router = useRouter();
   // Staff = owner/admin/office — the same rule the layout uses (it already
@@ -78,7 +81,7 @@ export function Topbar({
             on My Day that hid itself once setup was done — correct for a card, wrong for this:
             the moment somebody wants to change what they said, the thing they used has evaporated.
             Loud while it matters, quiet forever after, never gone. */}
-        {setup && <SetupButton initial={setup} isStaff={isStaff} />}
+        {setup && <SetupButton initial={setup} isStaff={isStaff} onboarded={!!onboarded} />}
         <GlobalQuickAdd placement="topbar" isStaff={isStaff} />
         <button
           onClick={() => window.dispatchEvent(new Event("cn:command"))}

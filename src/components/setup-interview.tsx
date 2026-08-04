@@ -3,139 +3,296 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Check, ClipboardList, Loader2 } from "lucide-react";
+import { ArrowRight, Check, ClipboardList, Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input, Label } from "@/components/ui/input";
+import { Input, Label, Textarea } from "@/components/ui/input";
 import { TellNort } from "@/components/tell-nort";
 import { SETUP_PLAYBOOK } from "@/lib/onboarding/setup-playbook";
 import { missingNeeds } from "@/lib/playbook/resolve";
 import { looseNumber } from "@/lib/inspection/capture";
-import { hearSetup, saveSetup } from "@/app/(app)/setup-actions";
-import type { Answers, AnswerValue } from "@/lib/playbook/types";
+import { savePlaybook } from "@/app/(app)/settings/playbook-actions";
+import { draftMyPlaybook, finishOnboarding, hearSetup, saveSetup } from "@/app/(app)/setup-actions";
+import type { Answers, AnswerValue, Need } from "@/lib/playbook/types";
 
 /**
- * THE INTERVIEW — an interview, not a tutorial, and not a wizard.
+ * THE WALK-THROUGH — an interview with training in it, and EVERYONE takes it.
  *
- * Erik: "onboarding needs to be smart like that and nort runs the show … an onboarding interview
- * with built in training rather than a tutorial focus."
+ * Erik, correcting me twice:
+ *   "His onboarding isn't complete if he hasn't been guided through the training and why lines"
+ *   "everyone should go through it even if they have a lot of it setup to learn the system"
  *
- * It is deliberately not its own engine. Setup is a PLAYBOOK: the same `Need` shape the inspector
- * renders, the same resolver deciding what is still missing, the same extraction turning a sentence
- * into typed answers, the same TellNort component. A second mechanism here would be a second set of
- * bugs and a second thing to teach — there is one Nort, and a surface contributes a target and a
- * projection, never an assistant of its own.
+ * I had built a gap-filler: five boxes that vanished once they were full. Andrew filled Vivian
+ * Builders' settings in and the thing declared him finished — he had never seen a why line, never
+ * been shown that the questions his inspector asks are HIS and can be changed. A populated
+ * settings row is evidence somebody typed, not evidence anybody learned.
  *
- * Which is why it TEACHES THE APP BY BEING THE APP: say it, watch boxes fill, check them, press
- * save. That is exactly the inspector they'll open on their first job.
+ * So it is three steps and it always runs end to end:
  *
- * IT LIVES IN THE TOP BAR (cn-v633), not on a page. It used to be a card on My Day that hid itself
- * once setup was done — which is correct behaviour for a card and wrong for this. Erik: "i would
- * prefer the interview to be front and center on the top bar next to the speak button so nobody has
- * to search for it." A vanishing card is unfindable the moment you want to change an answer, and
- * "where did that thing go" is the same failure as the questions nobody could find.
+ *   1. YOUR COMPANY   the five facts. Prefilled when known — seeing them already answered IS the
+ *                     lesson ("this is where that lives"), and it is where they meet Tell Nort.
+ *   2. YOUR QUESTIONS  Nort drafts the ask and the WHY for every question their walk-through will
+ *                     put in front of them, in their trade's terms, from what they just said. They
+ *                     correct it. THE CORRECTION IS THE TRAINING — nobody writes a good why from a
+ *                     blank box; you find out you have one by reading a version that's wrong.
+ *   3. WHERE IT LIVES  the short orientation, so nobody has to hunt for what they just made.
+ *
+ * Finishing records a fact (profiles.onboarded_at, 0180) rather than deriving one. Never a gate,
+ * and re-takeable forever from the top bar.
  */
-export function SetupInterview({ initial, onSaved }: { initial: Answers; onSaved?: () => void }) {
+
+type Step = 1 | 2 | 3;
+
+export function SetupInterview({
+  initial,
+  onSaved,
+}: {
+  initial: Answers;
+  onSaved?: () => void;
+}) {
   const router = useRouter();
+  const [step, setStep] = useState<Step>(1);
   const [answers, setAnswers] = useState<Answers>(initial);
   const [dirty, setDirty] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
+
+  // Step 2 state — the drafted questions, and whether a model actually wrote them.
+  const [formId, setFormId] = useState<string | null>(null);
+  const [needs, setNeeds] = useState<Need[] | null>(null);
+  const [wasDrafted, setWasDrafted] = useState(false);
 
   const open = missingNeeds(SETUP_PLAYBOOK, answers);
   const total = SETUP_PLAYBOOK.needs.length;
-  const done = total - open.length;
+  const answered = total - open.length;
 
   const set = (key: string, v: AnswerValue) => {
     setAnswers((a) => ({ ...a, [key]: v }));
     setDirty(true);
   };
 
+  const run = (fn: () => Promise<string | null>) =>
+    start(async () => {
+      setErr(null);
+      setMsg(null);
+      const e = await fn();
+      if (e) setErr(e);
+    });
+
+  // ── STEP 1 → 2. Save what they said, then ask Nort to draft their questions. ────────────────
+  const toQuestions = () =>
+    run(async () => {
+      if (dirty) {
+        const r = await saveSetup(answers);
+        if (!r.ok) return r.error;
+        setDirty(false);
+        router.refresh();
+      }
+      const d = await draftMyPlaybook();
+      if (!d.ok) return d.error;
+      setFormId(d.formId);
+      setNeeds(d.needs);
+      setWasDrafted(d.wasDrafted);
+      setStep(2);
+      return null;
+    });
+
+  const editNeed = (i: number, patch: Partial<Need>) =>
+    setNeeds((ns) => (ns ? ns.map((n, j) => (j === i ? { ...n, ...patch } : n)) : ns));
+
+  const toWhere = () =>
+    run(async () => {
+      if (formId && needs) {
+        const r = await savePlaybook(formId, needs);
+        if (!r.ok) return r.error;
+        router.refresh();
+      }
+      setStep(3);
+      return null;
+    });
+
+  const done = () =>
+    run(async () => {
+      const r = await finishOnboarding();
+      if (!r.ok) return r.error ?? "Couldn't finish.";
+      setMsg("All set.");
+      router.refresh();
+      onSaved?.();
+      return null;
+    });
+
   return (
     <div>
-      <p className="text-sm text-slate-500">
-        {done === total
-          ? "That's everything. Change anything here whenever it changes in real life."
-          : `${done} of ${total} — say it in one breath, or fill the boxes. Whichever's faster.`}
-      </p>
+      {/* Three dots, not a percentage. Somebody mid-walkthrough wants to know how much is left,
+          not how much they've done. */}
+      <div className="mb-4 flex items-center gap-2 text-xs text-slate-400">
+        {([1, 2, 3] as Step[]).map((s) => (
+          <span key={s} className={`h-1.5 flex-1 rounded-full ${s <= step ? "bg-brand" : "bg-slate-200"}`} />
+        ))}
+        <span className="shrink-0 tabular-nums">{step}/3</span>
+      </div>
 
-      <TellNort
-        hear={hearSetup}
-        answers={answers}
-        hint={open[0]?.ask}
-        label="Tell Nort about your business"
-        placeholder="I'm Justin Vivian, general contractor out of Truckee — I sub out electrical and plumbing, I cover Nevada County, and I bill 150 an hour."
-        onFilled={(next) => {
-          setAnswers(next);
-          setDirty(true);
-        }}
-      />
+      {step === 1 && (
+        <>
+          <h4 className="text-sm font-semibold text-slate-900">First, your company</h4>
+          <p className="mt-0.5 text-sm text-slate-500">
+            {answered === total
+              ? "Already on file — have a look and change anything that's out of date."
+              : `${answered} of ${total}. Say it in one breath, or fill the boxes.`}
+          </p>
 
-      {/* THE SAME BOXES, ALWAYS EDITABLE. What Nort fills lands here and what they type lands here;
-          one place a value lives, so there is nothing to reconcile. */}
-      <div className="mt-4 space-y-3">
-        {SETUP_PLAYBOOK.needs.map((n) => {
-          const v = answers[n.key];
-          const still = open.some((o) => o.key === n.key);
-          return (
-            <div key={n.key}>
-              <Label className="mb-1">
-                {n.ask}
-                {!still && <Check className="ml-1.5 inline h-3.5 w-3.5 text-emerald-600" />}
-              </Label>
-              {n.why && still && <p className="mb-1.5 line-clamp-2 text-xs leading-snug text-slate-500">{n.why}</p>}
-              {n.slot?.type === "number" ? (
-                <div className="flex items-center gap-2">
-                  <Input
-                    inputMode="decimal"
-                    value={typeof v === "number" ? String(v) : ""}
-                    onChange={(e) => set(n.key, looseNumber(e.target.value))}
-                  />
-                  <span className="shrink-0 text-sm text-slate-500">{n.slot.unit}</span>
+          <TellNort
+            hear={hearSetup}
+            answers={answers}
+            hint={open[0]?.ask}
+            label="Tell Nort about your business"
+            placeholder="I'm Justin Vivian, general contractor out of Truckee — I sub out electrical and plumbing, I cover Nevada County, and I bill 150 an hour."
+            onFilled={(next) => {
+              setAnswers(next);
+              setDirty(true);
+            }}
+          />
+
+          {/* THE SAME BOXES, ALWAYS EDITABLE. What Nort fills lands here and what they type lands
+              here; one place a value lives, so there is nothing to reconcile. */}
+          <div className="mt-4 space-y-3">
+            {SETUP_PLAYBOOK.needs.map((n) => {
+              const v = answers[n.key];
+              const still = open.some((o) => o.key === n.key);
+              return (
+                <div key={n.key}>
+                  <Label className="mb-1">
+                    {n.ask}
+                    {!still && <Check className="ml-1.5 inline h-3.5 w-3.5 text-emerald-600" />}
+                  </Label>
+                  {n.why && still && <p className="mb-1.5 line-clamp-2 text-xs leading-snug text-slate-500">{n.why}</p>}
+                  {n.slot?.type === "number" ? (
+                    <div className="flex items-center gap-2">
+                      <Input
+                        inputMode="decimal"
+                        value={typeof v === "number" ? String(v) : ""}
+                        onChange={(e) => set(n.key, looseNumber(e.target.value))}
+                      />
+                      <span className="shrink-0 text-sm text-slate-500">{n.slot.unit}</span>
+                    </div>
+                  ) : (
+                    <Input value={typeof v === "string" ? v : ""} onChange={(e) => set(n.key, e.target.value)} />
+                  )}
                 </div>
+              );
+            })}
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <Button type="button" disabled={pending} onClick={toQuestions}>
+              {pending ? (
+                <><Loader2 className="h-4 w-4 animate-spin" /> Working on your questions…</>
               ) : (
-                <Input value={typeof v === "string" ? v : ""} onChange={(e) => set(n.key, e.target.value)} />
+                <>Next: your questions <ArrowRight className="h-4 w-4" /></>
               )}
-            </div>
-          );
-        })}
-      </div>
+            </Button>
+            {err && <span className="text-sm text-rose-600">{err}</span>}
+          </div>
+        </>
+      )}
 
-      <div className="mt-4 flex flex-wrap items-center gap-3">
-        {/* FILLING WAS FREE; THIS IS THE COMMIT. Saying it changed nothing about the company —
-            pressing this changes what every estimate is priced against and what the public page
-            says, so it is deliberately its own button. */}
-        <Button
-          type="button"
-          disabled={pending || !dirty}
-          onClick={() =>
-            start(async () => {
-              setErr(null);
-              setMsg(null);
-              const r = await saveSetup(answers);
-              if (!r.ok) return setErr(r.error);
-              setDirty(false);
-              setMsg(r.seededSheet ? "Saved — and your walk-through questions are ready." : "Saved.");
-              router.refresh();
-              onSaved?.();
-            })
-          }
-        >
-          {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</> : <><Check className="h-4 w-4" /> Save</>}
-        </Button>
-        {err && <span className="text-sm text-rose-600">{err}</span>}
-        {msg && !err && <span className="text-sm font-medium text-emerald-700">{msg}</span>}
-      </div>
+      {step === 2 && (
+        <>
+          <h4 className="text-sm font-semibold text-slate-900">The questions you&rsquo;ll be asked on site</h4>
+          <p className="mt-0.5 text-sm text-slate-500">
+            {wasDrafted ? (
+              <>
+                Nort wrote these from what you just told it. <strong className="font-medium text-slate-700">They&rsquo;re a draft — cut
+                what&rsquo;s wrong.</strong> The <em>why</em> is the part that matters: it&rsquo;s what a wrong answer costs you, and
+                it&rsquo;s what Nort reads to know when a question is even worth asking.
+              </>
+            ) : (
+              <>These are the questions your walk-through asks. The <em>why</em> is what a wrong answer costs you — write it
+              in your own words, and Nort uses it to decide when the question is worth asking.</>
+            )}
+          </p>
 
-      {/* WHERE IT LIVES AFTERWARDS. Part of the training is knowing where to go back to — an
-          interview that leaves somebody unable to find what they just set up taught nothing. */}
-      <p className="mt-4 flex flex-wrap items-center gap-x-1.5 border-t border-slate-100 pt-3 text-xs text-slate-400">
-        <ClipboardList className="h-3.5 w-3.5" />
-        All of this lives in
-        <Link href="/settings" className="underline underline-offset-2 hover:text-slate-600">Settings</Link>
-        — and the questions your walk-through asks on site are under
-        <Link href="/settings?tab=playbook" className="underline underline-offset-2 hover:text-slate-600">Playbook</Link>.
-      </p>
+          <div className="mt-4 space-y-4">
+            {(needs ?? []).map((n, i) => (
+              <div key={n.key} className="rounded-lg border border-slate-200 p-3">
+                <Label className="mb-1">The question</Label>
+                <Input value={n.ask} onChange={(e) => editNeed(i, { ask: e.target.value })} />
+                <Label className="mb-1 mt-3">Why you ask it</Label>
+                <Textarea
+                  rows={3}
+                  value={n.why ?? ""}
+                  placeholder="What does it cost you when this is wrong or missing?"
+                  onChange={(e) => editNeed(i, { why: e.target.value || undefined })}
+                />
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <Button type="button" disabled={pending} onClick={toWhere}>
+              {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</> : <>Save &amp; finish <ArrowRight className="h-4 w-4" /></>}
+            </Button>
+            <button type="button" onClick={() => setStep(3)} className="text-sm text-slate-500 underline-offset-2 hover:underline">
+              Skip for now
+            </button>
+            {err && <span className="text-sm text-rose-600">{err}</span>}
+          </div>
+        </>
+      )}
+
+      {step === 3 && (
+        <>
+          <h4 className="text-sm font-semibold text-slate-900">Where everything lives</h4>
+          <p className="mt-0.5 text-sm text-slate-500">
+            Four places. That&rsquo;s the whole app.
+          </p>
+
+          <ul className="mt-4 space-y-3 text-sm">
+            <li className="flex gap-3">
+              <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
+              <span>
+                <strong className="font-medium text-slate-900">Just tell Nort</strong> — on a walk-through, say the whole job
+                the way you&rsquo;d say it to a person. The boxes fill in. Check them before you price it; Nort won&rsquo;t work out a
+                measurement you didn&rsquo;t say.
+              </span>
+            </li>
+            <li className="flex gap-3">
+              <ClipboardList className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
+              <span>
+                <strong className="font-medium text-slate-900">Your questions</strong> live in{" "}
+                <Link href="/settings?tab=playbook" className="underline underline-offset-2">Settings &rarr; Playbook</Link>. Add,
+                cut and reorder them, and change a why any time your mind changes.
+              </span>
+            </li>
+            <li className="flex gap-3">
+              <Check className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
+              <span>
+                <strong className="font-medium text-slate-900">Everything else about the business</strong> is in{" "}
+                <Link href="/settings" className="underline underline-offset-2">Settings</Link> — money, scheduling, your
+                website, integrations.
+              </span>
+            </li>
+            <li className="flex gap-3">
+              <ArrowRight className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
+              <span>
+                <strong className="font-medium text-slate-900">This walk-through</strong> stays in the top bar. Take it again
+                whenever you want — nothing here is one-time.
+              </span>
+            </li>
+          </ul>
+
+          <div className="mt-5 flex flex-wrap items-center gap-3">
+            <Button type="button" disabled={pending} onClick={done}>
+              {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> …</> : <><Check className="h-4 w-4" /> Got it</>}
+            </Button>
+            <button type="button" onClick={() => setStep(1)} className="text-sm text-slate-500 underline-offset-2 hover:underline">
+              Start over
+            </button>
+            {err && <span className="text-sm text-rose-600">{err}</span>}
+            {msg && !err && <span className="text-sm font-medium text-emerald-700">{msg}</span>}
+          </div>
+        </>
+      )}
     </div>
   );
 }

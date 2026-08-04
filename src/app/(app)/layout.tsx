@@ -185,7 +185,7 @@ export default async function AppLayout({
     >
       <Dock branding={branding} role={profile.role} badges={badges} />
       <div className="flex flex-1 flex-col overflow-hidden">
-        <Topbar profile={(profile as Profile) ?? null} lang={profile.language} branding={branding} setup={setup} />
+        <Topbar profile={(profile as Profile) ?? null} lang={profile.language} branding={branding} setup={setup} onboarded={!!(profile as any).onboarded_at} />
         {graceLeft > 0 && (
           <div
             className={`no-print px-4 py-2 text-center text-sm font-medium ${

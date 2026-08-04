@@ -4,8 +4,6 @@ import { useState } from "react";
 import { GraduationCap } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { SetupInterview } from "@/components/setup-interview";
-import { SETUP_PLAYBOOK } from "@/lib/onboarding/setup-playbook";
-import { missingNeeds } from "@/lib/playbook/resolve";
 import type { Answers } from "@/lib/playbook/types";
 
 /**
@@ -27,32 +25,40 @@ import type { Answers } from "@/lib/playbook/types";
  * STAFF ONLY, because what it writes is company config — a tech has nothing to answer here and RLS
  * would refuse the write anyway.
  */
-export function SetupButton({ initial, isStaff }: { initial: Answers; isStaff: boolean }) {
+export function SetupButton({
+  initial,
+  isStaff,
+  onboarded,
+}: {
+  initial: Answers;
+  isStaff: boolean;
+  /** Has THIS PERSON reached the end of the walk-through (profiles.onboarded_at, 0180)?
+   *  Deliberately not "are the fields full" — see the migration. */
+  onboarded: boolean;
+}) {
   const [open, setOpen] = useState(false);
   if (!isStaff) return null;
-
-  const left = missingNeeds(SETUP_PLAYBOOK, initial).length;
 
   return (
     <>
       <button
         type="button"
         onClick={() => setOpen(true)}
-        title={left ? `Finish setting up — ${left} to go` : "Your setup"}
-        aria-label={left ? `Finish setting up, ${left} remaining` : "Your setup"}
+        title={onboarded ? "Take the walk-through again" : "Start here — the two-minute walk-through"}
+        aria-label={onboarded ? "Take the walk-through again" : "Start here, the walk-through"}
         className={
-          left
-            ? "btn-gloss relative inline-flex h-10 items-center gap-1.5 rounded-full bg-amber-500 px-3 text-sm font-medium text-white shadow-sm transition-colors hover:bg-amber-600"
-            : "relative inline-flex h-10 w-10 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+          onboarded
+            ? "relative inline-flex h-10 w-10 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+            : "btn-gloss relative inline-flex h-10 items-center gap-1.5 rounded-full bg-amber-500 px-3 text-sm font-medium text-white shadow-sm transition-colors hover:bg-amber-600"
         }
       >
         <GraduationCap className="h-5 w-5 shrink-0" />
-        {left > 0 && (
+        {!onboarded && (
           <>
-            <span className="hidden md:inline">Set up</span>
-            <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-white/25 px-1 text-xs font-semibold">
-              {left}
-            </span>
+            <span className="hidden md:inline">Start here</span>
+            {/* On a phone the label is gone, so the dot is the only thing saying "this one is
+                waiting on you". */}
+            <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-rose-500 ring-2 ring-white md:hidden" />
           </>
         )}
       </button>

@@ -4,12 +4,20 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { runHear, type HearRun } from "@/lib/playbook/hear-run";
 import { coerceByPlaybook } from "@/lib/playbook/answers";
+import { playbookForForm } from "@/lib/playbook/parse";
+import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
+import { getOrgSettings } from "@/lib/org-settings";
 import { SETUP_PLAYBOOK } from "@/lib/onboarding/setup-playbook";
+import { aboutFromSetup, applyDraft, draftRequest, DRAFT_SYSTEM } from "@/lib/onboarding/draft-playbook";
 import { updateOrgSettings } from "./settings/actions";
 import { createStarterInspectionSheet } from "./forms/actions";
-import type { Answers } from "@/lib/playbook/types";
+import type { Answers, Need } from "@/lib/playbook/types";
 
 type Result = { ok: true; seededSheet: boolean } | { ok: false; error: string };
+
+export type DraftResult =
+  | { ok: true; formId: string; needs: Need[]; wasDrafted: boolean }
+  | { ok: false; error: string };
 
 /** Setting a company up is the same shape as walking a job — same playbook, same extraction. */
 export async function hearSetup(answers: Answers, transcript: string): Promise<HearRun> {
@@ -84,4 +92,87 @@ export async function saveSetup(answers: Answers): Promise<Result> {
   revalidatePath("/planner");
   revalidatePath("/settings");
   return { ok: true, seededSheet };
+}
+
+/**
+ * DRAFT THE WHY LINES — the training half of the interview.
+ *
+ * Erik: "his onboarding isn't complete if he hasn't been guided through the training and why
+ * lines." Nobody writes a good `why` from a blank box; you discover you have one by reading a
+ * version that is slightly wrong. So Nort drafts every line in their trade's terms from what they
+ * just told the interview, and the learning is them saying "no, that's not why I ask that."
+ *
+ * IT DRAFTS PROSE ONLY. Keys, slots, options and rules come from their own sheet and pass through
+ * untouched (see applyDraft) — the model never gets to invent a question, only to phrase one and
+ * say what a wrong answer costs. And it SAVES NOTHING: this returns a draft to argue with.
+ */
+export async function draftMyPlaybook(): Promise<DraftResult> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Sign in first." };
+
+  const { data: form } = await supabase
+    .from("forms")
+    .select("id, schema, playbook")
+    .eq("is_inspection", true)
+    .order("created_at")
+    .limit(1)
+    .maybeSingle();
+  if (!form) return { ok: false, error: "Say what trade you're in first — that's what builds your questions." };
+
+  const pb = playbookForForm(form as { schema?: unknown; playbook?: unknown });
+  if (!pb.needs.length) return { ok: false, error: "That walk-through has no questions in it yet." };
+  if (!process.env.ANTHROPIC_API_KEY) return { ok: true, formId: (form as { id: string }).id, needs: pb.needs, wasDrafted: false };
+
+  const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+  const s = getOrgSettings((org as { settings?: unknown } | null)?.settings);
+  const about = aboutFromSetup({
+    trade: s.trade_label,
+    city: s.public_city,
+    service_area: s.service_area,
+    labor_rate: s.default_labor_rate,
+  });
+
+  let text = "";
+  try {
+    const resp = await getAnthropic().messages.create({
+      model: DEFAULT_MODEL,
+      max_tokens: 4000,
+      system: [{ type: "text", text: DRAFT_SYSTEM, cache_control: { type: "ephemeral" } }],
+      messages: [{ role: "user", content: draftRequest(pb, about) }],
+    });
+    text = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("\n").trim();
+  } catch {
+    // A drafting failure is not a dead end — they can still read and write their own lines.
+    return { ok: true, formId: (form as { id: string }).id, needs: pb.needs, wasDrafted: false };
+  }
+
+  let raw: unknown = null;
+  const a = text.indexOf("{");
+  const b = text.lastIndexOf("}");
+  if (a >= 0 && b > a) { try { raw = JSON.parse(text.slice(a, b + 1)); } catch { /* leave null */ } }
+  const drafted = applyDraft(pb, raw);
+  return { ok: true, formId: (form as { id: string }).id, needs: drafted.needs, wasDrafted: raw !== null };
+}
+
+/**
+ * "I've been shown the system."
+ *
+ * Deliberately a RECORDED FACT, not a derived one. A populated settings row is evidence somebody
+ * typed, not evidence anybody learned — Andrew filled Vivian Builders in and the old card decided
+ * he was finished, having never seen a why line. Erik: "everyone should go through it even if they
+ * have a lot of it setup to learn the system." Per person (0180), never a gate, re-takeable from
+ * the top bar forever.
+ */
+export async function finishOnboarding(): Promise<{ ok: boolean; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Sign in first." };
+  const { error } = await supabase
+    .from("profiles")
+    .update({ onboarded_at: new Date().toISOString() })
+    .eq("id", user.id);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/", "layout");
+  return { ok: true };
 }

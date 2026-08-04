@@ -1,0 +1,82 @@
+import { describe, it, expect } from "vitest";
+import { aboutFromSetup, applyDraft, draftRequest } from "./draft-playbook";
+import { playbookFromSheet } from "@/lib/playbook/from-sheet";
+import { starterSchemaJson } from "@/lib/inspection/starter-sheets";
+import { applicableNeeds } from "@/lib/playbook/resolve";
+import type { Playbook } from "@/lib/playbook/types";
+
+const ELECTRICAL = playbookFromSheet(starterSchemaJson("electrical"));
+
+describe("what the drafter is told", () => {
+  const req = draftRequest(ELECTRICAL, aboutFromSetup({ trade: "general contractor, subs out electrical", city: "Reno", labor_rate: 110 }));
+
+  it("his own words about his business ride along", () => {
+    expect(req).toContain("subs out electrical");
+    expect(req).toContain("Reno");
+    expect(req).toContain("$110/hr");
+  });
+
+  it("every question, by key, with its shape", () => {
+    for (const n of ELECTRICAL.needs) expect(req).toContain(`key: ${n.key}`);
+    expect(req).toContain("he picks one of:");
+  });
+
+  it("a measured question is flagged as feeding a price", () => {
+    const withMeasured = draftRequest(
+      { needs: [{ key: "run_ft", label: "Run", ask: "Run?", slot: { type: "number", unit: "ft" }, measured: true }] },
+      "x",
+    );
+    expect(withMeasured).toContain("feeds a price");
+  });
+
+  it("an existing why is handed over to IMPROVE, never silently replaced", () => {
+    const pb: Playbook = { needs: [{ key: "a", label: "A", ask: "A?", why: "because the meter base falls off" }] };
+    expect(draftRequest(pb, "x")).toContain("IMPROVE, do not discard");
+    expect(draftRequest(pb, "x")).toContain("meter base falls off");
+  });
+
+  it("nothing known yet still produces a sentence, not an empty prompt", () => {
+    expect(aboutFromSetup({})).toContain("Nothing else known");
+  });
+});
+
+describe("STRUCTURE IS NEVER TAKEN FROM THE MODEL — only prose", () => {
+  const drafted = applyDraft(ELECTRICAL, {
+    needs: [
+      { key: "work_type", ask: "What are we doing here?", why: "It routes everything under it." },
+      { key: "panel_brand", ask: "What brand is the panel?", why: "Zinsco and I am not touching it." },
+      { key: "GHOST", ask: "invented", why: "invented" },
+    ],
+  });
+
+  it("same keys, same order, same count — a question cannot be invented or dropped", () => {
+    expect(drafted.needs.map((n) => n.key)).toEqual(ELECTRICAL.needs.map((n) => n.key));
+    expect(drafted.needs.map((n) => n.key)).not.toContain("GHOST");
+  });
+
+  it("slots and rules pass through untouched", () => {
+    for (let i = 0; i < ELECTRICAL.needs.length; i++) {
+      expect(drafted.needs[i].slot).toEqual(ELECTRICAL.needs[i].slot);
+      expect(drafted.needs[i].when).toEqual(ELECTRICAL.needs[i].when);
+    }
+    // ...so the resolver behaves identically after a draft as before it.
+    expect(applicableNeeds(drafted, {}).map((n) => n.key)).toEqual(applicableNeeds(ELECTRICAL, {}).map((n) => n.key));
+  });
+
+  it("the prose it DID write lands", () => {
+    const panel = drafted.needs.find((n) => n.key === "panel_brand")!;
+    expect(panel.ask).toBe("What brand is the panel?");
+    expect(panel.why).toContain("Zinsco");
+  });
+
+  it("a need the model skipped keeps what it had — silence is not a deletion", () => {
+    const untouched = drafted.needs.find((n) => n.key === "run_ft")!;
+    const before = ELECTRICAL.needs.find((n) => n.key === "run_ft")!;
+    expect(untouched.ask).toBe(before.ask);
+  });
+
+  it("garbage in leaves the playbook exactly as it was", () => {
+    for (const junk of [null, undefined, "nope", {}, { needs: "x" }, { needs: [1, null] }])
+      expect(applyDraft(ELECTRICAL, junk)).toEqual(ELECTRICAL);
+  });
+});
