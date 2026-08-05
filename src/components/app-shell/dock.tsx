@@ -75,6 +75,10 @@ function DockInner({ branding, role, badges }: DockProps) {
                 <Link
                   key={s.key}
                   href={s.href}
+                  // PER-SECTION ANCHORS, so the tour can walk the pipeline — Sales, then Jobs,
+                  // then Money — instead of waving at the whole rail once. Both renderings carry
+                  // the same name; the spotlight takes whichever is visible.
+                  data-tour={`dock-${s.key}`}
                   title={s.label}
                   className={`group relative flex w-[74px] flex-col items-center gap-0.5 rounded-2xl px-1 py-1.5 transition-transform ${
                     on ? "seaglass-active" : "hover:scale-[1.05]"
@@ -156,6 +160,7 @@ function DockInner({ branding, role, badges }: DockProps) {
             <Link
               key={s.key}
               href={s.href}
+              data-tour={`dock-${s.key}`}
               // gap-1 (not 0.5) between icon and label for readability; 10px label (not 9px)
               // reads better in the field and still fits all tiles at 375px.
               className={`relative flex flex-1 flex-col items-center gap-1 rounded-xl px-1 py-1.5 text-[10px] font-medium ${

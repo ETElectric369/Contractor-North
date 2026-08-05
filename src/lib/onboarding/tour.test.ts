@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { DOCK } from "@/lib/dock";
 import { TOUR, sayOf, tourIndex, type TourCtx } from "./tour";
 import { SETUP_PLAYBOOK } from "./setup-playbook";
 
@@ -63,12 +64,14 @@ describe("it points at things that exist", () => {
   // setup-button.tsx, account-menu.tsx). `settings-link` is the Settings item INSIDE the account
   // menu — it is not on the settings page, it is the door to it, which is the whole point.
   const SHELL = ["nort", "setup", "quickadd", "search", "bell", "account", "dock", "settings-link"];
+  // dock-<sectionKey> is set per section by dock.tsx, on BOTH the desktop rail and the mobile bar.
+  const isDockSection = (a: string) => DOCK.some((d) => a === `dock-${d.key}`);
   // Anchors that only exist once you are standing on /settings.
   const settingsOnly = (a: string) => a === "sections-settings" || (a.startsWith("settings-") && a !== "settings-link");
 
   it("every anchor is one the app sets", () => {
     for (const s of TOUR) {
-      if (!s.anchor || settingsOnly(s.anchor)) continue;
+      if (!s.anchor || settingsOnly(s.anchor) || isDockSection(s.anchor)) continue;
       expect(SHELL, `${s.key} points at ${s.anchor}`).toContain(s.anchor);
     }
   });
@@ -96,7 +99,10 @@ describe("it points at things that exist", () => {
       if (s.poke) expect(s.anchor, `${s.key} is pokeable but points at nothing`).toBeTruthy();
       if (s.awaits) {
         // It must wait for something the app actually sets, or the tour stops dead.
-        expect(SHELL.includes(s.awaits) || settingsOnly(s.awaits), `${s.key} awaits ${s.awaits}`).toBe(true);
+        expect(
+          SHELL.includes(s.awaits) || settingsOnly(s.awaits) || isDockSection(s.awaits),
+          `${s.key} awaits ${s.awaits}`,
+        ).toBe(true);
         // Waiting for a tap AND asking a question are two different kinds of turn.
         expect(s.ask, `${s.key} both awaits and asks`).toBeUndefined();
       }
@@ -152,7 +158,76 @@ describe("well-formed", () => {
   });
 
   it("it is a tour, not an epic — this gets taken standing in a truck", () => {
-    expect(TOUR.length).toBeLessThanOrEqual(20);
+    // Raised 20 -> 24 when Erik asked for the pipeline: "the tour should point out the process
+    // starting with leads all the way through". Six steps of run, paid for by folding the three
+    // one-line topbar-button steps into one. 24 is the new line, and the next thing that wants in
+    // buys its place by taking something else out — the ceiling is the only reason this stayed a
+    // tour instead of becoming a manual.
+    expect(TOUR.length).toBeLessThanOrEqual(24);
+  });
+
+  describe("THE RUN — lead to paid, and it must never overclaim", () => {
+    // A truth pass over the code cut ELEVEN claims from the first drafts of these steps. This is
+    // the guard that stops them creeping back, because every one of them is a sentence somebody
+    // would happily write again — they all SOUND true, and a contractor who believes his estimate
+    // priced itself sends one without reading it.
+    const said = spoken(STRANGER).join(" ").toLowerCase();
+
+    it("walks the pipeline in the order the work happens", () => {
+      const order = ["run-lead", "run-walk", "run-estimate", "run-job", "run-money", "run-win"];
+      const at = order.map((k) => TOUR.findIndex((s) => s.key === k));
+      expect(at.every((i) => i >= 0), "a run step went missing").toBe(true);
+      expect([...at].sort((a, b) => a - b)).toEqual(at);
+    });
+
+    it("points at the dock tile it is talking about", () => {
+      expect(TOUR.find((s) => s.key === "run-lead")!.anchor).toBe("dock-sales");
+      expect(TOUR.find((s) => s.key === "run-job")!.anchor).toBe("dock-jobs");
+      // The Money section's key really is `invoices` (dock.ts) even though its label is "Money".
+      expect(TOUR.find((s) => s.key === "run-money")!.anchor).toBe("dock-invoices");
+    });
+
+    it("never claims an automation the code does not do", () => {
+      // Each of these was in a draft and was cut against a specific file:
+      //   the app texts the customer      -> convert-menu builds an `sms:` href; HE presses send
+      //   hours attach themselves         -> the tech picks the job at clock-in
+      //   invoices send on their own       -> finishJob emails only when opts.sendInvoice is ticked
+      //   the estimate prices itself       -> nothing prices until Generate Line Items
+      for (const bad of [
+        "i text them",
+        "i send the text",
+        "sends itself",
+        "send themselves",
+        "prices itself",
+        "automatically",
+        "on their own",
+        "70%",
+        "80 percent",
+      ])
+        expect(said, `the tour claims: "${bad}"`).not.toContain(bad);
+    });
+
+    it("says out loud where the human still presses the button", () => {
+      // The counterweight to the test above: cutting overclaims must not leave it vague.
+      expect(said).toContain("you send it");
+      expect(said).toContain("until you press generate line items");
+      expect(said).toContain("unless you tick the box");
+    });
+
+    it("and the trade answer no longer claims to build job codes", () => {
+      // saveSetup writes trade_label/city/service_area/rate and seeds a starter walk-through. It
+      // never touches job_codes — those come only from importTradeCodePack, called by hand from
+      // Settings. This was live in the shipped tour until the run's truth pass found it.
+      expect(said).not.toContain("builds your job codes");
+      expect(said).toContain("starter job codes");
+    });
+
+    it("the tone step names the dial AND the limits that make it safe", () => {
+      const tone = sayOf(TOUR.find((s) => s.key === "tone")!.say, STRANGER).toLowerCase();
+      expect(tone).toContain("never go first");
+      expect(tone).toMatch(/customer|homeowner/);
+      expect(TOUR.find((s) => s.key === "tone")!.route).toBe("/settings?tab=you");
+    });
   });
 
   it("THE LOOP CLOSES BOTH WAYS — he says back what he knows, and what he is for", () => {

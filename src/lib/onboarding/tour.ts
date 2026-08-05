@@ -129,8 +129,8 @@ export const TOUR: TourStep[] = [
       "Now the one that matters most — what trade are you in? " +
       "If you sub most of it out, say that. 'General contractor, I sub out electrical and plumbing' " +
       "tells me more than picking one word off a list. " +
-      "This is the answer that builds your job codes, the questions I'll ask you on site, " +
-      "and what an estimate thinks it's pricing.",
+      "This is the answer that builds the questions I'll ask you on site and what an estimate " +
+      "thinks it's pricing — and it's what I use to offer you the right starter job codes.",
     ask: "trade",
   },
   {
@@ -233,24 +233,13 @@ export const TOUR: TourStep[] = [
       "your schedule. You'll never have to go more than one level deep to find a thing.",
   },
   {
-    key: "add",
+    key: "topbar",
     anchor: "quickadd",
-    title: "Making something new",
-    say: "Plus is how anything gets created — a job, a customer, a quote, a task. From any screen.",
-  },
-  {
-    key: "search",
-    anchor: "search",
-    title: "Finding anything",
+    title: "Plus, search, bell",
     say:
-      "Search finds records and runs commands. On a computer it's Command-K. " +
-      "When you can't remember where something lives, it's faster than the nav.",
-  },
-  {
-    key: "bell",
-    anchor: "bell",
-    title: "What needs you",
-    say: "The bell is what's waiting on you — it works whether or not you switch on phone notifications.",
+      "Three in this corner. Plus makes anything new — a job, a customer, an estimate, a task — " +
+      "from any screen. The magnifying glass finds anything you've ever typed in here. " +
+      "And the bell is what's waiting on you, whether or not you switch on phone notifications.",
   },
   {
     key: "account",
@@ -301,15 +290,44 @@ export const TOUR: TourStep[] = [
       "changes. This is yours, not mine — I just do what it says.",
   },
 
-  // ── 4. THE JOB. What this is all for. ──────────────────────────────────────────────────────
+  // ── 4. THE RUN. One job, phone call to money, pointing at the tile each time. ───────────────
+  //
+  // Erik: "the tour should point out the process starting with leads all the way through also
+  // explaining how the AI works for you through all the steps and feeds all the data … heres how
+  // you win (time, effort, thought conservation allowing focus, peace of mind)."
+  //
+  // Everything above taught him NORT. Nothing yet taught him THE SHAPE OF THE WORK, and a
+  // contractor who doesn't know Leads feeds Inspections feeds Estimates will use this as six
+  // unrelated apps and type the same address into all of them. Chronology is the teaching device:
+  // it is the order his day already happens in, so there is nothing new to memorise.
+  //
+  // EVERY LINE IN HERE WAS TRUTH-CHECKED AGAINST THE CODE, and eleven claims were cut for being
+  // false — including "they book themselves" (the app builds an sms: link, HE presses send),
+  // "the hours land on their own" (he picks the job at clock-in), and the 70-80% figure itself,
+  // which is honest at the walk-through fill and near zero at getting a lead in. What replaced it
+  // is the version true at every stage: a fact typed once rides all the way through. A man who
+  // thinks his estimate priced itself is a man who sends one without reading it.
   {
-    key: "inspector",
-    title: "On a job",
+    key: "run-lead",
+    anchor: "dock-sales",
+    title: "It starts with a phone call",
     say:
-      "Here's how it goes on site. You open a walk-through, press Talk, and say the whole job the " +
-      "way you'd say it to a person — everything, in one breath. I put what you said in the right " +
-      "boxes and only ask about what's left over.",
+      "Let's walk one job the whole way. Work runs one direction through here — Sales, then Jobs, " +
+      "then Money — and it starts under Sales, on Leads, where a phone number on its own is enough " +
+      "to save one. Turn that lead into a site visit and the address and what they told you ride " +
+      "over with it. Offer them three times instead of playing phone tag — I write the text, you " +
+      "send it, and whichever one they tap books itself onto your schedule.",
   },
+  {
+    key: "run-walk",
+    title: "Then you're stood in the yard",
+    say:
+      "Day of, you're on site with your phone. Open the walk-through, press Talk, and say the whole " +
+      "job in one breath the way you'd say it to a person. I put what you said into the right boxes " +
+      "and only ask about what's left over.",
+  },
+  // The honest half of that same moment, and it stays welded to it: it carries the only concrete
+  // example in the whole tour ("two outlets on each of three walls").
   {
     key: "trust",
     title: "One thing to know about me",
@@ -318,6 +336,69 @@ export const TOUR: TourStep[] = [
       "I won't work out a measurement you didn't give me — if you say two outlets on each of three " +
       "walls, I won't quietly write down six. I'll ask. " +
       "Anything I can't place goes in your notes word for word, so nothing you said gets lost.",
+  },
+  {
+    key: "run-estimate",
+    title: "Writing it up",
+    say:
+      "Back in the truck you press Start the estimate, and the answers from that walk-through are " +
+      "already in it, marked as measured so nothing gets worked out twice. Nothing gets priced " +
+      "until you press Generate Line Items. I work off your own price list, flag anything that " +
+      "isn't in it yet as my guess and not your price, and hand you a short list to check before " +
+      "it goes out.",
+  },
+  {
+    key: "run-job",
+    anchor: "dock-jobs",
+    title: "They say yes",
+    say:
+      "You mark the estimate accepted and the job builds itself — same customer, same site address, " +
+      "the lead it came from, plus a work order and a material list off the estimate. Then it " +
+      "starts collecting: clock in on that job and the hours land on it, photograph a supply house " +
+      "receipt and I read it and file it on as a cost. The ones I'm not certain about I put in a " +
+      "pile for you rather than guess.",
+  },
+  {
+    key: "run-money",
+    anchor: "dock-invoices",
+    title: "And the money",
+    say:
+      "Job's done. Press Finish Job and the invoice is already written — if there's an accepted " +
+      "estimate, that estimate IS the bill, and I won't stack the hours on top of a price they " +
+      "already agreed to. If there isn't one, it's every person's hours at the right rate plus " +
+      "every receipt with your markup on. It lands as a draft, and nothing reaches your customer " +
+      "unless you tick the box that sends it.",
+  },
+  // HIS "everybody wins", stated as something he can CHECK rather than handed back as a slogan.
+  // After the run and not before: a promise made ahead of the demonstration is a brochure; the
+  // same words after it are a summary. It names what is still his, because a tour that only lists
+  // what the app does leaves a man wondering what it does behind his back.
+  {
+    key: "run-win",
+    title: "So what did that just save you",
+    say:
+      "You typed that address once, on the phone call, and it was still with you at the invoice — " +
+      "same with the numbers off the walk-through and the hours off the clock. So you're not typing " +
+      "it four times, you're not carrying the job round in your head between the yard and the desk, " +
+      "and your customer gets a price off your real numbers instead of a guess made in a truck. " +
+      "Which lead, what date, what price, what goes out — that's all still yours. I do the typing " +
+      "and the remembering, you do the trade.",
+  },
+  // THE ONLY SETTING WHOSE WHOLE POINT IS THAT SOMEBODY KNOWS IT'S THERE, and it's three levels
+  // down. Erik asked for it with a wink. Stating the two limits out loud is what makes the dial
+  // safe to turn up — and it agrees with what the settings screen already says rather than
+  // contradicting it. Per person, because `register` lives on profiles (0183), not the org.
+  {
+    key: "tone",
+    route: "/settings?tab=you",
+    anchor: "settings-you",
+    title: "One more, under You",
+    say:
+      "Last one, and it's per person, so you and whoever's in the office don't have to agree. " +
+      "There's a dial in here for how funny I am and a switch for language, so when you're swearing " +
+      "at a seized breaker I'm not answering you like a call centre. I match you and I never go " +
+      "first — if you don't swear, you'll never hear it out of me. And none of it ever reaches a " +
+      "customer: estimates, invoices, anything a homeowner reads stays clean wherever that dial sits.",
   },
   {
     key: "done",
