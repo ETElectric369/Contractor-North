@@ -27,6 +27,7 @@ import { TaxRatesManager } from "./tax-rates-manager";
 import { JobCodesManager } from "./job-codes-manager";
 import { HomepageCard } from "./homepage-card";
 import { WebsiteSettings } from "./website-settings";
+import { IntakeCard } from "./intake-card";
 import { PortfolioManager } from "./portfolio-manager";
 import { ReviewsManager } from "./reviews-manager";
 import { PostsManager } from "./posts-manager";
@@ -108,6 +109,20 @@ export default async function SettingsPage({
     supabase.from("job_codes").select("id, code, description, billable, active").order("code"),
   ]);
 
+  // The public intake door (0185): on = exactly one form flagged is_public_intake. Read
+  // tolerantly — a deploy can land before its migration, and this page must not 500 for that.
+  let intakeOn = false;
+  try {
+    const { data: intakeForm } = await supabase
+      .from("forms")
+      .select("id")
+      .eq("is_public_intake", true)
+      .limit(1)
+      .maybeSingle();
+    intakeOn = !!intakeForm;
+  } catch {
+    /* pre-migration: the door simply reads as off */
+  }
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "";
   const sitesDomain = process.env.SITES_DOMAIN || "contractornorth.com";
   const settings = getOrgSettings((org as any)?.settings);
@@ -378,6 +393,15 @@ export default async function SettingsPage({
             <div className="space-y-6">
               <Section title="Your website">
                 <WebsiteSettings settings={settings} siteUrl={siteUrl} sitesDomain={sitesDomain} />
+              </Section>
+              {/* THE INTAKE DOOR (0185) — the "request an estimate" link for the org's own site.
+                  Lives with Website because that's where the link gets USED, not where the
+                  questions live (those are a form, under Playbook, once the door is on). */}
+              <Section title="Request-an-estimate link">
+                <IntakeCard
+                  on={intakeOn}
+                  url={settings.public_handle ? `${orgPublicBaseUrl(settings)}/intake/${settings.public_handle}` : null}
+                />
               </Section>
               <Section title="Homepage">
                 <HomepageCard
