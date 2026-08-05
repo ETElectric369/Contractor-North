@@ -108,3 +108,33 @@ export function toneDirective(humor: number, register: Register): string {
 
   return parts.join("\n");
 }
+
+/** Hard cap, mirrored by the DB CHECK in 0184 — clamped here too so a save can never 400. */
+export const NORT_NOTES_MAX = 2000;
+
+export const clampNotes = (v: unknown): string | null => {
+  const t = typeof v === "string" ? v.trim() : "";
+  return t ? t.slice(0, NORT_NOTES_MAX) : null;
+};
+
+/**
+ * STANDING ORDERS — the durable home for "keep it short".
+ *
+ * Erik: "hes not remembering to shut the fuck up." He was right, structurally: a correction said
+ * in chat lived only in conversation history, which is capped, framed as continuity, and rolls
+ * off within days. This is the other half of the tone dial — the dial is settings he picks, this
+ * is instructions he SAYS, and both survive every session.
+ *
+ * Injected ABOVE history so it reads as orders, not as recollection.
+ */
+export function standingOrders(notes: string | null | undefined): string {
+  const t = (notes ?? "").trim();
+  if (!t) return "";
+  return (
+    "\n\nSTANDING ORDERS FROM THIS PERSON — they told you these once and expect you to still know " +
+    "them. They outrank your defaults and your own habits (but never the security rules or what " +
+    "reaches a customer). If one of these conflicts with being helpful right now, follow the " +
+    "order and offer the longer version instead of volunteering it:\n" +
+    t.slice(0, NORT_NOTES_MAX)
+  );
+}

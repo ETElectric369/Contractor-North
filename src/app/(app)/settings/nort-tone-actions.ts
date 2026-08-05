@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { asRegister, clampHumor } from "@/lib/nort/tone";
+import { asRegister, clampHumor, clampNotes } from "@/lib/nort/tone";
 
 /**
  * Save how Nort talks to THIS person (0183).
@@ -15,6 +15,9 @@ import { asRegister, clampHumor } from "@/lib/nort/tone";
 export async function saveNortTone(
   humor: number,
   register: string,
+  /** Standing orders (0184). `undefined` = leave untouched, so the tone save can't clobber
+   *  something Nort wrote mid-conversation; "" = deliberately cleared. */
+  notes?: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -22,7 +25,11 @@ export async function saveNortTone(
 
   const { data, error } = await supabase
     .from("profiles")
-    .update({ nort_humor: clampHumor(humor), nort_register: asRegister(register) })
+    .update({
+      nort_humor: clampHumor(humor),
+      nort_register: asRegister(register),
+      ...(notes === undefined ? {} : { nort_notes: clampNotes(notes) }),
+    })
     .eq("id", user.id)
     .select("id");
   if (error) return { ok: false, error: error.message };

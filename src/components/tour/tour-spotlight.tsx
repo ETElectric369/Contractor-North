@@ -34,7 +34,6 @@ export function TourSpotlight({
   onExit,
   step,
   total,
-  poke,
 }: {
   anchor?: string;
   title: string;
@@ -42,8 +41,6 @@ export function TourSpotlight({
   onExit: () => void;
   step: number;
   total: number;
-  /** Let clicks through to the spotlighted control — see TourStep.poke. */
-  poke?: boolean;
 }) {
   const [rect, setRect] = useState<Rect | null>(null);
   const [mounted, setMounted] = useState(false);
@@ -52,6 +49,13 @@ export function TourSpotlight({
 
   // Measure on every step change, and keep measuring — a topbar control moves when the page
   // scrolls under it, and a phone rotating re-lays the whole shell.
+  //
+  // BUT ONLY SET STATE WHEN THE NUMBERS ACTUALLY CHANGE. Erik: "its super glitchy when pointing
+  // out the search, bell". This loop used to call setRect with a FRESH OBJECT every animation
+  // frame — sixty React re-renders a second, forever, while `transition-all duration-300` tried
+  // to animate toward a target that moved again every 16ms. The ring never settled and the card
+  // shivered next to it. A rAF poll is right; re-rendering on a poll that found nothing new is
+  // not. Same object identity in, no render out, and the transition gets to finish.
   useLayoutEffect(() => {
     if (!anchor) {
       setRect(null);
@@ -71,16 +75,38 @@ export function TourSpotlight({
     };
     const measure = () => {
       const el = findVisible();
-      if (!el) return setRect(null);
+      if (!el) {
+        setRect((prev) => (prev === null ? prev : null));
+        return;
+      }
       const r = el.getBoundingClientRect();
-      setRect({ top: r.top - PAD, left: r.left - PAD, width: r.width + PAD * 2, height: r.height + PAD * 2 });
+      const next = { top: r.top - PAD, left: r.left - PAD, width: r.width + PAD * 2, height: r.height + PAD * 2 };
+      setRect((prev) =>
+        prev &&
+        // Sub-pixel churn during a smooth scroll is not movement worth a render.
+        Math.abs(prev.top - next.top) < 0.5 &&
+        Math.abs(prev.left - next.left) < 0.5 &&
+        Math.abs(prev.width - next.width) < 0.5 &&
+        Math.abs(prev.height - next.height) < 0.5
+          ? prev
+          : next,
+      );
     };
     const loop = () => {
       measure();
       raf = requestAnimationFrame(loop);
     };
-    // Scroll it into view first — a spotlight on something off-screen is a dimmed screen.
-    findVisible()?.scrollIntoView({ block: "center", behavior: "smooth" });
+    // Scroll it into view — but ONLY if it isn't already. Every control in the topbar is fixed,
+    // so `scrollIntoView({block:"center"})` yanked the page underneath it to centre something that
+    // never moves. That jump, on the steps that point at the topbar, is the "super glitchy when
+    // pointing out the search, bell". `instant` too: a smooth scroll moves the anchor for ~400ms
+    // and the ring chases it the whole way.
+    const first = findVisible();
+    if (first) {
+      const r = first.getBoundingClientRect();
+      const inView = r.top >= 0 && r.bottom <= (window.innerHeight || 0);
+      if (!inView) first.scrollIntoView({ block: "center", behavior: "instant" as ScrollBehavior });
+    }
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
   }, [anchor]);
@@ -113,14 +139,13 @@ export function TourSpotlight({
       {/* The dimmer, and the hole in it. Clicks land here and go nowhere on purpose — mid-step is
           not the moment to wander off; Exit and the step buttons are the ways out.
 
-          UNLESS IT'S A POKE STEP, where the hole is a real hole. Then this element goes
-          click-through (a box-shadow is never hit-testable, so the dimming survives) and the four
-          rects below block everything around it instead. Four rects, not one, precisely because a
-          single element cannot have a hole — which is why the DIMMING is still one box-shadow: the
-          seams that would show between four translucent rects don't exist on invisible ones. */}
+          There was briefly a "poke" mode that let one click through to the highlighted control and
+          waited for it. Erik: "i dont want it waiting for me to click anything." He's right — a
+          tour that stops for homework is a form. Nort opens what needs opening himself now
+          (TourStep.opens), so the dimmer went back to being solid. */}
       {rect ? (
         <div
-          className={`${poke ? "pointer-events-none" : "pointer-events-auto"} absolute rounded-xl ring-2 ring-white/90 transition-all duration-300`}
+          className="pointer-events-auto absolute rounded-xl ring-2 ring-white/90 transition-all duration-300"
           style={{
             top: rect.top,
             left: rect.left,
@@ -131,15 +156,6 @@ export function TourSpotlight({
         />
       ) : (
         <div className="pointer-events-auto absolute inset-0 bg-slate-900/72" />
-      )}
-
-      {poke && rect && (
-        <>
-          <div className="pointer-events-auto absolute left-0 right-0" style={{ top: 0, height: Math.max(0, rect.top) }} />
-          <div className="pointer-events-auto absolute left-0 right-0 bottom-0" style={{ top: rect.top + rect.height }} />
-          <div className="pointer-events-auto absolute left-0" style={{ top: rect.top, height: rect.height, width: Math.max(0, rect.left) }} />
-          <div className="pointer-events-auto absolute right-0" style={{ top: rect.top, height: rect.height, left: rect.left + rect.width }} />
-        </>
       )}
 
       <div className="pointer-events-auto absolute rounded-2xl border border-white/60 bg-white shadow-2xl" style={cardStyle}>

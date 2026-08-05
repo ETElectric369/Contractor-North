@@ -100,14 +100,22 @@ export const DOCK: DockSection[] = [
     href: "/planner",
     children: [
       { id: "t-day", label: "My Day", icon: Sun, href: "/planner" },
-      // Schedule = planning the WHEN-WILL, so it lives with Today (plan/do), not behind the
-      // timeclock's impulse door — it sat as Clock's 3rd pill and nothing in the dock said
-      // "calendar". Office-only (/schedule redirects techs to /planner). /calendar,
-      // /appointments and /map are server redirects into /schedule, so no owns[] needed.
-      { id: "t-sched", label: "Schedule", icon: CalendarDays, href: "/schedule", staffOnly: true },
       { id: "t-tasks", label: "Tasks", icon: ListChecks, href: "/tasks" },
       { id: "t-org", label: "Organize", icon: Wand2, href: "/organize" },
     ],
+  },
+  // Schedule PROMOTED to its own tile, between Today and Clock — Erik, by name: "Move: Schedule -
+  // to main dock after Today before Clock". It had been a child pill under Today, and the man
+  // planning a week lives on this screen too much for it to sit one level down. Office-only
+  // (/schedule redirects techs to /planner); /calendar, /appointments and /map are server
+  // redirects into /schedule, so no owns[] needed.
+  {
+    key: "schedule",
+    label: "Schedule",
+    icon: CalendarDays,
+    href: "/schedule",
+    staffOnly: true,
+    children: [{ id: "s-week", label: "Schedule", icon: CalendarDays, href: "/schedule" }],
   },
   {
     key: "clock",

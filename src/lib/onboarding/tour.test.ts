@@ -63,7 +63,9 @@ describe("it points at things that exist", () => {
   // Anchors the SHELL carries, so they're reachable from any route (topbar.tsx, dock.tsx,
   // setup-button.tsx, account-menu.tsx). `settings-link` is the Settings item INSIDE the account
   // menu — it is not on the settings page, it is the door to it, which is the whole point.
-  const SHELL = ["nort", "setup", "quickadd", "search", "bell", "account", "dock", "settings-link"];
+  // `account-menu` is the PANEL behind the initials — in the shell, reachable from any route, and
+  // only in the DOM while the menu is open, which is why its step carries `opens`.
+  const SHELL = ["nort", "setup", "quickadd", "search", "bell", "account", "dock", "account-menu"];
   // dock-<sectionKey> is set per section by dock.tsx, on BOTH the desktop rail and the mobile bar.
   const isDockSection = (a: string) => DOCK.some((d) => a === `dock-${d.key}`);
   // Anchors that only exist once you are standing on /settings.
@@ -86,32 +88,41 @@ describe("it points at things that exist", () => {
     // Erik: "ive been asked multiple times where settings is located and in the tour it shows it
     // open but not where the button is." A step that navigates you to /settings can never show
     // you the button, because the button is how you'd have got there.
-    const door = TOUR.find((s) => s.anchor === "settings-link")!;
-    expect(door, "no step points at the Settings link itself").toBeTruthy();
+    const door = TOUR.find((s) => s.key === "settings-door")!;
     expect(door.route, "the door step must not teleport past the door").toBeUndefined();
+    // It points at the whole PANEL, and it opens that panel itself — a row-sized hole in the
+    // dimmer left the rest of the menu under 72% black, which read as "it never opened".
+    expect(door.anchor).toBe("account-menu");
+    expect(door.opens).toBe("account");
+    expect(sayOf(door.say, STRANGER).toLowerCase()).toContain("settings");
     // And it comes BEFORE any step that lands on the page.
     const firstOnPage = TOUR.findIndex((s) => s.route?.startsWith("/settings"));
     expect(TOUR.indexOf(door)).toBeLessThan(firstOnPage);
   });
 
-  it("a poke step has something to poke, and waits for a real anchor", () => {
+  it("NOTHING WAITS FOR A CLICK", () => {
+    // Erik: "i dont want it waiting for me to click anything." A step that gates on a tap is a
+    // form wearing a tour's clothes. Only `ask` may pause, and that one is his turn to talk.
     for (const s of TOUR) {
-      if (s.poke) expect(s.anchor, `${s.key} is pokeable but points at nothing`).toBeTruthy();
-      if (s.awaits) {
-        // It must wait for something the app actually sets, or the tour stops dead.
-        expect(
-          SHELL.includes(s.awaits) || settingsOnly(s.awaits) || isDockSection(s.awaits),
-          `${s.key} awaits ${s.awaits}`,
-        ).toBe(true);
-        // Waiting for a tap AND asking a question are two different kinds of turn.
-        expect(s.ask, `${s.key} both awaits and asks`).toBeUndefined();
-      }
+      expect(s, `${s.key} still gates on a tap`).not.toHaveProperty("awaits");
+      expect(s, `${s.key} still gates on a tap`).not.toHaveProperty("poke");
     }
   });
 
-  it("the account step names Settings — it used to list everything except it", () => {
-    const account = TOUR.find((s) => s.key === "account")!;
-    expect(sayOf(account.say, STRANGER).toLowerCase()).toContain("settings");
+  it("a step that opens a menu also points at that menu", () => {
+    // Opening a panel and then spotlighting something else leaves it hanging over the screen.
+    for (const s of TOUR) if (s.opens) expect(s.anchor, `${s.key} opens a menu it never shows`).toBe("account-menu");
+  });
+
+  it("the initials beat and the door land back to back", () => {
+    // The old `account` step listed sign-out, language and the QR code and never said the word
+    // Settings — which is where Settings lives. Now one step shows WHERE the initials are and the
+    // next opens them and names the row, so the pair has to stay adjacent and in that order.
+    const a = TOUR.findIndex((s) => s.key === "account");
+    const b = TOUR.findIndex((s) => s.key === "settings-door");
+    expect(b).toBe(a + 1);
+    expect(TOUR[a].anchor).toBe("account");
+    expect((sayOf(TOUR[a].say, STRANGER) + sayOf(TOUR[b].say, STRANGER)).toLowerCase()).toContain("settings");
   });
 
   it("the things Erik named by hand are all covered", () => {

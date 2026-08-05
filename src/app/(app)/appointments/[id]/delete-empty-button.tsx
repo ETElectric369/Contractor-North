@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/toast";
+import { hasInAppHistory } from "@/components/back-link";
 import { deleteAppointment } from "../actions";
 
 /**
@@ -55,7 +56,13 @@ export function DeleteEmptyInspectionButton({
           const r = await deleteAppointment(id);
           if (!r.ok) return toast(r.error ?? "Couldn't delete that.", "error");
           toast("Deleted.");
-          router.push(afterHref);
+          // GO BACK WHERE THEY CAME FROM, not to a hardcoded parent. Erik deleted from the
+          // Inspections list and landed on /schedule: "didn't go back to inspections page after
+          // deleting." Same law as every back link (back-link.tsx): real in-app history wins;
+          // the explicit fallback only covers a cold entry. back() after a delete is safe — the
+          // list page re-fetches on focus and the deleted row simply isn't in it.
+          if (hasInAppHistory()) router.back();
+          else router.push(afterHref);
         });
       }}
       className="text-rose-700"

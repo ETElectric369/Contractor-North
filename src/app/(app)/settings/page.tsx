@@ -208,6 +208,7 @@ export default async function SettingsPage({
           <NortTone
             humor={clampHumor((profile as any)?.nort_humor)}
             register={asRegister((profile as any)?.nort_register)}
+            notes={typeof (profile as any)?.nort_notes === "string" ? (profile as any).nort_notes : ""}
           />
         </Section>
         <Section title="Your profile">

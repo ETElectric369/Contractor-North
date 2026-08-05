@@ -33,10 +33,27 @@ export function AccountMenu({
   lang?: string;
 }) {
   const [open, setOpen] = useState(false);
+  // The TOUR opened it, not the user. While that's true, outside-clicks must not close it: the
+  // tour's dimmer swallows every click and those land outside this panel, so one stray tap would
+  // yank the menu out from under the step that is pointing at it.
+  const [byTour, setByTour] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
+  // Nort drives this menu during the guided tour — see TourStep.opens. A plain window event so no
+  // component has to know a tour exists beyond this one listener.
   useEffect(() => {
-    if (!open) return;
+    const onTour = (e: Event) => {
+      const d = (e as CustomEvent<{ menu?: string; open?: boolean }>).detail;
+      if (d?.menu !== "account") return;
+      setByTour(!!d.open);
+      setOpen(!!d.open);
+    };
+    window.addEventListener("cn:tour-menu", onTour);
+    return () => window.removeEventListener("cn:tour-menu", onTour);
+  }, []);
+
+  useEffect(() => {
+    if (!open || byTour) return;
     const modalOpen = () => document.body.classList.contains("modal-open");
     const onDoc = (e: MouseEvent) => {
       // The QR modal is open (in-place, above us at z-[120]) — never close
@@ -54,12 +71,15 @@ export function AccountMenu({
       document.removeEventListener("mousedown", onDoc);
       document.removeEventListener("keydown", onKey);
     };
-  }, [open]);
+  }, [open, byTour]);
 
   return (
     <div ref={ref} className="relative">
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          setByTour(false);
+          setOpen((v) => !v);
+        }}
         aria-label="Account"
         aria-haspopup="menu"
         aria-expanded={open}
@@ -89,6 +109,10 @@ export function AccountMenu({
            reachable on short/landscape viewports — no row may ever hide under
            the dock (the /team "Remove blocked by menu bar" class of bug). */
         <div
+          // THE TOUR ANCHORS ON THE WHOLE PANEL, not the Settings row inside it — the hole in the
+          // tour's dimmer is the only place anything is visible, and a row-sized hole leaves the
+          // rest of this menu under 72% black.
+          data-tour="account-menu"
           style={{
             position: "fixed",
             top: "4.5rem",

@@ -140,9 +140,29 @@ export function Inspector({
   const router = useRouter();
   const stored = useMemo(() => parseInspectorCapture(initialCapture), [initialCapture]);
 
-  const [templateId, setTemplateId] = useState<string | null>(
-    initialTemplateId ?? (templates.length === 1 ? templates[0].id : null),
-  );
+  // Only an explicit CHOICE is state. The default is DERIVED, fresh, every render — because the
+  // old useState initializer ran exactly once, at mount, and that froze two real people out:
+  //
+  //   Andrew pressed "Set up my questions", the seed created his form, router.refresh() delivered
+  //   it — and templateId was still null from a mount when there were zero templates. So
+  //   playbookForForm(undefined) produced an EMPTY playbook, zero open questions, and the green
+  //   "That's everything this job needs" on a job he hadn't said a word about. His bug report:
+  //   "Set up my questions button link did not go anywhere and gave me a green message."
+  //
+  //   Erik, with two sheets and an appointment that had never saved a pick, mounted straight into
+  //   the same empty-playbook green tick: "That's not everything the job needs, I haven't even
+  //   entered anything yet."
+  //
+  // A frozen default is a decision made from stale facts. Derive it and both bugs cannot exist.
+  const [chosenId, setChosenId] = useState<string | null>(initialTemplateId);
+  const template = useMemo(() => {
+    const chosen = templates.find((x) => x.id === chosenId);
+    if (chosen) return chosen;
+    // No (surviving) choice: prefer the sheet with a WRITTEN playbook — that's the org's real
+    // walk-through, not a converted checklist — else whatever the org has.
+    return templates.find((t) => !!t.playbook) ?? templates[0] ?? null;
+  }, [templates, chosenId]);
+  const templateId = template?.id ?? null;
   const [answers, setAnswers] = useState<Answers>(initialAnswers ?? {});
   const [items, setItems] = useState<CaptureItem[]>(stored.items ?? []);
   const [measures, setMeasures] = useState<CaptureMeasure[]>(stored.measures ?? []);
@@ -178,10 +198,7 @@ export function Inspector({
   const fileRef = useRef<HTMLInputElement>(null);
   const captureRef = useRef<HTMLInputElement>(null);
 
-  const playbook = useMemo<Playbook>(
-    () => playbookForForm(templates.find((x) => x.id === templateId)),
-    [templates, templateId],
-  );
+  const playbook = useMemo<Playbook>(() => playbookForForm(template), [template]);
 
   // THE ASK is what applies AND is still unanswered. The moment you answer something it leaves
   // the top and shows up below — the top of the screen is never a list of things you've done.
@@ -400,7 +417,7 @@ export function Inspector({
                 );
                 if (hasAnswers && !confirm("Switching to a different set of questions clears the answers you've given — they belong to the other sheet. Switch anyway?"))
                   return;
-                setTemplateId(next);
+                setChosenId(next);
                 setAnswers({});
                 queueAnswers();
               }}

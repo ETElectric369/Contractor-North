@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { asRegister, clampHumor, DEFAULT_HUMOR, humorLabel, toneDirective } from "./tone";
+import { asRegister, clampHumor, DEFAULT_HUMOR, humorLabel, toneDirective, NORT_NOTES_MAX, clampNotes, standingOrders } from "./tone";
 
 /**
  * Erik: "is there a humor setting we can put at like 55% and a swear word allowance we can match
@@ -83,5 +83,35 @@ describe("the humour end actually changes", () => {
       const t = toneDirective(h, "match").toLowerCase();
       expect(t.includes("answer") || t.includes("right"), String(h)).toBe(true);
     }
+  });
+});
+
+describe("standing orders — the durable home for 'keep it short' (0184)", () => {
+  it("empty and blank produce NOTHING — no header over no orders", () => {
+    expect(standingOrders(null)).toBe("");
+    expect(standingOrders(undefined)).toBe("");
+    expect(standingOrders("   ")).toBe("");
+  });
+
+  it("carries his words verbatim, framed as orders that outrank defaults", () => {
+    const s = standingOrders("Keep answers short.\nDon't read lists back.");
+    expect(s).toContain("STANDING ORDERS");
+    expect(s).toContain("Keep answers short.");
+    expect(s).toContain("outrank your defaults");
+    // ...but never the boundaries that aren't his to move.
+    expect(s).toContain("never the security rules");
+  });
+
+  it("clampNotes: trims, caps at the DB CHECK's limit, and empties to null", () => {
+    expect(clampNotes("  hi  ")).toBe("hi");
+    expect(clampNotes("")).toBeNull();
+    expect(clampNotes("   ")).toBeNull();
+    expect(clampNotes(42)).toBeNull();
+    expect(clampNotes("x".repeat(5000))!.length).toBe(NORT_NOTES_MAX);
+  });
+
+  it("standingOrders never exceeds the cap either — belt and braces with the CHECK", () => {
+    const s = standingOrders("y".repeat(5000));
+    expect(s.length).toBeLessThan(NORT_NOTES_MAX + 400);
   });
 });

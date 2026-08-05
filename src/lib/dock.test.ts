@@ -49,17 +49,16 @@ describe("DOCK jobs section ← JOB_STATUSES", () => {
  *  timeclock's impulse door (the time-section gut's "lostness cause a"). Clock keeps
  *  exactly the WHEN-DID pair. This pins placement, gating AND zero-duplication so a
  *  future wave can't quietly file the calendar behind the clock again. */
-describe("DOCK time doors — Schedule under Today, Clock keeps the when-did pair", () => {
-  const today = DOCK.find((s) => s.key === "today");
+describe("DOCK time doors — Schedule between Today and Clock, Clock keeps the when-did pair", () => {
   const clock = DOCK.find((s) => s.key === "clock");
 
-  it("Schedule sits directly after 'My day' in Today, office-only (/schedule redirects techs)", () => {
-    const ids = (today?.children ?? []).map((c) => c.id);
-    expect(ids.indexOf("t-sched")).toBe(ids.indexOf("t-day") + 1);
-    expect(today?.children.find((c) => c.id === "t-sched")).toMatchObject({
-      href: "/schedule",
-      staffOnly: true,
-    });
+  it("Schedule is its OWN tile, directly between Today and Clock, office-only", () => {
+    // Erik, verbatim: "Move: Schedule - to main dock after Today before Clock". It had been a
+    // child pill under Today; the man planning a week lives there too much for one level down.
+    const keys = DOCK.map((s) => s.key);
+    expect(keys.indexOf("schedule")).toBe(keys.indexOf("today") + 1);
+    expect(keys.indexOf("clock")).toBe(keys.indexOf("schedule") + 1);
+    expect(DOCK.find((s) => s.key === "schedule")).toMatchObject({ href: "/schedule", staffOnly: true });
   });
 
   it("Clock holds exactly Timeclock + Timecards — no planning surface behind the clock door", () => {
@@ -70,7 +69,7 @@ describe("DOCK time doors — Schedule under Today, Clock keeps the when-did pai
     const homes = DOCK.flatMap((s) => s.children).filter(
       (c) => c.href && basePath(c.href) === "/schedule",
     );
-    expect(homes.map((c) => c.id)).toEqual(["t-sched"]);
+    expect(homes.map((c) => c.id)).toEqual(["s-week"]);
   });
 });
 
@@ -150,8 +149,8 @@ describe("activeSection — child detail routes light the right section", () => 
     expect(key("/compliance")).toBe("office");
   });
 
-  it("/schedule lights Today (the dock move); the when-did pair still lights Clock", () => {
-    expect(key("/schedule")).toBe("today");
+  it("/schedule lights its OWN tile now; the when-did pair still lights Clock", () => {
+    expect(key("/schedule")).toBe("schedule");
     expect(key("/timeclock")).toBe("clock");
     expect(key("/timecards")).toBe("clock");
   });

@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Check, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/input";
+import { Label, Textarea } from "@/components/ui/input";
 import { clampHumor, humorLabel, type Register } from "@/lib/nort/tone";
 import { saveNortTone } from "./nort-tone-actions";
 
@@ -20,10 +20,11 @@ import { saveNortTone } from "./nort-tone-actions";
  * is a thing people are right to distrust — and the limit that matters to a contractor is that
  * none of it ever reaches a customer.
  */
-export function NortTone({ humor, register }: { humor: number; register: Register }) {
+export function NortTone({ humor, register, notes }: { humor: number; register: Register; notes: string }) {
   const router = useRouter();
   const [h, setH] = useState(clampHumor(humor));
   const [r, setR] = useState<Register>(register);
+  const [n, setN] = useState(notes);
   const [saved, setSaved] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -78,6 +79,23 @@ export function NortTone({ humor, register }: { humor: number; register: Registe
         </p>
       </div>
 
+      {/* STANDING ORDERS (0184) — the durable home for "keep it short". Nort writes this when you
+          tell him how to work with you mid-conversation; this box is the off switch and the audit:
+          a standing control you can't see is one you're right to distrust. */}
+      <div>
+        <Label className="mb-1.5">Standing orders — things you&rsquo;ve told Nort to always do</Label>
+        <Textarea
+          rows={3}
+          value={n}
+          placeholder={"Keep answers short.\nDon't read lists back to me.\nCall me E."}
+          onChange={(e) => { setN(e.target.value); setSaved(false); }}
+        />
+        <p className="mt-1 text-xs leading-snug text-slate-500">
+          Say it to Nort in any conversation — &ldquo;keep it short&rdquo;, &ldquo;stop reading everything
+          back&rdquo; — and it lands here and sticks. Edit or clear it any time; empty means no standing orders.
+        </p>
+      </div>
+
       {/* THE LIMITS, SAID OUT LOUD. A swearing toggle with no stated boundary is a thing people are
           right to distrust, and the one that matters to a contractor is his own reputation. */}
       <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-500">
@@ -94,7 +112,7 @@ export function NortTone({ humor, register }: { humor: number; register: Registe
           onClick={() =>
             start(async () => {
               setErr(null);
-              const res = await saveNortTone(h, r);
+              const res = await saveNortTone(h, r, n);
               if (!res.ok) return setErr(res.error);
               setSaved(true);
               router.refresh();

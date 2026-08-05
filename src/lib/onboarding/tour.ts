@@ -80,23 +80,22 @@ export interface TourStep {
   /** Label for the advance button when "Next" is too bland. */
   next?: string;
   /**
-   * LET HIM PRESS IT HIMSELF. The dimmer normally eats every click on purpose — mid-step is not
-   * the moment to wander off. A poke step opens exactly one hole in that rule: the spotlighted
-   * control stays live, everything around it stays blocked.
+   * NORT OPENS IT HIMSELF. A menu that has to be open before its contents can be pointed at.
    *
-   * Needed the moment a thing lives behind another thing. Erik: "ive been asked multiple times
-   * where settings is located and in the tour it shows it open but not where the button is."
-   * Settings lives inside the account menu, so a tour that navigates straight to /settings shows
-   * him the room and never the door — and being told where a door is has never once taught anybody
-   * where a door is.
+   * Erik: "doesnt not even show the initals drop down menu and i dont want it waiting for me to
+   * click anything."
+   *
+   * Both halves of that were my mistakes. The first version made him tap his own initials and
+   * waited — which is a tour stopping to give homework, and he was right to reject it. The second
+   * was worse and it was a reasoning error: I assumed the dimmer's box-shadow hole would let the
+   * opened menu show through. It does not. The menu is z-90 and the tour overlay is z-200, so the
+   * panel sat under 72% black and read as "nothing happened".
+   *
+   * So the tour drives: it opens the menu on entering the step, points at the WHOLE PANEL (which
+   * is what puts it inside the hole and therefore visible at all), and closes it on the way out.
+   * Nothing waits for a hand.
    */
-  poke?: boolean;
-  /**
-   * ADVANCE THE INSTANT THIS APPEARS. A `data-tour` name that doesn't exist yet — when his tap
-   * brings it into the DOM, the step is done and the tour moves on by itself. No Next to press,
-   * because pressing Next would be the tour congratulating itself for something he did.
-   */
-  awaits?: string;
+  opens?: "account";
 }
 
 export const TOUR: TourStep[] = [
@@ -244,30 +243,28 @@ export const TOUR: TourStep[] = [
   {
     key: "account",
     anchor: "account",
-    poke: true,
-    awaits: "settings-link",
     title: "Everything that's yours",
     say: (c) =>
-      `Your initials, top right${c.first ? `, ${c.first}` : ""} — that's your corner. Signing out, ` +
-      "your language, your estimate QR code for the truck or a business card. " +
-      "And Settings. Go on, tap them — I'll wait.",
-    next: "I can't find it",
+      `Your initials, top right${c.first ? `, ${c.first}` : ""} — that's your corner. ` +
+      "Watch, I'll open it.",
   },
   // THE DOOR, NOT THE ROOM. Erik: "ive been asked multiple times where settings is located and in
-  // the tour it shows it open but not where the button is." He was right — the old step navigated
-  // straight to /settings and talked about the page, which teaches the room and never the door.
-  // Being TOLD where a door is has never once taught anybody where a door is; this one waits for
-  // his hand and then lights up the actual link inside the menu he just opened.
+  // the tour it shows it open but not where the button is." The old step navigated straight to
+  // /settings and talked about the page, which teaches the room and never the door.
+  //
+  // The whole PANEL is the anchor, not the Settings row inside it. That is not a stylistic call:
+  // the hole in the dimmer is the only place anything is visible, so anchoring on the row would
+  // leave the rest of the menu under 72% black — which is exactly what he saw and reported as the
+  // menu not showing at all.
   {
     key: "settings-door",
-    anchor: "settings-link",
+    anchor: "account-menu",
+    opens: "account",
     title: "There it is — Settings",
     say:
-      "There. Settings lives behind your initials, every single time — that's the one thing to " +
-      "remember, because everything about the business is behind it. Go ahead and open it.",
-    poke: true,
-    awaits: "sections-settings",
-    next: "Just take me there",
+      "There's your corner. Sign out, your language, your estimate QR code for the truck — and " +
+      "Settings, right there in the middle. That's the door, and it's behind your initials on " +
+      "every single screen. That's the one thing worth remembering.",
   },
   {
     key: "settings",

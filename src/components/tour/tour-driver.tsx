@@ -121,7 +121,7 @@ export function TourDriver({
     stopSpeaking();
     if (muted) {
       // Silent, but still hands-free — paced by reading speed instead of by voice.
-      if (!step.ask && !step.awaits) {
+      if (!step.ask) {
         const t = setTimeout(() => void go(iRef.current + 1), Math.min(14000, 2500 + line.length * 45));
         return () => clearTimeout(t);
       }
@@ -129,8 +129,7 @@ export function TourDriver({
     }
     let cancelled = false;
     speakSmart(line, () => {
-      // `awaits` waits for HIS hand, not for the end of a sentence — same law as `ask`.
-      if (!cancelled && !step.ask && !step.awaits) advance.current = setTimeout(() => void go(iRef.current + 1), 550);
+      if (!cancelled && !step.ask) advance.current = setTimeout(() => void go(iRef.current + 1), 550);
     });
     return () => {
       cancelled = true;
@@ -142,26 +141,19 @@ export function TourDriver({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [i, muted, started]);
 
-  // HE DID IT — MOVE ON. A poke step ends when the thing it was waiting for exists on screen, not
-  // when a Next button gets pressed. Polling rather than a MutationObserver because "visible" is a
-  // measurement, not a mutation: the account menu's element can be in the DOM at zero size, which
-  // is precisely the bug that made the nav step point at empty air on a phone.
+  // NORT OPENS IT, NOT HIM. Erik: "i dont want it waiting for me to click anything."
+  //
+  // A menu is closed until something opens it, and its contents cannot be pointed at while it is.
+  // The first version made him tap and waited for the element to appear; this one just opens the
+  // thing. Closes it on the way out too, so the menu isn't left hanging over the next step.
   useEffect(() => {
-    if (!started || !step.awaits) return;
-    const t = setInterval(() => {
-      const seen = Array.from(document.querySelectorAll<HTMLElement>(`[data-tour="${step.awaits}"]`)).some((el) => {
-        const r = el.getBoundingClientRect();
-        return r.width >= 2 && r.height >= 2;
-      });
-      if (seen) {
-        clearInterval(t);
-        stopSpeaking(); // he's ahead of the sentence; finishing it over him is the wall
-        void go(iRef.current + 1);
-      }
-    }, 180);
-    return () => clearInterval(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [i, started, step.awaits]);
+    if (!started || !step.opens) return;
+    const fire = (open: boolean) => {
+      window.dispatchEvent(new CustomEvent("cn:tour-menu", { detail: { menu: step.opens, open } }));
+    };
+    fire(true);
+    return () => fire(false);
+  }, [i, started, step.opens]);
 
   useEffect(() => () => stopSpeaking(), []);
 
@@ -270,7 +262,7 @@ export function TourDriver({
     );
 
   return (
-    <TourSpotlight anchor={step.anchor} title={step.title} onExit={exit} step={i + 1} total={TOUR.length} poke={step.poke}>
+    <TourSpotlight anchor={step.anchor} title={step.title} onExit={exit} step={i + 1} total={TOUR.length}>
       <p className="text-sm leading-relaxed text-slate-600">{line}</p>
 
       {need && (
