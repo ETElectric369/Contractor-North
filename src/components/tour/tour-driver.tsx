@@ -5,7 +5,6 @@ import { usePathname, useRouter } from "next/navigation";
 import { ArrowRight, Check, Loader2, Mic, Square, Volume2, VolumeX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { looseNumber } from "@/lib/inspection/capture";
 import { TourSpotlight } from "./tour-spotlight";
 import { useDictation } from "@/lib/use-dictation";
 import { TOUR, sayOf, type TourCtx } from "@/lib/onboarding/tour";
@@ -59,6 +58,14 @@ export function TourDriver({
   const [typed, setTyped] = useState("");
   const [muted, setMuted] = useState(() => typeof window !== "undefined" && sessionStorage.getItem(MUTE) === "1");
   const [busy, setBusy] = useState(false);
+  // NOTHING HAPPENS UNTIL HE PRESSES ONE BUTTON. Erik: "when i click the top button it opens up to
+  // a start button declaring; state your name and your business". It is also the only tap that can
+  // do the two things iOS demands — unlock audio and open a microphone — so the whole flow after it
+  // can be hands-free.
+  const [started, setStarted] = useState(false);
+  // Typing is the fallback, not the flow. "confirm and advance WITH the conversation not hit next
+  // not or type it" — so it lives behind a link, for a dead mic or a loud site.
+  const [typing, setTyping] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   // What Nort just SAID back — shown as speech, not as a status line.
   const [reply, setReply] = useState<string | null>(null);
@@ -103,17 +110,36 @@ export function TourDriver({
     if (step.route && pathname !== step.route.split("?")[0]) router.push(step.route);
   }, [step.route, pathname, router]);
 
-  // SPEAK THE STEP. Re-speaks whenever the step changes; stops the moment it doesn't.
+  // SPEAK THE STEP — and on a step with nothing to answer, THE SPEECH IS THE PACING.
+  //
+  // Erik: "confirm and advance WITH the conversation not hit next". A Next button under an
+  // explanation is the app asking permission to keep talking. When Nort finishes a sentence he
+  // carries on, the way a person walking you round a site does; a QUESTION is the only thing that
+  // waits, because that one is actually his turn.
   useEffect(() => {
-    if (muted) return;
+    if (!started) return;
     stopSpeaking();
-    speakSmart(line);
-    return () => stopSpeaking();
+    if (muted) {
+      // Silent, but still hands-free — paced by reading speed instead of by voice.
+      if (!step.ask) {
+        const t = setTimeout(() => void go(iRef.current + 1), Math.min(14000, 2500 + line.length * 45));
+        return () => clearTimeout(t);
+      }
+      return;
+    }
+    let cancelled = false;
+    speakSmart(line, () => {
+      if (!cancelled && !step.ask) advance.current = setTimeout(() => void go(iRef.current + 1), 550);
+    });
+    return () => {
+      cancelled = true;
+      stopSpeaking();
+    };
     // Deliberately keyed on the STEP, not on `line` — `line` changes the instant an answer lands,
     // and re-speaking the whole card over somebody who just finished talking is the opposite of a
     // conversation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [i, muted]);
+  }, [i, muted, started]);
 
   useEffect(() => () => stopSpeaking(), []);
 
@@ -188,88 +214,119 @@ export function TourDriver({
     onClose(false);
   };
 
+  // ── THE START BUTTON ────────────────────────────────────────────────────────────────────────
+  // Erik: "when i click the top button it opens up to a start button declaring; state your name and
+  // your business". One instruction, one button, nothing else. It is also the tap iOS requires
+  // before it will play a sound OR open a microphone — so doing both here is what lets everything
+  // after it be hands-free.
+  if (!started)
+    return (
+      <TourSpotlight anchor="nort" title="Two minutes, out loud" onExit={() => onClose(false)} step={1} total={TOUR.length}>
+        <p className="text-sm leading-relaxed text-slate-600">
+          I&rsquo;m Nort. I&rsquo;d rather talk than make you type — press the button and{" "}
+          <strong className="font-medium text-slate-900">state your name and your business</strong>.
+        </p>
+        <Button
+          type="button"
+          className="mt-4 w-full"
+          onClick={() => {
+            unlockAudio();
+            setStarted(true);
+            void dictation.start(); // same tap — iOS refuses a mic opened any later
+          }}
+        >
+          <Mic className="h-4 w-4" /> Start — press and talk
+        </Button>
+        <button
+          type="button"
+          onClick={() => { setStarted(true); setTyping(true); }}
+          className="mt-3 w-full text-center text-xs text-slate-400 underline-offset-2 hover:underline"
+        >
+          No microphone? Type instead.
+        </button>
+      </TourSpotlight>
+    );
+
   return (
     <TourSpotlight anchor={step.anchor} title={step.title} onExit={exit} step={i + 1} total={TOUR.length}>
       <p className="text-sm leading-relaxed text-slate-600">{line}</p>
 
       {need && (
         <div className="mt-3 rounded-lg bg-slate-50 p-3">
-          {/* THE TALK BUTTON IS ALWAYS HERE, answered or not.
-              This hid it. Erik's profile already carries his name, his trade, his town and his
-              rate — so every step showed a green tick and there was NO Talk button anywhere in the
-              entire tour. He said: "i cant press the talk button anywhere to start saying my name."
-              Which is the same mistake as the vanishing setup card, one layer in: I read "we
-              already know this" as "there is nothing to do here", when the whole point of the step
-              is MEETING NORT. Pressing Talk and hearing it come back is the lesson; the answer is
-              a by-product. What is known shows above the mic, and saying it again replaces it. */}
-          {answered && (
-            <div className="mb-3">
-              <label className="mb-1 flex items-center gap-1.5 text-xs font-medium text-emerald-700">
-                <Check className="h-3.5 w-3.5 shrink-0" /> {need.label} — check the spelling
-              </label>
-              {/* EDITABLE, MIDSTREAM. Erik: "the availability to edit it midstream to make absolute
-                  sure every bit of information is accurate, spelled correctly, understood
-                  correctly." Speech-to-text mangles surnames and town names more than anything
-                  else, and this exact string goes on every estimate this company ever sends. A
-                  read-only tick would have made it somebody's job to notice later. */}
-              {need.slot?.type === "number" ? (
-                <div className="flex items-center gap-2">
-                  <Input
-                    inputMode="decimal"
-                    value={typeof known === "number" ? String(known) : ""}
-                    onChange={(e) => setAnswers((a) => ({ ...a, [step.ask!]: looseNumber(e.target.value) }))}
-                  />
-                  <span className="shrink-0 text-sm text-slate-500">{need.slot.unit}</span>
-                </div>
-              ) : (
-                <Input
-                  value={typeof known === "string" ? known : String(known ?? "")}
-                  onChange={(e) => setAnswers((a) => ({ ...a, [step.ask!]: e.target.value }))}
-                />
-              )}
-            </div>
-          )}
-          {
-            <>
-              <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  variant={dictation.recording ? "destructive" : "secondary"}
-                  disabled={dictation.transcribing || busy}
-                  onClick={() => {
-                    if (dictation.recording) return dictation.stop();
-                    // Two things must happen inside this tap: iOS only grants the mic in a gesture,
-                    // and it only unlocks audio playback in one. Stop talking first so Nort isn't
-                    // transcribing itself.
-                    stopSpeaking();
-                    unlockAudio();
-                    void dictation.start();
-                  }}
-                >
-                  {dictation.transcribing ? (
-                    <><Loader2 className="h-4 w-4 animate-spin" /> Writing it down…</>
-                  ) : dictation.recording ? (
-                    <><Square className="h-4 w-4" /> Stop</>
-                  ) : (
-                    <><Mic className="h-4 w-4" /> Talk</>
-                  )}
-                </Button>
-                {dictation.recording && <span className="text-xs text-rose-600">Listening…</span>}
-              </div>
-              <form
-                className="mt-2 flex items-center gap-2"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  void fill(typed);
-                }}
+          {/* WHAT LANDED, AS A FACT — not a box to proofread.
+              Erik: "converse first not transcribe because we want to actualize the data being
+              entered instead of continuing to edit it for the mere fact that claude gets the
+              spelling right way better than siri."
+              Exactly right, and it inverts what I built. The MODEL is the speller here, not the
+              dictation — so its value is the artifact. It gets stated, Nort says it out loud, and
+              correcting it is a second-class path you take only when he got it wrong. Handing
+              somebody a text box to proofread makes checking the machine's work into their job. */}
+          {answered && !typing && (
+            <p className="mb-2 flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-sm text-emerald-700">
+              <Check className="h-4 w-4 shrink-0 self-center" />
+              <span className="font-medium">{need.label}:</span>
+              <span className="text-slate-900">{String(known)}</span>
+              <button
+                type="button"
+                onClick={() => { setTyping(true); setTyped(String(known ?? "")); }}
+                className="text-xs text-slate-400 underline-offset-2 hover:underline"
               >
-                <Input value={typed} placeholder="…or type it" onChange={(e) => setTyped(e.target.value)} />
-                <Button type="submit" variant="secondary" disabled={!typed.trim() || busy}>
-                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Use it"}
-                </Button>
-              </form>
-            </>
-          }
+                not right?
+              </button>
+            </p>
+          )}
+
+          {/* THE MIC IS THE CONTROL. Full width, always there, and the only thing that looks like
+              the way forward — because it is. */}
+          <Button
+            type="button"
+            className="w-full"
+            variant={dictation.recording ? "destructive" : "secondary"}
+            disabled={dictation.transcribing || busy}
+            onClick={() => {
+              if (dictation.recording) return dictation.stop();
+              // Stop Nort talking first, or he transcribes himself.
+              stopSpeaking();
+              unlockAudio();
+              void dictation.start();
+            }}
+          >
+            {dictation.transcribing ? (
+              <><Loader2 className="h-4 w-4 animate-spin" /> Writing it down…</>
+            ) : dictation.recording ? (
+              <><Square className="h-4 w-4" /> Stop</>
+            ) : busy ? (
+              <><Loader2 className="h-4 w-4 animate-spin" /> Thinking…</>
+            ) : (
+              <><Mic className="h-4 w-4" /> {answered ? "Say it again" : "Talk"}</>
+            )}
+          </Button>
+          {dictation.recording && (
+            <p className="mt-1.5 text-center text-xs text-rose-600">Listening — press Stop when you&rsquo;re done.</p>
+          )}
+
+          {typing ? (
+            <form
+              className="mt-2 flex items-center gap-2"
+              onSubmit={(e) => { e.preventDefault(); void fill(typed); setTyping(false); }}
+            >
+              <Input
+                autoFocus
+                inputMode={need.slot?.type === "number" ? "decimal" : undefined}
+                value={typed}
+                onChange={(e) => setTyped(e.target.value)}
+              />
+              <Button type="submit" variant="secondary" disabled={!typed.trim() || busy}>Use it</Button>
+            </form>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setTyping(true)}
+              className="mt-2 w-full text-center text-xs text-slate-400 underline-offset-2 hover:underline"
+            >
+              Type it instead
+            </button>
+          )}
           {reply && (
             <p className="mt-2 rounded-lg bg-brand-light px-3 py-2 text-sm leading-relaxed text-slate-700">
               {reply}
@@ -284,13 +341,19 @@ export function TourDriver({
       )}
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        <Button type="button" disabled={busy} onClick={() => void go(i + 1)}>
-          {busy ? (
-            <><Loader2 className="h-4 w-4 animate-spin" /> …</>
-          ) : (
-            <>{step.next ?? (answered || !need ? "Next" : "Skip this one")} <ArrowRight className="h-4 w-4" /></>
-          )}
-        </Button>
+        {/* NOT THE ENGINE ANY MORE — the conversation is. Erik: "confirm and advance WITH the
+            conversation not hit next". This demoted to a link because it is now for HURRYING Nort
+            along, or moving past a question you'd rather not answer. A button that looks like the
+            way forward teaches people to press it instead of talking, which is the whole thing
+            this tour exists to prevent. */}
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void go(i + 1)}
+          className="inline-flex items-center gap-1 text-sm text-slate-500 underline-offset-2 hover:underline disabled:opacity-40"
+        >
+          {step.next ?? (need && !answered ? "Skip this one" : "Carry on")} <ArrowRight className="h-3.5 w-3.5" />
+        </button>
         {i > 0 && (
           <button type="button" onClick={() => void go(i - 1)} className="text-sm text-slate-500 underline-offset-2 hover:underline">
             Back
