@@ -35,7 +35,10 @@ export const ET_ELECTRIC: Playbook = {
       ask: "What are we doing here?",
       slot: { type: "select", multi: true, options: WORK },
       feeds: ["what"],
-      why: "Multi on purpose. The storage room was outlets AND lights on two circuits, and a router that only holds one answer is how the whole sheet asked the wrong questions.",
+      why: "Picks which questions come next — everything else on the sheet hangs off this one.",
+      note:
+        "Multi on purpose. The storage room was outlets AND lights on two circuits, and a router that " +
+        "only holds one answer is how the whole sheet asked the wrong questions.",
     },
 
     // ── THE OPEN ONES. No slot, so no control can hold them and none renders until answered. ──
@@ -46,7 +49,8 @@ export const ET_ELECTRIC: Playbook = {
       feeds: ["what", "where"],
       hold: true,
       when: [{ key: "work", in: NEEDS_POWER }],
-      why:
+      why: "Decides subpanel or home runs — and that sets every run length, wire size and trip count after it.",
+      note:
         "If the main panel's far, something closer usually is — a meter main, a sub, a J-box with room. " +
         "Two open slots at a close panel is either ONE 2-pole feeding a subpanel — short runs after that, room to grow — " +
         "or TWO 1-pole meaning exactly two circuits, each going the long way. Run length, wire size, conduit, breakers, " +
@@ -59,7 +63,8 @@ export const ET_ELECTRIC: Playbook = {
       ask: "Is anybody pulling a permit, and what for?",
       feeds: ["why", "when", "what"],
       hold: true,
-      why:
+      why: "Permitted for occupancy means an inspection before cover — that's a second trip in the price.",
+      note:
         "Not yes/no, and usually not me. On the storage room the homeowner is pulling one for OCCUPANCY — " +
         "I'm just doing the work so they can get it. That single fact reclassifies the room: receptacle spacing " +
         "off wall feet, AFCI, smoke and CO, and an inspection before anything gets covered. That's a rough-in " +
@@ -70,7 +75,10 @@ export const ET_ELECTRIC: Playbook = {
       label: "Anything that'll bite us",
       ask: "Anything here that's going to bite us?",
       feeds: ["why"],
-      why: "The meter base pulling off the wall. The dog. The tenant who's only there Tuesdays. Nobody's template has a box for it and it's half of what goes wrong.",
+      why: "Adds hours nothing else on the sheet accounts for — it's half of what goes wrong.",
+      note:
+        "The meter base pulling off the wall. The dog. The tenant who's only there Tuesdays. Nobody's " +
+        "template has a box for it and it's half of what goes wrong.",
     },
 
     // ── THE CLOSED ONES. Cold, offline, deterministic, and ORDERED. ──
@@ -81,7 +89,7 @@ export const ET_ELECTRIC: Playbook = {
       slot: { type: "select", options: ["Subpanel at the source", "Home runs to the existing panel", "Existing sub has room"] },
       feeds: ["what"],
       when: [{ key: "power_source", known: true }],
-      why: "The fork itself. Everything about wire and labor is downstream of it, so nothing downstream gets asked until it's settled.",
+      why: "Sets the wire and the labor for everything after it — nothing downstream gets asked until it's settled.",
     },
     {
       key: "run_ft",
@@ -91,7 +99,8 @@ export const ET_ELECTRIC: Playbook = {
       measured: true,
       feeds: ["what"],
       when: [{ key: "feed", known: true }],
-      why:
+      why: "Times the wire cost per foot, plus the conduit — 25 ft of feeder or 100-plus each way.",
+      note:
         "Only after the feed is decided. Before that the number doesn't exist — a subpanel makes it 25 ft of feeder, " +
         "home runs makes it 100+ each, and there's no single answer to give. Asking me for one number too early is " +
         "exactly what sends my brain sideways.",
@@ -103,7 +112,8 @@ export const ET_ELECTRIC: Playbook = {
       slot: { type: "select", options: ["Open", "Finished", "Some of each"] },
       feeds: ["what"],
       when: [{ key: "work", in: WORK }],
-      why:
+      why: "Roughly doubles the labor on its own — and finished plus permitted is two trips however small the job is.",
+      note:
         "Probably a 2x labor swing on its own. Finished means cutting and patching — and finished PLUS permitted means " +
         "they have to see it before it's covered, so it's two trips no matter how small the job is.",
     },
@@ -114,7 +124,8 @@ export const ET_ELECTRIC: Playbook = {
       slot: { type: "select", options: ["Fish it", "Surface EMT", "Surface MC", "Not decided yet"] },
       feeds: ["what"],
       when: [{ key: "walls", known: true }, { key: "permitted", known: true }],
-      why:
+      why: "Sets the material — fish it, EMT or MC. It's what the walls and the permit add up to.",
+      note:
         "This is a CONCLUSION, not an observation. Asking it before the wall finish and the permit are both known is " +
         "asking me to write the spec for a job I haven't designed yet. Once I know both, it's one tap.",
     },
@@ -126,7 +137,8 @@ export const ET_ELECTRIC: Playbook = {
       measured: true,
       feeds: ["what"],
       when: [{ key: "work", in: ["Add circuits", "Lighting", "Remodel / rough-in"] }],
-      why:
+      why: "Wall feet divided by 6 gives the outlet count under 210.52(A) — that's arithmetic, not a question.",
+      note:
         "Under 210.52(A) no point along a wall is more than 6 ft from a receptacle, so the count comes out of the " +
         "wall feet — ask me the room and show me the count. On the storage room that's 3 walls and a roll-up, which " +
         "changes the answer, and it's arithmetic, not a question. But only when I've given you the room: if I haven't, " +
@@ -140,7 +152,8 @@ export const ET_ELECTRIC: Playbook = {
       measured: true,
       feeds: ["what"],
       when: [{ key: "length_ft", known: true }],
-      why: "With the length this gives square footage, which sizes the lighting. Two numbers I read off one tape pull.",
+      why: "Times the length is the square footage, and that sizes the lighting.",
+      note: "Two numbers I read off one tape pull.",
     },
     {
       key: "ceiling_ft",
@@ -150,7 +163,7 @@ export const ET_ELECTRIC: Playbook = {
       measured: true,
       feeds: ["what"],
       when: [{ key: "work", in: ["Lighting", "Remodel / rough-in"] }],
-      why: "Drives can spacing and whether I'm on a ladder or a lift. Ten feet is a different day than eight.",
+      why: "Drives can spacing, and decides ladder or lift — ten feet is a different day than eight.",
     },
     {
       key: "device_count",
@@ -165,7 +178,8 @@ export const ET_ELECTRIC: Playbook = {
       // question — and the moment the dimensions arrive this stops applying and the derived count
       // wins, with clearInapplicable nulling whatever was guessed.
       when: [{ key: "work", in: ["Add circuits", "Remodel / rough-in"] }, { key: "length_ft", unknown: true }],
-      why:
+      why: "Times the per-outlet price. Second choice — if I gave you the room you already have it off wall feet.",
+      note:
         "Second choice, not the first. If I've walked it with a tape you already have the count off wall feet and " +
         "asking is noise. If I haven't — quoting off a phone call, or the room's full of somebody's storage — then " +
         "my number is the best number there is and you should take it.",
@@ -177,7 +191,8 @@ export const ET_ELECTRIC: Playbook = {
       slot: { type: "text" },
       feeds: ["what", "why"],
       when: [{ key: "work", in: ["Service / panel", "Add circuits", "EV charger", "Generator"] }],
-      why:
+      why: "Decides breaker or service change — Zinsco or FPE turns a $400 circuit into a panel swap.",
+      note:
         "Zinsco or Federal Pacific and I'm not adding a breaker to it at all — that turns a $400 circuit into a service " +
         "change, and the customer needs to hear that from me on site, not in an estimate three days later. " +
         "One text box, because 'Siemens, 200A, two slots open' is one thing I say, not three fields.",
@@ -189,7 +204,8 @@ export const ET_ELECTRIC: Playbook = {
       slot: { type: "select", options: ["Open / easy", "Attic", "Crawlspace", "From below — cut and drill", "Tight / difficult"] },
       feeds: ["what"],
       when: [{ key: "work", in: WORK }],
-      why:
+      why: "That IS the labor — cut-and-drill from below prices nothing like an open wall.",
+      note:
         "The storage room was 'from below, cut the outlet holes and drill wall to wall' — that IS the labor, and it's " +
         "not attic and it's not crawlspace. Don't ask me about a building I'm not standing in.",
     },
@@ -204,7 +220,8 @@ export const ET_ELECTRIC: Playbook = {
       // one. Open because "100 ft of 12-2 and 40 of 14-2, snap-on Siemens" is a sentence, so it
       // stays a chip until he reaches for it rather than an empty paragraph box on every job.
       feeds: ["what"],
-      why:
+      why: "Goes straight to the takeoff — when I say it, take it; when I don't, the price book fills it.",
+      note:
         "Half the time I already know: '100 ft of 12-2 and 40 of 14-2, snap-on Siemens.' When I say it, take it and " +
         "stop asking. When I don't, that's when the price book earns its keep — but don't make me dictate a takeoff " +
         "I haven't done yet.",

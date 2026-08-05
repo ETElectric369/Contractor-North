@@ -1,3 +1,4 @@
+import { WHY_ASK, whyHint } from "@/lib/playbook/why";
 import type { Need, Playbook } from "@/lib/playbook/types";
 
 /**
@@ -25,21 +26,31 @@ import type { Need, Playbook } from "@/lib/playbook/types";
  */
 
 export const DRAFT_SYSTEM =
-  "You are helping a contractor write the walk-through questions his own app will ask him on a " +
-  "job site, and — more importantly — the REASON behind each one.\n\n" +
-  "You will be given his trade, what he told you about his business, and the questions he already " +
-  "has. For each question, return two things:\n\n" +
+  "You are helping a contractor write the walk-through questions his own app will ask him on a job " +
+  "site, and — more importantly — WHERE EACH ANSWER ENDS UP IN HIS PRICE.\n\n" +
+  "For each question, return two things:\n\n" +
   "  ask — the question as a person would SAY it out loud, on site, to another human. Not a form " +
-  "label. 'Panel' is not a question. 'What's the panel — brand, size, any room in it?' is.\n" +
-  "  why — what a WRONG OR MISSING answer costs him, in his trade's own terms. Money, a second " +
-  "trip, a code problem, a job he shouldn't have quoted. Concrete, specific to the trade, and " +
-  "written the way a tradesman talks — not marketing, not a definition of the field.\n\n" +
-  "RULES:\n" +
-  "- NEVER invent, remove, merge or reorder questions. You get a list of keys; return exactly " +
-  "those keys, no more, no fewer. You are writing prose for questions somebody else chose.\n" +
-  "- Write the why as a DRAFT HE WILL CUT. Two or three sentences at most. If you are guessing " +
-  "about his trade, guess plainly and briefly so the wrong parts are easy to spot — an inference " +
-  "dressed up as his own judgement is worse than a blank line.\n" +
+  "label. 'Panel' is not a question. \"What's the panel — brand, size, any room in it?\" is.\n" +
+  "  why — THE PATH FROM THE ANSWER TO THE NUMBER. Not a justification, not a story about what goes " +
+  "wrong. State where the answer LANDS in his estimate. It takes one of three shapes:\n" +
+  "      A CALCULATION — \"Length × width is the square footage, and that drives the board count.\"\n" +
+  "      A FORK        — \"Decides subpanel or home runs, which sets every run length after it.\"\n" +
+  "      A TRIGGER     — \"Permitted means an inspection before cover — that's a second trip.\"\n\n" +
+  "RULES FOR THE WHY, AND THEY ARE THE WHOLE JOB:\n" +
+  "- ONE SENTENCE. Two at the absolute most. If it needs a paragraph you have written a story " +
+  "instead of a path. A contractor reviewing fifteen of these has to be able to read each in about " +
+  "three seconds.\n" +
+  "- IT MUST NAME A DESTINATION — a number it feeds, a decision it settles, or work it switches on. " +
+  "A line that says the question is important and nothing else is worthless.\n" +
+  "- WRITE IT THE WAY HE'D SAY IT ON THE PHONE. Short, blunt, no commas stacked up. \"Tells me how " +
+  "much wire.\" is a better line than three clauses about conduit fill.\n" +
+  "- NEVER RESTATE THE QUESTION. \"I need to know the panel brand\" is the question said backwards " +
+  "and carries nothing.\n" +
+  "- If it is a number, say the ARITHMETIC — what it multiplies with and what comes out. That is the " +
+  "most useful kind, because a machine can act on it.\n\n" +
+  "OTHER RULES:\n" +
+  "- NEVER invent, remove, merge or reorder questions. You get a list of keys; return exactly those " +
+  "keys, no more, no fewer. You are writing prose for questions somebody else chose.\n" +
   "- Use what he actually told you. If he said he subs out electrical, do not write a why that " +
   "assumes he pulls his own wire.\n" +
   "- Never mention this app, 'the system', or the software. He is describing his trade, not ours.\n\n" +
@@ -115,24 +126,30 @@ export function applyDraft(pb: Playbook, raw: unknown): Playbook {
  * somebody can write their own — and that is the only definition of "taught" that matters here.
  */
 export function explainWhy(n: Need, i: number, total: number): string {
-  const first = i === 0;
-  const opener = first
-    ? "Right — here's the first one, and I'll do these one at a time so it's clear what you're looking at. "
-    : i === total - 1
-      ? "Last one. "
+  const { shape } = whyHint(n);
+  const opener =
+    i === 0
+      ? "Here's the first one. One at a time, and this is quick. "
+      : i === total - 1
+        ? "Last one. "
+        : "";
+  // Two flags worth one clause each, because they change what the answer DOES rather than what it
+  // means: a measured number goes straight into a price, and a hold stops the job.
+  const tail = n.measured
+    ? " That one's a number — it goes straight into a price, so I do the arithmetic myself."
+    : n.hold
+      ? " And that one's a stopper — I won't let you price the job without it."
       : "";
-  const measured = n.measured ? " This one's a number that goes straight into a price, so it's worth being fussy about." : "";
-  const held = n.hold ? " I've got this marked as something you shouldn't price without." : "";
-  const drafted = n.why?.trim()
-    ? `The reason I've written down is: ${n.why.trim()}`
-    : "There's no reason written on this one yet, so it's a blank for you to fill.";
-  const close = first
-    ? " If that's not why YOU ask it, change it — your words beat mine every time, and the closer it is to how you'd say it out loud, the better I get at knowing when to ask."
-    : " Change it if it's not your reason.";
-  return `${opener}The question is "${n.ask}"${measured}${held} ${drafted}${close}`;
+  const drafted = n.why?.trim();
+  // ASK HIM, don't lecture him. The draft is a thing to agree with or correct in three seconds —
+  // reading a paragraph at somebody and then inviting edits is how fifteen of these became
+  // homework. If there's no draft, the question stands on its own and the shape shows him the form.
+  return drafted
+    ? `${opener}"${n.ask}" — I've got that landing here: ${drafted} That right?${tail}`
+    : `${opener}"${n.ask}" — ${WHY_ASK} Something like: "${shape.example}"${tail}`;
 }
 
-/** What he told the setup interview, as a paragraph the drafter can read. */
+/** What we know about them from the setup card, as prose the drafter can reason from. */
 export function aboutFromSetup(a: Record<string, unknown>): string {
   const bits: string[] = [];
   const s = (k: string) => (typeof a[k] === "string" ? (a[k] as string).trim() : "");

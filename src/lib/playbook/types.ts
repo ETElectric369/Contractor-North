@@ -102,11 +102,26 @@ export interface Need {
   /** ALL must hold. Every clause must name a need declared ABOVE this one — no cycles, one pass. */
   when?: Clause[];
   /**
-   * The contractor's own reason, in his own words. FUEL, NEVER FURNITURE — it is what the model
-   * reads to know when and how to ask, and what the cold renderer shows as a one-line hint. This
-   * is the part that makes a playbook *his* rather than ours.
+   * WHERE THE ANSWER ENDS UP IN THE PRICE — one line, in his words. See lib/playbook/why.ts.
+   *
+   * FUEL, NEVER FURNITURE: the model reads it to know when and how to ask, and the cold renderer
+   * shows it as a one-line hint under the question. This is the part that makes a playbook *his*
+   * rather than ours.
+   *
+   * ONE LINE IS THE WHOLE DISCIPLINE. Erik, on reading his own first drafts: "anyone including
+   * myself reviewing these proposed why lines is automatically confused as fuck." Everything longer
+   * than a breath belongs in `note`.
    */
   why?: string;
+  /**
+   * THE REST OF HIS VOICE. Everything true about this question that isn't the destination — the
+   * war story, the code section, the reason it must not be asked too early.
+   *
+   * It exists because the alternative was DELETING his words to make the line readable, and his
+   * words are the entire asset. Nort reads a note like it reads a why; a human only sees it if they
+   * open the question in Settings. It never appears on a job and it is never spoken in the tour.
+   */
+  note?: string;
   /** "Don't let me price without this." */
   hold?: boolean;
   /** A calculator may consume this → the provenance gate applies (see acceptFill). */

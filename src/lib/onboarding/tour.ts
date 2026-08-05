@@ -172,37 +172,37 @@ export const TOUR: TourStep[] = [
     title: "Now the part nobody guesses",
     say:
       "Here's the thing that makes this different from every other app you've tried. " +
-      "When you walk a job, I ask you questions — and behind every question there's a WHY LINE. " +
-      "That's you, in your own words, saying what it costs you when that answer is wrong or missing.",
+      "When you walk a job, I ask you questions — and every question has a WHY LINE attached. " +
+      "One line, in your words, saying WHERE THAT ANSWER ENDS UP IN YOUR PRICE. " +
+      "Not why it matters. Where it lands.",
   },
   {
     key: "why-example",
-    title: "What a why line sounds like",
+    title: "Two real ones",
     say:
-      "Here's a real one, from an electrician. The question is 'Is anybody pulling a permit, and what for?' " +
-      "And his why line says: 'Not yes or no, and usually not me. On the storage room the homeowner " +
-      "is pulling one for occupancy — that reclassifies the room, and it means an inspection before " +
-      "anything gets covered. That's a second trip. Price it without knowing and the second trip " +
-      "isn't in the number.' " +
-      "That's not documentation. That's the reason, and it's worth money.",
+      "A deck builder asks length and width. His why line: 'Length times width is the square " +
+      "footage, and that drives the board count and the joists.' That's it. That's the whole line. " +
+      "You can follow it from the answer to the number.\n\n" +
+      "An electrician asks about the panel. His: 'Decides subpanel or home runs — which sets every " +
+      "run length after it.' Same shape. The answer goes somewhere specific.",
   },
   {
     key: "why-how",
-    title: "How to write one",
+    title: "How to write yours",
     say:
-      "So when you write yours, don't describe the question — say what a wrong answer costs you. " +
-      "A second trip. Materials you eat. A job you shouldn't have quoted. " +
-      "I'll write you a first draft of every one from what you just told me, in your trade's terms, " +
-      "and then you cut what's wrong. That's the easy way in — arguing with a draft beats a blank box.",
+      "So don't explain the question. Finish this sentence: this answer gets... multiplied by " +
+      "something, or it decides something, or it turns something on. One of those three, every time.\n\n" +
+      "If you can't say where it lands, that's worth knowing too — it might be a question you don't " +
+      "actually need. And you're not starting from a blank box: I'll draft every one from what you " +
+      "just told me, and you tell me where I've got it wrong. Arguing beats writing.",
   },
   {
     key: "why-uses",
     title: "And why I need them",
     say:
-      "I read those lines to decide when a question is even worth asking you. " +
-      "If you already told me something, I don't ask it again. " +
-      "If a number can be worked out from what you said, I don't make you count it. " +
-      "The why lines are how I know the difference.",
+      "Because that's how I stop wasting your time. If a number can be worked out from something " +
+      "you already said, I don't make you count it. If you already told me, I don't ask twice. " +
+      "And when a line says 'times this equals that' — I can do that part myself.",
   },
 
   // ── 3. THE ROOM. Where everything is. ──────────────────────────────────────────────────────

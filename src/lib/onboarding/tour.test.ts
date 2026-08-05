@@ -46,8 +46,11 @@ describe("the why-line lesson is actually in here", () => {
   it("the example is a REAL one, not a description of one", () => {
     // An abstract "explain your reasoning" teaches nothing. The example carries a concrete cost.
     const ex = sayOf(TOUR.find((s) => s.key === "why-example")!.say, STRANGER).toLowerCase();
-    expect(ex).toContain("permit");
-    expect(ex).toContain("second trip");
+    // Both brothers, both shapes: arithmetic and a fork. Erik on the old permit example: "the
+    // example in #7 makes no sense to me nor do my why lines."
+    expect(ex).toContain("board count");
+    expect(ex).toContain("home runs");
+    expect(ex.toLowerCase()).toContain("square footage");
   });
 
   it("and it promises the draft that comes next, so the hand-off isn't a surprise", () => {

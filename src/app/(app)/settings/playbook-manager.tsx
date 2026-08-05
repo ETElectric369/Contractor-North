@@ -16,6 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { WhyField } from "@/components/playbook/why-field";
 import type { Clause, Need, NeedSlot } from "@/lib/playbook/types";
 import { clearPlaybook, installPlaybookStarter, savePlaybook } from "./playbook-actions";
 
@@ -283,15 +284,26 @@ export function PlaybookManager({
                       <Input value={n.label} onChange={(e) => edit(i, { label: e.target.value })} />
                     </div>
 
-                    <div>
-                      <Label className="mb-1.5">Why it matters — in your words</Label>
+                    <WhyField need={n} onChange={(why) => edit(i, { why })} />
+
+                    {/* Everything else true about this question. The line above has to be readable
+                        in three seconds; this has no such limit, and Nort reads both. Folded away
+                        because on most questions it's empty and an open box invites homework. */}
+                    <details className="group" open={!!n.note}>
+                      <summary className="cursor-pointer list-none text-xs text-slate-500 hover:text-slate-700">
+                        <span className="underline-offset-2 group-open:hidden">
+                          + Anything else about this one {n.note ? "" : "(optional)"}
+                        </span>
+                        <span className="hidden group-open:inline">Anything else about this one</span>
+                      </summary>
                       <Textarea
+                        className="mt-1.5"
                         rows={3}
-                        value={n.why ?? ""}
-                        placeholder="What a wrong answer costs you. This is what shows under the question, and what Nort reads to know when it's worth asking."
-                        onChange={(e) => edit(i, { why: e.target.value || undefined })}
+                        value={n.note ?? ""}
+                        placeholder="The war story, the code section, the reason not to ask it too early. Nort reads this; it never shows on a job."
+                        onChange={(e) => edit(i, { note: e.target.value || undefined })}
                       />
-                    </div>
+                    </details>
 
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div>

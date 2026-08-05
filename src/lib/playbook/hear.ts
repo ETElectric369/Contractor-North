@@ -84,7 +84,11 @@ export function hearRequest(pb: Playbook, answers: Answers, transcript: string):
     else if (n.slot) bits.push("  text");
     else bits.push("  anything he said, in his words");
     if (n.measured) bits.push("  MEASURED — the digits must appear verbatim in `heard`");
-    if (n.why) bits.push(`  why it matters (his words): ${n.why}`);
+    if (n.why) bits.push(`  where the answer lands (his words): ${n.why}`);
+    // The long-form reasoning too. It is where the asking rules live — "Ask me the fork, don't ask
+    // me for its outputs" — and it moved out of `why` only so a HUMAN could read the line in three
+    // seconds. The model has no such constraint and loses nothing.
+    if (n.note) bits.push(`  more from him: ${n.note}`);
     return bits.join("\n");
   });
 

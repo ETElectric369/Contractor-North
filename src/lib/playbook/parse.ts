@@ -91,6 +91,7 @@ export function parsePlaybook(raw: unknown): Playbook {
       ...(parseSlot(n.slot) ? { slot: parseSlot(n.slot) } : {}),
       ...(when.length ? { when } : {}),
       ...(str(n.why, 2000) ? { why: str(n.why, 2000) } : {}),
+      ...(str(n.note, 4000) ? { note: str(n.note, 4000) } : {}),
       ...(n.hold === true ? { hold: true } : {}),
       ...(n.measured === true ? { measured: true } : {}),
       ...(n.photo === true ? { photo: true } : {}),

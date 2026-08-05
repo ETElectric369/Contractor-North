@@ -5,7 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowRight, Check, ClipboardList, Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input, Label, Textarea } from "@/components/ui/input";
+import { Input, Label } from "@/components/ui/input";
+import { WhyField } from "@/components/playbook/why-field";
 import { TellNort } from "@/components/tell-nort";
 import { SETUP_PLAYBOOK } from "@/lib/onboarding/setup-playbook";
 import { missingNeeds } from "@/lib/playbook/resolve";
@@ -234,27 +235,21 @@ export function SetupInterview({
               const i = Math.min(whyAt, needs.length - 1);
               return (
                 <>
-                  <div className="mt-1 flex items-center gap-2 text-xs text-slate-400">
-                    <span className="tabular-nums">
-                      {i + 1} of {needs.length}
-                    </span>
-                    <span className="h-1 flex-1 rounded-full bg-slate-200">
-                      <span className="block h-1 rounded-full bg-brand" style={{ width: `${((i + 1) / needs.length) * 100}%` }} />
-                    </span>
-                  </div>
+                  {/* A COUNT, NEVER A BAR. A progress bar at 1/15 says "you are behind on your
+                      homework", and homework is the exact thing that made Erik say "guaranteed this
+                      aint going nowhere". One good line is a win; the rest keep. */}
+                  <p className="mt-1 text-xs tabular-nums text-slate-400">
+                    {needs.length} questions · {i} you&rsquo;ve been through
+                  </p>
 
                   <p className="mt-3 text-sm leading-relaxed text-slate-600">{explainWhy(n, i, needs.length)}</p>
 
                   <div className="mt-4 rounded-lg border border-slate-200 p-3">
                     <Label className="mb-1">The question</Label>
                     <Input value={n.ask} onChange={(e) => editNeed(i, { ask: e.target.value })} />
-                    <Label className="mb-1 mt-3">Why you ask it — in your words</Label>
-                    <Textarea
-                      rows={4}
-                      value={n.why ?? ""}
-                      placeholder="What does it cost you when this is wrong or missing?"
-                      onChange={(e) => editNeed(i, { why: e.target.value || undefined })}
-                    />
+                    <div className="mt-3">
+                      <WhyField need={n} rows={3} onChange={(why) => editNeed(i, { why })} />
+                    </div>
                   </div>
 
                   <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -273,12 +268,19 @@ export function SetupInterview({
                       </button>
                     )}
                     <span className="flex-1" />
-                    {/* AN ESCAPE THAT ISN'T A LOSS. Somebody who has got the idea by number four
-                        shouldn't be marched through eleven more — the rest are saved as drafted and
-                        Settings → Playbook is where they live. */}
-                    <button type="button" disabled={pending} onClick={toWhere} className="text-sm text-slate-500 underline-offset-2 hover:underline">
-                      I&rsquo;ve got it — save the rest
-                    </button>
+                    {/* STOPPING IS A FIRST-CLASS OUTCOME, not a grey escape hatch at the end of a
+                        row. One line understood beats fifteen skimmed, and the rest are saved as
+                        drafted — Settings → Playbook is where they live, and Nort will ask about
+                        the others on real jobs where they actually cost something. */}
+                    {i > 0 ? (
+                      <Button type="button" variant="secondary" disabled={pending} onClick={toWhere}>
+                        I&rsquo;ve got it — the rest can wait
+                      </Button>
+                    ) : (
+                      <button type="button" disabled={pending} onClick={toWhere} className="text-sm text-slate-500 underline-offset-2 hover:underline">
+                        Skip these for now
+                      </button>
+                    )}
                   </div>
                 </>
               );

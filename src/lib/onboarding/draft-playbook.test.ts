@@ -110,23 +110,29 @@ describe("walking one why line, out loud", () => {
     const t = explainWhy(n, 0, 6);
     expect(t).toContain("Is anybody pulling a permit");
     expect(t).toContain("It's a second trip.");
-    expect(t.toLowerCase()).toContain("change it");
+    // It ASKS. A paragraph read at somebody with "edit if you like" bolted on is how fifteen of
+    // these became homework — the whole point is a three-second yes or no.
+    expect(t).toContain("It's a second trip.");
+    expect(t.toLowerCase()).toContain("that right?");
   });
 
   it("the FIRST one explains the format; later ones don't repeat the lecture", () => {
     // Teaching by repetition is how people learn to skip. Say it once, then trust them.
     expect(explainWhy(n, 0, 6).length).toBeGreaterThan(explainWhy(n, 3, 6).length);
-    expect(explainWhy(n, 0, 6)).toContain("one at a time");
-    expect(explainWhy(n, 3, 6)).not.toContain("one at a time");
+    expect(explainWhy(n, 0, 6)).toContain("One at a time");
+    expect(explainWhy(n, 3, 6)).not.toContain("One at a time");
   });
 
   it("flags the two that carry consequences", () => {
-    expect(explainWhy(n, 1, 6)).toContain("shouldn't price without");
+    expect(explainWhy(n, 1, 6)).toContain("landing here");
     expect(explainWhy({ ...n, hold: undefined, measured: true }, 1, 6)).toContain("goes straight into a price");
   });
 
   it("a blank why says it's blank rather than pretending there's a reason", () => {
-    expect(explainWhy({ ...n, why: undefined }, 1, 6)).toContain("no reason written");
+    // No draft: the QUESTION stands on its own and the shape shows him the form to answer in.
+    const blank = explainWhy({ ...n, why: undefined }, 1, 6);
+    expect(blank).toContain("Where does this end up in your price?");
+    expect(blank).toContain("second trip"); // the trigger-shaped example, fitted to a prose need
   });
 
   it("and it always ends somewhere — last one says so", () => {
