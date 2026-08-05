@@ -34,6 +34,7 @@ export function TourSpotlight({
   onExit,
   step,
   total,
+  poke,
 }: {
   anchor?: string;
   title: string;
@@ -41,6 +42,8 @@ export function TourSpotlight({
   onExit: () => void;
   step: number;
   total: number;
+  /** Let clicks through to the spotlighted control — see TourStep.poke. */
+  poke?: boolean;
 }) {
   const [rect, setRect] = useState<Rect | null>(null);
   const [mounted, setMounted] = useState(false);
@@ -108,10 +111,16 @@ export function TourSpotlight({
   return createPortal(
     <div className="fixed inset-0 z-[200]" role="dialog" aria-modal="true" aria-label="Guided tour">
       {/* The dimmer, and the hole in it. Clicks land here and go nowhere on purpose — mid-step is
-          not the moment to wander off; Exit and the step buttons are the ways out. */}
+          not the moment to wander off; Exit and the step buttons are the ways out.
+
+          UNLESS IT'S A POKE STEP, where the hole is a real hole. Then this element goes
+          click-through (a box-shadow is never hit-testable, so the dimming survives) and the four
+          rects below block everything around it instead. Four rects, not one, precisely because a
+          single element cannot have a hole — which is why the DIMMING is still one box-shadow: the
+          seams that would show between four translucent rects don't exist on invisible ones. */}
       {rect ? (
         <div
-          className="pointer-events-auto absolute rounded-xl ring-2 ring-white/90 transition-all duration-300"
+          className={`${poke ? "pointer-events-none" : "pointer-events-auto"} absolute rounded-xl ring-2 ring-white/90 transition-all duration-300`}
           style={{
             top: rect.top,
             left: rect.left,
@@ -122,6 +131,15 @@ export function TourSpotlight({
         />
       ) : (
         <div className="pointer-events-auto absolute inset-0 bg-slate-900/72" />
+      )}
+
+      {poke && rect && (
+        <>
+          <div className="pointer-events-auto absolute left-0 right-0" style={{ top: 0, height: Math.max(0, rect.top) }} />
+          <div className="pointer-events-auto absolute left-0 right-0 bottom-0" style={{ top: rect.top + rect.height }} />
+          <div className="pointer-events-auto absolute left-0" style={{ top: rect.top, height: rect.height, width: Math.max(0, rect.left) }} />
+          <div className="pointer-events-auto absolute right-0" style={{ top: rect.top, height: rect.height, left: rect.left + rect.width }} />
+        </>
       )}
 
       <div className="pointer-events-auto absolute rounded-2xl border border-white/60 bg-white shadow-2xl" style={cardStyle}>

@@ -59,23 +59,53 @@ describe("the why-line lesson is actually in here", () => {
 });
 
 describe("it points at things that exist", () => {
-  // The anchors the shell actually carries (topbar.tsx, dock.tsx, setup-button.tsx).
-  const ANCHORS = ["nort", "setup", "quickadd", "search", "bell", "account", "dock"];
+  // Anchors the SHELL carries, so they're reachable from any route (topbar.tsx, dock.tsx,
+  // setup-button.tsx, account-menu.tsx). `settings-link` is the Settings item INSIDE the account
+  // menu — it is not on the settings page, it is the door to it, which is the whole point.
+  const SHELL = ["nort", "setup", "quickadd", "search", "bell", "account", "dock", "settings-link"];
+  // Anchors that only exist once you are standing on /settings.
+  const settingsOnly = (a: string) => a === "sections-settings" || (a.startsWith("settings-") && a !== "settings-link");
 
   it("every anchor is one the app sets", () => {
     for (const s of TOUR) {
-      if (!s.anchor) continue;
-      // settings-<cluster> is set per cluster by SettingsSubnav; the rest are the shell's.
-      if (s.anchor.startsWith("settings-")) continue;
-      expect(ANCHORS, `${s.key} points at ${s.anchor}`).toContain(s.anchor);
+      if (!s.anchor || settingsOnly(s.anchor)) continue;
+      expect(SHELL, `${s.key} points at ${s.anchor}`).toContain(s.anchor);
     }
   });
 
   it("a step that points INTO settings also routes there", () => {
     // An anchor that only exists on /settings, shown while standing on /planner, is a dimmed
     // screen and a card pointing at nothing.
-    for (const s of TOUR)
-      if (s.anchor?.startsWith("settings-")) expect(s.route, s.key).toMatch(/^\/settings/);
+    for (const s of TOUR) if (s.anchor && settingsOnly(s.anchor)) expect(s.route, s.key).toMatch(/^\/settings/);
+  });
+
+  it("...but the DOOR to settings is anchored in the shell, and does NOT route there", () => {
+    // Erik: "ive been asked multiple times where settings is located and in the tour it shows it
+    // open but not where the button is." A step that navigates you to /settings can never show
+    // you the button, because the button is how you'd have got there.
+    const door = TOUR.find((s) => s.anchor === "settings-link")!;
+    expect(door, "no step points at the Settings link itself").toBeTruthy();
+    expect(door.route, "the door step must not teleport past the door").toBeUndefined();
+    // And it comes BEFORE any step that lands on the page.
+    const firstOnPage = TOUR.findIndex((s) => s.route?.startsWith("/settings"));
+    expect(TOUR.indexOf(door)).toBeLessThan(firstOnPage);
+  });
+
+  it("a poke step has something to poke, and waits for a real anchor", () => {
+    for (const s of TOUR) {
+      if (s.poke) expect(s.anchor, `${s.key} is pokeable but points at nothing`).toBeTruthy();
+      if (s.awaits) {
+        // It must wait for something the app actually sets, or the tour stops dead.
+        expect(SHELL.includes(s.awaits) || settingsOnly(s.awaits), `${s.key} awaits ${s.awaits}`).toBe(true);
+        // Waiting for a tap AND asking a question are two different kinds of turn.
+        expect(s.ask, `${s.key} both awaits and asks`).toBeUndefined();
+      }
+    }
+  });
+
+  it("the account step names Settings — it used to list everything except it", () => {
+    const account = TOUR.find((s) => s.key === "account")!;
+    expect(sayOf(account.say, STRANGER).toLowerCase()).toContain("settings");
   });
 
   it("the things Erik named by hand are all covered", () => {

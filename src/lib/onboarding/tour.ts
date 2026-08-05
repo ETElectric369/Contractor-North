@@ -79,6 +79,24 @@ export interface TourStep {
   ask?: string;
   /** Label for the advance button when "Next" is too bland. */
   next?: string;
+  /**
+   * LET HIM PRESS IT HIMSELF. The dimmer normally eats every click on purpose — mid-step is not
+   * the moment to wander off. A poke step opens exactly one hole in that rule: the spotlighted
+   * control stays live, everything around it stays blocked.
+   *
+   * Needed the moment a thing lives behind another thing. Erik: "ive been asked multiple times
+   * where settings is located and in the tour it shows it open but not where the button is."
+   * Settings lives inside the account menu, so a tour that navigates straight to /settings shows
+   * him the room and never the door — and being told where a door is has never once taught anybody
+   * where a door is.
+   */
+  poke?: boolean;
+  /**
+   * ADVANCE THE INSTANT THIS APPEARS. A `data-tour` name that doesn't exist yet — when his tap
+   * brings it into the DOM, the step is done and the tour moves on by itself. No Next to press,
+   * because pressing Next would be the tour congratulating itself for something he did.
+   */
+  awaits?: string;
 }
 
 export const TOUR: TourStep[] = [
@@ -237,22 +255,40 @@ export const TOUR: TourStep[] = [
   {
     key: "account",
     anchor: "account",
-    title: "Your QR code lives here",
-    say:
-      "Under your account: signing out, language, and your estimate QR code — " +
-      "the one you put on the truck or a business card so a customer can send you a job themselves.",
+    poke: true,
+    awaits: "settings-link",
+    title: "Everything that's yours",
+    say: (c) =>
+      `Your initials, top right${c.first ? `, ${c.first}` : ""} — that's your corner. Signing out, ` +
+      "your language, your estimate QR code for the truck or a business card. " +
+      "And Settings. Go on, tap them — I'll wait.",
+    next: "I can't find it",
   },
-  // WALK THEM THERE, don't describe it. Erik asked "how does the nav work and where are the
-  // settings and my qr code and all the things" — pointing at the nav rail while talking about
-  // Settings answers none of that. These two steps put him ON the page, looking at the thing.
+  // THE DOOR, NOT THE ROOM. Erik: "ive been asked multiple times where settings is located and in
+  // the tour it shows it open but not where the button is." He was right — the old step navigated
+  // straight to /settings and talked about the page, which teaches the room and never the door.
+  // Being TOLD where a door is has never once taught anybody where a door is; this one waits for
+  // his hand and then lights up the actual link inside the menu he just opened.
+  {
+    key: "settings-door",
+    anchor: "settings-link",
+    title: "There it is — Settings",
+    say:
+      "There. Settings lives behind your initials, every single time — that's the one thing to " +
+      "remember, because everything about the business is behind it. Go ahead and open it.",
+    poke: true,
+    awaits: "sections-settings",
+    next: "Just take me there",
+  },
   {
     key: "settings",
     route: "/settings",
-    title: "Settings — the whole business",
+    anchor: "sections-settings",
+    title: "The whole business, one page",
     say:
-      "This is Settings. Everything about the business is on this one page behind those sections — " +
-      "money and tax, scheduling, your website, the connections to Google and the rest. " +
-      "You don't have to remember any of it; it's all in the one place.",
+      "And this is it. Money and tax, scheduling, your website, your people, the connections to " +
+      "Google and the rest — all behind those sections. You don't have to remember any of it. " +
+      "You only have to remember your initials.",
   },
   {
     key: "playbook-tab",
@@ -260,9 +296,9 @@ export const TOUR: TourStep[] = [
     anchor: "settings-playbook",
     title: "And this is your Playbook",
     say:
-      "That's the one to remember. Every question I'll ask you on a job is in here, with its why " +
-      "line, and you can rewrite, reorder or delete any of them whenever your mind changes. " +
-      "This is yours, not mine — I just do what it says.",
+      "That's the one to remember in here. Every question I'll ask you on a job is in this tab, " +
+      "with its why line, and you can rewrite, reorder or delete any of them whenever your mind " +
+      "changes. This is yours, not mine — I just do what it says.",
   },
 
   // ── 4. THE JOB. What this is all for. ──────────────────────────────────────────────────────

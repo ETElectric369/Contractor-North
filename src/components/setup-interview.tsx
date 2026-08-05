@@ -317,9 +317,14 @@ export function SetupInterview({
             <li className="flex gap-3">
               <Check className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
               <span>
+                {/* SAY WHERE THE BUTTON IS, not just where the page is. Erik: "ive been asked
+                    multiple times where settings is located." A link takes you there once; knowing
+                    it's behind your own initials takes you there forever. */}
                 <strong className="font-medium text-slate-900">Everything else about the business</strong> is in{" "}
                 <Link href="/settings" className="underline underline-offset-2">Settings</Link> — money, scheduling, your
-                website, integrations.
+                website, integrations. You get there from{" "}
+                <strong className="font-medium text-slate-900">your initials, top right</strong> — that&rsquo;s the door, on
+                every screen.
               </span>
             </li>
             <li className="flex gap-3">

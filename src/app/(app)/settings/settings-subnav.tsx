@@ -86,7 +86,10 @@ export function SettingsSubnav({
           groups there could be. A vertical column has room, so clusters can multiply until each
           one is a thing you can name, and it stays on screen while you read rather than scrolling
           away above you. */}
-      <div className="mb-5 hidden w-52 shrink-0 flex-col gap-1 self-start shell:sticky shell:top-4 shell:flex">
+      <div
+        data-tour="sections-settings"
+        className="mb-5 hidden w-52 shrink-0 flex-col gap-1 self-start shell:sticky shell:top-4 shell:flex"
+      >
         {clusters.map((c) => {
           const active = c.id === current;
           const Icon = CLUSTER_ICONS[c.id] ?? Settings;

@@ -71,6 +71,9 @@ export function SectionSheet({
       <button
         type="button"
         onClick={() => setOpen(true)}
+        // The tour finds the nav by name and takes the first VISIBLE match — so this handle and
+        // the desktop column below it can share one anchor and each screen gets the right one.
+        data-tour={`sections-${group.key}`}
         aria-label={`${group.label} pages`}
         aria-expanded={open}
         aria-haspopup="menu"

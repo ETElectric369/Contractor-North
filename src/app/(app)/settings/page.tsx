@@ -343,7 +343,11 @@ export default async function SettingsPage({
           label: "Playbook",
           icon: ClipboardList,
           content: (
-            <div className="space-y-6">
+            // Second home for the tour's playbook anchor. The desktop cluster link carries the
+            // same name and comes first in the DOM, so a computer spotlights the nav item; on a
+            // phone that column is hidden at zero size and the spotlight falls through to this,
+            // the panel itself — which is what he's actually looking at there anyway.
+            <div data-tour="settings-playbook" className="space-y-6">
               <Section title="What your walk-through asks">
                 <p className="mb-4 text-sm text-slate-500">
                   These are the questions your inspector asks on site, in order, and the reason each one exists.
