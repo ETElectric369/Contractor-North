@@ -12,6 +12,7 @@ const PUBLIC_PATHS = [
   "/portal/",
   "/inquire",
   "/estimate/",
+  "/intake/", // the public intake door (0185) — a customer has no account by definition
   "/site/",
   "/voice/", // authorized voice-donation portal — the invitee has no account (token-gated)
   "/pick/",
