@@ -189,7 +189,12 @@ export default async function TimecardsPage({
     ),
   );
   const nameById = new Map<string, string>(((members ?? []) as any[]).map((m) => [m.id, m.full_name ?? "Crew member"]));
-  const jobLabelById = new Map<string, string>(((jobs ?? []) as any[]).map((j) => [j.id, j.job_number ? `${j.job_number}` : (j.name ?? "job")]));
+  // THE NAME, NOT THE NUMBER. Erik, three separate bug reports: "timecards and all jobs need to be
+  // displayed as job name not job number everywhere" / "need to see job name not job number" /
+  // "this week should show jobs worked not job codes". A number is a filing reference; nobody
+  // recognises their own week from J-022. jobLabel is the SSOT and already prefers the name — these
+  // three call sites were hand-rolling the label instead of asking it.
+  const jobLabelById = new Map<string, string>(((jobs ?? []) as any[]).map((j) => [j.id, jobLabel(j)]));
 
   // Group by tech. (The hours-per-job-code tally that lived here is gone —
   // Erik: analytics territory, clutter on a payroll review page.)
@@ -248,7 +253,7 @@ export default async function TimecardsPage({
       dayStr,
       startMin,
       endMin,
-      label: `${firstNameOf(e.profiles?.full_name)}${e.job?.job_number ? ` · ${e.job.job_number}` : ""}`,
+      label: `${firstNameOf(e.profiles?.full_name)}${e.job ? ` · ${jobLabel(e.job)}` : ""}`,
       sub: `${formatTime(e.clock_in, tz)}–${e.clock_out ? formatTime(e.clock_out, tz) : "now"}`,
       color: pillColorForPerson(e.profile_id).pill,
       // A pill tap opens THAT entry's editor (?entry= auto-opens the modal
@@ -512,7 +517,7 @@ export default async function TimecardsPage({
                     <div className="min-w-0 text-slate-700">
                       <span className="font-medium">{e.profiles?.full_name ?? "—"}</span>
                       <span className="text-slate-500"> · in {formatDateTimeTz(e.clock_in, tz)}</span>
-                      {e.job && <span className="text-slate-500"> · {e.job.job_number}</span>}
+                      {e.job && <span className="text-slate-500"> · {jobLabel(e.job)}</span>}
                       <Badge tone="amber" className="ml-2">
                         {pastDay ? `open ${formatDuration(openHrs)} · past day` : `open ${formatDuration(openHrs)}`}
                       </Badge>
