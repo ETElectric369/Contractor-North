@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { ACCEPT_ATTR, INTAKE_BUCKET, MAX_UPLOAD_MB, isAllowedUpload, uploadDisplayName } from "@/lib/playbook/uploads";
 import { createClient } from "@/lib/supabase/client";
+import { prepareImageForUpload } from "@/lib/image-prep";
 import { applicableNeeds } from "@/lib/playbook/resolve";
 import type { PublicNeed } from "@/lib/playbook/public-intake";
 import type { Answers, Need } from "@/lib/playbook/types";
@@ -49,12 +50,20 @@ export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: 
     try {
       const supabase = createClient();
       const done: string[] = [];
-      for (const file of files) {
-        if (!isAllowedUpload(file.name)) throw new Error(`${file.name} isn't a file type we accept.`);
-        if (file.size > MAX_UPLOAD_MB * 1024 * 1024) throw new Error(`${file.name} is over ${MAX_UPLOAD_MB}MB.`);
+      for (const raw of files) {
+        if (!isAllowedUpload(raw.name)) throw new Error(`${raw.name} isn't a file type we accept.`);
+        // SHRINK A PHOTO BEFORE IT LEAVES THE PHONE — the same helper the inspector uses, which
+        // this door was missing. Erik's own test put a 4.4MB and a 3.3MB JPEG straight into the
+        // bucket: that is the contractor's storage bill, and on site cell service it is a customer
+        // watching a progress bar long enough to give up. A plan set (PDF/DWG) passes through
+        // untouched — those are documents, not snapshots.
+        const file = raw.type.startsWith("image/") ? await prepareImageForUpload(raw) : raw;
+        if (file.size > MAX_UPLOAD_MB * 1024 * 1024) throw new Error(`${raw.name} is over ${MAX_UPLOAD_MB}MB.`);
         const res = await fetch("/api/intake/upload-url", {
           method: "POST",
           headers: { "content-type": "application/json" },
+          // The SHRUNK size and the ORIGINAL name — the server validates the extension off the
+          // name it will actually write, and prepareImageForUpload can change a .heic to a .jpg.
           body: JSON.stringify({ handle, name: file.name, size: file.size }),
         });
         const slot = await res.json();

@@ -97,3 +97,33 @@ describe("estimateLinesFromIntake — configurator lines → draft quote lines",
     expect(estimateLinesFromIntake({ estimate: { lines: [] } })).toEqual([]);
   });
 });
+
+describe("the reason never claims a price the customer was never shown", () => {
+  /**
+   * From Erik's own intake test (2026-08-06): a lead with plans, files and photos but NO
+   * configured estimate read "Bucket A · no estimate · instant quote" on the Leads board.
+   * `showInstantPrice` was correctly false (it requires total > 0); the reason string simply
+   * re-derived the condition and got it wrong. A label stating something the code didn't do is the
+   * same class as a save that reports ok without writing.
+   */
+  it("no estimate => the reason says quote it, not instant quote", () => {
+    const t = classifyLead({ hasPlans: true, estimateTotal: null, contact: { email: "a@b.c" } });
+    expect(t.showInstantPrice).toBe(false);
+    expect(t.reason).not.toContain("instant quote");
+    expect(t.reason).toContain("quote it");
+  });
+
+  it("a real configured number under the gate still earns the instant quote", () => {
+    const t = classifyLead({ hasPlans: true, estimateTotal: 8000, contact: { email: "a@b.c" } });
+    expect(t.showInstantPrice).toBe(true);
+    expect(t.reason).toContain("instant quote");
+  });
+
+  it("and the reason and the flag can never disagree, whatever the intake", () => {
+    for (const total of [null, 0, 1, 8000, 20000, 20001, 500000])
+      for (const hasPlans of [true, false]) {
+        const t = classifyLead({ hasPlans, estimateTotal: total, contact: { phone: "1" } });
+        expect(t.reason.includes("instant quote"), `total=${total} plans=${hasPlans}`).toBe(t.showInstantPrice);
+      }
+  });
+});

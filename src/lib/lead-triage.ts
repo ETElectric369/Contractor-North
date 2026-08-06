@@ -111,11 +111,20 @@ export function classifyLead(
   const priority = sizePts + readyPts + approvedPts + contactPts;
 
   const money = total > 0 ? `$${Math.round(total).toLocaleString()}` : "no estimate";
+  // THE REASON READS OFF showInstantPrice, it does not re-derive it. It used to append
+  // "· instant quote" for any A/B lead under the threshold — including one with NO estimate at
+  // all, so the Leads board said "Bucket A · no estimate · instant quote" about a customer who
+  // was never shown a price. A label that states a thing the code did not do is the same class of
+  // wrong as a save that reports ok without writing: nothing looks broken, and the office acts on
+  // it. (Erik's own intake test, 2026-08-06.)
+  const plansNote = intake.plansApproved === "yes" ? " · plans approved" : "";
   const reason = siteInspectionRequired
     ? `Over threshold (${money}) — site inspection required`
     : bucket === "C"
       ? `Design consult — ${money}`
-      : `Bucket ${bucket} · ${money}${intake.plansApproved === "yes" ? " · plans approved" : ""} · instant quote`;
+      : showInstantPrice
+        ? `Bucket ${bucket} · ${money}${plansNote} · instant quote`
+        : `Bucket ${bucket} · ${money}${plansNote} — quote it`;
 
   return { bucket, siteInspectionRequired, showInstantPrice, priority, reason };
 }
