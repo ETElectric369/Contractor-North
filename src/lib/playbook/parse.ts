@@ -43,6 +43,17 @@ function parseSlot(raw: unknown): NeedSlot | undefined {
     }
     case "text":
       return { type: "text", ...(s.long === true ? { long: true } : {}) };
+    case "file":
+      // THE PARSER IS THE GATE, and forgetting it here is silent: an unknown type returns
+      // undefined, which makes the need OPEN — so a "file" question rendered as a plain text box
+      // with its label intact and no upload button anywhere. Nothing errored; it just quietly
+      // wasn't the question it said it was. Caught on the live page, not by a test.
+      return {
+        type: "file",
+        ...(Array.isArray(s.accept) ? { accept: s.accept.map((a) => str(a, 12)).filter(Boolean) } : {}),
+        ...(s.multi === true ? { multi: true } : {}),
+        ...(typeof s.maxMb === "number" && s.maxMb > 0 ? { maxMb: Math.min(Math.round(s.maxMb), 100) } : {}),
+      };
     default:
       return undefined;
   }

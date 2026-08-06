@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { coerceNeed } from "./answers";
-import { ACCEPT_ATTR, extOf, isAllowedUpload, isOwnIntakePath, uploadDisplayName } from "./uploads";
+import { ACCEPT_ATTR, MAX_UPLOAD_MB, extOf, isAllowedUpload, isOwnIntakePath, uploadDisplayName } from "./uploads";
+import { parsePlaybook } from "./parse";
 import type { Need } from "./types";
 
 const ORG = "7d6da1e2-c9a0-47d8-bcc1-5b4c3e412fed";
@@ -64,5 +65,40 @@ describe("the file answer shape", () => {
 
   it("shows the customer's own filename, not our storage key", () => {
     expect(uploadDisplayName(`${ORG}/intake/1754500000000-0f1e2d3c-4b5a-6789-abcd-ef0123456789-Deck_Plans.pdf`)).toBe("Deck_Plans.pdf");
+  });
+});
+
+describe("THE PARSER MUST KNOW THE TYPE — an unknown slot fails OPEN, and silently", () => {
+  /**
+   * Caught on the live page, not by a test: `parseSlot` returned undefined for "file", which makes
+   * the need OPEN — so the question rendered with its label and a plain text box, no upload button.
+   * Nothing threw. Every slot type this codebase can WRITE must survive the round trip it READS
+   * through, so this asserts the whole set rather than just the new one.
+   */
+  it("a file slot survives parsePlaybook", () => {
+    const parsed = parsePlaybook({
+      needs: [{ key: "plan_files", label: "Plans", ask: "Upload your plans", slot: { type: "file", multi: true, maxMb: 100 } }],
+    });
+    expect(parsed.needs[0].slot).toEqual({ type: "file", multi: true, maxMb: 100 });
+  });
+
+  it("and maxMb is clamped to the bucket's real ceiling, whatever the row claims", () => {
+    const parsed = parsePlaybook({
+      needs: [{ key: "f", label: "F", ask: "F?", slot: { type: "file", maxMb: 99999 } }],
+    });
+    expect((parsed.needs[0].slot as { maxMb: number }).maxMb).toBe(MAX_UPLOAD_MB);
+  });
+
+  it("EVERY slot type this app can write round-trips through the parser", () => {
+    const slots = [
+      { type: "number", unit: "ft" },
+      { type: "select", options: ["Yes", "No"] },
+      { type: "text", long: true },
+      { type: "file", multi: true },
+    ];
+    const parsed = parsePlaybook({
+      needs: slots.map((slot, i) => ({ key: `k${i}`, label: `L${i}`, ask: `A${i}?`, slot })),
+    });
+    expect(parsed.needs.map((n) => n.slot?.type)).toEqual(["number", "select", "text", "file"]);
   });
 });
