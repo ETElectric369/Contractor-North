@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { INTAKE_STARTER, publicIntakeNeeds } from "./public-intake";
 import { ET_ELECTRIC } from "./starters/et-electric";
 import { parsePlaybook } from "./parse";
-import { applicableNeeds } from "./resolve";
+import { applicableNeeds, clearInapplicable } from "./resolve";
 
 describe("THE PROJECTION — nothing private crosses to a public page", () => {
   it("why and note NEVER survive, even fed a playbook full of them", () => {
@@ -47,3 +47,19 @@ describe("THE STARTER INTAKE — five questions a customer can actually answer",
     for (const n of INTAKE_STARTER.needs) expect(n.why, n.key).toBeUndefined();
   });
 });
+
+describe("the door must not submit answers to questions it stopped showing", () => {
+  /**
+   * cn-v658 audit. The client hides a conditional follow-up when its trigger changes, but `set`
+   * only merges keys — it never deletes. So: "do you have plans? Yes" → type the detail → change
+   * to "No" still SUBMITTED the detail, and the lead read "Plans: No" and "About the plans: <text>"
+   * in the same summary. The inspector has always cleared on save; this door didn't.
+   */
+  it("clearing the trigger drops the follow-up's answer", () => {
+    const withDetail = { has_plans: "Yes", plans_detail: "Drawn by an architect, approved." };
+    expect(clearInapplicable(INTAKE_STARTER, withDetail).plans_detail).toBe("Drawn by an architect, approved.");
+
+    const changedMind = { has_plans: "No", plans_detail: "Drawn by an architect, approved." };
+    expect(clearInapplicable(INTAKE_STARTER, changedMind).plans_detail).toBeNull();
+  });
+})

@@ -26,6 +26,20 @@ export interface DraftMaterial {
 export type Result = { ok: boolean; error?: string; id?: string };
 
 /** Create a list and (optionally) seed it with items in one shot. */
+/**
+ * THE SILENT-WRITE LAW, applied to every mutating path in this file.
+ *
+ * A zero-row UPDATE/DELETE is a 204, not an error. `material_lists` / `material_list_items` are
+ * writable only by staff (0004_multitenancy: the write policy requires is_org_staff()), and a TECH
+ * can reach this editor: the job page's "other lists" link sits OUTSIDE its viewerIsStaff branch,
+ * /materials and /materials/[id] have no staff gate, and the item editor renders in full. So a tech
+ * tapping "purchased" matched zero rows, got a 204, and every one of these actions returned
+ * { ok: true }. The checkbox sprang back with no error and nothing was written.
+ *
+ * cn-v649 fixed exactly this shape on the job tab and stopped there. Rather than gate one more
+ * page — which leaves the next reachable caller to rediscover it — every write here now proves it
+ * touched a row. RLS was never the hole; the LIE about the write succeeding was.
+ */
 export async function createMaterialList(input: {
   name: string;
   job_id: string | null;
@@ -154,7 +168,8 @@ export async function updateMaterialItem(
   if (patch.vendor !== undefined) clean.vendor = patch.vendor || null;
   if (patch.est_cost !== undefined) clean.est_cost = patch.est_cost ?? null;
   if (patch.is_tool !== undefined) clean.is_tool = patch.is_tool;
-  const { error } = await supabase.from("material_list_items").update(clean).eq("id", itemId);
+  const { data, error } = await supabase.from("material_list_items").update(clean).eq("id", itemId).select("id");
+  if (!error && !data?.length) return { ok: false, error: "You don't have permission to change this list." };
   if (error) return { ok: false, error: error.message };
   revalidatePath(`/materials/${listId}`);
   return { ok: true };
@@ -166,11 +181,13 @@ export async function setMaterialItemPurchased(
   purchased: boolean,
 ): Promise<Result> {
   const supabase = await createClient();
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("material_list_items")
     .update({ purchased, purchased_at: purchased ? new Date().toISOString() : null })
-    .eq("id", itemId);
+    .eq("id", itemId)
+    .select("id");
   if (error) return { ok: false, error: error.message };
+  if (!data?.length) return { ok: false, error: "You don't have permission to change this list." };
   revalidatePath(`/materials/${listId}`);
   return { ok: true };
 }
@@ -183,7 +200,8 @@ export async function setMaterialItemTool(
   isTool: boolean,
 ): Promise<Result> {
   const supabase = await createClient();
-  const { error } = await supabase.from("material_list_items").update({ is_tool: isTool }).eq("id", itemId);
+  const { data, error } = await supabase.from("material_list_items").update({ is_tool: isTool }).eq("id", itemId).select("id");
+  if (!error && !data?.length) return { ok: false, error: "You don't have permission to change this list." };
   if (error) return { ok: false, error: error.message };
   revalidatePath(`/materials/${listId}`);
   return { ok: true };
@@ -194,11 +212,13 @@ export async function deleteMaterialItem(
   listId: string,
 ): Promise<Result> {
   const supabase = await createClient();
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("material_list_items")
     .delete()
-    .eq("id", itemId);
+    .eq("id", itemId)
+    .select("id");
   if (error) return { ok: false, error: error.message };
+  if (!data?.length) return { ok: false, error: "You don't have permission to change this list." };
   revalidatePath(`/materials/${listId}`);
   return { ok: true };
 }
@@ -222,7 +242,8 @@ export async function updateMaterialList(
   if (patch.job_id !== undefined) {
     clean.job_id = await visibleJobIdOrNull(supabase, patch.job_id);
   }
-  const { error } = await supabase.from("material_lists").update(clean).eq("id", listId);
+  const { data, error } = await supabase.from("material_lists").update(clean).eq("id", listId).select("id");
+  if (!error && !data?.length) return { ok: false, error: "You don't have permission to change this list." };
   if (error) return { ok: false, error: error.message };
   revalidatePath(`/materials/${listId}`);
   revalidatePath("/materials");
@@ -231,11 +252,13 @@ export async function updateMaterialList(
 
 export async function deleteMaterialList(listId: string): Promise<Result> {
   const supabase = await createClient();
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("material_lists")
     .delete()
-    .eq("id", listId);
+    .eq("id", listId)
+    .select("id");
   if (error) return { ok: false, error: error.message };
+  if (!data?.length) return { ok: false, error: "You don't have permission to change this list." };
   revalidatePath("/materials");
   return { ok: true };
 }

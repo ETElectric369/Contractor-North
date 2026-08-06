@@ -112,7 +112,12 @@ export function NortTone({ humor, register, notes }: { humor: number; register: 
           onClick={() =>
             start(async () => {
               setErr(null);
-              const res = await saveNortTone(h, r, n);
+              // Pass the notes ONLY when this form actually changed them. Nort writes the same
+              // column from the chat panel (remember_style); a Settings tab left open since before
+              // that write holds a stale `n`, and sending it unconditionally deleted the standing
+              // order he had just given. The guard for this already existed in the action — the
+              // caller simply never triggered it.
+              const res = await saveNortTone(h, r, n === notes ? undefined : n);
               if (!res.ok) return setErr(res.error);
               setSaved(true);
               router.refresh();

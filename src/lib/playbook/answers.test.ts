@@ -123,3 +123,33 @@ describe("what the estimator is told", () => {
     expect(factsForEstimator(ET_ELECTRIC, {})).toBe("");
   });
 });
+
+describe("factsForEstimator clears to a FIXED POINT before handing facts to the estimator", () => {
+  /**
+   * Found by the cn-v658 audit, reproduced against the real ET_ELECTRIC playbook.
+   *
+   * applicableNeeds is ONE pass. With work="Troubleshoot" it correctly drops `power_source` — but
+   * the stale power_source VALUE keeps `feed` applicable, and stale `feed` keeps `run_ft`
+   * applicable. So a 25-ft feeder measurement from an abandoned branch was handed to the estimator
+   * under the header "MEASURED ON SITE (these are given — use them, don't re-derive them)".
+   *
+   * A number that reaches a price must survive the same clear the inspector applies on save.
+   */
+  const stale = {
+    work: ["Troubleshoot"],
+    power_source: "meter panel, 2 slots",
+    feed: "Subpanel at the source",
+    run_ft: 25,
+  };
+
+  it("does NOT hand a measurement from an abandoned branch to the estimator", () => {
+    const out = factsForEstimator(ET_ELECTRIC, stale);
+    expect(out).not.toContain("Run (ft)");
+    expect(out).not.toContain("25");
+  });
+
+  it("and still carries the facts that DO apply", () => {
+    const live = { work: ["Add circuits"], power_source: "meter panel", feed: "Subpanel at the source", run_ft: 25 };
+    expect(factsForEstimator(ET_ELECTRIC, live)).toContain("25");
+  });
+});

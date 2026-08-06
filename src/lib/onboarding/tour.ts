@@ -129,7 +129,7 @@ export const TOUR: TourStep[] = [
       "If you sub most of it out, say that. 'General contractor, I sub out electrical and plumbing' " +
       "tells me more than picking one word off a list. " +
       "This is the answer that builds the questions I'll ask you on site and what an estimate " +
-      "thinks it's pricing — and it's what I use to offer you the right starter job codes.",
+      "thinks it's pricing — and it's where your starter job codes came from.",
     ask: "trade",
   },
   {

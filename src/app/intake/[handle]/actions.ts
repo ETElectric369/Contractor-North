@@ -5,6 +5,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { createTriagedInquiry } from "@/lib/inquiries/create-triaged-inquiry";
 import { clientIp, rateLimited } from "@/lib/rate-limit";
 import { coerceByPlaybook } from "@/lib/playbook/answers";
+import { clearInapplicable } from "@/lib/playbook/resolve";
 import { playbookForForm } from "@/lib/playbook/parse";
 import type { Answers } from "@/lib/playbook/types";
 
@@ -68,7 +69,12 @@ export async function submitIntake(
   if (!form) return { ok: false, error: "This form isn't available right now." };
 
   const pb = playbookForForm(form as { schema?: unknown; playbook?: unknown });
-  const answers = coerceByPlaybook(pb, (payload?.answers ?? {}) as Answers);
+  // COERCE, THEN CLEAR — in that order, and the clear is not optional. The client hides a
+  // conditional follow-up when its trigger changes, but `set` only ever merges keys, so answering
+  // "do you have plans? yes", typing the detail, then switching to "no" still SUBMITTED the
+  // detail. The lead then read "Plans: No" and "About the plans: <text>" in the same summary. The
+  // inspector has always cleared on save; this door didn't.
+  const answers = clearInapplicable(pb, coerceByPlaybook(pb, (payload?.answers ?? {}) as Answers));
 
   // A readable summary for the Leads board — label: answer, one per line, skipping blanks.
   const lines = pb.needs

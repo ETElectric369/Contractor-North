@@ -69,7 +69,6 @@ export function TourDriver({
   const [note, setNote] = useState<string | null>(null);
   // What Nort just SAID back — shown as speech, not as a status line.
   const [reply, setReply] = useState<string | null>(null);
-  const savedRef = useRef(false);
   // The auto-advance fires from inside a callback that closed over an older render, so it reads
   // the step and the mute flag from refs rather than from a stale closure.
   const iRef = useRef(0);
@@ -194,8 +193,15 @@ export function TourDriver({
   // The company facts are committed ONCE, when the questions are behind them — not per keystroke.
   // Saying things changed nothing; this is the write. (fill-vs-execute)
   const commit = useCallback(async () => {
-    if (savedRef.current) return;
-    savedRef.current = true;
+    // NO ONCE-ONLY GUARD. It used to early-return on a `savedRef` boolean that was set the first
+    // time the questions were behind him and never reset — so the recap step, which says out loud
+    // "if any of that's wrong, go back a step and say it again", solicited a correction, showed a
+    // green check for it, and then dropped it: every later commit() early-returned and saveSetup
+    // was never called again. Saying "tell me if I got it wrong" and then discarding the answer is
+    // worse than not asking.
+    //
+    // saveSetup is idempotent (it writes the same four settings keys), so the honest fix is to let
+    // it run whenever the tour reaches a commit point.
     await saveSetup(answers);
     router.refresh();
   }, [answers, router]);

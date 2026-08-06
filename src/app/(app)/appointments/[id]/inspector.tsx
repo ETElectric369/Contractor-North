@@ -227,6 +227,21 @@ export function Inspector({
   const answersDirty = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // THE LATEST VALUES, NOT THE ONES THE SCHEDULING RENDER CLOSED OVER.
+  //
+  // `schedule()` runs inside the event handler for render N and captures render N's `flush`, which
+  // read render N's `answers` — the value from BEFORE the setState that just fired. So the
+  // debounced write was permanently ONE ANSWER BEHIND: tap the last open question, put the phone
+  // in your pocket, and 900ms later it saved everything EXCEPT that answer and then said "Saved".
+  // Pressing Save explicitly hid it (flush(true) runs in the current render), which is why it
+  // survived — the failure only bites the hands-free path this whole screen exists for.
+  //
+  // Refs assigned at render time: always the newest value by the time any timeout fires.
+  const answersRef = useRef(answers);
+  answersRef.current = answers;
+  const placeRef = useRef(place);
+  placeRef.current = place;
+
   function queueCapture(patch: Record<string, unknown>) {
     capturePatchRef.current = { ...capturePatchRef.current, ...patch };
     schedule();
@@ -246,7 +261,8 @@ export function Inspector({
     const wantAnswers = answersDirty.current;
     capturePatchRef.current = {};
     answersDirty.current = false;
-    const placeDirty = place.trim() !== initialLocation.trim();
+    const latestPlace = placeRef.current;
+    const placeDirty = latestPlace.trim() !== initialLocation.trim();
     if (!Object.keys(patch).length && !wantAnswers && !placeDirty) {
       // Pressing Save when everything is already written must still ANSWER. Silence reads as a
       // dead button, and the whole point of the press is to be told the work is safe.
@@ -259,12 +275,12 @@ export function Inspector({
         const r = await saveInspectionCapture(appointmentId, patch as never);
         if (!r.ok) return setError(r.error ?? "Couldn't save.");
       }
-      if (place.trim() !== initialLocation.trim()) {
-        const r = await setAppointmentPlace(appointmentId, place);
+      if (latestPlace.trim() !== initialLocation.trim()) {
+        const r = await setAppointmentPlace(appointmentId, latestPlace);
         if (!r.ok) return setError(r.error ?? "Couldn't save the address.");
       }
       if (wantAnswers) {
-        const r = await saveInspectionAnswers(appointmentId, templateId, coerceByPlaybook(playbook, answers) as never);
+        const r = await saveInspectionAnswers(appointmentId, templateId, coerceByPlaybook(playbook, answersRef.current) as never);
         if (!r.ok) return setError(r.error ?? "Couldn't save.");
       }
       setSavedAt(Date.now());

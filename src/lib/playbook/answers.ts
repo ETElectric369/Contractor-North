@@ -1,5 +1,5 @@
 import { looseNumber } from "@/lib/inspection/capture";
-import { applicableNeeds } from "./resolve";
+import { applicableNeeds, clearInapplicable } from "./resolve";
 import type { Answers, AnswerValue, Need, Playbook } from "./types";
 
 /**
@@ -83,6 +83,13 @@ export function answerText(v: AnswerValue): string {
  * stale measurement handed over as a given is the exact failure the resolver exists to prevent.
  */
 export function factsForEstimator(pb: Playbook, answers: Answers): string {
+  // CLEAR TO A FIXED POINT FIRST. applicableNeeds is ONE pass: with work="Troubleshoot" it
+  // correctly drops power_source, but a stale power_source value keeps `feed` applicable, and a
+  // stale feed keeps run_ft applicable — so a 25-ft feeder from an abandoned branch was handed to
+  // the estimator labelled MEASURED ON SITE. Only clearInapplicable's fixed point walks the whole
+  // chain. Every other boundary in this file already does this; this one read path didn't.
+  answers = clearInapplicable(pb, answers);
+
   const lines: string[] = [];
   for (const n of applicableNeeds(pb, answers)) {
     const t = answerText(answers[n.key]);

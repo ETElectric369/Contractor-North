@@ -225,12 +225,23 @@ describe("well-formed", () => {
       expect(said).toContain("unless you tick the box");
     });
 
-    it("and the trade answer no longer claims to build job codes", () => {
-      // saveSetup writes trade_label/city/service_area/rate and seeds a starter walk-through. It
-      // never touches job_codes — those come only from importTradeCodePack, called by hand from
-      // Settings. This was live in the shipped tour until the run's truth pass found it.
+    it("the job-codes claim is in the PAST tense, because that is when it was true", () => {
+      // A three-way correction worth keeping straight, because I got it wrong twice:
+      //
+      //   ORIGINAL (false):  "builds your job codes" — present tense, implying the TOUR's trade
+      //                      answer seeds them. saveSetup never touches job_codes.
+      //   cn-v654 (true):    "what I use to offer you the right starter job codes" — accurate
+      //                      system-wide but vague about when.
+      //   NOW (precise):     "where your starter job codes CAME FROM" — the trade dropdown at
+      //                      /onboarding maps through TRADE_PRESETS[trade].codes -> p_codes ->
+      //                      create_organization (migration 0078), which inserts them at signup.
+      //                      By the time anyone sees this tour step, that already happened.
+      //
+      // The audit's skeptic caught an over-correction here: a narrow grep of the settings manager
+      // and saveSetup "proved" the claim false and nearly deleted a TRUE sentence. The wiring is
+      // one screen earlier, at signup. Assert the true shape, forbid the original false one.
       expect(said).not.toContain("builds your job codes");
-      expect(said).toContain("starter job codes");
+      expect(said).toContain("starter job codes came from");
     });
 
     it("the tone step names the dial AND the limits that make it safe", () => {

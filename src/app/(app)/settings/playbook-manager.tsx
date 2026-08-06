@@ -189,7 +189,21 @@ export function PlaybookManager({
     setDirty(true);
   };
 
-  const run = (fn: () => Promise<{ ok: boolean; error?: string }>, done: string) =>
+  /**
+   * `resyncs` = this operation REPLACED the questions server-side (install a starter, go back to
+   * the plain sheet), so the editor's local copy is now a lie.
+   *
+   * The render-time guard below only resyncs when the FORM ID changes, and these operations keep
+   * the same id — so the editor went on showing the OLD questions under a green "Starter loaded"
+   * message, and a subsequent Save wrote those stale questions straight back over the starter that
+   * had just been installed. Dropping `loadedFor` re-arms that guard on the next render, which is
+   * the one place the resync is already written correctly.
+   */
+  const run = (
+    fn: () => Promise<{ ok: boolean; error?: string }>,
+    done: string,
+    resyncs = false,
+  ) =>
     start(async () => {
       setErr(null);
       setMsg(null);
@@ -197,6 +211,7 @@ export function PlaybookManager({
       if (!r.ok) return setErr(r.error ?? "Couldn't save that.");
       setDirty(false);
       setMsg(done);
+      if (resyncs) setLoadedFor("");
       router.refresh();
     });
 
@@ -507,7 +522,7 @@ export function PlaybookManager({
               // destroyed a hand-authored sheet with no way back, and a soft "replace?" is not
               // the same warning as "this is gone".
               if (!confirm(`Replace all ${needs.length} of your questions with the ${s.label} starter?\n\nYour current questions and why lines are overwritten.`)) return;
-              run(() => installPlaybookStarter(form.id, s.key), "Starter loaded — now make it yours.");
+              run(() => installPlaybookStarter(form.id, s.key), "Starter loaded — now make it yours.", true);
             }}
           >
             Start from: {s.label}
@@ -521,7 +536,7 @@ export function PlaybookManager({
             disabled={pending}
             onClick={() => {
               if (!confirm("Go back to the plain question sheet? Your playbook is removed.")) return;
-              run(() => clearPlaybook(form.id), "Back to the sheet.");
+              run(() => clearPlaybook(form.id), "Back to the sheet.", true);
             }}
           >
             <RotateCcw className="h-4 w-4" /> Back to the plain sheet
