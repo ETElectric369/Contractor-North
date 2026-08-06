@@ -17,7 +17,7 @@ import { SectionSheet } from "./section-sheet";
  *  I" chip) opening a vertical slide-over of the same pages, headers as dividers. Never
  *  both: when the handle renders, no strip does (zero duplication).
  *
- *  MOBILE-ONLY (shell:hidden): on desktop the dock's inside-left rail now lists every section's
+ *  BELOW lg (lg:hidden): at 1024+ the dock's inside-left rail lists every section's
  *  pages, so either shape would just double it. On phones (no left rail) it's the only
  *  sibling nav, so it stays — and it persists on detail/sub-routes too (/quotes/[id],
  *  /forms/[id], /purchasing/[id]…), not just on a section's exact landing pages. */
@@ -64,8 +64,10 @@ export function SectionSubnav({ isStaff }: { isStaff?: boolean }) {
   // brand blue): the shared `.seaglass-active` recipe = tint + gloss + dark-teal ink.
   // Resting chips are frosted white glass (no tint) that warm to ink-teal on hover.
   // Labels show WHOLE WORDS (no truncation). `relative z-10` keeps content above the gloss.
+  // UP TO lg, NOT up to shell:. The dock's inside-left column only appears at 1024 now, so
+  // between 640 and 1024 on a mouse THIS is the section nav — and it costs no content width.
   return (
-    <div className="mb-4 flex w-full gap-1.5 pb-1 shell:hidden">
+    <div className="mb-4 flex w-full gap-1.5 pb-1 lg:hidden">
       {tabs.map((c) => {
         const active = c.href === activeHref;
         const Icon = c.icon;

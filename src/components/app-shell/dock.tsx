@@ -101,11 +101,17 @@ function DockInner({ branding, role, badges }: DockProps) {
           </div>
         </aside>
 
-        {/* The inside-left nav — shown for EVERY section with more than one page, so the
-            section's siblings are always one glance away on desktop. The mobile counterpart
-            is SectionSubnav's top strip (which hides itself at shell: to avoid doubling). */}
+        {/* The inside-left nav — the section's siblings, one glance away on a real desktop.
+            ONLY AT lg (>=1024), NOT at the shell breakpoint, and that gap is the whole point.
+            `shell:` starts at 640px on a mouse, so a ~900px window (Safari on a laptop, the
+            restored PWA) was paying 84px of rail PLUS 186px of this column — 270px of chrome —
+            which left ~615px of content. My Day's cards go two-up at a 672px CONTAINER, so they
+            fell to one column: the desktop dock with phone content, which is exactly what Erik
+            reported ("even though the dock is on the left its still mobile width").
+            Below 1024 the section's pages ride the horizontal strip instead (SectionSubnav),
+            which costs no width at all. */}
         {active && items.filter((c) => c.href).length > 1 && (
-          <nav className="flex h-full w-[186px] shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-slate-200/80 bg-white/55 px-2.5 py-3 backdrop-blur-sm">
+          <nav className="hidden h-full w-[186px] shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-slate-200/80 bg-white/55 px-2.5 py-3 backdrop-blur-sm lg:flex">
             <div className="px-2 pb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">{active.label}</div>
             {items.map((c) => {
               const CIcon = c.icon;

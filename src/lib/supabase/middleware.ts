@@ -13,6 +13,10 @@ const PUBLIC_PATHS = [
   "/inquire",
   "/estimate/",
   "/intake/", // the public intake door (0185) — a customer has no account by definition
+  // …AND ITS UPLOAD ENDPOINT. "/api/intake/upload-url" does not start with "/intake/", so the page
+  // was public and the thing the page calls was 401ing. Same miss as cn-v657, one layer deeper:
+  // a new public surface needs EVERY path it touches listed, not just the one you can see.
+  "/api/intake/",
   "/site/",
   "/voice/", // authorized voice-donation portal — the invitee has no account (token-gated)
   "/pick/",
