@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
 import { requireStaff } from "@/lib/staff-guard";
+import { createServiceClient } from "@/lib/supabase/server";
 import { formatPhone, formatState, formatZip, titleCase } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
 import { PROJECT_TYPES, estimateLinesFromIntake } from "@/lib/lead-triage";
@@ -11,6 +12,7 @@ import { createProposalCore, cleanSlots, type ProposalSlot } from "@/lib/appoint
 import { INQUIRY_STATUSES } from "@/lib/statuses";
 import { saveQuote } from "../quotes/actions";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { INTAKE_BUCKET, isOwnIntakePath } from "@/lib/playbook/uploads";
 
 export type Result = {
   ok: boolean;
@@ -431,4 +433,39 @@ export async function convertInquiry(
   revalidatePath("/leads");
   revalidatePath("/crm");
   return { ok: true, id: customerId ?? undefined, redirect };
+}
+
+/**
+ * A SHORT-LIVED LINK to something a customer uploaded through the public intake door.
+ *
+ * The paths live in the lead's `intake.intake_answers`; the bucket is private (0186), so nothing
+ * is readable without one of these. Staff-only and re-checked against the CALLER'S OWN org — the
+ * lead row is read through the caller's RLS client first and the path must sit inside that org's
+ * folder, so a guessed path from another tenant resolves to nothing. Ten minutes is enough to open
+ * a drawing and short enough that a copied URL dies before it travels.
+ */
+export async function intakeFileUrl(
+  inquiryId: string,
+  path: string,
+): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error ?? "This action is staff-only." };
+
+  // Authorize through the caller's own RLS-scoped read, then trust only what it returned.
+  const { data: inq } = await ctx.supabase.from("inquiries").select("id, org_id, intake").eq("id", inquiryId).maybeSingle();
+  if (!inq) return { ok: false, error: "Not found." };
+  const orgId = String((inq as { org_id?: string }).org_id ?? "");
+  if (!orgId) return { ok: false, error: "Not found." };
+  if (!isOwnIntakePath(orgId, path)) return { ok: false, error: "Not found." };
+
+  // And the path must be one this lead actually carries — not merely one shaped like it.
+  const answers = ((inq as { intake?: { intake_answers?: Record<string, unknown> } }).intake?.intake_answers ?? {}) as Record<string, unknown>;
+  const known = Object.values(answers).some((v) => Array.isArray(v) && v.includes(path));
+  if (!known) return { ok: false, error: "Not found." };
+
+  const { data, error } = await createServiceClient()
+    .storage.from(INTAKE_BUCKET)
+    .createSignedUrl(path, 600);
+  if (error || !data?.signedUrl) return { ok: false, error: "Couldn't open that file." };
+  return { ok: true, url: data.signedUrl };
 }

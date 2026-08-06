@@ -84,6 +84,9 @@ export function sheetFromPlaybook(pb: Playbook): InspectionField[] {
   const out: InspectionField[] = [];
   for (const n of pb.needs) {
     if (!n.slot) continue;
+    // A `file` need has no equivalent in the OLD sheet shape, so it is simply not exported back
+    // to one — a sheet that claimed a file question was a text box would lose the uploads.
+    if (n.slot.type === "file") continue;
     const type =
       n.slot.type === "number" ? "number" : n.slot.type === "select" ? "select" : n.slot.long ? "textarea" : "text";
     out.push({

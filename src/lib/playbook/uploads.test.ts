@@ -1,0 +1,68 @@
+import { describe, it, expect } from "vitest";
+import { coerceNeed } from "./answers";
+import { ACCEPT_ATTR, extOf, isAllowedUpload, isOwnIntakePath, uploadDisplayName } from "./uploads";
+import type { Need } from "./types";
+
+const ORG = "7d6da1e2-c9a0-47d8-bcc1-5b4c3e412fed";
+const OTHER = "60195593-2e18-4230-bc8e-7a32d36d038d";
+const fileNeed: Need = {
+  key: "plan_files",
+  label: "Plans",
+  ask: "Upload your plans",
+  slot: { type: "file", multi: true, maxMb: 100 },
+};
+
+describe("what a stranger may upload", () => {
+  it("takes plans and photos, refuses the things that execute", () => {
+    for (const ok of ["plan.pdf", "SITE.DWG", "detail.dxf", "photo.jpg", "shot.HEIC", "a.png"])
+      expect(isAllowedUpload(ok), ok).toBe(true);
+    for (const no of ["payload.exe", "run.sh", "macro.docm", "x.svg", "noextension", "a.pdf.exe"])
+      expect(isAllowedUpload(no), no).toBe(false);
+  });
+
+  it("the picker offers exactly what the server accepts — one list, no drift", () => {
+    for (const ext of ACCEPT_ATTR.split(",")) expect(isAllowedUpload(`f${ext}`), ext).toBe(true);
+  });
+
+  it("extension comes off the END, so a.pdf.exe is an exe", () => {
+    expect(extOf("a.pdf.exe")).toBe("exe");
+    expect(extOf("Plans v2.final.pdf")).toBe("pdf");
+  });
+});
+
+describe("THE CROSS-TENANT BOUNDARY — the client hands back paths and can claim anything", () => {
+  it("accepts only this org's own intake folder", () => {
+    expect(isOwnIntakePath(ORG, `${ORG}/intake/123-abc-plan.pdf`)).toBe(true);
+  });
+
+  it("rejects another tenant's folder, traversal, absolute URLs and near-misses", () => {
+    for (const bad of [
+      `${OTHER}/intake/steal.pdf`,                 // another tenant outright
+      `${ORG}/intake/../../${OTHER}/intake/x.pdf`, // traversal out of the folder
+      `${ORG}/appointments/x.pdf`,                 // right org, wrong area
+      `https://evil.example/${ORG}/intake/x.pdf`,  // a URL, not a path
+      `${ORG}x/intake/x.pdf`,                      // prefix collision
+      "",
+      null,
+      42,
+    ])
+      expect(isOwnIntakePath(ORG, bad as unknown), String(bad)).toBe(false);
+  });
+});
+
+describe("the file answer shape", () => {
+  it("is a list of paths — URLs are refused, because a URL in a column is a bearer token", () => {
+    const out = coerceNeed(fileNeed, [`${ORG}/intake/a.pdf`, "https://x/y.pdf", `${ORG}/intake/b.png`]);
+    expect(out).toEqual([`${ORG}/intake/a.pdf`, `${ORG}/intake/b.png`]);
+  });
+
+  it("caps the list and nulls an empty one", () => {
+    expect((coerceNeed(fileNeed, Array.from({ length: 50 }, (_, i) => `${ORG}/intake/${i}.pdf`)) as string[]).length).toBe(20);
+    expect(coerceNeed(fileNeed, [])).toBeNull();
+    expect(coerceNeed(fileNeed, null)).toBeNull();
+  });
+
+  it("shows the customer's own filename, not our storage key", () => {
+    expect(uploadDisplayName(`${ORG}/intake/1754500000000-0f1e2d3c-4b5a-6789-abcd-ef0123456789-Deck_Plans.pdf`)).toBe("Deck_Plans.pdf");
+  });
+});

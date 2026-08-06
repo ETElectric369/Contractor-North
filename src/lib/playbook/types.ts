@@ -52,7 +52,21 @@
 export type NeedSlot =
   | { type: "number"; unit?: string }
   | { type: "select"; options: string[]; multi?: boolean }
-  | { type: "text"; long?: boolean };
+  | { type: "text"; long?: boolean }
+  /**
+   * FILES — plans, drawings, photos. The answer is a list of storage PATHS (so it fits the existing
+   * `string[]` AnswerValue with no new shape), never URLs: a URL in an answer would be a bearer
+   * token pasted into a jsonb column, and these live in a private bucket read through short-lived
+   * signed links.
+   *
+   * Andrew (Vivian Builders, beta): "add a conditional field — 'Do you have plans already?'
+   * (Yes/No). When Yes, reveal an 'Upload your plans' file-upload button (PDF, JPG, PNG, DWG),
+   * optional, hidden by default, multiple files allowed, 100MB cap for large plan sets."
+   *
+   * The conditional half needed nothing new — that is what `when` already does. This is the half
+   * that was missing.
+   */
+  | { type: "file"; accept?: string[]; multi?: boolean; maxMb?: number };
 
 /** One condition. ALL of a need's clauses must hold for it to apply. */
 export type Clause =

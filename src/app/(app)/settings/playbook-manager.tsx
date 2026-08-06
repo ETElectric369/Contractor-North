@@ -46,7 +46,7 @@ import { clearPlaybook, installPlaybookStarter, savePlaybook } from "./playbook-
  * and the need has no slot, which is what makes it a sentence Nort has to phrase rather than a box.
  */
 
-type Kind = "one" | "many" | "number" | "text" | "long" | "open";
+type Kind = "one" | "many" | "number" | "text" | "long" | "file" | "open";
 
 const KIND_LABEL: Record<Kind, string> = {
   one: "Pick one",
@@ -54,6 +54,7 @@ const KIND_LABEL: Record<Kind, string> = {
   number: "A number",
   text: "Typed in — short",
   long: "Typed in — a paragraph",
+  file: "Files — plans, drawings, photos",
   open: "Anything you say (no box until it's answered)",
 };
 
@@ -62,13 +63,15 @@ const kindOf = (n: Need): Kind =>
     ? "open"
     : n.slot.type === "number"
       ? "number"
-      : n.slot.type === "select"
-        ? n.slot.multi
-          ? "many"
-          : "one"
-        : n.slot.long
-          ? "long"
-          : "text";
+      : n.slot.type === "file"
+        ? "file"
+        : n.slot.type === "select"
+          ? n.slot.multi
+            ? "many"
+            : "one"
+          : n.slot.long
+            ? "long"
+            : "text";
 
 /** Changing the kind keeps whatever the old kind had that the new one can still use. */
 function slotForKind(kind: Kind, prev: NeedSlot | undefined): NeedSlot | undefined {
@@ -84,6 +87,9 @@ function slotForKind(kind: Kind, prev: NeedSlot | undefined): NeedSlot | undefin
       return { type: "select", options, multi: true };
     case "long":
       return { type: "text", long: true };
+    case "file":
+      // Sensible defaults; a starter or a hand-edit can narrow `accept` per question.
+      return { type: "file", multi: true, maxMb: 100 };
     default:
       return { type: "text" };
   }

@@ -4,6 +4,8 @@ import { useMemo, useState, useTransition } from "react";
 import { Check, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { ACCEPT_ATTR, INTAKE_BUCKET, MAX_UPLOAD_MB, isAllowedUpload, uploadDisplayName } from "@/lib/playbook/uploads";
+import { createClient } from "@/lib/supabase/client";
 import { applicableNeeds } from "@/lib/playbook/resolve";
 import type { PublicNeed } from "@/lib/playbook/public-intake";
 import type { Answers, Need } from "@/lib/playbook/types";
@@ -29,6 +31,46 @@ export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: 
   const visible = useMemo(() => applicableNeeds(pb, answers), [pb, answers]);
 
   const set = (key: string, v: Answers[string]) => setAnswers((a) => ({ ...a, [key]: v }));
+
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+
+  /**
+   * UPLOAD STRAIGHT TO STORAGE, never through our server.
+   *
+   * A 100MB plan set cannot go through a Next.js action or route — Vercel caps the request body at
+   * ~4.5MB. So the server mints a signed slot for ONE path it chooses (see the upload-url route)
+   * and the browser PUTs the bytes to Supabase directly. What comes back into the answer is the
+   * PATH, which is meaningless without a signed read link.
+   */
+  async function addFiles(key: string, files: File[]) {
+    if (!files.length) return;
+    setBusyKey(key);
+    setErr(null);
+    try {
+      const supabase = createClient();
+      const done: string[] = [];
+      for (const file of files) {
+        if (!isAllowedUpload(file.name)) throw new Error(`${file.name} isn't a file type we accept.`);
+        if (file.size > MAX_UPLOAD_MB * 1024 * 1024) throw new Error(`${file.name} is over ${MAX_UPLOAD_MB}MB.`);
+        const res = await fetch("/api/intake/upload-url", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ handle, name: file.name, size: file.size }),
+        });
+        const slot = await res.json();
+        if (!res.ok) throw new Error(slot?.error ?? "Upload failed.");
+        const { error } = await supabase.storage.from(INTAKE_BUCKET).uploadToSignedUrl(slot.path, slot.token, file);
+        if (error) throw new Error("Upload failed — please try again.");
+        done.push(slot.path as string);
+      }
+      const have = Array.isArray(answers[key]) ? (answers[key] as string[]) : [];
+      set(key, [...have, ...done]);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Upload failed.");
+    } finally {
+      setBusyKey(null);
+    }
+  }
 
   if (done)
     return (
@@ -88,7 +130,40 @@ export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: 
       {visible.map((n) => (
         <div key={n.key}>
           <Label className="mb-1.5">{n.ask}</Label>
-          {n.slot?.type === "select" ? (
+          {n.slot?.type === "file" ? (
+            <div className="rounded-lg border border-dashed border-slate-300 p-3">
+              <input
+                type="file"
+                multiple={n.slot.multi !== false}
+                accept={ACCEPT_ATTR}
+                disabled={busyKey === n.key}
+                onChange={(e) => {
+                  void addFiles(n.key, Array.from(e.target.files ?? []));
+                  e.target.value = "";
+                }}
+                className="block w-full text-sm text-slate-600 file:mr-3 file:min-h-[40px] file:rounded-full file:border-0 file:bg-slate-900 file:px-4 file:text-sm file:text-white"
+              />
+              <p className="mt-1.5 text-xs text-slate-500">
+                {busyKey === n.key ? "Uploading…" : `PDF, DWG, DXF or photos — up to ${MAX_UPLOAD_MB}MB each.`}
+              </p>
+              {Array.isArray(answers[n.key]) && (answers[n.key] as string[]).length > 0 && (
+                <ul className="mt-2 space-y-1">
+                  {(answers[n.key] as string[]).map((path) => (
+                    <li key={path} className="flex items-center justify-between gap-2 text-sm text-slate-700">
+                      <span className="truncate">{uploadDisplayName(path)}</span>
+                      <button
+                        type="button"
+                        onClick={() => set(n.key, (answers[n.key] as string[]).filter((p) => p !== path) as never)}
+                        className="shrink-0 text-xs text-slate-400 underline-offset-2 hover:underline"
+                      >
+                        remove
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ) : n.slot?.type === "select" ? (
             n.slot.multi ? (
               <div className="flex flex-wrap gap-2">
                 {n.slot.options.map((o) => {

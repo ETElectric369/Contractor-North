@@ -11,6 +11,7 @@ import { MediaLightbox } from "@/components/media-lightbox";
 import { createClient } from "@/lib/supabase/client";
 import { prepareImageForUpload } from "@/lib/image-prep";
 import { coerceByPlaybook } from "@/lib/playbook/answers";
+import { ACCEPT_ATTR, isAllowedUpload, uploadDisplayName } from "@/lib/playbook/uploads";
 import { playbookForForm } from "@/lib/playbook/parse";
 import { applicableNeeds, clearInapplicable, missingNeeds, splitAsk } from "@/lib/playbook/resolve";
 import type { Answers, AnswerValue, Need, Playbook } from "@/lib/playbook/types";
@@ -399,7 +400,67 @@ export function Inspector({
         </div>
       );
 
-    return n.slot.long ? (
+    // FILES on the walk-through — the same question type the public door uses, so a playbook can
+    // hold "upload the plans" whichever side answers it. Authenticated here, so it goes straight to
+    // the private `documents` bucket the rest of the inspector already uses; the answer stores
+    // PATHS, matching the public side.
+    if (n.slot.type === "file") {
+      const have = Array.isArray(v) ? (v as string[]) : [];
+      return (
+        <div className="rounded-lg border border-dashed border-slate-300 p-2">
+          <input
+            type="file"
+            multiple={n.slot.multi !== false}
+            accept={ACCEPT_ATTR}
+            disabled={uploading}
+            onChange={async (e) => {
+              const files = Array.from(e.target.files ?? []);
+              e.target.value = "";
+              if (!files.length) return;
+              setUploading(true);
+              setError(null);
+              try {
+                const supabase = createClient();
+                const added: string[] = [];
+                for (const raw of files) {
+                  if (!isAllowedUpload(raw.name)) throw new Error(`${raw.name} isn't a file type we accept.`);
+                  const file = raw.type.startsWith("image/") ? await prepareImageForUpload(raw) : raw;
+                  const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+                  const path = `${orgId}/appointments/${appointmentId}/${Date.now()}-${safe}`;
+                  const { error: upErr } = await supabase.storage.from("documents").upload(path, file, { upsert: false });
+                  if (upErr) throw upErr;
+                  added.push(path);
+                }
+                setAnswer(n.key, [...have, ...added]);
+              } catch (err) {
+                setError(err instanceof Error ? err.message : "Upload failed.");
+              } finally {
+                setUploading(false);
+              }
+            }}
+            className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-full file:border-0 file:bg-slate-900 file:px-3 file:py-1.5 file:text-xs file:text-white"
+          />
+          {have.length > 0 && (
+            <ul className="mt-1.5 space-y-0.5">
+              {have.map((path) => (
+                <li key={path} className="flex items-center justify-between gap-2 text-xs text-slate-600">
+                  <span className="truncate">{uploadDisplayName(path)}</span>
+                  <button
+                    type="button"
+                    onClick={() => setAnswer(n.key, have.filter((x) => x !== path))}
+                    className="shrink-0 text-slate-400 underline-offset-2 hover:underline"
+                  >
+                    remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      );
+    }
+
+    return (n.slot.type === "text" && n.slot.long) ? (
       <Textarea rows={2} value={typeof v === "string" ? v : ""} onChange={(e) => setAnswer(n.key, e.target.value)} />
     ) : (
       <Input value={typeof v === "string" ? v : ""} onChange={(e) => setAnswer(n.key, e.target.value)} />

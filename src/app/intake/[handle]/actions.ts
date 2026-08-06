@@ -6,6 +6,7 @@ import { createTriagedInquiry } from "@/lib/inquiries/create-triaged-inquiry";
 import { clientIp, rateLimited } from "@/lib/rate-limit";
 import { coerceByPlaybook } from "@/lib/playbook/answers";
 import { clearInapplicable } from "@/lib/playbook/resolve";
+import { isOwnIntakePath, uploadDisplayName } from "@/lib/playbook/uploads";
 import { playbookForForm } from "@/lib/playbook/parse";
 import type { Answers } from "@/lib/playbook/types";
 
@@ -74,13 +75,30 @@ export async function submitIntake(
   // "do you have plans? yes", typing the detail, then switching to "no" still SUBMITTED the
   // detail. The lead then read "Plans: No" and "About the plans: <text>" in the same summary. The
   // inspector has always cleared on save; this door didn't.
-  const answers = clearInapplicable(pb, coerceByPlaybook(pb, (payload?.answers ?? {}) as Answers));
+  let answers = clearInapplicable(pb, coerceByPlaybook(pb, (payload?.answers ?? {}) as Answers));
+
+  // FILE PATHS ARE CLIENT-SUPPLIED, so they are filtered here and nowhere else. coerceByPlaybook
+  // proved the SHAPE (a list of path-ish strings); only this boundary knows the org, and a caller
+  // is perfectly capable of handing back another tenant's folder or a path it never uploaded to.
+  // Anything outside this org's own intake prefix is dropped silently — there is no legitimate way
+  // for a customer's browser to produce one.
+  for (const n of pb.needs) {
+    if (n.slot?.type !== "file") continue;
+    const claimed = answers[n.key];
+    if (!Array.isArray(claimed)) continue;
+    const mine = claimed.filter((p) => isOwnIntakePath(orgId, p));
+    answers = { ...answers, [n.key]: mine.length ? mine : null };
+  }
 
   // A readable summary for the Leads board — label: answer, one per line, skipping blanks.
+  // A file answer becomes the FILE NAMES, not the storage paths: the office wants to know that
+  // "Plans.pdf" arrived, and a raw path in an email is noise.
   const lines = pb.needs
     .map((n) => {
       const v = answers[n.key];
       if (v === null || v === undefined || v === "" || (Array.isArray(v) && !v.length)) return null;
+      if (n.slot?.type === "file" && Array.isArray(v))
+        return `${n.label}: ${v.map(uploadDisplayName).join(", ")}`;
       return `${n.label}: ${Array.isArray(v) ? v.join(", ") : String(v)}`;
     })
     .filter(Boolean) as string[];

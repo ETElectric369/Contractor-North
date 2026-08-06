@@ -50,6 +50,18 @@ export function coerceNeed(n: Need, v: unknown): AnswerValue {
       // so downstream never has to ask which shape it got.
       return multi ? picked : picked[0];
     }
+    case "file": {
+      // A LIST OF STORAGE PATHS, and nothing else. Never a URL (a signed URL in a jsonb column is
+      // a bearer token that outlives its purpose) and never a path from another tenant — the
+      // caller-supplied list is filtered against the org prefix at the write boundary, since a
+      // hostile client can claim any string it likes here.
+      const raw: unknown[] = Array.isArray(v) ? v : [v];
+      const paths = raw
+        .map((x) => String(x).trim())
+        .filter((x) => x && !x.includes("..") && !/^https?:/i.test(x))
+        .slice(0, 20);
+      return paths.length ? paths : null;
+    }
     default:
       return String(v).slice(0, n.slot.long ? 8000 : 500);
   }

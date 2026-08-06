@@ -13,6 +13,7 @@ import { formatDate } from "@/lib/utils";
 import type { Inquiry, LeadBucket } from "@/lib/types";
 import { INQUIRY_STATUSES } from "@/lib/statuses";
 import { LEAD_BUCKETS } from "@/lib/lead-triage";
+import { IntakeFiles } from "./intake-files";
 
 // Named INQUIRY_STATUS_TONE (not `statusTone`) so it can't shadow the shared badge
 // statusTone helper. Values cover every INQUIRY_STATUSES entry.
@@ -28,6 +29,16 @@ const INQUIRY_STATUS_TONE: Record<string, "blue" | "amber" | "indigo" | "green" 
 const BUCKET_TONE: Record<LeadBucket, "green" | "amber" | "blue"> = { A: "green", B: "amber", C: "blue" };
 const BUCKET_DOT: Record<LeadBucket, string> = { A: "🟢", B: "🟡", C: "🔵" };
 
+
+/** Every file path across the lead's intake answers, in answer order. */
+function intakePaths(intake: unknown): string[] {
+  const answers = (intake as { intake_answers?: Record<string, unknown> } | null)?.intake_answers;
+  if (!answers || typeof answers !== "object") return [];
+  return Object.values(answers)
+    .filter(Array.isArray)
+    .flat()
+    .filter((v): v is string => typeof v === "string" && v.includes("/intake/"));
+}
 
 export function InquiryRow({
   inquiry,
@@ -148,6 +159,9 @@ export function InquiryRow({
           {inquiry.intake?.reason && <span className="text-slate-400">· {inquiry.intake.reason}</span>}
         </div>
         {inquiry.message && <p className="mt-1.5 text-sm text-slate-600">{inquiry.message}</p>}
+        {/* Anything the customer uploaded through the public intake door — opened via a
+            short-lived signed link, because the bucket is private. */}
+        <IntakeFiles inquiryId={inquiry.id} paths={intakePaths(inquiry.intake)} />
       </div>
 
       {/* THE SCRUNCH FIX. This cluster had no responsive rule below `lg`, so on a phone the
