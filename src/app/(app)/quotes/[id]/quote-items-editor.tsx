@@ -48,6 +48,13 @@ export function QuoteItemsEditor({
 
   // details modal state
   const [detailsOpen, setDetailsOpen] = useState(false);
+
+  // THE SCOPE PARAGRAPH, ON THE PAGE. Erik, mid-estimate on Sarah Cain: "theres nowhere to add a
+  // description at the top." It WAS there — behind a button labelled "Edit Details", docked to the
+  // Line items card. Which is two clicks and a wrong label for the first thing the customer reads.
+  // Invoices already got this right (billing/[id]/invoice-detail.tsx): its own box, always visible,
+  // its own Save. He asked for the same here, so this is the same box, not a second design.
+  const [descrSaved, setDescrSaved] = useState(false);
   const [title, setTitle] = useState(quote.title ?? "");
   const [description, setDescription] = useState((quote as any).description ?? "");
   const [notes, setNotes] = useState(quote.notes ?? "");
@@ -88,6 +95,21 @@ export function QuoteItemsEditor({
     });
   }
 
+  const descrDirty = description !== ((quote as { description?: string | null }).description ?? "");
+  function saveDescr() {
+    setDescrSaved(false);
+    start(async () => {
+      // PATCH — only `description`. updateQuoteMeta writes just the keys it's given, so saving the
+      // paragraph can never blank a title or a tax rate somebody set in the modal a second ago.
+      const res = await updateQuoteMeta(quote.id, { description });
+      if (!res?.ok) { setError(res?.error ?? "Couldn't save the description — try again."); return; }
+      setError(null);
+      setDescrSaved(true);
+      setTimeout(() => setDescrSaved(false), 2000);
+      refresh();
+    });
+  }
+
   function saveDetails() {
     setError(null);
     start(async () => {
@@ -109,6 +131,27 @@ export function QuoteItemsEditor({
 
   return (
     <>
+      {/* ABOVE the line items on screen, because that is exactly where it prints on the document
+          the customer reads (quote-document.tsx renders DocDescription before the table). */}
+      <div className="mb-4 rounded-xl border border-slate-200 bg-white p-3">
+        <Label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">
+          Description (above line items)
+        </Label>
+        <Textarea
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="Scope of work — shows above the line items on the estimate."
+          className="min-h-[60px]"
+        />
+        <div className="mt-2 flex items-center gap-2">
+          <Button size="sm" onClick={saveDescr} disabled={pending || !descrDirty}>
+            {descrSaved ? <Check className="h-3.5 w-3.5" /> : null}
+            {descrSaved ? "Saved" : "Save"}
+          </Button>
+          {descrDirty && !pending && <span className="text-xs text-slate-400">Unsaved</span>}
+        </div>
+      </div>
+
       <Card>
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
           <span className="text-sm font-semibold text-slate-900">Line items</span>
