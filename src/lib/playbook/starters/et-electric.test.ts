@@ -13,20 +13,28 @@ import { applicableNeeds, clearInapplicable, holdingNeeds, isClosed, isOpen, mis
  */
 
 describe("it opens with one question", () => {
-  it("nothing applies before the work is named", () => {
+  it("nothing GATED applies before the work is named", () => {
     const first = applicableNeeds(ET_ELECTRIC, {});
-    expect(first.map((n) => n.key)).toEqual(["work", "permitted", "gotcha", "materials_known"]);
-    // Only ONE of them is a control. The rest are open — a sentence, not a box.
-    expect(first.filter((n) => !isOpen(n)).map((n) => n.key)).toEqual(["work"]);
+    expect(first.map((n) => n.key)).toEqual(["work_kind", "work", "permitted", "gotcha", "materials_known"]);
+    // work_kind joined the opening deliberately — Erik: "a service call title/option in the
+    // inspector would be sufficient, these are the ones that would go to the board." It is the
+    // shape-decider, so it sits above the work itself. Nothing gated has appeared: every need with
+    // a `when` clause is still waiting, which is what this test is actually for.
+    expect(first.every((n) => !n.when?.length)).toBe(true);
+    // TWO controls now, not one. The rest are open — a sentence, not a box.
+    expect(first.filter((n) => !isOpen(n)).map((n) => n.key)).toEqual(["work_kind", "work"]);
   });
 
-  it("WHAT IS ACTUALLY ON SCREEN: two questions, and the rest are chips", () => {
+  it("WHAT IS ACTUALLY ON SCREEN: the shape-deciders, and the rest are chips", () => {
     // "available is not visible", in the data. `work` shows because it has a control. `permitted`
     // shows despite having none, because it is a HOLD — don't let me price without it. The other
     // two are sentences nobody has reached for yet, so each is one named tap away instead of an
     // empty box sitting between him and the work.
+    // THREE now, and the third was asked for by name. That is a real cost against "available is
+    // not visible" — every control at the top is one more thing between him and the work — and it
+    // is the price of knowing on question one whether this is a half-hour service call.
     const { ask, reach } = splitAsk(ET_ELECTRIC, {});
-    expect(ask.map((n) => n.key)).toEqual(["work", "permitted"]);
+    expect(ask.map((n) => n.key)).toEqual(["work_kind", "work", "permitted"]);
     expect(reach.map((n) => n.key)).toEqual(["gotcha", "materials_known"]);
   });
 
@@ -102,7 +110,10 @@ describe("the storage room, turn by turn", () => {
     // wiring_method a conclusion, and it only became askable once walls AND permit were both known
     // length_ft     the tape he hasn't pulled
     // ceiling_ft    ladder or lift
+    // work_kind leads: he described the whole job in that paragraph and never said whether it was
+    // a service call or a contract, and a classification is not something to infer from prose.
     expect(splitAsk(ET_ELECTRIC, said).ask.map((n) => n.key)).toEqual([
+      "work_kind",
       "feed",
       "wiring_method",
       "length_ft",

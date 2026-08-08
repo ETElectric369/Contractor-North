@@ -30,6 +30,20 @@ const NEEDS_POWER = ["Add circuits", "Lighting", "EV charger", "Remodel / rough-
 export const ET_ELECTRIC: Playbook = {
   needs: [
     {
+      key: "work_kind",
+      label: "Service call or contract",
+      ask: "Is this a service call, or a contract job?",
+      slot: { type: "select", options: ["Service call", "Contract job"] },
+      feeds: ["what"],
+      why: "Decides the whole shape — a service call is priced off the trip and the hour, a contract job off the takeoff.",
+      note:
+        "Erik: \"a service call title/option in the inspector would be sufficient, these are the " +
+        "ones that would go to the board becuase i dont know at what moment ill be able to squeeze " +
+        "them in and many times its in and around other jobs so im in and out and its ready for an " +
+        "invoice.\" First question on purpose: it is the one that decides whether the rest of the " +
+        "sheet is even worth walking.",
+    },
+    {
       key: "work",
       label: "Kind of work",
       ask: "What are we doing here?",

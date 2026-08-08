@@ -73,12 +73,26 @@ export default async function NewQuotePage({
       // Kit sizing still reads the sheet shape; every measured need is a number slot, so the
       // projection back down loses nothing that sizes anything.
       measured = measurementsFromAnswers(sheetFromPlaybook(pb), answers);
+      // Capture photos hold documents too — a report he photographed or uploaded on site.
+      const docNames = (((cap as { photos?: unknown } | null)?.photos ?? []) as unknown[])
+        .filter((x): x is string => typeof x === "string")
+        .map((path) => path.split("/").pop() ?? path)
+        .map((n) => n.replace(/^\d+-/, "").replace(/_/g, " "));
       const parts = [
         `From site inspection — ${(appt as any).title}${(appt as any).location ? ` (${(appt as any).location})` : ""}`,
         measuredText ? `MEASURED ON SITE (these are given — use them, don't re-derive them):\n${measuredText}` : "",
         cap?.notes?.trim() ? `Notes:\n${cap.notes.trim()}` : "",
         cap?.measurements?.trim() ? `Measurements:\n${cap.measurements.trim()}` : "",
         cap?.materials?.trim() ? `Materials needed:\n${cap.materials.trim()}` : "",
+        // WHAT'S ATTACHED, BY NAME. Erik, estimating Sara Cain: "the estimator said it didnt have
+        // the file even though its there." It was there — a home-inspection PDF sitting in the
+        // walk-through's capture — and this hand-off simply never mentioned it, so the estimator
+        // answered honestly about a world it couldn't see. It still can't READ a PDF; naming the
+        // document is the difference between "I don't have it" and "I have it and can't open it",
+        // and only one of those is true.
+        docNames.length
+          ? `ATTACHED TO THIS WALK-THROUGH (you cannot open these — say so rather than guessing at their contents):\n${docNames.map((d) => `- ${d}`).join("\n")}`
+          : "",
       ].filter(Boolean);
       if (parts.length > 1) initialScope = parts.join("\n\n");
       // A `scopes` answer is already priced line items. Collect the picks here (where the playbook
