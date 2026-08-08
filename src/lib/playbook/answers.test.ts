@@ -122,6 +122,25 @@ describe("what the estimator is told", () => {
   it("nothing answered is an empty string, not a header with no rows", () => {
     expect(factsForEstimator(ET_ELECTRIC, {})).toBe("");
   });
+
+  /**
+   * THE PUNCH LIST STAYS A PUNCH LIST. Erik answered Sara Cain's scope as eight lines, each with
+   * its own materials and its own minutes. The bullet used to prefix only the first line, so the
+   * other seven reached the estimator unbulleted and unattached to any question — and we then asked
+   * a model to rebuild structure he had already typed.
+   */
+  it("keeps his line breaks as rows under one bullet, instead of orphaning them", () => {
+    const pb = { needs: [{ key: "work", label: "Scope", ask: "What's the work?" }] };
+    const out = factsForEstimator(pb, {
+      work: "loose outlet in living room (10 mins)\nnew white decor switch for bathroom (single pole switch + 30 mins)",
+    });
+    expect(out).toBe(
+      "- Scope: loose outlet in living room (10 mins)\n  new white decor switch for bathroom (single pole switch + 30 mins)",
+    );
+    // Every continuation is indented under its bullet — no line starts at column 0 but the first.
+    const rows = out.split("\n");
+    expect(rows.slice(1).every((r) => r.startsWith("  "))).toBe(true);
+  });
 });
 
 describe("factsForEstimator clears to a FIXED POINT before handing facts to the estimator", () => {

@@ -110,7 +110,14 @@ export function factsForEstimator(pb: Playbook, answers: Answers): string {
   const lines: string[] = [];
   for (const n of applicableNeeds(pb, answers)) {
     const t = answerText(answers[n.key]);
-    if (t.trim()) lines.push(`- ${n.label}: ${t}`);
+    if (!t.trim()) continue;
+    // HIS LINE BREAKS ARE HIS STRUCTURE. Erik answered Sara Cain's scope as an eight-line punch
+    // list — one item per line, each carrying its own materials and its own minutes: "new white
+    // decor switch for bathroom (single pole switch + 30 mins)". The bullet prefixed only the FIRST
+    // line, so the other seven arrived unbulleted and unattached, and we then asked a model to
+    // reconstruct the structure he had already typed. Indent the continuations so one need stays
+    // one bullet and his rows stay rows.
+    lines.push(`- ${n.label}: ${t.split("\n").join("\n  ")}`);
   }
   return lines.join("\n");
 }

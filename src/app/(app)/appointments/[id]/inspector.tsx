@@ -14,7 +14,7 @@ import { coerceByPlaybook } from "@/lib/playbook/answers";
 import { ACCEPT_ATTR, isAllowedUpload, uploadDisplayName } from "@/lib/playbook/uploads";
 import { scopeTotal, type ScopePick } from "@/lib/playbook/scopes";
 import { playbookForForm } from "@/lib/playbook/parse";
-import { applicableNeeds, clearInapplicable, missingNeeds, splitAsk } from "@/lib/playbook/resolve";
+import { applicableNeeds, clearInapplicable, isAnswered, isOpen, missingNeeds, splitAsk } from "@/lib/playbook/resolve";
 import type { Answers, AnswerValue, Need, Playbook } from "@/lib/playbook/types";
 import {
   captureId,
@@ -210,9 +210,31 @@ export function Inspector({
   // THE ASK is what applies AND is still unanswered. The moment you answer something it leaves
   // the top and shows up below — the top of the screen is never a list of things you've done.
   const open = useMemo(() => missingNeeds(playbook, answers), [playbook, answers]);
+
+  // ── THE SPINE STAYS UP TOP ───────────────────────────────────────────────────────────────
+  // Erik, looking at the Sara Cain walk-through: "i updated the scope and now its at the bottom
+  // and all this other stuff doesnt make sense." He was right about the effect and generous about
+  // the cause — nothing broke. The rule above did exactly what it says, and the rule is wrong for
+  // one kind of need.
+  //
+  // A need WITH a control is a question you finish: tap it, it's done, it belongs downstairs. A
+  // need with NO control is a sentence he is still writing. The scope is the working document of
+  // the whole walk-through — every other answer refers back to it — so demoting it the instant he
+  // types into it buries the one thing he's working against underneath six things he isn't.
+  //
+  // It never actually reached the bottom, which is worth knowing for the next person reading this:
+  // it went to first-in-Zone-B, position 7 of 12. What made it READ as gone was two smaller things
+  // fixed alongside — Zone B shows `n.label` ("Scope") instead of the sentence he answered, and the
+  // open-need control was a fixed 2-row box showing two lines of a 700-character punch list.
+  const spine = useMemo(
+    () => applicableNeeds(playbook, answers).filter((n) => isOpen(n) && isAnswered(answers[n.key])),
+    [playbook, answers],
+  );
   const answered = useMemo(() => {
     const stillOpen = new Set(open.map((n) => n.key));
-    return applicableNeeds(playbook, answers).filter((n) => !stillOpen.has(n.key));
+    // Slotted needs only — an answered OPEN need is now pinned up top, and showing it in both
+    // places would put the same textarea on screen twice with two cursors into one value.
+    return applicableNeeds(playbook, answers).filter((n) => !stillOpen.has(n.key) && !isOpen(n));
   }, [playbook, answers, open]);
   // What's on screen now vs what's one tap away — see splitAsk. `open` stays the honest count.
   const { ask, reach } = useMemo(() => splitAsk(playbook, answers, opened), [playbook, answers, opened]);
@@ -357,10 +379,19 @@ export function Inspector({
     // AN OPEN NEED — no slot, so no typed control can hold it. A box, because he types it himself
     // and Nort fills it in for him; that is the same instruction in both directions, and a
     // question with nowhere to put the answer is a dead end whichever way it got asked.
-    if (!n.slot)
+    if (!n.slot) {
+      const text = typeof v === "string" ? v : "";
       return (
-        <Textarea rows={2} value={typeof v === "string" ? v : ""} onChange={(e) => setAnswer(n.key, e.target.value)} />
+        <Textarea
+          autoComplete="off"
+          // GROWS WITH WHAT HE WROTE. Sara Cain's scope is 8 lines and ~700 characters; at a fixed
+          // 2 rows he could see two of them, which is half of why it read as lost rather than moved.
+          rows={Math.min(14, Math.max(3, text.split("\n").length + 1))}
+          value={text}
+          onChange={(e) => setAnswer(n.key, e.target.value)}
+        />
       );
+    }
 
     if (n.slot.type === "select") {
       const { options, multi } = n.slot;
@@ -647,6 +678,18 @@ export function Inspector({
             }}
           />
         )}
+
+        {/* THE SPINE, PINNED. Outside the ternary below on purpose: the green "that's everything"
+            branch replaces the whole ask block, and the moment he finishes the last question is the
+            worst possible moment for the scope to vanish. Labelled with the SENTENCE he answered,
+            not the short heading — "Scope" tells him nothing about the 700 characters underneath. */}
+        {spine.map((n) => (
+          <div key={n.key} className="mt-3">
+            <Label className="mb-1">{n.ask}</Label>
+            {n.why && <p className="mb-1.5 line-clamp-2 text-xs leading-snug text-slate-500">{n.why}</p>}
+            {control(n)}
+          </div>
+        ))}
 
         {noSheet ? (
           <div className="mt-3">

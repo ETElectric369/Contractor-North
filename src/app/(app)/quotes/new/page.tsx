@@ -80,7 +80,14 @@ export default async function NewQuotePage({
         .map((n) => n.replace(/^\d+-/, "").replace(/_/g, " "));
       const parts = [
         `From site inspection — ${(appt as any).title}${(appt as any).location ? ` (${(appt as any).location})` : ""}`,
-        measuredText ? `MEASURED ON SITE (these are given — use them, don't re-derive them):\n${measuredText}` : "",
+        // HIS WORDS, TAKEN AS GIVEN — but not called a measurement, because mostly they aren't.
+        // Not one need in his playbook is marked `measured`, yet this header fired on ANY answer,
+        // so a paragraph reading "(bulbs or inserts pricing)", "(~$500 optional)" and "(T&M) unknown"
+        // was handed over labelled as measured fact not to be re-derived. And nothing told the
+        // estimator that eight lines means eight line items — so his list arrived as one blob.
+        measuredText
+          ? `FROM THE WALK-THROUGH (his words — take them as given). Where he wrote a list, quote ONE LINE ITEM PER LINE:\n${measuredText}`
+          : "",
         cap?.notes?.trim() ? `Notes:\n${cap.notes.trim()}` : "",
         cap?.measurements?.trim() ? `Measurements:\n${cap.measurements.trim()}` : "",
         cap?.materials?.trim() ? `Materials needed:\n${cap.materials.trim()}` : "",
