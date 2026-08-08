@@ -45,11 +45,24 @@ export function coerceNeed(n: Need, v: unknown): AnswerValue {
       // it would null a real answer on the next autosave, which is a regression that erases data
       // while looking like nothing happened.
       const raw: unknown[] = typeof v === "boolean" ? [v ? "Yes" : "No"] : Array.isArray(v) ? v : [v];
-      const picked = raw.map(String).filter((x) => opts.includes(x));
-      if (!picked.length) return null;
+      const all = raw.map(String).map((x) => x.trim()).filter(Boolean);
+      const picked = all.filter((x) => opts.includes(x));
+
+      // THE "OTHER" BOX. Without it, a value outside `options` is refused — the right default,
+      // because it catches a stale template and a tampered payload both. With it, the question has
+      // deliberately said the list isn't exhaustive, so the unlisted answer IS the answer.
+      //
+      // What's given up is only the closed-set check; what's kept is everything that matters: it
+      // is still a trimmed, length-capped string, and a need that never opted in still rejects
+      // anything off its list. Erik types into Other constantly, and a paragraph nulled on save
+      // because it wasn't one of three chips is the failure mode this whole file exists to stop.
+      const free = n.slot.other ? all.filter((x) => !opts.includes(x)).map((x) => x.slice(0, 500)) : [];
+
+      const kept = multi ? [...picked, ...free].slice(0, 40) : [picked[0] ?? free[0]].filter(Boolean);
+      if (!kept.length) return null;
       // A multi slot always stores an array (even of one), a single slot always stores a scalar —
       // so downstream never has to ask which shape it got.
-      return multi ? picked : picked[0];
+      return multi ? kept : kept[0];
     }
     case "file": {
       // A LIST OF STORAGE PATHS, and nothing else. Never a URL (a signed URL in a jsonb column is

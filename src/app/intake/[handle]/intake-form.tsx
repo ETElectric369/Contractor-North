@@ -24,6 +24,9 @@ export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: 
   const [contact, setContact] = useState({ name: "", phone: "", email: "", address: "" });
   const [answers, setAnswers] = useState<Answers>({});
   const [hp, setHp] = useState(""); // honeypot — hidden from people, filled by bots
+  // Which questions the customer has opened "Something else" on. Only tracks the EMPTY in-between —
+  // once there's text, the answer itself carries it and survives a re-render.
+  const [otherOpen, setOtherOpen] = useState<string[]>([]);
   const [done, setDone] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -195,12 +198,43 @@ export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: 
                 })}
               </div>
             ) : (
-              <Select value={typeof answers[n.key] === "string" ? (answers[n.key] as string) : ""} onChange={(e) => set(n.key, e.target.value || null)}>
-                <option value="">Choose…</option>
-                {n.slot.options.map((o) => (
-                  <option key={o} value={o}>{o}</option>
-                ))}
-              </Select>
+              (() => {
+                const cur = typeof answers[n.key] === "string" ? (answers[n.key] as string) : "";
+                const listed = n.slot!.type === "select" && (n.slot as { options: string[] }).options.includes(cur);
+                const other = (n.slot as { other?: boolean }).other;
+                // Open when he's typed something unlisted, or when he asked for the box. Derived
+                // from the ANSWER first so a half-written sentence survives a re-render.
+                const showOther = !!other && ((!!cur && !listed) || otherOpen.includes(n.key));
+                return (
+                  <div className="space-y-2">
+                    <Select
+                      value={showOther ? "__other" : listed ? cur : ""}
+                      onChange={(e) => {
+                        if (e.target.value === "__other") {
+                          setOtherOpen((k) => [...k, n.key]);
+                          set(n.key, null);
+                        } else {
+                          setOtherOpen((k) => k.filter((x) => x !== n.key));
+                          set(n.key, e.target.value || null);
+                        }
+                      }}
+                    >
+                      <option value="">Choose…</option>
+                      {(n.slot as { options: string[] }).options.map((o) => (
+                        <option key={o} value={o}>{o}</option>
+                      ))}
+                      {other && <option value="__other">Something else…</option>}
+                    </Select>
+                    {showOther && (
+                      <Input
+                        placeholder="In your own words"
+                        value={listed ? "" : cur}
+                        onChange={(e) => set(n.key, e.target.value || null)}
+                      />
+                    )}
+                  </div>
+                );
+              })()
             )
           ) : n.slot?.type === "number" ? (
             <Input

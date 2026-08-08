@@ -107,3 +107,28 @@ describe("playbookForForm — one read, and it is a no-op until somebody writes 
     expect(playbookForForm(undefined).needs).toEqual([]);
   });
 });
+
+/**
+ * THE PARSER IS THE GATE (cn-v661). Drop `other` here and the slot silently loses its escape
+ * hatch: chips still render, the box never appears, and the coercer goes back to nulling anything
+ * he types. Nothing errors — the question just quietly becomes a wall again.
+ */
+describe("parseSlot carries `other` through", () => {
+  const slotOf = (raw: unknown) =>
+    playbookForForm({ playbook: { needs: [{ key: "k", label: "K", ask: "K?", slot: raw }] } }).needs[0].slot;
+
+  it("keeps other:true", () => {
+    expect(slotOf({ type: "select", options: ["A", "B"], other: true })).toEqual({
+      type: "select", options: ["A", "B"], other: true,
+    });
+  });
+
+  it("omits it when absent or falsy, rather than storing other:false everywhere", () => {
+    expect(slotOf({ type: "select", options: ["A"] })).toEqual({ type: "select", options: ["A"] });
+    expect(slotOf({ type: "select", options: ["A"], other: "yes" })).toEqual({ type: "select", options: ["A"] });
+  });
+
+  it("still refuses a select with no options — open is answerable, a select of nothing is not", () => {
+    expect(slotOf({ type: "select", options: [], other: true })).toBeUndefined();
+  });
+});

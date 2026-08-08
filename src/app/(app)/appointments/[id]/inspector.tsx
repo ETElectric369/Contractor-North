@@ -191,6 +191,9 @@ export function Inspector({
    * moment it HAS something, or the moment he reaches for it, and until then it is one word in a
    * row of chips.
    */
+  // Which "Something else" boxes he has opened but not yet typed into. Once there IS text the
+  // answer itself carries it, so this only tracks the empty in-between.
+  const [otherOpen, setOtherOpen] = useState<string[]>([]);
   const [opened, setOpened] = useState<Set<string>>(new Set());
   const shows = (key: string, hasContent: boolean) => hasContent || opened.has(key);
   const open1 = (key: string) => setOpened((s) => new Set(s).add(key));
@@ -398,37 +401,80 @@ export function Inspector({
     }
 
     if (n.slot.type === "select") {
-      const { options, multi } = n.slot;
+      const { options, multi, other } = n.slot;
       const picked = chosen(v);
+      const listed = picked.filter((o) => options.includes(o));
+      // WHAT HE TYPED RATHER THAN TAPPED. Derived from the ANSWER, never from local state, so it
+      // survives a reload — his sentence has to still be in the box tomorrow.
+      const free = picked.find((o) => !options.includes(o)) ?? "";
+      const showOther = !!other && (!!free || otherOpen.includes(n.key));
+      const put = (opts: string[], text: string) => {
+        const all = text.trim() ? [...opts, text] : opts;
+        setAnswer(n.key, multi ? (all.length ? all : null) : (all[0] ?? null));
+      };
       return (
-        // Chips, not a dropdown: a select on a phone costs a tap to open, a scroll, and a tap to
-        // choose. Chips cost one tap and you can read every option at a glance in daylight.
-        <div className="flex flex-wrap gap-2">
-          {options.map((o) => {
-            const on = picked.includes(o);
-            return (
+        <div className="space-y-2">
+          {/* Chips, not a dropdown: a select on a phone costs a tap to open, a scroll, and a tap
+              to choose. Chips cost one tap and you can read every option at a glance in daylight. */}
+          <div className="flex flex-wrap gap-2">
+            {options.map((o) => {
+              const on = listed.includes(o);
+              return (
+                <button
+                  key={o}
+                  type="button"
+                  onClick={() => {
+                    // MULTI. "2 new circuits one for lights and one for outlets" — outlets AND
+                    // lights, both true at once. Deselecting the last one is null, not [], because
+                    // an empty array reads as answered-with-nothing and the question would leave
+                    // the screen having never been answered.
+                    if (multi) put(on ? listed.filter((x) => x !== o) : [...listed, o], free);
+                    else put(on ? [] : [o], "");
+                  }}
+                  className={
+                    on
+                      ? "min-h-[44px] rounded-full border border-brand bg-brand px-4 text-sm font-medium text-white"
+                      : "min-h-[44px] rounded-full border border-slate-300 bg-white px-4 text-sm text-slate-700 active:bg-slate-50"
+                  }
+                >
+                  {o}
+                </button>
+              );
+            })}
+
+            {/* THE DOOR IN THE WALL. Erik: "you prompt me with options then a 'other' box i use
+                often." Dashed, so it reads as the exit and not as a fifth answer. */}
+            {other && (
               <button
-                key={o}
                 type="button"
                 onClick={() => {
-                  if (!multi) return setAnswer(n.key, on ? null : o);
-                  // MULTI. "2 new circuits one for lights and one for outlets" — outlets AND
-                  // lights, both true at once. Deselecting the last one is null, not [], because
-                  // an empty array reads as answered-with-nothing and the question would leave
-                  // the screen having never been answered.
-                  const next = on ? picked.filter((x) => x !== o) : [...picked, o];
-                  setAnswer(n.key, next.length ? next : null);
+                  if (showOther) {
+                    // Closing clears what he typed — prose stranded behind a hidden box is an
+                    // answer nobody can find, which is the failure this file keeps coming back to.
+                    put(multi ? listed : [], "");
+                    setOtherOpen((k) => k.filter((x) => x !== n.key));
+                  } else setOtherOpen((k) => [...k, n.key]);
                 }}
                 className={
-                  on
+                  showOther
                     ? "min-h-[44px] rounded-full border border-brand bg-brand px-4 text-sm font-medium text-white"
-                    : "min-h-[44px] rounded-full border border-slate-300 bg-white px-4 text-sm text-slate-700 active:bg-slate-50"
+                    : "min-h-[44px] rounded-full border border-dashed border-slate-400 bg-white px-4 text-sm text-slate-600 active:bg-slate-50"
                 }
               >
-                {o}
+                Something else
               </button>
-            );
-          })}
+            )}
+          </div>
+
+          {showOther && (
+            <Textarea
+              autoComplete="off"
+              rows={Math.min(10, Math.max(2, free.split("\n").length + 1))}
+              placeholder="In your own words"
+              value={free}
+              onChange={(e) => put(multi ? listed : [], e.target.value)}
+            />
+          )}
         </div>
       );
     }

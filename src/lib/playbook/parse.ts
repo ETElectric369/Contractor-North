@@ -39,7 +39,15 @@ function parseSlot(raw: unknown): NeedSlot | undefined {
       const options = Array.isArray(s.options) ? s.options.map((o) => str(o, 120)).filter(Boolean) : [];
       // No options = nothing to pick. Open is answerable; a select of nothing is not.
       if (!options.length) return undefined;
-      return { type: "select", options, ...(s.multi === true ? { multi: true } : {}) };
+      // THE PARSER IS THE GATE (cn-v661). Drop `other` here and the slot silently loses its
+      // escape hatch: the chips still render, the box never appears, and the coercer goes back to
+      // nulling anything he types. Nothing errors — the question just quietly becomes a wall again.
+      return {
+        type: "select",
+        options,
+        ...(s.multi === true ? { multi: true } : {}),
+        ...(s.other === true ? { other: true } : {}),
+      };
     }
     case "text":
       return { type: "text", ...(s.long === true ? { long: true } : {}) };

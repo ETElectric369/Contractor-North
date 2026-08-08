@@ -382,6 +382,21 @@ export function PlaybookManager({
                           >
                             <Plus className="h-4 w-4" /> Add a choice
                           </button>
+
+                          {/* Erik: "you prompt me with options then a 'other' box i use often."
+                              A list you can't step outside forces every unforeseen answer into the
+                              nearest wrong chip — and the honest ones just don't get said. */}
+                          <label className="mt-1 flex items-center gap-2 text-sm text-slate-600">
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4"
+                              checked={!!(n.slot as NeedSlot & { type: "select" }).other}
+                              onChange={(e) =>
+                                edit(i, { slot: { ...(n.slot as NeedSlot & { type: "select" }), other: e.target.checked || undefined } })
+                              }
+                            />
+                            Let me write my own answer too
+                          </label>
                         </div>
                       </div>
                     )}

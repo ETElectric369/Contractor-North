@@ -51,7 +51,24 @@
 
 export type NeedSlot =
   | { type: "number"; unit?: string }
-  | { type: "select"; options: string[]; multi?: boolean }
+  /**
+   * OPTIONS, PLUS A WAY TO SAY THE THING NOBODY LISTED.
+   *
+   * Erik: "so like you prompt me with options then a 'other' box i use often as you can see,
+   * something like that" — said right after answering a three-option question of mine by ignoring
+   * all three and typing a paragraph into Other. Which is the point: the options carry the common
+   * case at one tap, and the box carries the job.
+   *
+   * This is also the fix for his standing complaint about gated questions — "it makes those gated
+   * questions a wall to everything else i could possibly say in the scope." A fixed option list
+   * with no exit IS a wall: every answer the author didn't foresee is unsayable, so the honest
+   * ones get forced into the nearest wrong chip. `other` turns the wall into a door, and it costs
+   * a tap only when the listed answers are wrong.
+   *
+   * With `other`, coerceNeed stops rejecting values outside `options` — see it there for why that
+   * is a deliberate loosening of the tamper check and not a hole.
+   */
+  | { type: "select"; options: string[]; multi?: boolean; other?: boolean }
   | { type: "text"; long?: boolean }
   /**
    * FILES — plans, drawings, photos. The answer is a list of storage PATHS (so it fits the existing

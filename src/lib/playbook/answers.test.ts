@@ -211,3 +211,45 @@ describe("retiredAnswers keeps what he answered under a question he later remove
     expect(out).toContain("- Materials known: single gang remodel box");
   });
 });
+
+/**
+ * OPTIONS, PLUS A WAY TO SAY THE THING NOBODY LISTED.
+ *
+ * Erik: "so like you prompt me with options then a 'other' box i use often as you can see,
+ * something like that" — said immediately after answering a three-option question by ignoring all
+ * three and typing a paragraph into Other. A fixed list with no exit is the "wall" he's been
+ * complaining about since the gated questions: every answer the author didn't foresee is either
+ * unsayable or forced into the nearest wrong chip.
+ */
+describe("a select with `other` — the door in the wall", () => {
+  const closed = need({ key: "feed", slot: { type: "select", options: ["Subpanel", "Home runs"] } });
+  const open = need({ key: "feed", slot: { type: "select", options: ["Subpanel", "Home runs"], other: true } });
+
+  it("without `other`, an unlisted answer is still refused — stale template or tampered payload", () => {
+    expect(coerceNeed(closed, "two open slots in the meter panel")).toBeNull();
+  });
+
+  it("with `other`, the unlisted answer IS the answer", () => {
+    expect(coerceNeed(open, "two open slots in the meter panel")).toBe("two open slots in the meter panel");
+  });
+
+  it("a listed option still wins over free text on a single select", () => {
+    expect(coerceNeed(open, ["Subpanel", "whatever"])).toBe("Subpanel");
+  });
+
+  it("multi keeps the chips AND the sentence, because both are true", () => {
+    const multi = need({ key: "work", slot: { type: "select", options: ["Outlets", "Lights"], multi: true, other: true } });
+    expect(coerceNeed(multi, ["Outlets", "and a bath fan on its own switch"]))
+      .toEqual(["Outlets", "and a bath fan on its own switch"]);
+  });
+
+  it("trims and caps, so it is still a bounded string", () => {
+    expect(coerceNeed(open, "   spaced   ")).toBe("spaced");
+    expect(String(coerceNeed(open, "x".repeat(900)))).toHaveLength(500);
+  });
+
+  it("empty is still unanswered — a blank Other box never counts as answered", () => {
+    expect(coerceNeed(open, "   ")).toBeNull();
+    expect(coerceNeed(open, [])).toBeNull();
+  });
+});
