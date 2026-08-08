@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { pickSite, siteLines, SITE_COLS } from "@/lib/site-address";
 import { BackLink } from "@/components/back-link";
 import { createClient } from "@/lib/supabase/server";
 import { PrintButton } from "@/components/print-button";
@@ -29,7 +30,7 @@ export default async function WorkOrderPrintPage({
   const { data: wo } = await supabase
     .from("work_orders")
     .select(
-      "*, jobs(job_number, name, address), customers(name, company_name, address, city, state, zip, phone), assignee:assigned_to(full_name)",
+      `*, jobs(job_number, name, ${SITE_COLS}), customers(name, company_name, address, city, state, zip, phone), assignee:assigned_to(full_name)`,
     )
     .eq("id", id)
     .maybeSingle();
@@ -84,7 +85,11 @@ export default async function WorkOrderPrintPage({
             <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Job site</div>
             <div className="mt-1 text-slate-700">
               {w.jobs?.name ?? "—"}
-              {w.jobs?.address ? <div className="text-slate-500">{w.jobs.address}</div> : null}
+              {/* The whole address, not the street. The customer block beside this one has
+                  printed a full address all along; this said "Job site" and gave a street. */}
+              {siteLines(pickSite([{ source: "job", parts: w.jobs }])).map((l) => (
+                <div key={l} className="text-slate-500">{l}</div>
+              ))}
             </div>
             <div className="mt-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Assigned to</div>
             <div className="mt-1 text-slate-700">{w.assignee?.full_name ?? "Unassigned"}</div>

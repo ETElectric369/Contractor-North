@@ -1,4 +1,5 @@
 import { Zap } from "lucide-react";
+import { addressHasCityStateZipTail } from "@/lib/site-address";
 import type { CompanyInfo } from "./doc-letterhead";
 import { companyBlock } from "@/lib/company-lines";
 import { formatCurrency, formatCityStateZip } from "@/lib/utils";
@@ -195,7 +196,13 @@ export function DocParty({ label, customer, brand }: { label: string; customer: 
           </div>
           <div className="min-w-0 text-slate-700">
             {c.address && <div>{c.address}</div>}
-            {(c.city || c.state || c.zip) && <div>{formatCityStateZip(c.city, c.state, c.zip)}</div>}
+            {/* NEVER THE TOWN TWICE. Erik's own customer row is "94248 CA-70, Chilcoot, CA 96105,
+                USA" AND carries city "Chilcoot-Vinton" — so this printed Chilcoot on one line and
+                Chilcoot-Vinton on the next, on every document. When the address line already ends
+                in a city/state/ZIP, the parts line is a duplicate. */}
+            {(c.city || c.state || c.zip) && !addressHasCityStateZipTail(c.address) && (
+              <div>{formatCityStateZip(c.city, c.state, c.zip)}</div>
+            )}
           </div>
         </div>
       ) : (

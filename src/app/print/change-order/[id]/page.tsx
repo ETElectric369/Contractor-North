@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { pickSite, siteLines, SITE_COLS } from "@/lib/site-address";
 import { BackLink } from "@/components/back-link";
 import { createClient } from "@/lib/supabase/server";
 import { PrintButton } from "@/components/print-button";
@@ -28,7 +29,7 @@ export default async function ChangeOrderPrintPage({
 
   const { data: co } = await supabase
     .from("change_orders")
-    .select("*, jobs(job_number, name, customers(name, company_name, address, city, state, zip))")
+    .select(`*, jobs(job_number, name, ${SITE_COLS}, customers(name, company_name, address, city, state, zip))`)
     .eq("id", id)
     .maybeSingle();
 
@@ -83,6 +84,10 @@ export default async function ChangeOrderPrintPage({
             <div className="mt-1 text-sm text-slate-700">
               {(co as any).jobs?.name ?? "—"}
               {(co as any).jobs?.job_number ? ` (${(co as any).jobs.job_number})` : ""}
+              {/* HIGHEST STAKES OF THE THREE: he signs this, and it named no place at all. */}
+              {siteLines(pickSite([{ source: "job", parts: (co as any).jobs }])).map((l: string) => (
+                <div key={l} className="text-slate-500">{l}</div>
+              ))}
             </div>
             <div className="mt-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Status</div>
             <div className="mt-1 text-sm capitalize text-slate-700">{(co as any).status}</div>

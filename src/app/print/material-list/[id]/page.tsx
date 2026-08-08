@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { pickSite, siteLines, SITE_COLS } from "@/lib/site-address";
 import { BackLink } from "@/components/back-link";
 import { createClient } from "@/lib/supabase/server";
 import { PrintButton } from "@/components/print-button";
@@ -30,7 +31,7 @@ export default async function MaterialListPrintPage({
 
   const { data: list } = await supabase
     .from("material_lists")
-    .select("name, created_at, jobs(job_number, name, address)")
+    .select(`name, created_at, jobs(job_number, name, ${SITE_COLS})`)
     .eq("id", id)
     .maybeSingle();
   if (!list) notFound();
@@ -70,7 +71,11 @@ export default async function MaterialListPrintPage({
             <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Job</div>
             <div className="mt-1 text-slate-700">
               {job.name}
-              {job.address ? <span className="text-slate-500"> · {job.address}</span> : null}
+              {/* A street with no city is not a deliverable address, and this sheet is handed
+                  to a supply house. */}
+              {siteLines(pickSite([{ source: "job", parts: job }])).length > 0 && (
+                <span className="text-slate-500"> · {siteLines(pickSite([{ source: "job", parts: job }])).join(", ")}</span>
+              )}
             </div>
           </div>
         )}
