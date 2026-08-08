@@ -20,9 +20,18 @@ export interface PublicNeed {
   when?: Need["when"];
 }
 
-/** Allowlist projection. `why`, `note`, `feeds`, `hold`, `measured` never cross this line. */
+/**
+ * Allowlist projection. `why`, `note`, `feeds`, `hold`, `measured` never cross this line.
+ *
+ * AND A `scopes` NEED IS DROPPED ENTIRELY, not merely projected. Its options ARE the contractor's
+ * price-list codes and the whole interaction is "put a number on this" — a pricing tool, pointed
+ * at a stranger. Same instinct as the why lines: the public door shows the customer's questions,
+ * never the machinery behind the price.
+ */
 export function publicIntakeNeeds(pb: Playbook): PublicNeed[] {
-  return pb.needs.map((n) => ({
+  return pb.needs
+    .filter((n) => n.slot?.type !== "scopes")
+    .map((n) => ({
     key: n.key,
     label: n.label,
     ask: n.ask,

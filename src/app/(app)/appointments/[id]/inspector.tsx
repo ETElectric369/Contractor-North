@@ -12,6 +12,7 @@ import { createClient } from "@/lib/supabase/client";
 import { prepareImageForUpload } from "@/lib/image-prep";
 import { coerceByPlaybook } from "@/lib/playbook/answers";
 import { ACCEPT_ATTR, isAllowedUpload, uploadDisplayName } from "@/lib/playbook/uploads";
+import { scopeTotal, type ScopePick } from "@/lib/playbook/scopes";
 import { playbookForForm } from "@/lib/playbook/parse";
 import { applicableNeeds, clearInapplicable, missingNeeds, splitAsk } from "@/lib/playbook/resolve";
 import type { Answers, AnswerValue, Need, Playbook } from "@/lib/playbook/types";
@@ -62,6 +63,7 @@ export interface CapturePhoto {
 /** `playbook` (0179) is what it asks; `schema` is the older, smaller way of saying the same thing
  *  and is what every form still carries. See playbookForForm — one wins, and it is never both. */
 export type InspectionTemplate = { id: string; name: string; schema: unknown; playbook?: unknown };
+export type BookRow = { code: string; description: string; unit: string; price: number };
 
 /**
  * ONE SMART INSPECTOR.
@@ -113,6 +115,7 @@ export type InspectionTemplate = { id: string; name: string; schema: unknown; pl
 export function Inspector({
   appointmentId,
   templates,
+  priceBook,
   initialTemplateId,
   initialAnswers,
   initialCapture,
@@ -125,6 +128,8 @@ export function Inspector({
 }: {
   appointmentId: string;
   templates: InspectionTemplate[];
+  /** The org's own price list, for `scopes` questions. Empty is fine — the picker says so. */
+  priceBook: BookRow[];
   initialTemplateId: string | null;
   initialAnswers: Answers;
   initialCapture: unknown;
@@ -399,6 +404,82 @@ export function Inspector({
           {n.slot.unit && <span className="shrink-0 text-sm text-slate-500">{n.slot.unit}</span>}
         </div>
       );
+
+    // SCOPES — pick line items off his own price list and put a number on each, here, on site.
+    // Erik: "when he chooses remodel he needs to be able to choose from a dropdown of optional
+    // line items to add so he can add a value so it can be calculated ... it gets built with the
+    // inspection." The rate can be 0.00 in the book on purpose; this is where it gets discovered.
+    if (n.slot.type === "scopes") {
+      const picked = Array.isArray(v) ? (v as ScopePick[]).filter((x) => x && typeof x === "object") : [];
+      const allowed = n.slot.codes?.length ? new Set(n.slot.codes) : null;
+      const menu = priceBook.filter((b) => (!allowed || allowed.has(b.code)) && !picked.some((p) => p.code === b.code));
+      const setPicks = (next: ScopePick[]) => setAnswer(n.key, next.length ? (next as never) : null);
+      return (
+        <div className="rounded-lg border border-slate-200 p-2">
+          {picked.length > 0 && (
+            <ul className="mb-2 space-y-1.5">
+              {picked.map((p, idx) => {
+                const row = priceBook.find((b) => b.code === p.code);
+                return (
+                  <li key={p.code} className="flex items-center gap-1.5">
+                    <span className="min-w-0 flex-1 truncate text-sm text-slate-700" title={row?.description}>
+                      {row?.description || p.code}
+                    </span>
+                    <NumBox
+                      value={p.qty}
+                      onValue={(x) => setPicks(picked.map((q, j) => (j === idx ? { ...q, qty: x ?? 1 } : q)))}
+                    />
+                    <span className="w-8 shrink-0 text-xs text-slate-400">{row?.unit || "EA"}</span>
+                    <span className="text-xs text-slate-400">@</span>
+                    <NumBox
+                      value={p.price}
+                      onValue={(x) => setPicks(picked.map((q, j) => (j === idx ? { ...q, price: x ?? 0 } : q)))}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setPicks(picked.filter((_, j) => j !== idx))}
+                      className="shrink-0 px-1 text-xs text-slate-400 hover:text-rose-600"
+                      aria-label={`Remove ${row?.description || p.code}`}
+                    >
+                      ×
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {picked.length > 0 && (
+            <p className="mb-2 text-right text-sm font-medium text-slate-900">
+              {scopeTotal(picked).toLocaleString(undefined, { style: "currency", currency: "USD" })}
+            </p>
+          )}
+          {menu.length ? (
+            <Select
+              value=""
+              onChange={(e) => {
+                const row = priceBook.find((b) => b.code === e.target.value);
+                if (!row) return;
+                // Seed the price from the book — 0.00 for the scopes that are priced on site, which
+                // is the whole reason those rows exist. He types over it either way.
+                setPicks([...picked, { code: row.code, qty: 1, price: row.price }]);
+              }}
+            >
+              <option value="">Add a line item…</option>
+              {menu.map((b) => (
+                <option key={b.code} value={b.code}>
+                  {b.description || b.code}
+                  {b.price > 0 ? ` — $${b.price}/${b.unit}` : ""}
+                </option>
+              ))}
+            </Select>
+          ) : (
+            <p className="text-xs text-slate-400">
+              {priceBook.length ? "That's all of them." : "Add items to your price list and they'll show up here."}
+            </p>
+          )}
+        </div>
+      );
+    }
 
     // FILES on the walk-through — the same question type the public door uses, so a playbook can
     // hold "upload the plans" whichever side answers it. Authenticated here, so it goes straight to

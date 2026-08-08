@@ -4,6 +4,8 @@ import { PageHeader } from "@/components/page-header";
 import { getOrgSettings } from "@/lib/org-settings";
 import { measurementsFromAnswers, tolerateMissingColumns } from "@/lib/inspection/schema";
 import { factsForEstimator } from "@/lib/playbook/answers";
+import { coerceScopes, ownScopes, scopeLines, type ScopePick } from "@/lib/playbook/scopes";
+import type { DraftLineItem } from "@/lib/estimate/line-map";
 import { sheetFromPlaybook } from "@/lib/playbook/from-sheet";
 import { playbookForForm } from "@/lib/playbook/parse";
 import { DECK_ESTIMATE_CODES } from "@/lib/estimate/deck";
@@ -30,6 +32,7 @@ export default async function NewQuotePage({
   // Square/linear feet from the walk-through, handed to the kit picker so its sizing boxes open
   // with the numbers the inspector already took.
   let measured: { sqft: number | null; linearFt: number | null } | undefined;
+  const pickedScopes: { label: string; picks: ScopePick[] }[] = [];
   let captureInquiryId: string | undefined;
   let captureApptId: string | undefined; // verified appointment id — saveQuote stamps the write-up backlink on it
   // The inspection already knows WHOSE house this is. Without carrying these through, a repeat
@@ -78,6 +81,14 @@ export default async function NewQuotePage({
         cap?.materials?.trim() ? `Materials needed:\n${cap.materials.trim()}` : "",
       ].filter(Boolean);
       if (parts.length > 1) initialScope = parts.join("\n\n");
+      // A `scopes` answer is already priced line items. Collect the picks here (where the playbook
+      // is in scope) and map them to lines below, once the price book has loaded — the descriptions
+      // and units come from the book, not from the answer.
+      for (const n of pb.needs) {
+        if (n.slot?.type !== "scopes") continue;
+        const picks = coerceScopes((answers as Record<string, unknown>)[n.key]);
+        if (picks?.length) pickedScopes.push({ label: n.label, picks });
+      }
       captureInquiryId = (appt as any).inquiry_id ?? undefined;
       captureApptId = (appt as any).id;
       captureCustomerId = (appt as any).customer_id ?? undefined;
@@ -109,6 +120,15 @@ export default async function NewQuotePage({
       })(),
       supabase.from("organizations").select("settings").limit(1).maybeSingle(),
     ]);
+  // THE WALK-THROUGH'S PICKS, AS REAL LINES. Descriptions and units come from the org's own book
+  // (the answer stores codes, never prose), and a code that has since left the price list is
+  // dropped rather than rendered as a bare code with a price beside it.
+  const book = new Map((priceItems ?? []).map((p: any) => [p.code as string, { description: p.description, unit: p.unit }]));
+  const bookCodes = new Set(book.keys());
+  const seededLines: DraftLineItem[] = pickedScopes.flatMap((g) =>
+    scopeLines(ownScopes(g.picks, bookCodes), book, g.label),
+  );
+
   const settings = getOrgSettings((org as any)?.settings);
   const expiryDays = settings.quote_expiry_days;
   // Catalog-mode orgs (Tahoe Deck) estimate from TWO scope kits — "Decks" and "Remodels".
@@ -159,6 +179,7 @@ export default async function NewQuotePage({
         inquiryId={inquiry ?? captureInquiryId}
         captureId={captureApptId}
         initialScope={initialScope}
+        seededLines={seededLines}
         priceItems={(priceItems ?? []) as any}
         taxRates={(taxRates ?? []) as any}
         kits={estimateKits as any}

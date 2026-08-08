@@ -201,6 +201,21 @@ export const TAHOE_DECK: Playbook = {
       why: "TRPA means the DS3C permitting package and a much longer runway before anyone breaks ground.",
     },
     {
+      key: "remodel_scopes",
+      label: "Remodel scopes",
+      ask: "What's in this remodel? Pick the pieces and put a number on each.",
+      slot: { type: "scopes", codes: ["R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8"] },
+      feeds: ["what"],
+      when: [{ key: "project_type", in: ["Remodel"] }],
+      why: "This IS the price — each piece he picks becomes a line, and the total is the estimate.",
+      note:
+        "The R codes sit at $0.00 in his price list on purpose. Erik: \"they are based on " +
+        "calculations too, when he chooses remodel he needs to be able to choose from a dropdown of " +
+        "optional line items to add so he can add a value so it can be calculated ... it gets built " +
+        "with the inspection.\" A remodel has no square-foot rate — the scope is chosen standing " +
+        "there and priced standing there, and these picks arrive at the estimate as real lines.",
+    },
+    {
       key: "access",
       label: "Access",
       ask: "How are we getting materials and crew to it?",

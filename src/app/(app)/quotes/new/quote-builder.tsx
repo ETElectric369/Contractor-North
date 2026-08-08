@@ -63,6 +63,7 @@ export function QuoteBuilder({
   inquiryId,
   captureId,
   initialScope,
+  seededLines,
   priceItems = [],
   taxRates = [],
   kits = [],
@@ -87,6 +88,9 @@ export function QuoteBuilder({
   /** Prefill for the estimator scope box — e.g. an inspection's field capture
    *  (notes/measurements/materials) threaded in via /quotes/new?capture=. */
   initialScope?: string;
+  /** Line items the WALK-THROUGH already priced — a `scopes` question's picks, mapped straight
+   *  onto quote lines. They arrive as real editable rows, not as prose to re-type. */
+  seededLines?: DraftLineItem[];
   priceItems?: PriceItemLite[];
   taxRates?: TaxRateLite[];
   kits?: KitLite[];
@@ -113,7 +117,13 @@ export function QuoteBuilder({
     d.setDate(d.getDate() + (quoteExpiryDays || 30));
     return d.toISOString().slice(0, 10);
   });
-  const [items, setItems] = useState<DraftLineItem[]>([blankItem()]);
+  // A walk-through that already picked and priced its scopes seeds the estimate with those exact
+  // rows. Erik: the remodel codes sit at $0 in the book because "it gets built with the
+  // inspection" — so by the time the office opens this, the building is done and re-typing it
+  // would be the only manual step left in an otherwise automatic chain.
+  const [items, setItems] = useState<DraftLineItem[]>(
+    seededLines?.length ? seededLines.map((l) => ({ ...l })) : [blankItem()],
+  );
 
   // Resolve the markup via THE one rule (effectiveMarkupPct): the selected customer's
   // pricing-level markup → the item's own markup when > 0 → the org default → 0.

@@ -86,7 +86,7 @@ export async function submitIntake(
     if (n.slot?.type !== "file") continue;
     const claimed = answers[n.key];
     if (!Array.isArray(claimed)) continue;
-    const mine = claimed.filter((p) => isOwnIntakePath(orgId, p));
+    const mine = claimed.filter((p): p is string => typeof p === "string" && isOwnIntakePath(orgId, p));
     answers = { ...answers, [n.key]: mine.length ? mine : null };
   }
 
@@ -98,7 +98,7 @@ export async function submitIntake(
       const v = answers[n.key];
       if (v === null || v === undefined || v === "" || (Array.isArray(v) && !v.length)) return null;
       if (n.slot?.type === "file" && Array.isArray(v))
-        return `${n.label}: ${v.map(uploadDisplayName).join(", ")}`;
+        return `${n.label}: ${v.filter((x): x is string => typeof x === "string").map(uploadDisplayName).join(", ")}`;
       return `${n.label}: ${Array.isArray(v) ? v.join(", ") : String(v)}`;
     })
     .filter(Boolean) as string[];

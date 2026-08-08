@@ -66,7 +66,15 @@ export type NeedSlot =
    * The conditional half needed nothing new — that is what `when` already does. This is the half
    * that was missing.
    */
-  | { type: "file"; accept?: string[]; multi?: boolean; maxMb?: number };
+  | { type: "file"; accept?: string[]; multi?: boolean; maxMb?: number }
+  /**
+   * PICK MANY SCOPES FROM YOUR OWN PRICE LIST AND PRICE EACH ONE HERE. The second pricing shape —
+   * see lib/playbook/scopes.ts for why it exists and why it is general rather than a deck feature.
+   *
+   * `codes` narrows the menu to a family (Chris's R1–R8 remodel scopes); omit it and the whole
+   * price list is offered. The answer is a ScopePick[] and it maps 1:1 onto quote lines.
+   */
+  | { type: "scopes"; codes?: string[] };
 
 /** One condition. ALL of a need's clauses must hold for it to apply. */
 export type Clause =
@@ -174,7 +182,15 @@ export interface Playbook {
   needs: Need[];
 }
 
-export type AnswerValue = string | number | boolean | string[] | null;
+/** A chosen-and-priced scope; see lib/playbook/scopes.ts. Structurally declared here (rather than
+ *  imported) so `types.ts` stays the leaf every other playbook module hangs off. */
+export interface ScopePickValue {
+  code: string;
+  qty: number;
+  price: number;
+}
+
+export type AnswerValue = string | number | boolean | string[] | ScopePickValue[] | null;
 export type Answers = Record<string, AnswerValue>;
 
 /**

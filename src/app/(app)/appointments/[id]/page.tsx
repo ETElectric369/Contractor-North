@@ -38,7 +38,7 @@ export default async function AppointmentCapturePage({
   const { data: { user: viewer } } = await supabase.auth.getUser();
   const viewerId = viewer?.id ?? null;
 
-  const [{ data: appt }, { data: org }, picker, sheets, inspection] = await Promise.all([
+  const [{ data: appt }, { data: org }, picker, sheets, inspection, priceBook] = await Promise.all([
     supabase
       .from("appointments")
       .select(
@@ -61,6 +61,18 @@ export default async function AppointmentCapturePage({
     ),
     tolerateMissingColumns<{ inspection_template_id: string | null; inspection_answers: unknown }>(() =>
       supabase.from("appointments").select("inspection_template_id, inspection_answers").eq("id", id).maybeSingle(),
+    ),
+    // THE PRICE BOOK, for any `scopes` question in the playbook — the picker offers the org's own
+    // codes in the org's own words, which is what makes it a scope picker rather than a text box.
+    // Read tolerantly and unconditionally: it's a small table, and branching the query on whether
+    // the playbook happens to contain a scopes need would break the moment somebody adds one.
+    tolerateMissingColumns<{ code: string; description: string | null; unit: string | null; buy_price: number | null }[]>(
+      () =>
+        supabase
+          .from("price_list_items")
+          .select("code, description, unit, buy_price")
+          .eq("archived", false)
+          .order("code"),
     ),
   ]);
   if (!appt) notFound();
@@ -181,6 +193,12 @@ export default async function AppointmentCapturePage({
         orgId={a.org_id}
         userId={viewerId}
         templates={sheets ?? []}
+        priceBook={(priceBook ?? []).map((p) => ({
+          code: p.code,
+          description: p.description ?? "",
+          unit: p.unit ?? "EA",
+          price: Number(p.buy_price ?? 0),
+        }))}
         initialTemplateId={inspection?.inspection_template_id ?? null}
         initialAnswers={(inspection?.inspection_answers ?? {}) as never}
         initialCapture={capture}

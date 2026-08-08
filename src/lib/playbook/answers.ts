@@ -1,6 +1,7 @@
 import { looseNumber } from "@/lib/inspection/capture";
 import { applicableNeeds, clearInapplicable } from "./resolve";
 import type { Answers, AnswerValue, Need, Playbook } from "./types";
+import { coerceScopes } from "./scopes";
 
 /**
  * THE WRITE CONTRACT, expressed over a playbook instead of a sheet.
@@ -62,6 +63,10 @@ export function coerceNeed(n: Need, v: unknown): AnswerValue {
         .slice(0, 20);
       return paths.length ? paths : null;
     }
+    case "scopes":
+      // Shape only. Whether a CODE is really in this org's book is checked at the write boundary,
+      // which is the only place the catalogue is known — same split as the file slot's paths.
+      return coerceScopes(v);
     default:
       return String(v).slice(0, n.slot.long ? 8000 : 500);
   }

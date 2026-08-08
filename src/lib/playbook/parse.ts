@@ -54,6 +54,15 @@ function parseSlot(raw: unknown): NeedSlot | undefined {
         ...(s.multi === true ? { multi: true } : {}),
         ...(typeof s.maxMb === "number" && s.maxMb > 0 ? { maxMb: Math.min(Math.round(s.maxMb), 100) } : {}),
       };
+    case "scopes":
+      // THE PARSER IS THE GATE (cn-v661: forgetting it here made a file question render as a text
+      // box, silently). A scopes need with no codes offers the whole book — that's legitimate.
+      return {
+        type: "scopes",
+        ...(Array.isArray(s.codes)
+          ? { codes: s.codes.map((x) => str(x, 40)).filter(Boolean) }
+          : {}),
+      };
     default:
       return undefined;
   }

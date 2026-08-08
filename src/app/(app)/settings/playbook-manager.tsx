@@ -46,7 +46,7 @@ import { clearPlaybook, installPlaybookStarter, savePlaybook } from "./playbook-
  * and the need has no slot, which is what makes it a sentence Nort has to phrase rather than a box.
  */
 
-type Kind = "one" | "many" | "number" | "text" | "long" | "file" | "open";
+type Kind = "one" | "many" | "number" | "text" | "long" | "file" | "scopes" | "open";
 
 const KIND_LABEL: Record<Kind, string> = {
   one: "Pick one",
@@ -55,6 +55,7 @@ const KIND_LABEL: Record<Kind, string> = {
   text: "Typed in — short",
   long: "Typed in — a paragraph",
   file: "Files — plans, drawings, photos",
+  scopes: "Pick line items off your price list and price them on site",
   open: "Anything you say (no box until it's answered)",
 };
 
@@ -65,6 +66,8 @@ const kindOf = (n: Need): Kind =>
       ? "number"
       : n.slot.type === "file"
         ? "file"
+        : n.slot.type === "scopes"
+          ? "scopes"
         : n.slot.type === "select"
           ? n.slot.multi
             ? "many"
@@ -90,6 +93,9 @@ function slotForKind(kind: Kind, prev: NeedSlot | undefined): NeedSlot | undefin
     case "file":
       // Sensible defaults; a starter or a hand-edit can narrow `accept` per question.
       return { type: "file", multi: true, maxMb: 100 };
+    case "scopes":
+      // No `codes` = the whole price list is on offer. Narrow it per question by hand.
+      return { type: "scopes" };
     default:
       return { type: "text" };
   }
