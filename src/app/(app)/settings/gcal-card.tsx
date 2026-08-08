@@ -22,6 +22,17 @@ interface CalOption {
 /** Google Calendar connection: status, the two-way calendar picker (which of
  *  the account's calendars mirror into the schedule read-only), Sync now, the
  *  legacy one-tap full push, and Disconnect. */
+/** What each callback outcome means, in a contractor's words. See api/google/callback. */
+const FLASH: Record<string, string> = {
+  connected: "Connected to Google Calendar.",
+  cancelled: "No problem — nothing was connected. Press Connect whenever you're ready.",
+  refused: "Google wouldn't allow the connection. If it said the app isn't verified, tell us — that's ours to fix, not yours.",
+  state: "That link expired before you finished. Press Connect and go straight through.",
+  nocode: "Google didn't send anything back. Press Connect to try once more.",
+  notstaff: "Your account can't connect a calendar for this company — ask the owner to do it.",
+  exchange: "Google turned the connection down at the last step. We've logged it and we're on it — this one isn't something you can fix by retrying.",
+};
+
 export function GcalCard({
   configured,
   connected,
@@ -44,7 +55,9 @@ export function GcalCard({
   const router = useRouter();
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<string | null>(
-    flash === "connected" ? "Connected to Google Calendar." : flash === "error" || flash === "denied" ? "Could not connect — try again." : null,
+    // ONE SENTENCE PER CAUSE, and each one says what to actually do. "Could not connect — try
+    // again" covered four unrelated failures, and for two of them retrying can never work.
+    FLASH[flash ?? ""] ?? null,
   );
 
   // Calendar picker: loaded from Google on demand (not on every settings render).
@@ -119,11 +132,14 @@ export function GcalCard({
     });
   }
 
+  // NOT CONFIGURED IS OURS, NOT THEIRS. This used to print two environment-variable names at a
+  // contractor — a message he can neither act on nor report usefully. Erik: "showing what is
+  // needed and not what not." What's needed here is nothing from him.
   if (!configured) {
     return (
-      <p className="text-sm text-slate-400">
-        Add <code>GOOGLE_OAUTH_CLIENT_ID</code> and <code>GOOGLE_OAUTH_CLIENT_SECRET</code> to the
-        server environment to enable Google Calendar sync.
+      <p className="text-sm text-slate-500">
+        Google Calendar sync isn&rsquo;t switched on for Contractor North yet. Nothing for you to
+        do — it&rsquo;ll appear here when it&rsquo;s ready.
       </p>
     );
   }
