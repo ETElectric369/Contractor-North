@@ -160,7 +160,9 @@ export function ImportCustomersButton({ csv = true, label }: { csv?: boolean; la
         </Button>
         {!csv && (
           <span className="text-[11px] text-slate-400">
-            iPhone: open a contact → Share → Save to Files, then pick the .vcf here.
+            iPhone: open a contact → Share → Save to Files, then pick the .vcf here. For one
+            person it&apos;s quicker to hit New Customer and tap the name field — your phone offers
+            your contacts there and fills the whole card.
           </span>
         )}
       </span>

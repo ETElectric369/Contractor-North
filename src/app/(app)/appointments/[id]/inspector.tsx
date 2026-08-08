@@ -37,6 +37,7 @@ import { saveInspectionAnswers, saveInspectionCapture, setAppointmentPlace } fro
 function NumBox({ value, onValue, className }: { value: number | null; onValue: (n: number | null) => void; className?: string }) {
   return (
     <Input
+      autoComplete="off"
       inputMode="decimal"
       value={value === null ? "" : String(value)}
       className={className}
@@ -542,9 +543,13 @@ export function Inspector({
     }
 
     return (n.slot.type === "text" && n.slot.long) ? (
-      <Textarea rows={2} value={typeof v === "string" ? v : ""} onChange={(e) => setAnswer(n.key, e.target.value)} />
+      <Textarea autoComplete="off" rows={2} value={typeof v === "string" ? v : ""} onChange={(e) => setAnswer(n.key, e.target.value)} />
     ) : (
-      <Input value={typeof v === "string" ? v : ""} onChange={(e) => setAnswer(n.key, e.target.value)} />
+      // NO AUTOFILL ON AN ANSWER BOX. Erik, mid-walk-through: "a window to my personal contacts
+      // popped up where it shouldnt." Safari heuristically offers Contacts on any bare text input,
+      // and a playbook question is the worst possible place for it — he types a customer's name
+      // into Scope and the browser then offers his address book over the Materials field.
+      <Input autoComplete="off" value={typeof v === "string" ? v : ""} onChange={(e) => setAnswer(n.key, e.target.value)} />
     );
   };
 

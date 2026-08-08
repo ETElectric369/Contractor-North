@@ -192,11 +192,11 @@ export function NewCustomerButton() {
             <div key={formKey} className="grid grid-cols-2 gap-3">
               <div className="col-span-2">
                 <Label htmlFor="name">Name *</Label>
-                <Input id="name" name="name" required placeholder="Customer or contact name" defaultValue={prefill.name} />
+                <Input id="name" name="name" autoComplete="name" required placeholder="Customer or contact name" defaultValue={prefill.name} />
               </div>
               <div className="col-span-2">
                 <Label htmlFor="company_name">Company</Label>
-                <Input id="company_name" name="company_name" placeholder="(optional)" defaultValue={prefill.company_name} />
+                <Input id="company_name" name="company_name" autoComplete="organization" placeholder="(optional)" defaultValue={prefill.company_name} />
               </div>
               <div>
                 <Label htmlFor="type">Type</Label>
@@ -217,11 +217,11 @@ export function NewCustomerButton() {
               </div>
               <div>
                 <Label htmlFor="email">Email</Label>
-                <Input id="email" name="email" type="email" defaultValue={prefill.email} />
+                <Input id="email" name="email" type="email" autoComplete="email" defaultValue={prefill.email} />
               </div>
               <div>
                 <Label htmlFor="phone">Phone</Label>
-                <PhoneInput id="phone" name="phone" defaultValue={prefill.phone} />
+                <PhoneInput id="phone" name="phone" autoComplete="tel" defaultValue={prefill.phone} />
               </div>
               <div className="col-span-2">
                 <Label htmlFor="address">Address</Label>
@@ -239,7 +239,7 @@ export function NewCustomerButton() {
               </div>
               <div>
                 <Label htmlFor="city">City</Label>
-                <Input id="city" name="city" value={city} onChange={(e) => setCity(e.target.value)} />
+                <Input id="city" name="city" autoComplete="address-level2" value={city} onChange={(e) => setCity(e.target.value)} />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -248,7 +248,7 @@ export function NewCustomerButton() {
                 </div>
                 <div>
                   <Label htmlFor="zip">Zip</Label>
-                  <Input id="zip" name="zip" value={zip} onChange={(e) => setZip(e.target.value)} />
+                  <Input id="zip" name="zip" autoComplete="postal-code" value={zip} onChange={(e) => setZip(e.target.value)} />
                 </div>
               </div>
               <div className="col-span-2">
