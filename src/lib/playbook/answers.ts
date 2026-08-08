@@ -85,6 +85,46 @@ export function coerceByPlaybook(pb: Playbook, input: unknown): Answers {
   return out;
 }
 
+/**
+ * WHAT HE ANSWERED BEFORE HE CHANGED THE QUESTION.
+ *
+ * Erik, looking at 13125 Moraine Rd: "a bunch of info is missing and i found it in the playbook in
+ * those questions i deleted."
+ *
+ * coerceByPlaybook rebuilds the whole map from `pb.needs`, so the moment a question leaves the
+ * playbook its ANSWER leaves the appointment — on the next autosave, with no warning and no undo.
+ * Editing your questions is not supposed to be a destructive operation on finished site visits. At
+ * the time this was found, 725 Granlibakken was holding a real wire list under the retired key
+ * `materials_known` and was one keystroke away from losing it.
+ *
+ * WHY THIS DOESN'T REOPEN THE HOLE THE DROP EXISTS TO CLOSE. The drop is a real defence: this row
+ * is writable straight through PostgREST, so honouring unknown keys off the wire would let a
+ * crafted payload stuff arbitrary jsonb onto an appointment. So the carry-forward reads the value
+ * from the ROW THAT IS ALREADY STORED and ignores the incoming payload entirely. A client cannot
+ * introduce a retired key, and cannot change one. It can only fail to delete it.
+ *
+ * Flattened to text on purpose — the need that gave the value its type is gone, so there is nothing
+ * left to validate the shape against, and prose is the one form that can hold any of them.
+ */
+export function retiredAnswers(pb: Playbook, stored: unknown): Record<string, string> {
+  const src = (stored && typeof stored === "object" ? stored : {}) as Record<string, unknown>;
+  const declared = new Set(pb.needs.map((n) => n.key));
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(src)) {
+    if (declared.has(k) || !/^[a-z0-9_]{1,60}$/i.test(k)) continue;
+    const t = answerText(v as AnswerValue).trim();
+    if (t) out[k] = t.slice(0, 8000);
+    if (Object.keys(out).length >= 40) break;
+  }
+  return out;
+}
+
+/** "materials_known" → "Materials known". The need that carried a real label is gone. */
+export const retiredLabel = (key: string): string => {
+  const words = key.replace(/[_-]+/g, " ").trim();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+};
+
 /** One answer as a person would say it. An array is a list, because "outlets AND lights" is one answer. */
 export function answerText(v: AnswerValue): string {
   if (v === null || v === undefined) return "";
@@ -105,6 +145,8 @@ export function factsForEstimator(pb: Playbook, answers: Answers): string {
   // stale feed keeps run_ft applicable — so a 25-ft feeder from an abandoned branch was handed to
   // the estimator labelled MEASURED ON SITE. Only clearInapplicable's fixed point walks the whole
   // chain. Every other boundary in this file already does this; this one read path didn't.
+  // GRAB THE RETIRED ONES FIRST — clearInapplicable rebuilds from pb.needs, so it strips them.
+  const retired = retiredAnswers(pb, answers);
   answers = clearInapplicable(pb, answers);
 
   const lines: string[] = [];
@@ -119,5 +161,10 @@ export function factsForEstimator(pb: Playbook, answers: Answers): string {
     // one bullet and his rows stay rows.
     lines.push(`- ${n.label}: ${t.split("\n").join("\n  ")}`);
   }
+  // AND WHAT HE ANSWERED UNDER A QUESTION HE HAS SINCE RETIRED. Preserving it on the row but
+  // hiding it from the estimator would be the same loss wearing a better disguise — 725
+  // Granlibakken's wire list is a materials line whatever the question that caught it was called.
+  for (const [k, t] of Object.entries(retired))
+    lines.push(`- ${retiredLabel(k)}: ${t.split("\n").join("\n  ")}`);
   return lines.join("\n");
 }

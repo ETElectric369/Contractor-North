@@ -13,7 +13,7 @@ import { tzDateTimeUtc, todayStrInTz } from "@/lib/tz";
 import { createProposalCore, cleanSlots } from "@/lib/appointments/proposal";
 import { endAfterStart } from "@/lib/appointments/times";
 import { APPOINTMENT_STATUSES, APPOINTMENT_TYPES } from "@/lib/statuses";
-import { coerceByPlaybook } from "@/lib/playbook/answers";
+import { coerceByPlaybook, retiredAnswers } from "@/lib/playbook/answers";
 import { playbookForForm } from "@/lib/playbook/parse";
 import { clearInapplicable } from "@/lib/playbook/resolve";
 import { runOnce } from "@/lib/offline/run-once";
@@ -650,6 +650,17 @@ async function saveInspectionAnswersInner(
     // permit, stored as permitted. One renderer, one coercer.
     const pb = playbookForForm(form as { schema?: unknown; playbook?: unknown });
     clean = clearInapplicable(pb, coerceByPlaybook(pb, answers));
+    // CHANGING YOUR QUESTIONS MUST NOT DELETE FINISHED SITE VISITS. Anything answered under a
+    // question the playbook no longer declares is carried forward FROM THE STORED ROW — see
+    // retiredAnswers for why reading it from the row rather than the payload keeps the
+    // unknown-key defence intact. Merged after `clean` so a live need always wins its own key.
+    const { data: before } = await supabase
+      .from("appointments")
+      .select("inspection_answers")
+      .eq("id", id)
+      .maybeSingle();
+    const kept = retiredAnswers(pb, (before as { inspection_answers?: unknown } | null)?.inspection_answers);
+    if (Object.keys(kept).length) clean = { ...kept, ...clean };
   }
 
   const { data, error } = await supabase

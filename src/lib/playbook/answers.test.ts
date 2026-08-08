@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { answerText, coerceByPlaybook, coerceNeed, factsForEstimator } from "./answers";
+import { answerText, coerceByPlaybook, coerceNeed, factsForEstimator, retiredAnswers } from "./answers";
 import { playbookFromSheet } from "./from-sheet";
 import { looseNumber } from "@/lib/inspection/capture";
 import { ET_ELECTRIC } from "./starters/et-electric";
@@ -170,5 +170,44 @@ describe("factsForEstimator clears to a FIXED POINT before handing facts to the 
   it("and still carries the facts that DO apply", () => {
     const live = { work: ["Add circuits"], power_source: "meter panel", feed: "Subpanel at the source", run_ft: 25 };
     expect(factsForEstimator(ET_ELECTRIC, live)).toContain("25");
+  });
+});
+
+/**
+ * EDITING YOUR QUESTIONS MUST NOT DELETE FINISHED SITE VISITS.
+ *
+ * Erik, on 13125 Moraine Rd: "a bunch of info is missing and i found it in the playbook in those
+ * questions i deleted." coerceByPlaybook rebuilds from pb.needs, so a retired question took its
+ * answer with it on the next autosave. 725 Granlibakken was holding a real wire list under the
+ * retired key `materials_known` when this was found.
+ */
+describe("retiredAnswers keeps what he answered under a question he later removed", () => {
+  const pb = { needs: [{ key: "work", label: "Scope", ask: "What's the work?" }] };
+
+  it("keeps a value whose question is gone", () => {
+    expect(retiredAnswers(pb, { work: "add circuits", materials_known: "single gang remodel box" }))
+      .toEqual({ materials_known: "single gang remodel box" });
+  });
+
+  it("never shadows a live need — a declared key is the playbook's, not a leftover", () => {
+    expect(retiredAnswers(pb, { work: "add circuits" })).toEqual({});
+  });
+
+  it("drops empties and nulls, so a retired blank doesn't become a visible row", () => {
+    expect(retiredAnswers(pb, { feed: null, walls: "", gotcha: "   " })).toEqual({});
+  });
+
+  it("refuses a key that isn't a plain identifier — this map is rendered", () => {
+    expect(retiredAnswers(pb, { "<img src=x>": "boom", "a b": "no" })).toEqual({});
+  });
+
+  it("flattens a list, because the need that gave it a type is gone", () => {
+    expect(retiredAnswers(pb, { old_multi: ["Outlets", "Lights"] })).toEqual({ old_multi: "Outlets, Lights" });
+  });
+
+  it("reaches the estimator — preserved but hidden from money is the same loss in disguise", () => {
+    const out = factsForEstimator(pb, { work: "add circuits", materials_known: "single gang remodel box" } as never);
+    expect(out).toContain("- Scope: add circuits");
+    expect(out).toContain("- Materials known: single gang remodel box");
   });
 });

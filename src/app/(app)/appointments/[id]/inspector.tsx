@@ -10,7 +10,7 @@ import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { MediaLightbox } from "@/components/media-lightbox";
 import { createClient } from "@/lib/supabase/client";
 import { prepareImageForUpload } from "@/lib/image-prep";
-import { coerceByPlaybook } from "@/lib/playbook/answers";
+import { coerceByPlaybook, retiredAnswers, retiredLabel } from "@/lib/playbook/answers";
 import { ACCEPT_ATTR, isAllowedUpload, uploadDisplayName } from "@/lib/playbook/uploads";
 import { scopeTotal, type ScopePick } from "@/lib/playbook/scopes";
 import { playbookForForm } from "@/lib/playbook/parse";
@@ -226,6 +226,10 @@ export function Inspector({
   // it went to first-in-Zone-B, position 7 of 12. What made it READ as gone was two smaller things
   // fixed alongside — Zone B shows `n.label` ("Scope") instead of the sentence he answered, and the
   // open-need control was a fixed 2-row box showing two lines of a 700-character punch list.
+  // Answered under a question he has since retired. Read from what's STORED, not from live state —
+  // the whole point is that these keys are no longer part of the playbook's shape.
+  const retired = useMemo(() => retiredAnswers(playbook, initialAnswers), [playbook, initialAnswers]);
+
   const spine = useMemo(
     () => applicableNeeds(playbook, answers).filter((n) => isOpen(n) && isAnswered(answers[n.key])),
     [playbook, answers],
@@ -750,6 +754,29 @@ export function Inspector({
 
       {/* ── ZONE B — WHAT WE'VE GOT ───────────────────────────────────────────────────────── */}
       <div className="space-y-5 p-4">
+        {/* ANSWERED UNDER A QUESTION THAT NO LONGER EXISTS. Erik: "a bunch of info is missing and i
+            found it in the playbook in those questions i deleted." It was never shown because the
+            inspector only renders needs the playbook declares, so retiring a question made its
+            answer invisible — and then the next autosave deleted it. It survives now (see
+            retiredAnswers); this is where he can see it and move it somewhere that still exists. */}
+        {Object.keys(retired).length > 0 && (
+          <div>
+            <SectionLabel>From questions you&rsquo;ve since changed</SectionLabel>
+            <p className="mt-1 text-xs text-slate-500">
+              You answered these on site, then edited your questions. Nothing was lost — copy anything
+              still worth keeping into the boxes above.
+            </p>
+            <div className="mt-2 space-y-3">
+              {Object.entries(retired).map(([k, t]) => (
+                <div key={k} className="rounded-lg border border-amber-200 bg-amber-50/60 p-3">
+                  <div className="text-[11px] uppercase tracking-wide text-amber-700">{retiredLabel(k)}</div>
+                  <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{t}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {answered.length > 0 && (
           <div>
             <SectionLabel>Answered</SectionLabel>
