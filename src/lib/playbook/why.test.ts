@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { WHY_ASK, WHY_SHAPES, whyHint, whyNudge, whyProblems } from "./why";
 import { ET_ELECTRIC } from "./starters/et-electric";
+import { PLAYBOOK_STARTERS } from "./starters";
 import type { Need } from "./types";
 
 const need = (n: Partial<Need> & { key: string }): Need => ({ label: n.key, ask: `${n.key}?`, ...n });
@@ -112,11 +113,15 @@ describe("THE SHIPPED STARTERS PASS THEIR OWN CHECK", () => {
    *
    * Everything longer than a breath moved to `note`, verbatim. Nothing of his was deleted.
    */
-  for (const n of ET_ELECTRIC.needs) {
-    it(`${n.key} — one line, and it names where it lands`, () => {
-      expect(whyProblems(n.why, n), `${n.key}: "${n.why}"`).toEqual([]);
-      expect(n.why!.length, `${n.key} is still an essay`).toBeLessThanOrEqual(140);
-    });
+  // EVERY starter, not just Erik's. The playbook is the product — the rule has to hold for whoever
+  // we seed next, or "turnkey" is a claim about one org.
+  for (const starter of PLAYBOOK_STARTERS) {
+    for (const n of starter.playbook.needs) {
+      it(`${starter.key}/${n.key} — one line, and it names where it lands`, () => {
+        expect(whyProblems(n.why, n), `${n.key}: "${n.why}"`).toEqual([]);
+        expect(n.why!.length, `${n.key} is still an essay`).toBeLessThanOrEqual(140);
+      });
+    }
   }
 
   it("and his long-form reasoning survived, on the ones that had it", () => {

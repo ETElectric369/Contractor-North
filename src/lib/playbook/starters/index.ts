@@ -1,5 +1,6 @@
 import type { Playbook } from "../types";
 import { ET_ELECTRIC } from "./et-electric";
+import { TAHOE_DECK } from "./tahoe-deck";
 
 /**
  * THE STARTER LIBRARY — a playbook somebody can begin from instead of a blank page.
@@ -33,6 +34,15 @@ export const PLAYBOOK_STARTERS: PlaybookStarter[] = [
       "Erik's, built against a storage room being converted to living space: the panel fork first, " +
       "the run length only after it, and the outlet count derived from wall feet when the room was measured.",
     playbook: ET_ELECTRIC,
+  },
+  {
+    key: "tahoe-deck",
+    label: "Decks — build, resurface, railing & stairs",
+    blurb:
+      "Chris's, mirroring his own public estimator question for question so a customer's answers " +
+      "carry in and he confirms rather than re-asks. Formula why lines throughout — each names the " +
+      "price code it feeds, so the questions and the price list can be read against each other.",
+    playbook: TAHOE_DECK,
   },
 ];
 
