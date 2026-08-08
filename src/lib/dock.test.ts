@@ -196,3 +196,30 @@ describe("activeSection — child detail routes light the right section", () => 
     expect(activeSection("/timeclock", techSections)?.key).toBe("clock");
   });
 });
+
+describe("the section nav must be REACHABLE at every width (cn-v660 regression)", () => {
+  /**
+   * Erik, on a ~900px window: "the subnav is gone."
+   *
+   * SectionSubnav swaps its pill strip for the left-edge SHEET once a section has more than four
+   * pages. That handle is `left: 0`, which is right on a phone (the dock is a bottom bar) and
+   * wrong between 640 and 1024 on a mouse, where the dock is an 84px vertical rail sitting on top
+   * of it. Before cn-v660 those sections had the dock's inside-left column at that width so the
+   * handle was never needed there; hiding the column below lg exposed it.
+   *
+   * This asserts the SET that takes the sheet path, so the next section that crosses four pages is
+   * a deliberate decision rather than a silent disappearance.
+   */
+  const sheetSections = DOCK.filter((s) => s.children.filter((c) => c.href).length > 4).map((s) => s.key);
+
+  it("names exactly which sections depend on the left-edge handle", () => {
+    expect(sheetSections.sort()).toEqual(["invoices", "jobs", "office"]);
+  });
+
+  it("and every one of them has enough pages that a pill strip could not hold them", () => {
+    for (const key of sheetSections) {
+      const n = DOCK.find((s) => s.key === key)!.children.filter((c) => c.href).length;
+      expect(n, `${key} has ${n} pages`).toBeGreaterThan(4);
+    }
+  });
+});

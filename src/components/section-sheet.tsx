@@ -79,8 +79,16 @@ export function SectionSheet({
         aria-expanded={open}
         aria-haspopup="menu"
         title={`${group.label} — ${handleLabel}`}
-        style={{ position: "fixed", left: 0, top: "50%", transform: "translateY(-50%)", borderLeft: "none" }}
-        className="app-bottom-nav glass glass-tint glass-gloss z-[60] flex w-9 flex-col items-center gap-1.5 rounded-r-2xl py-3 text-[color:rgb(var(--glass-ink))] lg:hidden"
+        // CLEAR THE DOCK RAIL. This handle is `left: 0` because on a phone the dock is a BOTTOM
+        // bar and the left edge is free. Between 640 and 1024 on a mouse the dock is the 84px
+        // vertical RAIL at z-70 — and this handle is z-60, so it sat completely behind it. Erik,
+        // on a ~900px window: "the subnav is gone." It was, for Jobs, Money and Office (every
+        // section with more than four pages, which is what swaps the pill strip for this sheet).
+        // My own cn-v660 change surfaced it: before that, those sections had the dock's inside-left
+        // column at this width, so nothing needed the handle here.
+        // z-[71] as well as the offset — one pixel of rail overlap must never re-bury it.
+        style={{ position: "fixed", top: "50%", transform: "translateY(-50%)", borderLeft: "none" }}
+        className="app-bottom-nav glass glass-tint glass-gloss left-0 z-[71] flex w-9 flex-col items-center gap-1.5 rounded-r-2xl py-3 text-[color:rgb(var(--glass-ink))] shell:left-[84px] lg:hidden"
       >
         <HandleIcon className="relative z-10 h-4 w-4 shrink-0" />
         <span
