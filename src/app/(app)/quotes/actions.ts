@@ -866,7 +866,7 @@ async function runEstimator(
   content: any,
   markupPct?: number,
   laborRate?: number,
-): Promise<{ items: DraftLineItem[]; questions: string[] }> {
+): Promise<{ items: DraftLineItem[]; questions: string[]; description: string }> {
   const supabase = await createClient();
   const [{ data: org }, { data: book }] = await Promise.all([
     supabase.from("organizations").select("id, settings").limit(1).maybeSingle(),
@@ -906,7 +906,17 @@ async function runEstimator(
             ? "QUANTITIES: compute from the measurements given — areas = length × width, linear feet, counts. Do NOT apply trade calculations that don't fit this work. "
             : "QUANTITIES: calculate per the governing code for this trade — don't eyeball. For anything the CALCULATOR TOOLS cover (wire size, voltage drop, conduit fill, box fill) CALL THE TOOL instead of working the tables from memory; they return the exact NEC answer plus the code rule behind it. Reasoning a table in your head is where wrong numbers come from. ") +
           'If a needed material is NOT in the price book, still include it, estimate a typical retail price, and mark source "home_depot". ' +
-          'Respond with ONLY a JSON OBJECT: {"items": [ ... ], "questions": [ ... ]}. ' +
+          'Respond with ONLY a JSON OBJECT: {"description": string, "items": [ ... ], "questions": [ ... ]}. ' +
+          // THE SCOPE, POLISHED. Erik: "and the description is the scope polished / by default and
+          // editable." He writes a punch list on a ladder — "loose outlet in living room (15 mins)"
+          // — and that is the right way to capture it and the wrong way to send it. The same pass
+          // that prices the work can tidy the words, because it has already read them. Nothing is
+          // invented here: it re-states HIS scope, so a sentence that adds work is a bug.
+          '"description" = HIS OWN SCOPE, rewritten as 2-5 sentences a homeowner reads above the ' +
+          'line items. Plain, calm, specific about rooms and what gets done. STATE ONLY WHAT HE ' +
+          'DESCRIBED — no work he did not list, no hours, no prices, no sales language, no ' +
+          'promises about workmanship or timelines. Keep his options as options ("either ... or"). ' +
+          'If he wrote nothing to polish, return "". ' +
           'Each entry in "items": {"description": string, "quantity": number, "unit": "ea|ft|hr|lot", "kind": "material"|"labor", "catalog": string|null, "unit_cost": number, "source": "book"|"home_depot"} (labor: kind="labor", source="book", unit_cost=hourly rate). ' +
           '"questions" = a short list of plain-English things the contractor should REVIEW before sending: ambiguous counts, callouts that imply EXTRA scope, owner decisions, or anything low-confidence. Be specific. No prose outside the JSON.' +
           (playbook ? `\n\nCompany notes (apply on top; the price book + calc'd quantities govern):\n${playbook}` : ""),
@@ -977,7 +987,8 @@ async function runEstimator(
     .join("\n");
 
   const objText = text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
-  const parsed = JSON.parse(objText) as { items?: any[]; questions?: any[] };
+  const parsed = JSON.parse(objText) as { items?: any[]; questions?: any[]; description?: unknown };
+  const description = String(parsed.description ?? "").replace(/\s+/g, " ").trim().slice(0, 2000);
   const raw = Array.isArray(parsed.items) ? parsed.items : [];
   const questions = Array.isArray(parsed.questions)
     ? parsed.questions.map((q) => String(q).trim()).filter(Boolean)
@@ -1029,7 +1040,7 @@ async function runEstimator(
       laddered,
     }),
   );
-  return { items, questions };
+  return { items, questions, description };
 }
 
 function estimatorError(e: any) {
@@ -1076,7 +1087,7 @@ export async function generateQuoteDraft(
   scope: string,
   markupPct?: number,
   laborRate?: number,
-): Promise<{ ok: true; items: DraftLineItem[]; questions: string[] } | { ok: false; error: string }> {
+): Promise<{ ok: true; items: DraftLineItem[]; questions: string[]; description: string } | { ok: false; error: string }> {
   const gate = await guardEstimator();
   if (!gate.ok) return { ok: false, error: gate.error };
   if (!scope.trim()) return { ok: false, error: "Describe the work first." };
@@ -1097,7 +1108,7 @@ export async function generateQuoteDraft(
  */
 export async function generateQuoteDraftFromPlan(
   formData: FormData,
-): Promise<{ ok: true; items: DraftLineItem[]; questions: string[] } | { ok: false; error: string }> {
+): Promise<{ ok: true; items: DraftLineItem[]; questions: string[]; description: string } | { ok: false; error: string }> {
   // Gate BEFORE the 20 MB file is read and base64'd — an ungated caller shouldn't be able to make
   // the server do that work either.
   const gate = await guardEstimator();

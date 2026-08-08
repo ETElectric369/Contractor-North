@@ -250,11 +250,16 @@ export function QuoteBuilder({
   // Both estimator entry points land here: snapshot the current lines, surface the review
   // questions, and append the drafted lines (replacing empty rows). Shared so the text scope and
   // the plan upload behave identically — including the one-click Undo.
-  function applyDraft(res: { items: DraftLineItem[]; questions: string[] }) {
+  function applyDraft(res: { items: DraftLineItem[]; questions: string[]; description?: string }) {
     setPreGen(items);
     setQuestions(res.questions ?? []);
     const real = items.filter((i) => i.description.trim());
     setItems([...real, ...res.items]);
+    // THE SCOPE, POLISHED — as a DEFAULT, which means it fills a hole and never overwrites a hand.
+    // Erik: "the description is the scope polished / by default and editable." If he has already
+    // written the paragraph he wants the customer to read, a generate must not take it away from
+    // him; that is the same law the playbook fills run under.
+    if (res.description?.trim() && !description.trim()) setDescription(res.description.trim());
   }
 
   function onGenerate() {
