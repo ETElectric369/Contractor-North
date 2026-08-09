@@ -34,6 +34,26 @@ export const isAllowedUpload = (name: string): boolean =>
 export const ACCEPT_ATTR = ALLOWED_UPLOAD_EXTS.map((e) => `.${e}`).join(",");
 
 /**
+ * WHAT ONE QUESTION ACCEPTS, and what to tell a customer it accepts.
+ *
+ * The `file` slot has carried an optional `accept` since it shipped, and the renderer ignored it —
+ * so Andrew's "Upload your photos" question offered DWG and DXF and told a homeowner "PDF, DWG,
+ * DXF or photos". A question that asks for photos should open the camera roll, not a CAD picker.
+ * The org's allowlist is still the ceiling: a need can NARROW it and can never widen it.
+ */
+export function uploadAccept(accept?: readonly string[] | null): { attr: string; hint: string } {
+  const own = (accept ?? [])
+    .map((e) => String(e).replace(/^\./, "").toLowerCase())
+    .filter((e) => (ALLOWED_UPLOAD_EXTS as readonly string[]).includes(e));
+  const exts = own.length ? own : (ALLOWED_UPLOAD_EXTS as readonly string[]);
+  const photoOnly = exts.every((e) => !["pdf", "dwg", "dxf"].includes(e));
+  return {
+    attr: exts.map((e) => `.${e}`).join(","),
+    hint: photoOnly ? "Photos" : own.length ? exts.map((e) => e.toUpperCase()).join(", ") : "PDF, DWG, DXF or photos",
+  };
+}
+
+/**
  * A path is only acceptable if it is inside THIS org's intake folder.
  *
  * The client hands back the paths it uploaded, and a hostile client can hand back any string it

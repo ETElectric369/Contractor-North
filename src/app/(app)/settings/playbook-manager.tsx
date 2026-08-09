@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import { stampNeeds } from "@/lib/playbook/stamp";
 import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
@@ -132,7 +133,14 @@ export function PlaybookManager({
 }) {
   const router = useRouter();
   const [formId, setFormId] = useState(forms[0]?.id ?? "");
+  // What this form looked like when the page loaded. Sent on save so a concurrent edit is
+  // REFUSED instead of overwritten — see playbookStamp in playbook-actions.
+  const baseStamps = useMemo(
+    () => new Map(forms.map((f) => [f.id, f.owned ? stampNeeds(f.needs) : undefined])),
+    [forms],
+  );
   const form = forms.find((f) => f.id === formId) ?? forms[0];
+  const baseStamp = baseStamps.get(form?.id ?? "");
 
   const [needs, setNeeds] = useState<Need[]>(form?.needs ?? []);
   const [loadedFor, setLoadedFor] = useState(form?.id ?? "");
@@ -554,7 +562,7 @@ export function PlaybookManager({
       </button>
 
       <div className="flex flex-wrap items-center gap-3 border-t border-slate-200 pt-4">
-        <Button type="button" disabled={pending || !dirty} onClick={() => run(() => savePlaybook(form.id, needs), "Saved.")}>
+        <Button type="button" disabled={pending || !dirty} onClick={() => run(() => savePlaybook(form.id, needs, baseStamp), "Saved.")}>
           {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</> : <><Check className="h-4 w-4" /> Save</>}
         </Button>
 

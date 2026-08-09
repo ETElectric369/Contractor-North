@@ -4,7 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 import { Check, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
-import { ACCEPT_ATTR, INTAKE_BUCKET, MAX_UPLOAD_MB, isAllowedUpload, uploadDisplayName } from "@/lib/playbook/uploads";
+import { INTAKE_BUCKET, MAX_UPLOAD_MB, isAllowedUpload, uploadAccept, uploadDisplayName } from "@/lib/playbook/uploads";
 import { createClient } from "@/lib/supabase/client";
 import { prepareImageForUpload } from "@/lib/image-prep";
 import { applicableNeeds } from "@/lib/playbook/resolve";
@@ -147,7 +147,7 @@ export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: 
               <input
                 type="file"
                 multiple={n.slot.multi !== false}
-                accept={ACCEPT_ATTR}
+                accept={uploadAccept(n.slot.accept).attr}
                 disabled={busyKey === n.key}
                 onChange={(e) => {
                   void addFiles(n.key, Array.from(e.target.files ?? []));
@@ -156,7 +156,7 @@ export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: 
                 className="block w-full text-sm text-slate-600 file:mr-3 file:min-h-[40px] file:rounded-full file:border-0 file:bg-slate-900 file:px-4 file:text-sm file:text-white"
               />
               <p className="mt-1.5 text-xs text-slate-500">
-                {busyKey === n.key ? "Uploading…" : `PDF, DWG, DXF or photos — up to ${MAX_UPLOAD_MB}MB each.`}
+                {busyKey === n.key ? "Uploading…" : `${uploadAccept(n.slot.type === "file" ? n.slot.accept : undefined).hint} — up to ${MAX_UPLOAD_MB}MB each.`}
               </p>
               {Array.isArray(answers[n.key]) && (answers[n.key] as string[]).length > 0 && (
                 <ul className="mt-2 space-y-1">
