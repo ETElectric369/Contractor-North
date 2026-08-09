@@ -14,6 +14,7 @@ import { effectiveMarkupPct } from "@/lib/pricing/markup";
 import { buildDeckRatesWithMarkup, type DeckRateRow } from "@/lib/estimate/deck";
 import { subtotalTaxTotal } from "@/lib/invoice-math";
 import { useDraft } from "@/lib/use-draft";
+import { quoteDraftKey } from "@/lib/quote-draft-key";
 import { useToast } from "@/components/toast";
 import {
   saveQuote,
@@ -192,7 +193,22 @@ export function QuoteBuilder({
     // inquiryId is in the key because a lead-sourced estimate (cn-v477 defers the customer, so it
     // arrives with NO ?customer=) would otherwise collapse to the shared "new" slot — two prospects'
     // drafts bleeding into each other. Keyed per-lead keeps the "never share" promise above true.
-    "quote-builder:" + (jobId ?? preselected ?? inquiryId ?? "new"),
+    //
+    // captureId IS FIRST, AND ITS ABSENCE WAS THE BUG THE COMMENT ABOVE PREDICTED.
+    //
+    // Erik: "im creating an estimate for [Moraine Rd] now and its pulling info from a sarah cain
+    // inspection but i cant see anything i wrote for this job."
+    //
+    // An estimate started from a WALK-THROUGH is exactly the case that has none of the other three.
+    // Both of his live inspections — 13125 Moraine Rd and Sarah Cain — carry customer_id, job_id
+    // and inquiry_id all null, because an inspection can happen before any of those records exist.
+    // So both collapsed to "quote-builder:new", the shared slot, and Sarah Cain's saved draft
+    // restored straight over the Moraine Rd prefill: her scope, her description, her line items.
+    // Not lost — overwritten on screen by somebody else's job.
+    //
+    // The appointment is the MOST specific identity here (a job can hold several walk-throughs), so
+    // it goes first. Precedence + the one-time eviction prefix live in quoteDraftKey, tested.
+    quoteDraftKey({ captureId, jobId, customerId: preselected, inquiryId }),
     draftState,
     (d) => {
       setCustomerId(d.customerId ?? preselected ?? "");
