@@ -26,8 +26,28 @@ const DEBOUNCE_MS = 400;
  * drafts survive a reload but not the browser session, so a weeks-old
  * half-typed form can never resurface as a stale surprise.
  */
-export function useDraft<T>(key: string, state: T, setState: (t: T) => void) {
+export function useDraft<T>(
+  key: string,
+  state: T,
+  setState: (t: T) => void,
+  /**
+   * KEYS THIS DRAFT USED TO LIVE UNDER, newest first. Read only when `key` itself has nothing.
+   *
+   * Renaming a draft key is a DESTRUCTIVE ACT on work somebody has not saved yet, and I learned
+   * that the expensive way: cn-v680 added a "v2:" prefix to the quote-builder key to evict a
+   * poisoned shared slot, and Erik had an unsaved Moraine Rd estimate — built by hand, never
+   * submitted — sitting in the slot that prefix orphaned. The bytes were still in sessionStorage;
+   * nothing was reading them.
+   *
+   * So a key rename now carries its own way back. Adopt-and-migrate: read the old entry, write it
+   * under the new key, delete the old one. Runs at most once, because after it the new key is
+   * populated and the fallback never fires again.
+   */
+  legacyKeys?: string[],
+) {
   const storageKey = "draft:" + key;
+  const legacyRef = useRef(legacyKeys);
+  legacyRef.current = legacyKeys;
   // True when a draft existed and was rehydrated on mount (callers can toast it).
   const [restored, setRestored] = useState(false);
   const armed = useRef(false); // mirroring starts on the first CHANGE, not on mount
@@ -49,7 +69,21 @@ export function useDraft<T>(key: string, state: T, setState: (t: T) => void) {
   // Rehydrate once on mount (client-only — effects never run on the server).
   useEffect(() => {
     try {
-      const raw = window.sessionStorage.getItem(storageKey);
+      let raw = window.sessionStorage.getItem(storageKey);
+
+      // NOTHING HERE? LOOK WHERE THIS DRAFT USED TO LIVE. Then MOVE it, so the next mount finds it
+      // at the current key and this branch is never taken again. A rename must not strand work.
+      if (raw == null) {
+        for (const old of legacyRef.current ?? []) {
+          const legacy = window.sessionStorage.getItem("draft:" + old);
+          if (legacy == null) continue;
+          raw = legacy;
+          window.sessionStorage.setItem(storageKey, legacy);
+          window.sessionStorage.removeItem("draft:" + old);
+          break;
+        }
+      }
+
       if (raw != null) {
         setStateRef.current(JSON.parse(raw) as T);
         setRestored(true);

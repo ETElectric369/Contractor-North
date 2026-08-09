@@ -14,7 +14,7 @@ import { effectiveMarkupPct } from "@/lib/pricing/markup";
 import { buildDeckRatesWithMarkup, type DeckRateRow } from "@/lib/estimate/deck";
 import { subtotalTaxTotal } from "@/lib/invoice-math";
 import { useDraft } from "@/lib/use-draft";
-import { quoteDraftKey } from "@/lib/quote-draft-key";
+import { quoteDraftKey, quoteDraftLegacyKeys } from "@/lib/quote-draft-key";
 import { useToast } from "@/components/toast";
 import {
   saveQuote,
@@ -225,6 +225,7 @@ export function QuoteBuilder({
       // inspection-capture prefill (?capture=) — that's the whole point of the link.
       setScope(d.scope ? d.scope : (initialScope ?? ""));
     },
+    quoteDraftLegacyKeys({ captureId, jobId, customerId: preselected, inquiryId }),
   );
   // The builder is a full page (not a modal), so say it out loud when a draft
   // comes back — otherwise the refilled form just looks like déjà vu.

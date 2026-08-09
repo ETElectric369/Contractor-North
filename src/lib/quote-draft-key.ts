@@ -31,3 +31,28 @@ export function quoteDraftKey(ids: {
   // browser is quit — no use to somebody who is mid-estimate right now.
   return `quote-builder:v2:${own}`;
 }
+
+/**
+ * WHERE THIS DRAFT MIGHT STILL BE SITTING, newest scheme first.
+ *
+ * cn-v680's "v2:" prefix orphaned every pre-fix draft — and Erik had an unsaved Moraine Rd estimate,
+ * built by hand and never submitted, in the exact slot it orphaned. sessionStorage still had the
+ * bytes; the app had simply stopped asking for them.
+ *
+ * The "new" slot is included on purpose, and it is the whole point: an estimate started from a
+ * walk-through had no job, no customer and no lead, so BOTH of his inspections wrote there. That
+ * shared slot is precisely where the lost work is.
+ */
+export function quoteDraftLegacyKeys(ids: {
+  captureId?: string | null;
+  jobId?: string | null;
+  customerId?: string | null;
+  inquiryId?: string | null;
+}): string[] {
+  const preV2 = ids.jobId || ids.customerId || ids.inquiryId || "new";
+  const keys = [`quote-builder:${preV2}`];
+  // A walk-through-sourced estimate wrote to the shared slot under the old key even when it had a
+  // capture id, because the old key never looked at one.
+  if (ids.captureId && preV2 !== "new") keys.push("quote-builder:new");
+  return keys;
+}
