@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
+import type { ResolvedSite } from "@/lib/site-address";
 import { formatCurrency, formatDate } from "@/lib/utils";
-import { DocHeader, DocParty, DocTotals, DocNote, DocDescription, type DocPartyCustomer } from "@/components/doc-templates";
+import { DocHeader, DocParty, DocSite, DocTotals, DocNote, DocDescription, type DocPartyCustomer } from "@/components/doc-templates";
 import { lineItemParts } from "@/components/line-item-text";
 import type { QuoteCircuit } from "@/lib/types";
 
@@ -38,6 +39,7 @@ export function QuoteDocument({
   title,
   description,
   customer,
+  site,
   items,
   subtotal,
   taxRate,
@@ -60,6 +62,8 @@ export function QuoteDocument({
   title?: string | null;
   description?: string | null;
   customer: DocPartyCustomer;
+  /** The resolved job site — pickSite() output. Absent on surfaces that don't know one yet. */
+  site?: ResolvedSite | null;
   items: QuoteDocItem[];
   subtotal: number;
   taxRate?: number | null;
@@ -99,6 +103,13 @@ export function QuoteDocument({
       <div className="mt-6">
         <DocParty label="Prepared for" customer={c} brand={co.brand} />
       </div>
+
+      {/* WHERE THE WORK HAPPENS. Absent = exactly today's output, so this is additive. */}
+      {site && (
+        <div className="mt-5">
+          <DocSite site={site} brand={co.brand} />
+        </div>
+      )}
 
       {title && <div className="mt-5 text-base font-semibold text-slate-900">{title}</div>}
       {description && <DocDescription text={description} />}

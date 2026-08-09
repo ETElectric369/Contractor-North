@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { pickSite } from "@/lib/site-address";
 import { createClient } from "@/lib/supabase/server";
 import { PrintButton } from "@/components/print-button";
 import { companyFromOrg } from "@/components/doc-letterhead";
@@ -47,8 +48,15 @@ export default async function PublicQuotePage({
         <PrintButton label="Print / Save PDF" />
       </div>
 
+      {/* THE SAME pickSite AS THE OFFICE PAGE. The RPC hands over RAW candidates and applies no
+          precedence in SQL, so there is exactly one implementation of "which address wins" and
+          these two surfaces — which render the identical QuoteDocument — cannot drift. */}
       <QuoteDocument
         co={co}
+        site={pickSite([
+          ...(data.site_candidates ?? []),
+          { source: "customer", parts: data.customer },
+        ])}
         template={template}
         docLabel={label}
         number={q.quote_number}

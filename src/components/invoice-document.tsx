@@ -1,5 +1,6 @@
 import { formatCurrency, formatDate } from "@/lib/utils";
-import { DocHeader, DocParty, DocTotals, DocNote, DocDescription, type DocPartyCustomer } from "@/components/doc-templates";
+import type { ResolvedSite } from "@/lib/site-address";
+import { DocHeader, DocParty, DocSite, DocTotals, DocNote, DocDescription, type DocPartyCustomer } from "@/components/doc-templates";
 import { LineItemText } from "@/components/line-item-text";
 import { CostBreakdown } from "@/components/cost-breakdown";
 import { ProgressReportCard } from "@/components/progress-report-card";
@@ -31,6 +32,7 @@ export function InvoiceDocument({
   billingLabel,
   description,
   customer,
+  site,
   items,
   subtotal,
   taxRate,
@@ -52,6 +54,8 @@ export function InvoiceDocument({
   billingLabel?: string | null;
   description?: string | null;
   customer: DocPartyCustomer;
+  /** The job's site — an invoice owns none, it inherits through job_id. */
+  site?: ResolvedSite | null;
   items: InvoiceDocItem[];
   subtotal: number;
   taxRate?: number | null;
@@ -87,6 +91,12 @@ export function InvoiceDocument({
       <div className="mt-6 flex items-start justify-between gap-6">
         <div className="min-w-0 flex-1">
           <DocParty label="Bill to" customer={c} brand={co.brand} />
+          {/* An invoice to a property manager otherwise states nowhere that the work happened. */}
+          {site && (
+            <div className="mt-4">
+              <DocSite site={site} brand={co.brand} />
+            </div>
+          )}
         </div>
         <div className="shrink-0 rounded-lg border border-slate-200 bg-slate-50 px-5 py-3 text-right">
           <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Balance due</div>

@@ -73,9 +73,12 @@ export default async function MaterialListPrintPage({
               {job.name}
               {/* A street with no city is not a deliverable address, and this sheet is handed
                   to a supply house. */}
-              {siteLines(pickSite([{ source: "job", parts: job }])).length > 0 && (
-                <span className="text-slate-500"> · {siteLines(pickSite([{ source: "job", parts: job }])).join(", ")}</span>
-              )}
+              {/* Its OWN lines, not a comma join: these job rows are blobs ending in ", Tahoe City,
+                  CA 96145, USA", so joining would print the dwelling AFTER the ZIP — the exact
+                  thing the own-line rule exists to stop. This sheet goes to a supply house. */}
+              {siteLines(pickSite([{ source: "job", parts: job }])).map((l) => (
+                <div key={l} className="text-slate-500">{l}</div>
+              ))}
             </div>
           </div>
         )}

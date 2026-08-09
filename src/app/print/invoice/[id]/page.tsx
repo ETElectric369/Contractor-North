@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { pickSite, SITE_COLS } from "@/lib/site-address";
 import { BackLink } from "@/components/back-link";
 import { createClient } from "@/lib/supabase/server";
 import { PrintButton } from "@/components/print-button";
@@ -27,7 +28,7 @@ export default async function InvoicePrintPage({ params }: { params: Promise<{ i
 
   const { data: invoice } = await supabase
     .from("invoices")
-    .select("*, customers(name, company_name, email, phone, address, city, state, zip)")
+    .select(`*, customers(name, company_name, email, phone, ${SITE_COLS})`)
     .eq("id", id)
     .maybeSingle();
   if (!invoice) notFound();
@@ -54,7 +55,7 @@ export default async function InvoicePrintPage({ params }: { params: Promise<{ i
   // A clear "Time & Material vs Fixed-Price" statement from the job's billing model.
   const jobId = (inv as any).job_id;
   const { data: jobRow } = jobId
-    ? await supabase.from("jobs").select("billing_type").eq("id", jobId).maybeSingle()
+    ? await supabase.from("jobs").select(`billing_type, ${SITE_COLS}`).eq("id", jobId).maybeSingle()
     : { data: null };
   const billingLabel = invoiceTypeLabel((jobRow as any)?.billing_type, drawKind);
 
@@ -66,6 +67,10 @@ export default async function InvoicePrintPage({ params }: { params: Promise<{ i
       </div>
 
       <InvoiceDocument
+        site={pickSite([
+          { source: "job", parts: jobRow as never },
+          { source: "customer", parts: (inv as { customers?: never }).customers },
+        ])}
         co={co}
         template={template}
         number={inv.invoice_number}

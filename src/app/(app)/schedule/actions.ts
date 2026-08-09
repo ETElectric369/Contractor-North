@@ -130,6 +130,7 @@ export async function createJob(formData: FormData): Promise<Result> {
       address,
       // The parts the picker resolved. A fixed form is no help if the insert has nowhere to put
       // them — same shape updateJob has used all along (jobs/actions.ts:396-398).
+      unit: emptyToNull(formData.get("unit")),
       city: emptyToNull(formData.get("city")),
       state: emptyToNull(formData.get("state")),
       zip: emptyToNull(formData.get("zip")),

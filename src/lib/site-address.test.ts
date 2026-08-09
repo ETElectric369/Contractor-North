@@ -104,3 +104,46 @@ describe("siteLines — never prints the city twice", () => {
     expect(siteLines(null)).toEqual([]);
   });
 });
+
+/**
+ * THE UNIT. Four Tahoe Tavern jobs at 300 W Lake Blvd, the number living only in the job NAME
+ * ("TTP #11", "#56", "#224") — so every document named the building and not the dwelling, on two
+ * already-paid invoices. Erik: "yes for unit field for TTP, that is key for us and them."
+ */
+describe("the unit — its own line, never appended to a blob", () => {
+  it("prints under the street, ABOVE the city line", () => {
+    expect(siteLines(pickSite([{ source: "job", parts: { address: "300 W Lake Blvd", unit: "224", city: "Tahoe City", state: "CA", zip: "96145" } }])))
+      .toEqual(["300 W Lake Blvd", "Unit 224", "Tahoe City, CA 96145"]);
+  });
+
+  it("NEVER lands after the ZIP on a blob address — the failure the own-line rule exists to stop", () => {
+    const lines = siteLines(pickSite([{ source: "job", parts: { address: "300 W Lake Blvd, Tahoe City, CA 96145, USA", unit: "11" } }]));
+    expect(lines).toEqual(["300 W Lake Blvd, Tahoe City, CA 96145, USA", "Unit 11"]);
+    expect(lines[lines.length - 1]).toBe("Unit 11");
+  });
+
+  it("does not re-label a unit a human already labelled", () => {
+    expect(siteLines(pickSite([{ source: "job", parts: { address: "1 Main St", unit: "#224" } }]))[1]).toBe("#224");
+    expect(siteLines(pickSite([{ source: "job", parts: { address: "1 Main St", unit: "Apt B" } }]))[1]).toBe("Apt B");
+    expect(siteLines(pickSite([{ source: "job", parts: { address: "1 Main St", unit: "Suite 200" } }]))[1]).toBe("Suite 200");
+  });
+
+  it("no unit is no line at all, not a blank one", () => {
+    expect(siteLines(pickSite([{ source: "job", parts: { address: "1 Main St", unit: "  " } }]))).toEqual(["1 Main St"]);
+  });
+
+  it("a unit never travels without its own record's street", () => {
+    // All-or-nothing: the job wins whole, so the customer's unit must not ride along.
+    const got = pickSite([
+      { source: "job", parts: { address: "300 W Lake Blvd" } },
+      { source: "customer", parts: { address: "1 Elsewhere", unit: "99", city: "Reno" } },
+    ]);
+    expect(got?.unit).toBeNull();
+  });
+
+  it("survives the literal nulls public_quote actually returns", () => {
+    // json_build_array puts a bare null where a sub-select matched nothing — verified live.
+    const got = pickSite([null as never, { source: "job", parts: { address: "300 W Lake Blvd", unit: "56" } }, null as never]);
+    expect(got?.unit).toBe("56");
+  });
+});

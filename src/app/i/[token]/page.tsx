@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { pickSite } from "@/lib/site-address";
 import { createClient } from "@/lib/supabase/server";
 import { PrintButton } from "@/components/print-button";
 import { companyFromOrg } from "@/components/doc-letterhead";
@@ -72,6 +73,10 @@ export default async function PublicInvoicePage({
       )}
 
       <InvoiceDocument
+        site={pickSite([
+          ...((data as { site_candidates?: never[] }).site_candidates ?? []),
+          { source: "customer", parts: (data as { customer?: never }).customer },
+        ])}
         co={co}
         template={template}
         number={inv.invoice_number}

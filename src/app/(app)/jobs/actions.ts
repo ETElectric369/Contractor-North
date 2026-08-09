@@ -393,6 +393,7 @@ export async function updateJob(
       ...(formData.get("billing_type") != null ? { billing_type: String(formData.get("billing_type")) } : {}),
       ...codeTemplatePatch,
       address: emptyToNull(formData.get("address")),
+      unit: emptyToNull(formData.get("unit")),
       city: emptyToNull(formData.get("city")),
       state: emptyToNull(formData.get("state")),
       zip: emptyToNull(formData.get("zip")),

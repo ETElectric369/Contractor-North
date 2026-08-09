@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { pickSite, SITE_COLS } from "@/lib/site-address";
 import { BackLink } from "@/components/back-link";
 import { createClient } from "@/lib/supabase/server";
 import { PrintButton } from "@/components/print-button";
@@ -31,7 +32,7 @@ export default async function QuotePrintPage({
 
   const { data: quote } = await supabase
     .from("quotes")
-    .select("*, customers(name, company_name, email, phone, address, city, state, zip)")
+    .select(`*, customers(name, company_name, email, phone, ${SITE_COLS}), jobs(${SITE_COLS}), inquiries(${SITE_COLS})`)
     .eq("id", id)
     .maybeSingle();
 
@@ -66,6 +67,12 @@ export default async function QuotePrintPage({
 
       <QuoteDocument
         co={co}
+        site={pickSite([
+          { source: "quote", parts: q as never },
+          { source: "job", parts: (q as { jobs?: never }).jobs },
+          { source: "lead", parts: (q as { inquiries?: never }).inquiries },
+          { source: "customer", parts: (q as { customers?: never }).customers },
+        ])}
         template={template}
         docLabel={label}
         number={q.quote_number}

@@ -71,6 +71,7 @@ export interface Inquiry {
   email: string | null;
   phone: string | null;
   address: string | null;
+  unit: string | null;
   city: string | null;
   state: string | null;
   zip: string | null;
@@ -107,6 +108,7 @@ export interface Customer {
   email: string | null;
   phone: string | null;
   address: string | null;
+  unit: string | null;
   city: string | null;
   state: string | null;
   zip: string | null;
@@ -126,6 +128,7 @@ export interface Job {
   description: string | null;
   status: JobStatus;
   address: string | null;
+  unit: string | null;
   city: string | null;
   state: string | null;
   zip: string | null;

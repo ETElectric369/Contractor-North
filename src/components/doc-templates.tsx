@@ -1,5 +1,6 @@
 import { Zap } from "lucide-react";
-import { addressHasCityStateZipTail } from "@/lib/site-address";
+import { addressHasCityStateZipTail, siteLines, type ResolvedSite } from "@/lib/site-address";
+import { unitLine } from "@/lib/utils";
 import type { CompanyInfo } from "./doc-letterhead";
 import { companyBlock } from "@/lib/company-lines";
 import { formatCurrency, formatCityStateZip } from "@/lib/utils";
@@ -196,6 +197,7 @@ export function DocParty({ label, customer, brand }: { label: string; customer: 
           </div>
           <div className="min-w-0 text-slate-700">
             {c.address && <div>{c.address}</div>}
+            {unitLine((c as { unit?: string | null }).unit) && <div>{unitLine((c as { unit?: string | null }).unit)}</div>}
             {/* NEVER THE TOWN TWICE. Erik's own customer row is "94248 CA-70, Chilcoot, CA 96105,
                 USA" AND carries city "Chilcoot-Vinton" — so this printed Chilcoot on one line and
                 Chilcoot-Vinton on the next, on every document. When the address line already ends
@@ -216,6 +218,33 @@ export function DocParty({ label, customer, brand }: { label: string; customer: 
  *  Paid + Balance-due rows and DE-emphasize Total so Balance becomes the bold final line;
  *  OMIT it (quote) and Total itself is the bold emphasis. Tax-percent formatting is identical
  *  either way — so a quote and the invoice it converts to always agree to the cent. */
+/**
+ * THE JOB SITE — the slot no document in this app ever had.
+ *
+ * DocParty above is the customer's MAILING address ("Prepared for" / "Bill to"), and until now it
+ * was the only address block on a quote or an invoice. So the place the work happens printed only
+ * when the person being billed happened to live there. For Tahoe Tavern Properties that is four
+ * dwellings at one street, and two of them are on paid invoices.
+ *
+ * It PRINTS WHENEVER A SITE RESOLVES, including when it renders the same string as the bill-to. A
+ * block that disappears on a match is ambiguous — the reader cannot tell "same place" from "nobody
+ * filled it in", and on a change order somebody signs, that difference is the whole point.
+ */
+export function DocSite({ label = "Job site", site, brand }: { label?: string; site: ResolvedSite | null; brand: string }) {
+  const lines = siteLines(site);
+  if (!lines.length) return null;
+  return (
+    <>
+      <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</div>
+      <div className="mt-1.5 space-y-0.5 border-l-2 pl-2.5 text-sm text-slate-700" style={{ borderColor: brand }}>
+        {lines.map((l) => (
+          <div key={l}>{l}</div>
+        ))}
+      </div>
+    </>
+  );
+}
+
 export function DocTotals({
   subtotal,
   taxRate,

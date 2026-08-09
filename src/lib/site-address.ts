@@ -35,10 +35,12 @@
  * cost a wrong address, because nothing here writes anything.
  */
 
-import { formatCityStateZip } from "@/lib/utils";
+import { formatCityStateZip, unitLine } from "@/lib/utils";
 
 export interface SiteParts {
   address?: string | null;
+  /** The dwelling. Four TTP jobs share 300 W Lake Blvd and only this tells them apart. */
+  unit?: string | null;
   city?: string | null;
   state?: string | null;
   zip?: string | null;
@@ -52,7 +54,7 @@ export interface ResolvedSite extends SiteParts {
 }
 
 /** Columns every select list must carry. Import it instead of retyping four names. */
-export const SITE_COLS = "address, city, state, zip";
+export const SITE_COLS = "address, unit, city, state, zip";
 
 const t = (v: unknown): string => String(v ?? "").trim();
 
@@ -83,13 +85,18 @@ export function addressHasCityStateZipTail(s: string | null | undefined): boolea
  */
 export function pickSite(candidates: { source: string; parts?: SiteParts | null }[]): ResolvedSite | null {
   for (const c of candidates) {
-    const address = t(c.parts?.address);
+    // A CANDIDATE CAN BE NULL. public_quote builds its list with json_build_array, and a
+    // sub-select with no matching row lands in that array as a literal null — verified against
+    // the live function, not assumed. Reading c.parts on it throws inside a server component,
+    // which is a blank 500 on a customer's estimate.
+    const address = t(c?.parts?.address);
     if (!address) continue;
     const city = t(c.parts?.city);
     const state = t(c.parts?.state);
     const zip = t(c.parts?.zip);
     return {
       address,
+      unit: t(c.parts?.unit) || null,
       city: city || null,
       state: state || null,
       zip: zip || null,
@@ -106,6 +113,12 @@ export function pickSite(candidates: { source: string; parts?: SiteParts | null 
 export function siteLines(site: ResolvedSite | null): string[] {
   if (!site?.address) return [];
   const out = [site.address];
+  // ITS OWN LINE, DIRECTLY UNDER THE STREET — never appended to the address string. More than
+  // half the live job rows are blobs ending in ", Tahoe City, CA 96145, USA", so appending would
+  // put the dwelling after the ZIP; and inserting it before that tail would mean parsing the
+  // blob, which is the one thing this file exists to refuse.
+  const u = unitLine(site.unit);
+  if (u) out.push(u);
   if (!addressHasCityStateZipTail(site.address)) {
     const tail = formatCityStateZip(site.city, site.state, site.zip);
     if (tail) out.push(tail);

@@ -32,13 +32,29 @@ export function formatCityStateZip(
 
 /** THE canonical one-line address: "123 Main St, City, ST ZIP" — street then the
  *  city/state/zip tail, comma-joined; any empty part drops out. */
+/** Designators that already name themselves — "#11", "Apt B", "Ste 200". Anything else is a bare
+ *  number and gets the word in front of it. */
+const UNIT_DESIGNATOR = /^(?:#|unit|apt|apartment|ste|suite|bldg|building|lot|rm|room|space|spc|trlr|fl|floor)\b/i;
+
+/** THE unit string, exactly once. "11" → "Unit 11"; "#224" → "#224"; blank → "".
+ *  Never invents a unit, never re-labels one a human already labelled. */
+export function unitLine(unit?: string | null): string {
+  const u = String(unit ?? "").trim();
+  if (!u) return "";
+  return UNIT_DESIGNATOR.test(u) ? u : `Unit ${u}`;
+}
+
 export function formatFullAddress(
   address?: string | null,
   city?: string | null,
   state?: string | null,
   zip?: string | null,
+  /** OPTIONAL AND LAST ON PURPOSE — every existing call site keeps its exact behaviour and a
+   *  caller opts in only where a dwelling belongs. Do NOT pass it to a geocode or navigate
+   *  target: "Unit 11" is not something a maps API wants in the query. */
+  unit?: string | null,
 ): string {
-  return [address, formatCityStateZip(city, state, zip)].filter(Boolean).join(", ");
+  return [address, unitLine(unit), formatCityStateZip(city, state, zip)].filter(Boolean).join(", ");
 }
 
 // THE business timezone all dates render in. The server runs in UTC, so without a

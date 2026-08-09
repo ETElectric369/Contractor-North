@@ -152,6 +152,14 @@ export function JobEditButton({
               }}
             />
           </div>
+          <div>
+            {/* THE DWELLING. Four Tahoe Tavern jobs share 300 W Lake Blvd and the number lived
+                only inside the job NAME, so every document named the building. Uncontrolled +
+                defaultValue like the rest of this form: the address picker never fills it,
+                because Google returns a street, not somebody's apartment. */}
+            <Label htmlFor="ej-unit">Unit / Apt <span className="font-normal text-slate-400">(optional)</span></Label>
+            <Input id="ej-unit" name="unit" defaultValue={job.unit ?? ""} placeholder="e.g. 224, Apt B" maxLength={24} />
+          </div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <div className="col-span-2">
               <Label htmlFor="ej-city">City</Label>

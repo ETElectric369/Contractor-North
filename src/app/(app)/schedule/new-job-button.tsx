@@ -40,6 +40,8 @@ interface JobForm {
   status: string;
   billing_type: string;
   address: string;
+  /** The dwelling — typed, never resolved: a picker returns a street, not an apartment. */
+  unit: string;
   /** The resolved parts from the picker. Absent for typed input — see 0177: a guessed city is
    *  worse than a blank one, so these stay empty unless a suggestion was actually chosen. */
   city: string;
@@ -83,6 +85,7 @@ export function NewJobButton({
     billing_type: "tm",
     // A launch-context customer (the customer-page button) prefills too — still editable.
     address: defaultCustomerId ? customerAddress(defaultCustomerId) : "",
+    unit: "",
     city: "",
     state: "",
     zip: "",
@@ -346,6 +349,10 @@ export function NewJobButton({
             />
             {/* Hidden because the picker fills them and the street box is what he reads. They are
                 still SUBMITTED, which is the entire point — the parts existed all along. */}
+            <div className="mt-2">
+              <Label htmlFor="unit">Unit / Apt <span className="font-normal text-slate-400">(optional)</span></Label>
+              <Input id="unit" name="unit" value={form.unit} onChange={(e) => patch({ unit: e.target.value })} placeholder="e.g. 224, Apt B" maxLength={24} />
+            </div>
             <input type="hidden" name="city" value={form.city} />
             <input type="hidden" name="state" value={form.state} />
             <input type="hidden" name="zip" value={form.zip} />
