@@ -42,6 +42,11 @@ export const APPT_PUSH_STATUSES: readonly string[] = APPOINTMENT_STATUSES.filter
 export const APPOINTMENT_TYPES = [
   "inspection",
   "final_inspection",
+  // A SERVICE CALL IS A KIND OF BOOKING. Erik: "At booking: [Service call] [Contract job] →
+  // service calls land on the job board → walk-through never asks; it already knows." It used to
+  // be the walk-through's first question, where its answer was already settled — the phone knew
+  // it while Alexa wrote the address down. See migration 0188.
+  "service_call",
   "quote",
   "meeting",
   "appointment",
@@ -51,12 +56,19 @@ export type AppointmentType = (typeof APPOINTMENT_TYPES)[number];
 
 /** The inspection-shaped subset — what the Sales → Inspections tab shows. */
 export const INSPECTION_TYPES = ["inspection", "final_inspection"] as const;
+
+/** The squeeze-it-in work — what the job board is for. Erik: "these are the ones that would go to
+ *  the board becuase i dont know at what moment ill be able to squeeze them in… and its ready for
+ *  an invoice." Deliberately its own predicate rather than a === so the board and the calendar can
+ *  never disagree about what counts. */
+export const isServiceCall = (t: string | null | undefined): boolean => t === "service_call";
 export const isInspectionType = (t: string | null | undefined): boolean =>
   (INSPECTION_TYPES as readonly string[]).includes(t ?? "");
 
 const APPOINTMENT_TYPE_LABELS: Record<AppointmentType, string> = {
   inspection: "Inspection",
   final_inspection: "Final inspection",
+  service_call: "Service call",
   quote: "Quote / estimate",
   meeting: "Client meeting",
   appointment: "Appointment",
