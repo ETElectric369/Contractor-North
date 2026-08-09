@@ -40,6 +40,11 @@ interface JobForm {
   status: string;
   billing_type: string;
   address: string;
+  /** The resolved parts from the picker. Absent for typed input — see 0177: a guessed city is
+   *  worse than a blank one, so these stay empty unless a suggestion was actually chosen. */
+  city: string;
+  state: string;
+  zip: string;
   scheduled_date: string;
   scheduled_time: string; // optional "HH:MM"; blank = all-day (default 8–4 window)
   description: string;
@@ -78,6 +83,9 @@ export function NewJobButton({
     billing_type: "tm",
     // A launch-context customer (the customer-page button) prefills too — still editable.
     address: defaultCustomerId ? customerAddress(defaultCustomerId) : "",
+    city: "",
+    state: "",
+    zip: "",
     scheduled_date: today,
     scheduled_time: "",
     description: "",
@@ -318,12 +326,29 @@ export function NewJobButton({
               defaultValue={form.address}
               // Guard: onTextChange also fires on mount with the unchanged value;
               // patching then would plant a pristine "draft" just from opening.
-              onTextChange={(v) => v !== form.address && patch({ address: v })}
+              // Typing over a picked address DROPS its parts: they describe the old line, and a
+              // city left behind from a different street is exactly the false value 0177 forbids.
+              onTextChange={(v) => v !== form.address && patch({ address: v, city: "", state: "", zip: "" })}
+              // STREET ONLY. Without this, address-autocomplete:145 writes Google's whole
+              // "1871 Apache Ct Olympic Valley CA 96146 United States" line into ONE column while
+              // handing us city/state/zip as separate strings that were then dropped. That is
+              // where every blob row in the book came from — this form manufactured them.
+              streetOnly
               onResolved={(p) => {
                 // Auto-fill the job name with "number + street" when empty.
-                if (!form.name.trim() && p.line1) patch({ name: p.line1 });
+                patch({
+                  ...(form.name.trim() || !p.line1 ? {} : { name: p.line1 }),
+                  city: p.city ?? "",
+                  state: p.state ?? "",
+                  zip: p.zip ?? "",
+                });
               }}
             />
+            {/* Hidden because the picker fills them and the street box is what he reads. They are
+                still SUBMITTED, which is the entire point — the parts existed all along. */}
+            <input type="hidden" name="city" value={form.city} />
+            <input type="hidden" name="state" value={form.state} />
+            <input type="hidden" name="zip" value={form.zip} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>

@@ -413,8 +413,6 @@ export async function linkAppointmentTo(
     name = r.name;
     address = formatFullAddress(r.address, r.city, r.state, r.zip) || null;
     parts = { city: r.city ?? null, state: r.state ?? null, zip: r.zip ?? null };
-    parts = { city: r.city ?? null, state: r.state ?? null, zip: r.zip ?? null };
-    parts = { city: r.city ?? null, state: r.state ?? null, zip: r.zip ?? null };
   } else if (kind === "customer") {
     const { data: r } = await supabase
       .from("customers")
@@ -425,6 +423,11 @@ export async function linkAppointmentTo(
     patch.customer_id = r.id;
     name = r.name;
     address = formatFullAddress(r.address, r.city, r.state, r.zip) || null;
+    // KEEPING WHAT WE ALREADY FETCHED. This branch and the job branch below both selected
+    // city/state/zip, spent them on a display string, and dropped them — so `if (parts)` at the
+    // bottom was dead for two of the three link kinds. That is the whole reason 19 of Erik's 19
+    // appointments have a location and none has a city. Not a guess: the columns are right here.
+    parts = { city: r.city ?? null, state: r.state ?? null, zip: r.zip ?? null };
   } else {
     const { data: r } = await supabase
       .from("jobs")
@@ -436,6 +439,7 @@ export async function linkAppointmentTo(
     if (r.customer_id) patch.customer_id = r.customer_id;
     name = r.name ?? r.job_number;
     address = formatFullAddress(r.address, r.city, r.state, r.zip) || null;
+    parts = { city: r.city ?? null, state: r.state ?? null, zip: r.zip ?? null };
   }
 
   // FILL, NEVER OVERWRITE — the same law the inspector's Nort channel obeys.
@@ -817,7 +821,7 @@ export async function createJobFromAppointment(appointmentId: string): Promise<R
 
   const { data: appt } = await supabase
     .from("appointments")
-    .select("id, title, customer_id, location, job_id, starts_at")
+    .select("id, title, customer_id, location, city, state, zip, job_id, starts_at")
     .eq("id", appointmentId)
     .maybeSingle();
   if (!appt) return { ok: false, error: "Appointment not found." };
@@ -831,6 +835,14 @@ export async function createJobFromAppointment(appointmentId: string): Promise<R
       status: "scheduled",
       scheduled_start: appt.starts_at,
       address: appt.location,
+      // THE PARTS TRAVEL WITH THE LINE. This selected `location` alone and pushed that one string
+      // into jobs.address with city/state/zip null — the exact Waldow/Cohen blob shape, minted
+      // fresh on every job born from an appointment. `location` is already a formatted full line,
+      // so carrying the parts alongside it would print the town twice; siteLines suppresses the
+      // second line when the first carries its own tail, which is why this is now safe to do.
+      city: (appt as { city?: string | null }).city ?? null,
+      state: (appt as { state?: string | null }).state ?? null,
+      zip: (appt as { zip?: string | null }).zip ?? null,
       created_by: ctx.userId,
     })
     .select("id")

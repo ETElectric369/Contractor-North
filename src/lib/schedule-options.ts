@@ -53,7 +53,15 @@ export const jobSiteLabel = (j: {
 };
 
 export const toJobOptions = (rows: any[] | null | undefined): PickerOption[] =>
-  (rows ?? []).map((j) => ({ id: j.id, label: jobLabel(j), address: j.address ?? null }));
+  // SAME FILE, SAME PURPOSE, AND IT USED TO BEHAVE THE OPPOSITE WAY to toCustomerOptions right
+  // below: prefilling an appointment from a CUSTOMER gave a full line, from a JOB gave a bare
+  // street — because this one passed j.address straight through while that one ran
+  // formatFullAddress. Every downstream picker inherited the difference for free.
+  (rows ?? []).map((j) => ({
+    id: j.id,
+    label: jobLabel(j),
+    address: formatFullAddress(j.address, j.city, j.state, j.zip) || j.address || null,
+  }));
 export const toCustomerOptions = (rows: any[] | null | undefined): PickerOption[] =>
   // `address` rides along ONLY when the query fetched the parts (listNewJobCustomerOptions).
   // Optional by design: the plain pickers keep shipping two columns, and a surface that wants
@@ -115,7 +123,7 @@ export function addressPrefillOnCustomerPick(
  *  callers that don't already have the rows on hand. */
 export async function getSchedulePickerOptions(supabase: SupabaseClient) {
   const [{ data: jobs }, { data: customers }, { data: staff }] = await Promise.all([
-    supabase.from("jobs").select("id, job_number, name, address").order("created_at", { ascending: false }).limit(200),
+    supabase.from("jobs").select("id, job_number, name, address, city, state, zip").order("created_at", { ascending: false }).limit(200),
     // The richer query: an appointment IS a place you have to drive to, so its picker needs the
     // address the same way the new-job form does. Bounded by the org's own customer count.
     listNewJobCustomerOptions(supabase),

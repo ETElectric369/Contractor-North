@@ -128,6 +128,11 @@ export async function createJob(formData: FormData): Promise<Result> {
       status,
       billing_type: String(formData.get("billing_type") ?? "tm"), // T&M is the default now (Estimate); switch to fixed per job
       address,
+      // The parts the picker resolved. A fixed form is no help if the insert has nowhere to put
+      // them — same shape updateJob has used all along (jobs/actions.ts:396-398).
+      city: emptyToNull(formData.get("city")),
+      state: emptyToNull(formData.get("state")),
+      zip: emptyToNull(formData.get("zip")),
       scheduled_start: start ? new Date(start).toISOString() : null,
       created_by: ctx.userId,
     })
