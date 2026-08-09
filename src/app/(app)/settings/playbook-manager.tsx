@@ -118,6 +118,9 @@ export interface PlaybookForm {
   needs: Need[];
   /** False when the needs were converted from the sheet — saving is what promotes it. */
   owned: boolean;
+  /** THE ONE THE PUBLIC DOOR SERVES. Without saying this out loud, two forms with sensible names
+   *  are indistinguishable, and the customer-facing questions get written into the private one. */
+  isWebsite?: boolean;
 }
 
 export function PlaybookManager({
@@ -231,13 +234,31 @@ export function PlaybookManager({
     <div className="space-y-4">
       {forms.length > 1 && (
         <div>
-          <Label className="mb-1.5">Which walk-through</Label>
+          <Label className="mb-1.5">Which set of questions</Label>
           <Select value={formId} onChange={(e) => setFormId(e.target.value)}>
             {forms.map((f) => (
-              <option key={f.id} value={f.id}>{f.name}</option>
+              <option key={f.id} value={f.id}>
+                {f.name}
+                {f.isWebsite ? " — your website" : ""}
+              </option>
             ))}
           </Select>
         </div>
+      )}
+
+      {/* WHO IS GOING TO READ THESE. The whole confusion is that both lists are "questions", and
+          one of them is answered by a stranger on a phone who will never see the rest of the app. */}
+      {form.isWebsite ? (
+        <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+          <strong className="font-medium">These are the questions on your website.</strong> A customer
+          answers them at your public &ldquo;request an estimate&rdquo; link and lands on your Leads
+          board. Keep them short — every question is a chance to leave.
+        </p>
+      ) : (
+        <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
+          Your own walk-through — what you ask yourself standing on the job. Never shown to a customer.
+          {forms.some((f) => f.isWebsite) ? " Your website's questions are a separate set in the picker above." : ""}
+        </p>
       )}
 
       {!form.owned && (

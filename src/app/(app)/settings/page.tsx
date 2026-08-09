@@ -196,9 +196,27 @@ export default async function SettingsPage({
   // THE PLAYBOOK — the questions this company's own inspector asks, and why each one exists.
   // Read tolerantly: `playbook` is 0179 and a deploy lands before its migration, and a select
   // naming a column that doesn't exist yet fails the whole query rather than degrading.
+  //
+  // THE WEBSITE'S QUESTIONS BELONG IN HERE TOO. This query said `.eq("is_inspection", true)` and
+  // nothing else, so the PUBLIC INTAKE form — is_inspection false, is_public_intake true — was not
+  // in the editor at all. Andrew (Vivian Builders, beta) spent a day writing eleven customer-facing
+  // questions, could only find the walk-through to put them in, put them there, and then asked
+  // whether his Wix embed code was broken. It wasn't: his questions were in the internal form and
+  // the door was faithfully serving the other one. Meanwhile the Intake card told him in plain
+  // English that "the questions live in the Customer intake form under Playbook" — a sentence this
+  // select made false.
+  //
+  // `.or()` rather than dropping the filter: a form that is neither an inspection nor the intake
+  // door (his Job Site Safety Checklist) is not a playbook and must stay out.
   const inspectionForms = isStaff
-    ? await tolerateMissingColumns<{ id: string; name: string; schema: unknown; playbook: unknown }[]>(() =>
-        supabase.from("forms").select("id, name, schema, playbook").eq("is_inspection", true).order("name"),
+    ? await tolerateMissingColumns<
+        { id: string; name: string; schema: unknown; playbook: unknown; is_public_intake: boolean | null }[]
+      >(() =>
+        supabase
+          .from("forms")
+          .select("id, name, schema, playbook, is_public_intake")
+          .or("is_inspection.eq.true,is_public_intake.eq.true")
+          .order("name"),
       )
     : null;
   const playbookForms = (inspectionForms ?? []).map((f) => ({
@@ -208,6 +226,8 @@ export default async function SettingsPage({
     // real current questions rather than an empty page somebody has to guess at.
     needs: playbookForForm(f).needs,
     owned: parsePlaybook(f.playbook).needs.length > 0,
+    /** True for the one form the public door serves — the picker says so out loud. */
+    isWebsite: !!f.is_public_intake,
   }));
 
   // ── "You" — everything personal (profile, notifications, language, security). ─────────
