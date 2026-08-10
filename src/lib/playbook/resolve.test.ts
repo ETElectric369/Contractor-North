@@ -255,3 +255,48 @@ describe("applyFills — fill holes, never overwrite, never drop silently", () =
     expect(r.rejected.map((f) => f.key)).toEqual(["sqft"]);
   });
 });
+
+/**
+ * THE KEYBOARD BUG, as a resolver fact — bug 48fbfd6e, "Can't type, keyboard disappears with one
+ * click", filed from 13125 Moraine Rd. That walk-through's scope still reads "The scope of the job
+ * is to add" and stops there: he could not enter the rest.
+ *
+ * The inspector renders a need in exactly ONE of three lists — ask / spine / answered — chosen by
+ * whether it has an answer. Those are three different places in the tree, so the FIRST character
+ * moved the textarea to another branch, React remounted it, and iOS took the keyboard with it.
+ *
+ * The fix holds the classification still while the cursor is in the field: the inspector passes a
+ * view of the answers with the focused key blanked, so a half-typed answer is not yet an answer.
+ * These assertions are what that view has to make true.
+ */
+describe("a half-typed answer must not reclassify its own field", () => {
+  const pb: Playbook = {
+    needs: [
+      { key: "work", label: "Scope", ask: "What's the work?" },
+      { key: "panel", label: "Panel", ask: "What's the panel?", slot: { type: "text" } },
+    ],
+  };
+
+  it("one character normally moves the need out of the ask — the bug", () => {
+    expect(missingNeeds(pb, {}).map((n) => n.key)).toContain("work");
+    expect(missingNeeds(pb, { work: "T" }).map((n) => n.key)).not.toContain("work");
+  });
+
+  it("blanking the focused key keeps it exactly where it was, mid-word", () => {
+    const settled = { work: null };
+    expect(missingNeeds(pb, settled).map((n) => n.key)).toContain("work");
+    // …and it stays there no matter how much he types, until he leaves the field.
+    expect(missingNeeds(pb, { ...settled }).map((n) => n.key)).toContain("work");
+  });
+
+  it("only the FOCUSED field is held — everything else classifies normally", () => {
+    const settled = { work: null, panel: "Siemens 200A" };
+    const keys = missingNeeds(pb, settled).map((n) => n.key);
+    expect(keys).toContain("work");
+    expect(keys).not.toContain("panel");
+  });
+
+  it("on blur it reclassifies, which is when he is actually done", () => {
+    expect(missingNeeds(pb, { work: "2 outlets on each of 3 walls" }).map((n) => n.key)).not.toContain("work");
+  });
+});

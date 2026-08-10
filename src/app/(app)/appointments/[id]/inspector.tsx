@@ -34,13 +34,30 @@ import { saveInspectionAnswers, saveInspectionCapture, setAppointmentPlace } fro
 /** A numeric field that can be EMPTY. Deliberately not NumberInput: its value is a `number` and
  *  it renders 0 as blank, so "I didn't count it" and "zero of them" become the same stored value —
  *  and a silent zero reads as a real measurement all the way to a customer's price. */
-function NumBox({ value, onValue, className }: { value: number | null; onValue: (n: number | null) => void; className?: string }) {
+function NumBox({
+  value,
+  onValue,
+  className,
+  onFocus,
+  onBlur,
+}: {
+  value: number | null;
+  onValue: (n: number | null) => void;
+  className?: string;
+  /** Same keyboard-stealing bug as the prose boxes: the first DIGIT flips isAnswered, the field
+   *  moves to another branch of the tree, and iOS takes the keyboard with it. A measurement is
+   *  rarely one digit. */
+  onFocus?: () => void;
+  onBlur?: () => void;
+}) {
   return (
     <Input
       autoComplete="off"
       inputMode="decimal"
       value={value === null ? "" : String(value)}
       className={className}
+      onFocus={onFocus}
+      onBlur={onBlur}
       onChange={(e) => onValue(looseNumber(e.target.value))}
     />
   );
@@ -212,7 +229,29 @@ export function Inspector({
 
   // THE ASK is what applies AND is still unanswered. The moment you answer something it leaves
   // the top and shows up below — the top of the screen is never a list of things you've done.
-  const open = useMemo(() => missingNeeds(playbook, answers), [playbook, answers]);
+  // ── THE FIELD YOU ARE TYPING IN DOES NOT MOVE ────────────────────────────────────────────
+  //
+  // Erik, bug 48fbfd6e, filed from 13125 Moraine Rd: "Can't type, keyboard disappears with one
+  // click." That inspection's scope still reads "The scope of the job is to add" and stops there.
+  // He didn't lose the rest — he could never enter it.
+  //
+  // THE MECHANISM. A need lives in exactly ONE of three lists, and which one depends on whether it
+  // has an answer yet: `ask` while empty, then `spine` or `answered` once it isn't. Those are three
+  // separate .map() blocks in three different places in the tree. So the FIRST character he typed
+  // flipped isAnswered, moved the need to another branch, and React unmounted the textarea and
+  // mounted a new one somewhere else. On iOS an unmounted input takes the keyboard with it. One
+  // character per tap, forever.
+  //
+  // The fix is to hold the classification still while the cursor is in the field, rather than to
+  // rearrange the zones: an answer half-typed is not yet an answer, and treating it as one is what
+  // moved the furniture out from under him. It reclassifies on blur, which is when he's done.
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const settled = useMemo(
+    () => (editingKey ? { ...answers, [editingKey]: null } : answers),
+    [answers, editingKey],
+  );
+
+  const open = useMemo(() => missingNeeds(playbook, settled), [playbook, settled]);
 
   // ── THE SPINE STAYS UP TOP ───────────────────────────────────────────────────────────────
   // Erik, looking at the Sara Cain walk-through: "i updated the scope and now its at the bottom
@@ -234,17 +273,17 @@ export function Inspector({
   const retired = useMemo(() => retiredAnswers(playbook, initialAnswers), [playbook, initialAnswers]);
 
   const spine = useMemo(
-    () => applicableNeeds(playbook, answers).filter((n) => isOpen(n) && isAnswered(answers[n.key])),
-    [playbook, answers],
+    () => applicableNeeds(playbook, settled).filter((n) => isOpen(n) && isAnswered(settled[n.key])),
+    [playbook, settled],
   );
   const answered = useMemo(() => {
     const stillOpen = new Set(open.map((n) => n.key));
     // Slotted needs only — an answered OPEN need is now pinned up top, and showing it in both
     // places would put the same textarea on screen twice with two cursors into one value.
-    return applicableNeeds(playbook, answers).filter((n) => !stillOpen.has(n.key) && !isOpen(n));
-  }, [playbook, answers, open]);
+    return applicableNeeds(playbook, settled).filter((n) => !stillOpen.has(n.key) && !isOpen(n));
+  }, [playbook, settled, open]);
   // What's on screen now vs what's one tap away — see splitAsk. `open` stays the honest count.
-  const { ask, reach } = useMemo(() => splitAsk(playbook, answers, opened), [playbook, answers, opened]);
+  const { ask, reach } = useMemo(() => splitAsk(playbook, settled, opened), [playbook, settled, opened]);
 
   const readiness = inspectorReadiness({
     ...stored,
@@ -391,6 +430,8 @@ export function Inspector({
       return (
         <Textarea
           autoComplete="off"
+          onFocus={() => setEditingKey(n.key)}
+          onBlur={() => setEditingKey((k) => (k === n.key ? null : k))}
           // GROWS WITH WHAT HE WROTE. Sara Cain's scope is 8 lines and ~700 characters; at a fixed
           // 2 rows he could see two of them, which is half of why it read as lost rather than moved.
           rows={Math.min(14, Math.max(3, text.split("\n").length + 1))}
@@ -482,7 +523,12 @@ export function Inspector({
     if (n.slot.type === "number")
       return (
         <div className="flex items-center gap-2">
-          <NumBox value={typeof v === "number" ? v : null} onValue={(x) => setAnswer(n.key, x)} />
+          <NumBox
+            value={typeof v === "number" ? v : null}
+            onValue={(x) => setAnswer(n.key, x)}
+            onFocus={() => setEditingKey(n.key)}
+            onBlur={() => setEditingKey((k) => (k === n.key ? null : k))}
+          />
           {n.slot.unit && <span className="shrink-0 text-sm text-slate-500">{n.slot.unit}</span>}
         </div>
       );
@@ -624,13 +670,26 @@ export function Inspector({
     }
 
     return (n.slot.type === "text" && n.slot.long) ? (
-      <Textarea autoComplete="off" rows={2} value={typeof v === "string" ? v : ""} onChange={(e) => setAnswer(n.key, e.target.value)} />
+      <Textarea
+        autoComplete="off"
+        rows={2}
+        value={typeof v === "string" ? v : ""}
+        onFocus={() => setEditingKey(n.key)}
+        onBlur={() => setEditingKey((k) => (k === n.key ? null : k))}
+        onChange={(e) => setAnswer(n.key, e.target.value)}
+      />
     ) : (
       // NO AUTOFILL ON AN ANSWER BOX. Erik, mid-walk-through: "a window to my personal contacts
       // popped up where it shouldnt." Safari heuristically offers Contacts on any bare text input,
       // and a playbook question is the worst possible place for it — he types a customer's name
       // into Scope and the browser then offers his address book over the Materials field.
-      <Input autoComplete="off" value={typeof v === "string" ? v : ""} onChange={(e) => setAnswer(n.key, e.target.value)} />
+      <Input
+        autoComplete="off"
+        value={typeof v === "string" ? v : ""}
+        onFocus={() => setEditingKey(n.key)}
+        onBlur={() => setEditingKey((k) => (k === n.key ? null : k))}
+        onChange={(e) => setAnswer(n.key, e.target.value)}
+      />
     );
   };
 
