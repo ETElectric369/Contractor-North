@@ -14,6 +14,7 @@ import { getOrgSettings, accentHex, orgPublicBaseUrl } from "@/lib/org-settings"
 import { renderReadyBlocks } from "@/lib/public-pages";
 import { OrgSettingsForm } from "./org-settings-form";
 import { DocumentDesigner } from "./document-designer";
+import { PriceListCard } from "./price-list-card";
 import { LogoUpload } from "./logo-upload";
 import { LanguageToggle } from "./language-toggle";
 import { MapsProviderToggle } from "./maps-provider-toggle";
@@ -107,6 +108,14 @@ export default async function SettingsPage({
     supabase.from("pricing_levels").select("id, name, markup_pct, labor_rate, is_default").order("created_at"),
     supabase.from("job_code_templates").select("id, name, codes").order("name"),
     supabase.from("job_codes").select("id, code, description, billable, active").order("code"),
+  ]);
+
+  // THE PRICE-LIST PANE'S NUMBERS — counts, never rows. head:true sends no body, so this stays
+  // three cheap COUNT queries whatever the size of somebody's book.
+  const [{ count: priceItemCount }, { count: priceUnpriced }, { count: priceNoMarkup }] = await Promise.all([
+    supabase.from("price_list_items").select("id", { count: "exact", head: true }).eq("archived", false),
+    supabase.from("price_list_items").select("id", { count: "exact", head: true }).eq("archived", false).lte("buy_price", 0),
+    supabase.from("price_list_items").select("id", { count: "exact", head: true }).eq("archived", false).lte("markup_pct", 0),
   ]);
 
   // The public intake door (0185): on = exactly one form flagged is_public_intake. Read
@@ -509,6 +518,20 @@ export default async function SettingsPage({
               {/* "How we quote" moved to the Playbook cluster — it is the same idea one step
                   later (what you ask on site → how the estimate gets written), and having two
                   things called a playbook in two different clusters was the confusion. */}
+              {/* The price list is its own page and stays there — this is the door plus the one
+                  thing that genuinely belongs in Settings: which markup governs it. */}
+              <Section title="Price list">
+                <PriceListCard
+                  itemCount={priceItemCount ?? 0}
+                  unpricedCount={priceUnpriced ?? 0}
+                  noMarkupCount={priceNoMarkup ?? 0}
+                  defaultMarkupPct={settings.default_markup_pct}
+                  levels={((pricingLevels ?? []) as { name: string; markup_pct: number }[]).map((l) => ({
+                    name: l.name,
+                    markup_pct: l.markup_pct,
+                  }))}
+                />
+              </Section>
               <Section title="Payment methods"><PaymentMethods settings={settings} /></Section>
               <Section title="Estimate & invoice defaults"><DocumentSettings settings={settings} /></Section>
               <Section title="Numbering">

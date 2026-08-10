@@ -95,7 +95,10 @@ describe("DOCK office — Team present, Settings link absent (settings doctrine)
 
   it("Office does NOT own /settings — Settings is its own territory (its own side-tab drives it)", () => {
     expect(children.some((c) => c.owns?.some((p) => basePath(p) === "/settings"))).toBe(false);
-    expect(activeSection("/settings")).toBeUndefined();
+    // FOR STAFF, who reach Settings behind the avatar. A TECH now has a "You" tile pointing at the
+    // one cluster that is his (cn-v694), so the audience has to be named — the doctrine did not
+    // change, it just stopped being universal.
+    expect(activeSection("/settings", DOCK.filter((x) => !x.techOnly))).toBeUndefined();
   });
 
   it("zero duplication: /team has exactly one dock home", () => {
@@ -179,9 +182,11 @@ describe("activeSection — child detail routes light the right section", () => 
     expect(key("/tasks/site-prep")).toBe("today");
   });
 
-  it("the team roster lights Office; settings lights NOTHING (its own territory)", () => {
+  it("the team roster lights Office; settings lights NOTHING for staff (its own territory)", () => {
     expect(key("/team")).toBe("office");
-    expect(key("/settings")).toBeUndefined(); // owned by no dock section — its own side-tab drives it
+    // Staff only: no dock section owns Settings, the avatar menu is its door. A tech's "You" tile
+    // deliberately does own it — see the You-tile block below.
+    expect(activeSection("/settings", DOCK.filter((x) => !x.techOnly))).toBeUndefined();
   });
 
   it("unmapped routes match NOTHING — light nothing, never lie", () => {
@@ -221,5 +226,33 @@ describe("the section nav must be REACHABLE at every width (cn-v660 regression)"
       const n = DOCK.find((s) => s.key === key)!.children.filter((c) => c.href).length;
       expect(n, `${key} has ${n} pages`).toBeGreaterThan(4);
     }
+  });
+});
+
+/**
+ * THE TECH-ONLY "You" TILE. Erik: "i like that tech have a you settings and since its all already
+ * moved to the dock how about make it on the dock for them only." Staff reach Settings through the
+ * avatar menu (cn-v326) and have no use for a second door; a tech has no business in the other
+ * nine groups but every right to his own name, photo, language and notifications.
+ */
+describe("the You tile is a tech's door and nobody else's", () => {
+  const staff = DOCK.filter((s) => !s.techOnly);
+  const tech = DOCK.filter((s) => !s.staffOnly);
+
+  it("techs get it, staff never see it", () => {
+    expect(tech.some((s) => s.key === "you")).toBe(true);
+    expect(staff.some((s) => s.key === "you")).toBe(false);
+  });
+
+  it("lights on /settings for a tech — its href carries a ?query, a pathname never does", () => {
+    expect(activeSection("/settings", tech)?.key).toBe("you");
+  });
+
+  it("does NOT hijack /settings for staff, who reach it outside the dock", () => {
+    expect(activeSection("/settings", staff)?.key).toBeUndefined();
+  });
+
+  it("renders no page column — it has no children, and the column needs more than one", () => {
+    expect(DOCK.find((s) => s.key === "you")?.children).toEqual([]);
   });
 });

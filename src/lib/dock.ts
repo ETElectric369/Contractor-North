@@ -71,6 +71,13 @@ export interface DockSection {
   children: DockNode[];
   /** Whole section hidden from techs (office/admin/owner only). */
   staffOnly?: boolean;
+  /** The mirror: hidden from STAFF, shown only to techs. Exactly one thing uses it — the "You"
+   *  tile. Erik: "i like that tech have a you settings and since its all already moved to the
+   *  dock how about make it on the dock for them only." Staff already have a Settings door in
+   *  the avatar menu (cn-v326) and a tech has no business in the rest of Settings, so putting
+   *  the whole page behind a rail tile for them is the shortest honest path to their own
+   *  handful of switches. */
+  techOnly?: boolean;
 }
 
 /** First-letter cap for generated labels ("in progress" → "In progress"). The words stay
@@ -246,6 +253,18 @@ export const DOCK: DockSection[] = [
     children: [{ id: "c-all", label: "All Contacts", icon: Users, href: "/crm" }],
   },
   {
+    // A TECH'S OWN SETTINGS, ON THE DOCK. Everything else in /settings is the company's and is
+    // admin business — but his name, his photo, how Nort talks to him, his language, Face ID and
+    // his push notifications are his. Staff never see this tile: they reach the same page (and
+    // the other nine groups) through the avatar menu.
+    key: "you",
+    label: "You",
+    icon: UserCog,
+    href: "/settings?tab=you",
+    techOnly: true,
+    children: [],
+  },
+  {
     // Pulled out of Office to its own dock section — the calculators/utilities are a daily
     // field reach, so they get a one-tap home (everyone, not staff-only).
     key: "tools",
@@ -283,7 +302,11 @@ export function activeSection(
   const under = (base: string) => pathname === base || pathname.startsWith(base + "/");
   return sections.find(
     (s) =>
-      under(s.href) ||
+      // basePath, because a section href may carry a query — the tech-only "You" tile points at
+      // /settings?tab=you, and a raw compare against a pathname (which never has a query) would
+      // mean the tile could never light. Every other section href is query-less, so this is a
+      // no-op for them.
+      under(basePath(s.href)) ||
       s.children.some((c) => (c.href ? under(basePath(c.href)) : false) || c.owns?.some(under)),
   );
 }

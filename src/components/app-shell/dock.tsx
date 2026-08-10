@@ -38,7 +38,9 @@ function DockInner({ branding, role, badges }: DockProps) {
   const current = pathname + (search.toString() ? `?${search.toString()}` : "");
   const isStaff = role === "owner" || role === "admin" || role === "office";
   const logo = branding?.logo;
-  const sections = DOCK.filter((s) => isStaff || !s.staffOnly);
+  // staffOnly hides from techs; techOnly hides from staff. Both filters run here so every
+  // renderer below — rail tiles, the page column, the phone bottom bar — sees the same list.
+  const sections = DOCK.filter((s) => (isStaff || !s.staffOnly) && (!isStaff || !s.techOnly));
   // THE shared matcher (src/lib/dock.ts) — child detail routes (/quotes/[id], /forms/[id],
   // /purchasing/[id]…) light their owning section. No match → NOTHING lit and no rail: the
   // old `?? sections[0]` fallback lit "Today" (and railed My day/Tasks/Organize) on every
