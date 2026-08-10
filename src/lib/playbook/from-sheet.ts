@@ -20,9 +20,16 @@ function slotFor(f: InspectionField): NeedSlot {
     case "number":
       return { type: "number" };
     case "select":
-      // Single-valued, because that is what the stored sheet meant. A contractor who wants
-      // "outlets AND lights" turns multi on deliberately — we do not decide it for him.
-      return { type: "select", options: f.options ?? [] };
+      // Single-valued UNLESS the sheet says otherwise. The default is unchanged and deliberate —
+      // a contractor who wants "outlets AND lights" turns multi on himself, we never decide it
+      // for him — but a sheet that was WRITTEN from a playbook now carries what he chose, so the
+      // round-trip stops quietly narrowing his own question back down (cn-v698).
+      return {
+        type: "select",
+        options: f.options ?? [],
+        ...(f.multi ? { multi: true } : {}),
+        ...(f.other ? { other: true } : {}),
+      };
     case "checkbox":
       // A checkbox is a two-option select wearing a smaller coat, and saying so out loud is what
       // stops "Permit needed" from being answerable only as yes-or-silence. It is also the field
@@ -96,6 +103,10 @@ export function sheetFromPlaybook(pb: Playbook): InspectionField[] {
       label: n.label,
       type,
       ...(n.slot.type === "select" ? { options: n.slot.options } : {}),
+      // Both halves of what a select can be, or the mirror is lossy and clearPlaybook — the
+      // documented undo — erases answers rather than downgrading questions (cn-v698).
+      ...(n.slot.type === "select" && n.slot.multi ? { multi: true } : {}),
+      ...(n.slot.type === "select" && n.slot.other ? { other: true } : {}),
       // Only a single-clause rule survives the trip. A multi-clause need becomes UNCONDITIONAL
       // rather than half-gated: showing a question too often is a nuisance, hiding it on a rule
       // the old engine can't evaluate is a question nobody knows they were meant to answer.

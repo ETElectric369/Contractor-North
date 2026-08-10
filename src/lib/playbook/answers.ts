@@ -56,7 +56,16 @@ export function coerceNeed(n: Need, v: unknown): AnswerValue {
       // is still a trimmed, length-capped string, and a need that never opted in still rejects
       // anything off its list. Erik types into Other constantly, and a paragraph nulled on save
       // because it wasn't one of three chips is the failure mode this whole file exists to stop.
-      const free = n.slot.other ? all.filter((x) => !opts.includes(x)).map((x) => x.slice(0, 500)) : [];
+      //
+      // THE CAP IS THE OPEN CAP, NOT A CHIP CAP (cn-v698). It was 500, sized for a value that
+      // looks like a chip. But the whole reason a question carries `other` is that the listed
+      // answers are not exhaustive, and the answer that isn't listed is the PARAGRAPH — Erik's
+      // Sara Cain scope is ~700 characters, and the open branch above allows 8000. At 500 the
+      // moment a question gained choices its stored answer would be truncated on the next
+      // autosave, silently, and factsForEstimator would hand the estimator the short version as
+      // fact. One cap, both branches: the shape of the control must not decide how much of what
+      // he said survives.
+      const free = n.slot.other ? all.filter((x) => !opts.includes(x)).map((x) => x.slice(0, 8000)) : [];
 
       const kept = multi ? [...picked, ...free].slice(0, 40) : [picked[0] ?? free[0]].filter(Boolean);
       if (!kept.length) return null;

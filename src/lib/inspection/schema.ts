@@ -39,6 +39,21 @@ export interface InspectionField {
   label: string;
   type: InspectionFieldType;
   options?: string[];
+  /**
+   * SEVERAL AT ONCE, AND AN ANSWER THAT ISN'T ON THE LIST (cn-v698).
+   *
+   * These are playbook properties, and the sheet is the playbook's mirror — savePlaybook writes
+   * sheetFromPlaybook(pb) on every save, and clearPlaybook ("back to the plain sheet") reads it
+   * back as the source of truth. Until now the mirror dropped both, so the documented undo was a
+   * silent data-destroying operation: eight of Vivian Builders' Site-inspection needs are multi,
+   * and a multi answer rebuilt as a single select coerces from ["Framing","Electrical","Deck"] to
+   * "Framing" on the next autosave. `other` is worse — its free-text answer coerces to null.
+   *
+   * They live here rather than in a parallel structure for the same reason the whole bridge
+   * exists: two shapes for one fact is how a book and a quote start disagreeing.
+   */
+  multi?: boolean;
+  other?: boolean;
   showIf?: InspectionShowIf;
   /** Marks a field as something MEASURED on site rather than context. Measured answers are the
    *  ones a kit can size itself from, and the ones the estimator must treat as given. */
@@ -85,6 +100,10 @@ export function parseInspectionSchema(raw: unknown): InspectionField[] {
       ...(type === "select" && Array.isArray(f.options)
         ? { options: f.options.map((o) => String(o)).filter(Boolean) }
         : {}),
+      // `=== true`, not truthy — same rule the playbook parser uses for `other`, so a stored
+      // "yes" or 1 can never quietly widen a question the contractor didn't widen.
+      ...(type === "select" && f.multi === true ? { multi: true } : {}),
+      ...(type === "select" && f.other === true ? { other: true } : {}),
       ...(showKey && showIn.length ? { showIf: { key: showKey, in: showIn } } : {}),
       ...(f.measured === true ? { measured: true } : {}),
     });

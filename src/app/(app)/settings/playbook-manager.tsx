@@ -80,15 +80,21 @@ const kindOf = (n: Need): Kind =>
 /** Changing the kind keeps whatever the old kind had that the new one can still use. */
 function slotForKind(kind: Kind, prev: NeedSlot | undefined): NeedSlot | undefined {
   const options = prev && prev.type === "select" ? prev.options : ["Yes", "No"];
+  // `other` SURVIVES A KIND CHANGE (cn-v698). `multi` is dropped on purpose — one-vs-many IS the
+  // thing the dropdown selects. `other` was dropped by omission, and the doc-comment above was
+  // false about it: a select→select change can obviously still use it. The cost was silent —
+  // flipping "many" to "one" and back unticked "Let me write my own answer too" with no warning,
+  // and the free-text answers behind it coerce to null on the next autosave.
+  const keepOther = prev && prev.type === "select" && prev.other ? { other: true as const } : {};
   switch (kind) {
     case "open":
       return undefined;
     case "number":
       return { type: "number", ...(prev && prev.type === "number" && prev.unit ? { unit: prev.unit } : {}) };
     case "one":
-      return { type: "select", options };
+      return { type: "select", options, ...keepOther };
     case "many":
-      return { type: "select", options, multi: true };
+      return { type: "select", options, multi: true, ...keepOther };
     case "long":
       return { type: "text", long: true };
     case "file":

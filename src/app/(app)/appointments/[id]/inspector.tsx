@@ -246,10 +246,40 @@ export function Inspector({
   // rearrange the zones: an answer half-typed is not yet an answer, and treating it as one is what
   // moved the furniture out from under him. It reclassifies on blur, which is when he's done.
   const [editingKey, setEditingKey] = useState<string | null>(null);
-  const settled = useMemo(
-    () => (editingKey ? { ...answers, [editingKey]: null } : answers),
-    [answers, editingKey],
-  );
+  // ── AND NEITHER DOES THE CHIP GRID YOU ARE HALF-WAY THROUGH TAPPING ──────────────────────
+  //
+  // `editingKey` is set by onFocus, and a <button> chip fires no focus event, so it structurally
+  // cannot protect a chip row. That is fine for a SINGLE select — one tap is the whole answer, and
+  // the need dropping to Zone B afterwards is the rule Erik liked ("answer it and it leaves the
+  // top"). It is wrong for a MULTI select, where several taps are the point.
+  //
+  // What happens without this: tap "Wire" on a nine-category grid, isAnswered goes true on an
+  // array of length 1, and the entire grid relocates to a different .map() block further down the
+  // page. Taps two and three have to go find it. Worse, pulling ~150px of chips out of the ask
+  // block shifts everything below it UP, so a second tap aimed where "Lighting & fans" was a beat
+  // ago lands on whatever slid into that spot — a wrong answer on a different question, with no
+  // feedback at all. That is bug 48fbfd6e's twin: same cause (the classification moved mid-gesture),
+  // different input device.
+  //
+  // Vivian Builders' Site inspection has EIGHT multi-selects, so this is Andrew's sheet, live.
+  //
+  // It clears on the next interaction with any other need rather than on a timer, because a timer
+  // would make the furniture move on its own schedule instead of his.
+  const [multiKey, setMultiKey] = useState<string | null>(null);
+  const settled = useMemo(() => {
+    if (!editingKey && !multiKey) return answers;
+    const out = { ...answers };
+    // Both, not one: a held chip grid and a focused textarea are different needs, and dropping
+    // either hold to make room for the other is the bug all over again on whichever lost.
+    if (editingKey) out[editingKey] = null;
+    if (multiKey) out[multiKey] = null;
+    return out;
+  }, [answers, editingKey, multiKey]);
+  /** Focusing a field is attention leaving whatever chip grid was being tapped. */
+  const focusNeed = (key: string) => {
+    setEditingKey(key);
+    setMultiKey((k) => (k === key ? k : null));
+  };
 
   const open = useMemo(() => missingNeeds(playbook, settled), [playbook, settled]);
 
@@ -430,7 +460,7 @@ export function Inspector({
       return (
         <Textarea
           autoComplete="off"
-          onFocus={() => setEditingKey(n.key)}
+          onFocus={() => focusNeed(n.key)}
           onBlur={() => setEditingKey((k) => (k === n.key ? null : k))}
           // GROWS WITH WHAT HE WROTE. Sara Cain's scope is 8 lines and ~700 characters; at a fixed
           // 2 rows he could see two of them, which is half of why it read as lost rather than moved.
@@ -469,8 +499,14 @@ export function Inspector({
                     // lights, both true at once. Deselecting the last one is null, not [], because
                     // an empty array reads as answered-with-nothing and the question would leave
                     // the screen having never been answered.
-                    if (multi) put(on ? listed.filter((x) => x !== o) : [...listed, o], free);
-                    else put(on ? [] : [o], "");
+                    //
+                    // HOLD THE GRID STILL while he works through it — see multiKey. Only for a
+                    // multi: a single select IS finished in one tap, and dropping it to Zone B
+                    // then is the behaviour he asked for, not a bug.
+                    if (multi) {
+                      setMultiKey(n.key);
+                      put(on ? listed.filter((x) => x !== o) : [...listed, o], free);
+                    } else put(on ? [] : [o], "");
                   }}
                   className={
                     on
@@ -489,6 +525,7 @@ export function Inspector({
               <button
                 type="button"
                 onClick={() => {
+                  if (multi) setMultiKey(n.key);
                   if (showOther) {
                     // Closing clears what he typed — prose stranded behind a hidden box is an
                     // answer nobody can find, which is the failure this file keeps coming back to.
@@ -510,6 +547,15 @@ export function Inspector({
           {showOther && (
             <Textarea
               autoComplete="off"
+              // THE ONE TEXT CONTROL IN THIS FILE THAT HAD NO FOCUS WIRING. The open textarea, the
+              // NumBox and the long-text box all set editingKey; this one never did, so the moment
+              // any need carries `other: true` the first character typed here would flip isAnswered,
+              // move the need to another .map() block, and take the iOS keyboard with it — bug
+              // 48fbfd6e rebuilt inside the door that was meant to fix the wall. It has never bitten
+              // because `other` is set on zero of the 56 needs in production. That is luck, not a
+              // design, and it runs out the first time somebody ticks the box.
+              onFocus={() => focusNeed(n.key)}
+              onBlur={() => setEditingKey((k) => (k === n.key ? null : k))}
               rows={Math.min(10, Math.max(2, free.split("\n").length + 1))}
               placeholder="In your own words"
               value={free}
@@ -526,7 +572,7 @@ export function Inspector({
           <NumBox
             value={typeof v === "number" ? v : null}
             onValue={(x) => setAnswer(n.key, x)}
-            onFocus={() => setEditingKey(n.key)}
+            onFocus={() => focusNeed(n.key)}
             onBlur={() => setEditingKey((k) => (k === n.key ? null : k))}
           />
           {n.slot.unit && <span className="shrink-0 text-sm text-slate-500">{n.slot.unit}</span>}
@@ -674,7 +720,7 @@ export function Inspector({
         autoComplete="off"
         rows={2}
         value={typeof v === "string" ? v : ""}
-        onFocus={() => setEditingKey(n.key)}
+        onFocus={() => focusNeed(n.key)}
         onBlur={() => setEditingKey((k) => (k === n.key ? null : k))}
         onChange={(e) => setAnswer(n.key, e.target.value)}
       />
@@ -686,7 +732,7 @@ export function Inspector({
       <Input
         autoComplete="off"
         value={typeof v === "string" ? v : ""}
-        onFocus={() => setEditingKey(n.key)}
+        onFocus={() => focusNeed(n.key)}
         onBlur={() => setEditingKey((k) => (k === n.key ? null : k))}
         onChange={(e) => setAnswer(n.key, e.target.value)}
       />

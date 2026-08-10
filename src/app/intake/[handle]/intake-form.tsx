@@ -196,26 +196,74 @@ export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: 
             </div>
           ) : n.slot?.type === "select" ? (
             n.slot.multi ? (
-              <div className="flex flex-wrap gap-2">
-                {n.slot.options.map((o) => {
-                  const cur = Array.isArray(answers[n.key]) ? (answers[n.key] as string[]) : [];
-                  const on = cur.includes(o);
-                  return (
-                    <button
-                      key={o}
-                      type="button"
-                      onClick={() => set(n.key, on ? cur.filter((x) => x !== o) : [...cur, o])}
-                      className={
-                        on
-                          ? "min-h-[40px] rounded-full border border-slate-900 bg-slate-900 px-4 text-sm text-white"
-                          : "min-h-[40px] rounded-full border border-slate-300 bg-white px-4 text-sm text-slate-700"
-                      }
-                    >
-                      {o}
-                    </button>
-                  );
-                })}
-              </div>
+              // PICK SEVERAL — AND SAY THE THING NOBODY LISTED (cn-v698).
+              //
+              // `other` was read only in the single branch below, so a contractor who ticked
+              // "Let me write my own answer too" on a many-choice question got a checkbox that
+              // did nothing on the one surface it mattered most: the public door, where the
+              // person answering is a CUSTOMER who cannot ask anybody what the chips mean. The
+              // free value is derived from the ANSWER, never local state, exactly as the
+              // inspector does it — a half-typed sentence has to survive a re-render.
+              (() => {
+                const cur = Array.isArray(answers[n.key]) ? (answers[n.key] as string[]) : [];
+                const options = (n.slot as { options: string[] }).options;
+                const other = (n.slot as { other?: boolean }).other;
+                const listed = cur.filter((x) => options.includes(x));
+                const free = cur.find((x) => !options.includes(x)) ?? "";
+                const showOther = !!other && (!!free || otherOpen.includes(n.key));
+                const put = (opts: string[], text: string) => {
+                  const all = text.trim() ? [...opts, text] : opts;
+                  set(n.key, all.length ? all : null);
+                };
+                return (
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap gap-2">
+                      {options.map((o) => {
+                        const on = listed.includes(o);
+                        return (
+                          <button
+                            key={o}
+                            type="button"
+                            onClick={() => put(on ? listed.filter((x) => x !== o) : [...listed, o], free)}
+                            className={
+                              on
+                                ? "min-h-[40px] rounded-full border border-slate-900 bg-slate-900 px-4 text-sm text-white"
+                                : "min-h-[40px] rounded-full border border-slate-300 bg-white px-4 text-sm text-slate-700"
+                            }
+                          >
+                            {o}
+                          </button>
+                        );
+                      })}
+                      {other && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (showOther) {
+                              put(listed, "");
+                              setOtherOpen((k) => k.filter((x) => x !== n.key));
+                            } else setOtherOpen((k) => [...k, n.key]);
+                          }}
+                          className={
+                            showOther
+                              ? "min-h-[40px] rounded-full border border-slate-900 bg-slate-900 px-4 text-sm text-white"
+                              : "min-h-[40px] rounded-full border border-dashed border-slate-400 bg-white px-4 text-sm text-slate-600"
+                          }
+                        >
+                          Something else
+                        </button>
+                      )}
+                    </div>
+                    {showOther && (
+                      <Input
+                        placeholder="In your own words"
+                        value={free}
+                        onChange={(e) => put(listed, e.target.value)}
+                      />
+                    )}
+                  </div>
+                );
+              })()
             ) : (
               (() => {
                 const cur = typeof answers[n.key] === "string" ? (answers[n.key] as string) : "";

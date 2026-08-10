@@ -243,9 +243,15 @@ describe("a select with `other` — the door in the wall", () => {
       .toEqual(["Outlets", "and a bath fan on its own switch"]);
   });
 
-  it("trims and caps, so it is still a bounded string", () => {
+  it("trims and caps, so it is still a bounded string — at the OPEN length, not a chip length", () => {
     expect(coerceNeed(open, "   spaced   ")).toBe("spaced");
-    expect(String(coerceNeed(open, "x".repeat(900)))).toHaveLength(500);
+    // Was 500 until cn-v698. The point of `other` is that the unlisted answer is the PARAGRAPH —
+    // Erik's Sara Cain scope is ~700 characters — so a 500 cap meant a question that gained
+    // choices silently shortened the answer already stored against it on the next autosave. The
+    // bound still exists; it is the same bound an open need gets, because the shape of the
+    // control must not decide how much of what he said survives.
+    expect(String(coerceNeed(open, "x".repeat(900)))).toHaveLength(900);
+    expect(String(coerceNeed(open, "x".repeat(9000)))).toHaveLength(8000);
   });
 
   it("empty is still unanswered — a blank Other box never counts as answered", () => {

@@ -45,7 +45,8 @@ export const HEAR_SYSTEM =
   "character for character. Not a paraphrase, not a cleanup. A fill whose `heard` is not literally " +
   "in his words is thrown away.\n" +
   "- For a question with choices, the value must be EXACTLY one of the listed choices (or a list of " +
-  "them when it says several are allowed). If what he said is not one of them, leave it out.\n" +
+  "them when it says several are allowed). If what he said is not one of them, leave it out — " +
+  "UNLESS that question says his own words are allowed, in which case put what he said.\n" +
   "- For a number, the digits must appear in `heard`.\n" +
   "- When you are not sure, LEAVE IT OUT. A missing answer becomes a question he gets asked, which " +
   "is fine. A wrong answer becomes a price.\n" +
@@ -79,7 +80,17 @@ export function hearRequest(pb: Playbook, answers: Answers, transcript: string):
   const lines = pb.needs.filter((n) => !isAnswered(answers[n.key])).map((n) => {
     const bits = [`- key: ${n.key}`, `  question: ${n.ask}`];
     if (n.slot?.type === "select")
-      bits.push(`  choices: ${n.slot.options.join(" | ")}${n.slot.multi ? "  (a LIST of these is allowed)" : ""}`);
+      bits.push(
+        `  choices: ${n.slot.options.join(" | ")}${n.slot.multi ? "  (a LIST of these is allowed)" : ""}` +
+          // THE DOOR HAS TO BE DESCRIBED OR IT ISN'T A DOOR (cn-v698). `other: true` reached the
+          // parser, the coercer and both renderers and stopped there — the model was never told
+          // about it, and HEAR_SYSTEM says flatly "If what he said is not one of them, leave it
+          // out." So a select+other need was a CAPTURE DOWNGRADE from open: today Nort places
+          // "100 ft of 12/2 romex and 40' of 14/2" against an open materials question; with a
+          // nine-category list and no escape it would drop the quantities on the floor and the
+          // need would read as unheard.
+          (n.slot.other ? "\n  — or, if none of those fit, his own words: this question accepts an answer that is not on the list" : ""),
+      );
     else if (n.slot?.type === "number") bits.push(`  a number${n.slot.unit ? ` in ${n.slot.unit}` : ""}`);
     else if (n.slot) bits.push("  text");
     else bits.push("  anything he said, in his words");
