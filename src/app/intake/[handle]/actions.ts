@@ -13,7 +13,7 @@ import type { Answers } from "@/lib/playbook/types";
 export interface IntakePayload {
   /** Honeypot — a real person never fills it. */
   hp?: string;
-  contact: { name?: string; phone?: string; email?: string; address?: string };
+  contact: { name?: string; phone?: string; email?: string; address?: string; city?: string; state?: string; zip?: string };
   answers: Answers;
 }
 
@@ -39,6 +39,11 @@ export async function submitIntake(
   const email = String(payload?.contact?.email ?? "").trim().slice(0, 200);
   if (!phone && !email) return { ok: false, error: "Add a phone or email so we can reach you." };
   const address = String(payload?.contact?.address ?? "").trim().slice(0, 300);
+  // Resolved parts only — the client sends them only when a suggestion was picked.
+  const part = (v: unknown, n: number) => String(v ?? "").trim().slice(0, n) || null;
+  const city = part(payload?.contact?.city, 80);
+  const state = part(payload?.contact?.state, 40);
+  const zip = part(payload?.contact?.zip, 20);
 
   const ip = clientIp(await headers());
   if (await rateLimited(`intake:${ip}`, 5, 60)) {
@@ -110,6 +115,9 @@ export async function submitIntake(
     phone: phone || null,
     email: email || null,
     address: address || null,
+    city,
+    state,
+    zip,
     message: lines.join("\n").slice(0, 4000) || null,
     source: "intake",
     // Generic triage: plans → ready to quote; a written description → measure-and-talk; nothing

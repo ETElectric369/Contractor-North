@@ -173,6 +173,13 @@ export function TaxRatesManager({
 
       <div className="border-t border-slate-100 pt-4">
         <h4 className="mb-2 text-sm font-semibold text-slate-900">Defaults</h4>
+        {defaultMarkup !== materialMarkup && (
+          <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            Your two markups differ — <strong className="font-medium">{defaultMarkup}%</strong> on price-list
+            items and <strong className="font-medium">{materialMarkup}%</strong> on job materials. That is
+            allowed and sometimes deliberate. If you meant one number for everything, set both.
+          </p>
+        )}
         <div className="flex flex-wrap items-end gap-3">
           <div className="w-44">
             <Label htmlFor="fin-labor">Default labor rate ($/hr)</Label>
@@ -182,13 +189,22 @@ export function TaxRatesManager({
             <Label htmlFor="fin-mileage">Mileage rate ($/mi)</Label>
             <NumberInput id="fin-mileage" value={mileageRate} onValueChange={setMileageRate} />
           </div>
-          <div className="w-44">
-            <Label htmlFor="fin-default-markup">Default markup (%)</Label>
+          {/* TWO FIELDS, BOTH CALLED "MARKUP", GOVERNING DIFFERENT MONEY.
+              Andrew (Vivian Builders): "Default markup under Settings is set to 20%, but that
+              default is not transferring over to the Price List and Kits pages." He had set
+              Materials markup to 20 and left Default at 0 — an entirely reasonable reading of two
+              adjacent boxes that both say "markup", and the one he picked has nothing to do with
+              the price list. The values were always right; the labels never said what they drive.
+              So each now names its own destination, and the hint underneath repeats it. */}
+          <div className="w-56">
+            <Label htmlFor="fin-default-markup">Markup on price-list items (%)</Label>
             <NumberInput id="fin-default-markup" value={defaultMarkup} onValueChange={setDefaultMarkup} />
+            <p className="mt-1 text-xs text-slate-500">Estimates, the price list and kits.</p>
           </div>
-          <div className="w-44">
-            <Label htmlFor="fin-markup">Materials markup (%)</Label>
+          <div className="w-56">
+            <Label htmlFor="fin-markup">Markup on job materials (%)</Label>
             <NumberInput id="fin-markup" value={materialMarkup} onValueChange={setMaterialMarkup} />
+            <p className="mt-1 text-xs text-slate-500">Receipts and costs you bill on a job.</p>
           </div>
           <div className="w-44">
             <Label htmlFor="fin-buffer">AI estimate buffer (%)</Label>

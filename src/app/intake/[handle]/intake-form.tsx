@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { Check, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
@@ -21,7 +22,9 @@ import { submitIntake } from "./actions";
  * gives a contractor two minutes; every extra control here is a lead that closes the tab.
  */
 export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: PublicNeed[]; orgName: string }) {
-  const [contact, setContact] = useState({ name: "", phone: "", email: "", address: "" });
+  // city/state/zip are filled ONLY by the picker — a typed line leaves them empty, which is
+  // 0177's law: a guessed city is worse than a blank one.
+  const [contact, setContact] = useState({ name: "", phone: "", email: "", address: "", city: "", state: "", zip: "" });
   const [answers, setAnswers] = useState<Answers>({});
   const [hp, setHp] = useState(""); // honeypot — hidden from people, filled by bots
   // Which questions the customer has opened "Something else" on. Only tracks the EMPTY in-between —
@@ -124,7 +127,23 @@ export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: 
         </div>
         <div>
           <Label className="mb-1.5">Project address</Label>
-          <Input value={contact.address} autoComplete="street-address" onChange={(e) => setContact({ ...contact, address: e.target.value })} />
+          {/* THE ONE LEAD-CAPTURE SURFACE THAT NEVER GOT THE PICKER. Andrew asked for address
+              autocomplete here, and every sibling already had it — inquire/[org], the job form,
+              the inspector, the lead form, the CRM. This door, the one on his actual website, was
+              a plain box. It is also the single most valuable place for it: a stranger typing
+              their own address is the very start of the chain Erik means by "the right address
+              from the start", and everything downstream inherits whatever lands here.
+              streetOnly, so the box holds a street and the resolved parts ride their own columns
+              instead of being mashed into one blob. */}
+          <AddressAutocomplete
+            streetOnly
+            placeholder="Street address"
+            defaultValue={contact.address}
+            onTextChange={(v) => setContact({ ...contact, address: v, city: "", state: "", zip: "" })}
+            onResolved={(p) =>
+              setContact((c) => ({ ...c, address: p.line1 || c.address, city: p.city ?? "", state: p.state ?? "", zip: p.zip ?? "" }))
+            }
+          />
         </div>
       </div>
 
