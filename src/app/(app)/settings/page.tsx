@@ -657,16 +657,26 @@ export default async function SettingsPage({
   const navClusters = clusters.map((c) => ({ id: c.id, label: c.label }));
 
   return (
-    // Wider than max-w-3xl now: the sidebar takes a column of its own, so the content column
-    // keeps roughly the reading width it had rather than being squeezed by the nav.
-    <div className="mx-auto max-w-5xl">
+    // THE NAV SITS FLUSH, THE CONTENT KEEPS ITS READING WIDTH.
+    //
+    // Erik: "something happened to the sub-nav's position and its sticking out way too far."
+    // It was never too wide — 208px, the same as always. It was ~400px too far RIGHT, because
+    // `mx-auto max-w-5xl` wrapped the WHOLE thing: at a 1900px window that centres a 1024px block
+    // inside 1816px of space, so the nav floats in the middle of the page with a wide empty gutter
+    // between it and the dock rail. Every other page's nav is the dock's own 186px column, flush
+    // against the rail (app-shell/dock.tsx:113) — Settings was the one page where the nav drifted.
+    //
+    // So the cap moves OFF the outer row and ONTO the content column, which is what it was always
+    // for. The nav goes back where every other nav in the app lives, and a 900px window is
+    // unaffected because the subnav is still lg-only (see dock.tsx:104 for why that matters).
+    <div>
       <PageHeader title="Settings" description="Configure every part of your business." />
       {/* Two columns on desktop, stacked on a phone (the subnav renders its own slide-over
           there). `items-start` so the sticky sidebar can actually stick instead of being
           stretched to the content's full height by the default `stretch`. */}
       <div className="shell:flex shell:items-start shell:gap-6">
         <SettingsSubnav clusters={navClusters} activeTab={active.id} />
-        <div className="min-w-0 flex-1">{active.content}</div>
+        <div className="min-w-0 max-w-4xl flex-1">{active.content}</div>
       </div>
     </div>
   );
