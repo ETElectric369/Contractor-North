@@ -329,7 +329,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         key: `j-${j.id}`,
         kind: "job" as const,
         time: j.time,
-        title: `${j.job_number} — ${j.name}`,
+        title: jobLabel(j),
         sub: [j.customers?.name, j.address].filter(Boolean).join(" · ") || null,
         address: directionsTarget(j.address, j.name) || null,
         href: `/jobs/${j.id}`,
@@ -424,7 +424,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         kind: "job" as const,
         jobId: j.id,
         time: j.scheduled_start,
-        title: `${j.job_number} — ${j.name}`,
+        title: jobLabel(j),
         sub: [j.customers?.name, j.address].filter(Boolean).join(" · ") || null,
         address: directionsTarget(j.address, j.name) || null,
         href: `/jobs/${j.id}`,
@@ -474,7 +474,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           kind: "job",
           jobId: j.id,
           time: null,
-          title: `${j.job_number} — ${j.name}`,
+          title: jobLabel(j),
           sub: [j.customers?.name, j.address].filter(Boolean).join(" · ") || null,
           address: directionsTarget(j.address, j.name) || null,
           href: `/jobs/${j.id}`,
@@ -726,7 +726,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
             <div className="border-b border-brand/20 bg-brand-light/30 px-5 py-4">
               <div className="text-[11px] font-semibold uppercase tracking-wide text-brand">Now</div>
               <Link href={`/jobs/${currentJob.id}`} className="mt-0.5 block text-lg font-bold text-slate-900 hover:text-brand">
-                {currentJob.job_number} — {currentJob.name}
+                {jobLabel(currentJob)}
               </Link>
               {(currentJob.customers?.name || currentJob.address) && (
                 <div className="text-sm text-slate-500">

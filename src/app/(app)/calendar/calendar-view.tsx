@@ -1027,7 +1027,7 @@ function ApptRow({ a, picker, tz }: { a: CalAppt; picker: SchedulePicker; tz: st
           {a.customers?.name && <span>{a.customers.name}</span>}
           {a.jobs && (
             <Link href={`/jobs/${a.job_id}`} className="text-brand hover:underline">
-              {a.jobs.job_number} {a.jobs.name}
+              {jobLabel(a.jobs)}
             </Link>
           )}
           {a.profiles?.full_name && <span>· {a.profiles.full_name}</span>}

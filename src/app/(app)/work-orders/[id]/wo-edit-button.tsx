@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { jobLabel } from "@/lib/schedule-options";
 import { useRouter } from "next/navigation";
 import { Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -91,7 +92,7 @@ export function WoEditButton({
               <Select id="wo-job" name="job_id" defaultValue={wo.job_id ?? ""}>
                 <option value="">— None —</option>
                 {jobs.map((j) => (
-                  <option key={j.id} value={j.id}>{j.job_number} — {j.name}</option>
+                  <option key={j.id} value={j.id}>{jobLabel(j)}</option>
                 ))}
               </Select>
             </div>

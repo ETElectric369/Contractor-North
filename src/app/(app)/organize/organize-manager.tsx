@@ -334,7 +334,7 @@ export function OrganizeManager({
                 >
                   <option value="">File to job…</option>
                   {jobs.map((j) => (
-                    <option key={j.id} value={j.id}>{j.job_number} — {j.name}</option>
+                    <option key={j.id} value={j.id}>{jobLabel(j)}</option>
                   ))}
                 </Select>
               </span>
