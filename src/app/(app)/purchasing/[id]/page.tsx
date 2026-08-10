@@ -31,13 +31,19 @@ export default async function PurchaseOrderPage({
   if (!po) notFound();
   const p = po as PurchaseOrder & { jobs: any };
 
-  const [{ data: items }, { data: priceItems }, { data: jobs }] = await Promise.all([
+  const [{ data: items, error: itemsErr }, { data: priceItems }, { data: jobs }] = await Promise.all([
     supabase
       .from("purchase_order_items")
       .select("*")
       .eq("po_id", id)
-      .order("sort_order")
-      .order("created_at", { ascending: true }),
+      // NO SECOND .order("created_at") HERE. Erik, bug 7a6b17a8: "PO empty even though it was
+      // flagged with over $3k from somewhere." purchase_order_items has no created_at column —
+      // line-item tables in this schema order by sort_order and nothing else (same for
+      // invoice_items, quote_line_items, bill_line_items, material_list_items). PostgREST rejects
+      // the WHOLE query for an unknown order column, so `items` came back null, the page rendered
+      // an empty PO, and the header kept showing purchase_orders.total. PO-003's three lines were
+      // in the database the entire time and sum to exactly the $3,274 he was staring at.
+      .order("sort_order"),
     supabase
       .from("price_list_items")
       .select("id, code, description, unit, buy_price")
@@ -50,6 +56,12 @@ export default async function PurchaseOrderPage({
       .order("created_at", { ascending: false })
       .limit(100),
   ]);
+
+  // A REJECTED READ MUST NOT LOOK LIKE AN EMPTY PO. This error was never checked, so a query the
+  // database refused rendered as "this purchase order has no lines" — indistinguishable from a
+  // real empty one, and sitting under a total that said otherwise. Same shape as the poErr throw
+  // above: a real failure shouldn't masquerade as ordinary emptiness.
+  if (itemsErr) throw itemsErr;
 
   return (
     <div className="mx-auto max-w-4xl">
