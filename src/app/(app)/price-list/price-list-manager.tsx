@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Upload, Search, FileSpreadsheet } from "lucide-react";
+import { Plus, Trash2, Upload, Search, FileSpreadsheet, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
@@ -13,6 +13,7 @@ import { formatCurrency } from "@/lib/utils";
 import { createPriceItem, deletePriceItem, bulkImportPriceItems, type PriceItemInput } from "./actions";
 import { EditPriceItemButton } from "./edit-price-item-button";
 import { parseCSV } from "@/lib/csv";
+import { unitLooksShifted } from "@/lib/pricing/import-damage";
 
 interface PriceItem {
   id: string;
@@ -40,6 +41,7 @@ export function PriceListManager({ items }: { items: PriceItem[] }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [q, setQ] = useState("");
+  const [onlyShifted, setOnlyShifted] = useState(false);
 
   // add form
   const [code, setCode] = useState("");
@@ -57,13 +59,18 @@ export function PriceListManager({ items }: { items: PriceItem[] }) {
   const [mapping, setMapping] = useState<Record<string, number>>({});
   const [importMsg, setImportMsg] = useState<string | null>(null);
 
+  // ROWS AN OLD IMPORT SHIFTED — see lib/pricing/import-damage.ts. Same predicate the Settings
+  // count uses, so the number he was told and the rows he is shown can never disagree.
+  const shifted = useMemo(() => items.filter((i) => unitLooksShifted(i.unit)), [items]);
+
   const filtered = useMemo(() => {
+    const base = onlyShifted ? shifted : items;
     const t = q.trim().toLowerCase();
-    if (!t) return items;
-    return items.filter((i) =>
+    if (!t) return base;
+    return base.filter((i) =>
       [i.code, i.description, i.category, i.supplier].some((v) => (v ?? "").toLowerCase().includes(t)),
     );
-  }, [items, q]);
+  }, [items, shifted, onlyShifted, q]);
 
   function add() {
     setError(null);
@@ -142,6 +149,35 @@ export function PriceListManager({ items }: { items: PriceItem[] }) {
         </div>
       </Card>
 
+      {/* THE BOOK TELLING YOU IT IS WRONG. Until cn-v696 the shared CSV parser read an inch mark
+          (`4" RND LS`) as an opening quote, swallowed the comma after it, and shifted every
+          following column one to the left — so a net price landed in `unit` and something else
+          landed in the price. Three of Erik's CED rows are still like that, and they are quoting
+          at those wrong numbers today. Nothing is repaired automatically: the right value is a
+          PRICE, and a guessed price on a customer's estimate is worse than a flagged one. */}
+      {shifted.length > 0 && (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+          <div className="flex items-start gap-2 text-sm text-red-900">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              <span className="font-medium">
+                {shifted.length} item{shifted.length === 1 ? "" : "s"} came in from a CSV with the columns
+                shifted
+              </span>{" "}
+              — the price is sitting in the unit field, so {shifted.length === 1 ? "it quotes" : "they quote"}{" "}
+              at whatever landed in the price column. Set each one&rsquo;s unit back (
+              <span className="font-mono text-xs">ea</span>) and put the real cost in Buy. Imports parse
+              inch marks correctly now.
+              <div className="mt-2">
+                <Button size="sm" variant="outline" onClick={() => setOnlyShifted((v) => !v)}>
+                  {onlyShifted ? "Show the whole list" : `Show just these ${shifted.length}`}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="relative">
         <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
         <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search price list…" className="pl-9" />
@@ -161,7 +197,23 @@ export function PriceListManager({ items }: { items: PriceItem[] }) {
             { header: "Code", span: 2, className: "font-mono text-xs text-slate-500", cell: (i) => i.code ?? "—" },
             { header: "Description", span: 4, className: "text-sm font-medium text-slate-900", cell: (i) => i.description },
             { header: "Category", span: 2, className: "text-sm text-slate-500", cell: (i) => i.category ?? "—" },
-            { header: "Buy", span: 1, align: "right", className: "text-sm text-slate-600", cell: (i) => formatCurrency(i.buy_price) },
+            {
+              header: "Buy",
+              span: 1,
+              align: "right",
+              className: "text-sm text-slate-600",
+              // The stray number is shown, not hidden — "unit 36.730" is the whole diagnosis, and
+              // it is the value he needs in front of him to type the right one back in.
+              cell: (i) =>
+                unitLooksShifted(i.unit) ? (
+                  <span className="text-red-700">
+                    {formatCurrency(i.buy_price)}
+                    <span className="ml-1 whitespace-nowrap font-mono text-[10px]">unit {i.unit}</span>
+                  </span>
+                ) : (
+                  formatCurrency(i.buy_price)
+                ),
+            },
             { header: "MU%", span: 1, align: "right", className: "text-sm text-slate-500", cell: (i) => `${Number(i.markup_pct)}%` },
             { header: "Sell", span: 1, align: "right", className: "text-sm font-medium text-slate-900", cell: (i) => formatCurrency(sell(i.buy_price, i.markup_pct)) },
             {

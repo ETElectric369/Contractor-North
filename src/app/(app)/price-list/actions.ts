@@ -75,11 +75,14 @@ export async function deletePriceItem(id: string): Promise<Result> {
 
 /** Bulk insert from a parsed CSV. Inserts in chunks; returns the count. */
 export async function bulkImportPriceItems(rows: PriceItemInput[]): Promise<Result> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  // requireStaff, like every other write in this file. The DB boundary already holds — 0020's
+  // price_list_write policy carries `is_org_staff()` and the stamp_org_price_list trigger sets
+  // org_id — so this was never a hole. It was the ONE action here that let a tech through to a
+  // raw Postgres RLS message instead of a sentence, and an app guard that disagrees with its own
+  // siblings is how the two eventually drift apart.
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
 
   const clean = rows
     .filter((r) => r.description?.trim())

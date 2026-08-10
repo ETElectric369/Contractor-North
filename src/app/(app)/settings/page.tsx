@@ -28,6 +28,7 @@ import { renderReadyBlocks } from "@/lib/public-pages";
 import { OrgSettingsForm } from "./org-settings-form";
 import { DocumentDesigner } from "./document-designer";
 import { PriceListCard } from "./price-list-card";
+import { UNIT_STARTS_WITH_LETTER } from "@/lib/pricing/import-damage";
 import { LogoUpload } from "./logo-upload";
 import { LanguageToggle } from "./language-toggle";
 import { MapsProviderToggle } from "./maps-provider-toggle";
@@ -125,11 +126,20 @@ export default async function SettingsPage({
 
   // THE PRICE-LIST PANE'S NUMBERS — counts, never rows. head:true sends no body, so this stays
   // three cheap COUNT queries whatever the size of somebody's book.
-  const [{ count: priceItemCount }, { count: priceUnpriced }, { count: priceNoMarkup }] = await Promise.all([
-    supabase.from("price_list_items").select("id", { count: "exact", head: true }).eq("archived", false),
-    supabase.from("price_list_items").select("id", { count: "exact", head: true }).eq("archived", false).lte("buy_price", 0),
-    supabase.from("price_list_items").select("id", { count: "exact", head: true }).eq("archived", false).lte("markup_pct", 0),
-  ]);
+  const [{ count: priceItemCount }, { count: priceUnpriced }, { count: priceNoMarkup }, { count: priceShifted }] =
+    await Promise.all([
+      supabase.from("price_list_items").select("id", { count: "exact", head: true }).eq("archived", false),
+      supabase.from("price_list_items").select("id", { count: "exact", head: true }).eq("archived", false).lte("buy_price", 0),
+      supabase.from("price_list_items").select("id", { count: "exact", head: true }).eq("archived", false).lte("markup_pct", 0),
+      // Rows the old CSV parser shifted a column left — see lib/pricing/import-damage.ts. The
+      // operator is `imatch`, checked against production (3 rows) rather than assumed: a PostgREST
+      // rejection returns null and would render as a reassuring zero.
+      supabase
+        .from("price_list_items")
+        .select("id", { count: "exact", head: true })
+        .eq("archived", false)
+        .not("unit", "imatch", UNIT_STARTS_WITH_LETTER),
+    ]);
 
   // The public intake door (0185): on = exactly one form flagged is_public_intake. Read
   // tolerantly — a deploy can land before its migration, and this page must not 500 for that.
@@ -391,6 +401,7 @@ export default async function SettingsPage({
                   itemCount={priceItemCount ?? 0}
                   unpricedCount={priceUnpriced ?? 0}
                   noMarkupCount={priceNoMarkup ?? 0}
+                  shiftedCount={priceShifted ?? 0}
                   defaultMarkupPct={settings.default_markup_pct}
                   levels={((pricingLevels ?? []) as { name: string; markup_pct: number }[]).map((l) => ({
                     name: l.name,

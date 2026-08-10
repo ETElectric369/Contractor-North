@@ -22,6 +22,7 @@ export function PriceListCard({
   itemCount,
   unpricedCount,
   noMarkupCount,
+  shiftedCount,
   defaultMarkupPct,
   levels,
 }: {
@@ -30,6 +31,8 @@ export function PriceListCard({
   unpricedCount: number;
   /** Rows whose own markup_pct is 0, i.e. the ones the org default has to carry. */
   noMarkupCount: number;
+  /** Rows a pre-cn-v696 CSV import shifted a column left — lib/pricing/import-damage.ts. */
+  shiftedCount: number;
   defaultMarkupPct: number;
   levels: { name: string; markup_pct: number }[];
 }) {
@@ -84,6 +87,23 @@ export function PriceListCard({
           different moment — receipts and costs you bill on a job.
         </p>
       </div>
+
+      {/* THE THIRD WAY, and the only one that is somebody else's fault rather than a setting.
+          Until cn-v696 the shared CSV parser treated an inch mark — `4" RND LS` — as an opening
+          quote, which swallowed the next comma and shifted every column after it one to the left.
+          Three rows of Erik's CED import survived that way and are quoting today at the wrong
+          number. It says WHAT to look for rather than fixing it, because the repair is a price and
+          a guessed price is worse than a flagged one. */}
+      {shiftedCount > 0 && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
+          <span className="font-medium">{shiftedCount.toLocaleString()}</span> item
+          {shiftedCount === 1 ? " has" : "s have"} a price sitting in the <span className="font-medium">unit</span>{" "}
+          column — an old import bug that shifted the columns wherever a description contained an inch
+          mark. {shiftedCount === 1 ? "It quotes" : "They quote"} at whatever landed in the price field.
+          The price list flags {shiftedCount === 1 ? "it" : "them"} at the top with a button to show just
+          those rows; new imports parse inch marks correctly.
+        </div>
+      )}
 
       {/* THE TWO WAYS A BOOK QUOTES WRONG, counted rather than described. Erik's book is a raw CED
           parts import: 152 rows, markup 0 on every one — so his org default is doing all the work
