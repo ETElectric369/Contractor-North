@@ -4,7 +4,20 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { User, Building2, Globe, Wallet, CalendarDays, Plug, Layers, Tags, ClipboardList } from "lucide-react";
+import {
+  User,
+  Building2,
+  Globe,
+  Wallet,
+  CalendarDays,
+  Plug,
+  Layers,
+  ClipboardList,
+  FileText,
+  CreditCard,
+  MessageSquare,
+  Images,
+} from "lucide-react";
 import { tolerateMissingColumns } from "@/lib/inspection/schema";
 import { parsePlaybook, playbookForForm } from "@/lib/playbook/parse";
 import { PLAYBOOK_STARTERS } from "@/lib/playbook/starters";
@@ -291,10 +304,30 @@ export default async function SettingsPage({
   };
 
   // ── The admin clusters (staff only). ─────────────────────────────────────────────────
+  //
+  // ELEVEN GROUPS, NOT SEVEN (cn-v695). Erik: "i want to have the settings broken down into as
+  // many setting as possible for each thing on their own page with a sub nav more broken down…
+  // i dont like having to scroll to look for settings neither does andrew."
+  //
+  // The old shape had thirty-odd panes crammed into seven clusters, and two of them were doing
+  // most of the damage: Website held nine panes (domain, homepage, portfolio, reviews, articles,
+  // custom pages, the lead link, the QR, collaborator seats) and Money & Docs held eight. Either
+  // one is a scroll, which is the exact complaint. The cap was never editorial — it was the old
+  // horizontal pill strip, which had to stay short to fit on a line. That nav became a vertical
+  // column in cn-v6xx, so the ceiling is gone and the groups can multiply until each one is a
+  // thing you can NAME. A group you can name is a group you can find without reading it.
+  //
+  // Two panes also moved because they were simply filed wrong:
+  //   · "Getting paid" (Stripe Connect) lived under Company — it is how money reaches the bank,
+  //     not who we are. It now leads its own group with the CN subscription, because "how do I
+  //     take a card" and "what am I paying for this" are the two bills an owner hunts for.
+  //   · "Pricing & catalog" was a pair of link cards under Company that pointed at the price
+  //     list — the same door the Price list pane already opens, one cluster away. The duplicate
+  //     is gone; the kits card it also carried moved next to the price list, where the book is.
   const adminTabs = org && isStaff
     ? [
-        // "Company" — just who we are (identity + logo). The public site + how leads reach us moved
-        // to their own "Website" cluster below.
+        // "Company" — just who we are. Set once at signup and rarely touched again, which is
+        // exactly why it is small: everything that used to pad it out had a better home.
         {
           id: "company",
           label: "Company",
@@ -305,42 +338,121 @@ export default async function SettingsPage({
               <Section title="Company logo">
                 <LogoUpload orgId={(org as Organization).id} current={(org as Organization).logo_url} />
               </Section>
-
-              {/* WHERE THE CATALOG LIVES. Kits and the price list are edited on their own page,
-                  which is the right home for them — but Settings is where an owner LOOKS for
-                  "set up how my pricing works", and it had no outbound link to anywhere. Two
-                  cards, so the thing he's hunting for is one tap from where he went looking. */}
-              <Section title="Pricing & catalog">
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Link
-                    href="/price-list?tab=kits"
-                    className="rounded-xl border border-slate-200 p-4 transition hover:border-brand"
-                  >
-                    <div className="flex items-center gap-2 font-medium text-slate-800">
-                      <Layers className="h-4 w-4 text-slate-400" />
-                      Kits &amp; job lists
-                    </div>
-                    <p className="mt-1 text-sm text-slate-500">
-                      Build the lists you pick from when you write an estimate — and set which lines size
-                      themselves from the measurements taken on a walk-through.
-                    </p>
-                  </Link>
-                  <Link
-                    href="/price-list"
-                    className="rounded-xl border border-slate-200 p-4 transition hover:border-brand"
-                  >
-                    <div className="flex items-center gap-2 font-medium text-slate-800">
-                      <Tags className="h-4 w-4 text-slate-400" />
-                      Price list
-                    </div>
-                    <p className="mt-1 text-sm text-slate-500">
-                      Your real costs and markups, item by item. Everything you quote prices from here first.
-                    </p>
-                  </Link>
-                </div>
+            </div>
+          ),
+        },
+        // "Playbook" — the questions this company's own walk-through asks, and WHY each one is
+        // worth asking. Second in the list on purpose: it is the one thing here that changes what
+        // happens on a job site, and there has never been anywhere in this app to read it.
+        {
+          id: "playbook",
+          label: "Playbook",
+          icon: ClipboardList,
+          content: (
+            // Second home for the tour's playbook anchor. The desktop cluster link carries the
+            // same name and comes first in the DOM, so a computer spotlights the nav item; on a
+            // phone that column is hidden at zero size and the spotlight falls through to this,
+            // the panel itself — which is what he's actually looking at there anyway.
+            <div data-tour="settings-playbook" className="space-y-6">
+              <Section title="What your walk-through asks">
+                <p className="mb-4 text-sm text-slate-500">
+                  These are the questions your inspector asks on site, in order, and the reason each one exists.
+                  A question only shows when it applies — and one that&rsquo;s already been answered, out loud or
+                  from the lead, never gets asked at all.
+                </p>
+                <PlaybookManager
+                  forms={playbookForms}
+                  starters={PLAYBOOK_STARTERS.map((s) => ({ key: s.key, label: s.label, blurb: s.blurb }))}
+                />
               </Section>
-
-              <Section title="Getting paid">
+              <Section title="How Nort writes an estimate">
+                <QuotePlaybookForm settings={settings} />
+              </Section>
+            </div>
+          ),
+        },
+        // "Money" — what a number becomes: tax, markup, the book it comes from, and how a
+        // customer hands it over. NOT the paperwork it prints on (that's its own group now) and
+        // not the two bills (Stripe/subscription, also their own).
+        {
+          id: "money",
+          label: "Money",
+          icon: Wallet,
+          content: (
+            <div className="space-y-6">
+              <Section title="Tax, pricing & financial defaults"><TaxRatesManager taxRates={(taxRates ?? []) as any} pricingLevels={(pricingLevels ?? []) as any} settings={settings} /></Section>
+              {/* "How we quote" moved to the Playbook cluster — it is the same idea one step
+                  later (what you ask on site → how the estimate gets written), and having two
+                  things called a playbook in two different clusters was the confusion. */}
+              {/* The price list is its own page and stays there — this is the door plus the one
+                  thing that genuinely belongs in Settings: which markup governs it. */}
+              <Section title="Price list">
+                <PriceListCard
+                  itemCount={priceItemCount ?? 0}
+                  unpricedCount={priceUnpriced ?? 0}
+                  noMarkupCount={priceNoMarkup ?? 0}
+                  defaultMarkupPct={settings.default_markup_pct}
+                  levels={((pricingLevels ?? []) as { name: string; markup_pct: number }[]).map((l) => ({
+                    name: l.name,
+                    markup_pct: l.markup_pct,
+                  }))}
+                />
+              </Section>
+              {/* The other half of the book. Kits are edited on the price-list page like the
+                  items are; what belongs here is the door, next to the door for the items —
+                  they are one catalog and used to sit in two different clusters. */}
+              <Section title="Kits & job lists">
+                <Link
+                  href="/price-list?tab=kits"
+                  className="block rounded-xl border border-slate-200 p-4 transition hover:border-brand"
+                >
+                  <div className="flex items-center gap-2 font-medium text-slate-800">
+                    <Layers className="h-4 w-4 text-slate-400" />
+                    Open kits &amp; job lists
+                  </div>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Build the lists you pick from when you write an estimate — and set which lines size
+                    themselves from the measurements taken on a walk-through.
+                  </p>
+                </Link>
+              </Section>
+              <Section title="Payment methods"><PaymentMethods settings={settings} /></Section>
+            </div>
+          ),
+        },
+        // "Estimates & invoices" — the paperwork itself: what it says by default, what it's
+        // numbered, and what it looks like. Split out of the old Money & Docs because "change
+        // my payment terms" and "change my tax rate" are different errands.
+        {
+          id: "docs",
+          label: "Estimates & invoices",
+          icon: FileText,
+          content: (
+            <div className="space-y-6">
+              <Section title="Estimate & invoice defaults"><DocumentSettings settings={settings} /></Section>
+              <Section title="Numbering">
+                <NumberingSettings prefixes={settings.doc_prefixes} counters={docCounters} />
+              </Section>
+              <Section title="Document designer">
+                <DocumentDesigner
+                  templates={(org as Organization).doc_templates || {}}
+                  fallback={(org as Organization).doc_template || "classic"}
+                  brand={accentHex(settings.glass_tint)}
+                />
+              </Section>
+            </div>
+          ),
+        },
+        // "Getting paid" — the two money rails that AREN'T a job: the customer's card reaching
+        // this contractor's bank, and this contractor's own bill from us. Both were buried one
+        // cluster apart; both are things somebody goes looking for by name.
+        {
+          id: "getpaid",
+          label: "Getting paid",
+          icon: CreditCard,
+          content: (
+            <div className="space-y-6">
+              <Section title="Card payments">
                 {/* CONNECT (0161): the contractor's OWN Stripe account. Their customers'
                     money goes to their bank — Contractor North never holds it. */}
                 {(() => {
@@ -377,91 +489,83 @@ export default async function SettingsPage({
                   );
                 })()}
               </Section>
-            </div>
-          ),
-        },
-        // "Playbook" — the questions this company's own walk-through asks, and WHY each one is
-        // worth asking. Second in the list on purpose: it is the one thing here that changes what
-        // happens on a job site, and there has never been anywhere in this app to read it.
-        {
-          id: "playbook",
-          label: "Playbook",
-          icon: ClipboardList,
-          content: (
-            // Second home for the tour's playbook anchor. The desktop cluster link carries the
-            // same name and comes first in the DOM, so a computer spotlights the nav item; on a
-            // phone that column is hidden at zero size and the spotlight falls through to this,
-            // the panel itself — which is what he's actually looking at there anyway.
-            <div data-tour="settings-playbook" className="space-y-6">
-              <Section title="What your walk-through asks">
-                <p className="mb-4 text-sm text-slate-500">
-                  These are the questions your inspector asks on site, in order, and the reason each one exists.
-                  A question only shows when it applies — and one that&rsquo;s already been answered, out loud or
-                  from the lead, never gets asked at all.
-                </p>
-                <PlaybookManager
-                  forms={playbookForms}
-                  starters={PLAYBOOK_STARTERS.map((s) => ({ key: s.key, label: s.label, blurb: s.blurb }))}
-                />
-              </Section>
-              <Section title="How Nort writes an estimate">
-                <QuotePlaybookForm settings={settings} />
+              <Section title="Plan & subscription">
+                {billing === "success" && (
+                  <div className="mb-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">Subscription active — thank you!</div>
+                )}
+                {billing_error && (
+                  <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{billing_error}</div>
+                )}
+                <div className="flex flex-wrap items-center gap-3">
+                  <Badge tone={(org as Organization).subscription_status === "active" ? "green" : "amber"}>
+                    {(org as Organization).subscription_status}
+                  </Badge>
+                  <span className="text-sm text-slate-600">Plan: {(org as Organization).plan}</span>
+                  {(org as Organization).subscription_status === "trialing" && (
+                    <span className="text-sm text-slate-500">· {trialDaysLeft(org as Organization)} days left in trial</span>
+                  )}
+                </div>
+                {billingEnabled ? (
+                  <div className="mt-4 flex gap-2">
+                    {(org as Organization).subscription_status === "active" ? (
+                      <form action={openPortal}><Button variant="outline">Manage Billing</Button></form>
+                    ) : (
+                      <form action={startCheckout}><Button>Subscribe</Button></form>
+                    )}
+                  </div>
+                ) : (
+                  <p className="mt-3 text-sm text-slate-400">Billing isn&apos;t configured yet. Add your Stripe keys (STRIPE_SECRET_KEY, STRIPE_PRICE_ID, STRIPE_WEBHOOK_SECRET) to enable subscriptions.</p>
+                )}
               </Section>
             </div>
           ),
         },
-        // "Website" — the whole public-site surface in ONE place, separate from company identity:
-        // address/domain/style, the homepage hero + copy, portfolio, reviews, articles, custom pages,
-        // the printable lead link/QR, and the external SEO/content editor seats. Staff-only (this
-        // whole cluster is gated by isStaff); an outside SEO pro edits the same surface via /content.
+        // "Crew & time" — Alexa's control plane. The old "Scheduling" cluster minus the customer
+        // reminders, which were never about the crew.
         {
-          id: "website",
-          label: "Website",
-          icon: Globe,
+          id: "crew",
+          label: "Crew & time",
+          icon: CalendarDays,
           content: (
             <div className="space-y-6">
-              <Section title="Your website">
-                <WebsiteSettings settings={settings} siteUrl={siteUrl} sitesDomain={sitesDomain} />
+              <Section title="Scheduler & timesheets">
+                <SchedulingSettings
+                  settings={settings}
+                  employees={members.map((m) => ({ id: m.id, full_name: m.full_name }))}
+                  ownerName={members.find((m) => m.role === "owner")?.full_name ?? undefined}
+                />
               </Section>
+              <Section title="Job codes">
+                <JobCodesManager
+                  jobCodes={(jobCodes ?? []) as { id: string; code: string; description: string; billable: boolean; active: boolean }[]}
+                />
+              </Section>
+              <Section title="Job-code templates">
+                <CodeTemplatesManager
+                  templates={(codeTemplates ?? []) as { id: string; name: string; codes: string[] }[]}
+                  codes={((jobCodes ?? []) as { code: string; description: string; active: boolean }[]).filter((c) => c.active).map((c) => ({ code: c.code, description: c.description }))}
+                />
+              </Section>
+            </div>
+          ),
+        },
+        // "Customers" — every way a customer reaches us or hears from us, in one place. The two
+        // inbound doors were filed under Website (because that's where the link gets pasted) and
+        // the outbound reminders under Scheduling (because they fire off a date). Neither is
+        // where anyone looks for "how do people get hold of me".
+        {
+          id: "customers",
+          label: "Customers",
+          icon: MessageSquare,
+          content: (
+            <div className="space-y-6">
+              <Section title="Reminders & follow-ups"><AutomationSettings settings={settings} /></Section>
               {/* THE INTAKE DOOR (0185) — the "request an estimate" link for the org's own site.
-                  Lives with Website because that's where the link gets USED, not where the
-                  questions live (those are a form, under Playbook, once the door is on). */}
+                  The questions behind it are a form, under Playbook, once the door is on. */}
               <Section title="Request-an-estimate link">
                 <IntakeCard
                   on={intakeOn}
                   url={settings.public_handle ? `${orgPublicBaseUrl(settings)}/intake/${settings.public_handle}` : null}
-                />
-              </Section>
-              <Section title="Homepage">
-                <HomepageCard
-                  settings={settings}
-                  homeBlocks={renderReadyBlocks(settings.home_blocks)}
-                  brand={accentHex(settings.glass_tint)}
-                  orgId={(org as Organization).id}
-                  siteUrl={settings.public_handle ? orgPublicBaseUrl(settings) : null}
-                />
-              </Section>
-              <Section title="Portfolio photos">
-                <PortfolioManager orgId={(org as Organization).id} initial={settings.portfolio ?? []} />
-              </Section>
-              <Section title="Reviews">
-                <ReviewsManager initial={settings.reviews ?? []} />
-              </Section>
-              <Section title="Articles & blog">
-                <PostsManager
-                  initial={(sitePosts ?? []) as any}
-                  siteUrl={settings.public_handle ? orgPublicBaseUrl(settings) : null}
-                  handle={settings.public_handle}
-                  orgId={(org as Organization).id}
-                />
-              </Section>
-              <Section title="Custom pages">
-                <PagesManager
-                  initial={sitePages as any}
-                  siteUrl={settings.public_handle ? orgPublicBaseUrl(settings) : null}
-                  handle={settings.public_handle}
-                  brand={accentHex(settings.glass_tint)}
-                  orgId={(org as Organization).id}
                 />
               </Section>
               <Section title="Public lead link & QR">
@@ -501,49 +605,80 @@ export default async function SettingsPage({
                   </div>
                 </div>
               </Section>
+            </div>
+          ),
+        },
+        // "Website" — the site's own settings: address/domain/style, the homepage, and who from
+        // outside is allowed to edit it. What the site is MADE OF moved next door to "Photos &
+        // pages" — nine panes in one column was the worst scroll on this page.
+        {
+          id: "website",
+          label: "Website",
+          icon: Globe,
+          content: (
+            <div className="space-y-6">
+              <Section title="Your website">
+                <WebsiteSettings settings={settings} siteUrl={siteUrl} sitesDomain={sitesDomain} />
+              </Section>
+              <Section title="Homepage">
+                <HomepageCard
+                  settings={settings}
+                  homeBlocks={renderReadyBlocks(settings.home_blocks)}
+                  brand={accentHex(settings.glass_tint)}
+                  orgId={(org as Organization).id}
+                  siteUrl={settings.public_handle ? orgPublicBaseUrl(settings) : null}
+                />
+              </Section>
               <Section title="SEO / content collaborators">
                 <CollaboratorsManager initial={(siteCollaborators ?? []) as any} />
               </Section>
             </div>
           ),
         },
-        // "Money & docs" — dollars, tax/pricing, document numbering & design, QBO/Stripe.
+        // "Photos & pages" — the content ON the site. Four managers that are each a real editing
+        // session; nobody opens this one by accident, and nobody hunting for a domain name should
+        // have to scroll past it.
         {
-          id: "money",
-          label: "Money & Docs",
-          icon: Wallet,
+          id: "content",
+          label: "Photos & pages",
+          icon: Images,
           content: (
             <div className="space-y-6">
-              <Section title="Tax, pricing & financial defaults"><TaxRatesManager taxRates={(taxRates ?? []) as any} pricingLevels={(pricingLevels ?? []) as any} settings={settings} /></Section>
-              {/* "How we quote" moved to the Playbook cluster — it is the same idea one step
-                  later (what you ask on site → how the estimate gets written), and having two
-                  things called a playbook in two different clusters was the confusion. */}
-              {/* The price list is its own page and stays there — this is the door plus the one
-                  thing that genuinely belongs in Settings: which markup governs it. */}
-              <Section title="Price list">
-                <PriceListCard
-                  itemCount={priceItemCount ?? 0}
-                  unpricedCount={priceUnpriced ?? 0}
-                  noMarkupCount={priceNoMarkup ?? 0}
-                  defaultMarkupPct={settings.default_markup_pct}
-                  levels={((pricingLevels ?? []) as { name: string; markup_pct: number }[]).map((l) => ({
-                    name: l.name,
-                    markup_pct: l.markup_pct,
-                  }))}
+              <Section title="Portfolio photos">
+                <PortfolioManager orgId={(org as Organization).id} initial={settings.portfolio ?? []} />
+              </Section>
+              <Section title="Reviews">
+                <ReviewsManager initial={settings.reviews ?? []} />
+              </Section>
+              <Section title="Articles & blog">
+                <PostsManager
+                  initial={(sitePosts ?? []) as any}
+                  siteUrl={settings.public_handle ? orgPublicBaseUrl(settings) : null}
+                  handle={settings.public_handle}
+                  orgId={(org as Organization).id}
                 />
               </Section>
-              <Section title="Payment methods"><PaymentMethods settings={settings} /></Section>
-              <Section title="Estimate & invoice defaults"><DocumentSettings settings={settings} /></Section>
-              <Section title="Numbering">
-                <NumberingSettings prefixes={settings.doc_prefixes} counters={docCounters} />
-              </Section>
-              <Section title="Document designer">
-                <DocumentDesigner
-                  templates={(org as Organization).doc_templates || {}}
-                  fallback={(org as Organization).doc_template || "classic"}
+              <Section title="Custom pages">
+                <PagesManager
+                  initial={sitePages as any}
+                  siteUrl={settings.public_handle ? orgPublicBaseUrl(settings) : null}
+                  handle={settings.public_handle}
                   brand={accentHex(settings.glass_tint)}
+                  orgId={(org as Organization).id}
                 />
               </Section>
+            </div>
+          ),
+        },
+        // "Connections" — everything that talks to something outside this app. QuickBooks joins
+        // the AI key and the calendar: it was under Money, but connecting an accounting login is
+        // the same errand as connecting a calendar, not the same errand as setting a tax rate.
+        {
+          id: "integrations",
+          label: "Connections",
+          icon: Plug,
+          content: (
+            <div className="space-y-6">
               <Section title="QuickBooks">
                 {qbo === "connected" && (
                   <div className="mb-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">Connected to QuickBooks Online.</div>
@@ -568,79 +703,6 @@ export default async function SettingsPage({
                   </div>
                 )}
               </Section>
-              <Section title="Plan & subscription">
-                {billing === "success" && (
-                  <div className="mb-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">Subscription active — thank you!</div>
-                )}
-                {billing_error && (
-                  <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{billing_error}</div>
-                )}
-                <div className="flex flex-wrap items-center gap-3">
-                  <Badge tone={(org as Organization).subscription_status === "active" ? "green" : "amber"}>
-                    {(org as Organization).subscription_status}
-                  </Badge>
-                  <span className="text-sm text-slate-600">Plan: {(org as Organization).plan}</span>
-                  {(org as Organization).subscription_status === "trialing" && (
-                    <span className="text-sm text-slate-500">· {trialDaysLeft(org as Organization)} days left in trial</span>
-                  )}
-                </div>
-                {billingEnabled ? (
-                  <div className="mt-4 flex gap-2">
-                    {(org as Organization).subscription_status === "active" ? (
-                      <form action={openPortal}><Button variant="outline">Manage Billing</Button></form>
-                    ) : (
-                      <form action={startCheckout}><Button>Subscribe</Button></form>
-                    )}
-                  </div>
-                ) : (
-                  <p className="mt-3 text-sm text-slate-400">Billing isn&apos;t configured yet. Add your Stripe keys (STRIPE_SECRET_KEY, STRIPE_PRICE_ID, STRIPE_WEBHOOK_SECRET) to enable subscriptions.</p>
-                )}
-              </Section>
-            </div>
-          ),
-        },
-        // "Scheduling" — Alexa's control plane (scheduler + timesheets + job codes).
-        {
-          id: "scheduling",
-          label: "Scheduling",
-          icon: CalendarDays,
-          content: (
-            <div className="space-y-6">
-              <Section title="Scheduler & timesheets">
-                <SchedulingSettings
-                  settings={settings}
-                  employees={members.map((m) => ({ id: m.id, full_name: m.full_name }))}
-                  ownerName={members.find((m) => m.role === "owner")?.full_name ?? undefined}
-                />
-              </Section>
-              <Section title="Job codes">
-                <JobCodesManager
-                  jobCodes={(jobCodes ?? []) as { id: string; code: string; description: string; billable: boolean; active: boolean }[]}
-                />
-              </Section>
-              <Section title="Job-code templates">
-                <CodeTemplatesManager
-                  templates={(codeTemplates ?? []) as { id: string; name: string; codes: string[] }[]}
-                  codes={((jobCodes ?? []) as { code: string; description: string; active: boolean }[]).filter((c) => c.active).map((c) => ({ code: c.code, description: c.description }))}
-                />
-              </Section>
-              <Section title="Reminders & follow-ups"><AutomationSettings settings={settings} /></Section>
-            </div>
-          ),
-        },
-        // "Integrations" — the AI + calendar connectors.
-        {
-          id: "integrations",
-          label: "Integrations",
-          icon: Plug,
-          content: (
-            <div className="space-y-6">
-              <Section title="AI assistant">
-                <AiStatus
-                  configured={!!process.env.ANTHROPIC_API_KEY}
-                  model={process.env.ANTHROPIC_MODEL || "claude-opus-4-8"}
-                />
-              </Section>
               <Section title="Google Calendar">
                 <GcalCard
                   configured={gcalConfigured()}
@@ -655,6 +717,12 @@ export default async function SettingsPage({
                   }
                   lastSyncedAt={(gcalSync as { last_synced_at?: string | null } | null)?.last_synced_at ?? null}
                   needsReauth={connectionNeedsReauth(gcalSync)}
+                />
+              </Section>
+              <Section title="AI assistant">
+                <AiStatus
+                  configured={!!process.env.ANTHROPIC_API_KEY}
+                  model={process.env.ANTHROPIC_MODEL || "claude-opus-4-8"}
                 />
               </Section>
             </div>
@@ -673,7 +741,13 @@ export default async function SettingsPage({
   // cluttering /settings (cn-v331). Resolve the active cluster from the ?tab= param, default
   // to the first role-appropriate cluster (staff → "company", tech → "you"), exactly the old
   // <Tabs urlSync> default (tabs[0]). An unknown/gated tab falls back to that default too.
-  const active = clusters.find((c) => c.id === tab) ?? clusters[0];
+  //
+  // OLD LINKS KEEP LANDING (cn-v695). Splitting the clusters retired one id, and the fallback
+  // above is silent — a bookmarked ?tab=scheduling would have dropped somebody on Company with
+  // no hint that their link meant something. One alias is cheaper than that confusion.
+  const TAB_ALIASES: Record<string, string> = { scheduling: "crew" };
+  const wanted = TAB_ALIASES[tab ?? ""] ?? tab;
+  const active = clusters.find((c) => c.id === wanted) ?? clusters[0];
   // The nav needs only id/label per cluster — the icon is resolved client-side by id in
   // SettingsSubnav. (Passing c.icon, a lucide component/function, across the server→client
   // boundary threw "Functions cannot be passed to Client Components" and crashed /settings.)

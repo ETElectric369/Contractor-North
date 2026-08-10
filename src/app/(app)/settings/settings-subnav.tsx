@@ -2,7 +2,21 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { Settings, User, Building2, Globe, Wallet, CalendarDays, Plug, ClipboardList, type LucideIcon } from "lucide-react";
+import {
+  Settings,
+  User,
+  Building2,
+  Globe,
+  Wallet,
+  CalendarDays,
+  Plug,
+  ClipboardList,
+  FileText,
+  CreditCard,
+  MessageSquare,
+  Images,
+  type LucideIcon,
+} from "lucide-react";
 import type { DockNode, DockSection } from "@/lib/dock";
 import { SectionSheet } from "@/components/section-sheet";
 
@@ -21,7 +35,15 @@ const CLUSTER_ICONS: Record<string, LucideIcon> = {
   playbook: ClipboardList,
   website: Globe,
   money: Wallet,
+  // cn-v695 split the four fat clusters into eleven nameable ones. `scheduling` stays in the
+  // map only because a bookmark can still carry ?tab=scheduling — page.tsx aliases it to `crew`,
+  // and an icon for a cluster that no longer exists costs nothing.
   scheduling: CalendarDays,
+  crew: CalendarDays,
+  docs: FileText,
+  getpaid: CreditCard,
+  customers: MessageSquare,
+  content: Images,
   integrations: Plug,
 };
 
@@ -53,7 +75,10 @@ export function SettingsSubnav({
   const pathname = usePathname();
   const search = useSearchParams();
   // Prefer the live ?tab= (instant on client nav); fall back to the server-resolved default.
-  const current = search.get("tab") ?? activeTab;
+  // A ?tab= that names no cluster — a retired id off an old bookmark, which the server aliases
+  // for us — must NOT win, or the nav lights nothing while the panel shows something.
+  const raw = search.get("tab") ?? activeTab;
+  const current = clusters.some((c) => c.id === raw) ? raw : activeTab;
 
   const href = (id: string) => `/settings?tab=${id}`;
   const activeHref = href(current);
