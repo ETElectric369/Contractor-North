@@ -22,7 +22,7 @@ import { rankSix } from "@/lib/six-rank";
 import { getActionItems } from "@/lib/action-items/query";
 import { ActionList } from "@/components/action-items/action-list";
 import { AppointmentButton, type ApptValue } from "../appointments/appointment-button";
-import { JobMoveButton, ApptMoveButton } from "./agenda-move";
+import { JobMoveButton, ApptMoveButton, ApptDoneButton } from "./agenda-move";
 import { NewTaskBox } from "../tasks/tasks-view";
 import { QuickCostButton } from "@/components/quick-cost-button";
 
@@ -518,6 +518,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           {isStaff && i.appt && (
             <AppointmentButton jobs={jobOpts} customers={custOpts} staff={staffOpts} appointment={i.appt} />
           )}
+          {isStaff && i.appt && <ApptDoneButton id={i.appt.id} title={i.appt.title ?? "appointment"} />}
           {isStaff && i.appt && <ApptMoveButton id={i.appt.id} startsAt={i.appt.starts_at} endsAt={i.appt.ends_at} />}
           {isStaff && i.jobId && <JobMoveButton jobId={i.jobId} fromDate={todayStr} />}
         </div>

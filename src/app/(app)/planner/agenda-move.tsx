@@ -1,10 +1,13 @@
 "use client";
 
+import { useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { Check, Loader2 } from "lucide-react";
+import { useToast } from "@/components/toast";
 import { MoveToDay } from "@/components/move-to-day";
 import { shiftApptToDay } from "@/lib/appt-time";
 import { moveJobDay } from "../schedule/actions";
-import { rescheduleAppointment } from "../appointments/actions";
+import { rescheduleAppointment, setAppointmentStatus } from "../appointments/actions";
 
 // Row verbs for the My Day agenda — thin client wrappers that bind the shared
 // <MoveToDay> sheet to each record type's canonical server contract (jobs →
@@ -59,5 +62,47 @@ export function ApptMoveButton({ id, startsAt, endsAt }: { id: string; startsAt:
         return res; // a withdrawn pick-a-time link surfaces via `note` as a toast
       }}
     />
+  );
+}
+
+/**
+ * DONE, FROM WHERE YOU ARE STANDING.
+ *
+ * Erik, three separate reports about one thing: "The later inspections already happened" /
+ * "The lead was already inspected and the inspection already happened. We need a better flow for
+ * this." / "when something is done close it."
+ *
+ * My Day only ever showed TODAY, and it already hid cancelled and completed ones — so nothing was
+ * piling up. The problem was narrower and more annoying than a pile: an appointment he had just
+ * finished stayed on the list for the rest of the day, because closing it meant opening the
+ * appointment, finding the status control, and coming back. So it sat there, and by the afternoon
+ * his own day was lying to him about what was left.
+ *
+ * setAppointmentStatus has existed the whole time. This is the button that calls it.
+ */
+export function ApptDoneButton({ id, title }: { id: string; title: string }) {
+  const router = useRouter();
+  const toast = useToast();
+  const [pending, start] = useTransition();
+  return (
+    <button
+      type="button"
+      aria-label={`Mark ${title} done`}
+      title="Mark done"
+      disabled={pending}
+      className={rowTrigger}
+      onClick={() =>
+        start(async () => {
+          const res = await setAppointmentStatus(id, "completed");
+          // A zero-row update is a 204, not an error — the action already checks, so trust its
+          // verdict rather than the absence of a throw.
+          if (!res.ok) return toast(res.error ?? "Couldn't mark it done.", "error");
+          toast("Done — off your day.", "success");
+          router.refresh();
+        })
+      }
+    >
+      {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+    </button>
   );
 }
