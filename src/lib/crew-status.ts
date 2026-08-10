@@ -5,6 +5,8 @@
  * shifts. Hours are deliberately NOT here anymore — those belong to payroll (/timecards); this
  * board is pure live presence (Erik: the crew-hours table isn't needed anywhere but payroll).
  */
+import { jobLabel } from "@/lib/schedule-options";
+
 export type CrewMember = {
   id: string;
   name: string;
@@ -36,9 +38,17 @@ export async function getCrewStatus(supabase: any): Promise<CrewMember[]> {
       id: m.id,
       name: m.full_name ?? "—",
       clockedIn: !!o,
-      // Deliberately NOT schedule-options' jobLabel: this omits the " · " when a job
-      // has no name (the shared shape would print "J-0012 · undefined" on the board).
-      jobLabel: job ? `${job.job_number}${job.name ? ` · ${job.name}` : ""}` : null,
+      // THE SSOT, not a fork (cn-v697). The old line built its own label with the NUMBER first,
+      // justified by a comment claiming the shared helper "would print J-0012 · undefined" — it
+      // would not: schedule-options' jobLabel is `name || num || "Job"`, so it never emits a
+      // dangling separator and never emits undefined. That describes jobLabelWithNumber, or a
+      // version of jobLabel that predates cn-v590.
+      //
+      // The cost of the fork was Erik filing the same bug three times — "timecards and all jobs
+      // need to be displayed as job name not job number everywhere", twice more in other words.
+      // /timecards itself was fixed; this strip across the top of it was still number-led, which
+      // is why it kept looking unfixed.
+      jobLabel: job ? jobLabel(job) : null,
     };
   });
 }

@@ -172,17 +172,24 @@ export default async function TimeclockPage() {
       }
     : null;
 
-  // The label a week-old entry's JOB shows on this page: the job number (codes on,
-  // unchanged) or the customer · address identity (codes off). Entries can point at
-  // finished jobs, so this reads the entry's own join, not the active-jobs options.
+  // The label a week-old entry's JOB shows on this page. Entries can point at finished jobs, so
+  // this reads the entry's own join, not the active-jobs options.
+  //
+  // NAME, NOT NUMBER (cn-v697). Erik, on this exact list: "this week should show jobs worked not
+  // job codes" — and twice more elsewhere, "timecards and all jobs need to be displayed as job
+  // name not job number everywhere". The codes-on branch returned a bare `job_number`, so his
+  // week read J-009, J-013, J-017 — three different dwellings at 300 W Lake Blvd whose only
+  // distinguishing text lives in the NAME. jobLabel is the SSOT and already prefers the name,
+  // falling back to the number for a job that hasn't got one.
+  //
+  // The codes-OFF branch keeps jobSiteLabel: an org with codes off navigates by whose house the
+  // crew is at, which is a different question, not a worse answer to this one.
   const weekJobTag = (e: TimeEntry): string | null => {
     const j = (e as any).job as
       | { job_number?: string | null; name?: string | null; address?: string | null; customers?: { name?: string | null } | null }
       | null;
     if (!j) return null;
-    return jobCodesOn
-      ? (j.job_number ?? null)
-      : jobSiteLabel({ ...j, customer_name: j.customers?.name ?? null });
+    return jobCodesOn ? jobLabel(j) : jobSiteLabel({ ...j, customer_name: j.customers?.name ?? null });
   };
 
   const openEntry = (openRes.data as TimeEntry) ?? null;
