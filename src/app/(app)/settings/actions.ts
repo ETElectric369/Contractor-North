@@ -49,40 +49,75 @@ export async function updateOrganization(formData: FormData): Promise<Result> {
   const orgId = await myOrgId(supabase);
   if (!orgId) return { ok: false, error: "No organization." };
 
-  const taxPct = Number(formData.get("default_tax_pct"));
+  // ── A PATCH, NOT A WHOLE-ROW WRITE ────────────────────────────────────────────────────────
+  //
+  // This wrote EVERY column on organizations from a single FormData, with defaults for anything
+  // absent. Today that is survivable because exactly one giant form posts here and it always
+  // carries every field. It stops being survivable the moment Settings splits into panes — which
+  // is the next thing we are doing — because a pane that submits only its own fields would:
+  //
+  //   name          missing → RENAMES THE COMPANY TO "My Company"   (`|| "My Company"`)
+  //   default_tax_pct missing → ZEROES THE TAX RATE                 (`: 0`)
+  //   address/phone/email/license missing → nulled                  (emptyToNull/norm)
+  //   currency/timezone/glass_tint/weather_source missing → reset to USD / America/Los_Angeles /
+  //                                                          #1b9488 / device
+  //
+  // So a "change your phone number" pane would rename the business, wipe the address and reset the
+  // tax rate. formData.has() is the whole fix: it distinguishes NOT SUBMITTED from SUBMITTED BLANK,
+  // which is the distinction the old code could not express. A field the caller sent is written
+  // exactly as before, blanks included; a field it never mentioned is not touched.
+  const patch: Record<string, unknown> = {};
+  const sent = (k: string) => formData.has(k);
 
-  // Currency / timezone / tax number live in the settings JSONB — merge them in.
-  const { data: existing } = await supabase
+  if (sent("name")) patch.name = String(formData.get("name") ?? "").trim() || "My Company";
+  if (sent("address_line1")) patch.address_line1 = emptyToNull(formData.get("address_line1"));
+  if (sent("address_line2")) patch.address_line2 = emptyToNull(formData.get("address_line2"));
+  if (sent("city")) patch.city = norm(titleCase(String(formData.get("city") ?? "")));
+  if (sent("state")) patch.state = norm(formatState(String(formData.get("state") ?? "")));
+  if (sent("zip")) patch.zip = norm(formatZip(String(formData.get("zip") ?? "")));
+  if (sent("phone")) patch.phone = norm(formatPhone(String(formData.get("phone") ?? "")));
+  if (sent("email")) patch.email = emptyToNull(formData.get("email"));
+  if (sent("license")) patch.license = emptyToNull(formData.get("license"));
+  if (sent("default_tax_pct")) {
+    const taxPct = Number(formData.get("default_tax_pct"));
+    patch.default_tax_rate = Number.isFinite(taxPct) ? taxPct / 100 : 0;
+  }
+
+  // The settings JSONB is merged the same way: read what is stored, overlay ONLY the keys this
+  // form actually carried. The old code re-asserted a default for every key on every save, so a
+  // form that didn't include the timezone quietly moved the company to Los Angeles.
+  const jsonKeys: Array<[string, (v: FormDataEntryValue | null) => unknown]> = [
+    ["currency", (v) => String(v ?? "USD") || "USD"],
+    ["timezone", (v) => String(v ?? "America/Los_Angeles")],
+    ["tax_number", (v) => String(v ?? "").trim()],
+    ["glass_tint", (v) => String(v ?? "#1b9488") || "#1b9488"],
+    ["weather_source", (v) => (v === "business" ? "business" : "device")],
+  ];
+  const touchedJson = jsonKeys.filter(([k]) => sent(k));
+  if (touchedJson.length) {
+    const { data: existing } = await supabase
+      .from("organizations")
+      .select("settings")
+      .eq("id", orgId)
+      .single();
+    patch.settings = {
+      ...((existing?.settings as Record<string, unknown>) ?? {}),
+      ...Object.fromEntries(touchedJson.map(([k, coerce]) => [k, coerce(formData.get(k))])),
+    };
+  }
+
+  // Nothing to do beats writing an empty object and reporting success.
+  if (!Object.keys(patch).length) return { ok: true };
+
+  // .select() SO A ZERO-ROW WRITE CANNOT REPORT SUCCESS — an RLS-blocked update is a 204.
+  const { data: wrote, error } = await supabase
     .from("organizations")
-    .select("settings")
+    .update(patch)
     .eq("id", orgId)
-    .single();
-  const mergedSettings = {
-    ...(existing?.settings ?? {}),
-    currency: String(formData.get("currency") ?? "USD") || "USD",
-    timezone: String(formData.get("timezone") ?? "America/Los_Angeles"),
-    tax_number: String(formData.get("tax_number") ?? "").trim(),
-    glass_tint: String(formData.get("glass_tint") ?? "#1b9488") || "#1b9488",
-    weather_source: formData.get("weather_source") === "business" ? "business" : "device",
-  };
+    .select("id");
 
-  const { error } = await supabase
-    .from("organizations")
-    .update({
-      name: String(formData.get("name") ?? "").trim() || "My Company",
-      address_line1: emptyToNull(formData.get("address_line1")),
-      address_line2: emptyToNull(formData.get("address_line2")),
-      city: norm(titleCase(String(formData.get("city") ?? ""))),
-      state: norm(formatState(String(formData.get("state") ?? ""))),
-      zip: norm(formatZip(String(formData.get("zip") ?? ""))),
-      phone: norm(formatPhone(String(formData.get("phone") ?? ""))),
-      email: emptyToNull(formData.get("email")),
-      license: emptyToNull(formData.get("license")),
-      default_tax_rate: Number.isFinite(taxPct) ? taxPct / 100 : 0,
-      settings: mergedSettings,
-    })
-    .eq("id", orgId);
-
+  if (!error && !wrote?.length)
+    return { ok: false, error: "That didn't save — check your access and try again." };
   if (error) return { ok: false, error: error.message };
   revalidatePath("/settings");
   revalidatePath("/", "layout");
