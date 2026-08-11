@@ -1,5 +1,6 @@
 "use server";
 
+import { splitLeadAddress } from "@/lib/inquiries/lead-address";
 import { headers } from "next/headers";
 import { createServiceClient } from "@/lib/supabase/server";
 import { createTriagedInquiry } from "@/lib/inquiries/create-triaged-inquiry";
@@ -14,6 +15,8 @@ export interface IntakePayload {
   /** Honeypot — a real person never fills it. */
   hp?: string;
   contact: { name?: string; phone?: string; email?: string; address?: string; city?: string; state?: string; zip?: string };
+  /** Where the WORK is, when it isn't the contact's own address. null = same as home (0189). */
+  site?: { address?: string; city?: string; state?: string; zip?: string } | null;
   answers: Answers;
 }
 
@@ -38,12 +41,17 @@ export async function submitIntake(
   const phone = String(payload?.contact?.phone ?? "").trim().slice(0, 40);
   const email = String(payload?.contact?.email ?? "").trim().slice(0, 200);
   if (!phone && !email) return { ok: false, error: "Add a phone or email so we can reach you." };
-  const address = String(payload?.contact?.address ?? "").trim().slice(0, 300);
-  // Resolved parts only — the client sends them only when a suggestion was picked.
-  const part = (v: unknown, n: number) => String(v ?? "").trim().slice(0, n) || null;
-  const city = part(payload?.contact?.city, 80);
-  const state = part(payload?.contact?.state, 40);
-  const zip = part(payload?.contact?.zip, 20);
+  // TWO ADDRESSES, AND `address` IS STILL THE SITE (0189) — see lib/inquiries/lead-address.ts for
+  // the rule and why it lives in one place rather than at both of its call sites.
+  const split = splitLeadAddress({ contact: payload?.contact ?? {}, site: payload?.site ?? null });
+  const address = split.site.address ?? "";
+  const city = split.site.city;
+  const state = split.site.state;
+  const zip = split.site.zip;
+  const contactAddress = split.contact.address ?? "";
+  const contactCity = split.contact.city;
+  const contactState = split.contact.state;
+  const contactZip = split.contact.zip;
 
   const ip = clientIp(await headers());
   if (await rateLimited(`intake:${ip}`, 5, 60)) {
@@ -118,6 +126,10 @@ export async function submitIntake(
     city,
     state,
     zip,
+    contact_address: contactAddress || null,
+    contact_city: contactCity,
+    contact_state: contactState,
+    contact_zip: contactZip,
     message: lines.join("\n").slice(0, 4000) || null,
     source: "intake",
     // Generic triage: plans → ready to quote; a written description → measure-and-talk; nothing
@@ -128,7 +140,7 @@ export async function submitIntake(
       hasDimensions: false,
       needsDesignHelp: !hasPlans,
       estimateTotal: null,
-      contact: { name, phone: phone || null, email: email || null, address: address || null },
+      contact: { name, phone: phone || null, email: email || null, address: contactAddress || null },
     },
     intakeJson: { intake_answers: answers },
     // Caller-authored content with no size-verified total: a stranger must not be able to talk

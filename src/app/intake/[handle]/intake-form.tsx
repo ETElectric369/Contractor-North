@@ -25,6 +25,11 @@ export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: 
   // city/state/zip are filled ONLY by the picker — a typed line leaves them empty, which is
   // 0177's law: a guessed city is worse than a blank one.
   const [contact, setContact] = useState({ name: "", phone: "", email: "", address: "", city: "", state: "", zip: "" });
+  // THE SECOND ADDRESS (0189). `contact.address` is where the PERSON is; this is where the WORK is,
+  // and it is the one that becomes the job. Ticked by default so a residential service call is
+  // still one address typed once — which is every lead ET Electric and TAHOE DECK have ever had.
+  const [siteSame, setSiteSame] = useState(true);
+  const [site, setSite] = useState({ address: "", city: "", state: "", zip: "" });
   const [answers, setAnswers] = useState<Answers>({});
   const [hp, setHp] = useState(""); // honeypot — hidden from people, filled by bots
   // Which questions the customer has opened "Something else" on. Only tracks the EMPTY in-between —
@@ -106,7 +111,7 @@ export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: 
         e.preventDefault();
         start(async () => {
           setErr(null);
-          const r = await submitIntake(handle, { hp, contact, answers });
+          const r = await submitIntake(handle, { hp, contact, site: siteSame ? null : site, answers });
           if (!r.ok) return setErr(r.error);
           setDone(true);
         });
@@ -126,7 +131,7 @@ export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: 
           <Input type="email" value={contact.email} autoComplete="email" onChange={(e) => setContact({ ...contact, email: e.target.value })} />
         </div>
         <div>
-          <Label className="mb-1.5">Project address</Label>
+          <Label className="mb-1.5">Home address</Label>
           {/* THE ONE LEAD-CAPTURE SURFACE THAT NEVER GOT THE PICKER. Andrew asked for address
               autocomplete here, and every sibling already had it — inquire/[org], the job form,
               the inspector, the lead form, the CRM. This door, the one on his actual website, was
@@ -145,6 +150,41 @@ export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: 
             }
           />
         </div>
+      </div>
+
+      {/* ── WHERE THE WORK IS ─────────────────────────────────────────────────────────────────
+          Andrew: "the top box with the customer info … to say home address then the project is
+          the project." A general contractor's lead lives in a house that already exists and is
+          building on a lot that does not, so one address could never be both. The tick keeps the
+          old behaviour for everybody else: leave it on and the site IS the home address, which is
+          one box typed once, exactly as this form worked before. */}
+      <div className="rounded-xl border border-slate-200 p-4">
+        <label className="flex min-h-[44px] items-center gap-2 text-sm text-slate-700">
+          <input
+            type="checkbox"
+            className="h-4 w-4"
+            checked={siteSame}
+            onChange={(e) => {
+              setSiteSame(e.target.checked);
+              if (e.target.checked) setSite({ address: "", city: "", state: "", zip: "" });
+            }}
+          />
+          The work is at my home address
+        </label>
+        {!siteSame && (
+          <div className="mt-3">
+            <Label className="mb-1.5">Project address</Label>
+            <AddressAutocomplete
+              streetOnly
+              placeholder="Where the work happens"
+              defaultValue={site.address}
+              onTextChange={(v) => setSite({ address: v, city: "", state: "", zip: "" })}
+              onResolved={(p) =>
+                setSite((x) => ({ address: p.line1 || x.address, city: p.city ?? "", state: p.state ?? "", zip: p.zip ?? "" }))
+              }
+            />
+          </div>
+        )}
       </div>
 
       {/* Honeypot: visually gone, still in the DOM for bots that fill every field. */}

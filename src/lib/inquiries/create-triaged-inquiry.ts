@@ -23,10 +23,17 @@ export interface CreateTriagedInquiryInput {
   company_name?: string | null;
   email?: string | null;
   phone?: string | null;
+  /** THE JOB SITE — copied to jobs.address on conversion. See 0189. */
   address?: string | null;
   city?: string | null;
   state?: string | null;
   zip?: string | null;
+  /** Where the PERSON is (0189). Fills customers.address on conversion; null falls back to
+   *  `address`, which is how every door that only captures one address behaves. */
+  contact_address?: string | null;
+  contact_city?: string | null;
+  contact_state?: string | null;
+  contact_zip?: string | null;
   type?: string | null;
   message?: string | null;
   source: string;
@@ -71,6 +78,13 @@ export async function createTriagedInquiry(
       city: input.city ?? null,
       state: input.state ?? null,
       zip: input.zip ?? null,
+      // Written only when a door actually captured a second address (0189). Every other door
+      // leaves these null, and the conversion reads `contact_address ?? address` — so a lead from
+      // /inquire, the partner webhook or the deck configurator behaves exactly as it always did.
+      contact_address: input.contact_address ?? null,
+      contact_city: input.contact_city ?? null,
+      contact_state: input.contact_state ?? null,
+      contact_zip: input.contact_zip ?? null,
       type: input.type ?? "residential",
       message: input.message ?? null,
       source: String(input.source).slice(0, 40),

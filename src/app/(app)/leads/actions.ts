@@ -1,5 +1,6 @@
 "use server";
 
+import { customerAddressFrom } from "@/lib/inquiries/lead-address";
 import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
 import { requireStaff } from "@/lib/staff-guard";
@@ -376,10 +377,9 @@ export async function convertInquiry(
         status: "active",
         email: inq.email,
         phone: inq.phone,
-        address: inq.address,
-        city: inq.city,
-        state: inq.state,
-        zip: inq.zip,
+        // THE PERSON'S ADDRESS, not the site (0189) — one helper, both directions, so the write
+        // side and this read side cannot drift into printing a home address as a job site.
+        ...customerAddressFrom(inq),
         notes: inq.message ? `From inquiry: ${inq.message}` : inq.notes,
         created_by: ctx.userId,
       })
