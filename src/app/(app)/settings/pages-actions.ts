@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { resolveSiteContext } from "@/lib/site-editor-guard";
@@ -130,7 +131,7 @@ export async function deleteSitePage(id: string, orgId?: string): Promise<Result
   const ctx = await resolveSiteContext(orgId);
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const { data, error } = await ctx.supabase.from("site_pages").delete().eq("id", id).eq("org_id", ctx.orgId).select("id");
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   if (!data?.length) return { ok: false, error: "That page no longer exists." };
   revalidatePath("/settings");
   revalidatePath("/content");

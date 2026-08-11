@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
@@ -67,7 +68,7 @@ export async function createKit(input: { name: string; category?: string | null 
     .insert({ name: input.name.trim(), category: input.category?.trim() || null })
     .select("id")
     .single();
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/price-list");
   return { ok: true, id: data.id };
 }
@@ -88,7 +89,7 @@ export async function updateKit(
     .from("kits")
     .update({ name: input.name.trim(), category: input.category?.trim() || null })
     .eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/price-list");
   return { ok: true };
 }
@@ -96,7 +97,7 @@ export async function updateKit(
 export async function deleteKit(id: string): Promise<Result> {
   const supabase = await createClient();
   const { error } = await supabase.from("kits").delete().eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/price-list");
   return { ok: true };
 }
@@ -175,7 +176,7 @@ export async function updateKitItems(
         unit_price: Number.isFinite(e.unit_price) ? Math.max(0, e.unit_price) : 0,
       })
       .eq("id", e.id);
-    if (error) return { ok: false, error: error.message };
+    if (error) return { ok: false, error: dbError(error) };
     updated++;
   }
   revalidatePath("/price-list");
@@ -218,7 +219,7 @@ export async function updateKitItem(
       ...(input.qty_round !== undefined ? { qty_round: input.qty_round || null } : {}),
     })
     .eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/price-list");
   return { ok: true };
 }
@@ -226,7 +227,7 @@ export async function updateKitItem(
 export async function deleteKitItem(id: string): Promise<Result> {
   const supabase = await createClient();
   const { error } = await supabase.from("kit_items").delete().eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/price-list");
   return { ok: true };
 }

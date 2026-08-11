@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
@@ -102,7 +103,7 @@ export async function createTask(input: {
     })
     .select("id")
     .single();
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidateTaskViews(category, input.job_id);
   return { ok: true, id: created?.id as string | undefined };
 }
@@ -157,7 +158,7 @@ export async function toggleTask(
       completed_at: done ? new Date().toISOString() : null,
     })
     .eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidateTaskViews(opts?.category, opts?.jobId);
   return { ok: true };
 }
@@ -212,7 +213,7 @@ export async function updateTask(
   }
 
   const { error } = await supabase.from("tasks").update(clean).eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidateTaskViews(opts?.category, opts?.jobId);
   // If the task was re-linked to a different job, refresh that job's page too.
   const newJobId = clean.job_id as string | null | undefined;
@@ -226,7 +227,7 @@ export async function deleteTask(
 ): Promise<Result> {
   const supabase = await createClient();
   const { error } = await supabase.from("tasks").delete().eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidateTaskViews(opts?.category, opts?.jobId);
   return { ok: true };
 }

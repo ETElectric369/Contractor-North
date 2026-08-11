@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
@@ -158,7 +159,7 @@ export async function setJobStatus(id: string, status: string): Promise<{ ok: bo
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
   const { data, error } = await supabase.from("jobs").update({ status }).eq("id", id).select("id");
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   if (!data || !data.length) return { ok: false, error: "Job not found." };
   // Google reconcile (fire-safe): leaving the active set deletes the event,
   // re-activating a scheduled job re-pushes it.
@@ -194,7 +195,7 @@ export async function finishJob(
     .limit(1);
   if (draws && draws.length) {
     const { error } = await supabase.from("jobs").update({ status: "complete" }).eq("id", jobId);
-    if (error) return { ok: false, error: error.message };
+    if (error) return { ok: false, error: dbError(error) };
     await pushCalendarItem("job", jobId); // finished job leaves Google (fire-safe)
     revalidatePath(`/jobs/${jobId}`);
     revalidatePath("/jobs");
@@ -210,7 +211,7 @@ export async function finishJob(
   if (!inv.ok || !inv.id) return { ok: false, error: inv.error ?? "Could not create the invoice." };
 
   const { error } = await supabase.from("jobs").update({ status: "complete" }).eq("id", jobId);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   await pushCalendarItem("job", jobId); // finished job leaves Google (fire-safe)
 
   // Auto-invoice: when asked, email the draft to the customer now. Best-effort —
@@ -328,7 +329,7 @@ export async function deleteJob(
   // BEFORE the row goes (it reads google_event_id off the row). Fire-safe.
   await deleteCalendarItem("job", id);
   const { error } = await supabase.from("jobs").delete().eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/jobs");
   revalidatePath("/planner"); // a status/finish change moves a job on/off today's My Day
   revalidatePath("/schedule");
@@ -403,7 +404,7 @@ export async function updateJob(
       updated_at: new Date().toISOString(),
     })
     .eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   if (prevJob) {
     const p = prevJob as { assigned_to: string[] | null; org_id: string | null; job_number: string | null };
@@ -470,7 +471,7 @@ export async function createBill(input: {
     })
     .select("id")
     .single();
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   // Best-effort receipt link (never fails the bill): only when the document is visible
   // via RLS AND on this bill's job — same containment rule as the po_id link above.
@@ -544,7 +545,7 @@ export async function linkReceiptToBill(billId: string, documentId: string): Pro
     file_url: doc.file_url,
     created_by: ctx.userId,
   });
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath(`/jobs/${bill.job_id}`);
   return { ok: true };
 }
@@ -599,7 +600,7 @@ export async function updateBill(
   }
 
   const { data, error } = await supabase.from("bills").update(clean).eq("id", id).select("job_id").maybeSingle();
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   for (const jid of new Set([oldJobId, (data as any)?.job_id].filter(Boolean) as string[])) revalidatePath(`/jobs/${jid}`);
   revalidatePath("/bills");
   revalidatePath("/analytics"); // bill cost moves job profitability
@@ -615,7 +616,7 @@ export async function setBillStatus(
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
   const { error } = await supabase.from("bills").update({ status }).eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath(`/jobs/${jobId}`);
   return { ok: true };
 }
@@ -625,7 +626,7 @@ export async function deleteBill(id: string, jobId: string): Promise<Result> {
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
   const { error } = await supabase.from("bills").delete().eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath(`/jobs/${jobId}`);
   return { ok: true };
 }
@@ -641,7 +642,7 @@ export async function updateJobNotes(
     .from("jobs")
     .update({ notes: notes.trim() || null })
     .eq("id", jobId);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath(`/jobs/${jobId}`);
   return { ok: true };
 }
@@ -658,7 +659,7 @@ export async function updateJobDescription(
     .from("jobs")
     .update({ description: description.trim() || null })
     .eq("id", jobId);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath(`/jobs/${jobId}`);
   return { ok: true };
 }
@@ -689,7 +690,7 @@ export async function addDocument(input: {
     })
     .select("id")
     .single();
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   revalidatePath(`/jobs/${input.job_id}`);
   return { ok: true, id: data?.id };
@@ -717,7 +718,7 @@ export async function updateDocument(
   if (patch.category !== undefined) clean.category = patch.category ?? null;
 
   const { error } = await supabase.from("documents").update(clean).eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath(`/jobs/${jobId}`);
   return { ok: true };
 }
@@ -732,7 +733,7 @@ export async function deleteDocument(
   // to a job have NO file (file_url null) — skip storage for those, like /organize does.
   if (path) await supabase.storage.from("documents").remove([path]);
   const { error } = await supabase.from("documents").delete().eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath(`/jobs/${jobId}`);
   return { ok: true };
 }

@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { customerAddressFrom } from "@/lib/inquiries/lead-address";
 import { revalidatePath } from "next/cache";
@@ -104,7 +105,7 @@ export async function createInquiry(formData: FormData): Promise<Result> {
     })
     .select("id")
     .single();
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   revalidatePath("/leads");
   // /schedule no longer needs waking: a new lead doesn't put anything on the calendar any more.
@@ -127,7 +128,7 @@ export async function updateInquiry(id: string, formData: FormData): Promise<Res
     .from("inquiries")
     .update({ name, ...fields, updated_at: new Date().toISOString() })
     .eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   revalidatePath("/leads");
   return { ok: true };
@@ -164,7 +165,7 @@ export async function markInquiryContacted(id: string, nextFollowUp?: string | n
     if (!cur || cur <= todayStr) patch.next_follow_up_at = ymdAddDays(todayStr, FOLLOW_UP_DEFAULT_DAYS);
   }
   const { error } = await supabase.from("inquiries").update(patch).eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/leads");
   // My Day's "Needs action" inbox lists open leads — mark-contacted from THERE (Alexa
   // 2026-07-20: "checking the box resets") needs the planner to re-fetch too, else the
@@ -186,7 +187,7 @@ export async function setInquiryStatus(id: string, status: string): Promise<Resu
     .from("inquiries")
     .update({ status, updated_at: new Date().toISOString() })
     .eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/leads");
   revalidatePath("/planner"); // My Day shows inquiry counts — keep it in sync
   return { ok: true };
@@ -197,7 +198,7 @@ export async function deleteInquiry(id: string): Promise<Result> {
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
   const { error } = await supabase.from("inquiries").delete().eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/leads");
   return { ok: true };
 }

@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { requireStaff } from "@/lib/staff-guard";
@@ -99,7 +100,7 @@ export async function revokeSiteCollaborator(id: string): Promise<Result> {
     .eq("id", id)
     .eq("org_id", orgId)
     .select("id");
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   if (!data?.length) return { ok: false, error: "That invite no longer exists." };
 
   // Tombstone (0159): who had access, from when to when, cut by whom. Best-effort — the

@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 /**
  * Crew DAY-assignments (migration 0139) — the /timeclock board's week-planning
@@ -118,7 +119,7 @@ export async function setCrewDayAssignment(input: {
         },
         { onConflict: "profile_id,work_date" },
       );
-      if (error) return { ok: false, error: error.message };
+      if (error) return { ok: false, error: dbError(error) };
       revalidatePath("/timeclock");
       revalidatePath("/planner");
       return { ok: true };
@@ -129,7 +130,7 @@ export async function setCrewDayAssignment(input: {
       .delete()
       .eq("profile_id", profileId)
       .eq("work_date", workDate);
-    if (error) return { ok: false, error: error.message };
+    if (error) return { ok: false, error: dbError(error) };
     revalidatePath("/timeclock");
     revalidatePath("/planner"); // clock-in default + My Day follow the assignment
     return { ok: true };
@@ -192,7 +193,7 @@ export async function setCrewDayAssignment(input: {
     },
     { onConflict: "profile_id,work_date" },
   );
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   // Day-specific notify — only when the day's JOB was created/changed AND
   // setJobCrew didn't already bell them for the add. Never the caller
@@ -331,7 +332,7 @@ export async function setCrewOffRange(input: {
     })),
     { onConflict: "profile_id,work_date" },
   );
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   revalidatePath("/timeclock");
   revalidatePath("/planner");
@@ -357,7 +358,7 @@ export async function clearCrewOffRange(input: {
     .eq("kind", "off")
     .gte("work_date", input.fromDate)
     .lte("work_date", input.toDate);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/timeclock");
   revalidatePath("/planner");
   return { ok: true };

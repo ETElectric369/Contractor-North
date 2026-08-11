@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import {
@@ -87,7 +88,7 @@ export async function finishPasskeyRegistration(
     label: (label || "Passkey").slice(0, 40),
   });
   await supabase.from("webauthn_challenges").delete().eq("user_id", user.id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/settings");
   return { ok: true };
 }

@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
@@ -140,7 +141,7 @@ export async function createJob(formData: FormData): Promise<Result> {
     .select("id")
     .single();
 
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   // Live Google push (fire-safe: never throws, no-op when not connected).
   if (start) await pushCalendarItem("job", data.id);
@@ -175,7 +176,7 @@ export async function setJobAssignee(
     .from("jobs")
     .update({ assigned_to: ids })
     .eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   if (prev) {
     const p = prev as { assigned_to: string[] | null; org_id: string | null; job_number: string | null; name: string | null };
     // Awaited: an un-awaited promise in a serverless action can be dropped when the
@@ -207,7 +208,7 @@ export async function setJobCrew(id: string, employeeIds: string[]): Promise<Res
     .eq("id", id)
     .maybeSingle();
   const { error } = await supabase.from("jobs").update({ assigned_to: ids }).eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   if (prev) {
     const p = prev as { assigned_to: string[] | null; org_id: string | null; job_number: string | null; name: string | null };
     // Awaited (not `void`): serverless can drop an un-awaited promise after the action
@@ -245,7 +246,7 @@ export async function createScheduleProposal(
     .insert({ job_id: jobId, dates: clean, time_note: timeNote || null, created_by: ctx.userId })
     .select("token")
     .single();
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath(`/jobs/${jobId}`);
   return { ok: true, token: data.token };
 }
@@ -255,7 +256,7 @@ export async function cancelScheduleProposal(id: string, jobId: string): Promise
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
   const { error } = await supabase.from("schedule_proposals").update({ status: "cancelled" }).eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath(`/jobs/${jobId}`);
   return { ok: true };
 }
@@ -332,7 +333,7 @@ export async function setJobScheduleRanges(
   // server-action POST (audit cn-v328 — the loadJobDaySegments guard only caught the
   // wrappers). See also the belt-and-suspenders note in that audit.
   const { data: upd, error } = await supabase.from("jobs").update(patch).eq("id", jobId).select("id");
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   if (!upd?.length) return { ok: false, error: "Job not found." };
   // A scheduled date advances early-stage status (consistent with the other writers).
   if (minStart) await advanceToScheduled(supabase, jobId);
@@ -383,7 +384,7 @@ async function loadJobDaySegments(
     .select("start_date, end_date")
     .eq("job_id", jobId)
     .order("start_date");
-  if (error) return { segments: [], error: error.message };
+  if (error) return { segments: [], error: dbError(error) };
   const segments = (segRows ?? []).map((s: any) => ({ start: s.start_date as string, end: s.end_date as string }));
   if (segments.length) return { segments };
   const { data: job } = await supabase.from("jobs").select("scheduled_start, scheduled_end").eq("id", jobId).maybeSingle();

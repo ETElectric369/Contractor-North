@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
@@ -371,7 +372,7 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
       payment: kind === "receipt" ? paymentRead : null,
     })
     .eq("id", itemId);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   revalidatePath("/organize");
   revalidatePath("/bills");
@@ -666,7 +667,7 @@ export async function fileItem(id: string, dest: FileDestination): Promise<Resul
     .from("organized_items")
     .update({ job_id: jobId, document_id: documentId, bill_id: billId, category, status: "filed" })
     .eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   revalidatePath("/organize");
   revalidatePath("/bills");
@@ -688,7 +689,7 @@ export async function deleteOrganizedItem(id: string): Promise<Result> {
   if (item.bill_id) await supabase.from("bills").delete().eq("id", item.bill_id);
   if (item.file_url) await supabase.storage.from("documents").remove([item.file_url]);
   const { error } = await supabase.from("organized_items").delete().eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   revalidatePath("/organize");
   revalidatePath("/bills");
@@ -715,7 +716,7 @@ export async function saveVoiceNote(text: string): Promise<Result> {
     file_url: null,
     created_by: user.id,
   });
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/organize");
   return { ok: true };
 }
@@ -768,7 +769,7 @@ export async function updateOrganizedItem(
       summary,
     })
     .eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   revalidatePath("/organize");
   return { ok: true };
@@ -778,7 +779,7 @@ export async function updateOrganizedItem(
 export async function archiveItem(id: string): Promise<Result> {
   const supabase = await createClient();
   const { error } = await supabase.from("organized_items").update({ status: "archived" }).eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/organize");
   return { ok: true };
 }
@@ -787,7 +788,7 @@ export async function archiveItem(id: string): Promise<Result> {
 export async function unarchiveItem(id: string): Promise<Result> {
   const supabase = await createClient();
   const { error } = await supabase.from("organized_items").update({ status: "needs_review" }).eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/organize");
   return { ok: true };
 }

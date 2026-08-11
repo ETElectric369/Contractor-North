@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { requireStaff } from "@/lib/staff-guard";
@@ -26,7 +27,7 @@ export async function linkJobContact(jobId: string, customerId: string, role: st
       return { ok: false, error: "That contact is already on this job in that role." };
     if ((error as { code?: string }).code === "42P01")
       return { ok: false, error: "Sublinking isn't set up yet — run migration 0087." };
-    return { ok: false, error: error.message };
+    return { ok: false, error: dbError(error) };
   }
   revalidatePath(`/jobs/${jobId}`);
   return { ok: true };
@@ -40,7 +41,7 @@ export async function unlinkJobContact(id: string, jobId: string): Promise<Resul
   const { data: link } = await ctx.supabase.from("job_contacts").select("job_id").eq("id", id).maybeSingle();
   if (!link || link.job_id !== jobId) return { ok: false, error: "Link not found." };
   const { error } = await ctx.supabase.from("job_contacts").delete().eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath(`/jobs/${jobId}`);
   return { ok: true };
 }

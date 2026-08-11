@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
@@ -55,7 +56,7 @@ export async function createPurchaseOrder(input: {
     })
     .select("id")
     .single();
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   if (seedItems?.length) {
     const rows = seedItems.map((it: any, idx: number) => ({
@@ -104,7 +105,7 @@ export async function addPoItem(
     unit: item.unit || "ea",
     unit_cost: item.unit_cost || 0,
   });
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   await recalcPoTotals(supabase, poId);
   revalidatePath(`/purchasing/${poId}`);
   return { ok: true };
@@ -139,7 +140,7 @@ export async function updatePoItem(
       // received_qty intentionally untouched — receiving history is preserved.
     })
     .eq("id", itemId);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   await recalcPoTotals(supabase, poId);
   revalidatePath(`/purchasing/${poId}`);
   return { ok: true };
@@ -151,7 +152,7 @@ export async function deletePoItem(itemId: string, poId: string): Promise<Result
     .from("purchase_order_items")
     .delete()
     .eq("id", itemId);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   await recalcPoTotals(supabase, poId);
   revalidatePath(`/purchasing/${poId}`);
   return { ok: true };
@@ -162,7 +163,7 @@ export async function setPoStatus(id: string, status: string): Promise<Result> {
   const patch: Record<string, unknown> = { status };
   if (status === "sent") patch.ordered_at = new Date().toISOString();
   const { error } = await supabase.from("purchase_orders").update(patch).eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/purchasing");
   revalidatePath(`/purchasing/${id}`);
   return { ok: true };
@@ -203,7 +204,7 @@ export async function updatePurchaseOrder(
     .from("purchase_orders")
     .update(clean)
     .eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/purchasing");
   revalidatePath(`/purchasing/${id}`);
   return { ok: true };
@@ -212,7 +213,7 @@ export async function updatePurchaseOrder(
 export async function deletePurchaseOrder(id: string): Promise<Result> {
   const supabase = await createClient();
   const { error } = await supabase.from("purchase_orders").delete().eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/purchasing");
   revalidatePath("/bills");
   return { ok: true };
@@ -236,7 +237,7 @@ export async function receiveItem(
     .from("purchase_order_items")
     .update({ received_qty: newQty })
     .eq("id", itemId);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   // Received goods flow into stock: add the delta to the matching inventory item
   // (by part number), creating it if it's new. Lines with no part number are

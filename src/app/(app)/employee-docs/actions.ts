@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
@@ -30,7 +31,7 @@ export async function addEmployeeDoc(input: {
     notes: input.notes?.trim() || null,
     uploaded_by: user.id,
   });
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/employee-docs");
   return { ok: true };
 }
@@ -72,7 +73,7 @@ export async function updateEmployeeDoc(
       notes: input.notes?.trim() || null,
     })
     .eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/employee-docs");
   return { ok: true };
 }
@@ -81,7 +82,7 @@ export async function deleteEmployeeDoc(id: string, path: string): Promise<Resul
   const supabase = await createClient();
   await supabase.storage.from("documents").remove([path]);
   const { error } = await supabase.from("employee_documents").delete().eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/employee-docs");
   return { ok: true };
 }

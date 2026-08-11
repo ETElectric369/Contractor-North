@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { revalidateMoney } from "@/lib/revalidate-money";
@@ -50,7 +51,7 @@ export async function createCustomerCredit(
     note: note?.trim() || null,
     created_by: ctx.userId,
   });
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   // C6: a credit on account reduces what the customer owes — fold it into amount_paid via
   // recalc so the balance + collected reflect it (recalcInvoice now sums open credits as
   // payments). A refund is a cash-OUT, tracked in `collected` already, so it doesn't recalc.
@@ -257,7 +258,7 @@ export async function createInvoiceFromQuote(quoteId: string): Promise<Result> {
     })
     .select("id")
     .single();
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   const { data: items } = await supabase
     .from("quote_line_items")
@@ -329,7 +330,7 @@ export async function createBlankInvoice(input: {
     })
     .select("id")
     .single();
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   revalidateMoney();
   if (input.job_id) revalidatePath(`/jobs/${input.job_id}`);
@@ -363,7 +364,7 @@ export async function addInvoiceItem(
     unit: item.unit || "ea",
     unit_price: item.unit_price || 0,
   });
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   await recalcInvoice(supabase, invoiceId);
   revalidateMoney(invoiceId);
   return { ok: true };
@@ -401,7 +402,7 @@ async function upsertImportedItems(
     p_source: source,
     p_rows: rows,
   });
-  if (error) return { error: error.message };
+  if (error) return { error: dbError(error) };
   return { stats: (data ?? undefined) as never };
 }
 
@@ -786,7 +787,7 @@ export async function createProgressReportInvoice(
   if (error) {
     if ((error as any).code === "23505")
       return { ok: false, error: "A draft draw is already open on this job — send or delete it before creating another." };
-    return { ok: false, error: error.message };
+    return { ok: false, error: dbError(error) };
   }
 
   // Itemize the actual work to date (labor at bill rate + materials with markup). A real import failure
@@ -924,7 +925,7 @@ export async function setPaymentSchedule(
     };
 
   const { error } = await supabase.from("payment_milestones").insert(rows); // org_id via trigger
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath(`/jobs/${jobId}`);
   return { ok: true };
 }
@@ -1015,7 +1016,7 @@ async function createMilestoneDraw(
     // race that slips past the SELECT above — surface the friendly message, not raw SQL.
     if ((error as any).code === "23505")
       return { ok: false, error: "A draft draw is already open on this job — send or delete it before requesting the next payment." };
-    return { ok: false, error: error.message };
+    return { ok: false, error: dbError(error) };
   }
 
   const pctNote = Number(next.percent) > 0 ? ` (${Number(next.percent)}% of contract)` : "";
@@ -1080,7 +1081,7 @@ export async function updateInvoiceItem(
     .update(clean)
     .eq("id", itemId)
     .eq("invoice_id", invoiceId); // L3: the item must belong to THIS invoice
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   await recalcInvoice(supabase, invoiceId);
   revalidateMoney(invoiceId);
   return { ok: true };
@@ -1101,7 +1102,7 @@ export async function deleteInvoiceItem(
     .delete()
     .eq("id", itemId)
     .eq("invoice_id", invoiceId); // L3: the item must belong to THIS invoice
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   await recalcInvoice(supabase, invoiceId);
   revalidateMoney(invoiceId);
   return { ok: true };
@@ -1146,7 +1147,7 @@ export async function setInvoiceStatus(
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
   const { error } = await supabase.from("invoices").update({ status }).eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   // A DRAFT never auto-advances on payment (cn-v549), so a draft that was fully prepaid
   // (Jackie's Venmo before the invoice went out) leaves this call marked 'sent' and stays
   // there forever — never 'paid', permanently on the AR list. Recompute once the row is no
@@ -1228,7 +1229,7 @@ export async function recordPayment(input: {
     recorded_by: ctx.userId,
     ...(paidAt ? { paid_at: paidAt } : {}),
   });
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   await recalcInvoice(supabase, input.invoice_id);
   // Cash-in ping to the OTHER office staff (the recorder already knows).
@@ -1288,7 +1289,7 @@ export async function updatePayment(
       ...(paidAt ? { paid_at: paidAt } : {}),
     })
     .eq("id", paymentId);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   await recalcInvoice(supabase, invoiceId);
   revalidateMoney(invoiceId);
   revalidateMoney();
@@ -1301,7 +1302,7 @@ export async function deletePayment(paymentId: string, invoiceId: string): Promi
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
   const { error } = await supabase.from("payments").delete().eq("id", paymentId);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   await recalcInvoice(supabase, invoiceId);
   revalidateMoney(invoiceId);
   revalidateMoney();
@@ -1328,7 +1329,7 @@ export async function deleteInvoice(id: string): Promise<Result> {
     .update({ status: "pending", billed_amount: null })
     .eq("invoice_id", id);
   const { error } = await supabase.from("invoices").delete().eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidateMoney();
   return { ok: true };
 }
@@ -1343,7 +1344,7 @@ export async function setInvoiceTaxRate(
   const supabase = ctx.supabase;
   const rate = Number.isFinite(ratePercent) ? ratePercent / 100 : 0;
   const { error } = await supabase.from("invoices").update({ tax_rate: rate }).eq("id", invoiceId);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   await recalcInvoice(supabase, invoiceId);
   revalidateMoney(invoiceId);
   return { ok: true };
@@ -1360,7 +1361,7 @@ export async function setInvoiceDescription(
     .from("invoices")
     .update({ description: description.trim() || null })
     .eq("id", invoiceId);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidateMoney(invoiceId);
   return { ok: true };
 }
@@ -1376,7 +1377,7 @@ export async function setInvoiceTitle(
     .from("invoices")
     .update({ title: title.trim() || null })
     .eq("id", invoiceId);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidateMoney(invoiceId);
   revalidateMoney();
   return { ok: true };
@@ -1396,7 +1397,7 @@ export async function setInvoiceDueDate(
     .from("invoices")
     .update({ due_date: dueDate })
     .eq("id", invoiceId);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidateMoney(invoiceId);
   revalidateMoney();
   return { ok: true };
@@ -1462,7 +1463,7 @@ export async function setInvoiceCustomerJob(
     .from("invoices")
     .update(clean)
     .eq("id", invoiceId);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidateMoney(invoiceId);
   for (const jid of new Set([oldJobId, jobId].filter(Boolean) as string[])) revalidatePath(`/jobs/${jid}`);
   return { ok: true };

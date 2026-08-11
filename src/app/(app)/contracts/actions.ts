@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { requireStaff } from "@/lib/staff-guard";
@@ -89,7 +90,7 @@ export async function generateContractFromJob(jobId: string): Promise<Result> {
       .from("contracts")
       .update({ body, customer_id: j.customer_id ?? null, title, updated_at: new Date().toISOString() })
       .eq("id", (existing as any).id);
-    if (error) return { ok: false, error: error.message };
+    if (error) return { ok: false, error: dbError(error) };
     revalidatePath(`/jobs/${jobId}`);
     return { ok: true, id: (existing as any).id };
   }
@@ -114,7 +115,7 @@ export async function generateContractFromJob(jobId: string): Promise<Result> {
         return { ok: true, id: (live as any).id };
       }
     }
-    return { ok: false, error: error.message };
+    return { ok: false, error: dbError(error) };
   }
   revalidatePath(`/jobs/${jobId}`);
   return { ok: true, id: inserted.id };
@@ -132,7 +133,7 @@ export async function updateContract(id: string, input: { title?: string; body?:
   if (input.title != null) patch.title = input.title;
   if (input.body != null) patch.body = input.body;
   const { error } = await supabase.from("contracts").update(patch).eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath(`/jobs/${(c as any).job_id}`);
   return { ok: true };
 }
@@ -187,7 +188,7 @@ export async function voidContract(id: string): Promise<Result> {
   // A signed contract is an executed legal record — don't let it be voided away.
   if ((c as any).status === "signed") return { ok: false, error: "A signed contract can't be voided." };
   const { error } = await supabase.from("contracts").update({ status: "void" }).eq("id", id).neq("status", "signed");
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath(`/jobs/${(c as any).job_id}`);
   return { ok: true };
 }

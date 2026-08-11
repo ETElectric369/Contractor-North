@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
@@ -32,7 +33,7 @@ export async function saveNortTone(
     })
     .eq("id", user.id)
     .select("id");
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   // A zero-row update is a 204, not an error — never report a save that didn't land.
   if (!data?.length) return { ok: false, error: "That didn't save. Try again?" };
   revalidatePath("/settings");

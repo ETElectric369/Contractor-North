@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { isStaffRole } from "@/lib/actions/perms";
@@ -145,7 +146,7 @@ export async function unmarkPeriodPaid(input: {
     .not("paid_at", "is", null)
     .gte("clock_in", startIso)
     .lt("clock_in", endIso);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   await supabase
     .from("payroll_runs")
@@ -263,7 +264,7 @@ export async function unsettleMileage(input: {
     .not("mileage_paid_at", "is", null)
     .gte("clock_in", startIso)
     .lt("clock_in", endIso);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   await supabase
     .from("payroll_runs")

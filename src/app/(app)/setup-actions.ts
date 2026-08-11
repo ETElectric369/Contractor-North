@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
@@ -140,7 +141,7 @@ export async function saveSetup(answers: Answers): Promise<Result> {
   const name = text("full_name");
   if (name) {
     const { error } = await supabase.from("profiles").update({ full_name: name }).eq("id", user.id);
-    if (error) return { ok: false, error: error.message };
+    if (error) return { ok: false, error: dbError(error) };
   }
 
   // Only send what was actually answered. A blank in this card must never blank a setting somebody
@@ -252,7 +253,7 @@ export async function finishOnboarding(): Promise<{ ok: boolean; error?: string 
     .from("profiles")
     .update({ onboarded_at: new Date().toISOString() })
     .eq("id", user.id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/", "layout");
   return { ok: true };
 }

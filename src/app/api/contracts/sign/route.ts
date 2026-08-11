@@ -1,3 +1,4 @@
+import { dbError } from "@/lib/db-error";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
@@ -41,6 +42,6 @@ export async function POST(req: NextRequest) {
     p_ip: ip,
     p_ua: ua.slice(0, 400),
   });
-  if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ ok: false, error: dbError(error) }, { status: 500 });
   return NextResponse.json(data);
 }

@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { resolveSiteContext } from "@/lib/site-editor-guard";
@@ -153,7 +154,7 @@ export async function deleteSitePost(id: string, orgId?: string): Promise<Result
   const ctx = await resolveSiteContext(orgId);
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const { data, error } = await ctx.supabase.from("site_posts").delete().eq("id", id).eq("org_id", ctx.orgId).select("id");
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   if (!data?.length) return { ok: false, error: "That article no longer exists." };
   revalidateSite();
   return { ok: true };

@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
@@ -28,7 +29,7 @@ export async function createChangeOrder(formData: FormData): Promise<Result> {
     .select("id")
     .single();
 
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/change-orders");
   return { ok: true, id: data.id };
 }
@@ -49,7 +50,7 @@ export async function updateChangeOrder(id: string, formData: FormData): Promise
   if (Object.keys(clean).length === 0) return { ok: false, error: "Nothing to update." };
 
   const { error } = await supabase.from("change_orders").update(clean).eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/change-orders");
   return { ok: true };
 }
@@ -57,7 +58,7 @@ export async function updateChangeOrder(id: string, formData: FormData): Promise
 export async function deleteChangeOrder(id: string): Promise<Result> {
   const supabase = await createClient();
   const { error } = await supabase.from("change_orders").delete().eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/change-orders");
   return { ok: true };
 }
@@ -71,7 +72,7 @@ export async function setChangeOrderStatus(
     .from("change_orders")
     .update({ status })
     .eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/change-orders");
   return { ok: true };
 }

@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
@@ -99,7 +100,7 @@ export async function createCustomer(formData: FormData): Promise<ActionResult> 
     // Postgres enum error — surface a clear nudge instead.
     if (/enum/i.test(error.message) && /subcontractor/i.test(error.message))
       return { ok: false, error: "Subcontractor type isn't set up yet — run migration 0087." };
-    return { ok: false, error: error.message };
+    return { ok: false, error: dbError(error) };
   }
 
   revalidatePath("/crm");
@@ -133,7 +134,7 @@ export async function updateCustomer(
       pricing_level_id: emptyToNull(formData.get("pricing_level_id")),
     })
     .eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   revalidatePath(`/crm/${id}`);
   revalidatePath("/crm");
@@ -168,7 +169,7 @@ export async function patchCustomer(
   if (patch.notes !== undefined) upd.notes = emptyToNull(patch.notes);
   if (Object.keys(upd).length === 0) return { ok: false, error: "Nothing to update." };
   const { error } = await supabase.from("customers").update(upd).eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/crm");
   return { ok: true };
 }
@@ -219,7 +220,7 @@ export async function bulkImportCustomers(rows: CustomerImportRow[]): Promise<Ac
 
   if (fresh.length) {
     const { error } = await supabase.from("customers").insert(fresh);
-    if (error) return { ok: false, error: error.message };
+    if (error) return { ok: false, error: dbError(error) };
   }
   revalidatePath("/crm");
   return { ok: true, imported: fresh.length, skipped };
@@ -307,7 +308,7 @@ export async function deleteCustomer(
   }
 
   const { error } = await supabase.from("customers").delete().eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/crm");
   return { ok: true };
 }
@@ -353,7 +354,7 @@ export async function mergeCustomers(
       .map((l: any) => l.id);
     if (collidingIds.length) {
       const { error } = await supabase.from("job_contacts").delete().in("id", collidingIds);
-      if (error) return { ok: false, error: error.message };
+      if (error) return { ok: false, error: dbError(error) };
     }
   }
 

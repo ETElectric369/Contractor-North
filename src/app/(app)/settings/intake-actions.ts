@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
@@ -26,7 +27,7 @@ export async function setPublicIntake(on: boolean): Promise<{ ok: true } | { ok:
       .update({ is_public_intake: false })
       .eq("is_public_intake", true)
       .select("id");
-    if (error) return { ok: false, error: error.message };
+    if (error) return { ok: false, error: dbError(error) };
     if (!data?.length) return { ok: false, error: "It wasn't on." };
     revalidatePath("/settings");
     return { ok: true };
@@ -45,7 +46,7 @@ export async function setPublicIntake(on: boolean): Promise<{ ok: true } | { ok:
       .update({ is_public_intake: true })
       .eq("id", existing.id)
       .select("id");
-    if (error) return { ok: false, error: error.message };
+    if (error) return { ok: false, error: dbError(error) };
     if (!data?.length) return { ok: false, error: "That didn't save. Try again?" };
   } else {
     // …else seed the starter. org_id comes from the insert trigger off the caller's session.
@@ -53,7 +54,7 @@ export async function setPublicIntake(on: boolean): Promise<{ ok: true } | { ok:
       .from("forms")
       .insert({ name: "Customer intake", schema: [], playbook: INTAKE_STARTER, is_public_intake: true, is_inspection: false })
       .select("id");
-    if (error) return { ok: false, error: error.message };
+    if (error) return { ok: false, error: dbError(error) };
     if (!data?.length) return { ok: false, error: "That didn't save. Try again?" };
   }
   revalidatePath("/settings");

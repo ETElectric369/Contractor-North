@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
@@ -118,7 +119,7 @@ export async function updateOrganization(formData: FormData): Promise<Result> {
 
   if (!error && !wrote?.length)
     return { ok: false, error: "That didn't save — check your access and try again." };
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/settings");
   revalidatePath("/", "layout");
   return { ok: true };
@@ -135,7 +136,7 @@ export async function setLanguage(language: string): Promise<Result> {
     .from("profiles")
     .update({ language: lang })
     .eq("id", user.id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/", "layout");
   return { ok: true };
 }
@@ -148,7 +149,7 @@ export async function setLogoUrl(url: string | null): Promise<Result> {
     .from("organizations")
     .update({ logo_url: url })
     .eq("id", orgId);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/settings");
   revalidatePath("/", "layout");
   return { ok: true };
@@ -178,7 +179,7 @@ export async function setDocTemplateFor(
     .from("organizations")
     .update({ doc_templates: map })
     .eq("id", orgId);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/settings");
   return { ok: true };
 }
@@ -202,7 +203,7 @@ export async function createInvitation(formData: FormData): Promise<Result & { l
     role,
     invited_by: user.id,
   });
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   // ACTUALLY SEND the invite — the row alone was invisible to the invitee (the reported
   // "invite not received" bug). They join by signing up with THIS email (pending_invite /
@@ -233,7 +234,7 @@ export async function createInvitation(formData: FormData): Promise<Result & { l
 export async function deleteInvitation(id: string): Promise<Result> {
   const supabase = await createClient();
   const { error } = await supabase.from("invitations").delete().eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/team");
   revalidatePath("/settings");
   return { ok: true };
@@ -440,7 +441,7 @@ export async function disconnectGoogleCalendar(): Promise<Result> {
     .eq("provider", "google")
     .maybeSingle();
   const { error } = await supabase.from("calendar_connections").delete().eq("provider", "google");
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   // Prune the org's mirrored Google events. ALL other pruning lives inside
   // syncOrgCalendars, which the 15-min cron only reaches for orgs that still HAVE a
   // connection row — without this, stale mirrored events render on /schedule and
@@ -508,7 +509,7 @@ export async function saveSelectedCalendars(calendarIds: string[]): Promise<Resu
     .from("calendar_connections")
     .update({ selected_calendars: clean, sync_tokens: tokens })
     .eq("id", conn.id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/settings");
   return { ok: true };
 }
@@ -551,7 +552,7 @@ export async function setAvatarUrl(url: string | null): Promise<Result> {
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
   const { error } = await supabase.from("profiles").update({ avatar_url: url }).eq("id", user.id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/settings");
   revalidatePath("/", "layout");
   return { ok: true };
@@ -586,7 +587,7 @@ export async function updateMember(
   if (!Object.keys(clean).length) return { ok: true };
 
   const { error } = await supabase.from("profiles").update(clean).eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/team");
   revalidatePath("/settings");
   revalidatePath("/planner"); // role/active/rate feed the planner's assignee pickers
@@ -625,7 +626,7 @@ export async function updateMemberAuth(
 
   const admin = createAdminClient();
   const { error } = await admin.auth.admin.updateUserById(id, attrs);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   if (attrs.email) await admin.from("profiles").update({ email: attrs.email }).eq("id", id);
   revalidatePath("/team");
   revalidatePath("/settings");
@@ -654,7 +655,7 @@ export async function setMemberActive(id: string, active: boolean): Promise<Resu
   if (target.role === "owner" && !active) return { ok: false, error: "The owner can't be deactivated." };
 
   const { error } = await supabase.from("profiles").update({ active, deactivated_at: active ? null : new Date().toISOString(), deactivated_by: active ? null : user.id }).eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   // KILL THE LIVE SESSION. Migration 0158 makes RLS itself deny a deactivated profile, so
   // their token stops returning data immediately — but the token is still a valid
@@ -695,7 +696,7 @@ export async function memberFootprint(id: string): Promise<{ ok: boolean; error?
     .from("time_entries")
     .select("id", { count: "exact", head: true })
     .eq("profile_id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   return { ok: true, timeEntries: count ?? 0 };
 }
 
@@ -762,7 +763,7 @@ export async function updateMemberRate(
   const patch: Record<string, unknown> = { hourly_rate: hourlyRate };
   if (billRate !== undefined) patch.bill_rate = billRate;
   const { error } = await supabase.from("profiles").update(patch).eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/team");
   revalidatePath("/settings");
   return { ok: true };
@@ -802,7 +803,7 @@ export async function setPublicHandle(
   const { data: org } = await supabase.from("organizations").select("settings").eq("id", orgId).single();
   const merged = { ...(org?.settings ?? {}), public_handle: handle };
   const { error } = await supabase.from("organizations").update({ settings: merged }).eq("id", orgId);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/settings");
   revalidatePath("/", "layout");
   return { ok: true, handle };
@@ -843,7 +844,7 @@ export async function setCustomDomain(
   const { data: org } = await supabase.from("organizations").select("settings").eq("id", orgId).single();
   const merged = { ...(org?.settings ?? {}), custom_domain: domain };
   const { error } = await supabase.from("organizations").update({ settings: merged }).eq("id", orgId);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/settings");
   revalidatePath("/", "layout");
   return { ok: true, domain };
@@ -868,7 +869,7 @@ export async function updateOrgSettings(
 
   if (ctx.isCollaborator) {
     const { error } = await ctx.supabase.rpc("update_site_content", { target_org: ctx.orgId, patch });
-    if (error) return { ok: false, error: error.message };
+    if (error) return { ok: false, error: dbError(error) };
     revalidatePath("/content");
     revalidatePath("/", "layout");
     return { ok: true };
@@ -899,7 +900,7 @@ export async function updateOrgSettings(
     .update({ settings: merged })
     .eq("id", ctx.orgId)
     .select("id");
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   if (!wrote?.length)
     return { ok: false, error: "That didn't save — your role can't change company settings. Ask an owner or admin." };
   revalidatePath("/settings");
@@ -958,7 +959,7 @@ export async function saveNumbering(
       if (error.code === "PGRST202" || /set_doc_counter/i.test(error.message)) {
         return { ok: false, error: "Prefixes saved. The next-number control needs migration 0088 applied to take effect." };
       }
-      return { ok: false, error: error.message };
+      return { ok: false, error: dbError(error) };
     }
   }
 
@@ -985,7 +986,7 @@ export async function createTaxRate(input: {
     rate: Number.isFinite(input.rate) ? input.rate : 0,
     is_default: !!input.is_default,
   });
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/settings");
   return { ok: true };
 }
@@ -1006,7 +1007,7 @@ export async function updateTaxRate(
     })
     .eq("id", id)
     .eq("org_id", orgId);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/settings");
   return { ok: true };
 }
@@ -1017,7 +1018,7 @@ export async function setDefaultTaxRate(id: string): Promise<Result> {
   if (!orgId) return { ok: false, error: "No organization." };
   await supabase.from("tax_rates").update({ is_default: false }).eq("org_id", orgId);
   const { error } = await supabase.from("tax_rates").update({ is_default: true }).eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/settings");
   return { ok: true };
 }
@@ -1025,7 +1026,7 @@ export async function setDefaultTaxRate(id: string): Promise<Result> {
 export async function deleteTaxRate(id: string): Promise<Result> {
   const supabase = await createClient();
   const { error } = await supabase.from("tax_rates").delete().eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/settings");
   return { ok: true };
 }
@@ -1055,7 +1056,7 @@ export async function createPricingLevel(input: {
     labor_rate: cleanLaborRate(input.labor_rate),
     is_default: !!input.is_default,
   });
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/settings");
   return { ok: true };
 }
@@ -1077,7 +1078,7 @@ export async function updatePricingLevel(
     })
     .eq("id", id)
     .eq("org_id", orgId);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/settings");
   return { ok: true };
 }
@@ -1088,7 +1089,7 @@ export async function setDefaultPricingLevel(id: string): Promise<Result> {
   if (!orgId) return { ok: false, error: "No organization." };
   await supabase.from("pricing_levels").update({ is_default: false }).eq("org_id", orgId);
   const { error } = await supabase.from("pricing_levels").update({ is_default: true }).eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/settings");
   return { ok: true };
 }
@@ -1096,7 +1097,7 @@ export async function setDefaultPricingLevel(id: string): Promise<Result> {
 export async function deletePricingLevel(id: string): Promise<Result> {
   const supabase = await createClient();
   const { error } = await supabase.from("pricing_levels").delete().eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/settings");
   return { ok: true };
 }
@@ -1133,12 +1134,12 @@ export async function saveJobCode(input: {
       .update({ code, description, billable, active })
       .eq("id", input.id)
       .eq("org_id", orgId);
-    if (error) return { ok: false, error: error.message };
+    if (error) return { ok: false, error: dbError(error) };
   } else {
     const { error } = await supabase
       .from("job_codes")
       .insert({ org_id: orgId, code, description, billable, active });
-    if (error) return { ok: false, error: error.message };
+    if (error) return { ok: false, error: dbError(error) };
   }
   revalidatePath("/settings");
   revalidatePath("/timeclock");
@@ -1167,7 +1168,7 @@ export async function importTradeCodePack(packId: string): Promise<Result & { ad
 
   if (rows.length) {
     const { error } = await supabase.from("job_codes").insert(rows);
-    if (error) return { ok: false, error: error.message };
+    if (error) return { ok: false, error: dbError(error) };
   }
   revalidatePath("/settings");
   revalidatePath("/timeclock");
@@ -1180,7 +1181,7 @@ export async function setJobCodeActive(id: string, active: boolean): Promise<Res
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const { error } = await ctx.supabase.from("job_codes").update({ active }).eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/settings");
   revalidatePath("/timeclock");
   return { ok: true };
@@ -1191,7 +1192,7 @@ export async function deleteJobCode(id: string): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const { error } = await ctx.supabase.from("job_codes").delete().eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/settings");
   revalidatePath("/timeclock");
   return { ok: true };

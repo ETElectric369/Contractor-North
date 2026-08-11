@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { createClient } from "@/lib/supabase/server";
 
@@ -25,7 +26,7 @@ export async function savePushSubscription(
     },
     { onConflict: "endpoint" },
   );
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   return { ok: true };
 }
 
@@ -48,6 +49,6 @@ export async function savePushPrefs(prefs: Record<string, boolean>) {
   } = await supabase.auth.getUser();
   if (!user) return { ok: false };
   const { error } = await supabase.from("profiles").update({ push_prefs: prefs }).eq("id", user.id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   return { ok: true };
 }

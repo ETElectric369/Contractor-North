@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { requireStaff } from "@/lib/staff-guard";
@@ -27,7 +28,7 @@ export async function addPettyCash(input: {
     job_id: input.job_id || null,
     created_by: ctx.userId,
   });
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/petty-cash");
   return { ok: true };
 }
@@ -57,7 +58,7 @@ export async function updatePettyCash(
       description: patch.description?.trim() || null,
     })
     .eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/petty-cash");
   return { ok: true };
 }
@@ -67,7 +68,7 @@ export async function deletePettyCash(id: string): Promise<Result> {
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
   const { error } = await supabase.from("petty_cash").delete().eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/petty-cash");
   return { ok: true };
 }

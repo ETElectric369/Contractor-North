@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
@@ -40,7 +41,7 @@ export async function createPriceItem(input: PriceItemInput): Promise<Result> {
     buy_price: Number.isFinite(input.buy_price) ? input.buy_price : 0,
     markup_pct: Number.isFinite(input.markup_pct) ? input.markup_pct : 0,
   });
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/price-list");
   return { ok: true };
 }
@@ -58,7 +59,7 @@ export async function updatePriceItem(id: string, patch: PriceItemInput): Promis
   if (patch.buy_price !== undefined) clean.buy_price = patch.buy_price ?? 0;
   if (patch.markup_pct !== undefined) clean.markup_pct = patch.markup_pct ?? 0;
   const { error } = await supabase.from("price_list_items").update(clean).eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/price-list");
   return { ok: true };
 }
@@ -68,7 +69,7 @@ export async function deletePriceItem(id: string): Promise<Result> {
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
   const { error } = await supabase.from("price_list_items").delete().eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/price-list");
   return { ok: true };
 }

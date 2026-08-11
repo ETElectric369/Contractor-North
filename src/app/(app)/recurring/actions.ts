@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
@@ -90,10 +91,10 @@ export async function saveRecurring(formData: FormData, id?: string): Promise<Re
 
   if (id) {
     const { error } = await supabase.from("recurring_templates").update(row).eq("id", id);
-    if (error) return { ok: false, error: error.message };
+    if (error) return { ok: false, error: dbError(error) };
   } else {
     const { error } = await supabase.from("recurring_templates").insert({ ...row, created_by: ctx.userId });
-    if (error) return { ok: false, error: error.message };
+    if (error) return { ok: false, error: dbError(error) };
   }
   revalidatePath("/recurring");
   return { ok: true };
@@ -104,7 +105,7 @@ export async function setRecurringActive(id: string, active: boolean): Promise<R
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
   const { error } = await supabase.from("recurring_templates").update({ active }).eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/recurring");
   return { ok: true };
 }
@@ -114,7 +115,7 @@ export async function deleteRecurring(id: string): Promise<Result> {
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
   const { error } = await supabase.from("recurring_templates").delete().eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/recurring");
   return { ok: true };
 }
@@ -240,7 +241,7 @@ export async function createProgressInvoice(
     // Partial unique index (one open draft draw per job) backstops a double-submit race.
     if ((error as any).code === "23505")
       return { ok: false, error: "A draft draw is already open on this job — send or delete it before creating another." };
-    return { ok: false, error: error.message };
+    return { ok: false, error: dbError(error) };
   }
 
   const { error: liErr } = await supabase.from("invoice_items").insert({

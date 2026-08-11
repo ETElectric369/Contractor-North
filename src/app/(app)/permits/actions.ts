@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { requireStaff } from "@/lib/staff-guard";
@@ -49,7 +50,7 @@ export async function createPermit(input: PermitInput): Promise<Result> {
     portal_url: input.portal_url?.trim() || null,
     created_by: ctx.userId,
   });
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   rev(input.job_id);
   return { ok: true };
 }
@@ -68,7 +69,7 @@ export async function updatePermit(id: string, patch: PermitInput): Promise<Resu
   if (patch.fee !== undefined) clean.fee = patch.fee ?? 0;
 
   const { error } = await supabase.from("permits").update(clean).eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   rev(patch.job_id);
   return { ok: true };
 }
@@ -78,7 +79,7 @@ export async function deletePermit(id: string, jobId?: string | null): Promise<R
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
   const { error } = await supabase.from("permits").delete().eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   rev(jobId);
   return { ok: true };
 }

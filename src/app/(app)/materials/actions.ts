@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
@@ -60,7 +61,7 @@ export async function createMaterialList(input: {
     .select("id")
     .single();
 
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   if (input.items.length) {
     const rows = input.items.map((it, idx) => ({
@@ -119,7 +120,7 @@ export async function ensureJobMaterialList(jobId: string): Promise<Result> {
     .insert({ name: `Materials — ${(job as any).job_number}`, job_id: jobId, created_by: user.id })
     .select("id")
     .single();
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   revalidatePath("/materials");
   revalidatePath(`/jobs/${jobId}`);
@@ -149,7 +150,7 @@ export async function addMaterialItem(
     is_tool: item.is_tool ?? false,
     sort_order: ((last?.sort_order as number) ?? -1) + 1,
   });
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath(`/materials/${listId}`);
   return { ok: true };
 }
@@ -170,7 +171,7 @@ export async function updateMaterialItem(
   if (patch.is_tool !== undefined) clean.is_tool = patch.is_tool;
   const { data, error } = await supabase.from("material_list_items").update(clean).eq("id", itemId).select("id");
   if (!error && !data?.length) return { ok: false, error: "You don't have permission to change this list." };
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath(`/materials/${listId}`);
   return { ok: true };
 }
@@ -186,7 +187,7 @@ export async function setMaterialItemPurchased(
     .update({ purchased, purchased_at: purchased ? new Date().toISOString() : null })
     .eq("id", itemId)
     .select("id");
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   if (!data?.length) return { ok: false, error: "You don't have permission to change this list." };
   revalidatePath(`/materials/${listId}`);
   return { ok: true };
@@ -202,7 +203,7 @@ export async function setMaterialItemTool(
   const supabase = await createClient();
   const { data, error } = await supabase.from("material_list_items").update({ is_tool: isTool }).eq("id", itemId).select("id");
   if (!error && !data?.length) return { ok: false, error: "You don't have permission to change this list." };
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath(`/materials/${listId}`);
   return { ok: true };
 }
@@ -217,7 +218,7 @@ export async function deleteMaterialItem(
     .delete()
     .eq("id", itemId)
     .select("id");
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   if (!data?.length) return { ok: false, error: "You don't have permission to change this list." };
   revalidatePath(`/materials/${listId}`);
   return { ok: true };
@@ -244,7 +245,7 @@ export async function updateMaterialList(
   }
   const { data, error } = await supabase.from("material_lists").update(clean).eq("id", listId).select("id");
   if (!error && !data?.length) return { ok: false, error: "You don't have permission to change this list." };
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath(`/materials/${listId}`);
   revalidatePath("/materials");
   return { ok: true };
@@ -257,7 +258,7 @@ export async function deleteMaterialList(listId: string): Promise<Result> {
     .delete()
     .eq("id", listId)
     .select("id");
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   if (!data?.length) return { ok: false, error: "You don't have permission to change this list." };
   revalidatePath("/materials");
   return { ok: true };
@@ -312,7 +313,7 @@ export async function createMaterialListFromQuote(quoteId: string): Promise<Resu
     })
     .select("id")
     .single();
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   // The price book (RLS-scoped to this org) → resolve each material line to its REAL buy cost,
   // catalog #, and vendor. Match on the "[CODE]" tag in the description first, then on the

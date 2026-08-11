@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { requireStaff } from "@/lib/staff-guard";
@@ -55,7 +56,7 @@ export async function patchLienRecord(jobId: string, patch: Partial<LienInput>):
   const { error } = existing
     ? await supabase.from("lien_records").update(fields).eq("job_id", jobId)
     : await supabase.from("lien_records").insert({ ...fields, job_id: jobId, created_by: ctx.userId });
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath(`/jobs/${jobId}`);
   return { ok: true };
 }
@@ -90,7 +91,7 @@ export async function upsertLienRecord(jobId: string, input: LienInput): Promise
   const { error } = existing
     ? await supabase.from("lien_records").update(fields).eq("id", (existing as any).id)
     : await supabase.from("lien_records").insert({ ...fields, job_id: jobId, created_by: ctx.userId });
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath(`/jobs/${jobId}`);
   return { ok: true };
 }
@@ -116,7 +117,7 @@ export async function upsertInsuranceClaim(jobId: string, input: InsuranceInput)
   const { error } = existing
     ? await supabase.from("insurance_claims").update(fields).eq("id", (existing as any).id)
     : await supabase.from("insurance_claims").insert({ ...fields, job_id: jobId, created_by: ctx.userId });
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath(`/jobs/${jobId}`);
   return { ok: true };
 }

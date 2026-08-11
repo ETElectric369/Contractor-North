@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
@@ -101,7 +102,7 @@ export async function createForm(input: {
     .select("id")
     .single();
 
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/forms");
   return { ok: true, id: data.id };
 }
@@ -155,7 +156,7 @@ export async function createStarterInspectionSheet(): Promise<Result> {
     .select("id")
     .single();
 
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/forms");
   revalidatePath("/appointments");
   revalidatePath("/inspections");
@@ -215,7 +216,7 @@ export async function updateForm(
     })
     .eq("id", id);
 
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/forms");
   revalidatePath(`/forms/${id}`);
   return { ok: true, id };
@@ -243,7 +244,7 @@ export async function submitForm(input: {
     .select("id")
     .single();
 
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath(`/forms/${input.form_id}`);
   return { ok: true, id: data.id };
 }
@@ -265,7 +266,7 @@ export async function deleteFormSubmission(
     .eq("id", id)
     .eq("form_id", formId);
 
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath(`/forms/${formId}`);
   return { ok: true };
 }
@@ -276,7 +277,7 @@ export async function deleteForm(id: string): Promise<Result> {
     .from("forms")
     .update({ active: false })
     .eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/forms");
   return { ok: true };
 }

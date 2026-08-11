@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { stampNeeds } from "@/lib/playbook/stamp";
@@ -96,7 +97,7 @@ export async function savePlaybook(
     .update(alreadyPlaybook ? { playbook: pb, schema: sheetFromPlaybook(pb) } : { playbook: pb })
     .eq("id", formId)
     .select("id");
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   // A zero-row update is a 204, not an error — never let a blocked write report success.
   if (!wrote?.length) return { ok: false, error: "That didn't save — check your access and try again." };
   revalidatePath("/settings");
@@ -151,7 +152,7 @@ export async function clearPlaybook(formId: string): Promise<Result> {
     .update(current.needs.length ? { playbook: null, schema: sheetFromPlaybook(current) } : { playbook: null })
     .eq("id", formId)
     .select("id");
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   if (!wrote?.length) return { ok: false, error: "That didn't save — check your access and try again." };
   revalidatePath("/settings");
   revalidatePath("/appointments", "layout");

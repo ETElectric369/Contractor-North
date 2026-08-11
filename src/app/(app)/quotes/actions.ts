@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
@@ -35,7 +36,7 @@ export async function setQuoteType(id: string, docType: "estimate" | "quote") {
     .from("quotes")
     .update({ doc_type: docType, updated_at: new Date().toISOString() })
     .eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath(`/quotes/${id}`);
   revalidatePath("/quotes");
   return { ok: true };
@@ -249,7 +250,7 @@ export async function addQuoteItem(
     unit_price: item.unit_price || 0,
     sort_order: (last?.sort_order ?? -1) + 1,
   });
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   await recalcQuote(supabase, quoteId);
   revalidatePath(`/quotes/${quoteId}`);
   revalidatePath("/quotes");
@@ -281,7 +282,7 @@ export async function updateQuoteItem(
     .from("quote_line_items")
     .update(clean)
     .eq("id", itemId);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   await recalcQuote(supabase, quoteId);
   revalidatePath(`/quotes/${quoteId}`);
   revalidatePath("/quotes");
@@ -298,7 +299,7 @@ export async function deleteQuoteItem(
   const editable = await requireEditableQuote(supabase, quoteId);
   if (!editable.ok) return editable;
   const { error } = await supabase.from("quote_line_items").delete().eq("id", itemId);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   await recalcQuote(supabase, quoteId);
   revalidatePath(`/quotes/${quoteId}`);
   revalidatePath("/quotes");
@@ -333,7 +334,7 @@ export async function updateQuoteMeta(
     .from("quotes")
     .update(clean)
     .eq("id", quoteId);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   await recalcQuote(supabase, quoteId);
   revalidatePath(`/quotes/${quoteId}`);
   revalidatePath("/quotes");
@@ -363,7 +364,7 @@ export async function setQuoteCustomer(
     .from("quotes")
     .update({ customer_id: safeCustomerId, updated_at: new Date().toISOString() })
     .eq("id", quoteId);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath(`/quotes/${quoteId}`);
   revalidatePath("/quotes");
   return { ok: true };
@@ -391,7 +392,7 @@ export async function setQuoteJob(
     .from("quotes")
     .update({ job_id: jobId, updated_at: new Date().toISOString() })
     .eq("id", quoteId);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath(`/quotes/${quoteId}`);
   revalidatePath("/quotes");
   if (jobId) revalidatePath(`/jobs/${jobId}`);
@@ -433,7 +434,7 @@ export async function deleteQuote(id: string): Promise<{ ok: boolean; error?: st
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
   const { error } = await supabase.from("quotes").delete().eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/quotes");
   return { ok: true };
 }
@@ -479,7 +480,7 @@ export async function resolveDuplicateDrafts(
     return { ok: false, error: "These drafts belong to different customers." };
 
   const { error } = await supabase.from("quotes").delete().in("id", losers);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/quotes");
   return { ok: true, deleted: losers.length };
 }
@@ -527,7 +528,7 @@ export async function saveQuote(input: SaveQuoteInput) {
     .select("id, quote_number")
     .single();
 
-  if (error) return { ok: false as const, error: error.message };
+  if (error) return { ok: false as const, error: dbError(error) };
 
   if (input.items.length) {
     const rows = input.items.map((it, idx) => ({
@@ -783,7 +784,7 @@ export async function createJobFromQuote(
     })
     .select("id")
     .single();
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   await supabase.from("quotes").update({ job_id: job.id }).eq("id", quoteId);
 
@@ -840,7 +841,7 @@ export async function updateQuoteStatus(id: string, status: string) {
   const patch: Record<string, unknown> =
     status === "accepted" ? { status, accepted_at: new Date().toISOString() } : { status };
   const { error } = await supabase.from("quotes").update(patch).eq("id", id);
-  if (error) return { ok: false as const, error: error.message };
+  if (error) return { ok: false as const, error: dbError(error) };
 
   if (status === "accepted") {
     await createJobFromQuote(id).catch(() => {}); // links quotes.job_id + spins up WO/materials
@@ -1200,7 +1201,7 @@ export async function generateCircuitSchedule(
       }))
       .filter((r) => r.description);
     const { error } = await supabase.from("quotes").update({ circuits }).eq("id", quoteId);
-    if (error) return { ok: false, error: error.message };
+    if (error) return { ok: false, error: dbError(error) };
     revalidatePath(`/quotes/${quoteId}`);
     return { ok: true, circuits };
   } catch (e: any) {
@@ -1233,7 +1234,7 @@ export async function saveCircuitSchedule(
     .from("quotes")
     .update({ circuits: clean.length ? clean : null })
     .eq("id", quoteId);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath(`/quotes/${quoteId}`);
   return { ok: true };
 }

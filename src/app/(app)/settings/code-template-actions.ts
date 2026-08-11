@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { requireStaff } from "@/lib/staff-guard";
@@ -22,10 +23,10 @@ export async function saveCodeTemplate(input: {
   const { supabase, userId } = ctx;
   if (input.id) {
     const { error } = await supabase.from("job_code_templates").update({ name, codes }).eq("id", input.id);
-    if (error) return { ok: false, error: error.message };
+    if (error) return { ok: false, error: dbError(error) };
   } else {
     const { error } = await supabase.from("job_code_templates").insert({ name, codes, created_by: userId });
-    if (error) return { ok: false, error: error.message };
+    if (error) return { ok: false, error: dbError(error) };
   }
   revalidatePath("/settings");
   return { ok: true };
@@ -35,7 +36,7 @@ export async function deleteCodeTemplate(id: string): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const { error } = await ctx.supabase.from("job_code_templates").delete().eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/settings");
   return { ok: true };
 }

@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { requireStaff } from "@/lib/staff-guard";
@@ -33,7 +34,7 @@ export async function addSafetyRecord(input: {
     attendees: input.attendees?.trim() || null,
     created_by: ctx.userId,
   });
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/safety");
   return { ok: true };
 }
@@ -76,7 +77,7 @@ export async function updateSafetyRecord(
       attendees: isToolbox ? patch.attendees?.trim() || null : null,
     })
     .eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/safety");
   return { ok: true };
 }
@@ -86,7 +87,7 @@ export async function deleteSafetyRecord(id: string): Promise<Result> {
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
   const { error } = await supabase.from("safety_records").delete().eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/safety");
   return { ok: true };
 }

@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
@@ -62,7 +63,7 @@ export async function createBugReport(input: {
     // /content path never carries a screenshot — drop any client-sent path there.
     screenshot_path: collabOrgId ? null : input.screenshotPath || null,
   });
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   return { ok: true };
 }
 

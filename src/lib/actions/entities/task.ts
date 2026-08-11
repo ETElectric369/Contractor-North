@@ -1,3 +1,4 @@
+import { dbError } from "@/lib/db-error";
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { createTask, toggleTask, updateTask, deleteTask } from "@/app/(app)/tasks/actions";
@@ -85,7 +86,7 @@ async function matchOpenTasks(f: BulkFilter): Promise<{ ids: string[] } | { erro
   if (f.due_before) q = q.lt("due_date", f.due_before); // NULL due dates never match — undated_only is the explicit ask
   if (f.undated_only) q = q.is("due_date", null);
   const { data, error } = await q.limit(101);
-  if (error) return { error: error.message };
+  if (error) return { error: dbError(error) };
   if ((data?.length ?? 0) > 100)
     return { error: "That filter matches more than 100 open tasks — narrow it (add a title word, category, or job)." };
   return { ids: (data ?? []).map((t) => t.id as string) };
@@ -246,7 +247,7 @@ export const taskActions: Record<string, ActionDef> = {
         .from("tasks")
         .update({ status: "done", completed_at: doneAt })
         .in("id", m.ids);
-      if (error) return { ok: false, error: error.message };
+      if (error) return { ok: false, error: dbError(error) };
       revalidateBulkViews(i);
       const kidCount = kids?.length ?? 0;
       return {
@@ -277,7 +278,7 @@ export const taskActions: Record<string, ActionDef> = {
       if (!m.ids.length) return { ok: true, data: { affected: 0 }, speak: "No open tasks match that." };
       const supabase = await createClient();
       const { error } = await supabase.from("tasks").update({ due_date: i.new_due }).in("id", m.ids);
-      if (error) return { ok: false, error: error.message };
+      if (error) return { ok: false, error: dbError(error) };
       revalidateBulkViews(i);
       return {
         ok: true,

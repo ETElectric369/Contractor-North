@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { createClient } from "@/lib/supabase/server";
 
@@ -15,7 +16,7 @@ export async function updateMyPassword(newPassword: string): Promise<{ ok: boole
   if (pw.length < 8) return { ok: false, error: "Password must be at least 8 characters." };
 
   const { error } = await supabase.auth.updateUser({ password: pw });
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   // profiles_update_self lets the user clear their own flag.
   await supabase.from("profiles").update({ must_reset_password: false }).eq("id", user.id);

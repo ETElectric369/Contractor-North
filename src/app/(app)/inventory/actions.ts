@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
@@ -25,7 +26,7 @@ export async function createInventoryItem(formData: FormData): Promise<Result> {
     location: emptyToNull(formData.get("location")),
   });
 
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/inventory");
   return { ok: true };
 }
@@ -50,7 +51,7 @@ export async function updateInventoryItem(id: string, formData: FormData): Promi
       location: emptyToNull(formData.get("location")),
     })
     .eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/inventory");
   return { ok: true };
 }
@@ -60,7 +61,7 @@ export async function deleteInventoryItem(id: string): Promise<Result> {
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
   const { error } = await supabase.from("inventory_items").delete().eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/inventory");
   return { ok: true };
 }
@@ -85,7 +86,7 @@ export async function adjustQuantity(
     .from("inventory_items")
     .update({ quantity_on_hand: next })
     .eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   revalidatePath("/inventory");
   return { ok: true };

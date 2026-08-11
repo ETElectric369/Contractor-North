@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { mergeCaptureSections, type CapturePatch } from "@/lib/inspection/capture";
@@ -115,7 +116,7 @@ export async function createAppointment(formData: FormData): Promise<Result> {
     })
     .select("id")
     .single();
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   // Live Google push (fire-safe: never throws, no-op when not connected).
   await pushCalendarItem("appointment", data.id);
@@ -200,7 +201,7 @@ export async function createInspectionNow(
     })
     .select("id")
     .single();
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   await pushCalendarItem("appointment", appt.id); // live Google push (fire-safe)
 
@@ -456,7 +457,7 @@ export async function linkAppointmentTo(
     .from("appointments")
     .update({ ...patch, updated_at: new Date().toISOString() })
     .eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   revalidatePath("/schedule");
   revalidatePath("/planner");
@@ -516,7 +517,7 @@ export async function setAppointmentPlace(
     })
     .eq("id", id)
     .select("id, title");
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   if (!data?.length) return { ok: false, error: "Appointment not found." };
   revalidatePath("/schedule");
   revalidatePath("/planner");
@@ -564,7 +565,7 @@ export async function saveInspectionCapture(
     .update({ capture: merged, updated_at: new Date().toISOString() })
     .eq("id", id)
     .select("id");
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   if (!data?.length) return { ok: false, error: "Appointment not found." };
   revalidatePath("/schedule");
   revalidatePath("/planner");
@@ -676,7 +677,7 @@ async function saveInspectionAnswersInner(
     })
     .eq("id", id)
     .select("id");
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   if (!data?.length) return { ok: false, error: "Appointment not found." };
   revalidatePath(`/appointments/${id}`);
   revalidatePath("/inspections");
@@ -723,7 +724,7 @@ export async function updateAppointment(id: string, formData: FormData): Promise
       updated_at: new Date().toISOString(),
     })
     .eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   await pushCalendarItem("appointment", id); // live Google push (fire-safe)
 
@@ -746,7 +747,7 @@ export async function setAppointmentStatus(id: string, status: string): Promise<
     .from("appointments")
     .update({ status, updated_at: new Date().toISOString() })
     .eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   // Cancelling/completing an appointment kills any live "pick a time" link, so a
   // customer tap can't resurrect a closed appointment.
   if (status === "cancelled" || status === "completed") {
@@ -789,7 +790,7 @@ export async function rescheduleAppointment(
     patch.ends_at = end.toISOString();
   }
   const { data, error } = await supabase.from("appointments").update(patch).eq("id", id).select("id");
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   if (!data || !data.length) return { ok: false, error: "Appointment not found." };
   // The reschedule supersedes any pending pick-a-time link — kill it, or the customer
   // could tap a stale option later and move the appointment back underneath us.
@@ -847,7 +848,7 @@ export async function createJobFromAppointment(appointmentId: string): Promise<R
     })
     .select("id")
     .single();
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   await supabase.from("appointments").update({ job_id: job.id }).eq("id", appointmentId);
   await pushCalendarItem("job", job.id); // the new job is scheduled — push it (fire-safe)
@@ -864,7 +865,7 @@ export async function deleteAppointment(id: string): Promise<Result> {
   // BEFORE the row goes (it reads google_event_id off the row). Fire-safe.
   await deleteCalendarItem("appointment", id);
   const { error } = await supabase.from("appointments").delete().eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too

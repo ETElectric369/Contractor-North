@@ -1,3 +1,4 @@
+import { dbError } from "@/lib/db-error";
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
@@ -49,7 +50,7 @@ export const captureActions: Record<string, ActionDef> = {
         file_url: null,
         created_by: ctx.userId,
       });
-      if (error) return { ok: false, error: error.message };
+      if (error) return { ok: false, error: dbError(error) };
       revalidatePath("/organize");
       revalidatePath("/planner");
       return { ok: true, speak: "Captured — it's in your inbox." };

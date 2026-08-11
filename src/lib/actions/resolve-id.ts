@@ -1,3 +1,4 @@
+import { dbError } from "@/lib/db-error";
 // Fragment-first name resolution — the SAFETY NET behind the "ids are uuids" prompt rule.
 //
 // Nort still occasionally passes a NAME ("John Chmura"), a fabricated slug ("c1a-first-rob"),
@@ -154,7 +155,7 @@ async function runMatch(
   orFilter: string,
 ): Promise<{ rows: { id: string }[] } | { error: string }> {
   const { data, error } = await supabase.from(table).select("id").or(orFilter).limit(3);
-  if (error) return { error: error.message ?? "lookup failed" };
+  if (error) return { error: dbError(error) ?? "lookup failed" };
   return { rows: (data ?? []) as { id: string }[] };
 }
 

@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { isStaffRole } from "@/lib/actions/perms";
@@ -238,7 +239,7 @@ async function clockInInner(
   if (error) {
     return {
       ok: false,
-      error: error.message.includes("one_open_entry")
+      error: dbError(error).includes("one_open_entry")
         ? "You're already clocked in."
         : error.message,
     };
@@ -398,7 +399,7 @@ export async function switchJob(input: {
     })
     .eq("id", entry.id)
     .eq("profile_id", user.id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   // Switching into a job means work has started there — promote it to in_progress
   // (same rule as clock-in; never un-complete a finished/cancelled job).
@@ -572,7 +573,7 @@ export async function clockOut(input: {
     .eq("id", input.entry_id)
     .eq("profile_id", user.id);
 
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   // Replace any existing allocations with the submitted set — ONLY when the caller
   // actually sent one (undefined = leave the recorded rows alone, so a one-tap close
@@ -757,7 +758,7 @@ export async function adoptGeofenceAnchor(entryId: string, gps: GeoPoint): Promi
     .eq("id", entryId)
     .eq("profile_id", user.id)
     .eq("status", "open");
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   return { ok: true };
 }
 
@@ -978,7 +979,7 @@ export async function createManualEntry(input: {
     status: "closed",
     source: "manual",
   });
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   revalidatePath("/timeclock");
   revalidatePath("/timecards");
@@ -1098,7 +1099,7 @@ export async function updateTimeEntry(input: {
     .from("time_entries")
     .update(patch)
     .eq("id", input.id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   revalidatePath("/timecards");
   revalidatePath("/timeclock");
@@ -1176,7 +1177,7 @@ export async function deleteTimeEntry(id: string): Promise<ClockResult> {
   if (lock?.paid_at) return { ok: false, error: "Entry is in a paid period — Undo on Payroll first." };
   if (lock?.mileage_paid_at) return { ok: false, error: "Entry's mileage is settled — Undo on Payroll first." };
   const { error } = await supabase.from("time_entries").delete().eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/timecards");
   revalidatePath("/timeclock");
   revalidatePath("/planner"); // a deleted entry changes My Day's hours/clock state
@@ -1219,7 +1220,7 @@ export async function duplicateTimeEntry(id: string): Promise<ClockResult> {
     status: "closed",
     source: "manual",
   });
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/timecards");
   revalidatePath("/timeclock");
   revalidatePath("/planner"); // a duplicated entry changes My Day's hours + crew board
@@ -1237,7 +1238,7 @@ export async function saveEntryNotes(
     .from("time_entries")
     .update({ notes, translated_notes })
     .eq("id", entry_id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/timeclock");
   revalidatePath("/planner"); // notes/job changes surface on My Day
   return { ok: true };
@@ -1411,7 +1412,7 @@ export async function fileDailyReport(input: {
     },
     { onConflict: "org_id,profile_id,report_date" },
   );
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   // Tell the office — bell (always works) + push, suppressing the filer.
   const staff = (await orgStaffIds(me.org_id)).filter((id) => id !== user.id);
@@ -1439,7 +1440,7 @@ export async function markDailyReportReviewed(id: string): Promise<ClockResult> 
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const { error } = await ctx.supabase.from("daily_reports").update({ status: "reviewed" }).eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/timecards");
   revalidatePath("/planner");
   return { ok: true };

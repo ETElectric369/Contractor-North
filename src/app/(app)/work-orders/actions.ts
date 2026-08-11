@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
@@ -44,7 +45,7 @@ export async function createWorkOrder(formData: FormData): Promise<Result> {
     .select("id")
     .single();
 
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   revalidatePath("/work-orders");
   return { ok: true, id: data.id };
@@ -107,7 +108,7 @@ export async function createWorkOrderFromQuote(quoteId: string): Promise<Result>
     })
     .select("id")
     .single();
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   revalidatePath("/work-orders");
   if (quote.job_id) revalidatePath(`/jobs/${quote.job_id}`);
@@ -152,7 +153,7 @@ export async function updateWorkOrder(id: string, formData: FormData): Promise<R
   if (Object.keys(clean).length === 0) return { ok: false, error: "Nothing to update." };
 
   const { error } = await supabase.from("work_orders").update(clean).eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
 
   revalidatePath("/work-orders");
   revalidatePath(`/work-orders/${id}`);
@@ -163,7 +164,7 @@ export async function deleteWorkOrder(id: string): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const { error } = await ctx.supabase.from("work_orders").delete().eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/work-orders");
   return { ok: true };
 }
@@ -180,7 +181,7 @@ export async function setWorkOrderStatus(
     .from("work_orders")
     .update({ status })
     .eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/work-orders");
   revalidatePath(`/work-orders/${id}`);
   return { ok: true };

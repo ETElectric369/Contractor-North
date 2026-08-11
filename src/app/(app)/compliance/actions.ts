@@ -1,4 +1,5 @@
 "use server";
+import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { requireStaff } from "@/lib/staff-guard";
@@ -47,7 +48,7 @@ export async function createCompliance(input: ComplianceInput): Promise<Result> 
   const { error } = await supabase
     .from("compliance_items")
     .insert({ ...clean(input), file_url: input.file_url ?? null, created_by: ctx.userId });
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidate();
   return { ok: true };
 }
@@ -57,7 +58,7 @@ export async function updateCompliance(id: string, input: ComplianceInput): Prom
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
   const { error } = await supabase.from("compliance_items").update(clean(input)).eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   revalidate();
   return { ok: true };
 }
@@ -75,7 +76,7 @@ export async function setComplianceFile(id: string, fileUrl: string | null): Pro
     .maybeSingle();
   if (!existing) return { ok: false, error: "That item isn't available." };
   const { error } = await supabase.from("compliance_items").update({ file_url: fileUrl }).eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   if (existing.file_url && existing.file_url !== fileUrl) {
     await supabase.storage.from("documents").remove([existing.file_url]);
   }
@@ -503,7 +504,7 @@ export async function deleteCompliance(id: string): Promise<Result> {
     .eq("id", id)
     .maybeSingle();
   const { error } = await supabase.from("compliance_items").delete().eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: dbError(error) };
   if (existing?.file_url) await supabase.storage.from("documents").remove([existing.file_url]);
   revalidate();
   return { ok: true };
