@@ -46,10 +46,35 @@ export function applicableNeeds(pb: Playbook, answers: Answers): Need[] {
   return pb.needs.filter((n) => !n.when?.length || n.when.every((c) => clauseHolds(c, answers)));
 }
 
-/** Applicable and still unanswered — "what am I actually still missing", in declaration order. */
-export function missingNeeds(pb: Playbook, answers: Answers): Need[] {
-  return applicableNeeds(pb, answers).filter((n) => !isAnswered(answers[n.key]));
+const NOTHING_HELD: ReadonlySet<string> = new Set();
+
+/**
+ * Applicable and still unanswered — "what am I actually still missing", in declaration order.
+ *
+ * ── `held` — AND WHY IT IS NOT JUST A MASKED `answers` OBJECT (cn-v699) ─────────────────────
+ *
+ * The inspector holds a need's CLASSIFICATION still while somebody is working in it, so the field
+ * under their thumb doesn't relocate mid-gesture (bug 48fbfd6e, and its chip-grid twin). cn-v698
+ * implemented that hold by passing a COPY of the answers with the held key nulled — which also
+ * hid the answer from `applicableNeeds`, because that is the same object the `when` graph reads.
+ *
+ * The consequence was severe and I shipped it: Vivian Builders' site inspection is a chain of
+ * eight multi-selects — symptom → q_msgpd6ui, scope → size, access → permit → q_msgnw9bk — so
+ * tapping "New Construction" held `symptom`, masked it, and the follow-up question written for
+ * exactly that answer DISAPPEARED until something else was touched. A router that is being tapped
+ * is precisely the router whose answer everything downstream is waiting for.
+ *
+ * So the two ideas are separated here rather than conflated: applicability ALWAYS reads the real
+ * answers, and `held` only makes a need count as still-missing so it keeps its place on screen.
+ */
+export function missingNeeds(pb: Playbook, answers: Answers, held: ReadonlySet<string> = NOTHING_HELD): Need[] {
+  return applicableNeeds(pb, answers).filter((n) => held.has(n.key) || !isAnswered(answers[n.key]));
 }
+
+/** Answered AND not being worked in — the inverse of `held.has(k) || !isAnswered(...)` above, so
+ *  a caller sorting needs into zones uses the same rule the resolver does. */
+export const isSettled = (answers: Answers, key: string, held: ReadonlySet<string> = NOTHING_HELD): boolean =>
+  !held.has(key) && isAnswered(answers[key]);
 
 /** Missing AND marked hold — "don't let me price without this". */
 export const holdingNeeds = (pb: Playbook, answers: Answers) => missingNeeds(pb, answers).filter((n) => n.hold);
@@ -73,8 +98,10 @@ export function splitAsk(
   pb: Playbook,
   answers: Answers,
   reached: ReadonlySet<string> = new Set(),
+  /** Keys whose classification is frozen because somebody is typing/tapping in them. */
+  held: ReadonlySet<string> = NOTHING_HELD,
 ): { ask: Need[]; reach: Need[] } {
-  const missing = missingNeeds(pb, answers);
+  const missing = missingNeeds(pb, answers, held);
   return {
     ask: missing.filter((n) => n.slot || n.hold || reached.has(n.key)),
     reach: missing.filter((n) => !n.slot && !n.hold && !reached.has(n.key)),

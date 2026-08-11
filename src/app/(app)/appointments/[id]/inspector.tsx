@@ -14,7 +14,7 @@ import { coerceByPlaybook, retiredAnswers, retiredLabel } from "@/lib/playbook/a
 import { ACCEPT_ATTR, isAllowedUpload, uploadDisplayName } from "@/lib/playbook/uploads";
 import { scopeTotal, type ScopePick } from "@/lib/playbook/scopes";
 import { playbookForForm } from "@/lib/playbook/parse";
-import { applicableNeeds, clearInapplicable, isAnswered, isOpen, missingNeeds, splitAsk } from "@/lib/playbook/resolve";
+import { applicableNeeds, clearInapplicable, isAnswered, isOpen, isSettled, missingNeeds, splitAsk } from "@/lib/playbook/resolve";
 import type { Answers, AnswerValue, Need, Playbook } from "@/lib/playbook/types";
 import {
   captureId,
@@ -266,22 +266,26 @@ export function Inspector({
   // It clears on the next interaction with any other need rather than on a timer, because a timer
   // would make the furniture move on its own schedule instead of his.
   const [multiKey, setMultiKey] = useState<string | null>(null);
-  const settled = useMemo(() => {
-    if (!editingKey && !multiKey) return answers;
-    const out = { ...answers };
-    // Both, not one: a held chip grid and a focused textarea are different needs, and dropping
-    // either hold to make room for the other is the bug all over again on whichever lost.
-    if (editingKey) out[editingKey] = null;
-    if (multiKey) out[multiKey] = null;
-    return out;
-  }, [answers, editingKey, multiKey]);
+  /**
+   * THE KEYS WHOSE CLASSIFICATION IS FROZEN — never a masked copy of the answers.
+   *
+   * cn-v698 held a need still by passing `{...answers, [held]: null}` to the resolver. That froze
+   * the zone correctly and ALSO hid the answer from the `when` graph, because applicableNeeds
+   * reads the same object — so on Vivian Builders' chain of eight multi-selects, tapping a chip
+   * made the question gated on that chip vanish. See missingNeeds' comment: applicability now
+   * always reads the real `answers`, and a held key only counts as still-missing.
+   */
+  const held = useMemo(
+    () => new Set([editingKey, multiKey].filter((k): k is string => !!k)),
+    [editingKey, multiKey],
+  );
   /** Focusing a field is attention leaving whatever chip grid was being tapped. */
   const focusNeed = (key: string) => {
     setEditingKey(key);
     setMultiKey((k) => (k === key ? k : null));
   };
 
-  const open = useMemo(() => missingNeeds(playbook, settled), [playbook, settled]);
+  const open = useMemo(() => missingNeeds(playbook, answers, held), [playbook, answers, held]);
 
   // ── THE SPINE STAYS UP TOP ───────────────────────────────────────────────────────────────
   // Erik, looking at the Sara Cain walk-through: "i updated the scope and now its at the bottom
@@ -303,17 +307,17 @@ export function Inspector({
   const retired = useMemo(() => retiredAnswers(playbook, initialAnswers), [playbook, initialAnswers]);
 
   const spine = useMemo(
-    () => applicableNeeds(playbook, settled).filter((n) => isOpen(n) && isAnswered(settled[n.key])),
-    [playbook, settled],
+    () => applicableNeeds(playbook, answers).filter((n) => isOpen(n) && isSettled(answers, n.key, held)),
+    [playbook, answers, held],
   );
   const answered = useMemo(() => {
     const stillOpen = new Set(open.map((n) => n.key));
     // Slotted needs only — an answered OPEN need is now pinned up top, and showing it in both
     // places would put the same textarea on screen twice with two cursors into one value.
-    return applicableNeeds(playbook, settled).filter((n) => !stillOpen.has(n.key) && !isOpen(n));
-  }, [playbook, settled, open]);
+    return applicableNeeds(playbook, answers).filter((n) => !stillOpen.has(n.key) && !isOpen(n));
+  }, [playbook, answers, open]);
   // What's on screen now vs what's one tap away — see splitAsk. `open` stays the honest count.
-  const { ask, reach } = useMemo(() => splitAsk(playbook, settled, opened), [playbook, settled, opened]);
+  const { ask, reach } = useMemo(() => splitAsk(playbook, answers, opened, held), [playbook, answers, opened, held]);
 
   const readiness = inspectorReadiness({
     ...stored,
@@ -395,6 +399,10 @@ export function Inspector({
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
   const setAnswer = (key: string, value: AnswerValue) => {
+    // THE CATCH-ALL RELEASE. Every control funnels through here, so a hold cannot outlive the
+    // gesture that took it however somebody moves on — a photo, a scope pick, another question's
+    // chip. Without it the last multi answered stays in the ask list reading as unanswered.
+    setMultiKey((k) => (k === key ? k : null));
     // Answer, then drop anything that answer just made inapplicable — a stale panel brand must not
     // ride into a lighting estimate as a fact. Iterates to a fixed point, which is the part the
     // sheet's one-pass clear could not do: work → power_source → feed → run_ft is four levels, and
@@ -506,7 +514,14 @@ export function Inspector({
                     if (multi) {
                       setMultiKey(n.key);
                       put(on ? listed.filter((x) => x !== o) : [...listed, o], free);
-                    } else put(on ? [] : [o], "");
+                    } else {
+                      // A single-select tap RELEASES any held grid — including one on another
+                      // need. Without this, tapping through a multi question and then answering
+                      // something else leaves the first one pinned in the ask list looking
+                      // unanswered until a text field happened to take focus.
+                      setMultiKey(null);
+                      put(on ? [] : [o], "");
+                    }
                   }}
                   className={
                     on
@@ -527,9 +542,13 @@ export function Inspector({
                 onClick={() => {
                   if (multi) setMultiKey(n.key);
                   if (showOther) {
-                    // Closing clears what he typed — prose stranded behind a hidden box is an
+                    // Closing clears what he TYPED — prose stranded behind a hidden box is an
                     // answer nobody can find, which is the failure this file keeps coming back to.
-                    put(multi ? listed : [], "");
+                    // It must not clear what he TAPPED: `multi ? listed : []` threw the chip away
+                    // on a single select, so picking "Panel upgrade", opening Other to add a note
+                    // and then closing it left the question unanswered. `listed` is empty anyway
+                    // when the stored value IS the free text, so this only ever restores.
+                    put(listed, "");
                     setOtherOpen((k) => k.filter((x) => x !== n.key));
                   } else setOtherOpen((k) => [...k, n.key]);
                 }}

@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   acceptFill,
   applicableNeeds,
+  splitAsk,
+  isSettled,
   applyFills,
   clearInapplicable,
   holdingNeeds,
@@ -298,5 +300,62 @@ describe("a half-typed answer must not reclassify its own field", () => {
 
   it("on blur it reclassifies, which is when he is actually done", () => {
     expect(missingNeeds(pb, { work: "2 outlets on each of 3 walls" }).map((n) => n.key)).not.toContain("work");
+  });
+});
+
+/**
+ * HELD ≠ UNANSWERED TO THE `when` GRAPH (cn-v699).
+ *
+ * cn-v698 froze a need's classification by handing the resolver a copy of the answers with the
+ * held key nulled. That is the same object applicableNeeds reads, so holding a router HID its
+ * answer and every question gated on it disappeared mid-gesture.
+ *
+ * The shape below is Vivian Builders' live site inspection: a chain of eight multi-selects where
+ * each question gates the next. Andrew taps one chip and the rest of his sheet should still be
+ * there.
+ */
+describe("held keys freeze the zone without hiding the answer", () => {
+  const chain: Playbook = {
+    needs: [
+      { key: "symptom", label: "Type", ask: "What type of project?", slot: { type: "select", options: ["New Construction", "Addition"], multi: true } },
+      { key: "sub", label: "If new", ask: "If new construction, then…", when: [{ key: "symptom", in: ["New Construction"] }], slot: { type: "select", options: ["SFD", "Multi"], multi: true } },
+      { key: "scope", label: "Plans", ask: "Plans prepared?", slot: { type: "select", options: ["Yes", "No"], multi: true } },
+      { key: "size", label: "Size", ask: "How big?", when: [{ key: "scope", known: true }], slot: { type: "number" } },
+    ],
+  };
+  const answers = { symptom: ["New Construction"], scope: ["Yes"] };
+  const holdSymptom: ReadonlySet<string> = new Set(["symptom"]);
+
+  it("the question gated on the chip being tapped STAYS ON SCREEN", () => {
+    expect(applicableNeeds(chain, answers).map((n) => n.key)).toContain("sub");
+    // The regression: with the answer masked, `sub` vanished the moment symptom was held.
+    expect(missingNeeds(chain, answers, holdSymptom).map((n) => n.key)).toContain("sub");
+  });
+
+  it("the held need itself keeps its place in the ask list", () => {
+    expect(missingNeeds(chain, answers, holdSymptom).map((n) => n.key)).toContain("symptom");
+    // …and drops out again the moment the hold is released.
+    expect(missingNeeds(chain, answers).map((n) => n.key)).not.toContain("symptom");
+  });
+
+  it("holding one link does not collapse the rest of the chain", () => {
+    const keys = missingNeeds(chain, answers, new Set(["scope"])).map((n) => n.key);
+    expect(keys).toContain("size"); // gated on scope being KNOWN
+    expect(keys).toContain("scope");
+  });
+
+  it("splitAsk carries the hold through to the ask/reach split", () => {
+    const { ask } = splitAsk(chain, answers, new Set(), holdSymptom);
+    expect(ask.map((n) => n.key)).toEqual(expect.arrayContaining(["symptom", "sub"]));
+  });
+
+  it("isSettled is the exact inverse used for the answered/spine zones", () => {
+    expect(isSettled(answers, "symptom")).toBe(true);
+    expect(isSettled(answers, "symptom", holdSymptom)).toBe(false);
+    expect(isSettled(answers, "size")).toBe(false);
+  });
+
+  it("no hold behaves exactly as before — every existing caller is untouched", () => {
+    expect(missingNeeds(chain, answers).map((n) => n.key)).toEqual(missingNeeds(chain, answers, new Set()).map((n) => n.key));
   });
 });
