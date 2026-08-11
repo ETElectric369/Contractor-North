@@ -28,7 +28,7 @@ export async function GET(req: Request) {
   // reported he couldn't connect and there was nothing — for him or for us — that said which of
   // four unrelated causes he hit. Worse, "try again" is actively wrong advice for a redirect-URI
   // mismatch or a Google app that hasn't been granted his account: retrying can never fix either.
-  const back = (reason: string) => NextResponse.redirect(`${site}/settings?gcal=${reason}`);
+  const back = (reason: string) => NextResponse.redirect(`${site}/settings?tab=integrations&gcal=${reason}`);
 
   // The user pressed Cancel on Google's consent screen — not an error, and it says so.
   const googleError = searchParams.get("error");

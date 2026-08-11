@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { execSync } from "node:child_process";
 
 /**
  * THE SETTINGS CLUSTERS, LOCKED FROM THE SOURCE.
@@ -53,6 +54,28 @@ describe("settings clusters", () => {
     // /forms/[id], setup-interview and the onboarding TOUR all link ?tab=playbook or ?tab=you.
     expect(clusters).toContain("playbook");
     expect(page).toContain('id: "you"');
+  });
+
+  /**
+   * EVERY ?tab= IN THE REPO NAMES A REAL CLUSTER.
+   *
+   * cn-v695 renamed and split the clusters; three redirect sites still pointed at the old shape,
+   * and because an unknown tab falls back SILENTLY to the first cluster, nothing broke loudly.
+   * A contractor came back from Stripe Connect onboarding to a page showing their company logo,
+   * and every Google Calendar failure message — six of them, written in cn-v665 — had never been
+   * visible to anybody, because the callback landed on a cluster that doesn't render them.
+   *
+   * The silent fallback is right for a stale bookmark and wrong for our own links, so this is the
+   * thing that tells the difference: a link WE ship has to name a cluster that exists.
+   */
+  it("every ?tab= the app itself links to names a live cluster", () => {
+    const src = execSync(
+      "grep -rho 'settings?tab=[a-z]*' src/ --include=*.ts --include=*.tsx || true",
+      { cwd: process.cwd(), encoding: "utf8" },
+    );
+    const used = [...new Set(src.split("\n").filter(Boolean).map((m) => m.split("=")[1]))].filter(Boolean);
+    expect(used.length).toBeGreaterThan(3); // the grep works
+    for (const tab of used) expect(clusters, `?tab=${tab} names no cluster`).toContain(tab);
   });
 
   it("aliases the one id the split retired, so old bookmarks still land", () => {

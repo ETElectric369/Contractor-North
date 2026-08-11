@@ -25,7 +25,7 @@ async function loadOwnerOrg() {
     .maybeSingle();
 
   if (!profile?.org_id || !["owner", "admin"].includes(profile.role)) {
-    redirect("/settings?billing_error=Only an owner or admin can manage billing.");
+    redirect("/settings?tab=getpaid&billing_error=Only an owner or admin can manage billing.");
   }
 
   const { data: org } = await supabase
@@ -84,8 +84,8 @@ export async function startCheckout(formData?: FormData) {
         mode: "subscription",
         customer: customerId,
         line_items: [{ price: priceId, quantity: 1 }],
-        success_url: `${siteUrl()}/settings?billing=success`,
-        cancel_url: `${siteUrl()}/settings?billing=cancelled`,
+        success_url: `${siteUrl()}/settings?tab=getpaid&billing=success`,
+        cancel_url: `${siteUrl()}/settings?tab=getpaid&billing=cancelled`,
         metadata: { org_id: org.id },
         subscription_data: { metadata: { org_id: org.id } },
       });
@@ -96,8 +96,8 @@ export async function startCheckout(formData?: FormData) {
   }
 
   // Redirects live OUTSIDE the try so they aren't swallowed by the catch.
-  if (errMsg) redirect(`/settings?billing_error=${encodeURIComponent(errMsg)}`);
-  redirect(url ?? "/settings?billing_error=Could not start checkout.");
+  if (errMsg) redirect(`/settings?tab=getpaid&billing_error=${encodeURIComponent(errMsg)}`);
+  redirect(url ?? "/settings?tab=getpaid&billing_error=Could not start checkout.");
 }
 
 export async function openPortal() {
@@ -112,7 +112,7 @@ export async function openPortal() {
       const stripe = getStripe();
       const session = await stripe.billingPortal.sessions.create({
         customer: org.stripe_customer_id,
-        return_url: `${siteUrl()}/settings`,
+        return_url: `${siteUrl()}/settings?tab=getpaid`,
       });
       url = session.url;
     } catch (e: any) {
@@ -120,7 +120,7 @@ export async function openPortal() {
     }
   }
 
-  if (errMsg) redirect(`/settings?billing_error=${encodeURIComponent(errMsg)}`);
+  if (errMsg) redirect(`/settings?tab=getpaid&billing_error=${encodeURIComponent(errMsg)}`);
   redirect(url ?? "/settings");
 }
 
@@ -169,8 +169,8 @@ export async function connectPayments() {
       account: accountId,
       // Stripe expires these links quickly; both URLs come back here so a refresh
       // just mints a new one rather than dead-ending.
-      refresh_url: `${siteUrl()}/settings?connect=refresh`,
-      return_url: `${siteUrl()}/settings?connect=done`,
+      refresh_url: `${siteUrl()}/settings?tab=getpaid&connect=refresh`,
+      return_url: `${siteUrl()}/settings?tab=getpaid&connect=done`,
       type: "account_onboarding",
     });
     url = link.url;
@@ -178,7 +178,7 @@ export async function connectPayments() {
     errMsg = e?.message ?? "Stripe error";
   }
 
-  if (errMsg) redirect(`/settings?billing_error=${encodeURIComponent(errMsg)}`);
+  if (errMsg) redirect(`/settings?tab=getpaid&billing_error=${encodeURIComponent(errMsg)}`);
   redirect(url ?? "/settings");
 }
 
@@ -199,7 +199,7 @@ export async function openPayoutsDashboard() {
     }
   }
 
-  if (errMsg) redirect(`/settings?billing_error=${encodeURIComponent(errMsg)}`);
+  if (errMsg) redirect(`/settings?tab=getpaid&billing_error=${encodeURIComponent(errMsg)}`);
   redirect(url ?? "/settings");
 }
 

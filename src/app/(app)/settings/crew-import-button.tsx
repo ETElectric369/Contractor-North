@@ -1,5 +1,6 @@
 "use client";
 
+import { parseCSV } from "@/lib/csv";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Upload, Check, AlertCircle } from "lucide-react";
@@ -7,28 +8,22 @@ import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { importCrew, type CrewImportRow, type CrewImportResult } from "./actions";
 
-function splitLine(line: string): string[] {
-  const out: string[] = [];
-  let cur = "";
-  let q = false;
-  for (const ch of line) {
-    if (ch === '"') q = !q;
-    else if (ch === "," && !q) { out.push(cur); cur = ""; }
-    else cur += ch;
-  }
-  out.push(cur);
-  return out;
-}
-
+/**
+ * THE ONE PARSER (cn-v700). This file carried a private `splitLine` doing `if (ch === '"') q = !q`
+ * — the exact rule cn-v696 removed from lib/csv.ts, because an inch mark (`4" RND LS`, `2x6x12'`)
+ * flipped quote mode mid-field and swallowed the rest of the line. csv.ts's own header claims to
+ * be "the one parser the CSV imports share so they can't diverge on quoting edge cases"; it was
+ * true of three importers out of five, and the fix made the two halves disagree about what a
+ * quote means. It also handles a quoted field containing newlines, which line-splitting cannot.
+ */
 function parseCsv(text: string): CrewImportRow[] {
-  const lines = text.trim().split(/\r?\n/).filter((l) => l.trim());
-  if (lines.length < 2) return [];
-  const headers = splitLine(lines[0]).map((h) => h.trim().toLowerCase());
+  const rows = parseCSV(text);
+  if (rows.length < 2) return [];
+  const headers = rows[0].map((h) => h.trim().toLowerCase());
   const at = (re: RegExp) => headers.findIndex((h) => re.test(h));
   const iName = at(/name/), iEmail = at(/e-?mail/), iPhone = at(/phone|cell|mobile/), iRole = at(/role/);
-  return lines
+  return rows
     .slice(1)
-    .map(splitLine)
     .map((c) => ({
       full_name: (c[iName] ?? "").trim(),
       email: (c[iEmail] ?? "").trim(),

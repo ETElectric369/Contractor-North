@@ -129,9 +129,26 @@ export async function installPlaybookStarter(formId: string, starterKey: string)
 export async function clearPlaybook(formId: string): Promise<Result> {
   const ctx = await staff();
   if (!ctx.ok) return { ok: false, error: ctx.error };
+
+  // REGENERATE THE MIRROR BEFORE DROPPING THE PLAYBOOK (cn-v700).
+  //
+  // This wrote `{ playbook: null }` and nothing else, so the form landed on whatever `schema`
+  // happened to be stored — and that row can be MONTHS old. Vivian Builders' site inspection has
+  // eight `multi: true` needs in its playbook and zero in its stored schema, because that schema
+  // was last written before cn-v698 taught sheetFromPlaybook to carry `multi`. Clearing it would
+  // have turned eight pick-any questions into pick-one, and coerceNeed then keeps only the first
+  // element of every stored array answer.
+  //
+  // Rebuilding the mirror from the CURRENT playbook first means the way back is the closed half
+  // of the questions you have now, which is what the doc-comment above always claimed it was.
+  // It does NOT rescue file or scopes needs — a sheet has no shape for those — which is why the
+  // button now names what it is about to delete before it does it.
+  const { data: before } = await ctx.supabase.from("forms").select("playbook").eq("id", formId).maybeSingle();
+  const current = parsePlaybook((before as { playbook?: unknown } | null)?.playbook);
+
   const { data: wrote, error } = await ctx.supabase
     .from("forms")
-    .update({ playbook: null })
+    .update(current.needs.length ? { playbook: null, schema: sheetFromPlaybook(current) } : { playbook: null })
     .eq("id", formId)
     .select("id");
   if (error) return { ok: false, error: error.message };

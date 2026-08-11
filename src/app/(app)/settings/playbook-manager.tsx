@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import { stampNeeds } from "@/lib/playbook/stamp";
 import { useRouter } from "next/navigation";
 import {
@@ -78,8 +78,14 @@ const kindOf = (n: Need): Kind =>
             : "text";
 
 /** Changing the kind keeps whatever the old kind had that the new one can still use. */
-function slotForKind(kind: Kind, prev: NeedSlot | undefined): NeedSlot | undefined {
-  const options = prev && prev.type === "select" ? prev.options : ["Yes", "No"];
+function slotForKind(kind: Kind, prev: NeedSlot | undefined, remembered?: string[]): NeedSlot | undefined {
+  // `remembered` is the last list this question HAD, kept by the editor across a round trip
+  // (cn-v700). Without it the carry-over only worked select→select, so a contractor who opened
+  // "The project", tried "Typed in — short" to see what it looked like, and came back to
+  // "Pick one" found his thirteen hand-written choices replaced by Yes / No — silently, one Save
+  // from being the version on his website, and with every stored answer outside the new list
+  // coercing to null on the next autosave.
+  const options = prev && prev.type === "select" ? prev.options : remembered?.length ? remembered : ["Yes", "No"];
   // `other` SURVIVES A KIND CHANGE (cn-v698). `multi` is dropped on purpose — one-vs-many IS the
   // thing the dropdown selects. `other` was dropped by omission, and the doc-comment above was
   // false about it: a select→select change can obviously still use it. The cost was silent —
@@ -138,7 +144,13 @@ export function PlaybookManager({
   starters: { key: string; label: string; blurb: string }[];
 }) {
   const router = useRouter();
-  const [formId, setFormId] = useState(forms[0]?.id ?? "");
+  // NOT forms[0] — that is alphabetical, and cn-v683 added the WEBSITE form to this picker.
+  // For Vivian Builders "Customer intake" sorts before "Site inspection", so the editor started
+  // opening on the questions that are live on Andrew's website rather than on his own
+  // walk-through. Default to the private one; orgs with a single form are unaffected.
+  /** The last option list each question carried, so a kind round trip can put it back. */
+  const lastOptions = useRef(new Map<string, string[]>());
+  const [formId, setFormId] = useState((forms.find((f) => !f.isWebsite) ?? forms[0])?.id ?? "");
   // What this form looked like when the page loaded. Sent on save so a concurrent edit is
   // REFUSED instead of overwritten — see playbookStamp in playbook-actions.
   const baseStamps = useMemo(
@@ -370,7 +382,18 @@ export function PlaybookManager({
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div>
                         <Label className="mb-1.5">How it gets answered</Label>
-                        <Select value={kind} onChange={(e) => edit(i, { slot: slotForKind(e.target.value as Kind, n.slot) })}>
+                        <Select
+                          value={kind}
+                          onChange={(e) => {
+                            // Record the outgoing list BEFORE the slot is replaced — this is the
+                            // only moment it still exists.
+                            if (n.slot?.type === "select" && n.slot.options.length)
+                              lastOptions.current.set(n.key, n.slot.options);
+                            edit(i, {
+                              slot: slotForKind(e.target.value as Kind, n.slot, lastOptions.current.get(n.key)),
+                            });
+                          }}
+                        >
                           {(Object.keys(KIND_LABEL) as Kind[]).map((k) => (
                             <option key={k} value={k}>{KIND_LABEL[k]}</option>
                           ))}
@@ -597,7 +620,21 @@ export function PlaybookManager({
             variant="secondary"
             disabled={pending}
             onClick={() => {
-              if (!confirm("Go back to the plain question sheet? Your playbook is removed.")) return;
+              // NAME THE LOSSES (cn-v700). A sheet has no shape for an open question, a file
+              // upload or a price-list picker, so sheetFromPlaybook drops them — permanently,
+              // because `forms` has no history table. On Andrew's website form that is "Plan
+              // files" and "Photo files", the two uploads he filed bugs about this week, and
+              // the button that deletes them said only "Your playbook is removed."
+              const gone = needs
+                .filter((n) => !n.slot || n.slot.type === "file" || n.slot.type === "scopes")
+                .map((n) => n.label);
+              const whys = needs.filter((n) => n.why || n.note).length;
+              const losses = [
+                gone.length ? `\n\nThese questions are DELETED — a plain sheet cannot hold them:\n  · ${gone.join("\n  · ")}` : "",
+                whys ? `\n\n${whys} why line${whys === 1 ? "" : "s"} will also be lost.` : "",
+                form.isWebsite ? "\n\nThis is the form on your WEBSITE." : "",
+              ].join("");
+              if (!confirm(`Go back to the plain question sheet?${losses}\n\nThere is no undo.`)) return;
               run(() => clearPlaybook(form.id), "Back to the sheet.", true);
             }}
           >

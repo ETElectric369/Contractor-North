@@ -12,12 +12,12 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   // CSRF: the returned state must match the cookie set at connect-time, or this is a
   // forged code (binding an attacker's QuickBooks realm to the signed-in user's org).
-  const fail = NextResponse.redirect(`${site}/settings?qbo=denied`);
+  const fail = NextResponse.redirect(`${site}/settings?tab=integrations&qbo=denied`);
   if (!(await verifyOAuthState(fail, "quickbooks", searchParams.get("state")))) return fail;
   const code = searchParams.get("code");
   const realmId = searchParams.get("realmId");
   if (!code || !realmId) {
-    return NextResponse.redirect(`${site}/settings?qbo=error`);
+    return NextResponse.redirect(`${site}/settings?tab=integrations&qbo=error`);
   }
 
   const supabase = await createClient();
@@ -32,7 +32,7 @@ export async function GET(req: Request) {
     .eq("id", user.id)
     .maybeSingle();
   if (!profile?.org_id || !["owner", "admin"].includes(profile.role)) {
-    return NextResponse.redirect(`${site}/settings?qbo=denied`);
+    return NextResponse.redirect(`${site}/settings?tab=integrations&qbo=denied`);
   }
 
   try {
@@ -49,8 +49,8 @@ export async function GET(req: Request) {
       expires_at: new Date(Date.now() + (t.expires_in ?? 3600) * 1000).toISOString(),
       connected_at: new Date().toISOString(),
     });
-    return NextResponse.redirect(`${site}/settings?qbo=connected`);
+    return NextResponse.redirect(`${site}/settings?tab=integrations&qbo=connected`);
   } catch {
-    return NextResponse.redirect(`${site}/settings?qbo=error`);
+    return NextResponse.redirect(`${site}/settings?tab=integrations&qbo=error`);
   }
 }

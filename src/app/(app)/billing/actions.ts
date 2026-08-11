@@ -117,12 +117,27 @@ export async function invoiceShareText(
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const { data: invoice } = await ctx.supabase
     .from("invoices")
-    .select("invoice_number, total, amount_paid, public_token, org_id, organizations(name)")
+    .select("invoice_number, status, total, amount_paid, public_token, org_id, organizations(name)")
     .eq("id", id)
     .maybeSingle();
   if (!invoice) return { ok: false, error: "Invoice not found." };
   const token = (invoice as { public_token?: string | null }).public_token;
   if (!token) return { ok: false, error: "This invoice has no customer link yet." };
+
+  // A DRAFT'S LINK IS A 404, SO REFUSE RATHER THAN HAND IT OVER (cn-v700).
+  //
+  // Every invoice is born `draft`, and migration 0187 narrowed public_invoice to
+  // ('sent','partial','paid','overdue') to stop unsent pricing being readable. Every OTHER way a
+  // link leaves the building flips draft→sent on the way past — textInvoice below,
+  // deliverInvoiceEmail. The share sheet has no send step to hang that on, so it was the one
+  // egress that handed out a link to a page the customer cannot open.
+  //
+  // It refuses instead of silently sending, because the failure is invisible from this side: the
+  // OS share sheet reports success, the text goes, and the first anyone hears is a customer
+  // saying the link is broken. It does NOT flip the status by itself — sharing is not sending,
+  // and a status change nobody asked for is how an unfinished price becomes a debt.
+  if (String((invoice as { status?: string | null }).status ?? "") === "draft")
+    return { ok: false, error: "This invoice is still a draft — send it first, then share the link." };
 
   const who = (invoice as { organizations?: { name?: string } }).organizations?.name ?? "Your contractor";
   const balance = invoiceBalance(invoice.total, invoice.amount_paid);
