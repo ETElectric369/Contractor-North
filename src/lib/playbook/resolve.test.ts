@@ -324,38 +324,90 @@ describe("held keys freeze the zone without hiding the answer", () => {
     ],
   };
   const answers = { symptom: ["New Construction"], scope: ["Yes"] };
-  const holdSymptom: ReadonlySet<string> = new Set(["symptom"]);
+  // Held, and it WAS answered when the hold was taken — Andrew tapping a chip he already picked.
+  const holdSymptom: ReadonlyMap<string, boolean> = new Map([["symptom", true]]);
+  // Held while still unanswered — the first tap on a fresh question.
+  const holdSymptomFresh: ReadonlyMap<string, boolean> = new Map([["symptom", false]]);
 
   it("the question gated on the chip being tapped STAYS ON SCREEN", () => {
     expect(applicableNeeds(chain, answers).map((n) => n.key)).toContain("sub");
     // The regression: with the answer masked, `sub` vanished the moment symptom was held.
-    expect(missingNeeds(chain, answers, holdSymptom).map((n) => n.key)).toContain("sub");
+    expect(missingNeeds(chain, answers, holdSymptomFresh).map((n) => n.key)).toContain("sub");
   });
 
   it("the held need itself keeps its place in the ask list", () => {
-    expect(missingNeeds(chain, answers, holdSymptom).map((n) => n.key)).toContain("symptom");
+    expect(missingNeeds(chain, answers, holdSymptomFresh).map((n) => n.key)).toContain("symptom");
     // …and drops out again the moment the hold is released.
     expect(missingNeeds(chain, answers).map((n) => n.key)).not.toContain("symptom");
   });
 
   it("holding one link does not collapse the rest of the chain", () => {
-    const keys = missingNeeds(chain, answers, new Set(["scope"])).map((n) => n.key);
+    const keys = missingNeeds(chain, answers, new Map([["scope", false]])).map((n) => n.key);
     expect(keys).toContain("size"); // gated on scope being KNOWN
     expect(keys).toContain("scope");
   });
 
   it("splitAsk carries the hold through to the ask/reach split", () => {
-    const { ask } = splitAsk(chain, answers, new Set(), holdSymptom);
+    const { ask } = splitAsk(chain, answers, new Set(), holdSymptomFresh);
     expect(ask.map((n) => n.key)).toEqual(expect.arrayContaining(["symptom", "sub"]));
   });
 
   it("isSettled is the exact inverse used for the answered/spine zones", () => {
     expect(isSettled(answers, "symptom")).toBe(true);
-    expect(isSettled(answers, "symptom", holdSymptom)).toBe(false);
+    expect(isSettled(answers, "symptom", holdSymptomFresh)).toBe(false);
+    // …and an ALREADY-ANSWERED need stays settled while held, so the scope keeps its place in the
+    // spine instead of leaving it mid-gesture (audit 6).
+    expect(isSettled(answers, "symptom", holdSymptom)).toBe(true);
     expect(isSettled(answers, "size")).toBe(false);
   });
 
   it("no hold behaves exactly as before — every existing caller is untouched", () => {
-    expect(missingNeeds(chain, answers).map((n) => n.key)).toEqual(missingNeeds(chain, answers, new Set()).map((n) => n.key));
+    expect(missingNeeds(chain, answers).map((n) => n.key)).toEqual(missingNeeds(chain, answers, new Map()).map((n) => n.key));
+  });
+});
+
+/**
+ * A HOLD FREEZES THE CLASSIFICATION AT WHAT IT WAS — IN BOTH DIRECTIONS (audit 6).
+ *
+ * cn-v699 made a held key count as still-MISSING. Right for a first answer, wrong for one that was
+ * already given: tapping into Erik's scope — an open need pinned in the spine because it is the
+ * document every other answer refers back to — forced it to "missing" and it left the spine
+ * mid-gesture. That is bug 48fbfd6e rebuilt by the fix for bug 48fbfd6e.
+ */
+describe("a hold freezes the classification, it does not force one", () => {
+  const pb: Playbook = {
+    needs: [
+      { key: "scope", label: "Scope", ask: "What is the job?" }, // OPEN — no slot, lives in the spine
+      { key: "walls", label: "Walls", ask: "Open or finished?", slot: { type: "select", options: ["Open", "Finished"] } },
+    ],
+  };
+  const answered = { scope: "eight-line punch list", walls: "Open" };
+
+  it("an ANSWERED open need stays answered while held — it keeps its place in the spine", () => {
+    const held = new Map([["scope", true]]);
+    expect(isSettled(answered, "scope", held)).toBe(true);
+    expect(missingNeeds(pb, answered, held).map((n) => n.key)).not.toContain("scope");
+  });
+
+  it("an UNANSWERED need stays missing while held — the cn-v699 case still holds", () => {
+    const held = new Map([["scope", false]]);
+    expect(isSettled({}, "scope", held)).toBe(false);
+    expect(missingNeeds(pb, {}, held).map((n) => n.key)).toContain("scope");
+  });
+
+  it("clearing the box while held does NOT relocate it mid-keystroke", () => {
+    // He selects all and deletes: the answer is now empty, but the hold says it was answered, so
+    // the field stays exactly where his cursor is until he blurs.
+    expect(isSettled({ scope: "" }, "scope", new Map([["scope", true]]))).toBe(true);
+  });
+
+  it("typing the first character while held does NOT relocate it either", () => {
+    expect(isSettled({ scope: "e" }, "scope", new Map([["scope", false]]))).toBe(false);
+  });
+
+  it("no hold at all reads the real answers, exactly as before", () => {
+    expect(isSettled(answered, "scope")).toBe(true);
+    expect(isSettled({}, "scope")).toBe(false);
+    expect(missingNeeds(pb, answered).map((n) => n.key)).toEqual([]);
   });
 });

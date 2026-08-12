@@ -275,12 +275,34 @@ export function Inspector({
    * made the question gated on that chip vanish. See missingNeeds' comment: applicability now
    * always reads the real `answers`, and a held key only counts as still-missing.
    */
-  const held = useMemo(
-    () => new Set([editingKey, multiKey].filter((k): k is string => !!k)),
-    [editingKey, multiKey],
-  );
+  //
+  // A MAP, NOT A SET (audit 6). cn-v699 made a held key count as still-MISSING, which froze a
+  // first-time answer correctly and moved an ALREADY-ANSWERED one: tapping into the scope — an
+  // open need pinned in the spine because it is the document everything else refers back to —
+  // forced it to "missing" and it left the spine mid-gesture. The hold has to freeze the
+  // classification at what it WAS, so the value here is isAnswered captured at hold time.
+  const heldWas = useRef(new Map<string, boolean>());
+  const held = useMemo(() => {
+    const live = [editingKey, multiKey].filter((k): k is string => !!k);
+    // Drop remembered holds that have been released, so the NEXT hold on that key reads the
+    // classification fresh instead of resurrecting a stale one.
+    for (const k of [...heldWas.current.keys()]) if (!live.includes(k)) heldWas.current.delete(k);
+    return new Map(live.map((k) => [k, heldWas.current.get(k) ?? false] as const));
+  }, [editingKey, multiKey]);
+  /**
+   * Take a hold, remembering the classification AS IT WAS WHEN THE GESTURE STARTED.
+   *
+   * ONLY IF NOT ALREADY HELD. Re-capturing on every tap defeats the whole thing: the first tap on
+   * a nine-chip grid records "unanswered" and the grid stays put, but the second tap would record
+   * "answered" — and the grid would relocate out from under his thumb between taps two and three,
+   * which is the exact bug the hold exists to prevent.
+   */
+  const takeHold = (key: string) => {
+    if (!heldWas.current.has(key)) heldWas.current.set(key, isAnswered(answers[key]));
+  };
   /** Focusing a field is attention leaving whatever chip grid was being tapped. */
   const focusNeed = (key: string) => {
+    takeHold(key);
     setEditingKey(key);
     setMultiKey((k) => (k === key ? k : null));
   };
@@ -378,21 +400,47 @@ export function Inspector({
       if (explicit) setSavedAt(Date.now());
       return;
     }
+    // ── A FAILED SAVE MUST KEEP THE WORK AND TRY AGAIN ──────────────────────────────────────
+    //
+    // Two faults, both fatal in a crawlspace, both found by audit 6.
+    //
+    // 1. The refs were emptied ABOVE, before the write. Any failure — a server {ok:false}, or the
+    //    network rejecting in a dead zone — dropped the patch on the floor. The next keystroke
+    //    scheduled a flush carrying only THAT keystroke, so the answers before it were gone with
+    //    no trace, and the last thing on screen was a green "Saved" tick.
+    // 2. There was no try/catch at all. A rejected fetch inside a transition is an unhandled
+    //    rejection, which takes the whole walk-through down to the error boundary — losing every
+    //    unsaved answer on a page whose entire promise is that it saves itself.
+    //
+    // So: restore, say so, and RE-ARM. Newer keystrokes win the merge, because the retry must not
+    // resurrect an old value over something he has since corrected.
+    const restore = (msg: string) => {
+      capturePatchRef.current = { ...patch, ...capturePatchRef.current };
+      if (wantAnswers) answersDirty.current = true;
+      setSavedAt(null); // a stale green tick must never stand over unwritten work
+      setError(msg);
+      schedule(); // retry without needing him to type another character
+    };
     start(async () => {
       setError(null);
-      if (Object.keys(patch).length) {
-        const r = await saveInspectionCapture(appointmentId, patch as never);
-        if (!r.ok) return setError(r.error ?? "Couldn't save.");
+      try {
+        if (Object.keys(patch).length) {
+          const r = await saveInspectionCapture(appointmentId, patch as never);
+          if (!r.ok) return restore(r.error ?? "Couldn't save — still trying.");
+        }
+        if (latestPlace.trim() !== initialLocation.trim()) {
+          const r = await setAppointmentPlace(appointmentId, latestPlace);
+          if (!r.ok) return restore(r.error ?? "Couldn't save the address — still trying.");
+        }
+        if (wantAnswers) {
+          const r = await saveInspectionAnswers(appointmentId, templateId, coerceByPlaybook(playbook, answersRef.current) as never);
+          if (!r.ok) return restore(r.error ?? "Couldn't save — still trying.");
+        }
+        setSavedAt(Date.now());
+      } catch {
+        // No signal. Nothing is lost and nothing is written; it will go as soon as there are bars.
+        restore("No signal — your answers are held on this phone and will save when you're back in range.");
       }
-      if (latestPlace.trim() !== initialLocation.trim()) {
-        const r = await setAppointmentPlace(appointmentId, latestPlace);
-        if (!r.ok) return setError(r.error ?? "Couldn't save the address.");
-      }
-      if (wantAnswers) {
-        const r = await saveInspectionAnswers(appointmentId, templateId, coerceByPlaybook(playbook, answersRef.current) as never);
-        if (!r.ok) return setError(r.error ?? "Couldn't save.");
-      }
-      setSavedAt(Date.now());
     });
   }
   // A tab closing mid-debounce must not eat the last thing typed.
@@ -512,6 +560,7 @@ export function Inspector({
                     // multi: a single select IS finished in one tap, and dropping it to Zone B
                     // then is the behaviour he asked for, not a bug.
                     if (multi) {
+                      takeHold(n.key);
                       setMultiKey(n.key);
                       put(on ? listed.filter((x) => x !== o) : [...listed, o], free);
                     } else {
@@ -540,7 +589,7 @@ export function Inspector({
               <button
                 type="button"
                 onClick={() => {
-                  if (multi) setMultiKey(n.key);
+                  if (multi) { takeHold(n.key); setMultiKey(n.key); }
                   if (showOther) {
                     // Closing clears what he TYPED — prose stranded behind a hidden box is an
                     // answer nobody can find, which is the failure this file keeps coming back to.

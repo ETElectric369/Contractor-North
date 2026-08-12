@@ -236,14 +236,12 @@ async function clockInInner(
     source: offlinePunch ? "offline" : backdated ? "manual" : input.gps ? "app" : "manual",
   });
 
-  if (error) {
-    return {
-      ok: false,
-      error: dbError(error).includes("one_open_entry")
-        ? "You're already clocked in."
-        : error.message,
-    };
-  }
+  // "You're already clocked in" now lives in dbError's constraint map, not in a string test here.
+  // cn-v702 wrapped the ARGUMENT of this test: dbError translates the duplicate-key message into a
+  // sentence, that sentence never contains "one_open_entry", so the branch went dead and the most
+  // common clock-in failure — tapping Clock In twice at 60mph — started showing the raw Postgres
+  // text on the surface whose whole point was to stop doing that.
+  if (error) return { ok: false, error: dbError(error) };
 
   // Clocking into a job means work has started — promote it to in_progress.
   //

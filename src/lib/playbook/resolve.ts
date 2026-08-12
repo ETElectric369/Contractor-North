@@ -46,7 +46,20 @@ export function applicableNeeds(pb: Playbook, answers: Answers): Need[] {
   return pb.needs.filter((n) => !n.when?.length || n.when.every((c) => clauseHolds(c, answers)));
 }
 
-const NOTHING_HELD: ReadonlySet<string> = new Set();
+/**
+ * WHAT A HELD KEY'S CLASSIFICATION WAS when the hold was taken — answered or not.
+ *
+ * A Set was not enough, and the audit caught why. cn-v699 made a held key count as still-MISSING,
+ * which is right for a need being answered for the first time and wrong for one that was ALREADY
+ * answered: tapping into Erik's scope — an open need, pinned in the spine precisely because it is
+ * the working document of the whole walk-through — forced it to "missing", so it left the spine
+ * and re-rendered somewhere else. That is bug 48fbfd6e rebuilt by the fix for bug 48fbfd6e.
+ *
+ * A hold must freeze the classification at whatever it WAS, in either direction.
+ */
+export type Held = ReadonlyMap<string, boolean>;
+
+const NOTHING_HELD: Held = new Map();
 
 /**
  * Applicable and still unanswered — "what am I actually still missing", in declaration order.
@@ -67,14 +80,16 @@ const NOTHING_HELD: ReadonlySet<string> = new Set();
  * So the two ideas are separated here rather than conflated: applicability ALWAYS reads the real
  * answers, and `held` only makes a need count as still-missing so it keeps its place on screen.
  */
-export function missingNeeds(pb: Playbook, answers: Answers, held: ReadonlySet<string> = NOTHING_HELD): Need[] {
-  return applicableNeeds(pb, answers).filter((n) => held.has(n.key) || !isAnswered(answers[n.key]));
+export function missingNeeds(pb: Playbook, answers: Answers, held: Held = NOTHING_HELD): Need[] {
+  return applicableNeeds(pb, answers).filter((n) =>
+    held.has(n.key) ? !held.get(n.key) : !isAnswered(answers[n.key]),
+  );
 }
 
 /** Answered AND not being worked in — the inverse of `held.has(k) || !isAnswered(...)` above, so
  *  a caller sorting needs into zones uses the same rule the resolver does. */
-export const isSettled = (answers: Answers, key: string, held: ReadonlySet<string> = NOTHING_HELD): boolean =>
-  !held.has(key) && isAnswered(answers[key]);
+export const isSettled = (answers: Answers, key: string, held: Held = NOTHING_HELD): boolean =>
+  held.has(key) ? !!held.get(key) : isAnswered(answers[key]);
 
 /** Missing AND marked hold — "don't let me price without this". */
 export const holdingNeeds = (pb: Playbook, answers: Answers) => missingNeeds(pb, answers).filter((n) => n.hold);
@@ -98,8 +113,9 @@ export function splitAsk(
   pb: Playbook,
   answers: Answers,
   reached: ReadonlySet<string> = new Set(),
-  /** Keys whose classification is frozen because somebody is typing/tapping in them. */
-  held: ReadonlySet<string> = NOTHING_HELD,
+  /** Keys whose classification is frozen because somebody is typing/tapping in them, mapped to
+   *  what that classification WAS when the hold was taken. */
+  held: Held = NOTHING_HELD,
 ): { ask: Need[]; reach: Need[] } {
   const missing = missingNeeds(pb, answers, held);
   return {

@@ -28,6 +28,10 @@ const BY_CONSTRAINT: Record<string, string> = {
   purchase_orders_org_number_key: "That PO number is already in use. Try saving again — it'll take the next one.",
   work_orders_org_number_key: "That work-order number is already in use. Try saving again — it'll take the next one.",
   change_orders_org_number_key: "That change-order number is already in use. Try saving again — it'll take the next one.",
+  // The most common clock-in failure there is: two taps at 60mph, or a shift left open on another
+  // device. It was handled by a string test at the call site until cn-v702 translated the string
+  // out from under it (see timeclock/actions.ts). A sentence belongs in the map, once.
+  one_open_entry_per_user: "You're already clocked in.",
   profiles_email_key: "Someone with that email address is already on the team.",
   organizations_public_handle_key: "That web address is already taken — pick another.",
 };

@@ -75,7 +75,28 @@ export function computeJobLaborBilling(
    *  bill_rate then org default, as before. (Quotes use the level rate as the single
    *  draft labor rate — different surface, deliberate.) */
   levelRate?: number | null,
+  /**
+   * CODES THE ORG MARKED NON-BILLABLE — job_codes.billable = false.
+   *
+   * This existed as a checkbox in Settings, was badged "non-billable" in the picker, and was read
+   * by NOTHING in the billing math. Every org is seeded with SHOP ("Shop / yard time") and PTO
+   * ("Paid time off") already set false (0004:467). So a shift clocked into a real job with code
+   * SHOP — prefabbing FOR that job, a perfectly natural pick — billed the customer for shop time,
+   * with an invoice line reading "Erik — 8.0 hrs" and nothing on it saying SHOP.
+   *
+   * IT MUST BE THIS PREDICATE AND NOT "HAS A CODE AT ALL". Every ordinary punch carries a code —
+   * SVC, ROUGH, TRIM, PANEL — so skipping any coded hour would zero out the whole labor book,
+   * which is the silent-unbilled-week failure the docstring above this function was written about.
+   *
+   * Empty set = bill everything, i.e. exactly the old behaviour. That is the safe default for any
+   * caller that hasn't got the org's codes to hand.
+   */
+  nonBillableCodes: ReadonlySet<string> = new Set(),
 ): { lines: LaborLine[]; total: number } {
+  const unbillable = (code: unknown): boolean => {
+    const c = String(code ?? "").trim();
+    return !!c && nonBillableCodes.has(c);
+  };
   const rawLevel = Number(levelRate);
   const level = Number.isFinite(rawLevel) && rawLevel > 0 ? rawLevel : 0;
   const rawDefault = Number(defaultRate);
@@ -103,7 +124,12 @@ export function computeJobLaborBilling(
   // (1) exact hours allocated to this job (handles split shifts)
   const billedAllocIds = new Set<string>();
   for (const a of jobAllocs ?? []) {
+    // Dedupe FIRST and unconditionally: an unbillable row still has to be marked as seen, or
+    // path (2) would treat it as "unlabeled" and bill it right back.
     if (a.id) billedAllocIds.add(String(a.id));
+    // A row can carry BOTH a job and a code — switchJob writes exactly that shape, and so does
+    // the clock-out breakdown, whose Job and Code selects are not mutually exclusive.
+    if (unbillable(a.job_code)) continue;
     addHours(a.time_entries?.profiles, Number(a.hours ?? 0));
   }
   for (const e of jobEntries ?? []) {
@@ -125,8 +151,10 @@ export function computeJobLaborBilling(
       }
       continue;
     }
-    // (3) un-split closed entries on this job → gross hours
+    // (3) un-split closed entries on this job → gross hours. This is the EVERYDAY one-tap
+    // clock-out, so the code test here is the one that had to be exactly right.
     if (!e.clock_out) continue;
+    if (unbillable(e.job_code)) continue;
     const lunch = Math.max(0, Number(e.lunch_minutes) || 0); // a negative lunch can't add billable time
     addHours(e.profiles, (new Date(e.clock_out).getTime() - new Date(e.clock_in).getTime()) / 3_600_000 - lunch / 60);
   }
@@ -143,23 +171,36 @@ export function computeJobLaborBilling(
 /** The two queries computeJobLaborBilling needs, run against a job_id. Returns
  *  { jobEntries, jobAllocs } ready to pass in. Centralised so import + financials
  *  fetch identical data. */
-export async function fetchJobLaborRows(supabase: any, jobId: string): Promise<{ jobEntries: any[]; jobAllocs: any[] }> {
-  const [{ data: jobEntries }, { data: jobAllocs }] = await Promise.all([
+export async function fetchJobLaborRows(
+  supabase: any,
+  jobId: string,
+): Promise<{ jobEntries: any[]; jobAllocs: any[]; nonBillableCodes: Set<string> }> {
+  const [{ data: jobEntries }, { data: jobAllocs }, { data: codes }] = await Promise.all([
     supabase
       .from("time_entries")
       // allocation CONTENTS, not just ids: computeJobLaborBilling has to bill the
       // unlabeled (job_id NULL) rows on this job's entries, which the cost side already
       // charges to the job — selecting only ids is what hid a whole unbilled week.
-      .select("clock_in, clock_out, lunch_minutes, profiles(id, full_name, hourly_rate, bill_rate), time_allocations(id, job_id, job_code, hours)")
+      // job_code on the ENTRY, not only on its allocations: an un-split punch carries its code
+      // here and nowhere else. Not selecting it is why path (3) could not see one.
+      .select("clock_in, clock_out, lunch_minutes, job_code, profiles(id, full_name, hourly_rate, bill_rate), time_allocations(id, job_id, job_code, hours)")
       .eq("job_id", jobId)
       .eq("status", "closed"),
     supabase
       .from("time_allocations")
-      .select("id, hours, time_entries!inner(status, profiles(id, full_name, hourly_rate, bill_rate))")
+      .select("id, hours, job_code, time_entries!inner(status, profiles(id, full_name, hourly_rate, bill_rate))")
       .eq("job_id", jobId)
       .eq("time_entries.status", "closed"),
+    // The org's own answer to "which of these hours does a customer pay for". Fetched HERE so all
+    // three consumers — the job hub, the invoice import and the progress draw — cannot disagree
+    // about it, which is the same reason the two queries above live in this function.
+    supabase.from("job_codes").select("code").eq("billable", false),
   ]);
-  return { jobEntries: jobEntries ?? [], jobAllocs: jobAllocs ?? [] };
+  return {
+    jobEntries: jobEntries ?? [],
+    jobAllocs: jobAllocs ?? [],
+    nonBillableCodes: new Set(((codes ?? []) as { code: string }[]).map((c) => String(c.code).trim()).filter(Boolean)),
+  };
 }
 
 /** The customer's pricing-level labor rate for a JOB (null when the job has no customer,

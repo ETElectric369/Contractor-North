@@ -352,7 +352,7 @@ export default async function JobDetailPage({
   const jobCodesEnabled = getOrgSettings((org as any)?.settings).timeclock_job_codes;
   const laborRows = await fetchJobLaborRows(supabase, id);
   const jobLevelRate = await customerLaborRateForJob(supabase, id);
-  const billableLabor = computeJobLaborBilling(laborRows.jobEntries, laborRows.jobAllocs, defaultLaborRate, jobLevelRate).total;
+  const billableLabor = computeJobLaborBilling(laborRows.jobEntries, laborRows.jobAllocs, defaultLaborRate, jobLevelRate, laborRows.nonBillableCodes).total;
   const progress = computeJobProgress({
     billingTypeRaw: (j as any).billing_type,
     quotes: (quotes ?? []) as any,

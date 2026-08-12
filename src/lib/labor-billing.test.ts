@@ -197,3 +197,85 @@ describe("time-code parts are paid but NEVER billed (cn-v560)", () => {
     expect(r).toEqual({ lines: [], total: 0 });
   });
 });
+
+/**
+ * NON-BILLABLE CODES — the checkbox that did nothing (audit 6).
+ *
+ * job_codes.billable was set in Settings, badged "non-billable" in the picker, and read by nothing
+ * in the billing math. Every org ships with SHOP and PTO already marked false (migration 0004:467),
+ * so the precondition was live on all three tenants from day one.
+ *
+ * The SECOND describe block is the more important one: the obvious fix — "skip any hour that has a
+ * code" — would have unbilled the entire labor book, because every ordinary punch carries SVC or
+ * ROUGH or TRIM. These tests exist so nobody ever ships that.
+ */
+describe("non-billable job codes are not billed to the customer", () => {
+  const brianRate = { id: "b", full_name: "Brian", bill_rate: 95 };
+  const NON_BILLABLE = new Set(["SHOP", "PTO"]);
+  const punch = (hours: number, job_code?: string) => ({
+    clock_in: "2026-08-01T08:00:00Z",
+    clock_out: new Date(Date.parse("2026-08-01T08:00:00Z") + hours * 3_600_000).toISOString(),
+    lunch_minutes: 0,
+    job_code,
+    profiles: brianRate,
+    time_allocations: [],
+  });
+
+  it("an un-split punch coded SHOP bills nothing — the everyday one-tap clock-out", () => {
+    expect(computeJobLaborBilling([punch(8, "SHOP")], [], 0, null, NON_BILLABLE).total).toBe(0);
+  });
+
+  it("PTO on a job bills nothing", () => {
+    expect(computeJobLaborBilling([punch(8, "PTO")], [], 0, null, NON_BILLABLE).total).toBe(0);
+  });
+
+  it("an allocation carrying BOTH a job and a non-billable code is skipped", () => {
+    // switchJob and the clock-out breakdown both write this shape.
+    const allocs = [{ id: "a1", hours: 2, job_code: "SHOP", time_entries: { status: "closed", profiles: brianRate } }];
+    expect(computeJobLaborBilling([], allocs, 0, null, NON_BILLABLE).total).toBe(0);
+  });
+
+  it("mixed shift: the billable part bills, the shop part does not", () => {
+    const allocs = [
+      { id: "a1", hours: 6, job_code: "TRIM", time_entries: { status: "closed", profiles: brianRate } },
+      { id: "a2", hours: 2, job_code: "SHOP", time_entries: { status: "closed", profiles: brianRate } },
+    ];
+    expect(computeJobLaborBilling([], allocs, 0, null, NON_BILLABLE).total).toBe(6 * 95);
+  });
+
+  it("a skipped allocation is still DEDUPED, or path 2 bills it right back as unlabeled", () => {
+    const entry = { ...punch(8), time_allocations: [{ id: "a2", hours: 2 }] };
+    const allocs = [{ id: "a2", hours: 2, job_code: "SHOP", time_entries: { status: "closed", profiles: brianRate } }];
+    expect(computeJobLaborBilling([entry], allocs, 0, null, NON_BILLABLE).total).toBe(0);
+  });
+});
+
+describe("…and EVERY ordinary coded hour still bills — the regression the obvious fix would cause", () => {
+  const brianRate = { id: "b", full_name: "Brian", bill_rate: 95 };
+  const NON_BILLABLE = new Set(["SHOP", "PTO"]);
+  const punch = (hours: number, job_code?: string) => ({
+    clock_in: "2026-08-01T08:00:00Z",
+    clock_out: new Date(Date.parse("2026-08-01T08:00:00Z") + hours * 3_600_000).toISOString(),
+    lunch_minutes: 0,
+    job_code,
+    profiles: brianRate,
+    time_allocations: [],
+  });
+
+  it.each(["SVC", "ROUGH", "TRIM", "PANEL", "TRAVEL"])("a punch coded %s bills in full", (code) => {
+    expect(computeJobLaborBilling([punch(8, code)], [], 0, null, NON_BILLABLE).total).toBe(8 * 95);
+  });
+
+  it("an uncoded punch bills in full", () => {
+    expect(computeJobLaborBilling([punch(8)], [], 0, null, NON_BILLABLE).total).toBe(8 * 95);
+  });
+
+  it("an EMPTY non-billable set bills everything — the safe default for any caller without the codes", () => {
+    expect(computeJobLaborBilling([punch(8, "SHOP")], [], 0).total).toBe(8 * 95);
+    expect(computeJobLaborBilling([punch(8, "SHOP")], [], 0, null, new Set()).total).toBe(8 * 95);
+  });
+
+  it("the code test is exact — 'shop' lowercase is a different code and still bills", () => {
+    expect(computeJobLaborBilling([punch(8, "shop")], [], 0, null, NON_BILLABLE).total).toBe(8 * 95);
+  });
+});

@@ -34,7 +34,7 @@ export async function jobProgressFinancials(supabase: any, jobId: string): Promi
     jobId,
     getOrgSettings((org as any)?.settings).material_markup_percent,
   );
-  const { total: billableLabor } = computeJobLaborBilling(labor.jobEntries, labor.jobAllocs, defaultRate, levelRate);
+  const { total: billableLabor } = computeJobLaborBilling(labor.jobEntries, labor.jobAllocs, defaultRate, levelRate, labor.nonBillableCodes);
 
   return computeJobProgress({
     billingTypeRaw: (job as any)?.billing_type,
