@@ -328,12 +328,43 @@ export function workDayWindowHm(raw: unknown): { start: string; end: string } {
 }
 
 /** Merge stored settings over defaults so every key is always present. */
+/**
+ * IS THIS A TIMEZONE POSTGRES AND Intl BOTH KNOW?
+ *
+ * Asked of the runtime rather than matched against a list, because a hand-kept list of IANA zone
+ * names is wrong the moment one is renamed.
+ */
+function isValidTz(tz: unknown): boolean {
+  const v = String(tz ?? "").trim();
+  if (!v) return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: v });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function getOrgSettings(raw: unknown): OrgSettings {
   const stored = (raw && typeof raw === "object" ? raw : {}) as Partial<OrgSettings>;
   const merged = { ...DEFAULT_SETTINGS, ...stored };
   // doc_prefixes is a nested map — fill any missing per-type prefix from the defaults so a
   // partially-saved map still resolves every doc type.
   merged.doc_prefixes = { ...DEFAULT_SETTINGS.doc_prefixes, ...(merged.doc_prefixes ?? {}) };
+  // ── A BAD TIMEZONE IS A CROSS-TENANT KILL SWITCH (audit 6) ────────────────────────────────
+  //
+  // Every night-time engine — recurring invoice generation, customer reminders, the end-of-day
+  // texts — loops ALL orgs in one request and formats each org's "today" in its own zone. One
+  // unparseable value throws inside that loop, and the loop dies where it stands: every org after
+  // the bad one silently gets no invoices and no reminders. One tenant, three tenants broken.
+  //
+  // SANITIZED ON READ, not on write, which is this project's own doctrine and the only version
+  // that actually closes it: settings/actions.ts has TWO writers, and the second (updateOrgSettings)
+  // merges a caller-supplied patch and strips only custom_domain / public_handle /
+  // lead_inbound_secret — so a write-side whitelist on the first would have left the easier bypass
+  // wide open. Fixing it here also heals any row already poisoned, and covers every writer added
+  // later without anyone remembering to.
+  if (!isValidTz(merged.timezone)) merged.timezone = DEFAULT_SETTINGS.timezone;
   return merged;
 }
 

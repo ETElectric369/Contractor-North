@@ -2,10 +2,9 @@
 
 import { useState } from "react";
 import { CalendarClock, CheckCircle2, ExternalLink, Loader2 } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { publicScheduleInspection } from "@/lib/actions/public-schedule";
-import { notifyNewInquiry } from "./actions";
+import { submitPublicInquiry } from "./actions";
 
 export function InquiryForm({
   org,
@@ -64,25 +63,26 @@ export function InquiryForm({
     setError(null);
     if (!name.trim()) return setError("Please enter your name.");
     if (!phone.trim() && !email.trim()) return setError("Please add a phone or email so we can reach you.");
-    if (hp) { setDone(true); return; } // bot trap
     setBusy(true);
     try {
-      const supabase = createClient();
-      const { error: rpcErr } = await supabase.rpc("submit_inquiry", {
-        p_org: org,
-        p_name: name,
-        p_email: email || null,
-        p_phone: phone || null,
-        p_message: message || null,
-        p_address: address || null,
-        p_city: city || null,
-        p_state: stateName || null,
-        p_zip: zip || null,
-        p_ref: refId, // referral attribution — validated org-side, never blocks the lead
+      // SERVER-SIDE NOW (audit 6). This called supabase.rpc() straight from the browser with the
+      // anon key, so the honeypot above was a client-side `if` an attacker simply doesn't run and
+      // nothing rate-limited the door at all — on a URL printed on business cards. The server
+      // action owns the honeypot, both ceilings and the office ping.
+      const res = await submitPublicInquiry(org, {
+        hp,
+        name,
+        email,
+        phone,
+        message,
+        address,
+        city,
+        state: stateName,
+        zip,
+        ref: refId, // referral attribution — validated org-side, never blocks the lead
       });
-      if (rpcErr) throw rpcErr;
+      if (!res.ok) { setError(res.error); return; }
       setDone(true);
-      void notifyNewInquiry(org); // fire-and-forget office ping (best-effort)
     } catch (err: any) {
       setError(err?.message ?? "Something went wrong. Please call us instead.");
     } finally {

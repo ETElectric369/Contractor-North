@@ -47,3 +47,33 @@ describe("parseGeoFromMapUrl — geo from a pasted Google Maps link", () => {
     expect(parseGeoFromMapUrl("@200,-400,10z")).toBeNull();
   });
 });
+
+/**
+ * A BAD TIMEZONE IS A CROSS-TENANT KILL SWITCH (audit 6). The nightly engines loop every org in
+ * one request and format each org's "today" in its own zone; one unparseable value throws inside
+ * the loop and every org AFTER it silently gets no invoices and no reminders.
+ */
+describe("getOrgSettings — the timezone can never be unparseable", () => {
+  const tz = (v: unknown) => getOrgSettings({ timezone: v }).timezone;
+
+  it("keeps a real IANA zone", () => {
+    expect(tz("America/New_York")).toBe("America/New_York");
+    expect(tz("Europe/London")).toBe("Europe/London");
+    expect(tz("America/Los_Angeles")).toBe("America/Los_Angeles");
+  });
+
+  it.each([["", "empty"], ["   ", "whitespace"], ["Mars/Olympus", "not a zone"], ["not a timezone", "prose"]])(
+    "falls back for %s (%s)", (bad) => {
+      expect(tz(bad)).toBe("America/Los_Angeles");
+      expect(() => new Intl.DateTimeFormat("en-US", { timeZone: tz(bad) })).not.toThrow();
+    });
+
+  it.each([[null], [undefined], [123], [{}], [[]], [true]])("falls back for the non-string %s", (bad) => {
+    expect(() => new Intl.DateTimeFormat("en-US", { timeZone: tz(bad) })).not.toThrow();
+  });
+
+  it("a poisoned row READS clean, so an already-broken tenant is healed without a migration", () => {
+    const poisoned = { timezone: "", currency: "USD" };
+    expect(getOrgSettings(poisoned).timezone).toBe("America/Los_Angeles");
+  });
+});

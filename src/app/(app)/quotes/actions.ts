@@ -1,4 +1,5 @@
 "use server";
+import { customerAddressFrom } from "@/lib/inquiries/lead-address";
 import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
@@ -675,10 +676,12 @@ async function materializeQuoteCustomer(
         status: "active", // a won estimate = a real, active customer
         email: inq.email,
         phone: inq.phone,
-        address: inq.address,
-        city: inq.city,
-        state: inq.state,
-        zip: inq.zip,
+        // WHERE THE PERSON IS, not where the work is (audit 6). `inq.address` is THE SITE — 0189
+        // said so out loud — and writing it here made a lead who lives at 12 Elm St into a
+        // customer who lives on the bare lot they are building on. customerAddressFrom is the one
+        // rule, shared with the lead-conversion path and with the SQL twin in migration 0192, so
+        // the three cannot drift into disagreeing about which address a customer record holds.
+        ...customerAddressFrom(inq),
         notes: inq.message ? `From inquiry: ${inq.message}` : inq.notes,
         created_by: userId,
       })
