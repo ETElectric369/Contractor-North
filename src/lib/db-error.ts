@@ -34,6 +34,12 @@ const BY_CONSTRAINT: Record<string, string> = {
   one_open_entry_per_user: "You're already clocked in.",
   profiles_email_key: "Someone with that email address is already on the team.",
   organizations_public_handle_key: "That web address is already taken — pick another.",
+  // 0194 made these real constraints rather than TypeScript checks, so a squat now surfaces here
+  // instead of quietly succeeding. The wording says WHOSE problem it is: another tenant holds it,
+  // and no amount of retrying will change that.
+  organizations_public_handle_uniq: "Another company is already using that web address — pick another.",
+  organizations_custom_domain_uniq: "Another company has already connected that domain. If it's yours, contact support.",
+  organizations_lead_secret_uniq: "That inbound key is already in use — generate a new one.",
 };
 
 /** Column names that read badly in a sentence. Anything else is title-cased as-is. */

@@ -143,15 +143,24 @@ export default async function TimecardsPage({
   // still open from a PAST day (a forgotten clock-out) or open more than 12 hours
   // today. One cheap org-wide query (open entries are a handful at most), so the
   // strip works regardless of which week is being viewed.
+  //
+  // AND THE ZERO-HOUR ROWS (0193). A forgotten shift is now closed at zero hours by the DB when
+  // its owner punches in again, so the person is never locked out of their own timecard. But a
+  // CLOSED row does not match `status = 'open'`, so without this it would have vanished from the
+  // one screen that exists to catch it — a real day silently worth nothing. `auto_closed_reason`
+  // is null on every ordinary shift, so this adds exactly the rows that need a human.
   const { data: openNow } = await supabase
     .from("time_entries")
     .select(
-      "id, profile_id, clock_in, clock_out, lunch_minutes, miles, job_id, job_code, status, notes, source, rate_override, profiles:profile_id(full_name), job:job_id(job_number, name), time_allocations(job_id, job_code, hours, description)",
+      "id, profile_id, clock_in, clock_out, lunch_minutes, miles, job_id, job_code, status, notes, source, rate_override, auto_closed_reason, profiles:profile_id(full_name), job:job_id(job_number, name), time_allocations(job_id, job_code, hours, description)",
     )
-    .eq("status", "open")
+    .or("status.eq.open,auto_closed_reason.not.is.null")
     .order("clock_in", { ascending: true });
   const todayStartMs = tzDayStartUtc(todayStrInTz(tz), tz).getTime();
   const needsAttention = (openNow ?? []).filter((e: any) => {
+    // A zero-closed row needs the office WHENEVER it happened — it is not a forgotten shift any
+    // more, it is a shift with no hours on it, and that never ages out of being wrong.
+    if (e.auto_closed_reason) return true;
     const inMs = new Date(e.clock_in).getTime();
     return inMs < todayStartMs || Date.now() - inMs > 12 * 3_600_000;
   });
