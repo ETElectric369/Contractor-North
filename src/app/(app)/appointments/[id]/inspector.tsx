@@ -370,6 +370,12 @@ export function Inspector({
   // Refs assigned at render time: always the newest value by the time any timeout fires.
   const answersRef = useRef(answers);
   answersRef.current = answers;
+  // The unmount/pagehide flush runs OUTSIDE render, so it cannot close over the render's values —
+  // it would send whatever they were when the effect was created. Refs, kept current every render.
+  const templateIdRef = useRef(templateId);
+  templateIdRef.current = templateId;
+  const playbookRef = useRef(playbook);
+  playbookRef.current = playbook;
   const placeRef = useRef(place);
   placeRef.current = place;
 
@@ -443,8 +449,46 @@ export function Inspector({
       }
     });
   }
-  // A tab closing mid-debounce must not eat the last thing typed.
-  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+  // ── A TAB CLOSING MID-DEBOUNCE MUST NOT EAT THE LAST THING TYPED ─────────────────────────
+  //
+  // That is what this comment always said. What the code did was CANCEL the timer — which is the
+  // opposite: it guaranteed the pending write never happened. Nine hundred milliseconds is a long
+  // time in the field, and the two ways out of this page both land inside it:
+  //
+  //   · "Start the estimate" sits six pixels from Save in the same sticky bar. Type "run 140 ft",
+  //     tap it, and the measurement is gone — on the page whose whole promise is that it saves
+  //     itself, at the moment the number is about to be turned into money.
+  //   · Backgrounding the PWA on iOS, which may never resume this page-life at all.
+  //
+  // So: FLUSH, don't cancel. Fired directly rather than through flush(), because that path calls
+  // setState and start() — a React transition on an unmounting tree does nothing, and the write
+  // would be dropped a second way. These are plain promises; a server action already in flight
+  // survives the component that started it.
+  useEffect(() => {
+    const send = () => {
+      if (timer.current) clearTimeout(timer.current);
+      const patch = capturePatchRef.current;
+      capturePatchRef.current = {};
+      if (Object.keys(patch).length) void saveInspectionCapture(appointmentId, patch as never).catch(() => {});
+      if (answersDirty.current) {
+        answersDirty.current = false;
+        void saveInspectionAnswers(
+          appointmentId,
+          templateIdRef.current,
+          coerceByPlaybook(playbookRef.current, answersRef.current) as never,
+        ).catch(() => {});
+      }
+    };
+    // pagehide covers the iOS case unmount does not: the PWA backgrounded and never resumed.
+    // It is the one lifecycle event Safari reliably fires there — beforeunload is not.
+    const onHide = () => send();
+    window.addEventListener("pagehide", onHide);
+    return () => {
+      window.removeEventListener("pagehide", onHide);
+      send();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appointmentId]);
 
   const setAnswer = (key: string, value: AnswerValue) => {
     // THE CATCH-ALL RELEASE. Every control funnels through here, so a hold cannot outlive the

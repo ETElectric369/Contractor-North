@@ -109,7 +109,20 @@ export function TellNort({
     if (!said) return;
     start(async () => {
       setErr(null);
-      const r = await hear(answers, said);
+      // ── AN LTE DROP MUST NOT DESTROY NINETY SECONDS OF TALKING (audit 6) ─────────────────
+      //
+      // `hear` is a server action. /api/transcribe is wrapped, but THIS call was not, so a
+      // rejection in a crawlspace was an unhandled rejection: the whole capture went to the error
+      // boundary and took the transcript with it — after he had already corrected "fourteen" back
+      // to "forty" in the box. The text is the only copy; the audio is long gone.
+      //
+      // On failure the box KEEPS its text and the panel stays open, so the same tap can retry it.
+      let r: Awaited<ReturnType<typeof hear>>;
+      try {
+        r = await hear(answers, said);
+      } catch {
+        return setErr("No signal — your words are still here. Try Fill it in again when you're back in range.");
+      }
       if (!r.ok) return setErr(r.error);
       onFilled(r.answers, r.filled, r.note);
       setText("");

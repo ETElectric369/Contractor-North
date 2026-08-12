@@ -111,7 +111,22 @@ export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: 
         e.preventDefault();
         start(async () => {
           setErr(null);
-          const r = await submitIntake(handle, { hp, contact, site: siteSame ? null : site, answers });
+          // ── ONE BAR OF LTE MUST NOT DESTROY THE LEAD (audit 6) ────────────────────────────
+          //
+          // A homeowner fills in their name, phone, email, address, every playbook answer and two
+          // uploaded photos, then taps Send with one bar. The server action rejected at the
+          // network layer, and the unhandled rejection took the whole page to the error boundary —
+          // which on this route showed a stranger a link to the CONTRACTOR'S LOGIN. Every answer
+          // gone, and the contractor never learns the lead existed.
+          //
+          // Now the form stays exactly as they filled it, says so in their language, and the same
+          // Send button retries. The uploads already happened, so nothing is re-uploaded.
+          let r: Awaited<ReturnType<typeof submitIntake>>;
+          try {
+            r = await submitIntake(handle, { hp, contact, site: siteSame ? null : site, answers });
+          } catch {
+            return setErr("That didn't send — check your connection and tap Send again. Nothing you typed is lost.");
+          }
           if (!r.ok) return setErr(r.error);
           setDone(true);
         });
