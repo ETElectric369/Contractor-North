@@ -488,6 +488,9 @@ export async function clockOut(input: {
    *  and the AutoClockoutPrompt re-asks whenever the entry is left under-allocated). */
   allocations?: JobAllocationInput[];
   at?: string; // explicit clock-out time (ISO) — used by the geofence auto clock-out
+  /** Set when the SYSTEM closed this shift with nobody answering, so the card says why and the
+   *  office's "needs attention" list picks it up (0193's column). Null on every human close. */
+  autoClosedReason?: string | null;
 }): Promise<ClockResult> {
   const supabase = await createClient();
   const {
@@ -564,6 +567,9 @@ export async function clockOut(input: {
       gps_out: input.gps,
       status: "closed",
       source: input.auto ? "auto_gps" : undefined,
+      // A shift the system closed by itself has to SAY so on the card — a back-dated clock-out
+      // that nobody agreed to is exactly the row an office needs to see (audit 6).
+      ...(input.autoClosedReason ? { auto_closed_reason: input.autoClosedReason } : {}),
       // Only set miles when the clock-out captured them, so we never overwrite an
       // existing value with 0.
       ...(input.miles != null && input.miles > 0 ? { miles: input.miles } : {}),
@@ -766,7 +772,25 @@ export async function adoptGeofenceAnchor(entryId: string, gps: GeoPoint): Promi
  *  GPS last observed them at the site. Clocks out the caller's OPEN entry, stamps the
  *  GPS, and marks the source 'auto_gps' so /timeclock asks the codes+lunch questions
  *  after the fact. The entry's note is preserved. */
-export async function geoClockOut(gps: GeoPoint | null, atIso: string): Promise<ClockResult> {
+/**
+ * @param unattended  TRUE only when the monitor closed the shift ITSELF, with nobody answering.
+ *
+ * ── WHY THIS IS A MARK AND NOT A CEILING (audit 6) ──────────────────────────────────────────
+ *
+ * The reviewer's fix said to put a bound in the database, "where the client cannot bypass it".
+ * The principle is right — law 5 — but there is no bound the database can actually compute here.
+ * A legitimate geofence close IS back-dated: he left at 15:00, the phone noticed at 15:05, and
+ * closing at 15:00 is the CORRECT and conservative answer. The stale-observation bug produces the
+ * same shape — a clock_out well before now() — just with a wrong number in it. From inside
+ * Postgres, holding only clock_in, the proposed clock_out and now(), the two are indistinguishable,
+ * so any ceiling tight enough to catch the bug would refuse real closes.
+ *
+ * What the database CAN do is refuse to let it pass unnoticed. `auto_closed_reason` (0193) puts
+ * the row in the timecards "needs attention" list, where a human who can tell the difference sees
+ * it. The actual fix for the wrong number is in the monitor, which is the only place that knows
+ * whether its own observation was continuous.
+ */
+export async function geoClockOut(gps: GeoPoint | null, atIso: string, unattended = false): Promise<ClockResult> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -802,6 +826,9 @@ export async function geoClockOut(gps: GeoPoint | null, atIso: string): Promise<
     gps,
     auto: true,
     at: atIso,
+    autoClosedReason: unattended
+      ? "closed automatically from the last GPS fix at the job site — nobody answered the prompt"
+      : null,
     allocations: (allocCount ?? 0) > 0 ? undefined : [],
   });
 }

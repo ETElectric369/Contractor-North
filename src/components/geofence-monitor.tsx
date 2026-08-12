@@ -39,6 +39,8 @@ const WAKE_THROTTLE_MS = 60_000;
 // entry at the last GPS-observed at-site time (the pre-existing auto_gps behavior, now
 // always preceded by a visible prompt).
 const AUTO_FALLBACK_MS = 5 * 60_000;
+/** Longer than this between accepted fixes and the watch was asleep, not the person (audit 6). */
+const STREAM_GAP_MS = 15 * 60_000;
 
 // Snooze survives the (frequent) iOS PWA page reload — an in-memory flag would re-prompt
 // on every reopen right after the tech said "Still working".
@@ -113,6 +115,21 @@ export function GeofenceMonitor({
   const doneRef = useRef(false);
   const seenInsideRef = useRef(false);
   const lastInsideMsRef = useRef(0);
+  /**
+   * WHEN THE LAST ACCEPTED FIX ARRIVED — the stream, not the position (audit 6).
+   *
+   * The auto-close fires at `lastInsideMsRef`, "the last time we saw you at the site". That is a
+   * sound conservative choice ONLY while the fix stream is continuous. iOS suspends a PWA in a
+   * pocket and kills watchPosition; `seenInsideRef` stays true and `lastInsideMsRef` stays at
+   * 07:20. Brian drives home at 16:00, the page wakes in the same page-life, the watch re-arms
+   * OUTSIDE the fence, and four minutes later the monitor closes his shift at 07:20 — twenty
+   * recorded minutes for a nine-hour day.
+   *
+   * A gap in the stream means the last-seen-inside time is a MEMORY, not an observation of an
+   * exit. This is what tells the two apart.
+   */
+  const lastFixMsRef = useRef(0);
+  const streamGapRef = useRef(false);
   const firstOutsideMsRef = useRef<number | null>(null);
   const lastFixRef = useRef<GeoPoint | null>(null); // stamps gps_out on close
   const promptShownAtRef = useRef(0);
@@ -173,6 +190,8 @@ export function GeofenceMonitor({
     doneRef.current = false;
     seenInsideRef.current = false;
     lastInsideMsRef.current = clockInIso ? Date.parse(clockInIso) || Date.now() : Date.now();
+    lastFixMsRef.current = 0;
+    streamGapRef.current = false;
     firstOutsideMsRef.current = null;
     promptShownAtRef.current = 0;
     setPhase("idle");
@@ -201,12 +220,23 @@ export function GeofenceMonitor({
     } catch {}
   }
 
+  // What the un-answered fallback WOULD write, in his words — null when it cannot fire (a wake
+  // prompt, or an observation we no longer trust). Same source as the submit() call below, so the
+  // sheet can never promise a time the code wouldn't use.
+  const autoAtLabel =
+    phase === "prompt" && promptSourceRef.current === "live" && lastInsideMsRef.current > 0 && !streamGapRef.current
+      ? new Date(lastInsideMsRef.current).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+      : null;
+
   // The one write path for every close. `atIso` is now / the user's pick / the
   // observed last-at-site time — see the component doc.
   function submit(gps: GeoPoint | null, atIso: string, auto = false) {
     setError(null);
     setPhase("saving");
-    geoClockOut(gps, atIso)
+    // `auto` here means "nobody answered" — the same flag the notification below keys on. It is
+    // what marks the row for review, so an unattended close is never indistinguishable from one a
+    // person agreed to.
+    geoClockOut(gps, atIso, auto)
       .then((res) => {
         if (!res.ok) {
           if (/not clocked in/i.test(res.error ?? "")) {
@@ -295,10 +325,15 @@ export function GeofenceMonitor({
       lastFixRef.current = { lat: here.lat, lng: here.lng, accuracy: acc };
       const d = haversineM(center, here);
       const now = Date.now();
+      // A silence longer than a few fix intervals means the watch was DEAD, not that he stood
+      // still. Everything we "know" about where he was is from before the silence.
+      if (lastFixMsRef.current > 0 && now - lastFixMsRef.current > STREAM_GAP_MS) streamGapRef.current = true;
+      lastFixMsRef.current = now;
       // Pad the radius by the fix's uncertainty so a fuzzy-but-usable fix can't trip it.
       if (d <= radiusM + acc) {
         seenInsideRef.current = true;
         lastInsideMsRef.current = now;
+        streamGapRef.current = false; // presence re-observed — the memory is current again
         firstOutsideMsRef.current = null;
         // Back inside with the sheet un-actioned (GPS drift, or a quick run they
         // returned from) — retract it rather than nag. Never mid-pick/save.
@@ -325,7 +360,15 @@ export function GeofenceMonitor({
         phaseRef.current === "prompt" &&
         promptSourceRef.current === "live" &&
         promptShownAtRef.current > 0 &&
-        now - promptShownAtRef.current >= AUTO_FALLBACK_MS
+        now - promptShownAtRef.current >= AUTO_FALLBACK_MS &&
+        // THE OBSERVATION HAS TO BE AN OBSERVATION (audit 6). Two ways it isn't:
+        //   · the fix stream had a hole — the watch was dead, so "last seen inside" is a memory;
+        //   · the last inside fix is older than this whole exit could plausibly be.
+        // In either case a human states the time. Nothing is lost by waiting: detectStrayTime
+        // already surfaces a still-open entry as something the office must chase, and refusing
+        // to guess is the difference between a late timecard and a wrong one.
+        !streamGapRef.current &&
+        now - lastInsideMsRef.current <= graceMs + AUTO_FALLBACK_MS + STREAM_GAP_MS
       ) {
         submit(lastFixRef.current, new Date(lastInsideMsRef.current).toISOString(), true);
       }
@@ -512,6 +555,17 @@ export function GeofenceMonitor({
                   You&apos;re still on the clock. Left a while ago with the app closed? Pick the
                   time you actually left.
                 </div>
+                {/* SAY WHAT HAPPENS IF HE SAYS NOTHING (audit 6).
+                    The sheet asks a question and then, five minutes later, answers it for him at
+                    a time he was never shown. Naming it is what makes a wrong one catchable by
+                    the one person who can catch it — and he is usually driving, so it has to be
+                    on screen rather than discovered on Friday's timecard. Rendered only when the
+                    fallback can actually fire; a wake prompt waits for a human indefinitely. */}
+                {autoAtLabel && (
+                  <div className="mt-1 text-xs font-medium text-amber-700">
+                    No answer? We&apos;ll clock you out at {autoAtLabel}.
+                  </div>
+                )}
               </div>
             </div>
 
