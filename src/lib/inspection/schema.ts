@@ -194,13 +194,27 @@ export function coerceAnswers(fields: InspectionField[], input: unknown): Inspec
 export async function tolerateMissingColumns<T>(
   run: () => PromiseLike<{ data: T | null; error: unknown }>,
 ): Promise<T | null> {
-  try {
-    const { data, error } = await run();
-    if (error) return null;
-    return data;
-  } catch {
-    return null;
-  }
+  const { data, error } = await run();
+  if (!error) return data;
+  // ── ONLY THE SHAPE THE DOC-COMMENT PROMISES (audit 6) ─────────────────────────────────────
+  //
+  // This swallowed EVERY error, including a timeout, an RLS refusal, a dropped connection. On the
+  // appointment page that is the silent-write law's read-side twin with teeth: a failed answers
+  // read returned null, the page rendered `?? {}`, and the inspector opened showing an EMPTY
+  // walk-through of a job somebody had already finished. The first keystroke then autosaved that
+  // emptiness over eighteen real answers.
+  //
+  // The narrow case is worth keeping — a push to main deploys before its migration, and a select
+  // naming a column that doesn't exist yet fails the WHOLE query rather than degrading. So: those
+  // codes only. 42703 = undefined_column, 42P01 = undefined_table.
+  //
+  // Everything else now throws. A transient error 500s the page instead of rendering a blank
+  // sheet, and that is the POINT: an error page is recoverable by reloading, an empty sheet that
+  // overwrites the real one is not.
+  const code = String((error as { code?: string })?.code ?? "");
+  const message = String((error as { message?: string })?.message ?? "");
+  if (code === "42703" || code === "42P01" || /does not exist/i.test(message)) return null;
+  throw error;
 }
 
 /**

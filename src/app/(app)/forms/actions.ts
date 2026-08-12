@@ -272,12 +272,19 @@ export async function deleteFormSubmission(
 }
 
 export async function deleteForm(id: string): Promise<Result> {
-  const supabase = await createClient();
-  const { error } = await supabase
+  // requireStaff, like updateForm and deleteFormSubmission (audit 6). This was the one write here
+  // without it, and `forms_write` is staff-only — so a tech's Archive tap hit a zero-row UPDATE,
+  // which PostgREST reports as success. It returned ok:true and navigated away as if the form had
+  // been archived. The silent-write law: a mutation that affects nothing must not report success.
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { data: wrote, error } = await ctx.supabase
     .from("forms")
     .update({ active: false })
-    .eq("id", id);
+    .eq("id", id)
+    .select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!wrote?.length) return { ok: false, error: "That form didn't archive — check your access and try again." };
   revalidatePath("/forms");
   return { ok: true };
 }

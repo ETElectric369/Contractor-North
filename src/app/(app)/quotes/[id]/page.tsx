@@ -33,7 +33,10 @@ export default async function QuoteDetailPage({
 
   const { data: quote, error: quoteErr } = await supabase
     .from("quotes")
-    .select("*, customers(*), inquiry:inquiry_id(id, name)")
+    // pricing_levels nested INSIDE customers(*) — the star stays, because CustomerSelect's
+    // `customer` prop needs the full row for EditCustomerButton. Narrowing it to a field list
+    // would fix the markup and break that card.
+    .select("*, customers(*, pricing_levels(markup_pct)), inquiry:inquiry_id(id, name)")
     .eq("id", id)
     .maybeSingle();
 
@@ -164,6 +167,10 @@ export default async function QuoteDetailPage({
         priceItems={(priceItems ?? []) as never}
         kits={(kits ?? []) as never}
         defaultMarkupPct={getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).default_markup_pct}
+        // `?? null` and never `?? 0`: effectiveMarkupPct returns immediately on ANY finite level,
+        // including 0, so a 0 here would price every customer-without-a-level at net cost — a
+        // worse bug than the one this fixes.
+        levelMarkupPct={(quote as any)?.customers?.pricing_levels?.markup_pct ?? null}
       />
       <CircuitScheduleCard quoteId={q.id} initial={(q.circuits ?? []) as any} />
     </div>

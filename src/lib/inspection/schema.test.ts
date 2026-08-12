@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseInspectionSchema, coerceAnswers, unansweredFields, answersForEstimator, measurementsFromAnswers, type InspectionField } from "./schema";
+import { parseInspectionSchema, coerceAnswers, unansweredFields, answersForEstimator, measurementsFromAnswers, type InspectionField, tolerateMissingColumns } from "./schema";
 
 const fields: InspectionField[] = [
   { key: "run_ft", label: "Run from panel", type: "number" },
@@ -169,3 +169,48 @@ describe("measurements a kit can size itself from", () => {
     expect(m.sqft).toBe(120);
   });
 })
+
+/**
+ * THE WRAPPER THAT SWALLOWED EVERYTHING (audit 6).
+ *
+ * It existed for one narrow case — a deploy landing before its migration, where a select naming a
+ * column that doesn't exist yet fails the WHOLE query instead of degrading. But it caught every
+ * error, so on the appointment page a timeout or an RLS refusal returned null, the page rendered
+ * `?? {}`, and the inspector opened showing an EMPTY walk-through of a finished job. The first
+ * keystroke then autosaved that emptiness over eighteen real answers.
+ *
+ * Loud beats silent: an error page is recoverable by reloading, an empty sheet that overwrites the
+ * real one is not.
+ */
+describe("tolerateMissingColumns — narrow on purpose", () => {
+  const run = (r: { data?: unknown; error?: unknown }) => () => Promise.resolve({ data: r.data ?? null, error: r.error ?? null });
+
+  it("passes data straight through", async () => {
+    await expect(tolerateMissingColumns(run({ data: [{ key: "a" }] }))).resolves.toEqual([{ key: "a" }]);
+  });
+
+  it("swallows a missing COLUMN — the case it exists for", async () => {
+    await expect(tolerateMissingColumns(run({ error: { code: "42703", message: 'column "playbook" does not exist' } }))).resolves.toBeNull();
+  });
+
+  it("swallows a missing TABLE", async () => {
+    await expect(tolerateMissingColumns(run({ error: { code: "42P01", message: 'relation "forms" does not exist' } }))).resolves.toBeNull();
+  });
+
+  it("swallows a PostgREST message with no code, which is how it actually arrives", async () => {
+    await expect(tolerateMissingColumns(run({ error: { message: "column appointments.unit does not exist" } }))).resolves.toBeNull();
+  });
+
+  it.each([
+    ["a timeout", { code: "57014", message: "canceling statement due to statement timeout" }],
+    ["an RLS refusal", { code: "42501", message: "permission denied for table appointments" }],
+    ["a dropped connection", { message: "fetch failed" }],
+    ["a deadlock", { code: "40P01", message: "deadlock detected" }],
+  ])("RETHROWS %s — the class that used to render an empty walk-through", async (_label, error) => {
+    await expect(tolerateMissingColumns(run({ error }))).rejects.toBeTruthy();
+  });
+
+  it("no row is not an error — a fresh inspection still returns null cleanly", async () => {
+    await expect(tolerateMissingColumns(run({ data: null }))).resolves.toBeNull();
+  });
+});

@@ -22,12 +22,16 @@ export function QuoteItemsEditor({
   priceItems = [],
   kits = [],
   defaultMarkupPct = 0,
+  levelMarkupPct = null,
 }: {
   quote: Quote;
   items: QuoteLineItem[];
   priceItems?: PriceItemLite[];
   kits?: { id: string; name: string; kit_items: unknown[] }[];
   defaultMarkupPct?: number;
+  /** The customer's pricing-level markup. null = the customer has no level — NEVER 0, which would
+   *  price them at net cost, because effectiveMarkupPct returns on ANY finite level including 0. */
+  levelMarkupPct?: number | null;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -235,7 +239,13 @@ export function QuoteItemsEditor({
           <AddLineItems
             priceItems={priceItems}
             kits={kits as never}
-            markupFor={(p) => effectiveMarkupPct({ itemPct: p.markup_pct, orgDefaultPct: defaultMarkupPct })}
+            // THE CUSTOMER'S LEVEL, which this picker was ignoring (audit 6). /quotes/new applies
+            // it; this one did not — so the same part landed at two different prices depending on
+            // whether it was added while composing or after saving, on the screen you are most
+            // likely to be using in front of the customer.
+            markupFor={(p) =>
+              effectiveMarkupPct({ levelPct: levelMarkupPct, itemPct: p.markup_pct, orgDefaultPct: defaultMarkupPct })
+            }
             onAdd={(lines) =>
               start(async () => {
                 for (const l of lines) {
