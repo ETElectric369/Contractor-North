@@ -141,8 +141,56 @@ export function retiredAnswers(pb: Playbook, stored: unknown): Record<string, st
   return out;
 }
 
+/**
+ * WHAT HE PICKED BEFORE HE RENAMED THE CHIP — the twin of retiredAnswers, for OPTIONS.
+ *
+ * retiredAnswers rescues an answer whose KEY left the playbook. Nothing rescued an answer whose
+ * key is still declared but whose VALUE is no longer one of the choices. Rename "Deck" to
+ * "Decking" in Settings, and coerceByPlaybook drops the unmatched string on the next autosave of
+ * every finished visit that held it — a multi-select loses one chip, a single select goes null.
+ * Andrew has been renaming Vivian Builders' chips all week; each rename silently rewrote history
+ * on every site visit already completed.
+ *
+ * READ FROM THE STORED ROW, NEVER THE PAYLOAD. `other` carries an unlisted value forward from the
+ * INCOMING answer, which is safe only because the question opted in by declaring `other`. Doing
+ * that unconditionally would reopen the closed-set defence coerceByPlaybook exists to be — this
+ * row is writable straight through PostgREST, so a crafted payload could stuff arbitrary strings
+ * into any select. Reading the stored row means a client can never introduce or change a retired
+ * option, only fail to delete one.
+ *
+ * It is also unambiguous: an unmatched value is not tappable in the UI, so it can never be a
+ * deliberate deselection. Preserving it always is the only reading.
+ *
+ * Kept OUT of the live key and returned as its own labelled block, for the same reason
+ * retiredAnswers flattens to text: folding "Deck" back under `scope` would just leave a value that
+ * re-coerces to null on the following save, and would break the key's type contract in between.
+ */
+export function retiredOptions(pb: Playbook, stored: unknown): Record<string, string> {
+  const src = (stored && typeof stored === "object" ? stored : {}) as Record<string, unknown>;
+  const out: Record<string, string> = {};
+  for (const n of pb.needs) {
+    if (n.slot?.type !== "select") continue;
+    // A question that declared `other` MEANT to accept unlisted values — nothing was lost there.
+    if (n.slot.other) continue;
+    const v = src[n.key];
+    if (v === undefined || v === null) continue;
+    const had = Array.isArray(v) ? v.map((x) => String(x)) : [String(v)];
+    const opts = new Set(n.slot.options);
+    const gone = had.map((x) => x.trim()).filter((x) => x && !opts.has(x));
+    if (gone.length) out[n.key] = gone.join(", ").slice(0, 8000);
+    if (Object.keys(out).length >= 40) break;
+  }
+  return out;
+}
+
 /** "materials_known" → "Materials known". The need that carried a real label is gone. */
 export const retiredLabel = (key: string): string => {
+  // `scope__was` is the parking slot retiredOptions writes a renamed chip into. Say what it is,
+  // rather than rendering "Scope  was" and leaving somebody to guess.
+  if (key.endsWith("__was")) {
+    const base = retiredLabel(key.slice(0, -"__was".length));
+    return `${base} — choices you've since changed`;
+  }
   const words = key.replace(/[_-]+/g, " ").trim();
   return words.charAt(0).toUpperCase() + words.slice(1);
 };

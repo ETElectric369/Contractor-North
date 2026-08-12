@@ -17,7 +17,7 @@ import { invoiceSectionTree } from "@/lib/nav-tree";
 import { deleteInvoice, invoiceShareText } from "../actions";
 import { getOrgSettings } from "@/lib/org-settings";
 import { jobProgressFinancials, receivedBeforeThisInvoice } from "@/lib/job-financials";
-import { invoiceBalance, isDrawKind } from "@/lib/invoice-math";
+import { invoiceBalance, isDrawKind, invoiceOverpayment } from "@/lib/invoice-math";
 import { listCustomerOptions } from "@/lib/schedule-options";
 import { ProgressReportCard } from "@/components/progress-report-card";
 import type { Invoice, InvoiceItem, Payment } from "@/lib/types";
@@ -184,7 +184,9 @@ export default async function InvoicePage({
               // Deliberately the INVERSE of invoiceBalance: paid − total = the OVERPAYMENT
               // (the refund default). invoiceBalance floors at 0, so it can't express this —
               // not a bypass of the balance SSOT.
-              defaultAmount={Math.max(0, Number(inv.amount_paid) - Number(inv.total))}
+              // One definition of "how much too much", shared with the Stripe webhook that now
+              // flags it — otherwise a refund gets computed one way and announced another.
+              defaultAmount={invoiceOverpayment(inv.total, inv.amount_paid)}
             />
             {qboConfigured() && <QboInvoiceButton menuItem id={inv.id} />}
           </SectionActionsMenu>

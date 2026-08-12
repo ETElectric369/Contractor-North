@@ -223,6 +223,31 @@ export function PlaybookManager({
     setDirty(true);
   };
 
+  /**
+   * Rewrite every later need's `when` clause that names an option being renamed.
+   *
+   * Deliberately NOT applied on delete: a deleted choice has no replacement, so a rule pointing at
+   * it is a rule the author has to resolve — silently dropping the clause would change which
+   * questions apply, which is the same silent-rewrite this exists to prevent.
+   */
+  const renameOptionInRules = (key: string, from: string, to: string) => {
+    const a = from.trim();
+    const b = to.trim();
+    if (!a || !b || a === b) return;
+    setNeeds((cur) =>
+      cur.map((n) =>
+        n.when?.some((c) => "in" in c && c.key === key && c.in.includes(a))
+          ? {
+              ...n,
+              when: n.when.map((c) =>
+                "in" in c && c.key === key ? { ...c, in: c.in.map((x) => (x === a ? b : x)) } : c,
+              ),
+            }
+          : n,
+      ),
+    );
+  };
+
   const add = () => {
     const key = `q_${Date.now().toString(36)}`;
     setNeeds([...needs, { key, label: "New question", ask: "" }]);
@@ -418,6 +443,19 @@ export function PlaybookManager({
                                 value={o}
                                 onChange={(e) => {
                                   const options = (n.slot as { options: string[] }).options.map((x, k) => (k === oi ? e.target.value : x));
+                                  // RENAMING A CHIP RENAMES THE RULES THAT POINT AT IT.
+                                  //
+                                  // A `when` clause matches an option by its exact STRING. Rename
+                                  // "New Construction" and every question gated on it silently
+                                  // stops applying — the follow-ups just never appear again, and
+                                  // nothing anywhere says why. Vivian Builders' site inspection is
+                                  // a chain of eight of these, so one rename can orphan the rest
+                                  // of the sheet.
+                                  //
+                                  // THIS KEYSTROKE IS THE ONLY PLACE THE INTENT IS KNOWABLE: it
+                                  // holds both the old string and the new one. A minute later
+                                  // there is nothing left to tell a rename from a delete-and-add.
+                                  renameOptionInRules(n.key, o, e.target.value);
                                   edit(i, { slot: { ...(n.slot as NeedSlot & { type: "select" }), options } });
                                 }}
                               />

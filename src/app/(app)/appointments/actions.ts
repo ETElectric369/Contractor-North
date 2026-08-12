@@ -14,7 +14,7 @@ import { tzDateTimeUtc, todayStrInTz } from "@/lib/tz";
 import { createProposalCore, cleanSlots } from "@/lib/appointments/proposal";
 import { endAfterStart } from "@/lib/appointments/times";
 import { APPOINTMENT_STATUSES, APPOINTMENT_TYPES } from "@/lib/statuses";
-import { coerceByPlaybook, retiredAnswers } from "@/lib/playbook/answers";
+import { coerceByPlaybook, retiredAnswers, retiredOptions } from "@/lib/playbook/answers";
 import { playbookForForm } from "@/lib/playbook/parse";
 import { clearInapplicable } from "@/lib/playbook/resolve";
 import { runOnce } from "@/lib/offline/run-once";
@@ -664,8 +664,17 @@ async function saveInspectionAnswersInner(
       .select("inspection_answers")
       .eq("id", id)
       .maybeSingle();
-    const kept = retiredAnswers(pb, (before as { inspection_answers?: unknown } | null)?.inspection_answers);
+    const storedAnswers = (before as { inspection_answers?: unknown } | null)?.inspection_answers;
+    const kept = retiredAnswers(pb, storedAnswers);
     if (Object.keys(kept).length) clean = { ...kept, ...clean };
+    // AND THE OPTIONS TWIN. Same read, same row, same reasoning — a chip renamed in Settings must
+    // not rewrite what somebody already picked on a finished visit. Stored under a distinct key so
+    // it can never collide with the live need's own value or its type.
+    const keptOpts = retiredOptions(pb, storedAnswers);
+    for (const [k, v] of Object.entries(keptOpts)) {
+      const slot = `${k}__was`;
+      if (clean[slot] === undefined) clean[slot] = v;
+    }
   }
 
   const { data, error } = await supabase

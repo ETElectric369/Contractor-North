@@ -1,3 +1,4 @@
+import { invoiceOverpayment } from "@/lib/invoice-math";
 import { getStripe } from "@/lib/stripe";
 import { createServiceClient } from "@/lib/supabase/server";
 import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
@@ -70,7 +71,9 @@ export async function POST(req: Request) {
     await recalcInvoice(supabase, invoiceId);
     const { data: inv } = await supabase
       .from("invoices")
-      .select("invoice_number, customers(name)")
+      // total + amount_paid so the overpayment is knowable HERE — the projection law: you cannot
+      // notice what you did not select.
+      .select("invoice_number, total, amount_paid, customers(name)")
       .eq("id", invoiceId)
       .single();
 
@@ -78,11 +81,34 @@ export async function POST(req: Request) {
     // Awaited (not fire-and-forget): a serverless function can freeze right after
     // responding to Stripe, killing an un-awaited push. sendPush never throws.
     const cust = (inv as any)?.customers?.name as string | undefined;
-    await sendPushToProfiles(await orgStaffIds(orgId), "invoice_paid", {
-      title: "Payment received",
-      body: `${formatCurrency(amount)} paid online on ${inv?.invoice_number || "an invoice"}${cust ? ` — ${cust}` : ""}`,
-      url: `/billing/${invoiceId}`,
-    });
+
+    // ── PAID TWICE (audit 6) ────────────────────────────────────────────────────────────────
+    //
+    // This is the only payment writer with no ceiling. recordPayment refuses to exceed the
+    // balance and credits are capped, but a customer who taps Pay twice on a slow connection
+    // mints two Checkout sessions that EACH read a full balance, because neither has settled yet.
+    // Both go through, both post, and the invoice then reads $0 owed — the one number anybody
+    // checks — with nothing anywhere saying it took double.
+    //
+    // THE ROW IS STILL WRITTEN. The money already moved at Stripe; refusing the insert would lose
+    // the record of a real payment, which is strictly worse than recording an awkward one. And
+    // the disposition is NOT chosen here: credit-versus-refund is the judgement CreditButton asks
+    // a human to make, and an overpayment is sometimes a deliberate prepayment toward the next
+    // job. A webhook picking "refund" would pre-empt that and double-post against a later manual
+    // credit. So it does the one thing a machine should: say so, loudly, to the people who can
+    // decide.
+    const over = invoiceOverpayment((inv as any)?.total, (inv as any)?.amount_paid);
+    await sendPushToProfiles(await orgStaffIds(orgId), "invoice_paid", over > 0.005
+      ? {
+          title: "Overpaid — action needed",
+          body: `${formatCurrency(amount)} paid online on ${inv?.invoice_number || "an invoice"}${cust ? ` — ${cust}` : ""}. That's ${formatCurrency(over)} MORE than the total. Credit it or refund it.`,
+          url: `/billing/${invoiceId}`,
+        }
+      : {
+          title: "Payment received",
+          body: `${formatCurrency(amount)} paid online on ${inv?.invoice_number || "an invoice"}${cust ? ` — ${cust}` : ""}`,
+          url: `/billing/${invoiceId}`,
+        });
   }
 
   async function syncSubscription(sub: Stripe.Subscription) {

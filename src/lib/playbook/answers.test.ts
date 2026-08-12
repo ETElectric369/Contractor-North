@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { answerText, coerceByPlaybook, coerceNeed, factsForEstimator, retiredAnswers } from "./answers";
+import { answerText, coerceByPlaybook, coerceNeed, factsForEstimator, retiredAnswers, retiredLabel, retiredOptions } from "./answers";
 import { playbookFromSheet } from "./from-sheet";
 import { looseNumber } from "@/lib/inspection/capture";
 import { ET_ELECTRIC } from "./starters/et-electric";
@@ -257,5 +257,64 @@ describe("a select with `other` — the door in the wall", () => {
   it("empty is still unanswered — a blank Other box never counts as answered", () => {
     expect(coerceNeed(open, "   ")).toBeNull();
     expect(coerceNeed(open, [])).toBeNull();
+  });
+});
+
+/**
+ * RENAMING A CHIP MUST NOT REWRITE HISTORY (audit 6).
+ *
+ * Andrew has been renaming Vivian Builders' chips all week. Each rename silently dropped the old
+ * string from every FINISHED site visit that held it, on the next autosave — a multi-select lost a
+ * chip, a single select went null, and nothing said so.
+ */
+describe("retiredOptions — the twin of retiredAnswers, for choices", () => {
+  const pb = (options: string[], extra: Record<string, unknown> = {}): Playbook => ({
+    needs: [{ key: "scope", label: "Scope", ask: "What's in it?", slot: { type: "select", options, multi: true, ...extra } as never }],
+  });
+
+  it("rescues the chip that was renamed out from under a finished visit", () => {
+    expect(retiredOptions(pb(["Decking", "Railing"]), { scope: ["Deck", "Railing"] })).toEqual({ scope: "Deck" });
+  });
+
+  it("says nothing when every stored value is still a choice", () => {
+    expect(retiredOptions(pb(["Deck", "Railing"]), { scope: ["Deck", "Railing"] })).toEqual({});
+  });
+
+  it("a single select that went unlisted is rescued whole", () => {
+    const single: Playbook = { needs: [{ key: "w", label: "W", ask: "?", slot: { type: "select", options: ["Open"] } }] };
+    expect(retiredOptions(single, { w: "Finished" })).toEqual({ w: "Finished" });
+  });
+
+  it("skips a question that declared `other` — nothing was ever lost there", () => {
+    expect(retiredOptions(pb(["Decking"], { other: true }), { scope: ["Deck"] })).toEqual({});
+  });
+
+  it("reads the STORED row only — it cannot be used to introduce a value", () => {
+    // The whole safety argument: a crafted payload can't reach this, because the caller passes the
+    // row that is already in the database, not the incoming answers.
+    expect(retiredOptions(pb(["A"]), {})).toEqual({});
+    expect(retiredOptions(pb(["A"]), null)).toEqual({});
+    expect(retiredOptions(pb(["A"]), "not an object")).toEqual({});
+  });
+
+  it("ignores non-select needs and empty values", () => {
+    const mixed: Playbook = {
+      needs: [
+        { key: "open", label: "O", ask: "?" },
+        { key: "num", label: "N", ask: "?", slot: { type: "number" } },
+        { key: "sel", label: "S", ask: "?", slot: { type: "select", options: ["A"] } },
+      ],
+    };
+    expect(retiredOptions(mixed, { open: "prose", num: 5, sel: null })).toEqual({});
+  });
+
+  it("labels the parking slot in English", () => {
+    expect(retiredLabel("scope__was")).toBe("Scope — choices you've since changed");
+    expect(retiredLabel("materials_known")).toBe("Materials known");
+  });
+
+  it("the rescued value survives the NEXT save as an ordinary retired key", () => {
+    // scope__was is undeclared, so retiredAnswers carries it forward on every later autosave.
+    expect(retiredAnswers(pb(["Decking"]), { scope: ["Decking"], scope__was: "Deck" })).toEqual({ scope__was: "Deck" });
   });
 });

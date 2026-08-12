@@ -40,6 +40,26 @@ export function invoiceBalance(total: number | null | undefined, amountPaid: num
   return cents(Math.max(0, fin(total) - fin(amountPaid)));
 }
 
+/**
+ * THE INVERSE OF invoiceBalance — money taken BEYOND the total.
+ *
+ * Lives here, next to the balance it mirrors, for the reason invoiceBalance itself does: three
+ * call sites needed this number and the one that existed was open-coded on a page
+ * (billing/[id]/page.tsx). Two definitions of "how much too much" is how a refund gets computed
+ * one way and displayed another.
+ *
+ * The Stripe webhook is the only payment writer with NO cap — recordPayment refuses to exceed the
+ * balance, credits are capped, but a customer who taps Pay twice on a slow connection mints two
+ * checkout sessions that each read a full balance. Both settle, both post, and the invoice reads
+ * $0 owed with no sign that it took double.
+ */
+export function invoiceOverpayment(total: number | null | undefined, amountPaid: number | null | undefined): number {
+  const t = Number(total);
+  const p = Number(amountPaid);
+  const over = (Number.isFinite(p) ? p : 0) - (Number.isFinite(t) ? t : 0);
+  return over > 0 ? Math.round(over * 100) / 100 : 0;
+}
+
 /** The progress-DRAW invoice kinds — a job billed in stages (mirrors the 0063 invoice_kind
  *  CHECK, minus 'standard'). One definition so the H4 double-billing guard and the "is this
  *  a draw?" checks scattered across billing can't drift. */

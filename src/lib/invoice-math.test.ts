@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { recalcTotals, resolveDrawCredit, drawAmount, progressSummary, shouldBlockStandardImport, isStandardBillingBlocker, groupInvoiceLines, paidStatus, invoiceTypeLabel, invoiceBalance, subtotalTaxTotal, isDrawKind, DRAW_KINDS } from "@/lib/invoice-math";
+import { recalcTotals, resolveDrawCredit, drawAmount, progressSummary, shouldBlockStandardImport, isStandardBillingBlocker, groupInvoiceLines, paidStatus, invoiceTypeLabel, invoiceBalance, subtotalTaxTotal, isDrawKind, DRAW_KINDS, invoiceOverpayment } from "@/lib/invoice-math";
 
 describe("isDrawKind — one draw-vs-standard predicate", () => {
   it("the three draw kinds are draws", () => {
@@ -267,5 +267,43 @@ describe("progressSummary", () => {
   });
   it("can show over-100% on a T&M job that ran past the estimate", () => {
     expect(progressSummary(17325, 20000, 0, 0).pctComplete).toBeGreaterThan(100);
+  });
+});
+
+/**
+ * PAID TWICE (audit 6). The Stripe webhook is the only payment writer with no ceiling: two
+ * Checkout sessions minted before either settles each read a full balance, both post, and the
+ * invoice then reads $0 owed — the one number anybody checks — with nothing saying it took double.
+ */
+describe("invoiceOverpayment — the inverse of invoiceBalance", () => {
+  it("is zero when the invoice is short-paid or exact", () => {
+    expect(invoiceOverpayment(1000, 0)).toBe(0);
+    expect(invoiceOverpayment(1000, 400)).toBe(0);
+    expect(invoiceOverpayment(1000, 1000)).toBe(0);
+  });
+
+  it("names the excess when a second payment lands", () => {
+    expect(invoiceOverpayment(2400, 4800)).toBe(2400); // the double-tap
+    expect(invoiceOverpayment(1000, 1250.5)).toBe(250.5);
+  });
+
+  it("rounds to cents, so a float artefact never shows as a refund of $0.0000001", () => {
+    expect(invoiceOverpayment(0.1 + 0.2, 0.6)).toBe(0.3);
+    expect(invoiceOverpayment(100, 100.004)).toBe(0);
+  });
+
+  it("survives nulls and junk rather than producing NaN on a money screen", () => {
+    expect(invoiceOverpayment(null, 100)).toBe(100);
+    expect(invoiceOverpayment(100, null)).toBe(0);
+    expect(invoiceOverpayment(undefined, undefined)).toBe(0);
+    expect(invoiceOverpayment("x" as never, "y" as never)).toBe(0);
+  });
+
+  it("is exactly the mirror of invoiceBalance — one of them is always zero", () => {
+    for (const [t, p] of [[1000, 400], [1000, 1000], [1000, 1600], [0, 50]] as const) {
+      const bal = invoiceBalance(t, p);
+      const over = invoiceOverpayment(t, p);
+      expect(bal === 0 || over === 0).toBe(true);
+    }
   });
 });
