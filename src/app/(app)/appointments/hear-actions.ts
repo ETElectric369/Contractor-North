@@ -45,7 +45,7 @@ export async function hearIntoPlaybook(
   // doesn't resolve, so the playbook we fill against is always one this org owns.
   const { data: appt } = await supabase
     .from("appointments")
-    .select("id, inspection_template_id")
+    .select("id, org_id, inspection_template_id")
     .eq("id", appointmentId)
     .maybeSingle();
   if (!appt) return { ok: false, error: "That inspection no longer exists." };
@@ -63,5 +63,8 @@ export async function hearIntoPlaybook(
   if (!(form as { is_inspection?: boolean }).is_inspection)
     return { ok: false, error: "That form isn't a walk-through." };
 
-  return runHear(playbookForForm(form as { schema?: unknown; playbook?: unknown }), answers, transcript);
+  return runHear(playbookForForm(form as { schema?: unknown; playbook?: unknown }), answers, transcript, {
+    orgId: (appt as { org_id?: string } | null)?.org_id ?? null,
+    surface: "playbook:hear",
+  });
 }

@@ -1,3 +1,4 @@
+import { recordAiUsage } from "@/lib/ai-cost";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 
@@ -161,6 +162,7 @@ export async function generateNortReview(
       system: [{ type: "text", text: ANALYST_SYSTEM, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: `Review the last ${Math.round(hours)} hours for this contractor:\n\n${digest}` }],
     });
+    void recordAiUsage({ orgId, model: DEFAULT_MODEL, surface: "nort:review", usage: resp.usage as never });
     text = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("\n").trim();
   } catch {
     return null;

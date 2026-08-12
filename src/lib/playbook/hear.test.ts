@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { execSync } from "node:child_process";
 import { describe, it, expect } from "vitest";
 import { applyHeard, hearRequest, parseHeard } from "./hear";
 import { ET_ELECTRIC } from "./starters/et-electric";
@@ -230,5 +233,61 @@ describe("nothing he said is thrown away", () => {
       leftover: said,
     });
     expect(out.note).toBe(said);
+  });
+});
+
+/**
+ * THE LEDGER AND THE CEILING REACH THE FIELD SURFACE (audit 6).
+ *
+ * runHear was one of ten model call sites with no spend check, no ledger row and no rate limit —
+ * on the flagship model, on the surface that runs on EVERY site visit. 0162 exists to make "what
+ * did this org spend" answerable and 0163 to stop it running away; neither reached here.
+ *
+ * Asserted against the SOURCE because the alternative is mocking the Anthropic client, which would
+ * test the mock. What matters is structural: the guard is present, it runs before the call, and
+ * each caller files under its own name.
+ */
+describe("runHear is metered and capped", () => {
+  const src = readFileSync(join(process.cwd(), "src/lib/playbook/hear-run.ts"), "utf8");
+
+  it("checks the org's spend ceiling", () => {
+    expect(src).toContain("aiSpendExceeded");
+  });
+
+  it("checks it BEFORE spending money, not after", () => {
+    expect(src.indexOf("aiSpendExceeded")).toBeLessThan(src.indexOf("messages.create"));
+  });
+
+  it("records the call against the org's ledger", () => {
+    expect(src).toContain("recordAiUsage");
+  });
+
+  it("files it under the CALLER's surface, not one collapsed label", () => {
+    // 0162's row is keyed org/day/model/surface precisely so "which feature costs what" is
+    // answerable. One shared "playbook" label throws away the only thing the column is for.
+    expect(src).toContain("ctx.surface");
+    const inspector = readFileSync(join(process.cwd(), "src/app/(app)/appointments/hear-actions.ts"), "utf8");
+    const setup = readFileSync(join(process.cwd(), "src/app/(app)/setup-actions.ts"), "utf8");
+    expect(inspector).toContain('surface: "playbook:hear"');
+    expect(setup).toContain('surface: "setup:talk"');
+  });
+
+  it("takes the org from the CALLER — it must not do its own getUser and break the sharing", () => {
+    // runHear is shared by the inspector and the setup card on purpose (fill-vs-execute: a surface
+    // contributes a target and a projection, never an assistant of its own).
+    expect(src).not.toContain("auth.getUser");
+    expect(src).toContain("HearCtx");
+  });
+});
+
+describe("every model call site is on the ledger", () => {
+  it("no messages.create without a recordAiUsage in the same file", () => {
+    const files = execSync(
+      "grep -rl 'messages.create' src/ --include=*.ts | grep -v test || true",
+      { cwd: process.cwd(), encoding: "utf8" },
+    ).split("\n").filter(Boolean);
+    expect(files.length).toBeGreaterThan(5); // the grep works
+    const blind = files.filter((f) => !readFileSync(join(process.cwd(), f), "utf8").includes("recordAiUsage"));
+    expect(blind, `unmetered model call sites: ${blind.join(", ")}`).toEqual([]);
   });
 });

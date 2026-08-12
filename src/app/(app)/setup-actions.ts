@@ -1,4 +1,5 @@
 "use server";
+import { recordAiUsage, aiSpendExceeded, currentOrgId } from "@/lib/ai-cost";
 import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
@@ -67,6 +68,11 @@ export async function talkSetup(needKey: string | null, answers: Answers, said: 
   // No model configured is not a dead end — the boxes still work, and Nort still says something.
   if (!process.env.ANTHROPIC_API_KEY)
     return { ok: true, say: fallbackSay(need, false, first), answers: known, filled: [] };
+  // Over the ceiling, the interview keeps WORKING — it just stops paying a model to phrase it.
+  // fallbackSay is the same escape used when the API key is absent, so somebody setting their
+  // company up is never blocked; they get the plain question instead of the spoken one.
+  if (await aiSpendExceeded(await currentOrgId()))
+    return { ok: true, say: fallbackSay(need, false, first), answers: known, filled: [] };
 
   let raw = "";
   try {
@@ -79,6 +85,7 @@ export async function talkSetup(needKey: string | null, answers: Answers, said: 
       ],
       messages: [{ role: "user", content: conversePrompt(need, known, text, first) }],
     });
+    void recordAiUsage({ orgId: await currentOrgId(), model: DEFAULT_MODEL, surface: "setup:converse", usage: resp.usage as never });
     raw = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("\n").trim();
   } catch {
     // A model that is down must not become an error message about a model being down.
@@ -107,7 +114,7 @@ export async function hearSetup(answers: Answers, transcript: string): Promise<H
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Sign in first." };
-  return runHear(SETUP_PLAYBOOK, answers, transcript);
+  return runHear(SETUP_PLAYBOOK, answers, transcript, { orgId: await currentOrgId(), surface: "setup:talk" });
 }
 
 /**
@@ -222,6 +229,7 @@ export async function draftMyPlaybook(): Promise<DraftResult> {
       system: [{ type: "text", text: DRAFT_SYSTEM, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: draftRequest(pb, about) }],
     });
+    void recordAiUsage({ orgId: await currentOrgId(), model: DEFAULT_MODEL, surface: "setup:draft", usage: resp.usage as never });
     text = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("\n").trim();
   } catch {
     // A drafting failure is not a dead end — they can still read and write their own lines.

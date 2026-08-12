@@ -1,3 +1,4 @@
+import { recordAiUsage, aiSpendExceeded } from "@/lib/ai-cost";
 import { NextResponse } from "next/server";
 import type Anthropic from "@anthropic-ai/sdk";
 import { getAnthropic } from "@/lib/anthropic";
@@ -400,6 +401,19 @@ export async function POST(req: Request) {
   const area =
     org.settings.service_area ||
     [org.settings.public_city, org.settings.public_state].filter(Boolean).join(", ");
+  // THE CEILING, ON THE ONE SURFACE A STRANGER DRIVES (audit 6). aiSpendExceeded existed and was
+  // checked at 2 of 16 model call sites — law 1 applied to spend: a rule at one read path is a
+  // convention. This is the site that most needed it, because the caller is an anonymous visitor
+  // on the contractor's public website and there is no seat, no login and no upper bound on how
+  // many of them there are. Refusing is the kind answer: the alternative is an unbounded bill
+  // arriving at a one-truck electrician.
+  if (await aiSpendExceeded(org.id)) {
+    return Response.json({
+      reply: "Thanks for stopping by — the chat is taking a short break. Please use the contact form and we'll get right back to you.",
+      done: true,
+    });
+  }
+
   const threshold = org.settings.site_inspection_threshold || 20000;
 
   // Give Nort the deterministic deck estimator ONLY if this org actually has deck pricing.
@@ -439,6 +453,11 @@ export async function POST(req: Request) {
         tools,
         messages: convo,
       });
+      // METERED PER ROUND (audit 6). This is a PUBLIC surface — an anonymous visitor on the
+      // contractor's website drives it — and it was one of ten model call sites with no ledger
+      // row at all, so the one place a runaway bill would show up first was invisible. Per round,
+      // not per request: the round loop is where the tokens actually go.
+      void recordAiUsage({ orgId: org.id, model: MODEL, surface: "site-chat", usage: resp.usage as never });
       convo.push({ role: "assistant", content: resp.content });
       // web_search runs server-side and can pause a long turn — re-invoke to let it finish, but
       // do NOT push a tool_result (there's no CLIENT tool to answer). Only client tool_use gets one.
