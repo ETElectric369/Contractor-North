@@ -36,6 +36,23 @@ export async function submitSiteContact(
   if (!org) return { ok: false, error: "Something went wrong — please call us." };
   const settings = getOrgSettings((org as { settings?: unknown }).settings);
 
+  // ── THE ORG COMES FROM THE CALLER, SO IT HAS TO EARN IT (audit 6) ────────────────────────
+  //
+  // This is an exported server action on an unauthenticated page, so it is POST-able directly
+  // with the Next-Action header and whatever org uuid the caller likes. The only test was "does
+  // this org exist" — every org exists. So any tenant's id accepted unlimited leads, each one
+  // costing a push to every office phone and an email.
+  //
+  // TWO GATES. First: the door must actually BE a door. A site with no public_handle renders
+  // nowhere, so it has no contact form and cannot be receiving submissions — the same test
+  // toPublicOrg applies, so no live site loses anything.
+  if (!settings.public_handle) return { ok: false, error: "Something went wrong — please call us." };
+  // Second: the per-org daily ceiling the per-IP check cannot provide. rateLimited fails OPEN by
+  // default, which is right here — refusing a real customer because a limiter hiccuped is the
+  // worse failure, and no per-call money is spent.
+  if (await rateLimited(`contact-org:${orgId}`, 50, 86_400))
+    return { ok: false, error: "We've had a lot of messages today — please call us instead." };
+
   try {
     await createTriagedInquiry(supabase, orgId, {
       name,

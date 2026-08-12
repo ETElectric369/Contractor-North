@@ -318,3 +318,48 @@ describe("retiredOptions — the twin of retiredAnswers, for choices", () => {
     expect(retiredAnswers(pb(["Decking"]), { scope: ["Decking"], scope__was: "Deck" })).toEqual({ scope__was: "Deck" });
   });
 });
+
+describe("the two slots whose STORED shape isn't the shape a person says out loud", () => {
+  const pb: Playbook = {
+    needs: [
+      need({ key: "remodel", label: "Remodel scopes", slot: { type: "scopes" } }),
+      need({ key: "photos", label: "Site photos", slot: { type: "file" } }),
+      need({ key: "rooms", label: "Rooms", slot: { type: "select", options: ["Kitchen", "Bath"], multi: true } }),
+    ],
+  } as Playbook;
+
+  it("a scopes answer is READ, not stringified — it reached the estimator as [object Object]", () => {
+    const out = factsForEstimator(pb, {
+      remodel: [
+        { code: "R1", qty: 1, price: 850 },
+        { code: "R4", qty: 2, price: 0 },
+      ],
+    } as never);
+    expect(out).not.toContain("[object Object]");
+    expect(out).toContain("R1 — $850");
+    expect(out).toContain("R4 ×2 — not priced yet");
+  });
+
+  it("a file answer arrives by NAME, and says it can't be opened", () => {
+    const out = factsForEstimator(pb, {
+      photos: ["org-1/intake/1754000000000-0f8fa1e2-4c3b-4a1d-9d2e-1a2b3c4d5e6f-panel.jpg"],
+    } as never);
+    // The machine key is what the estimator used to be handed, under a heading saying take this
+    // as given. Neither the epoch nor the uuid may survive.
+    expect(out).toContain("panel.jpg");
+    expect(out).not.toContain("intake/");
+    expect(out).not.toContain("1754000000000");
+    expect(out).toContain("cannot open");
+  });
+
+  it("A MULTI-SELECT IS ALSO string[] — which is why the fix can't live in answerText", () => {
+    // Same runtime shape as `file`, and it must still read as a plain list. Only the need's
+    // declared slot tells them apart, so only a per-need branch can.
+    const out = factsForEstimator(pb, { rooms: ["Kitchen", "Bath"] } as never);
+    expect(out).toBe("- Rooms: Kitchen, Bath");
+  });
+
+  it("an empty pick list is silent, not an empty bullet", () => {
+    expect(factsForEstimator(pb, { remodel: [], photos: [] } as never)).toBe("");
+  });
+});

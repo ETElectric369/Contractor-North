@@ -199,7 +199,16 @@ export default async function SettingsPage({
   const { data: qboConn } = isAdmin
     ? await supabase.from("accounting_connections").select("realm_id, connected_at").maybeSingle()
     : { data: null };
-  const { data: gcalConn } = isAdmin
+  // isStaff, not isAdmin (audit 6). The Connections cluster is gated on isStaff — which includes
+  // office — so Alexa SEES the Google Calendar pane, but this read was admin-only, so `gcalConn`
+  // came back null and the pane told her the org had no calendar connected and invited her to
+  // connect HER OWN account over the owner's. Every other gcal surface already treats this as
+  // staff-level: RLS is is_org_staff(), and listGoogleCalendars / saveSelectedCalendars /
+  // syncGoogleNow all call requireStaff(). This was the one read that disagreed.
+  //
+  // qboConn above stays isAdmin ON PURPOSE — accounting_select really is owner/admin-only, so
+  // widening it would produce an RLS-rejected read that renders as ordinary emptiness.
+  const { data: gcalConn } = isStaff
     ? await supabase.from("calendar_connections").select("id").eq("provider", "google").maybeSingle()
     : { data: null };
   // Two-way sync columns (0132) — a SEPARATE best-effort read so a not-yet-migrated

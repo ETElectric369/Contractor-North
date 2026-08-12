@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ArrowRight, Check, Loader2, Mic, Square, Volume2, VolumeX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,6 +48,7 @@ export function TourDriver({
 }) {
   const router = useRouter();
   const pathname = usePathname();
+  const search = useSearchParams();
 
   const [i, setI] = useState(() => {
     if (typeof window === "undefined") return 0;
@@ -102,12 +103,22 @@ export function TourDriver({
   // A pending advance must never fire into a tour that has been closed or stepped past by hand.
   useEffect(() => () => { if (advance.current) clearTimeout(advance.current); }, []);
 
-  // Walk them to the right screen before pointing at something on it. Compare on the PATH only —
-  // usePathname() drops the query, so testing against "/settings?tab=playbook" is never equal and
-  // would push on every render, forever.
+  // Walk them to the right screen before pointing at something on it.
+  //
+  // COMPARE ON THE FULL LOCATION, QUERY INCLUDED (audit 6). The old compare stripped the query to
+  // avoid a push-every-render loop — but that made every ?tab= route a no-op: already on
+  // /settings, so /settings?tab=playbook was "already there". The tour then spent four steps
+  // explaining why lines while pointing at the Company cluster, and the `tone` step talked about
+  // Nort's voice on a page that wasn't showing it. The steps that mattered most were the ones
+  // that never arrived.
+  //
+  // No loop: after pushing, `here` equals step.route exactly, so the effect is inert. Reading
+  // searchParams in a shell-mounted client component is already precedented (app-shell/dock.tsx).
   useEffect(() => {
-    if (step.route && pathname !== step.route.split("?")[0]) router.push(step.route);
-  }, [step.route, pathname, router]);
+    const qs = search.toString();
+    const here = pathname + (qs ? `?${qs}` : "");
+    if (step.route && here !== step.route) router.push(step.route);
+  }, [step.route, pathname, search, router]);
 
   // SPEAK THE STEP — and on a step with nothing to answer, THE SPEECH IS THE PACING.
   //

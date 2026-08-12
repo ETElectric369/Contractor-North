@@ -146,7 +146,12 @@ export async function createTriagedInquiry(
   // a notify failure must NEVER stop the lead from landing in the pipeline.
   try {
     const [{ data: staff }, { data: orgRow }] = await Promise.all([
-      supabase.from("profiles").select("id, email").eq("org_id", orgId).in("role", ["owner", "admin", "office"]),
+      // `.eq("active", true)` — 0158 made deactivation a real BOUNDARY, but this reads on the
+      // SERVICE client, which never runs RLS, so the boundary has to be applied by hand (the same
+      // reason push.ts:34 does it). Without it a new lead's email could go to an offboarded
+      // ex-employee — and if the org has no email on file, ONLY to them. `role` comes along so the
+      // recipient below is chosen rather than picked at random from an unordered set.
+      supabase.from("profiles").select("id, email, role").eq("org_id", orgId).eq("active", true).in("role", ["owner", "admin", "office"]),
       supabase.from("organizations").select("email, name").eq("id", orgId).maybeSingle(),
     ]);
     const staffIds = ((staff ?? []) as { id: string }[]).map((s) => s.id);
@@ -160,8 +165,15 @@ export async function createTriagedInquiry(
     await createNotifications(orgId, staffIds, { type: "inquiry", title, body, url: "/leads" });
     await sendPushToProfiles(staffIds, "inquiry", { title, body, url: "/leads" });
 
+    // A DETERMINISTIC recipient. sendEmail takes one address, and `.find(Boolean)` over an
+    // unordered query was a coin flip between whoever Postgres happened to return first. Order:
+    // the org's own address, then the OWNER, then any active admin/office — the owner is the only
+    // defensible default for "the lead notification went to exactly one person".
+    const contacts = ((staff ?? []) as { email?: string; role?: string }[]).filter((x) => x.email);
     const to = (orgRow as { email?: string } | null)?.email
-      || ((staff ?? []) as { email?: string }[]).map((s) => s.email).find(Boolean);
+      || contacts.find((x) => x.role === "owner")?.email
+      || contacts.find((x) => x.role === "admin")?.email
+      || contacts[0]?.email;
     if (to) {
       const site = process.env.NEXT_PUBLIC_SITE_URL || "https://contractor-north.vercel.app";
       const esc = (s: string) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));

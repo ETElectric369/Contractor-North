@@ -257,25 +257,7 @@ async function clockInInner(
   //   · only from a pre-work status — never un-complete or un-cancel a finished job
   // It writes ONE column on ONE row, and it is the same promotion the office's own clock-in did.
   if (jobId) {
-    try {
-      // THE AUTHORIZATION IS THIS READ, on the caller's OWN client. If RLS won't show them the
-      // job, there is no org id and nothing is promoted — so the service write below can only ever
-      // touch a job this person could already see, in their own org.
-      const { data: jobRow } = await supabase.from("jobs").select("org_id").eq("id", jobId).maybeSingle();
-      const jobOrg = (jobRow as { org_id?: string } | null)?.org_id;
-      if (!jobOrg) throw new Error("not visible");
-      const admin = createServiceClient();
-      await admin
-        .from("jobs")
-        .update({ status: "in_progress" })
-        .eq("id", jobId)
-        .eq("org_id", jobOrg)
-        // Promote any not-yet-finished job to in_progress on clock-in (never un-complete a
-        // finished/cancelled one). Was a literal carrying dead 'quoted'/'lead' (non-job statuses).
-        .in("status", ACTIVE_JOB_STATUSES.filter((s) => s !== "in_progress"));
-    } catch {
-      // Still never let this fail the clock-in — the punch is the thing that must land.
-    }
+    await promoteJobToInProgress(supabase, jobId);
     revalidatePath(`/jobs/${jobId}`);
     revalidatePath("/jobs");
   }
@@ -283,6 +265,42 @@ async function clockInInner(
   revalidatePath("/timeclock");
   revalidatePath("/planner");
   return { ok: true };
+}
+
+/**
+ * PROMOTE A JOB TO in_progress WHEN SOMEBODY STARTS WORKING ON IT.
+ *
+ * ONE COPY, called by clock-in and by switch-job. The drift between those two copies IS the bug
+ * this fixes: clockIn was moved onto the service client in cn-v650 because `jobs_write` requires
+ * is_org_staff(), so a TECH's promotion was a zero-row UPDATE that PostgREST reports as success —
+ * Brian starts at 7am, the job sits in to_be_scheduled all day, and the office's board is wrong
+ * about what is actually being worked. switchJob kept the old broken copy, so the same silent
+ * no-op survived on the other path.
+ *
+ * THE AUTHORIZATION IS THE READ, on the caller's OWN RLS client. No visible row means no org id
+ * and nothing is promoted — so the service write can only ever touch a job this person could
+ * already see, in their own org. It writes ONE column on ONE row, and never un-completes a
+ * finished or cancelled job.
+ *
+ * Never throws: the punch is the thing that must land.
+ */
+async function promoteJobToInProgress(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  jobId: string,
+): Promise<void> {
+  try {
+    const { data: jobRow } = await supabase.from("jobs").select("org_id").eq("id", jobId).maybeSingle();
+    const jobOrg = (jobRow as { org_id?: string } | null)?.org_id;
+    if (!jobOrg) return;
+    await createServiceClient()
+      .from("jobs")
+      .update({ status: "in_progress" })
+      .eq("id", jobId)
+      .eq("org_id", jobOrg)
+      .in("status", ACTIVE_JOB_STATUSES.filter((st) => st !== "in_progress"));
+  } catch {
+    /* the punch already landed — a board that lags is not worth failing it over */
+  }
 }
 
 export type SwitchJobResult = ClockResult & {
@@ -399,13 +417,10 @@ export async function switchJob(input: {
     .eq("profile_id", user.id);
   if (error) return { ok: false, error: dbError(error) };
 
-  // Switching into a job means work has started there — promote it to in_progress
-  // (same rule as clock-in; never un-complete a finished/cancelled job).
-  await supabase
-    .from("jobs")
-    .update({ status: "in_progress" })
-    .eq("id", jobId)
-    .in("status", ACTIVE_JOB_STATUSES.filter((s) => s !== "in_progress"));
+  // Switching into a job means work has started there. Through the shared helper — this used to
+  // be its own copy on the CALLER's client, which for a tech is a zero-row no-op reported as
+  // success (the same bug clockIn was moved off in cn-v650, still live on this path).
+  await promoteJobToInProgress(supabase, jobId);
   revalidatePath(`/jobs/${jobId}`);
   if (entry.job_id) revalidatePath(`/jobs/${entry.job_id}`);
   revalidatePath("/jobs");

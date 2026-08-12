@@ -8,6 +8,7 @@ import { scheduleStatus, contractTotalFromQuotes, type Milestone } from "@/lib/p
 import { buildContractBody } from "@/lib/contract-body";
 import { sendEmail, renderReminderEmail, ownerBcc } from "@/lib/email";
 import { formatDate, formatCityStateZip } from "@/lib/utils";
+import { type SiteParts, pickSite, siteLines } from "@/lib/site-address";
 
 type Result = { ok: boolean; error?: string; id?: string };
 
@@ -17,6 +18,23 @@ type Result = { ok: boolean; error?: string; id?: string };
 
 const csz = (x: { city?: string | null; state?: string | null; zip?: string | null } | null | undefined) =>
   formatCityStateZip(x?.city, x?.state, x?.zip);
+
+/**
+ * THE ADDRESS ON THE SIGNED PAPER, through the one resolver (cn-v711).
+ *
+ * This built its address strings by hand and so predated `unit` entirely: four TTP jobs share
+ * 300 W Lake Blvd, and the contract naming the property said only "300 W Lake Blvd" — on the one
+ * document where which dwelling it is has to be unambiguous. It also had no fallback, so a job
+ * carrying no address of its own printed an EMPTY property block, and contract-body's own
+ * `|| cu.address` then quietly named the customer's HOME as the work site — which after 0189 is a
+ * different place on purpose.
+ *
+ * LINE-joined, never comma-joined: siteLines puts the dwelling on its own line directly under the
+ * street, and contract-body's block() joins its lines with a newline, so a multi-line string lands
+ * exactly as that block intends.
+ */
+const siteBlock = (...candidates: { source: string; parts?: SiteParts | null }[]): string | undefined =>
+  siteLines(pickSite(candidates)).join("\n") || undefined;
 
 /** Generate (or regenerate the draft of) a contract from a job — auto-filling the
  *  parties, property, scope, dates, billing model + payment schedule, and terms. */
@@ -38,7 +56,7 @@ export async function generateContractFromJob(jobId: string): Promise<Result> {
 
   const { data: job } = await supabase
     .from("jobs")
-    .select("name, description, address, city, state, zip, scheduled_start, scheduled_end, customer_id, billing_type")
+    .select("name, description, address, unit, city, state, zip, scheduled_start, scheduled_end, customer_id, billing_type")
     .eq("id", jobId)
     .maybeSingle();
   if (!job) return { ok: false, error: "Job not found." };
@@ -46,7 +64,7 @@ export async function generateContractFromJob(jobId: string): Promise<Result> {
 
   const [{ data: customer }, { data: org }, { data: quotes }, { data: milestones }] = await Promise.all([
     j.customer_id
-      ? supabase.from("customers").select("name, company_name, address, city, state, zip").eq("id", j.customer_id).maybeSingle()
+      ? supabase.from("customers").select("name, company_name, address, unit, city, state, zip").eq("id", j.customer_id).maybeSingle()
       : Promise.resolve({ data: null }),
     supabase.from("organizations").select("name, license, address_line1, address_line2, city, state, zip, phone, email, settings").maybeSingle(),
     supabase.from("quotes").select("total, status").eq("job_id", jobId),
@@ -69,9 +87,11 @@ export async function generateContractFromJob(jobId: string): Promise<Result> {
     customer: {
       name: cu?.name ?? "Customer",
       line2: cu?.company_name || undefined,
-      address: [cu?.address, csz(cu)].filter(Boolean).join(", ") || undefined,
+      address: siteBlock({ source: "customer", parts: cu }),
     },
-    propertyAddress: [j.address, csz(j)].filter(Boolean).join(", ") || undefined,
+    // Job first, customer second — the same order every other document resolves in, and
+    // all-or-nothing per record: never the job's street under the customer's town.
+    propertyAddress: siteBlock({ source: "job", parts: j }, { source: "customer", parts: cu }),
     scopeTitle: j.name ?? "Service work",
     scopeDetail: j.description || undefined,
     startDate: j.scheduled_start ? formatDate(j.scheduled_start) : undefined,

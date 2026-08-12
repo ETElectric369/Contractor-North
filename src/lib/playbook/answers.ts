@@ -1,7 +1,8 @@
 import { looseNumber } from "@/lib/inspection/capture";
 import { applicableNeeds, clearInapplicable } from "./resolve";
 import type { Answers, AnswerValue, Need, Playbook } from "./types";
-import { coerceScopes } from "./scopes";
+import { coerceScopes, scopeText } from "./scopes";
+import { uploadDisplayName } from "./uploads";
 
 /**
  * THE WRITE CONTRACT, expressed over a playbook instead of a sheet.
@@ -204,6 +205,41 @@ export function answerText(v: AnswerValue): string {
 }
 
 /**
+ * One answer as the ESTIMATOR should read it — answerText, plus the two slots whose stored shape
+ * is not the shape a person says out loud.
+ *
+ * It has to live here, in a per-need branch, because `n.slot.type` is the ONLY thing that tells
+ * these apart: a `file` answer and a multi-select are both `string[]`, and no inspection of the
+ * value can distinguish them. That is why the fix is not in answerText.
+ *
+ *   · scopes — an object array, so `join(", ")` handed the estimator "[object Object]" as a given
+ *     fact. Chris's whole remodel flow answers in this shape.
+ *   · file — a list of STORAGE PATHS ("<org>/intake/1754...-<uuid>-panel.jpg"), which is a machine
+ *     key printed under a heading that says take this as given. Same treatment the intake summary
+ *     already gives it.
+ *
+ * The scopes book is deliberately empty: descriptions come from the org's price list, which this
+ * pure function does not have. scopeText already falls back to the CODE, which is what the office
+ * calls that scope anyway — and the picks reach the draft as real line items separately.
+ */
+function needText(n: Need, v: AnswerValue): string {
+  if (n.slot?.type === "scopes") {
+    const picks = coerceScopes(v);
+    return picks?.length ? scopeText(picks, new Map()) : "";
+  }
+  if (n.slot?.type === "file") {
+    const names = (Array.isArray(v) ? v : [v])
+      .filter((x): x is string => typeof x === "string" && x.trim() !== "")
+      .map(uploadDisplayName);
+    // Say it cannot be opened, in the same breath. Erik hit the other half of this on Sara Cain's
+    // estimate — a PDF that was there and went unmentioned — and naming a file without saying we
+    // can't read it just trades one wrong answer for a more confident one.
+    return names.length ? `${names.join(", ")} (attached — you cannot open these)` : "";
+  }
+  return answerText(v);
+}
+
+/**
  * What the estimator is TOLD, as given facts rather than something to re-derive.
  *
  * Applicable needs only: an answer to a need that no longer applies is stale by definition, and a
@@ -221,7 +257,7 @@ export function factsForEstimator(pb: Playbook, answers: Answers): string {
 
   const lines: string[] = [];
   for (const n of applicableNeeds(pb, answers)) {
-    const t = answerText(answers[n.key]);
+    const t = needText(n, answers[n.key]);
     if (!t.trim()) continue;
     // HIS LINE BREAKS ARE HIS STRUCTURE. Erik answered Sara Cain's scope as an eight-line punch
     // list — one item per line, each carrying its own materials and its own minutes: "new white
