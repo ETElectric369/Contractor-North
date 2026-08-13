@@ -54,6 +54,12 @@ interface FormEditorProps {
   initialDescription?: string;
   initialIsInspection?: boolean;
   initialFields?: FieldRow[];
+  /** THIS FORM'S FIELDS ARE A MIRROR, NOT A SOURCE. Once a form is playbook-backed, savePlaybook
+   *  regenerates `schema` from the playbook on every save, so an edit made here is overwritten by
+   *  the next one — and in the meantime it changes nothing, because every reader prefers the
+   *  playbook. That is how Andrew deleted his website's Budget question and watched it stay.
+   *  Name, description and the inspection flag are real columns and stay editable. */
+  fieldsLocked?: boolean;
 }
 
 /** Shared field-builder modal used for both creating and editing a form. */
@@ -65,6 +71,7 @@ export function FormEditor({
   initialDescription = "",
   initialIsInspection = false,
   initialFields,
+  fieldsLocked = false,
 }: FormEditorProps) {
   const isEdit = Boolean(formId);
   const [name, setName] = useState(initialName);
@@ -208,17 +215,26 @@ export function FormEditor({
         <div>
           <div className="mb-1.5 flex items-center justify-between">
             <Label className="mb-0">Fields</Label>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() =>
-                setFields((p) => [...p, { label: "", type: "text", options: "" }])
-              }
-            >
-              <Plus className="h-3.5 w-3.5" /> Add Field
-            </Button>
+            {!fieldsLocked && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  setFields((p) => [...p, { label: "", type: "text", options: "" }])
+                }
+              >
+                <Plus className="h-3.5 w-3.5" /> Add Field
+              </Button>
+            )}
           </div>
-          <div className="space-y-2">
+          {fieldsLocked && (
+            <p className="mb-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              These questions live in your playbook now &mdash; what&rsquo;s below is a copy of it, rewritten
+              every time you save there. Edit them in Settings &rarr; Playbook; the name and description
+              above are still yours to change here.
+            </p>
+          )}
+          <div className={`space-y-2 ${fieldsLocked ? "pointer-events-none opacity-50" : ""}`}>
             {fields.map((f, i) => (
               <div key={i} className="rounded-lg border border-slate-100 p-2">
                 <div className="flex gap-2">

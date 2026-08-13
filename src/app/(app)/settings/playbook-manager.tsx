@@ -301,24 +301,19 @@ export function PlaybookManager({
     start(async () => {
       setErr(null);
       setMsg(null);
-      const r = await fn();
-      if (!r.ok) {
-        // REFRESH ON FAILURE TOO. This returned early, so after a refused save the `forms` prop was
-        // never refetched, `baseStamps` never recomputed, and the next Save re-sent the identical
-        // stale stamp and was refused identically — forever. One stale load turned the editor into
-        // a machine that answered every Save with "Someone else changed these questions", with no
-        // reload affordance at all inside the installed PWA. That IS the frozen playbook.
-        //
-        // The refresh only reloads the STORED version into `forms`; his edits stay in `needs`
-        // untouched, so pressing Save again now compares against what is really on the row.
-        setErr(r.error ?? "Couldn't save that.");
+      try {
+        const r = await fn();
+        if (!r.ok) return setErr(r.error ?? "Couldn't save that.");
+        setDirty(false);
+        setMsg(done);
+        if (resyncs) setLoadedFor("");
         router.refresh();
-        return;
+      } catch {
+        // A rejected server action left NOTHING on screen — the button spun, came back, and said
+        // nothing, which reads as a page that quietly refuses to save. Most often a tab held open
+        // across one of the day's deploys.
+        setErr("That didn't reach the server — your questions are still on this screen. Check your connection and try again.");
       }
-      setDirty(false);
-      setMsg(done);
-      if (resyncs) setLoadedFor("");
-      router.refresh();
     });
 
   return (
@@ -755,8 +750,31 @@ export function PlaybookManager({
           memory — and the message it most often carries ("someone else changed these questions")
           is the one whose entire point is that the user must act before their work is safe. */}
       {err && (
-        <div className="sticky bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-20 rounded-lg border border-rose-300 bg-rose-50/95 px-3 py-2 text-sm text-rose-900 shadow-md backdrop-blur shell:bottom-2">
-          {err}
+        <div className="sticky bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-20 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-rose-300 bg-rose-50/95 px-3 py-2 text-sm text-rose-900 shadow-md backdrop-blur shell:bottom-2">
+          <span>{err}</span>
+          {/* THE WAY OUT OF A CONFLICT, and the only correct one.
+              A refused save leaves this editor holding a fingerprint of a version that is no
+              longer on the row, so every retry is refused identically — forever, with no reload
+              affordance at all inside the installed PWA. That is the most literal reading of
+              "frozen".
+              My first fix was a router.refresh() on the failure path, and it was worse than the
+              bug: refresh preserves client state, so the FINGERPRINT would have quietly
+              re-baselined to the other person's version while `needs` still held this user's —
+              and the next Save would have sailed through the guard and overwritten them. That is
+              exactly the cn-v686 clobber the stamp was built to stop.
+              So the escape is explicit, and it costs you your unsaved edit on purpose: a full
+              reload, behind a confirm, which is the only version of "show me theirs" that cannot
+              silently eat somebody's work. */}
+          <button
+            type="button"
+            onClick={() => {
+              if (dirty && !confirm("Reload their version? Your unsaved changes on this screen are lost.")) return;
+              window.location.reload();
+            }}
+            className="shrink-0 font-medium underline underline-offset-2"
+          >
+            Reload their version
+          </button>
         </div>
       )}
 

@@ -232,7 +232,7 @@ export async function updateForm(
     };
 
   // RLS isolates by org; the id match scopes the update to this form.
-  const { error } = await supabase
+  const { data: wrote, error } = await supabase
     .from("forms")
     .update({
       name,
@@ -240,9 +240,14 @@ export async function updateForm(
       is_inspection: !!input.is_inspection,
       schema,
     })
-    .eq("id", id);
+    .eq("id", id)
+    .select("id");
 
   if (error) return { ok: false, error: dbError(error) };
+  // A zero-row UPDATE is a 204, not an error — the silent-write law. Without this an RLS-refused
+  // edit reports success and the form simply does not change, which is the same shape of failure
+  // this whole commit is about.
+  if (!wrote?.length) return { ok: false, error: "That didn't save — check your access and try again." };
   revalidatePath("/forms");
   revalidatePath(`/forms/${id}`);
   return { ok: true, id };

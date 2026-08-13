@@ -12,12 +12,15 @@ export function EditFormButton({
   description,
   isInspection,
   fields,
+  fieldsLocked,
 }: {
   formId: string;
   name: string;
   description: string | null;
   isInspection: boolean;
   fields: FormField[];
+  /** True once this form is playbook-backed: the fields below are a regenerated mirror. */
+  fieldsLocked?: boolean;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -38,6 +41,7 @@ export function EditFormButton({
         formId={formId}
         initialName={name}
         initialDescription={description ?? ""}
+        fieldsLocked={fieldsLocked}
         initialIsInspection={isInspection}
         initialFields={fieldsToRows(fields)}
       />

@@ -68,20 +68,20 @@ export default async function FormDetailPage({
           )}
         </div>
         <div className="flex items-center gap-1">
-          {/* NO EDIT BUTTON ON A PLAYBOOK-BACKED FORM. The fields below are a MIRROR of the
-              playbook, regenerated on every playbook save, so an edit here has nowhere to go —
-              which is how Andrew deleted his website's Budget question, got a success, and
-              changed nothing. updateForm refuses the write too; this is so he never finds the
-              door in the first place. */}
-          {!isPlaybook && (
-            <EditFormButton
-              formId={form.id}
-              name={form.name}
-              description={form.description}
-              isInspection={!!(form as { is_inspection?: boolean }).is_inspection}
-              fields={fields}
-            />
-          )}
+          {/* THE BUTTON STAYS; THE FIELDS HALF OF IT DOES NOT.
+              Hiding the whole editor on a playbook-backed form was my first pass and it took the
+              only UI that can RENAME a form with it — and every form here is playbook-backed the
+              moment its owner saves a playbook, so Erik's and Chris's would all have become
+              permanently un-renamable. `fieldsLocked` removes the field rows and keeps the name,
+              the description and the inspection flag, which are real columns nothing mirrors. */}
+          <EditFormButton
+            formId={form.id}
+            name={form.name}
+            description={form.description}
+            isInspection={!!(form as { is_inspection?: boolean }).is_inspection}
+            fields={fields}
+            fieldsLocked={isPlaybook}
+          />
           <DeleteFormButton formId={form.id} />
         </div>
       </div>

@@ -27,7 +27,23 @@ import type { Clause, Dimension, Need, NeedSlot, Playbook } from "./types";
 
 const DIMENSIONS: Dimension[] = ["who", "what", "where", "when", "why"];
 
-const str = (v: unknown, cap: number): string => (typeof v === "string" ? v.trim().slice(0, cap) : "");
+/**
+ * TRIM, CAP, TRIM. The trailing trim is what makes parsePlaybook a FIXED POINT.
+ *
+ * savePlaybook stores `parsePlaybook({ needs })` where `needs` came out of a parse already, and
+ * the concurrency guard hashes a re-parse of the stored row — so `parse(parse(x))` MUST equal
+ * `parse(x)` byte for byte or a save is refused with "someone else changed these" when nobody
+ * did. It nearly didn't: trimming before the cap meant a value landing exactly on the boundary
+ * could be cut mid-word and leave a trailing space, which the NEXT parse then trimmed away,
+ * producing a different string and a different fingerprint.
+ *
+ * The first trim stays FIRST, deliberately. Slicing before it would make leading whitespace count
+ * against the cap, so a pasted why line with a long indent would be truncated mid-sentence — and a
+ * pasted `ask` that is all indent then text would collapse to "" and fall through to
+ * askFromLabel(), replacing a contractor's own sentence with a machine-made one.
+ */
+const str = (v: unknown, cap: number): string =>
+  typeof v === "string" ? v.trim().slice(0, cap).trim() : "";
 
 function parseSlot(raw: unknown): NeedSlot | undefined {
   if (!raw || typeof raw !== "object") return undefined;
