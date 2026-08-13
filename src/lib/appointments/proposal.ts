@@ -57,6 +57,11 @@ export interface ProposalInput {
   /** The tentative first-slot instant, already resolved to UTC by the caller
    *  (browser ISO or tz-helper) — this module stays timezone-agnostic. */
   startsAtIso?: string | null;
+  /** The walk-through this inspection will be filled in on, and any answers the CUSTOMER already
+   *  gave through the public intake door. Resolved by the caller (only it knows the lead); this
+   *  module just carries them onto the row. Omitted by every non-inspection caller. */
+  inspectionTemplateId?: string | null;
+  inspectionAnswers?: Record<string, unknown> | null;
 }
 
 export type ProposalResult =
@@ -130,6 +135,8 @@ export async function createProposalCore(
       assigned_to: input.assignedTo ?? null,
       status: "proposed",
       created_by: input.createdBy ?? null,
+      inspection_template_id: input.inspectionTemplateId ?? null,
+      inspection_answers: input.inspectionAnswers ?? {},
     })
     .select("id")
     .single();

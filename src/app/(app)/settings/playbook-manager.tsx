@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { stampNeeds } from "@/lib/playbook/stamp";
 import { useRouter } from "next/navigation";
 import {
@@ -177,6 +177,27 @@ export function PlaybookManager({
     setOpenKey(null);
   }
 
+  /**
+   * LEAVING THE PAGE WITH UNSAVED QUESTIONS SHOULD COST YOU A CLICK, NOT A MORNING.
+   *
+   * Andrew removed the Budget question from Vivian Builders' website form and rang Erik the next
+   * morning to say his playbook was frozen: he could not change the questions. The row had never
+   * been written. Nothing under this component is broken — the save action, the concurrency stamp
+   * and the RLS policy all work, and his four real playbooks round-trip byte-identically. What was
+   * missing was any signal at all that a change was still on his screen and nowhere else.
+   *
+   * beforeunload is the browser's own version of this and it is deliberately blunt: no custom
+   * text, and iOS standalone PWAs ignore it entirely. It is therefore the WEAKEST of the three
+   * guards here (the sticky bar and the form-switch confirm are the ones that actually save him),
+   * but it is free and it catches the desktop tab-close.
+   */
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+
   const byKey = useMemo(() => new Map(needs.map((n) => [n.key, n])), [needs]);
 
   if (!form)
@@ -286,7 +307,19 @@ export function PlaybookManager({
       {forms.length > 1 && (
         <div>
           <Label className="mb-1.5">Which set of questions</Label>
-          <Select value={formId} onChange={(e) => setFormId(e.target.value)}>
+          <Select
+            value={formId}
+            onChange={(e) => {
+              // SWITCHING THE PICKER DISCARDS EVERYTHING UNSAVED, silently — the render-time sync
+              // below reloads the other form's needs and resets `dirty`. That is the right
+              // behaviour (an edit must never be carried onto a different question set) and the
+              // wrong way to reach it: Andrew has TWO forms and the editor opens on the private
+              // one, so "delete Budget, flick to the other list to check something, flick back"
+              // loses the delete and looks exactly like a form that refuses to change.
+              if (dirty && !confirm("You haven't saved your changes to these questions. Switch anyway and lose them?")) return;
+              setFormId(e.target.value);
+            }}
+          >
             {forms.map((f) => (
               <option key={f.id} value={f.id}>
                 {f.name}
@@ -682,8 +715,33 @@ export function PlaybookManager({
 
         {err && <span className="text-sm text-rose-600">{err}</span>}
         {msg && !err && <span className="text-sm font-medium text-emerald-700">{msg}</span>}
-        {dirty && !pending && !err && <span className="text-sm text-slate-500">Unsaved changes</span>}
       </div>
+
+      {/* ── THE BAR THAT FOLLOWS YOU ──────────────────────────────────────────────────────────
+          Andrew removed the Budget question from Vivian Builders' website form and rang Erik the
+          next morning to say his playbook was frozen — he could not change the questions. The row
+          had never been written, and nothing under this component was broken: the save action, the
+          concurrency stamp and the RLS policy all work, and his four real playbooks round-trip
+          byte-identically. What was missing was any signal that his change was still only on his
+          screen. A delete removes the card INSTANTLY, so the question is visibly gone; the Save
+          button is below twenty question cards; and the words "Unsaved changes" sat right beside
+          that button, which parks the only warning where you can read it just after you have
+          already found the thing it is telling you to press.
+
+          `sticky`, not `fixed`, so it belongs to this section rather than floating over the whole
+          Settings page. Offset above the mobile bottom nav, because the nav's backdrop-filter
+          builds a stacking context that beats ordinary content — which is precisely how a Save
+          button has ended up underneath it before (cn-v57). Above `shell:` there is no nav. */}
+      {dirty && !pending && (
+        <div className="sticky bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-20 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50/95 px-3 py-2 shadow-md backdrop-blur shell:bottom-2">
+          <span className="text-sm font-medium text-amber-900">
+            Not saved yet &mdash; {form.isWebsite ? "your website still asks the old questions" : "your inspector still asks the old questions"}
+          </span>
+          <Button type="button" onClick={() => run(() => savePlaybook(form.id, needs, baseStamp), "Saved.")}>
+            <Check className="h-4 w-4" /> Save
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

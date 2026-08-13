@@ -15,6 +15,8 @@ import { INQUIRY_STATUSES } from "@/lib/statuses";
 import { saveQuote } from "../quotes/actions";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { INTAKE_BUCKET, isOwnIntakePath } from "@/lib/playbook/uploads";
+import { playbookForForm } from "@/lib/playbook/parse";
+import { answersFromIntake } from "@/lib/inquiries/carry-intake-answers";
 
 export type Result = {
   ok: boolean;
@@ -204,6 +206,46 @@ export async function deleteInquiry(id: string): Promise<Result> {
 }
 
 /**
+ * WHAT THE CUSTOMER ALREADY ANSWERED, READY TO GO ONTO THE WALK-THROUGH.
+ *
+ * Booking an inspection copied the lead's `message` — a flattened "Label: answer" summary — into
+ * the appointment's notes and stopped there. The customer's structured answers, sitting in
+ * `intake.intake_answers` since they filled the form on the contractor's website, were never
+ * carried, so the inspector asked every one of them again on site and the estimator was handed
+ * them back as a paragraph to re-read. See lib/inquiries/carry-intake-answers for which answers
+ * may cross and why a measured one may not.
+ *
+ * Returns nulls when there is nothing to carry, so both booking paths can spread it unconditionally.
+ */
+async function intakeCarry(
+  supabase: SupabaseClient,
+  inq: { intake?: { intake_answers?: unknown } | null },
+): Promise<{ inspectionTemplateId: string | null; inspectionAnswers: Record<string, unknown>; carried: string[] }> {
+  const none = { inspectionTemplateId: null, inspectionAnswers: {}, carried: [] };
+  const stored = inq.intake?.intake_answers;
+  if (!stored || typeof stored !== "object") return none;
+  // THE walk-through, singular: `is_inspection` is what distinguishes it from the safety checklist
+  // and from the public intake form, and every org has exactly one. Read on the caller's own RLS
+  // client, so this can only ever find their own org's.
+  const { data: form } = await supabase
+    .from("forms")
+    .select("id, schema, playbook")
+    .eq("is_inspection", true)
+    .limit(1)
+    .maybeSingle();
+  if (!form) return none;
+  const pb = playbookForForm(form as { schema?: unknown; playbook?: unknown });
+  const { answers, carried } = answersFromIntake(pb, stored);
+  if (!carried.length) return none;
+  return { inspectionTemplateId: (form as { id: string }).id, inspectionAnswers: answers, carried };
+}
+
+/** One line for the appointment's notes. A pre-filled answer that looks like the contractor's own
+ *  is worse than no pre-fill: he has to know which of these came from a stranger. */
+const carriedNote = (carried: string[]): string | null =>
+  carried.length ? `Already answered by the customer online (confirm on site): ${carried.join(", ")}.` : null;
+
+/**
  * Explicitly convert an inquiry. Nothing happens automatically — the caller
  * picks the target AND whether to link an existing customer or create one
  * from the inquiry's details. We stamp the inquiry so it leaves the open list
@@ -250,6 +292,7 @@ export async function convertInquiry(
     // it also withdraws any earlier still-pending link for this same lead).
     const slots = cleanSlots(opts.slots, "09:00");
     if (slots.length) {
+      const carry = await intakeCarry(supabase, inq);
       const res = await createProposalCore(supabase, {
         type: "inspection",
         title: `Site inspection: ${inq.name}`,
@@ -258,7 +301,9 @@ export async function convertInquiry(
         inquiryId: id,
         customerId: null, // deferred-customer doctrine: no contact row before the win
         location: inq.address,
-        notes: inq.message ?? inq.notes ?? null,
+        notes: [inq.message ?? inq.notes ?? null, carriedNote(carry.carried)].filter(Boolean).join("\n\n") || null,
+        inspectionTemplateId: carry.inspectionTemplateId,
+        inspectionAnswers: carry.inspectionAnswers,
         createdBy: ctx.userId,
         // 9 AM org-local tentative instant from the first offered slot.
         startsAtIso: tzDateTimeUtc(slots[0].date, slots[0].time, tz),
@@ -286,12 +331,17 @@ export async function convertInquiry(
     const startDate = opts.startDate || ymdAddDays(todayStrInTz(tz), 2);
     const startsAtIso = tzDateTimeUtc(startDate, "09:00", tz);
     if (!startsAtIso) return { ok: false, error: "Pick a valid inspection date." };
+    const carry = await intakeCarry(supabase, inq);
     const { error: aErr } = await supabase.from("appointments").insert({
       type: "inspection",
       title: `Site inspection: ${inq.name}`,
       starts_at: startsAtIso,
       location: inq.address,
-      notes: inq.message ?? inq.notes ?? null,
+      notes: [inq.message ?? inq.notes ?? null, carriedNote(carry.carried)].filter(Boolean).join("\n\n") || null,
+      // The customer's own answers, on the walk-through, so the inspector CONFIRMS rather than
+      // re-asks — which is what the Tahoe Deck starter has claimed since it was written.
+      inspection_template_id: carry.inspectionTemplateId,
+      inspection_answers: carry.inspectionAnswers,
       customer_id: opts.customerId || inq.customer_id || null,
       inquiry_id: id, // provenance: the calendar entry knows its lead
       created_by: ctx.userId,
