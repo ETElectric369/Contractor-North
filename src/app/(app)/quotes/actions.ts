@@ -2,6 +2,7 @@
 import { customerAddressFrom } from "@/lib/inquiries/lead-address";
 import { dbError } from "@/lib/db-error";
 import { parseAiJson } from "@/lib/ai-json";
+import { statedLaborRate } from "@/lib/estimate/stated-rate";
 
 import { revalidatePath } from "next/cache";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
@@ -883,6 +884,17 @@ async function runEstimator(
   const orgS = getOrgSettings((org as any)?.settings);
   const playbook = orgS.quote_playbook?.trim();
   const rate = laborRate != null && laborRate > 0 ? laborRate : orgS.default_labor_rate;
+  // A RATE HE TYPED. `content` is his scope on the text path and a content-block array on the plan
+  // path; only the text he wrote is searched, never a PDF's contents — a number lifted out of
+  // somebody else's drawing is not his instruction.
+  const stated = statedLaborRate(
+    typeof content === "string"
+      ? content
+      : (Array.isArray(content) ? content : [])
+          .filter((b: { type?: string }) => b?.type === "text")
+          .map((b: { text?: string }) => String(b.text ?? ""))
+          .join("\n"),
+  );
 
   const rows = (book ?? []) as any[];
   const catalog = rows
@@ -905,7 +917,7 @@ async function runEstimator(
         type: "text" as const,
         text:
           `You are an estimator for a ${trade}. Draft quote line items for the scope, pricing materials from the contractor's OWN PRICE BOOK (their real net cost) — never invent market prices. ` +
-          `LABOR: ${rate > 0 ? `$${rate}/hr` : "a realistic US rate for this trade"}; estimate crew-hours realistically (one or more labor lines). ` +
+          `LABOR: ${stated ? `$${stated}/hr — HE STATED THIS RATE IN THE SCOPE, use it` : rate > 0 ? `$${rate}/hr` : "a realistic US rate for this trade"}; estimate crew-hours realistically (one or more labor lines). ` +
           "MATERIALS: pick items from the PRICE BOOK below where they fit — return the EXACT catalog code and the book cost. " +
           // THE WIRE NUTS. Erik: "get rid of the wire nuts, that small stuff gets worked into the
           // material ideally grouped together as misc but i dont think its necessary anymore to
@@ -936,14 +948,29 @@ async function runEstimator(
           'promises about workmanship or timelines. Keep his options as options ("either ... or"). ' +
           'If he wrote nothing to polish, return "". ' +
           'Each entry in "items": {"description": string, "quantity": number, "unit": "ea|ft|hr|lot", "kind": "material"|"labor", "catalog": string|null, "unit_cost": number, "source": "book"|"home_depot"} (labor: kind="labor", source="book", unit_cost=hourly rate). ' +
-          // NEVER SAY IT TWICE, ON TWO CHANNELS. `items` and `questions` render side by side as
-          // things not yet on his estimate; a question that restates a line he can already see
-          // reads as a second, unactionable copy of it — which is what made the box "a whole bunch
-          // of stuff i cant do anything about". A question earns its place only by asking for a
-          // decision no line item can carry.
-          '"questions" = AT MOST THREE things that would CHANGE THE PRICE and that you could not settle yourself: ' +
-          'an owner decision, a count only he can confirm, scope his words imply but do not state. ' +
-          'NEVER restate an item you already returned, and never explain your own pricing. Empty is the right answer when there is nothing to decide. ' +
+          // NOTHING WITHOUT DATA — THE SAME LAW THE LINE ITEMS RUN UNDER.
+          //
+          // Erik, on a real estimate whose questions were otherwise good: "it asked some questions
+          // that didnt need to be asked as i stated the basics (feeders are already in place). the
+          // MLO question is a good one but its so specific that it will be stated if needed so we
+          // shouldnt be trying to make too much up without data just like i didnt mention anything
+          // about sheetrock and will if needed."
+          //
+          // Two failures, one rule. It asked whether the existing feeders were sized for 200A when
+          // he had already written that the feed wires are in place — questioning a fact he
+          // stated. And it offered to quote drywall patch on a job where nobody had mentioned
+          // opening a wall — inventing scope. A contractor who needs drywall in the price says so;
+          // silence is not an omission to be helpfully filled, it is an answer.
+          //
+          // So a question must be ABOUT SOMETHING HE SAID, and it must be a genuine ambiguity in
+          // what he said. Not a checklist of what a job like this sometimes involves.
+          '"questions" = AT MOST TWO, and usually ZERO. A question is allowed ONLY when his own words are ' +
+          'genuinely ambiguous in a way that changes the price — two readings of a count, a quantity he ' +
+          'gave without a unit, an option he named without choosing. ' +
+          'FORBIDDEN: anything he already stated plainly (do not ask him to confirm a fact he gave you); ' +
+          'work he never mentioned (drywall, paint, permits, trenching, disposal — if he wanted it quoted he ' +
+          'would have said so); trade options he did not raise; and any restatement of a line item you already ' +
+          'returned. Never explain your own pricing. An empty list is the correct answer for a clear scope. ' +
           "No prose outside the JSON." +
           (playbook ? `\n\nCompany notes (apply on top; the price book + calc'd quantities govern):\n${playbook}` : ""),
       },
@@ -1062,7 +1089,13 @@ async function runEstimator(
     .filter((i) => i.kind !== "labor")
     .filter((i) => !(i.catalog && byCode.has(String(i.catalog).trim().toUpperCase())))
     .map((i) => String(i.description ?? "").trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    // NOT THE CATCH-ALL LINE. cn-v716 told the estimator to roll small hardware into one "Misc
+    // materials" row, and the ladder promptly word-matched that row to an unrelated $8.03 part and
+    // flagged it "check this is the right part before quoting it". There IS no right part: the
+    // line is a bag of oddments by construction, so every match it can make is a wrong one. Its
+    // own rough number stands, and the est-and-confirm flag says what it is.
+    .filter((d) => !/^\s*misc\b/i.test(d));
   const uniqueDescs = [...new Set(unresolved.map((d) => d.toLowerCase()))].slice(0, LADDER_CAP);
   const laddered = new Map<string, LadderPrice>();
   await Promise.all(
@@ -1089,6 +1122,7 @@ async function runEstimator(
   const items: DraftLineItem[] = raw.map((i) =>
     mapEstimatorLine(i, {
       rate,
+      statedRate: stated,
       byCode: byCode as Map<string, BookRow>,
       levelPct: markupPct ?? null,
       orgDefaultPct: orgS.default_markup_pct,

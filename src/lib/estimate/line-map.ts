@@ -66,6 +66,11 @@ export type LadderPrice = {
 export type LineMapContext = {
   /** The company/customer bill rate, already resolved. Authoritative whenever it is > 0. */
   rate: number;
+  /**
+   * A RATE HE TYPED INTO THE SCOPE, read out of his own words by statedLaborRate — never taken
+   * from the model. Beats `rate` when present, because a rate he dictated is not a guess.
+   */
+  statedRate?: number | null;
   /** Price book indexed by UPPERCASE code. */
   byCode: Map<string, BookRow>;
   /** Customer pricing-level markup, or null. */
@@ -87,16 +92,28 @@ export function mapEstimatorLine(i: EstimatorRawItem, ctx: LineMapContext): Draf
   const kind = i.kind === "labor" ? "labor" : "material";
 
   if (kind === "labor") {
-    // The bill rate is a business fact the app already resolved; the model was handed it in the
-    // prompt. Its echo is only a fallback for an org that has never set one — and then we say so
-    // rather than presenting a guessed hourly as though it were the company's rate.
+    // THREE SOURCES, IN THIS ORDER, AND THE ORDER IS THE WHOLE POINT.
+    //
+    //   1. what HE SAID in the scope — read out of his text by statedLaborRate, never from the
+    //      model. Erik wrote "a 2 man labor rate of 200 per hour", got 145 back (his company
+    //      default) and corrected every labor line by hand: "it didnt catch the 2 man labor rate
+    //      of 200 per hour statement … i edited it". A two-man crew rate is not his one-man rate,
+    //      and he is the one who sets both.
+    //   2. the COMPANY rate the app resolved, for the ordinary case where he said nothing.
+    //   3. the model's echo, only for an org that has never set one — and then we say so, rather
+    //      than presenting a guessed hourly as though it were the company's.
+    //
+    // The old code stopped at 2, and its comment defended that as anti-invention. It was right
+    // about invention and wrong about dictation, which is the same distinction as the outlet
+    // count: add whatever is stated.
     const echoed = Number(i.unit_cost) || 0;
+    const stated = ctx.statedRate && ctx.statedRate > 0 ? ctx.statedRate : null;
     return {
       description: String(i.description ?? "Labor"),
       quantity: Number(i.quantity) || 1,
       unit: "hr",
-      unit_price: ctx.rate > 0 ? ctx.rate : echoed,
-      flag: ctx.rate > 0 ? undefined : "no company labor rate set — confirm this hourly",
+      unit_price: stated ?? (ctx.rate > 0 ? ctx.rate : echoed),
+      flag: stated || ctx.rate > 0 ? undefined : "no company labor rate set — confirm this hourly",
     };
   }
 

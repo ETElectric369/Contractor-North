@@ -476,7 +476,7 @@ export function QuoteBuilder({
                     <p className="text-xs text-slate-500">Nothing here is on your estimate yet.</p>
                   )}
                 </div>
-                {proposed.length > 1 && (
+                {proposed.length > 1 ? (
                   <button
                     type="button"
                     onClick={() => {
@@ -487,7 +487,11 @@ export function QuoteBuilder({
                   >
                     {proposed.every((p) => p.keep) ? "Untick all" : "Tick all"}
                   </button>
-                )}
+                ) : proposed.length === 0 && questions.length > 0 ? (
+                  <button onClick={() => setQuestions([])} className="text-xs text-slate-400 hover:text-slate-900">
+                    Clear
+                  </button>
+                ) : null}
               </div>
 
               <div className="space-y-2">
@@ -566,12 +570,14 @@ export function QuoteBuilder({
                   the same moment: read them, then take what you want. */}
               {questions.length > 0 && (
                 <div className={proposed.length ? "mt-4 border-t border-slate-200 pt-3" : ""}>
-                  <div className="mb-1.5 flex items-center justify-between gap-2">
-                    <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Worth checking</h4>
-                    <button onClick={() => setQuestions([])} className="text-xs text-slate-400 hover:text-slate-900">
-                      Clear
-                    </button>
-                  </div>
+                  {/* The sub-heading only exists to separate these from the proposals ABOVE them.
+                      With no proposals the card title is already "Worth checking", and printing it
+                      twice is what shipped in cn-v716. */}
+                  {proposed.length > 0 && (
+                    <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Worth checking
+                    </h4>
+                  )}
                   <ul className="list-disc space-y-1 pl-5 text-sm text-slate-600">
                     {questions.map((q, i) => (
                       <li key={i}>{q}</li>
