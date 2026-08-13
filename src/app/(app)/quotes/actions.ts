@@ -907,6 +907,19 @@ async function runEstimator(
           `You are an estimator for a ${trade}. Draft quote line items for the scope, pricing materials from the contractor's OWN PRICE BOOK (their real net cost) — never invent market prices. ` +
           `LABOR: ${rate > 0 ? `$${rate}/hr` : "a realistic US rate for this trade"}; estimate crew-hours realistically (one or more labor lines). ` +
           "MATERIALS: pick items from the PRICE BOOK below where they fit — return the EXACT catalog code and the book cost. " +
+          // THE WIRE NUTS. Erik: "get rid of the wire nuts, that small stuff gets worked into the
+          // material ideally grouped together as misc but i dont think its necessary anymore to
+          // try and outsmart the contractor — we want to be doing what they need as simple as
+          // possible." A dozen $4 rows, each wearing a confirm-this-price badge, buried among the
+          // real lines is work he then has to undo by hand.
+          //
+          // TRADE-NEUTRAL WORDING, deliberately. This whole prompt was rewritten to be trade-blind
+          // after it priced Chris's deck as an electrician told to size conduit; naming wire nuts
+          // here would put that back one word at a time. Fasteners and adhesives are as true of a
+          // deck as connectors are of a panel.
+          "CONSUMABLES: never give small hardware its own line — fasteners, connectors, clips, tape, " +
+          "adhesives, sealant and the like. Work them into the material line they belong to, or into a " +
+          "single 'Misc materials' line if they belong to no one line. " +
           (catalogMode
             ? "QUANTITIES: compute from the measurements given — areas = length × width, linear feet, counts. Do NOT apply trade calculations that don't fit this work. "
             : "QUANTITIES: calculate per the governing code for this trade — don't eyeball. For anything the CALCULATOR TOOLS cover (wire size, voltage drop, conduit fill, box fill) CALL THE TOOL instead of working the tables from memory; they return the exact NEC answer plus the code rule behind it. Reasoning a table in your head is where wrong numbers come from. ") +
@@ -923,7 +936,15 @@ async function runEstimator(
           'promises about workmanship or timelines. Keep his options as options ("either ... or"). ' +
           'If he wrote nothing to polish, return "". ' +
           'Each entry in "items": {"description": string, "quantity": number, "unit": "ea|ft|hr|lot", "kind": "material"|"labor", "catalog": string|null, "unit_cost": number, "source": "book"|"home_depot"} (labor: kind="labor", source="book", unit_cost=hourly rate). ' +
-          '"questions" = a short list of plain-English things the contractor should REVIEW before sending: ambiguous counts, callouts that imply EXTRA scope, owner decisions, or anything low-confidence. Be specific. No prose outside the JSON.' +
+          // NEVER SAY IT TWICE, ON TWO CHANNELS. `items` and `questions` render side by side as
+          // things not yet on his estimate; a question that restates a line he can already see
+          // reads as a second, unactionable copy of it — which is what made the box "a whole bunch
+          // of stuff i cant do anything about". A question earns its place only by asking for a
+          // decision no line item can carry.
+          '"questions" = AT MOST THREE things that would CHANGE THE PRICE and that you could not settle yourself: ' +
+          'an owner decision, a count only he can confirm, scope his words imply but do not state. ' +
+          'NEVER restate an item you already returned, and never explain your own pricing. Empty is the right answer when there is nothing to decide. ' +
+          "No prose outside the JSON." +
           (playbook ? `\n\nCompany notes (apply on top; the price book + calc'd quantities govern):\n${playbook}` : ""),
       },
       {

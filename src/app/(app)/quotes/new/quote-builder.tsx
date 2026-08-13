@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Sparkles, Loader2, ChevronDown, ChevronRight, Undo2, FileUp, ListPlus } from "lucide-react";
+import { Plus, Trash2, Sparkles, Loader2, ChevronDown, ChevronRight, Check, X, FileUp, ListPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
@@ -47,6 +47,17 @@ interface TaxRateLite {
   is_default: boolean;
 }
 type KitLite = { id: string; name: string; kit_items: unknown[] };
+
+/**
+ * One line the estimator PROPOSED. `keep` starts true on purpose.
+ *
+ * The kit picker defaults every row to unchecked, on Chris's rule — "don't auto select all items"
+ * — and that is right for a KIT, which is a template of what a job could need. A take-off is the
+ * opposite: it is a reading of the scope he just typed. Making him tick twenty-five boxes to get
+ * back what one press used to give him is a worse tool, not a safer one. He unticks what he does
+ * not want; nothing lands until he presses the button.
+ */
+type Proposal = DraftLineItem & { pid: number; keep: boolean };
 
 const blankItem = (): DraftLineItem => ({
   description: "",
@@ -167,11 +178,33 @@ export function QuoteBuilder({
   }
 
   const [scope, setScope] = useState(initialScope ?? "");
-  // Snapshot of the line items from BEFORE the last AI generate, so "Undo AI draft" can back the
-  // generated lines out without you having to delete them one by one (or save them by accident).
-  const [preGen, setPreGen] = useState<DraftLineItem[] | null>(null);
-  // Things the estimator wants you to review before sending (ambiguous counts, implied scope like
-  // "data outlets may need a home-run Cat6 to a central data box", owner decisions).
+  /**
+   * WHAT THE ESTIMATOR PROPOSED AND HAS NOT YET BEEN PUT ON THE ESTIMATE.
+   *
+   * Erik: "keep it to what is proposed for a line item that hasnt been confirmed already and
+   * inserted with surety … the readout now is a whole bunch of stuff i cant do anything about or
+   * doesnt make sense to the context and some it good but i think thats from the mixing logics."
+   *
+   * The mixing was this: a generate APPENDED every drafted line straight into the table below,
+   * while separately showing an amber box of prose that could not become anything. The box named
+   * things — some of which had silently become lines and some of which had not — and there was no
+   * way to act on either. That is "some insert, some don't", exactly.
+   *
+   * Two lists now, each meaning one thing. Below: THE ESTIMATE — every line on it is there because
+   * he put it there. Here: PROPOSALS — nothing on this list is on the estimate. A line leaves this
+   * list only by being taken or dropped, and it is never in both.
+   *
+   * Three bugs stop existing rather than getting fixed, which is why it is worth doing this way:
+   *   · a second Generate no longer stacks a duplicate set on the estimate (it replaces this list,
+   *     and nothing was inserted to duplicate);
+   *   · anything typed during the thirty seconds the model is thinking survives, because `items`
+   *     is never rewritten from a snapshot taken before the call;
+   *   · "Undo AI draft" is gone, and with it the restore-a-stale-snapshot hazard it carried.
+   */
+  const [proposed, setProposed] = useState<Proposal[]>([]);
+  // Things the estimator wants checked before sending — ambiguous counts, implied scope, owner
+  // decisions. Shown UNDER the proposals in the same card, because they are the same kind of
+  // thing: not on your estimate, and yours to decide about.
   const [questions, setQuestions] = useState<string[]>([]);
   const [aiError, setAiError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -264,20 +297,37 @@ export function QuoteBuilder({
     );
   }
 
-  // Both estimator entry points land here: snapshot the current lines, surface the review
-  // questions, and append the drafted lines (replacing empty rows). Shared so the text scope and
-  // the plan upload behave identically — including the one-click Undo.
+  // Both estimator entry points land here. It PROPOSES and does not insert: `items` is not touched
+  // at all, which is what keeps a line he typed during the thirty seconds the model was thinking.
+  // A second generate replaces the proposals rather than stacking a duplicate set on the estimate.
   function applyDraft(res: { items: DraftLineItem[]; questions: string[]; description?: string }) {
-    setPreGen(items);
     setQuestions(res.questions ?? []);
-    const real = items.filter((i) => i.description.trim());
-    setItems([...real, ...res.items]);
+    setProposed(
+      res.items
+        // A line with no description cannot be read, priced or corrected, and saveQuote drops it
+        // silently at save — so it would leave as a number in the subtotal and arrive as nothing.
+        .filter((i) => i.description.trim())
+        .map((i, n) => ({ ...i, pid: n, keep: true })),
+    );
     // THE SCOPE, POLISHED — as a DEFAULT, which means it fills a hole and never overwrites a hand.
     // Erik: "the description is the scope polished / by default and editable." If he has already
     // written the paragraph he wants the customer to read, a generate must not take it away from
     // him; that is the same law the playbook fills run under.
     if (res.description?.trim() && !description.trim()) setDescription(res.description.trim());
   }
+
+  /** Put the ticked proposals on the estimate. They leave this list; a line is never in both. */
+  function acceptProposals() {
+    const taking = proposed.filter((p) => p.keep);
+    if (!taking.length) return;
+    const real = items.filter((i) => i.description.trim());
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    setItems([...real, ...taking.map(({ pid, keep, ...line }) => line)]);
+    setProposed(proposed.filter((p) => !p.keep));
+  }
+
+  const editProposal = (pid: number, patch: Partial<Proposal>) =>
+    setProposed((prev) => prev.map((p) => (p.pid === pid ? { ...p, ...patch } : p)));
 
   function onGenerate() {
     setAiError(null);
@@ -380,11 +430,6 @@ export function QuoteBuilder({
                   </>
                 )}
               </Button>
-              {preGen != null && !generating && !uploading && (
-                <Button variant="outline" onClick={() => { setItems(preGen); setPreGen(null); setQuestions([]); }}>
-                  <Undo2 className="h-4 w-4" /> Undo AI draft
-                </Button>
-              )}
             </div>
 
             {/* …or take off a plan. Claude reads the PDF natively (legend, schedules, notes, and
@@ -413,26 +458,127 @@ export function QuoteBuilder({
                 <span className="text-xs text-slate-400">applies your note above to the plan</span>
               )}
             </div>
-            {preGen != null && !generating && (
-              <p className="text-xs text-slate-500">Review the added lines below — keep them, edit them, or undo the draft.</p>
-            )}
           </CardContent>
         </Card>
 
-        {/* Review these — the estimator's flagged questions/uncertainties, so you catch the things
-            that are easy to miss (implied scope, ambiguous counts, owner decisions) before sending. */}
-        {questions.length > 0 && !generating && (
-          <Card className="border-amber-300 bg-amber-50/60">
+        {/* ── THE READOUT: WHAT IT PROPOSED, AND NOTHING ELSE ──────────────────────────────────
+            One card, one meaning: none of this is on your estimate. Tick what you want, fix a
+            number where it is wrong, press the button once. What you leave unticked is dropped. */}
+        {(proposed.length > 0 || questions.length > 0) && !generating && !uploading && (
+          <Card className="border-brand/30">
             <CardContent className="py-4">
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold text-amber-900">Review these before sending</h3>
-                <button onClick={() => setQuestions([])} className="text-xs text-amber-700 hover:underline">Dismiss</button>
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-900">
+                    {proposed.length ? `Proposed — ${proposed.length} line${proposed.length === 1 ? "" : "s"}` : "Worth checking"}
+                  </h3>
+                  {proposed.length > 0 && (
+                    <p className="text-xs text-slate-500">Nothing here is on your estimate yet.</p>
+                  )}
+                </div>
+                {proposed.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const allOn = proposed.every((p) => p.keep);
+                      setProposed(proposed.map((p) => ({ ...p, keep: !allOn })));
+                    }}
+                    className="text-xs font-medium text-slate-500 hover:text-slate-900"
+                  >
+                    {proposed.every((p) => p.keep) ? "Untick all" : "Tick all"}
+                  </button>
+                )}
               </div>
-              <ul className="list-disc space-y-1.5 pl-5 text-sm text-amber-900">
-                {questions.map((q, i) => (
-                  <li key={i}>{q}</li>
+
+              <div className="space-y-2">
+                {proposed.map((p) => (
+                  <div
+                    key={p.pid}
+                    className={`grid grid-cols-12 items-start gap-2 rounded-lg border p-2 ${p.keep ? "border-slate-200 bg-white" : "border-slate-100 bg-slate-50/70 opacity-55"}`}
+                  >
+                    <div className="col-span-1 pt-2.5">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4"
+                        checked={p.keep}
+                        onChange={(e) => editProposal(p.pid, { keep: e.target.checked })}
+                        aria-label={`Add ${p.description}`}
+                      />
+                    </div>
+                    <div className="col-span-11 sm:col-span-4">
+                      <Input
+                        placeholder="Description"
+                        value={p.description}
+                        onChange={(e) => editProposal(p.pid, { description: e.target.value })}
+                      />
+                      {p.flag && (
+                        <span className="mt-1 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-800">
+                          {p.flag}
+                        </span>
+                      )}
+                    </div>
+                    <div className="col-span-3 sm:col-span-2">
+                      <NumberInput placeholder="Qty" value={p.quantity} onValueChange={(n) => editProposal(p.pid, { quantity: n })} />
+                    </div>
+                    <div className="col-span-3 sm:col-span-1">
+                      <Input placeholder="ea" value={p.unit} onChange={(e) => editProposal(p.pid, { unit: e.target.value })} />
+                    </div>
+                    <div className="col-span-4 sm:col-span-2">
+                      <NumberInput placeholder="Unit $" value={p.unit_price} onValueChange={(n) => editProposal(p.pid, { unit_price: n })} />
+                    </div>
+                    <div className="col-span-2 flex items-center justify-end gap-1">
+                      <span className="text-sm font-medium text-slate-700">{formatCurrency(p.quantity * p.unit_price)}</span>
+                      <button
+                        type="button"
+                        onClick={() => setProposed((prev) => prev.filter((x) => x.pid !== p.pid))}
+                        className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                        aria-label="Drop this proposal"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
                 ))}
-              </ul>
+              </div>
+
+              {proposed.length > 0 && (
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  <Button variant="primary" onClick={acceptProposals} disabled={!proposed.some((p) => p.keep)}>
+                    <Check className="h-4 w-4" />
+                    Add {proposed.filter((p) => p.keep).length} to the estimate
+                  </Button>
+                  <button
+                    type="button"
+                    onClick={() => setProposed([])}
+                    className="text-sm text-slate-500 hover:text-slate-900"
+                  >
+                    Drop them all
+                  </button>
+                  <span className="text-sm text-slate-500">
+                    {formatCurrency(
+                      proposed.filter((p) => p.keep).reduce((t, p) => t + p.quantity * p.unit_price, 0),
+                    )}
+                  </span>
+                </div>
+              )}
+
+              {/* Not line items — things it wants a decision on. Same card, because they belong to
+                  the same moment: read them, then take what you want. */}
+              {questions.length > 0 && (
+                <div className={proposed.length ? "mt-4 border-t border-slate-200 pt-3" : ""}>
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Worth checking</h4>
+                    <button onClick={() => setQuestions([])} className="text-xs text-slate-400 hover:text-slate-900">
+                      Clear
+                    </button>
+                  </div>
+                  <ul className="list-disc space-y-1 pl-5 text-sm text-slate-600">
+                    {questions.map((q, i) => (
+                      <li key={i}>{q}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </CardContent>
           </Card>
         )}
