@@ -586,6 +586,12 @@ export default async function SettingsPage({
                 <IntakeCard
                   on={intakeOn}
                   url={settings.public_handle ? `${orgPublicBaseUrl(settings)}/intake/${settings.public_handle}` : null}
+                  live={(() => {
+                    // Reuse the row the playbook editor already loaded rather than probing again —
+                    // the flagged form is right here, with its parsed needs.
+                    const w = playbookForms.find((f) => f.isWebsite);
+                    return w ? { id: w.id, name: w.name, count: w.needs.length } : undefined;
+                  })()}
                 />
               </Section>
               <Section title="Public lead link & QR">

@@ -36,30 +36,10 @@ async function staff(): Promise<Staff> {
  * phone in a crawlspace. Six of Chris's sheet rules could never match, and nobody found out for a
  * month.
  */
-/**
- * A FINGERPRINT OF WHAT THE EDITOR LOADED, so two people cannot silently overwrite each other.
- *
- * Erik and Andrew were both in Vivian Builders' intake playbook at the same time. I wrote his two
- * changes and verified them in a live browser; Andrew then pressed Save on a page that had loaded
- * BEFORE that write, and his stale copy went straight over the top. No error, no warning, nothing
- * in either UI — the whole exchange looked successful to both of us, and the questions simply
- * reverted. That is the silent-write law wearing a different hat: the row updated fine, it just
- * updated to the wrong thing.
- *
- * Deliberately a hash of the CONTENT rather than a version column: no migration, and it compares
- * the only thing that actually matters — is the playbook still what you were editing.
- */
-function playbookStamp(v: unknown): string {
-  const s = JSON.stringify(parsePlaybook(v).needs ?? []);
-  let h = 5381;
-  for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
-  return String(h);
-}
-
 export async function savePlaybook(
   formId: string,
   needs: unknown,
-  /** playbookStamp() of what the editor opened. Omitted = an old client; save as before rather
+  /** stampNeeds() of what the editor opened. Omitted = an old client; save as before rather
    *  than refuse, because a deploy must never lock somebody out of their own questions. */
   baseStamp?: string,
 ): Promise<Result> {

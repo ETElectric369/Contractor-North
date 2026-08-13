@@ -7,6 +7,7 @@ import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { requireStaff } from "@/lib/staff-guard";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { modelFor, recordAiUsage } from "@/lib/ai-cost";
+import { parseAiJson } from "@/lib/ai-json";
 import { listJobScopes } from "@/lib/analytics/job-profitability";
 import { OVERHEAD_CATEGORIES } from "./constants";
 
@@ -121,44 +122,6 @@ async function insertItemizedBill(
 
 /** Pull a JSON object out of a Claude reply (tolerates ```json fences and a
  *  trailing comma before a closing bracket — a common model slip). */
-function extractJsonObject(text: string): string {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const body = fenced ? fenced[1] : text;
-  const start = body.indexOf("{");
-  const end = body.lastIndexOf("}");
-  if (start === -1 || end === -1) throw new Error("No JSON in AI reply");
-  return body.slice(start, end + 1).replace(/,(\s*[}\]])/g, "$1");
-}
-
-/**
- * Parse a JSON object from an AI reply, healing the two failure modes we hit on
- * real receipts: (1) a long supplier invoice truncated mid-array, and (2) an
- * UNESCAPED double-quote inside a transcribed line (inch marks like 6" or 1/2"),
- * which breaks the string and yields 'Expected "," or "]" after array element'.
- * Try a direct parse; if it throws, ask the model to repair it into strict JSON
- * and parse that. Only throws a friendly error if both attempts fail.
- */
-async function parseAiJson(client: ReturnType<typeof getAnthropic>, raw: string): Promise<any> {
-  try {
-    return JSON.parse(extractJsonObject(raw));
-  } catch {
-    /* fall through to one repair round-trip */
-  }
-  const fix = await client.messages.create({
-    // Repairing malformed JSON needs no domain knowledge — pure mechanics, so it runs
-    // on the cheap model. The READING of a receipt (below) stays on the good one.
-    model: modelFor("classify"),
-    max_tokens: 4096,
-    system:
-      "You repair malformed JSON. Output ONLY one valid, complete JSON object — no prose, no code fences. " +
-      'Escape every double-quote that appears INSIDE a string value (inch marks: write 6\\" not 6"). ' +
-      "If the input was cut off, close the open arrays and objects. Never invent or drop data.",
-    messages: [{ role: "user", content: `Repair this into valid JSON:\n\n${raw}` }],
-  });
-  const t = fix.content.find((b) => b.type === "text") as { text: string } | undefined;
-  return JSON.parse(extractJsonObject(t?.text ?? ""));
-}
-
 /**
  * The heart of "Organize My": given an already-uploaded storage file, have
  * Claude read the image, classify it (receipt / note / job document), extract
@@ -264,7 +227,7 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
     // METER (0162): receipt/document reads are a real cost centre, not just chat.
     void recordAiUsage({ orgId: ctx.orgId, model: (msg as { model?: string }).model ?? DEFAULT_MODEL, surface: "organize", usage: msg.usage as never });
     const text = msg.content.find((b) => b.type === "text") as { text: string } | undefined;
-    parsed = await parseAiJson(client, text?.text ?? "");
+    parsed = await parseAiJson(client, text?.text ?? "", ctx.orgId);
   } catch (e: any) {
     // The capture is NOT lost — the placeholder row stays needs_review in the tray.
     revalidatePath("/organize");
@@ -512,7 +475,7 @@ In every "description", write inches as the word in (e.g. "6 in EMT", not 6") an
     // METER (0162): receipt/document reads are a real cost centre, not just chat.
     void recordAiUsage({ orgId: ctx.orgId, model: (msg as { model?: string }).model ?? DEFAULT_MODEL, surface: "organize", usage: msg.usage as never });
     const text = msg.content.find((b) => b.type === "text") as { text: string } | undefined;
-    parsed = await parseAiJson(client, text?.text ?? "");
+    parsed = await parseAiJson(client, text?.text ?? "", ctx.orgId);
   } catch (e: any) {
     return { ok: false, error: e?.message ?? "AI could not read this receipt." };
   }
@@ -847,7 +810,7 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
     // METER (0162): receipt/document reads are a real cost centre, not just chat.
     void recordAiUsage({ orgId: (item as { org_id?: string }).org_id, model: (msg as { model?: string }).model ?? DEFAULT_MODEL, surface: "organize", usage: msg.usage as never });
     const block = msg.content.find((b) => b.type === "text") as { text: string } | undefined;
-    parsed = await parseAiJson(client, block?.text ?? "");
+    parsed = await parseAiJson(client, block?.text ?? "", (item as { org_id?: string }).org_id);
   } catch (e: any) {
     return {
       ok: false,

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { stampNeeds } from "@/lib/playbook/stamp";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
   Check,
@@ -150,9 +150,16 @@ export function PlaybookManager({
   // walk-through. Default to the private one; orgs with a single form are unaffected.
   /** The last option list each question carried, so a kind round trip can put it back. */
   const lastOptions = useRef(new Map<string, string[]>());
-  const [formId, setFormId] = useState((forms.find((f) => !f.isWebsite) ?? forms[0])?.id ?? "");
+  // ?form=<id> WINS. The default below is a guess about which set you probably meant; a link that
+  // names one is not a guess. /forms/[id]'s "edit it in Settings → Playbook" banner carries the id,
+  // because without it Andrew followed that link from his WEBSITE form and landed on the
+  // walk-through — ten questions that were not the ones he came to change.
+  const linked = useSearchParams().get("form");
+  const [formId, setFormId] = useState(
+    (forms.find((f) => f.id === linked) ?? forms.find((f) => !f.isWebsite) ?? forms[0])?.id ?? "",
+  );
   // What this form looked like when the page loaded. Sent on save so a concurrent edit is
-  // REFUSED instead of overwritten — see playbookStamp in playbook-actions.
+  // REFUSED instead of overwritten — see stampNeeds in lib/playbook/stamp.
   const baseStamps = useMemo(
     () => new Map(forms.map((f) => [f.id, f.owned ? stampNeeds(f.needs) : undefined])),
     [forms],
@@ -295,7 +302,19 @@ export function PlaybookManager({
       setErr(null);
       setMsg(null);
       const r = await fn();
-      if (!r.ok) return setErr(r.error ?? "Couldn't save that.");
+      if (!r.ok) {
+        // REFRESH ON FAILURE TOO. This returned early, so after a refused save the `forms` prop was
+        // never refetched, `baseStamps` never recomputed, and the next Save re-sent the identical
+        // stale stamp and was refused identically — forever. One stale load turned the editor into
+        // a machine that answered every Save with "Someone else changed these questions", with no
+        // reload affordance at all inside the installed PWA. That IS the frozen playbook.
+        //
+        // The refresh only reloads the STORED version into `forms`; his edits stay in `needs`
+        // untouched, so pressing Save again now compares against what is really on the row.
+        setErr(r.error ?? "Couldn't save that.");
+        router.refresh();
+        return;
+      }
       setDirty(false);
       setMsg(done);
       if (resyncs) setLoadedFor("");
@@ -713,7 +732,6 @@ export function PlaybookManager({
           </Button>
         )}
 
-        {err && <span className="text-sm text-rose-600">{err}</span>}
         {msg && !err && <span className="text-sm font-medium text-emerald-700">{msg}</span>}
       </div>
 
@@ -732,7 +750,17 @@ export function PlaybookManager({
           Settings page. Offset above the mobile bottom nav, because the nav's backdrop-filter
           builds a stacking context that beats ordinary content — which is precisely how a Save
           button has ended up underneath it before (cn-v57). Above `shell:` there is no nav. */}
-      {dirty && !pending && (
+      {/* AN ERROR HERE IS NOT A FOOTNOTE. It used to render as a one-line rose span at the bottom
+          of a long scrolling editor, beside a Save button somebody had just pressed from muscle
+          memory — and the message it most often carries ("someone else changed these questions")
+          is the one whose entire point is that the user must act before their work is safe. */}
+      {err && (
+        <div className="sticky bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-20 rounded-lg border border-rose-300 bg-rose-50/95 px-3 py-2 text-sm text-rose-900 shadow-md backdrop-blur shell:bottom-2">
+          {err}
+        </div>
+      )}
+
+      {dirty && !pending && !err && (
         <div className="sticky bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-20 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50/95 px-3 py-2 shadow-md backdrop-blur shell:bottom-2">
           <span className="text-sm font-medium text-amber-900">
             Not saved yet &mdash; {form.isWebsite ? "your website still asks the old questions" : "your inspector still asks the old questions"}

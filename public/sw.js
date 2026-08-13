@@ -4,7 +4,7 @@
 // so a SW bug can't trap users on old code. We only cache hashed/immutable
 // static assets and an offline fallback page. API and auth requests are never
 // touched. Bump VERSION to invalidate the static cache.
-const VERSION = "cn-v712";
+const VERSION = "cn-v713";
 const STATIC_CACHE = `static-${VERSION}`;
 // Pages visited while online, kept so a dead zone shows the real page instead of /offline.
 // SEPARATE from the static cache because it holds ORG DATA and has to be purgeable on sign-out.
@@ -44,6 +44,20 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return;
   // Never cache or intercept API / auth traffic.
   if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/auth/")) return;
+
+  // NOR THE PUBLIC DOORS. The navigation arm below falls back to a cached copy whenever the
+  // network fetch rejects, and a playbook edit is a DATABASE change — no deploy, so nothing ever
+  // invalidates that copy. Andrew testing his own form on his own phone, after one flaky load,
+  // gets served the exact HTML from before his edit, Budget question and all, and reloading does
+  // not help. These pages belong to strangers on somebody else's website; an offline fallback for
+  // them was never the point of the page cache, which exists to hold the crew's own job pages.
+  if (
+    url.pathname.startsWith("/intake/") ||
+    url.pathname.startsWith("/inquire/") ||
+    url.pathname.startsWith("/estimate/") ||
+    url.pathname.startsWith("/pick/")
+  )
+    return;
 
   // Page navigations: network-first → cache → offline page. Never serve stale html.
   //

@@ -1,6 +1,7 @@
 "use server";
 import { customerAddressFrom } from "@/lib/inquiries/lead-address";
 import { dbError } from "@/lib/db-error";
+import { parseAiJson } from "@/lib/ai-json";
 
 import { revalidatePath } from "next/cache";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
@@ -960,6 +961,14 @@ async function runEstimator(
       // an estimate that spends its whole budget calculating exits the loop mid-tool-call with no
       // text to parse — the contractor gets an error instead of a draft, which is the worst
       // outcome of the three.
+      //
+      // COSTS A CACHE MISS, knowingly. The tools block sits in front of the price-book cache
+      // breakpoint, so dropping it re-bills the whole catalog on the last round of any estimate
+      // that called a calculator. `tool_choice: {type: "none"}` would forbid tool use while
+      // leaving the prefix intact — the API takes it, but @anthropic-ai/sdk 0.36.3 does not type
+      // it, and casting past the SDK on the estimator is not a trade worth making for an
+      // optimisation that is invisible on a book this size. Revisit with the SDK bump, BEFORE the
+      // CED net pricing import multiplies the catalog.
       ...(tools && round < LAST_ROUND ? { tools } : {}),
       messages: convo,
     });
@@ -990,8 +999,29 @@ async function runEstimator(
     .map((b) => (b as { text: string }).text)
     .join("\n");
 
-  const objText = text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
-  const parsed = JSON.parse(objText) as { items?: any[]; questions?: any[]; description?: unknown };
+  /**
+   * THE ANSWER IS READ PROPERLY NOW.
+   *
+   * This was `JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1))` — no fence
+   * handling, no trailing-comma scrub, no repair, on the single most expensive operation in the
+   * product. One unescaped inch mark in a description (`3/4" EMT`, the everyday vocabulary of this
+   * trade) breaks the string and the whole take-off becomes "Estimator failed: Unexpected token".
+   * Because the odds of hitting one rise with the SIZE of the take-off, it reads from the outside
+   * as the estimator working sometimes and not others.
+   *
+   * TRUNCATION IS CHECKED FIRST AND NEVER SALVAGED. materials/actions.ts recovers what it can from
+   * a cut-off array by trimming to the last complete object; that is right for a shopping list and
+   * wrong here. A take-off that quietly loses its last four lines is a wrong PRICE wearing the
+   * appearance of a finished one, and nothing on screen would say a line went missing. Say it ran
+   * long instead, and let him split the job.
+   */
+  if (msg.stop_reason === "max_tokens")
+    throw new Error("That take-off ran longer than one pass — split the plan, or trim the scope and try again.");
+  const parsed = (await parseAiJson(client, text, (org as { id?: string } | null)?.id)) as {
+    items?: any[];
+    questions?: any[];
+    description?: unknown;
+  };
   const description = String(parsed.description ?? "").replace(/\s+/g, " ").trim().slice(0, 2000);
   const raw = Array.isArray(parsed.items) ? parsed.items : [];
   const questions = Array.isArray(parsed.questions)

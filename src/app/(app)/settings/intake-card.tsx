@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Copy, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -17,7 +18,16 @@ import { setPublicIntake } from "./intake-actions";
 const embedSnippet = (url: string) =>
   `<iframe src="${url}?embed=1" title="Request an estimate" style="width:100%;border:0;min-height:820px"></iframe>`;
 
-export function IntakeCard({ on, url }: { on: boolean; url: string | null }) {
+export function IntakeCard({
+  on,
+  url,
+  live,
+}: {
+  on: boolean;
+  url: string | null;
+  /** The form the door actually serves, if there is one. See the block below. */
+  live?: { id: string; name: string; count: number };
+}) {
   const router = useRouter();
   const [err, setErr] = useState<string | null>(null);
   const [copied, setCopied] = useState<"link" | "embed" | null>(null);
@@ -38,6 +48,25 @@ export function IntakeCard({ on, url }: { on: boolean; url: string | null }) {
       </p>
       {on && url ? (
         <div className="space-y-2">
+          {/* WHICH FORM IS ON THE OTHER END OF THIS LINK.
+              The card printed a URL and never said what it served, so there was no way to check
+              the form against the editor — and when the two disagreed, the only available reading
+              was "the website is broken". That is exactly what Andrew reported. It names the form,
+              counts its questions and links straight into that form in the editor. */}
+          {live ? (
+            <p className="text-sm text-slate-600">
+              This link serves <strong className="font-medium">{live.name}</strong> &mdash;{" "}
+              {live.count} question{live.count === 1 ? "" : "s"}.{" "}
+              <Link href={`/settings?tab=playbook&form=${live.id}`} className="font-medium text-slate-900 underline underline-offset-2">
+                Edit these questions
+              </Link>
+            </p>
+          ) : (
+            <p className="text-sm text-amber-700">
+              The door is on but no form is flagged for it &mdash; customers will see nothing. Switch it
+              off and on again to seed one.
+            </p>
+          )}
           <div className="flex flex-wrap items-center gap-2">
             <code className="max-w-full overflow-x-auto rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-700">{url}</code>
             <Button type="button" size="sm" variant="secondary" onClick={() => copy(url, "link")}>

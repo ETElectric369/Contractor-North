@@ -29,15 +29,24 @@ export interface PublicNeed {
  * never the machinery behind the price.
  */
 export function publicIntakeNeeds(pb: Playbook): PublicNeed[] {
-  return pb.needs
-    .filter((n) => n.slot?.type !== "scopes")
-    .map((n) => ({
-    key: n.key,
-    label: n.label,
-    ask: n.ask,
-    ...(n.slot ? { slot: n.slot } : {}),
-    ...(n.when ? { when: n.when } : {}),
-  }));
+  const kept = pb.needs.filter((n) => n.slot?.type !== "scopes");
+  // PRUNE THE RULES THAT NAME WHAT WE JUST DROPPED. A `when` clause pointing at a scopes need can
+  // never resolve on a page where that need does not exist, so the question it gated either never
+  // appears (a question the contractor wrote, silently missing from his own form) or appears
+  // unconditionally (one he meant to hide). Neither is visible in the editor, which renders the
+  // full playbook. Dropping the whole clause list rather than the need keeps the question
+  // REACHABLE — the same way round parse.ts already degrades a rule it cannot honour.
+  const live = new Set(kept.map((n) => n.key));
+  return kept.map((n) => {
+    const when = (n.when ?? []).filter((c) => live.has(c.key));
+    return {
+      key: n.key,
+      label: n.label,
+      ask: n.ask,
+      ...(n.slot ? { slot: n.slot } : {}),
+      ...(when.length ? { when } : {}),
+    };
+  });
 }
 
 /**
@@ -45,6 +54,10 @@ export function publicIntakeNeeds(pb: Playbook): PublicNeed[] {
  * the door on. Deliberately small: every public question is friction, and the walk-through will
  * re-ask anything that matters once a human is involved. Slots on EVERY need — there is no Nort
  * on the public page (v1), so an open need would render nothing.
+ *
+ * NOTE ON OPEN NEEDS: the claim above that one "would render nothing" is not what the form does
+ * — intake-form's final branch renders a slotless need as a bare one-line text box with no
+ * guidance, which is worse than nothing because it looks deliberate. Give every need a slot.
  *
  * "Do you have plans?" gates its follow-up with a `when` clause — the conditional reveal Andrew
  * asked for, built from machinery the playbook already had. (The file upload he also asked for is

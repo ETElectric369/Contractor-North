@@ -467,20 +467,24 @@ export async function generateMaterialDraft(
       max_tokens: 2000,
       system:
         'You are a material estimator for a trade contractor. Given a scope of work, output a JSON array of material take-off items. Each item: {"description": string, "part_number": string|null, "quantity": number, "unit": string (ea/ft/box/roll/lot), "vendor": string|null, "est_cost": number|null (per-unit USD, rough)}. Include wire, conduit, fittings, breakers, devices, boxes, etc. as appropriate. Respond with ONLY the JSON array — no prose, no code fences.',
-      // Prefill the assistant turn with "[" so the model is forced to begin the
-      // JSON array immediately (no preamble, no ```json fence). We prepend it back
-      // before parsing. This eliminates the "No JSON array in response" failures.
-      messages: [
-        { role: "user", content: scope },
-        { role: "assistant", content: "[" },
-      ],
+      // NO ASSISTANT PREFILL. This turn used to end with `{ role: "assistant", content: "[" }` to
+      // force the model straight into a JSON array — a technique that stopped being supported on
+      // the 4.6-and-later family. On claude-opus-4-8 the API rejects it outright, so EVERY call to
+      // this action has been returning a 400 and the catch below turned it into
+      // "AI generation failed: …". The AI material take-off has simply not worked, and because the
+      // failure is a caught string it never reached error_events either.
+      //
+      // parseDraftArray already does the job the prefill was there for: it strips code fences and
+      // finds the array. Both halves had to come off together — dropping the prefill while still
+      // prepending "[" below would produce "[[{…}]" and fail both the parse and the salvage.
+      messages: [{ role: "user", content: scope }],
     });
     void recordAiUsage({ orgId: await currentOrgId(), model: DEFAULT_MODEL, surface: "materials", usage: msg.usage as never });
 
     const block = msg.content.find((b) => b.type === "text") as
       | { text: string }
       | undefined;
-    const raw = "[" + (block?.text ?? "");
+    const raw = block?.text ?? "";
     const items = (parseDraftArray(raw) as DraftMaterial[]).map(
       (i) => ({
         description: String(i.description ?? ""),

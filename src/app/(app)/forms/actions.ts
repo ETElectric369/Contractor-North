@@ -1,5 +1,6 @@
 "use server";
 import { dbError } from "@/lib/db-error";
+import { parsePlaybook } from "@/lib/playbook/parse";
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
@@ -203,6 +204,31 @@ export async function updateForm(
     return {
       ok: false,
       error: `${severe[0].message}${severe.length > 1 ? ` (+${severe.length - 1} more)` : ""}`,
+    };
+
+  /**
+   * A PLAYBOOK-BACKED FORM CANNOT BE EDITED HERE, AND SAYING SO IS NOT ENOUGH.
+   *
+   * /forms/[id] already carries a banner whose own words are "A SHEET EDITOR THAT SILENTLY DOES
+   * NOTHING IS WORSE THAN NO EDITOR" — and then it left the editor enabled and the write allowed.
+   * So this is what actually happened to Andrew:
+   *
+   *   `schema` is a live MIRROR of the playbook (savePlaybook writes sheetFromPlaybook(pb) beside
+   *   it), so this page renders every one of his website's questions, Budget included. He deleted
+   *   Budget here and saved. The update below wrote `schema` and not `playbook` — and the public
+   *   door reads through playbookForForm, which prefers `playbook` and never looks at `schema`.
+   *   Success toast, unchanged form, and the next playbook save regenerates the mirror and puts
+   *   Budget back. He rang Erik the next morning to say the playbook was frozen.
+   *
+   * Refusing is the honest answer: there is nowhere for this edit to go. Name is still editable —
+   * it is a real column that nothing mirrors — so only the fields are refused.
+   */
+  const { data: existing } = await supabase.from("forms").select("playbook, schema").eq("id", id).maybeSingle();
+  const isPlaybook = parsePlaybook((existing as { playbook?: unknown } | null)?.playbook).needs.length > 0;
+  if (isPlaybook && JSON.stringify(schema) !== JSON.stringify((existing as { schema?: unknown } | null)?.schema))
+    return {
+      ok: false,
+      error: "These questions live in the playbook now — this page only shows a copy. Edit them in Settings → Playbook.",
     };
 
   // RLS isolates by org; the id match scopes the update to this form.

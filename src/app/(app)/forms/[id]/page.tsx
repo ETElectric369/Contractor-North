@@ -10,6 +10,7 @@ import { DeleteFormButton } from "./delete-form-button";
 import { DeleteSubmissionButton } from "./delete-submission-button";
 import type { FormField } from "../actions";
 import { jobLabel } from "@/lib/schedule-options";
+import { parsePlaybook } from "@/lib/playbook/parse";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +36,9 @@ export default async function FormDetailPage({
 
   if (!form) notFound();
   const fields = (form.schema ?? []) as FormField[];
+  // A REAL playbook, not merely a non-null column: parsePlaybook is the tolerant reader every
+  // other surface uses, and `{}` or `{needs: []}` must not count as one.
+  const isPlaybook = parsePlaybook((form as { playbook?: unknown }).playbook).needs.length > 0;
 
   const [{ data: jobs }, { data: subs }] = await Promise.all([
     supabase
@@ -64,13 +68,20 @@ export default async function FormDetailPage({
           )}
         </div>
         <div className="flex items-center gap-1">
-          <EditFormButton
-            formId={form.id}
-            name={form.name}
-            description={form.description}
-            isInspection={!!(form as { is_inspection?: boolean }).is_inspection}
-            fields={fields}
-          />
+          {/* NO EDIT BUTTON ON A PLAYBOOK-BACKED FORM. The fields below are a MIRROR of the
+              playbook, regenerated on every playbook save, so an edit here has nowhere to go —
+              which is how Andrew deleted his website's Budget question, got a success, and
+              changed nothing. updateForm refuses the write too; this is so he never finds the
+              door in the first place. */}
+          {!isPlaybook && (
+            <EditFormButton
+              formId={form.id}
+              name={form.name}
+              description={form.description}
+              isInspection={!!(form as { is_inspection?: boolean }).is_inspection}
+              fields={fields}
+            />
+          )}
           <DeleteFormButton formId={form.id} />
         </div>
       </div>
@@ -78,10 +89,18 @@ export default async function FormDetailPage({
       {/* A SHEET EDITOR THAT SILENTLY DOES NOTHING IS WORSE THAN NO EDITOR. Once this form has a
           playbook (0179) the inspector asks from the playbook, so editing the fields here would
           look like it worked and change nothing on a job site. Say where the real edit lives. */}
-      {(form as { playbook?: unknown }).playbook ? (
+      {isPlaybook ? (
         <div className="mb-6 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          <span>This walk-through is a playbook now — the questions below are a copy of its closed half.</span>
-          <Link href="/settings?tab=playbook" className="font-medium underline underline-offset-2">
+          <span>
+            {(form as { is_public_intake?: boolean }).is_public_intake
+              ? "These are the questions on your website. What you see below is a read-only copy — editing it here would change nothing."
+              : "This walk-through is a playbook now — the questions below are a copy of its closed half."}
+          </span>
+          {/* CARRIES THE FORM ID. Without it the editor opens on whichever form it defaults to,
+              which for an org with both a website form and a walk-through is the other one —
+              so "edit it over there" landed on ten questions that were not the ones he came to
+              change, and looked like a playbook that refused to show him his own work. */}
+          <Link href={`/settings?tab=playbook&form=${form.id}`} className="font-medium underline underline-offset-2">
             Edit it in Settings &rarr; Playbook
           </Link>
         </div>
