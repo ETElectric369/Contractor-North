@@ -149,8 +149,11 @@ describe("the two rules the model does not get to bend", () => {
       parseHeard(JSON.stringify({ fills: [{ key: "length_ft", value: 16, heard: "16 by 20" }] })),
     );
     expect(out.answers.length_ft).toBe(16);
-    // ...and the derived count stops being asked, without anybody choosing.
-    expect(missingNeeds(ET_ELECTRIC, out.answers).map((n) => n.key)).not.toContain("device_count");
+    // ...and the outlet count is STILL asked. This line used to assert the opposite, on the
+    // strength of a why line claiming the count fell out of the wall feet — Erik cut that rule:
+    // "it shouldnt be more complicated than adding whatever is stated." Measuring a room must
+    // never remove a question whose answer nothing else produces.
+    expect(missingNeeds(ET_ELECTRIC, out.answers).map((n) => n.key)).toContain("device_count");
   });
 
   it("a `heard` that isn't in the transcript is refused — no paraphrasing a measurement", () => {

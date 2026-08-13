@@ -135,24 +135,32 @@ describe("the storage room, turn by turn", () => {
     expect(missingNeeds(ET_ELECTRIC, { ...withFeed, walls: "Finished" }).map((n) => n.key)).toContain("wiring_method");
   });
 
-  it("DERIVE IT, OR ELSE ASK IT — the outlet count", () => {
-    // Erik's correction, and it is the sharper rule: "i dont necessarily want it to never ask me
-    // an outlet count, thats important and if it cant be resolved from the info then its an
-    // appropriate question." The law is not "never ask X", it is DON'T ASK WHAT IS ALREADY
-    // RESOLVED. 210.52(A) gets the count off wall feet — but only if somebody walked it.
+  it("ADD WHATEVER IS STATED — the outlet count is asked, and measuring the room does not take it away", () => {
+    // Erik, reading his own why line back: "i dont understand the /6 rule, it shouldnt be more
+    // complicated than adding whatever is stated." The divisor was an inference off 210.52(A) that
+    // I had written into his mouth, and the derivation it promised existed nowhere in the codebase
+    // — so pulling out a tape made the outlet count leave the estimate. The more carefully he
+    // worked, the less he got.
     const noTape = { work: ["Add circuits"] };
     expect(missingNeeds(ET_ELECTRIC, noTape).map((n) => n.key)).toContain("device_count");
 
-    // Room measured → it is arithmetic, and the question goes away on its own.
-    const measured = { ...noTape, length_ft: 16 };
-    expect(missingNeeds(ET_ELECTRIC, measured).map((n) => n.key)).not.toContain("device_count");
+    // Measured room, SAME question. This is the assertion that used to say `not.toContain`.
+    const measured = { ...noTape, length_ft: 16, width_ft: 20 };
+    expect(missingNeeds(ET_ELECTRIC, measured).map((n) => n.key)).toContain("device_count");
   });
 
-  it("...and a guessed count is nulled the moment the room IS measured", () => {
-    // The derived value wins, and it wins without anybody choosing — otherwise a phone-call guess
-    // outlives the tape measure and rides into the price as if it had been counted.
-    const guessed = { work: ["Add circuits"], device_count: 6 };
-    expect(clearInapplicable(ET_ELECTRIC, { ...guessed, length_ft: 16 }).device_count).toBeNull();
+  it("...and his count survives the tape rather than being nulled by it", () => {
+    // The old rule cleared this on the grounds that a derived value would replace it. Nothing ever
+    // derived one, so the clear was a straight deletion of the only number anybody had.
+    const stated = { work: ["Add circuits"], device_count: 6 };
+    expect(clearInapplicable(ET_ELECTRIC, { ...stated, length_ft: 16 }).device_count).toBe(6);
+  });
+
+  it("no why line in this playbook claims a derivation the code does not perform", () => {
+    // The general form of the same mistake: a why line is where the answer lands in the price, and
+    // a why line that describes arithmetic nobody wrote is a promise the estimate cannot keep.
+    const whys = ET_ELECTRIC.needs.map((n) => `${n.why ?? ""} ${n.note ?? ""}`).join(" ");
+    expect(whys).not.toMatch(/divided by \d|\/\s*\d+\s*(gives|=)/i);
   });
 
   it("fixture count is never asked — that one really is derived", () => {

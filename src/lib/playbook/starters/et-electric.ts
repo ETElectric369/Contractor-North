@@ -11,6 +11,21 @@ import type { Playbook } from "../types";
  * Where a line quotes him, it quotes him. Where it reasons about the trade, that reasoning is mine
  * and he should cut it — an inference dressed as his own judgement is worse than a blank.
  *
+ * ── AND HE CUT ONE. THE RULE THAT CAME OUT OF IT: ────────────────────────────────────────────
+ *
+ *   "i dont understand the /6 rule, it shouldnt be more complicated than adding whatever is
+ *    stated."
+ *
+ * A why line said the outlet count fell out of the wall feet, divided by 6, per 210.52(A). It read
+ * like his shop rule and it was a code section I had gone and looked up. The tell is simple and it
+ * generalises: A RATE HE PUT IN HIS OWN PRICE LIST, APPLIED TO A NUMBER HE STATED, IS HIS. A
+ * divisor I found in a book and wrote into his mouth is mine, and it does not belong in a playbook
+ * however correct it is. Chris's deck rates are the first kind — D1 per square foot is a row in
+ * his price list. The /6 was the second.
+ *
+ * His own live playbook is the shortest possible statement of the rule: what is the job, what
+ * materials are needed, how long will it take. Three answers, added up. Nothing derived.
+ *
  * THE JOB THIS WAS BUILT AGAINST, in his words, in one breath, unprompted:
  *
  *   "2 new circuits one for lights and one for outlets installed new in a finished room with
@@ -151,12 +166,13 @@ export const ET_ELECTRIC: Playbook = {
       measured: true,
       feeds: ["what"],
       when: [{ key: "work", in: ["Add circuits", "Lighting", "Remodel / rough-in"] }],
-      why: "Wall feet divided by 6 gives the outlet count under 210.52(A) — that's arithmetic, not a question.",
+      why: "With the width, the square footage — which is what sizes the lighting.",
       note:
-        "Under 210.52(A) no point along a wall is more than 6 ft from a receptacle, so the count comes out of the " +
-        "wall feet — ask me the room and show me the count. On the storage room that's 3 walls and a roll-up, which " +
-        "changes the answer, and it's arithmetic, not a question. But only when I've given you the room: if I haven't, " +
-        "the count is a fair thing to ask.",
+        "This used to claim the outlet count fell out of it: wall feet over 6, per 210.52(A). Erik, reading it back: " +
+        "\"i dont understand the /6 rule, it shouldnt be more complicated than adding whatever is stated.\" The " +
+        "divisor was MINE — an inference off a code section, written into his why line as though it were his shop " +
+        "rule. This file's own header says to cut exactly that, and he cut it himself: his live playbook has no " +
+        "outlet question and no room dimensions at all. It asks what the job is, what materials, and how many hours.",
     },
     {
       key: "width_ft",
@@ -186,17 +202,21 @@ export const ET_ELECTRIC: Playbook = {
       slot: { type: "number" },
       measured: true,
       feeds: ["what"],
-      // ASK IT ONLY IF I DIDN'T GIVE YOU THE ROOM. Erik: "i dont necessarily want it to never ask
-      // me an outlet count, thats important and if it cant be resolved from the info then its an
-      // appropriate question." Measure the room and it's arithmetic; skip the tape and it's a
-      // question — and the moment the dimensions arrive this stops applying and the derived count
-      // wins, with clearInapplicable nulling whatever was guessed.
-      when: [{ key: "work", in: ["Add circuits", "Remodel / rough-in"] }, { key: "length_ft", unknown: true }],
-      why: "Times the per-outlet price. Second choice — if I gave you the room you already have it off wall feet.",
+      // ASK IT. Erik: "it shouldnt be more complicated than adding whatever is stated."
+      //
+      // This question used to disappear the moment the room was measured, on the promise that the
+      // count would be DERIVED from wall feet instead. Two things were wrong with that. The
+      // derivation never existed anywhere in the codebase, so measuring the room made the outlet
+      // count leave the estimate entirely — the more carefully he worked, the less he got. And the
+      // divisor behind the promise was an inference off 210.52(A), not his number.
+      //
+      // He counts outlets. We add outlets. If he ever wants a count derived from a room he will
+      // say so, in his own words, with his own divisor.
+      when: [{ key: "work", in: ["Add circuits", "Remodel / rough-in"] }],
+      why: "Times the per-outlet price.",
       note:
-        "Second choice, not the first. If I've walked it with a tape you already have the count off wall feet and " +
-        "asking is noise. If I haven't — quoting off a phone call, or the room's full of somebody's storage — then " +
-        "my number is the best number there is and you should take it.",
+        "His number, taken as given. Quoting off a phone call or standing in a room full of somebody's storage, " +
+        "his count is the best count there is — and standing in an empty room with a tape it is still his count.",
     },
     {
       key: "panel_condition",
@@ -247,9 +267,10 @@ export const ET_ELECTRIC: Playbook = {
  * WHAT I DELIBERATELY DID NOT PUT IN, and why — each of these was on his real sheet and each one
  * failed him on 13125 Moraine Rd:
  *
- *   device_count / fixture_count  — 210.52 derives receptacles from wall feet. Asking a man to
- *                                   count outlets he hasn't laid out yet is asking for a guess and
- *                                   then pricing it as a fact.
+ *   fixture_count                 — a can layout is his design decision, and he states it in the
+ *                                   scope. (device_count was on this list too, on the grounds that
+ *                                   210.52 derives receptacles from wall feet. That was my
+ *                                   inference and he has since cut it — see its note.)
  *   attic_access / crawl_access   — two questions about a building he wasn't in. Folded into one
  *                                   `access` whose options are the ways he actually gets to work.
  *   "Panel" as a bare label       — not a question. It transmits nothing about the answer wanted,
