@@ -120,6 +120,11 @@ export function SetupInterview({
   const editNeed = (i: number, patch: Partial<Need>) =>
     setNeeds((ns) => (ns ? ns.map((n, j) => (j === i ? { ...n, ...patch } : n)) : ns));
 
+  // BOTH ESCAPE HATCHES SAVE EVERYTHING. This writes the WHOLE drafted set — every question and
+  // every why line Nort wrote, including the fourteen nobody read. That is the right behaviour (a
+  // drafted playbook beats an empty one, and Settings → Playbook is where you fix it) and it was
+  // the wrong label for it: "Skip these for now" reads as "write nothing", which is the opposite
+  // of what it does.
   const toWhere = () =>
     run(async () => {
       if (formId && needs) {
@@ -226,9 +231,25 @@ export function SetupInterview({
               the shape is obvious — which is the moment they can write their own, and the only
               definition of "taught" that matters here. */}
           {!needs?.length ? (
-            <p className="mt-3 flex items-center gap-2 text-sm text-slate-500">
-              <Loader2 className="h-4 w-4 animate-spin" /> Writing you a first draft…
-            </p>
+            /* A SPINNER IS NOT AN ERROR MESSAGE. draftMyPlaybook fails outright when the company has
+               no walk-through sheet — the ordinary state for anybody who reached this card without a
+               trade, because saveSetup only seeds one when a trade is set. `err` was being written
+               and then rendered UNDERNEATH a spinner that kept turning forever, so an honest failure
+               read as a slow one and people sat waiting on it. */
+            err ? (
+              <div className="mt-3 space-y-2">
+                <p className="text-sm text-rose-700">{err}</p>
+                <p className="text-sm text-slate-500">
+                  That usually means I never got your trade, so there are no questions to draft yet.
+                  Take the walk-through again from the cap button and tell me your trade &mdash; or
+                  write them yourself under Settings &rarr; Playbook.
+                </p>
+              </div>
+            ) : (
+              <p className="mt-3 flex items-center gap-2 text-sm text-slate-500">
+                <Loader2 className="h-4 w-4 animate-spin" /> Writing you a first draft…
+              </p>
+            )
           ) : (
             (() => {
               const n = needs[Math.min(whyAt, needs.length - 1)];
@@ -274,11 +295,11 @@ export function SetupInterview({
                         the others on real jobs where they actually cost something. */}
                     {i > 0 ? (
                       <Button type="button" variant="secondary" disabled={pending} onClick={toWhere}>
-                        I&rsquo;ve got it — the rest can wait
+                        I&rsquo;ve got it — save the rest as drafted
                       </Button>
                     ) : (
                       <button type="button" disabled={pending} onClick={toWhere} className="text-sm text-slate-500 underline-offset-2 hover:underline">
-                        Skip these for now
+                        Save Nort&rsquo;s drafts and read them later
                       </button>
                     )}
                   </div>

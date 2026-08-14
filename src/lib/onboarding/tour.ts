@@ -126,10 +126,10 @@ export const TOUR: TourStep[] = [
     say: (c) =>
       (c.trade ? `Right — I've got you as ${c.trade}. ` : "Good to meet you. ") +
       "Now the one that matters most — what trade are you in? " +
-      "If you sub most of it out, say that. 'General contractor, I sub out electrical and plumbing' " +
-      "tells me more than picking one word off a list. " +
-      "This is the answer that builds the questions I'll ask you on site and what an estimate " +
-      "thinks it's pricing — and it's where your starter job codes came from.",
+      "Say the one word that fits best — there are four starter walk-throughs, electrical, deck, " +
+      "plumbing and a general one, and the first trade word I spot picks it. " +
+      "This builds the questions I'll ask you on site, and tells the estimator what trade it's " +
+      "pricing. Your job codes came from the dropdown at sign-up; change those under Settings.",
     ask: "trade",
   },
   {
@@ -139,7 +139,7 @@ export const TOUR: TourStep[] = [
     say: (c) =>
       (c.city ? `And you're out of ${c.city}. ` : "") +
       "Where are you working out of, and how far do you go? " +
-      "The town puts the weather on your day, and the area is what your public page tells customers.",
+      "That's what customers see when they look you up.",
     ask: "city",
   },
   {
@@ -217,9 +217,10 @@ export const TOUR: TourStep[] = [
     key: "why-uses",
     title: "And why I need them",
     say:
-      "Because that's how I stop wasting your time. If a number can be worked out from something " +
-      "you already said, I don't make you count it. If you already told me, I don't ask twice. " +
-      "And when a line says 'times this equals that' — I can do that part myself.",
+      "Two reasons. If you already told me something, I don't ask you twice — that one I really do. " +
+      "And when I write the estimate, your why line is what tells me where that answer lands in the " +
+      "price. It's for reading, mine and yours. I don't run the sum in it, and I never work out a " +
+      "number you didn't give me.",
   },
 
   // ── 3. THE ROOM. Where everything is. ──────────────────────────────────────────────────────
@@ -237,7 +238,8 @@ export const TOUR: TourStep[] = [
     title: "Plus, search, bell",
     say:
       "Three in this corner. Plus makes anything new — a job, a customer, an estimate, a task — " +
-      "from any screen. The magnifying glass finds anything you've ever typed in here. " +
+      "from any screen. The magnifying glass finds your jobs, customers, estimates, invoices and " +
+      "appointments by name or number. " +
       "And the bell is what's waiting on you, whether or not you switch on phone notifications.",
   },
   {
@@ -272,8 +274,9 @@ export const TOUR: TourStep[] = [
     anchor: "sections-settings",
     title: "The whole business, one page",
     say:
-      "And this is it. Money and tax, scheduling, your website, your people, the connections to " +
-      "Google and the rest — all behind those sections. You don't have to remember any of it. " +
+      "And this is it. Money and tax, your crew's scheduling and job codes, your website, the " +
+      "connections to Google and the rest — all behind those sections. (Your people have their own " +
+      "page, under Office.) You don't have to remember any of it. " +
       "You only have to remember your initials.",
   },
   {
@@ -339,10 +342,11 @@ export const TOUR: TourStep[] = [
     title: "Writing it up",
     say:
       "Back in the truck you press Start the estimate, and the answers from that walk-through are " +
-      "already in it, marked as measured so nothing gets worked out twice. Nothing gets priced " +
-      "until you press Generate Line Items. I work off your own price list, flag anything that " +
-      "isn't in it yet as my guess and not your price, and hand you a short list to check before " +
-      "it goes out.",
+      "already in it, in your own words, taken as given rather than read back to you. Anything you " +
+      "priced standing on site is already a line. Press Generate Line Items and I don't touch your " +
+      "estimate — I hand you a list of PROPOSED lines. Tick the ones you want, fix any number I got " +
+      "wrong, and press Add. Nothing of mine lands until you do. I work off your own price list and " +
+      "I flag anything that isn't in it yet as my guess and not your price.",
   },
   {
     key: "run-job",

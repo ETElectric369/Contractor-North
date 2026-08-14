@@ -134,11 +134,14 @@ export function explainWhy(n: Need, i: number, total: number): string {
         ? "Last one. "
         : "";
   // Two flags worth one clause each, because they change what the answer DOES rather than what it
-  // means: a measured number goes straight into a price, and a hold stops the job.
+  // means. Both used to overstate: `measured` claimed "I do the arithmetic myself" (nothing derives
+  // an answer from another — hear.ts:41 forbids it in terms) and `hold` claimed to block pricing
+  // (holdingNeeds, resolve.ts:95, has no caller and "Start the estimate" is an unguarded link).
+  // A flag that says it stops you, and doesn't, teaches somebody to ignore the next flag too.
   const tail = n.measured
-    ? " That one's a number — it goes straight into a price, so I do the arithmetic myself."
+    ? " That one's a number — it goes straight into a price."
     : n.hold
-      ? " And that one's a stopper — I won't let you price the job without it."
+      ? " That one gets a 'before you price it' flag so it can't hide — nothing stops you starting the estimate without it."
       : "";
   const drafted = n.why?.trim();
   // ASK HIM, don't lecture him. The draft is a thing to agree with or correct in three seconds —

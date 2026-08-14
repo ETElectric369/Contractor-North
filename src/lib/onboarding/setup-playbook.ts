@@ -42,10 +42,11 @@ export const SETUP_PLAYBOOK: Playbook = {
       hold: true,
       feeds: ["what"],
       why:
-        "The one answer that lights up three dead surfaces: the job codes seeded at signup, the " +
-        "questions your walk-through asks on site, and what an estimate thinks it's pricing. " +
-        "If you sub most of it out, say that — 'general contractor, I sub out electrical and plumbing' " +
-        "is a better answer than picking one trade off a list.",
+        "Two things: the questions your walk-through asks on site, and what an estimate thinks " +
+        "it's pricing. (Your job codes came from the dropdown at sign-up — this doesn't change " +
+        "them.) SAY ONE WORD. There are four starter walk-throughs — electrical, deck, plumbing " +
+        "and a general one — and the FIRST trade word in your answer picks it, so " +
+        "\"I sub out electrical\" hands a general contractor an electrician's sheet.",
     },
     {
       key: "city",
@@ -53,7 +54,7 @@ export const SETUP_PLAYBOOK: Playbook = {
       ask: "What town are you working out of?",
       slot: { type: "text" },
       feeds: ["where"],
-      why: "Puts the weather on your day, and it's what customers see when they look you up.",
+      why: "What customers see when they look you up, and the town on your public page. (The weather on My Day comes off your company address under Settings.)",
     },
     {
       key: "service_area",

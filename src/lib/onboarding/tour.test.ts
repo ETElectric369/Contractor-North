@@ -3,6 +3,9 @@ import { DOCK } from "@/lib/dock";
 import { TOUR, sayOf, tourIndex, type TourCtx } from "./tour";
 import { SETUP_PLAYBOOK } from "./setup-playbook";
 
+/** A sentence that CLAIMS where something came from, as opposed to where it lives. */
+const ORIGIN_VERB = /\b(came|come|comes|built|builds|build|seeded|seeds|created|creates|set up|sets up|made|makes)\b/i;
+
 /** Somebody Nort has never met, and somebody he has. Lines that change must work for both. */
 const STRANGER: TourCtx = { first: "", trade: "", city: "", rate: "", returning: false };
 const KNOWN: TourCtx = { first: "Erik", trade: "electrical contractor", city: "Truckee", rate: "$145", returning: true };
@@ -220,8 +223,15 @@ describe("well-formed", () => {
 
     it("says out loud where the human still presses the button", () => {
       // The counterweight to the test above: cutting overclaims must not leave it vague.
+      //
+      // The estimate line moved when cn-v716 rebuilt that surface. It used to be "nothing gets
+      // priced until you press Generate Line Items", which was the only human-presses-it beat in
+      // that step because everything after the press landed by itself. Now the press is the
+      // SECOND gate, not the first, and the copy has to name the one that matters: the tick and
+      // the Add.
       expect(said).toContain("you send it");
-      expect(said).toContain("until you press generate line items");
+      expect(said).toContain("tick the ones you want");
+      expect(said).toContain("nothing of mine lands until you do");
       expect(said).toContain("unless you tick the box");
     });
 
@@ -240,8 +250,18 @@ describe("well-formed", () => {
       // The audit's skeptic caught an over-correction here: a narrow grep of the settings manager
       // and saveSetup "proved" the claim false and nearly deleted a TRUE sentence. The wiring is
       // one screen earlier, at signup. Assert the true shape, forbid the original false one.
+      //   cn-v718 (this):    past tense was never the safeguard — "it's where your starter job
+      //                      codes came from" is past tense AND still attributes them to the
+      //                      TRADE ANSWER, because "it" is "this is the answer that…". The August
+      //                      truth pass caught it again. So the assertion is now about the SOURCE,
+      //                      not the tense: any sentence that mentions job codes must name the
+      //                      sign-up dropdown in the same breath.
       expect(said).not.toContain("builds your job codes");
-      expect(said).toContain("starter job codes came from");
+      // Only an ORIGIN claim has to name the source. A sentence saying where job codes LIVE
+      // ("your crew's scheduling and job codes, behind those sections") is navigation, and true.
+      for (const sentence of said.split(/[.!?\n]/).filter((x) => x.includes("job codes") && ORIGIN_VERB.test(x)))
+        expect(sentence, `claims an origin for job codes without naming it: "${sentence.trim()}"`)
+          .toMatch(/sign-?up|dropdown/);
     });
 
     it("the tone step names the dial AND the limits that make it safe", () => {
@@ -275,5 +295,71 @@ describe("well-formed", () => {
     expect(tourIndex("nope")).toBe(0);
     expect(tourIndex(null)).toBe(0);
     expect(tourIndex(undefined)).toBe(0);
+  });
+});
+
+/**
+ * THE CLAIMS THAT CAME BACK, AND THE ONES THAT CAN.
+ *
+ * A truth pass in June cut eleven false claims out of this onboarding, one of which — "builds your
+ * job codes" — had already shipped. It came BACK, in a different sentence ("it's where your starter
+ * job codes came from"), and survived until the August pass found it again. A finding that can
+ * return in a paraphrase needs a test, not a memory.
+ *
+ * Each of these pins a claim to the code that would have to exist for it to be true. If somebody
+ * BUILDS one of these for real, the test is the place to come and delete.
+ */
+describe("no claim in the onboarding promises something the code does not do", () => {
+  const SPOKEN = [TOUR.map((s) => (typeof s.say === "function" ? s.say({} as never) : s.say)).join("\n"),
+    SETUP_PLAYBOOK.needs.map((n) => `${n.ask} ${n.why ?? ""}`).join("\n")].join("\n");
+
+  it("does not claim the job codes come from the trade ANSWER — they come from the sign-up dropdown", () => {
+    // create_organization seeds job_codes from p_codes, the <Select name="trade"> on /onboarding
+    // (onboarding/page.tsx → actions.ts p_codes → 0078_generic_org_seed.sql). saveSetup never
+    // touches job_codes. This exact claim has now been written twice and cut twice.
+    // Ban the false ATTRIBUTION, not the word. "Your job codes came from the dropdown at sign-up"
+    // is the true sentence and has to survive; what must not is anything crediting them to this
+    // answer, to Nort, or to the tour.
+    expect(SPOKEN).not.toMatch(/(builds|build|sets up|seeds|creates)[^.]{0,40}(your |the )?(starter )?job codes/i);
+    expect(SPOKEN).not.toMatch(/job codes[^.]{0,30}(came|come) from (this|that|it|your answer|what you)/i);
+    for (const sentence of SPOKEN.split(/[.!?\n]/).filter((x) => /job codes/i.test(x) && ORIGIN_VERB.test(x)))
+      expect(sentence, `claims an origin for job codes without naming it: "${sentence.trim()}"`)
+        .toMatch(/sign-?up|dropdown/i);
+  });
+
+  it("does not promise to DERIVE one answer from another", () => {
+    // hear.ts:41 forbids it in terms — "Never infer, never average, never compute" — and cn-v715
+    // removed the last need that was gated on the promise.
+    expect(SPOKEN).not.toMatch(/worked out from something you already said/i);
+    expect(SPOKEN).not.toMatch(/I don'?t make you count it/i);
+  });
+
+  it("does not promise to RUN the arithmetic in a why line", () => {
+    // Every reader of Need.why stores, displays, shape-checks or quotes it into a prompt. There is
+    // no evaluator anywhere.
+    expect(SPOKEN).not.toMatch(/times this equals that/i);
+    expect(SPOKEN).not.toMatch(/do (that|the) (part|sum|math|maths|arithmetic) myself/i);
+  });
+
+  it("does not claim a hold question BLOCKS pricing", () => {
+    // holdingNeeds (resolve.ts:95) has no caller and "Start the estimate" is an unguarded link.
+    expect(SPOKEN).not.toMatch(/won'?t let you price/i);
+    expect(SPOKEN).not.toMatch(/stopper/i);
+  });
+
+  it("does not claim the town drives the weather", () => {
+    // This answer writes settings.public_city; the weather reads organizations.city, and nothing
+    // syncs the two.
+    expect(SPOKEN).not.toMatch(/weather on your day/i);
+  });
+
+  it("does not claim search covers everything you have typed", () => {
+    // /api/search: five tables, names and numbers only, and leads are not among them.
+    expect(SPOKEN).not.toMatch(/finds anything you'?ve ever typed/i);
+  });
+
+  it("does not describe the estimator appending its lines to the estimate", () => {
+    // cn-v716: Generate proposes; nothing lands until the user ticks rows and presses Add.
+    expect(SPOKEN).not.toMatch(/marked as measured/i);
   });
 });
