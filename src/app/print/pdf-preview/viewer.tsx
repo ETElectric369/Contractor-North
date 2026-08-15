@@ -88,6 +88,9 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
         const ctx = canvas.getContext("2d")!;
         ctx.scale(dpr, dpr);
         await page.render({ canvasContext: ctx, viewport: vp }).promise;
+        // SHOW PAGE 1 THE MOMENT IT EXISTS. Waiting for every canvas made a 6-page doc feel
+        // as slow as its last page; the rest keep painting into the already-visible list.
+        if (n === 1) setState("ready");
       }
       setState("ready");
     } catch (e: any) {

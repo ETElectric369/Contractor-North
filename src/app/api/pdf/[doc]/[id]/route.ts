@@ -95,15 +95,21 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ doc: string
   const printTarget = `${url.origin}/print/${path}/${id}`;
   let fingerprint: string | null = null;
   const svc = createServiceClient();
+  // Phase timings land in the function log so slowness is measured, never guessed
+  // (Erik: "not near instant no" — on a confirmed HIT, so the cost is in these phases).
+  const t0 = Date.now();
+  const phases: Record<string, number> = {};
   try {
     const pre = await fetch(printTarget, {
       headers: reqCookie ? { cookie: reqCookie } : undefined,
       redirect: "manual",
       cache: "no-store",
     });
+    phases.preflight = Date.now() - t0;
     if (pre.status === 200) {
       const visibleHtml = (await pre.text()).replace(/<script[\s\S]*?<\/script>/gi, "");
       fingerprint = createHash("sha256").update(visibleHtml).digest("hex");
+      const tL = Date.now();
       const { data: hit } = await svc
         .from("doc_pdf_cache")
         .select("fingerprint, path")
@@ -111,9 +117,18 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ doc: string
         .eq("doc_id", id)
         .eq("margin", m)
         .maybeSingle();
+      phases.lookup = Date.now() - tL;
       if (hit?.fingerprint === fingerprint && hit.path) {
+        const tD = Date.now();
         const { data: blob } = await svc.storage.from("doc-pdfs").download(hit.path);
-        if (blob) return pdfResponse(new Uint8Array(await blob.arrayBuffer()), await docFilename(supabase, doc, id));
+        phases.download = Date.now() - tD;
+        if (blob) {
+          const bytes = new Uint8Array(await blob.arrayBuffer());
+          console.log(JSON.stringify({ pdfCache: "HIT", doc, id: id.slice(0, 8), kb: Math.round(bytes.length / 1024), ms: phases, total: Date.now() - t0 }));
+          return pdfResponse(bytes, await docFilename(supabase, doc, id));
+        }
+      } else {
+        console.log(JSON.stringify({ pdfCache: hit ? "STALE" : "MISS", doc, id: id.slice(0, 8), ms: phases }));
       }
     }
   } catch {
@@ -201,6 +216,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ doc: string
       `,
     });
     const pdf = await page.pdf({ format: "letter", printBackground: true });
+    console.log(JSON.stringify({ pdfCache: "RENDER", doc, id: id.slice(0, 8), renderMs: Date.now() - t0 }));
 
     // KEEP THE BYTES (0198). Best-effort: a storage hiccup must never cost the response the
     // user is waiting on. The fingerprint is the one computed BEFORE the render — if the
