@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { UserPlus } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { INSPECTION_TYPES } from "@/lib/statuses";
@@ -15,9 +16,9 @@ export const dynamic = "force-dynamic";
 export default async function InquiriesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ focus?: string }>;
+  searchParams: Promise<{ focus?: string; due?: string }>;
 }) {
-  const { focus } = await searchParams;
+  const { focus, due } = await searchParams;
   const supabase = await createClient();
 
   const [{ data: inqData }, { data: custData }] = await Promise.all([
@@ -81,7 +82,16 @@ export default async function InquiriesPage({
       .maybeSingle();
     focusExtra = (data as Inquiry) ?? null;
   }
-  const rows = focusExtra ? [focusExtra, ...inquiries] : inquiries;
+  // ?due=1 — THE FOLLOW-UP LIST, as a lens on this board rather than a new page (the shape the
+  // layout mock recommended and everyone agreed to). next_follow_up_at already IS the follow-up
+  // list (cn-v612); this is the first surface that shows it as one.
+  const dueOnly = due === "1";
+  // Same cutoff as the dueToday tile below — the lens and the number it sits on must agree.
+  const dueCutoff = new Date(new Date().toDateString());
+  const base = focusExtra ? [focusExtra, ...inquiries] : inquiries;
+  const rows = dueOnly
+    ? base.filter((i) => i.next_follow_up_at && new Date(i.next_follow_up_at) <= dueCutoff)
+    : base;
 
   const today = new Date(new Date().toDateString());
   const dueToday = inquiries.filter(
@@ -101,8 +111,15 @@ export default async function InquiriesPage({
 
       {inquiries.length > 0 && (
         <FactsGrid cols={2} className="mb-4 sm:max-w-sm">
-          <StatTile label="Open inquiries" value={inquiries.length} />
-          <StatTile label="Follow-ups due" value={dueToday} tone={dueToday > 0 ? "warning" : "default"} />
+          {/* The tiles are the FILTER now — tap "Follow-ups due" and the board shows only what's
+              due; tap "Open inquiries" (or it again) and everything is back. State lives in the
+              URL, so the lens survives a refresh and can be sent to somebody. */}
+          <Link href="/leads" aria-current={!dueOnly ? "true" : undefined} className={!dueOnly ? "rounded-xl ring-2 ring-brand" : ""}>
+            <StatTile label="Open inquiries" value={inquiries.length} />
+          </Link>
+          <Link href="/leads?due=1" aria-current={dueOnly ? "true" : undefined} className={dueOnly ? "rounded-xl ring-2 ring-brand" : ""}>
+            <StatTile label="Follow-ups due" value={dueToday} tone={dueToday > 0 ? "warning" : "default"} />
+          </Link>
         </FactsGrid>
       )}
 

@@ -62,6 +62,11 @@ export function InquiryRow({
   const toast = useToast();
   const rowRef = useRef<HTMLLIElement>(null);
   const [flash, setFlash] = useState(false);
+  // Option B (approved by Erik AND Andrew off the layout mock): two lines per lead, the one-tap
+  // verbs ON the row, and everything heavier — the message, the files, follow-up date, status,
+  // edit — behind this one toggle. The old row stacked all of it full-width below lg, so three
+  // leads filled a phone screen.
+  const [open, setOpen] = useState(false);
 
   useEffect(() => {
     // On un-focus (e.g. a same-route nav to /leads that keeps this row mounted) clear the ring —
@@ -98,108 +103,112 @@ export function InquiryRow({
     <li
       ref={rowRef}
       id={`lead-${inquiry.id}`}
-      className={`flex scroll-mt-24 flex-col gap-3 px-5 py-4 transition-colors lg:flex-row lg:items-start lg:gap-4 ${
+      className={`flex scroll-mt-24 flex-col gap-1 px-4 py-2.5 transition-colors ${
         flash ? "bg-brand/5 ring-2 ring-inset ring-brand" : ""
       }`}
     >
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-medium text-slate-900">{inquiry.name}</span>
-          {inquiry.company_name && <span className="text-xs text-slate-400">{inquiry.company_name}</span>}
-          <Badge tone={INQUIRY_STATUS_TONE[inquiry.status] ?? "slate"}>{inquiry.status}</Badge>
-          {/* "the sarah cain lead was already converted to an inspection but still shows up as a
-              new lead." Staying open is right — an inspected lead can still become an estimate,
-              so inspection is deliberately exempt from converting. But the row said nothing about
-              a walk-through that had already happened, which is what made it read as untouched.
-              A count, not a status: what the badge says is true and stays true. */}
-          {!!inspections?.done && (
-            <Badge tone="green">
-              {inspections.done === 1 ? "inspected" : `inspected ×${inspections.done}`}
-            </Badge>
-          )}
-          {!inspections?.done && !!inspections?.upcoming && <Badge tone="blue">inspection booked</Badge>}
-          {/* Triage — the A/B/C readiness bucket and the big-job site-visit gate come from
-              /api/inbound/lead (Tahoe Deck); the site-visit flag ALSO lights when a customer
-              taps "Request a site visit" on a public surface (publicScheduleInspection).
-              Legacy/manual leads have neither and show nothing. */}
-          {inquiry.lead_bucket && (
-            <Badge tone={BUCKET_TONE[inquiry.lead_bucket]} title={LEAD_BUCKETS[inquiry.lead_bucket].blurb}>
-              {BUCKET_DOT[inquiry.lead_bucket]} {inquiry.lead_bucket} · {LEAD_BUCKETS[inquiry.lead_bucket].label}
-            </Badge>
-          )}
-          {inquiry.site_inspection_required && (
-            <Badge tone="red" title="Needs a human site visit — triaged over the threshold, or the customer requested one (send them times via Convert → Let them pick).">
-              🚩 Site visit
-            </Badge>
-          )}
-          {inquiry.source === "public_form" && (
-            <Badge tone="slate">
-              <Globe className="mr-1 inline h-3 w-3" />web
-            </Badge>
-          )}
-          {(inquiry.source === "tahoe_deck" || inquiry.source === "deck_configurator") && (
-            <Badge tone="slate">
-              <Globe className="mr-1 inline h-3 w-3" />deck site
-            </Badge>
-          )}
-          {/* Referral credit ("Brian at the bar") — who shared the link this lead came through. */}
-          {(inquiry as any).referrer?.full_name && (
-            <Badge tone="green">referred by {(inquiry as any).referrer.full_name}</Badge>
-          )}
-        </div>
-        <div className="mt-0.5 flex flex-wrap items-center gap-3 text-xs text-slate-500">
-          {inquiry.phone && (
-            <span className="flex items-center gap-1"><Phone className="h-3 w-3" /> {inquiry.phone}</span>
-          )}
-          {inquiry.email && (
-            <span className="flex items-center gap-1"><Mail className="h-3 w-3" /> {inquiry.email}</span>
-          )}
-          {/* TIME, not just the date. Andrew: "maybe the time that it was submitted versus just
-              the date" — fresh leads are triaged by recency, and a same-day lead looked identical
-              at 8am and 8pm. */}
-          <span>Added {formatDateTime(inquiry.created_at)}</span>
-          {inquiry.last_contacted_at && <span>· Contacted {formatDate(inquiry.last_contacted_at)}</span>}
-          {inquiry.intake?.reason && <span className="text-slate-400">· {inquiry.intake.reason}</span>}
-        </div>
-        {inquiry.message && <p className="mt-1.5 text-sm text-slate-600">{inquiry.message}</p>}
-        {/* Anything the customer uploaded through the public intake door — opened via a
-            short-lived signed link, because the bucket is private. */}
-        <IntakeFiles inquiryId={inquiry.id} paths={intakePaths(inquiry.intake)} />
+      {/* ── LINE 1: who, what state, when. The time sits hard right — fresh leads are triaged by
+          recency, and it reads as a column down the board. ── */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span className="font-semibold text-slate-900">{inquiry.name}</span>
+        {inquiry.company_name && <span className="text-xs text-slate-400">{inquiry.company_name}</span>}
+        <Badge tone={INQUIRY_STATUS_TONE[inquiry.status] ?? "slate"}>{inquiry.status}</Badge>
+        {/* Staying open after an inspection is deliberate (an inspected lead can still become an
+            estimate); the badge is what stops the row reading as untouched. A count, not a
+            status: what it says is true and stays true. */}
+        {!!inspections?.done && (
+          <Badge tone="green">{inspections.done === 1 ? "inspected" : `inspected ×${inspections.done}`}</Badge>
+        )}
+        {!inspections?.done && !!inspections?.upcoming && <Badge tone="blue">inspection booked</Badge>}
+        {inquiry.lead_bucket && (
+          <Badge tone={BUCKET_TONE[inquiry.lead_bucket]} title={LEAD_BUCKETS[inquiry.lead_bucket].blurb}>
+            {BUCKET_DOT[inquiry.lead_bucket]} {inquiry.lead_bucket}
+          </Badge>
+        )}
+        {inquiry.site_inspection_required && (
+          <Badge tone="red" title="Needs a human site visit — triaged over the threshold, or the customer requested one (send them times via Convert → Let them pick).">
+            🚩 Site visit
+          </Badge>
+        )}
+        {["public_form", "intake"].includes(String(inquiry.source)) && (
+          <Badge tone="slate"><Globe className="mr-1 inline h-3 w-3" />web</Badge>
+        )}
+        {(inquiry.source === "tahoe_deck" || inquiry.source === "deck_configurator") && (
+          <Badge tone="slate"><Globe className="mr-1 inline h-3 w-3" />deck site</Badge>
+        )}
+        {(inquiry as any).referrer?.full_name && (
+          <Badge tone="green">referred by {(inquiry as any).referrer.full_name}</Badge>
+        )}
+        {overdue && <Badge tone="red">follow-up overdue</Badge>}
+        <span className="ml-auto whitespace-nowrap font-mono text-xs tabular-nums text-slate-400" title={`Added ${formatDateTime(inquiry.created_at)}`}>
+          {formatDateTime(inquiry.created_at)}
+        </span>
       </div>
 
-      {/* THE SCRUNCH FIX. This cluster had no responsive rule below `lg`, so on a phone the
-          fixed-width controls (w-36 / w-32) and their right-aligned micro-labels crushed together
-          against the left edge. Below lg each control now takes the full width with a left-aligned
-          label; at lg and up the original compact right-aligned row is unchanged. */}
-      <div className="flex w-full flex-wrap items-end gap-2 lg:w-auto">
-        <div className="flex-1 basis-32 lg:flex-none lg:text-right">
-          <label className="mb-0.5 block text-[10px] uppercase tracking-wide text-slate-400">Follow up</label>
-          <div className="flex items-center gap-1">
-            <Input type="date" value={followUp} onChange={(e) => setFollowUp(e.target.value)} className="h-8 w-full text-xs lg:w-36" />
-            {overdue && <Badge tone="red">overdue</Badge>}
+      {/* ── LINE 2: how to reach them, and the verbs. Call is one tap (tel:), the pipeline verbs
+          are the ConvertMenu's own buttons, and ⋯ opens everything else. ── */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-slate-500">
+        {inquiry.phone && (
+          <a href={`tel:${inquiry.phone}`} className="flex items-center gap-1 font-medium text-brand hover:underline">
+            <Phone className="h-3 w-3" /> {inquiry.phone}
+          </a>
+        )}
+        {inquiry.email && (
+          <span className="hidden items-center gap-1 sm:flex"><Mail className="h-3 w-3" /> {inquiry.email}</span>
+        )}
+        {inquiry.last_contacted_at && <span>contacted {formatDate(inquiry.last_contacted_at)}</span>}
+        {inquiry.intake?.reason && <span className="hidden text-slate-400 md:inline">{inquiry.intake.reason}</span>}
+        <span className="ml-auto flex flex-wrap items-center justify-end gap-1.5">
+          <ConvertMenu inquiryId={inquiry.id} inquiryName={inquiry.name} customers={customers} />
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+            aria-label={open ? "Hide details" : "Show details — message, files, follow-up, status"}
+            className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-500 hover:bg-slate-50"
+          >
+            {open ? "Less" : "⋯"}
+          </button>
+        </span>
+      </div>
+
+      {/* The message rides collapsed as ONE clamped line — the single biggest source of the old
+          row's height. The full text, the customer's files and the workflow controls all live one
+          tap away, on the row, without a navigation. */}
+      {!open && inquiry.message && (
+        <p className="line-clamp-1 text-xs text-slate-500">{inquiry.message}</p>
+      )}
+
+      {open && (
+        <div className="mt-1 space-y-3 rounded-lg bg-slate-50/70 p-3">
+          {inquiry.message && <p className="whitespace-pre-wrap text-sm text-slate-600">{inquiry.message}</p>}
+          <IntakeFiles inquiryId={inquiry.id} paths={intakePaths(inquiry.intake)} />
+          <div className="flex flex-wrap items-end gap-3">
+            <div>
+              <label className="mb-0.5 block text-[10px] uppercase tracking-wide text-slate-400">Follow up</label>
+              <Input type="date" value={followUp} onChange={(e) => setFollowUp(e.target.value)} className="h-8 w-40 text-xs" />
+            </div>
+            <div>
+              <label className="mb-0.5 block text-[10px] uppercase tracking-wide text-slate-400">Status</label>
+              {/* "Lost" lives ONLY here (a deliberate two-tap pick) — the old one-tap "Mark lost"
+                  button vanished the row from a mis-tap beside Edit/Convert. */}
+              <Select
+                value={inquiry.status}
+                disabled={pending}
+                className="h-8 w-36 text-xs"
+                onChange={(e) => changeStatus(e.target.value)}
+              >
+                {INQUIRY_STATUSES.map((st) => (
+                  <option key={st} value={st}>
+                    {st.replace(/^\w/, (c) => c.toUpperCase())}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <InquiryModal inquiry={inquiry} mode="edit" />
           </div>
         </div>
-        <div className="flex-1 basis-32 lg:flex-none lg:text-right">
-          <label className="mb-0.5 block text-[10px] uppercase tracking-wide text-slate-400">Status</label>
-          <Select
-            value={inquiry.status}
-            disabled={pending}
-            className="h-8 w-full text-xs lg:w-32"
-            onChange={(e) => changeStatus(e.target.value)}
-          >
-            {INQUIRY_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {s.replace(/^\w/, (c) => c.toUpperCase())}
-              </option>
-            ))}
-          </Select>
-        </div>
-        {/* "Lost" lives ONLY in the Status select (a deliberate two-tap pick) —
-            the old one-tap "Mark lost" button duplicated it mid-cluster and
-            vanished the row from a mis-tap beside Edit/Convert. */}
-        <InquiryModal inquiry={inquiry} mode="edit" />
-        <ConvertMenu inquiryId={inquiry.id} inquiryName={inquiry.name} customers={customers} />
-      </div>
+      )}
     </li>
   );
 }
