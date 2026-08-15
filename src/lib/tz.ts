@@ -87,6 +87,20 @@ export function tzDateTimeUtc(ymd: string, hm: string, tz: string): string | nul
   return tzLocalHourUtc(ymd, hours, tz).toISOString();
 }
 
+/** A model- or user-supplied timestamp, read the way a person means it: NAIVE
+ *  ("2026-08-14T10:00", no Z/offset) is a WALL-CLOCK time in `tz` and converts;
+ *  an explicit offset is honored as-is (stripping a correct one would double-shift).
+ *  The timecard-in-UTC bug: Nort was told "10:00 AM", stamped a Z on it, and Brian's
+ *  card read 3 AM Pacific. Timezone arithmetic happens HERE, never in the model. */
+export function tzNaiveIsoToUtc(v: string | undefined, tz: string): string | undefined {
+  if (!v) return v;
+  const t = v.trim();
+  if (/(?:Z|[+-]\d{2}:?\d{2})$/i.test(t)) return t; // explicit offset — an instant already
+  const m = t.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})/);
+  if (!m) return v;
+  return tzDateTimeUtc(m[1], m[2], tz) ?? v;
+}
+
 /** Day boundaries (as UTC instants) + the date string for "today" in tz. */
 export function todayBoundsInTz(tz: string): { dayStart: Date; dayEnd: Date; todayStr: string } {
   const todayStr = todayStrInTz(tz);

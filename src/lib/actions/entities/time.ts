@@ -5,6 +5,8 @@ import { autoLunchMinutes } from "@/lib/lunch-rule";
 import { createClient } from "@/lib/supabase/server";
 import { visibleJobIdOrNull } from "@/lib/job-visibility";
 import { resolveJobId, resolveProfileId } from "../resolve-id";
+import { tzNaiveIsoToUtc } from "@/lib/tz";
+import { getOrgSettings } from "@/lib/org-settings";
 import type { ActionDef } from "../types";
 
 // Time-logging, finally in the registry — so voice ("clock me in / out / add 2 hours
@@ -57,7 +59,7 @@ export const timeActions: Record<string, ActionDef> = {
     group: "time",
     label: "Add time entry",
     description:
-      "Add a past/manual timecard entry, for any crew member via profile_id. Office correction — staff only; techs clock in/out live. TWO shapes: exact times (clock_in & clock_out as ISO timestamps) OR a duration ('Brian worked 6 hours Tuesday' → work_date YYYY-MM-DD + hours). hours must be the USER'S stated number — never estimate or infer it (that's payroll); if they didn't say the hours, ASK.",
+      "Add a past/manual timecard entry, for any crew member via profile_id. Office correction — staff only; techs clock in/out live. TWO shapes: exact times (clock_in & clock_out as NAIVE local timestamps, YYYY-MM-DDTHH:MM in the company's own timezone — NO Z, NO offset; the app converts) OR a duration ('Brian worked 6 hours Tuesday' → work_date YYYY-MM-DD + hours). hours must be the USER'S stated number — never estimate or infer it (that's payroll); if they didn't say the hours, ASK.",
     // Fragment-first with the payroll boundary: either a full span, or an EXPLICIT
     // day + hour count (expanded server-side to a midday-centered span and flagged in
     // notes as duration-entered). The superRefine issues use zod's "Required" message
@@ -106,10 +108,23 @@ export const timeActions: Record<string, ActionDef> = {
       if ("error" in person) return { ok: false, error: person.error };
       const job = await resolveJobId(supabase, i.job_id ?? null);
       if ("error" in job) return { ok: false, error: job.error };
+      /**
+       * "10 AM" MEANS 10 AM WHERE THE CREW WORKS — converted in CODE, never by the model.
+       *
+       * Erik: "Nort submitted brians time card in UTC time." He said "10:00 AM"; the model,
+       * asked for "ISO timestamps", helpfully stamped a Z on it — so Brian's card read a 10:00
+       * UTC clock-in, which is 3 AM Pacific, and payroll math ran off it. The model must never
+       * do timezone arithmetic (ONE LAW, TWO CLOCKS, ONE MAP): a NAIVE timestamp (no Z, no
+       * offset) is taken as org-local and converted here; a timestamp that carries an explicit
+       * offset is honored as-is, because stripping a correct one would double-shift it.
+       */
+      const { data: orgRow } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+      const tz = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone || "America/Los_Angeles";
+      const localToUtc = (v?: string) => tzNaiveIsoToUtc(v, tz);
       return createManualEntry({
         profile_id: person.id ?? "",
-        clock_in: i.clock_in,
-        clock_out: i.clock_out,
+        clock_in: localToUtc(i.clock_in),
+        clock_out: localToUtc(i.clock_out),
         work_date: i.work_date,
         hours: i.hours,
         job_id: job.id,

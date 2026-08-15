@@ -7,7 +7,7 @@ import { Input, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { InquiryModal } from "./inquiry-modal";
 import { ConvertMenu } from "./convert-menu";
-import { markInquiryContacted, setInquiryStatus } from "./actions";
+import { deleteInquiry, markInquiryContacted, setInquiryStatus } from "./actions";
 import { useToast } from "@/components/toast";
 import { formatDateTime, formatDate } from "@/lib/utils";
 import type { Inquiry, LeadBucket } from "@/lib/types";
@@ -206,6 +206,26 @@ export function InquiryRow({
               </Select>
             </div>
             <InquiryModal inquiry={inquiry} mode="edit" />
+            {/* DELETE, inside the ⋯ panel — Erik: "add a way to delete a lead entry… or a Delete
+                option inside the row's ⋯ menu." Behind the door and behind a confirm, per the nav
+                doctrine: destructive never sits beside the verbs you tap at 60mph. Note the split
+                of meanings — LOST is a two-tap status for a lead that said no (it keeps the
+                record); delete is for tests and junk, and it keeps nothing. */}
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => {
+                if (!confirm(`Delete "${inquiry.name}" completely? A lead that said no should be marked Lost instead — delete keeps nothing.`)) return;
+                start(async () => {
+                  const r = await deleteInquiry(inquiry.id);
+                  if (!r.ok) toast(r.error ?? "Couldn't delete that.", "error");
+                  else router.refresh();
+                });
+              }}
+              className="ml-auto self-end rounded-lg px-2 py-1.5 text-xs font-medium text-rose-600 hover:bg-rose-50"
+            >
+              Delete lead
+            </button>
           </div>
         </div>
       )}

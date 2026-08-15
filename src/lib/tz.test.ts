@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { payPeriodBounds, payPeriodForOffset, timeEntryGridSpan, todayStrInTz, tzMinutesOfDay, weekDayStrs } from "@/lib/tz";
+import { payPeriodBounds, payPeriodForOffset, timeEntryGridSpan, todayStrInTz, tzMinutesOfDay, tzNaiveIsoToUtc, weekDayStrs } from "@/lib/tz";
 
 const ANCHOR = "2026-01-05"; // a Monday
 
@@ -119,5 +119,24 @@ describe("appointment grid primitives (the /schedule week/day mapping)", () => {
     const iso = "2026-07-16T04:00:00Z"; // 9:00 PM PDT on July 15
     expect(todayStrInTz(PT, new Date(iso))).toBe("2026-07-15");
     expect(tzMinutesOfDay(iso, PT)).toBe(21 * 60);
+  });
+});
+
+describe("tzNaiveIsoToUtc — a spoken time is a wall-clock time", () => {
+  it("naive means org-local: Brian's '10:00 AM' Pacific is 17:00 UTC in August", () => {
+    expect(tzNaiveIsoToUtc("2026-08-14T10:00", "America/Los_Angeles")).toBe("2026-08-14T17:00:00.000Z");
+  });
+  it("an explicit Z is an instant already — passed through, never double-shifted", () => {
+    expect(tzNaiveIsoToUtc("2026-08-14T17:00:00Z", "America/Los_Angeles")).toBe("2026-08-14T17:00:00Z");
+  });
+  it("an explicit offset is honored too", () => {
+    expect(tzNaiveIsoToUtc("2026-08-14T10:00:00-07:00", "America/Los_Angeles")).toBe("2026-08-14T10:00:00-07:00");
+  });
+  it("seconds on a naive stamp don't break the minute read", () => {
+    expect(tzNaiveIsoToUtc("2026-08-14T10:30:45", "America/Los_Angeles")).toBe("2026-08-14T17:30:00.000Z");
+  });
+  it("garbage and undefined pass through untouched", () => {
+    expect(tzNaiveIsoToUtc("yesterday at ten", "America/Los_Angeles")).toBe("yesterday at ten");
+    expect(tzNaiveIsoToUtc(undefined, "America/Los_Angeles")).toBeUndefined();
   });
 });
