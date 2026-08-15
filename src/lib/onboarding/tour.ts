@@ -138,9 +138,23 @@ export const TOUR: TourStep[] = [
     title: "Where you work",
     say: (c) =>
       (c.city ? `And you're out of ${c.city}. ` : "") +
-      "Where are you working out of, and how far do you go? " +
+      "Where are you working out of? " +
       "That's what customers see when they look you up.",
     ask: "city",
+  },
+  {
+    key: "reach",
+    anchor: "nort",
+    title: "How far you go",
+    say: (c) =>
+      (c.city ? `And from ${c.city} — ` : "And ") +
+      "how far out do you go? Not a radius — the places you'd actually drive to. " +
+      "It's what your public page says you cover.",
+    // THE QUESTION NOBODY ASKED. service_area has been a declared setup need since the interview
+    // was written — saveSetup writes it, the public page reads it — and no tour step ever carried
+    // it, so for anyone who set up by tour it has been null forever. Erik: "service area is a good
+    // catch, do what you need to do to fold that in."
+    ask: "service_area",
   },
   {
     key: "rate",
@@ -242,14 +256,6 @@ export const TOUR: TourStep[] = [
       "appointments by name or number. " +
       "And the bell is what's waiting on you, whether or not you switch on phone notifications.",
   },
-  {
-    key: "account",
-    anchor: "account",
-    title: "Everything that's yours",
-    say: (c) =>
-      `Your initials, top right${c.first ? `, ${c.first}` : ""} — that's your corner. ` +
-      "Watch, I'll open it.",
-  },
   // THE DOOR, NOT THE ROOM. Erik: "ive been asked multiple times where settings is located and in
   // the tour it shows it open but not where the button is." The old step navigated straight to
   // /settings and talked about the page, which teaches the room and never the door.
@@ -263,10 +269,15 @@ export const TOUR: TourStep[] = [
     anchor: "account-menu",
     opens: "account",
     title: "There it is — Settings",
-    say:
-      "There's your corner. Sign out, your language, your estimate QR code for the truck — and " +
-      "Settings, right there in the middle. That's the door, and it's behind your initials on " +
-      "every single screen. That's the one thing worth remembering.",
+    // ABSORBED the old "account" teaser step (its whole script was "that's your corner — watch,
+    // I'll open it"), when the service_area ask bought its place under the 24-step ceiling. The
+    // driver opens the menu on entry (`opens`), so the reveal happens either way; the teaser was
+    // paying a step for a beat of suspense.
+    say: (c) =>
+      `Your initials, top right${c.first ? `, ${c.first}` : ""} — that's your corner, on every ` +
+      "single screen, and I've opened it. Sign out, your language, your estimate QR code for the " +
+      "truck — and Settings, right there in the middle. That's the door. " +
+      "That's the one thing worth remembering.",
   },
   {
     key: "settings",

@@ -117,22 +117,33 @@ describe("it points at things that exist", () => {
     for (const s of TOUR) if (s.opens) expect(s.anchor, `${s.key} opens a menu it never shows`).toBe("account-menu");
   });
 
-  it("the initials beat and the door land back to back", () => {
-    // The old `account` step listed sign-out, language and the QR code and never said the word
-    // Settings — which is where Settings lives. Now one step shows WHERE the initials are and the
-    // next opens them and names the row, so the pair has to stay adjacent and in that order.
-    const a = TOUR.findIndex((s) => s.key === "account");
-    const b = TOUR.findIndex((s) => s.key === "settings-door");
-    expect(b).toBe(a + 1);
-    expect(TOUR[a].anchor).toBe("account");
-    expect((sayOf(TOUR[a].say, STRANGER) + sayOf(TOUR[b].say, STRANGER)).toLowerCase()).toContain("settings");
+  it("the initials beat and the door are ONE step now, and it still says everything both did", () => {
+    // History of this pair, because it has moved twice and each move had a reason:
+    //   v1: one `account` step that listed sign-out, language and the QR code and never said the
+    //       word "Settings" — which is where Settings lives. Split into two.
+    //   v2: `account` (here are your initials) + `settings-door` (opened, and Settings named) —
+    //       the adjacency this test used to pin.
+    //   v3 (now): merged back into settings-door alone, when the service_area ask bought its
+    //       place under the 24-step ceiling. Safe THIS time because the driver's `opens` does the
+    //       reveal the teaser step existed for — v1's failure was missing WORDS, not a missing
+    //       step. So the assertion is on the words: one step must locate the initials, open the
+    //       menu, and name Settings.
+    const door = TOUR.find((s) => s.key === "settings-door")!;
+    expect(TOUR.find((s) => s.key === "account")).toBeUndefined();
+    expect(door.anchor).toBe("account-menu");
+    expect(door.opens).toBe("account");
+    const said = sayOf(door.say, STRANGER).toLowerCase();
+    expect(said).toContain("initials");
+    expect(said).toContain("settings");
+    expect(said).toContain("qr code");
   });
 
   it("the things Erik named by hand are all covered", () => {
     // "where the button is for nort … how does the nav work and where are the settings and my qr
     // code and all the things"
     const anchored = TOUR.map((s) => s.anchor);
-    for (const a of ["nort", "dock", "account"]) expect(anchored).toContain(a);
+    // "account-menu" since the merge — the initials are still pointed at, as the opened panel.
+    for (const a of ["nort", "dock", "account-menu"]) expect(anchored).toContain(a);
     const said = spoken(STRANGER).join(" ").toLowerCase();
     expect(said).toContain("qr code");
     expect(said).toContain("settings");

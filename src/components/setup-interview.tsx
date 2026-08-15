@@ -74,6 +74,15 @@ export function SetupInterview({
   // normally does it was never taken. Guarded so React's double-invoke in dev can't ask twice.
   useEffect(() => {
     if (startAt !== 2 || needs || drafting.current) return;
+    // NO TRADE, NO DRAFT — GO ASK. Erik: "the tour shouldn't assume a trade exists." Answering is
+    // optional on every tour step, so somebody can land here having skipped the trade — and
+    // draftMyPlaybook needs a walk-through sheet that only exists once a trade was saved. Rather
+    // than fetch a failure and explain it, drop to the questions step: trade is the second box on
+    // it, and the step-1→2 transition saves (which seeds the sheet) and then drafts, in order.
+    if (!String(answers.trade ?? "").trim()) {
+      setStep(1);
+      return;
+    }
     drafting.current = true;
     start(async () => {
       const d = await draftMyPlaybook();
@@ -81,7 +90,7 @@ export function SetupInterview({
       setFormId(d.formId);
       setNeeds(d.needs);
     });
-  }, [startAt, needs, start]);
+  }, [startAt, needs, start, answers.trade]);
 
   const open = missingNeeds(SETUP_PLAYBOOK, answers);
   const total = SETUP_PLAYBOOK.needs.length;
