@@ -38,12 +38,19 @@ export function LessonOffer({
   const [dismissed, setDismissed] = useState(false);
   const [pending, start] = useTransition();
 
-  if (!lesson || dismissed || seen.includes(lesson.key)) return null;
+  if (!lesson) return null;
+  // THE OFFER MUST NOT KILL ITS OWN LESSON (Erik: "the tour shut off before starting").
+  // "Show me" records the offer, markLessonSeen revalidates /settings, the server re-render hands
+  // this component `seen` WITH the key in it — and the old guard returned null, unmounting the
+  // TourDriver a second after it started. The strip goes; the running driver stays.
+  const offerGone = dismissed || seen.includes(lesson.key);
+  if (offerGone && !running) return null;
 
   const record = () => start(async () => void (await markLessonSeen(lesson.key)));
 
   return (
     <>
+      {!offerGone && (
       <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-brand/30 bg-brand-light/30 px-3 py-2">
         <GraduationCap className="h-4 w-4 shrink-0 text-brand" />
         <span className="min-w-0 text-sm text-slate-700">
@@ -77,6 +84,7 @@ export function LessonOffer({
           </button>
         </span>
       </div>
+      )}
 
       {running && (
         <TourDriver
