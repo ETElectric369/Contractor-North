@@ -1,6 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { DOCK } from "@/lib/dock";
-import { TOUR, sayOf, tourIndex, type TourCtx } from "./tour";
+import { LESSONS, TOUR, lessonByKey, sayOf, tourIndex, type TourCtx } from "./tour";
+
+/**
+ * THE SPLIT (cn-v726): TOUR is now ONLY the setup — every step asks something saveSetup writes,
+ * or closes the loop. The teaching became LESSONS, replayable from the cap and offered inline.
+ * Content pins that used to scan TOUR scan ALL_STEPS; structure pins name the lesson they mean.
+ */
+const ALL_STEPS = [...TOUR, ...LESSONS.flatMap((l) => l.steps)];
+const findStep = (key: string) => ALL_STEPS.find((s) => s.key === key)!;
 import { SETUP_PLAYBOOK } from "./setup-playbook";
 
 /** A sentence that CLAIMS where something came from, as opposed to where it lives. */
@@ -9,7 +17,7 @@ const ORIGIN_VERB = /\b(came|come|comes|built|builds|build|seeded|seeds|created|
 /** Somebody Nort has never met, and somebody he has. Lines that change must work for both. */
 const STRANGER: TourCtx = { first: "", trade: "", city: "", rate: "", returning: false };
 const KNOWN: TourCtx = { first: "Erik", trade: "electrical contractor", city: "Truckee", rate: "$145", returning: true };
-const spoken = (c: TourCtx) => TOUR.map((s) => sayOf(s.say, c));
+const spoken = (c: TourCtx) => ALL_STEPS.map((s) => sayOf(s.say, c));
 
 /**
  * The tour is DATA, so it can be wrong in the ways data is wrong: a typo'd key makes a step
@@ -43,13 +51,13 @@ describe("the why-line lesson is actually in here", () => {
   it("says what a why line IS, shows one, and says how to write it", () => {
     // "i didnt even know what a why line really meant until you showed me" — the whole reason the
     // tour exists. A tour that skips this is the form it replaced.
-    for (const key of ["why-what", "why-example", "why-how"]) expect(TOUR.map((s) => s.key)).toContain(key);
+    for (const key of ["why-what", "why-example", "why-how"]) expect(lessonByKey("why-lines")!.steps.map((s) => s.key)).toContain(key);
     expect(said).toContain("why line");
   });
 
   it("the example is a REAL one, not a description of one", () => {
     // An abstract "explain your reasoning" teaches nothing. The example carries a concrete cost.
-    const ex = sayOf(TOUR.find((s) => s.key === "why-example")!.say, STRANGER).toLowerCase();
+    const ex = sayOf(findStep("why-example").say, STRANGER).toLowerCase();
     // Both brothers, both shapes: arithmetic and a fork. Erik on the old permit example: "the
     // example in #7 makes no sense to me nor do my why lines."
     expect(ex).toContain("board count");
@@ -58,7 +66,7 @@ describe("the why-line lesson is actually in here", () => {
   });
 
   it("and it promises the draft that comes next, so the hand-off isn't a surprise", () => {
-    expect(sayOf(TOUR.find((s) => s.key === "why-how")!.say, STRANGER).toLowerCase()).toContain("draft");
+    expect(sayOf(findStep("why-how").say, STRANGER).toLowerCase()).toContain("draft");
   });
 });
 
@@ -91,7 +99,7 @@ describe("it points at things that exist", () => {
     // Erik: "ive been asked multiple times where settings is located and in the tour it shows it
     // open but not where the button is." A step that navigates you to /settings can never show
     // you the button, because the button is how you'd have got there.
-    const door = TOUR.find((s) => s.key === "settings-door")!;
+    const door = findStep("settings-door");
     expect(door.route, "the door step must not teleport past the door").toBeUndefined();
     // It points at the whole PANEL, and it opens that panel itself — a row-sized hole in the
     // dimmer left the rest of the menu under 72% black, which read as "it never opened".
@@ -128,8 +136,8 @@ describe("it points at things that exist", () => {
     //       reveal the teaser step existed for — v1's failure was missing WORDS, not a missing
     //       step. So the assertion is on the words: one step must locate the initials, open the
     //       menu, and name Settings.
-    const door = TOUR.find((s) => s.key === "settings-door")!;
-    expect(TOUR.find((s) => s.key === "account")).toBeUndefined();
+    const door = findStep("settings-door");
+    expect(ALL_STEPS.find((s) => s.key === "account")).toBeUndefined();
     expect(door.anchor).toBe("account-menu");
     expect(door.opens).toBe("account");
     const said = sayOf(door.say, STRANGER).toLowerCase();
@@ -141,7 +149,7 @@ describe("it points at things that exist", () => {
   it("the things Erik named by hand are all covered", () => {
     // "where the button is for nort … how does the nav work and where are the settings and my qr
     // code and all the things"
-    const anchored = TOUR.map((s) => s.anchor);
+    const anchored = ALL_STEPS.map((s) => s.anchor);
     // "account-menu" since the merge — the initials are still pointed at, as the opened panel.
     for (const a of ["nort", "dock", "account-menu"]) expect(anchored).toContain(a);
     const said = spoken(STRANGER).join(" ").toLowerCase();
@@ -198,18 +206,19 @@ describe("well-formed", () => {
     // priced itself sends one without reading it.
     const said = spoken(STRANGER).join(" ").toLowerCase();
 
-    it("walks the pipeline in the order the work happens", () => {
+    it("walks the pipeline in the order the work happens — inside its LESSON now", () => {
+      const steps = lessonByKey("how-a-job-runs")!.steps;
       const order = ["run-lead", "run-walk", "run-estimate", "run-job", "run-money", "run-win"];
-      const at = order.map((k) => TOUR.findIndex((s) => s.key === k));
+      const at = order.map((k) => steps.findIndex((s) => s.key === k));
       expect(at.every((i) => i >= 0), "a run step went missing").toBe(true);
       expect([...at].sort((a, b) => a - b)).toEqual(at);
     });
 
     it("points at the dock tile it is talking about", () => {
-      expect(TOUR.find((s) => s.key === "run-lead")!.anchor).toBe("dock-sales");
-      expect(TOUR.find((s) => s.key === "run-job")!.anchor).toBe("dock-jobs");
+      expect(findStep("run-lead").anchor).toBe("dock-sales");
+      expect(findStep("run-job").anchor).toBe("dock-jobs");
       // The Money section's key really is `invoices` (dock.ts) even though its label is "Money".
-      expect(TOUR.find((s) => s.key === "run-money")!.anchor).toBe("dock-invoices");
+      expect(findStep("run-money").anchor).toBe("dock-invoices");
     });
 
     it("never claims an automation the code does not do", () => {
@@ -302,7 +311,11 @@ describe("well-formed", () => {
   });
 
   it("resume is total: an unknown or missing key starts at the beginning", () => {
-    expect(tourIndex("why-how")).toBe(TOUR.findIndex((s) => s.key === "why-how"));
+    // "why-how" left the TOUR in the cn-v726 split; resuming its key now correctly falls back to
+    // the start rather than landing mid-list of a different script — which is exactly why the
+    // driver keys its resume storage PER SCRIPT (cn.tour.step vs cn.lesson.<key>).
+    expect(tourIndex("rate")).toBe(TOUR.findIndex((s) => s.key === "rate"));
+    expect(tourIndex("why-how")).toBe(0);
     expect(tourIndex("nope")).toBe(0);
     expect(tourIndex(null)).toBe(0);
     expect(tourIndex(undefined)).toBe(0);

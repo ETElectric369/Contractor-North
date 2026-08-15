@@ -22,6 +22,7 @@ import { tolerateMissingColumns } from "@/lib/inspection/schema";
 import { parsePlaybook, playbookForForm } from "@/lib/playbook/parse";
 import { PLAYBOOK_STARTERS } from "@/lib/playbook/starters";
 import { PlaybookManager } from "./playbook-manager";
+import { LessonOffer } from "@/components/tour/lesson-offer";
 import { SettingsSubnav } from "./settings-subnav";
 import { getOrgSettings, accentHex, orgPublicBaseUrl } from "@/lib/org-settings";
 import { renderReadyBlocks } from "@/lib/public-pages";
@@ -374,6 +375,15 @@ export default async function SettingsPage({
             // the panel itself — which is what he's actually looking at there anyway.
             <div data-tour="settings-playbook" className="space-y-6">
               <Section title="What your walk-through asks">
+                {/* THE WHY-LINES LESSON, offered where why lines live (cn-v726 split). Erik's
+                    brief for the tour was that nobody works this out unaided; teaching it on day
+                    one, seventeen steps from this screen, is how it drifted. Offered once —
+                    lessons_seen (0197) — and replayable forever from the cap. */}
+                <LessonOffer
+                  lessonKey="why-lines"
+                  seen={Array.isArray((me as { lessons_seen?: unknown } | null)?.lessons_seen) ? ((me as { lessons_seen: unknown[] }).lessons_seen as unknown[]).map(String) : []}
+                  initial={{}}
+                />
                 <p className="mb-4 text-sm text-slate-500">
                   These are the questions your inspector asks on site, in order, and the reason each one exists.
                   A question only shows when it applies — and one that&rsquo;s already been answered, out loud or

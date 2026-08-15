@@ -6,6 +6,7 @@ import { unlockAudio } from "@/lib/tts";
 import { Modal } from "@/components/ui/modal";
 import { SetupInterview } from "@/components/setup-interview";
 import { TourDriver } from "@/components/tour/tour-driver";
+import { LESSONS, lessonByKey } from "@/lib/onboarding/tour";
 import { missingNeeds } from "@/lib/playbook/resolve";
 import { SETUP_PLAYBOOK } from "@/lib/onboarding/setup-playbook";
 import type { Answers } from "@/lib/playbook/types";
@@ -42,6 +43,8 @@ export function SetupButton({
   onboarded: boolean;
 }) {
   const [mode, setMode] = useState<null | "tour" | "questions" | "finish">(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [lessonKey, setLessonKey] = useState<string | null>(null);
   /**
    * WHAT THE COMPANY STILL HASN'T SAID ABOUT ITSELF — computed here, from the same answers the
    * layout already loads, so the third state costs no query. `onboarded` is about the PERSON (has
@@ -63,6 +66,7 @@ export function SetupButton({
 
   return (
     <>
+      <span className="relative inline-flex">
       <button
         type="button"
         data-tour="setup"
@@ -72,7 +76,12 @@ export function SetupButton({
           // — which is outside the gesture. Without this, Nort is silent on an iPhone for the whole
           // first step, on the one screen whose entire job is proving he talks.
           unlockAudio();
-          setMode(state === "finish" ? "finish" : "tour");
+          // THE CAP IS THE INDEX (cn-v726). Amber runs setup; teal finishes it; the quiet grey cap
+          // opens a menu of the LESSONS — the teaching that used to be steps 6–22 of the tour,
+          // replayable one topic at a time instead of only as a 24-step march.
+          if (state === "finish") setMode("finish");
+          else if (state === "start") setMode("tour");
+          else setMenuOpen((v) => !v);
         }}
         title={
           state === "start"
@@ -112,6 +121,52 @@ export function SetupButton({
           </span>
         )}
       </button>
+
+      {menuOpen && mode === null && !lessonKey && (
+        <div className="absolute right-0 top-12 z-[60] w-72 rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
+          <p className="px-2 pb-1 pt-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Lessons</p>
+          {LESSONS.map((l) => (
+            <button
+              key={l.key}
+              type="button"
+              onClick={() => {
+                unlockAudio();
+                setMenuOpen(false);
+                setLessonKey(l.key);
+              }}
+              className="block w-full rounded-lg px-2 py-2 text-left hover:bg-slate-50"
+            >
+              <span className="block text-sm font-medium text-slate-900">{l.title}</span>
+              <span className="block text-xs text-slate-500">{l.blurb}</span>
+            </button>
+          ))}
+          <div className="mt-1 border-t border-slate-100 pt-1">
+            <button
+              type="button"
+              onClick={() => {
+                unlockAudio();
+                setMenuOpen(false);
+                setMode("tour");
+              }}
+              className="block w-full rounded-lg px-2 py-2 text-left text-sm text-slate-600 hover:bg-slate-50"
+            >
+              Take the setup again
+            </button>
+          </div>
+        </div>
+      )}
+
+      </span>
+
+      {lessonKey && (
+        <TourDriver
+          initial={initial}
+          returning
+          steps={lessonByKey(lessonKey)!.steps}
+          storageKey={`cn.lesson.${lessonKey}`}
+          onClose={() => setLessonKey(null)}
+        />
+      )}
 
       {mode === "tour" && (
         <TourDriver

@@ -38,6 +38,8 @@ export function TourDriver({
   initial,
   returning = false,
   onClose,
+  steps = TOUR,
+  storageKey = KEY,
 }: {
   initial: Answers;
   /** They've finished before — this is a revisit, not an introduction. */
@@ -45,6 +47,12 @@ export function TourDriver({
   /** `completed` distinguishes reaching the end from bailing out — the caller hands a finisher
    *  straight to the why-line draft the tour just promised, and hands a quitter nothing. */
   onClose: (completed: boolean) => void;
+  /** The script to run. Default is the SETUP tour; a LESSON passes its own steps (cn-v726 split)
+   *  — same driver, same spotlight, same voice, different words. */
+  steps?: typeof TOUR;
+  /** Resume position is per-script: a lesson interrupted mid-way must not resume the setup tour
+   *  at step 3 of a different list. */
+  storageKey?: string;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -52,8 +60,8 @@ export function TourDriver({
 
   const [i, setI] = useState(() => {
     if (typeof window === "undefined") return 0;
-    const n = Number(sessionStorage.getItem(KEY));
-    return Number.isFinite(n) && n > 0 && n < TOUR.length ? n : 0;
+    const n = Number(sessionStorage.getItem(storageKey));
+    return Number.isFinite(n) && n > 0 && n < steps.length ? n : 0;
   });
   const [answers, setAnswers] = useState<Answers>(initial);
   const [typed, setTyped] = useState("");
@@ -87,14 +95,14 @@ export function TourDriver({
     returning,
   };
 
-  const step = TOUR[i];
+  const step = steps[i];
   const line = sayOf(step.say, ctx);
   const need = step.ask ? SETUP_PLAYBOOK.needs.find((n) => n.key === step.ask) : undefined;
   const known = step.ask ? answers[step.ask] : undefined;
   const answered = known !== null && known !== undefined && String(known).trim() !== "";
 
   useEffect(() => {
-    sessionStorage.setItem(KEY, String(i));
+    sessionStorage.setItem(storageKey, String(i));
     iRef.current = i;
   }, [i]);
   useEffect(() => {
@@ -221,18 +229,18 @@ export function TourDriver({
     if (advance.current) clearTimeout(advance.current);
     advance.current = null;
     stopSpeaking();
-    if (to >= TOUR.length) {
+    if (to >= steps.length) {
       setBusy(true);
       await commit();
       setBusy(false);
-      sessionStorage.removeItem(KEY);
+      sessionStorage.removeItem(storageKey);
       router.refresh();
       // NOT finishOnboarding() — "shown" means shown the why lines too, and those are the next
       // screen. The draft step records it when they're actually done. (0180)
       return onClose(true);
     }
     // Leaving the last question → save what was said.
-    if (TOUR[i].ask && !TOUR[to]?.ask) await commit();
+    if (steps[i].ask && !steps[to]?.ask) await commit();
     setNote(null);
     setReply(null);
     setI(Math.max(0, to));
@@ -252,7 +260,7 @@ export function TourDriver({
   // after it be hands-free.
   if (!started)
     return (
-      <TourSpotlight anchor="nort" title="Two minutes, out loud" onExit={() => onClose(false)} step={1} total={TOUR.length}>
+      <TourSpotlight anchor="nort" title="Two minutes, out loud" onExit={() => onClose(false)} step={1} total={steps.length}>
         <p className="text-sm leading-relaxed text-slate-600">
           I&rsquo;m Nort. I&rsquo;d rather talk than make you type — press the button and{" "}
           <strong className="font-medium text-slate-900">state your name and your business</strong>.
@@ -279,7 +287,7 @@ export function TourDriver({
     );
 
   return (
-    <TourSpotlight anchor={step.anchor} title={step.title} onExit={exit} step={i + 1} total={TOUR.length}>
+    <TourSpotlight anchor={step.anchor} title={step.title} onExit={exit} step={i + 1} total={steps.length}>
       <p className="text-sm leading-relaxed text-slate-600">{line}</p>
 
       {need && (

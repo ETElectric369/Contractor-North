@@ -265,3 +265,29 @@ export async function finishOnboarding(): Promise<{ ok: boolean; error?: string 
   revalidatePath("/", "layout");
   return { ok: true };
 }
+
+/**
+ * RECORD A LESSON OFFER (0197) — pressed "Show me" or "No thanks", both count. The inline offer
+ * strip shows only while the key is absent, so recording the decline is what stops it nagging;
+ * replay always lives behind the cap, so declining loses nothing. Read-modify-write on the
+ * caller's own row (RLS scopes it), and duplicates are dropped so a double-tap can't grow the
+ * array forever.
+ */
+export async function markLessonSeen(key: string): Promise<{ ok: boolean }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false };
+  const k = String(key).slice(0, 40);
+  const { data: prof } = await supabase.from("profiles").select("lessons_seen").eq("id", user.id).maybeSingle();
+  const seen = Array.isArray((prof as { lessons_seen?: unknown } | null)?.lessons_seen)
+    ? ((prof as { lessons_seen: unknown[] }).lessons_seen as unknown[]).map(String)
+    : [];
+  if (seen.includes(k)) return { ok: true };
+  const { error } = await supabase
+    .from("profiles")
+    .update({ lessons_seen: [...seen, k] })
+    .eq("id", user.id);
+  if (error) return { ok: false };
+  revalidatePath("/settings");
+  return { ok: true };
+}

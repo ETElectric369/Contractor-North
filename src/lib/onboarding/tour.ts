@@ -98,6 +98,22 @@ export interface TourStep {
   opens?: "account";
 }
 
+/**
+ * ── THE SPLIT (cn-v726). Erik: "the onboarding is one thing but maybe it should just be
+ * onboarding and something else better for training can come after."
+ *
+ * The 24-step tour was two things wearing one coat: six steps that SET UP (they ask and write)
+ * and eighteen that TEACH. Interleaved, a contractor who just wanted to start had to sit through
+ * the why-line lecture to reach the tone dial at step 23 — and the teaching drifted, because a
+ * step that describes a screen from three steps away goes stale silently.
+ *
+ * So: TOUR is now ONLY the setup — every step either asks something saveSetup writes, or closes
+ * the loop (recap, tone, done). The teaching became LESSONS: named, self-contained, offered ONCE
+ * on the surface each explains (the why-lines lesson at the playbook editor — the one thing
+ * "nobody is going to figure out without holding their hand"), and replayable forever from the
+ * cap. A lesson that lives next to the button it describes goes stale LOUDLY, which is the whole
+ * point of the move.
+ */
 export const TOUR: TourStep[] = [
   // ── 1. MEET NORT. A question, out loud, before anything else. ───────────────────────────────
   {
@@ -166,7 +182,6 @@ export const TOUR: TourStep[] = [
       "you change it per job and per customer whenever you like.",
     ask: "labor_rate",
   },
-
   // ── 1b. THE HANDSHAKE. Both directions, out loud. ──────────────────────────────────────────
   //
   // Erik: "Nort gets to know me and i get to know Nort, what he can and where everything i need to
@@ -196,7 +211,49 @@ export const TOUR: TourStep[] = [
       );
     },
   },
+  // THE ONLY SETTING WHOSE WHOLE POINT IS THAT SOMEBODY KNOWS IT'S THERE, and it's three levels
+  // down. Erik asked for it with a wink. Stating the two limits out loud is what makes the dial
+  // safe to turn up — and it agrees with what the settings screen already says rather than
+  // contradicting it. Per person, because `register` lives on profiles (0183), not the org.
+  {
+    key: "tone",
+    route: "/settings?tab=you",
+    anchor: "settings-you",
+    title: "One more, under You",
+    say:
+      "Last one, and it's per person, so you and whoever's in the office don't have to agree. " +
+      "There's a dial in here for how funny I am and a switch for language, so when you're swearing " +
+      "at a seized breaker I'm not answering you like a call centre. I match you and I never go " +
+      "first — if you don't swear, you'll never hear it out of me. And none of it ever reaches a " +
+      "customer: estimates, invoices, anything a homeowner reads stays clean wherever that dial sits.",
+  },
+  {
+    key: "done",
+    route: "/planner",
+    anchor: "setup",
+    title: "That's it",
+    say:
+      "That's the whole thing. This cap button is where I live — take this again any time, " +
+      "or come back to change what you told me. Let's get you a job in here.",
+    next: "Done",
+  },
+];
 
+export interface Lesson {
+  key: string;
+  /** The menu label on the cap, and the offer strip's name for itself. */
+  title: string;
+  /** One sentence: what you'll know after. Shown on the cap menu and the offer strip. */
+  blurb: string;
+  steps: TourStep[];
+}
+
+export const LESSONS: Lesson[] = [
+  {
+    key: "why-lines",
+    title: "Why lines",
+    blurb: "What a why line is, two real ones, how to write yours — the part nobody guesses.",
+    steps: [
   // ── 2. THE WHY LINE. The part nobody figures out unaided. ──────────────────────────────────
   {
     key: "why-what",
@@ -236,7 +293,23 @@ export const TOUR: TourStep[] = [
       "price. It's for reading, mine and yours. I don't run the sum in it, and I never work out a " +
       "number you didn't give me.",
   },
-
+  {
+    key: "playbook-tab",
+    route: "/settings?tab=playbook",
+    anchor: "settings-playbook",
+    title: "And this is your Playbook",
+    say:
+      "That's the one to remember in here. Every question I'll ask you on a job is in this tab, " +
+      "with its why line, and you can rewrite, reorder or delete any of them whenever your mind " +
+      "changes. This is yours, not mine — I just do what it says.",
+  },
+    ],
+  },
+  {
+    key: "getting-around",
+    title: "Getting around",
+    blurb: "The dock, the top bar, and the one door worth remembering — Settings, behind your initials.",
+    steps: [
   // ── 3. THE ROOM. Where everything is. ──────────────────────────────────────────────────────
   {
     key: "dock",
@@ -290,17 +363,13 @@ export const TOUR: TourStep[] = [
       "page, under Office.) You don't have to remember any of it. " +
       "You only have to remember your initials.",
   },
-  {
-    key: "playbook-tab",
-    route: "/settings?tab=playbook",
-    anchor: "settings-playbook",
-    title: "And this is your Playbook",
-    say:
-      "That's the one to remember in here. Every question I'll ask you on a job is in this tab, " +
-      "with its why line, and you can rewrite, reorder or delete any of them whenever your mind " +
-      "changes. This is yours, not mine — I just do what it says.",
+    ],
   },
-
+  {
+    key: "how-a-job-runs",
+    title: "How a job runs",
+    blurb: "Phone call to paid — lead, walk-through, estimate, job, money — and what Nort does at each step.",
+    steps: [
   // ── 4. THE RUN. One job, phone call to money, pointing at the tile each time. ───────────────
   //
   // Erik: "the tour should point out the process starting with leads all the way through also
@@ -396,33 +465,13 @@ export const TOUR: TourStep[] = [
       "Which lead, what date, what price, what goes out — that's all still yours. I do the typing " +
       "and the remembering, you do the trade.",
   },
-  // THE ONLY SETTING WHOSE WHOLE POINT IS THAT SOMEBODY KNOWS IT'S THERE, and it's three levels
-  // down. Erik asked for it with a wink. Stating the two limits out loud is what makes the dial
-  // safe to turn up — and it agrees with what the settings screen already says rather than
-  // contradicting it. Per person, because `register` lives on profiles (0183), not the org.
-  {
-    key: "tone",
-    route: "/settings?tab=you",
-    anchor: "settings-you",
-    title: "One more, under You",
-    say:
-      "Last one, and it's per person, so you and whoever's in the office don't have to agree. " +
-      "There's a dial in here for how funny I am and a switch for language, so when you're swearing " +
-      "at a seized breaker I'm not answering you like a call centre. I match you and I never go " +
-      "first — if you don't swear, you'll never hear it out of me. And none of it ever reaches a " +
-      "customer: estimates, invoices, anything a homeowner reads stays clean wherever that dial sits.",
-  },
-  {
-    key: "done",
-    route: "/planner",
-    anchor: "setup",
-    title: "That's it",
-    say:
-      "That's the whole thing. This cap button is where I live — take this again any time, " +
-      "or come back to change what you told me. Let's get you a job in here.",
-    next: "Done",
+    ],
   },
 ];
+
+export const lessonByKey = (key: string | null | undefined): Lesson | null =>
+  LESSONS.find((l) => l.key === key) ?? null;
+
 
 /** A step by key, for resuming where somebody left off. */
 export const tourIndex = (key: string | null | undefined) => {
