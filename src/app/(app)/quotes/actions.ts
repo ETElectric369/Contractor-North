@@ -13,6 +13,7 @@ import { subtotalTaxTotal } from "@/lib/invoice-math";
 import { QUOTE_STATUSES } from "@/lib/statuses";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { effectiveMarkupPct } from "@/lib/pricing/markup";
+import { reviewAgainstBook, type BookReview } from "@/lib/pricing/book-review";
 import { CALC_TOOLS, runCalc } from "@/lib/electrical-calc";
 import { recordAiUsage, aiSpendExceeded, currentOrgId } from "@/lib/ai-cost";
 import { rateLimited } from "@/lib/rate-limit";
@@ -1216,7 +1217,10 @@ export async function generateQuoteDraft(
  */
 export async function generateQuoteDraftFromSupplier(
   formData: FormData,
-): Promise<{ ok: true; items: DraftLineItem[]; questions: string[]; description: string } | { ok: false; error: string }> {
+): Promise<
+  | { ok: true; items: DraftLineItem[]; questions: string[]; description: string; bookReview: BookReview }
+  | { ok: false; error: string }
+> {
   const gate = await guardEstimator();
   if (!gate.ok) return { ok: false, error: gate.error };
   try {
@@ -1231,7 +1235,12 @@ export async function generateQuoteDraftFromSupplier(
     const levelPct = mk != null && String(mk) !== "" ? Number(mk) : null;
 
     const supabase = await createClient();
-    const { data: org } = await supabase.from("organizations").select("id, settings").limit(1).maybeSingle();
+    const [{ data: org }, { data: bookRows }] = await Promise.all([
+      supabase.from("organizations").select("id, settings").limit(1).maybeSingle(),
+      // For the price-book review below — read-only here; price_list_read is staff-only (0056),
+      // and guardEstimator already required staff.
+      supabase.from("price_list_items").select("id, code, description, unit, buy_price").eq("archived", false),
+    ]);
     const orgS = getOrgSettings((org as { settings?: unknown } | null)?.settings);
 
     const instruction =
@@ -1309,7 +1318,16 @@ export async function generateQuoteDraftFromSupplier(
       })
       .filter((l) => l.description);
     if (!items.length) return { ok: false, error: "Couldn't read any line items off that quote — is it the itemized page?" };
-    return { ok: true, items, questions: [], description: "" };
+
+    // THE BOOK REVIEW — read off the PRE-tax nets, because the book stores COST as the supplier
+    // states it; the tax share is an estimate-side concern (landed cost), not a catalog fact.
+    // Pure matching (lib/pricing/book-review): exact code, then exact normalized description,
+    // no fuzzy rung. Everything it proposes is opt-in in the UI; nothing here writes.
+    const bookReview = reviewAgainstBook(
+      (bookRows ?? []) as never,
+      rawItems.map((l) => ({ description: l.description, quantity: l.quantity, unit: l.unit, net: l.net })),
+    );
+    return { ok: true, items, questions: [], description: "", bookReview };
   } catch (e) {
     return estimatorError(e);
   }

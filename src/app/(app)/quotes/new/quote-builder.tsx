@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { NewCustomerInline } from "@/components/new-customer-inline";
+import { applyPriceBookReview } from "../../price-list/actions";
+import type { BookUpdate, BookAddition } from "@/lib/pricing/book-review";
 import { Plus, Trash2, Sparkles, Loader2, ChevronDown, ChevronRight, Check, X, FileUp, ListPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -364,6 +366,43 @@ export function QuoteBuilder({
         return;
       }
       applyDraft(res);
+      // THE BOOK REVIEW rides alongside the proposals. Ticks default OFF — Erik: "some people
+      // arent going to want anything to override anything." A fresh upload replaces the review,
+      // same as it replaces the proposals.
+      setBookReview(
+        res.bookReview.updates.length || res.bookReview.additions.length
+          ? {
+              source: `${file.name.replace(/\.[a-z0-9]+$/i, "").slice(0, 40)} · ${new Date().toLocaleDateString()}`,
+              updates: res.bookReview.updates.map((u) => ({ ...u, keep: false })),
+              additions: res.bookReview.additions.map((a) => ({ ...a, keep: false })),
+              unchanged: res.bookReview.unchanged,
+            }
+          : null,
+      );
+    });
+  }
+
+  const [bookReview, setBookReview] = useState<null | {
+    source: string;
+    updates: (BookUpdate & { keep: boolean })[];
+    additions: (BookAddition & { keep: boolean })[];
+    unchanged: number;
+  }>(null);
+  const [bookMsg, setBookMsg] = useState<string | null>(null);
+  const [applyingBook, startApplyBook] = useTransition();
+
+  function applyBook() {
+    if (!bookReview) return;
+    startApplyBook(async () => {
+      setBookMsg(null);
+      const r = await applyPriceBookReview(
+        bookReview.updates.filter((u) => u.keep).map((u) => ({ itemId: u.itemId, newBuy: u.newBuy })),
+        bookReview.additions.filter((a) => a.keep).map((a) => ({ description: a.description, unit: a.unit, newBuy: a.newBuy })),
+        bookReview.source,
+      );
+      if (!r.ok) return setBookMsg(r.error ?? "Couldn't update the price book.");
+      setBookMsg(`Price book updated — ${r.updated ?? 0} price${(r.updated ?? 0) === 1 ? "" : "s"}, ${r.added ?? 0} new item${(r.added ?? 0) === 1 ? "" : "s"}.`);
+      setBookReview(null);
     });
   }
 
@@ -499,6 +538,61 @@ export function QuoteBuilder({
             </div>
           </CardContent>
         </Card>
+
+        {/* ── THE PRICE-BOOK REVIEW — what this supplier quote knows that the book doesn't ─────
+            Opt-in per row, ticks default OFF, and closing it loses nothing but the offer. */}
+        {(bookReview || bookMsg) && !uploading && (
+          <Card className="border-slate-300">
+            <CardContent className="py-4">
+              {bookMsg && <p className="text-sm font-medium text-emerald-700">{bookMsg}</p>}
+              {bookReview && (
+                <>
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-900">Update your price book from this quote?</h3>
+                      <p className="text-xs text-slate-500">
+                        Tick what you want &mdash; nothing changes unless you apply.
+                        {bookReview.unchanged > 0 && ` ${bookReview.unchanged} matched at the same price.`}
+                      </p>
+                    </div>
+                    <button type="button" onClick={() => setBookReview(null)} className="text-xs text-slate-400 hover:text-slate-900">
+                      Not now
+                    </button>
+                  </div>
+                  <div className="space-y-1.5">
+                    {bookReview.updates.map((u, i) => (
+                      <label key={u.itemId} className="flex min-h-[36px] cursor-pointer items-center gap-2 text-sm">
+                        <input type="checkbox" className="h-4 w-4" checked={u.keep}
+                               onChange={(e) => setBookReview((p) => p && { ...p, updates: p.updates.map((x, j) => (j === i ? { ...x, keep: e.target.checked } : x)) })} />
+                        <span className="min-w-0 truncate">{u.description}{u.code ? <span className="ml-1 font-mono text-xs text-slate-400">[{u.code}]</span> : null}</span>
+                        <span className="ml-auto whitespace-nowrap font-mono text-xs tabular-nums">
+                          <span className="text-slate-400 line-through">${u.oldBuy.toFixed(2)}</span>
+                          {" → "}
+                          <span className={u.newBuy > u.oldBuy ? "text-rose-700" : "text-emerald-700"}>${u.newBuy.toFixed(2)}</span>
+                        </span>
+                      </label>
+                    ))}
+                    {bookReview.additions.map((a, i) => (
+                      <label key={`add-${i}`} className="flex min-h-[36px] cursor-pointer items-center gap-2 text-sm">
+                        <input type="checkbox" className="h-4 w-4" checked={a.keep}
+                               onChange={(e) => setBookReview((p) => p && { ...p, additions: p.additions.map((x, j) => (j === i ? { ...x, keep: e.target.checked } : x)) })} />
+                        <span className="min-w-0 truncate">{a.description}</span>
+                        <span className="ml-auto whitespace-nowrap font-mono text-xs tabular-nums text-slate-600">new · ${a.newBuy.toFixed(2)}/{a.unit}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <div className="mt-3">
+                    <Button type="button" size="sm" onClick={applyBook}
+                            disabled={applyingBook || !(bookReview.updates.some((u) => u.keep) || bookReview.additions.some((a) => a.keep))}>
+                      {applyingBook ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                      Apply {bookReview.updates.filter((u) => u.keep).length + bookReview.additions.filter((a) => a.keep).length} to the price book
+                    </Button>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {/* ── THE READOUT: WHAT IT PROPOSED, AND NOTHING ELSE ──────────────────────────────────
             One card, one meaning: none of this is on your estimate. Tick what you want, fix a

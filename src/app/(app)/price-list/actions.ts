@@ -109,3 +109,69 @@ export async function bulkImportPriceItems(rows: PriceItemInput[]): Promise<Resu
   revalidatePath("/price-list");
   return { ok: true, imported };
 }
+
+/**
+ * APPLY A SUPPLIER-QUOTE REVIEW — only ever the rows a person ticked.
+ *
+ * Erik: "some people arent going to want anything to override anything so maybe that should be
+ * handled lightly per org or a flag for review." This is the flag-for-review shape: the supplier
+ * upload PROPOSES (lib/pricing/book-review sorts lines into updates/additions, matching by exact
+ * code or exact normalized description, no fuzzy rung), the review card shows old → new with
+ * every tick DEFAULT OFF, and this action receives only what was ticked. Nothing overrides
+ * silently, ever. A per-org auto-apply default can sit on top the day an org asks.
+ *
+ * PROVENANCE RIDES THE `supplier` COLUMN — "CED quote · Aug 15, 2026" — so a price always says
+ * where it came from, which is the difference between a book and a pile of numbers.
+ */
+export async function applyPriceBookReview(
+  updates: { itemId: string; newBuy: number }[],
+  additions: { description: string; unit: string; newBuy: number }[],
+  sourceLabel: string,
+): Promise<{ ok: boolean; error?: string; updated?: number; added?: number }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const source = sourceLabel.trim().slice(0, 80) || "supplier quote";
+
+  // Bounded: a review is a human reading rows, not a bulk import — the CSV importer exists for
+  // that. 200 covers any real quote and stops a crafted payload rewriting the whole book.
+  const ups = updates.slice(0, 200).filter((u) => u.itemId && Number.isFinite(u.newBuy) && u.newBuy >= 0);
+  const adds = additions.slice(0, 200).filter((a) => a.description?.trim() && Number.isFinite(a.newBuy) && a.newBuy >= 0);
+  if (!ups.length && !adds.length) return { ok: false, error: "Nothing was ticked." };
+
+  let updated = 0;
+  for (const u of ups) {
+    // Per-row, with the silent-write check — one refused row must not report the whole review
+    // applied. RLS scopes the id to this org.
+    const { data: wrote, error } = await supabase
+      .from("price_list_items")
+      .update({ buy_price: Math.round(u.newBuy * 100) / 100, supplier: source })
+      .eq("id", u.itemId)
+      .select("id");
+    if (error) return { ok: false, error: dbError(error) };
+    if (wrote?.length) updated++;
+  }
+
+  let added = 0;
+  if (adds.length) {
+    const { data: ins, error } = await supabase
+      .from("price_list_items")
+      .insert(
+        adds.map((a) => ({
+          description: a.description.trim(),
+          unit: a.unit?.trim() || "ea",
+          buy_price: Math.round(a.newBuy * 100) / 100,
+          // markup_pct 0 = the item rung is vacuous, so pricing falls through to customer level →
+          // org default — the same ladder every other line rides.
+          markup_pct: 0,
+          supplier: source,
+        })),
+      )
+      .select("id");
+    if (error) return { ok: false, error: dbError(error) };
+    added = ins?.length ?? 0;
+  }
+
+  revalidatePath("/price-list");
+  return { ok: true, updated, added };
+}
