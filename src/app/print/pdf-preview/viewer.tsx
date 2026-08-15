@@ -130,10 +130,30 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
   // redirect wearing the app's URL — and this page is reached straight from a money document.
   const safeBack = back && /^\/(?!\/)/.test(back) ? back : "/";
 
+  // GO BACK, don't push forward (Erik: "the pdf generator gets stuck in a loop and i cant get
+  // out of it with the back button"). The old <a href={back}> PUSHED the document page on top,
+  // so the history read doc → preview → doc → preview…, and every browser-back landed on this
+  // page again — which re-ran the whole render. When we arrived here from inside the app, Back
+  // now means history.back(), which unwinds the stack instead of growing it; the href stays as
+  // the fallback for a preview opened cold (new tab, shared link), where back() would leave the
+  // app entirely.
+  const goBack = (e: React.MouseEvent) => {
+    let cameFromApp = false;
+    try {
+      cameFromApp = window.history.length > 1 && !!document.referrer && new URL(document.referrer).origin === window.location.origin;
+    } catch {
+      cameFromApp = false;
+    }
+    if (cameFromApp) {
+      e.preventDefault();
+      window.history.back();
+    }
+  };
+
   return (
     <div className="pdf-preview-root flex h-screen flex-col bg-slate-200">
       <div className="no-print flex flex-wrap items-center justify-between gap-3 border-b border-slate-300 bg-white px-4 py-2.5">
-        <a href={safeBack} className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900">
+        <a href={safeBack} onClick={goBack} className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900">
           <ArrowLeft className="h-4 w-4" /> Back
         </a>
         <div className="flex items-center gap-2">

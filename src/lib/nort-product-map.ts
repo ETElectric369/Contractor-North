@@ -24,6 +24,7 @@ WHERE THINGS LIVE (the app's surfaces — point people here; you cannot press th
 - Sales → Estimates (/quotes): builder at /quotes/new. "Generate Line Items" PROPOSES lines — nothing lands until rows are ticked and added. Upload Plans reads a PDF. Estimate vs fixed-price quote is a toggle on the document.
 - Jobs (/jobs): job hub — schedule, crew, photos (take or upload), materials list, time, costs, change orders, work orders.
 - Money → Invoices (/billing): drafts from finished jobs or by hand; import materials/labor onto a draft invoice with confirm dialogs; progress payments; AR ageing.
+- Document PDFs: Preview/Print on any invoice, estimate, work/change order or material list shows the real PDF. Unchanged documents open from a stored copy (fast); an edit or payment re-renders automatically. A customer's emailed link gets its own Download PDF button once a copy exists — same file the office sees.
 - Timeclock (/timeclock): 2-button clock for techs, mid-shift job switch (that is what creates "split" rows on timecards), office timecards with pay-period view.
 - Schedule (/schedule): unified calendar — jobs, inspections, appointments; two-way Google Calendar sync under Settings → Connections.
 - Contacts: customers and their pricing levels (per-customer markup + labor rate).

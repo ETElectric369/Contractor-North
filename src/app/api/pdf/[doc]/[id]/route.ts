@@ -1,6 +1,7 @@
+import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { headers } from "next/headers";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { isStaffRole } from "@/lib/actions/perms";
 
 export const dynamic = "force-dynamic";
@@ -26,6 +27,40 @@ const DOCS: Record<string, string> = {
   "prelim-notice": "prelim-notice",
 };
 
+/** Friendly filename — WITH THE JOB NAME for invoices (Erik: "we need to add the job name to
+ *  the file name when sharing or exporting a file"). Shared by the stored-bytes and the
+ *  fresh-render paths so the two can never disagree. */
+async function docFilename(supabase: Awaited<ReturnType<typeof createClient>>, doc: string, id: string): Promise<string> {
+  let filename = `${doc}-${id.slice(0, 8)}.pdf`;
+  if (doc === "invoice") {
+    const { data: inv } = await supabase
+      .from("invoices")
+      .select("invoice_number, jobs(name)")
+      .eq("id", id)
+      .maybeSingle();
+    if (inv?.invoice_number) {
+      const job = ((inv as { jobs?: { name?: string | null } | { name?: string | null }[] }).jobs ?? null);
+      const jobName = String((Array.isArray(job) ? job[0]?.name : job?.name) ?? "").trim();
+      filename = `Invoice ${inv.invoice_number}${jobName ? ` — ${jobName.slice(0, 60)}` : ""}.pdf`;
+    }
+  }
+  return filename;
+}
+
+function pdfResponse(bytes: Uint8Array, filename: string) {
+  return new NextResponse(bytes as unknown as BodyInit, {
+    headers: {
+      "Content-Type": "application/pdf",
+      // Quote/newline-strip: invoice_number is settable via a direct PostgREST PATCH, and a
+      // raw quote or CRLF in a header value is a response-splitting primitive.
+      "Content-Disposition": `inline; filename="${filename.replace(/[\r\n"\\]/g, "")}"`,
+      // no-store at the HTTP layer on purpose: the caching lives server-side, behind the
+      // fingerprint check, where staleness is impossible. A browser-cached copy could go stale.
+      "Cache-Control": "no-store",
+    },
+  });
+}
+
 export async function GET(req: NextRequest, ctx: { params: Promise<{ doc: string; id: string }> }) {
   const { doc, id } = await ctx.params;
   const path = DOCS[doc];
@@ -35,14 +70,56 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ doc: string
   const supabase = await createClient();
   const { data: auth } = await supabase.auth.getUser();
   if (!auth?.user) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
-  const { data: me } = await supabase.from("profiles").select("role").eq("id", auth.user.id).maybeSingle();
+  const { data: me } = await supabase.from("profiles").select("role, org_id").eq("id", auth.user.id).maybeSingle();
   if (!isStaffRole((me as { role?: string } | null)?.role)) {
     return NextResponse.json({ error: "Staff only." }, { status: 403 });
   }
+  const orgId = (me as { org_id?: string | null } | null)?.org_id ?? null;
 
   const url = new URL(req.url);
   const m = Math.min(1.25, Math.max(0.25, Number(url.searchParams.get("m")) || 0.75));
   const margin = `${m}in`;
+
+  /**
+   * THE STORED COPY, WHEN NOTHING CHANGED (Erik: "once the pdf is created and nothing has been
+   * edited … store it instead of regenerating over and over again", 0198).
+   *
+   * The fingerprint is a hash of the print page's HTML — the single layout source this route
+   * renders anyway. One cheap HTML fetch replaces a ~5s chromium boot whenever the document is
+   * unchanged; an edit, a payment landing, a logo swap or a fresh deploy all change the HTML,
+   * so a stale PDF cannot be served and no per-table invalidation code exists to forget.
+   * Erik's edit loop ("often i need to regenerate it exactly because im making edits") still
+   * re-renders every time, because every edit moves the fingerprint.
+   */
+  const reqCookie = (await headers()).get("cookie");
+  const printTarget = `${url.origin}/print/${path}/${id}`;
+  let fingerprint: string | null = null;
+  const svc = createServiceClient();
+  try {
+    const pre = await fetch(printTarget, {
+      headers: reqCookie ? { cookie: reqCookie } : undefined,
+      redirect: "manual",
+      cache: "no-store",
+    });
+    if (pre.status === 200) {
+      const visibleHtml = (await pre.text()).replace(/<script[\s\S]*?<\/script>/gi, "");
+      fingerprint = createHash("sha256").update(visibleHtml).digest("hex");
+      const { data: hit } = await svc
+        .from("doc_pdf_cache")
+        .select("fingerprint, path")
+        .eq("doc", doc)
+        .eq("doc_id", id)
+        .eq("margin", m)
+        .maybeSingle();
+      if (hit?.fingerprint === fingerprint && hit.path) {
+        const { data: blob } = await svc.storage.from("doc-pdfs").download(hit.path);
+        if (blob) return pdfResponse(new Uint8Array(await blob.arrayBuffer()), await docFilename(supabase, doc, id));
+      }
+    }
+  } catch {
+    // The cache is a shortcut, never a gate — any failure here falls through to the render.
+    fingerprint = null;
+  }
 
   // Chromium: the Vercel lambda build on prod; a local Chrome for dev.
   const isVercel = !!process.env.VERCEL;
@@ -90,8 +167,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ doc: string
     // rendered page makes, including cross-origin subresources (the org logo is a free-text
     // URL), which would hand the viewer's Supabase access+refresh token to whatever host that
     // URL names. Request interception lets us scope the credential to the app origin.
-    const cookie = (await headers()).get("cookie");
-    const target = `${url.origin}/print/${path}/${id}`;
+    const cookie = reqCookie;
+    const target = printTarget;
     if (cookie) {
       await page.setRequestInterception(true);
       page.on("request", (r) => {
@@ -125,33 +202,35 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ doc: string
     });
     const pdf = await page.pdf({ format: "letter", printBackground: true });
 
-    // Friendly filename for invoices — WITH THE JOB NAME. Erik: "we need to add the job name to
-    // the file name when sharing or exporting a file". A folder of "Invoice INV-048.pdf" tells an
-    // accountant nothing; "Invoice INV-048 — Moraine Rd.pdf" files itself. The header sanitizer
-    // below strips anything a job name could smuggle into Content-Disposition.
-    let filename = `${doc}-${id.slice(0, 8)}.pdf`;
-    if (doc === "invoice") {
-      const { data: inv } = await supabase
-        .from("invoices")
-        .select("invoice_number, jobs(name)")
-        .eq("id", id)
-        .maybeSingle();
-      if (inv?.invoice_number) {
-        const job = ((inv as { jobs?: { name?: string | null } | { name?: string | null }[] }).jobs ?? null);
-        const jobName = String((Array.isArray(job) ? job[0]?.name : job?.name) ?? "").trim();
-        filename = `Invoice ${inv.invoice_number}${jobName ? ` — ${jobName.slice(0, 60)}` : ""}.pdf`;
+    // KEEP THE BYTES (0198). Best-effort: a storage hiccup must never cost the response the
+    // user is waiting on. The fingerprint is the one computed BEFORE the render — if the
+    // pre-flight failed there is nothing safe to store under, so we skip.
+    if (fingerprint && orgId) {
+      try {
+        const objPath = `${orgId}/${doc}/${id}/m${m}.pdf`;
+        const up = await svc.storage
+          .from("doc-pdfs")
+          .upload(objPath, Buffer.from(pdf), { contentType: "application/pdf", upsert: true });
+        if (!up.error) {
+          // Stamp the doc's CURRENT status on the copy — the customer door (share-pdf) only
+          // serves a copy whose stored status still matches, so a draft-era render or a
+          // post-flip copy is refused there. The staff door doesn't read it.
+          let docStatus = "";
+          if (doc === "invoice" || doc === "quote") {
+            const { data: d } = await svc.from(doc === "invoice" ? "invoices" : "quotes").select("status").eq("id", id).maybeSingle();
+            docStatus = String((d as { status?: string } | null)?.status ?? "");
+          }
+          const { error: rowErr } = await svc
+            .from("doc_pdf_cache")
+            .upsert({ doc, doc_id: id, margin: m, fingerprint, path: objPath, org_id: orgId, doc_status: docStatus, updated_at: new Date().toISOString() });
+          if (rowErr) console.error("doc_pdf_cache upsert failed", rowErr.message);
+        }
+      } catch (e) {
+        console.error("pdf store failed", e instanceof Error ? e.message : e);
       }
     }
 
-    return new NextResponse(Buffer.from(pdf), {
-      headers: {
-        "Content-Type": "application/pdf",
-        // Quote/newline-strip: invoice_number is settable via a direct PostgREST PATCH, and a
-        // raw quote or CRLF in a header value is a response-splitting primitive.
-        "Content-Disposition": `inline; filename="${filename.replace(/[\r\n"\\]/g, "")}"`,
-        "Cache-Control": "no-store",
-      },
-    });
+    return pdfResponse(new Uint8Array(pdf), await docFilename(supabase, doc, id));
   } finally {
     inFlight--;
     await browser.close();

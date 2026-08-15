@@ -1,5 +1,6 @@
 import "server-only";
 import { recalcTotals } from "@/lib/invoice-math";
+import { bustDocPdf } from "@/lib/pdf-cache";
 import { reportError } from "@/lib/observe";
 
 /** Recompute an invoice's totals from items + payments, and auto-advance paid status.
@@ -42,4 +43,9 @@ export async function recalcInvoice(supabase: any, invoiceId: string): Promise<v
   // If this silently fails the invoice shows stale totals/status (wrong balance,
   // wrong paid state) — surface it rather than letting the money figures drift.
   if (error) reportError("recalcInvoice", error, { invoiceId });
+
+  // Every money change on an invoice funnels through here — payments recorded, edited or
+  // deleted, Stripe settlements, credits — so this is THE place the stored PDF (0198) goes
+  // stale for the customer door. Drop it; the next staff view or send re-stores a fresh copy.
+  await bustDocPdf("invoice", invoiceId);
 }

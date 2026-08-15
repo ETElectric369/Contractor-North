@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { pickSite } from "@/lib/site-address";
 import { createClient } from "@/lib/supabase/server";
 import { PrintButton } from "@/components/print-button";
+import { sharePdfReady } from "@/lib/pdf-cache";
 import { companyFromOrg } from "@/components/doc-letterhead";
 import { templateFor } from "@/components/doc-templates";
 import { PublicQuoteAccept } from "./accept";
@@ -35,6 +36,7 @@ export default async function PublicQuotePage({
   if (!data) notFound();
 
   const q = data.quote;
+  const pdfReady = await sharePdfReady("quote", token, String(q.status ?? ""));
   const items = data.items ?? [];
   const c = data.customer;
   const org = data.org as Organization | null;
@@ -44,7 +46,15 @@ export default async function PublicQuotePage({
 
   return (
     <div className="min-h-screen bg-slate-100 py-8 print:bg-white print:py-0">
-      <div className="no-print mx-auto mb-4 flex max-w-3xl items-center justify-end px-4">
+      <div className="no-print mx-auto mb-4 flex max-w-3xl items-center justify-end gap-2 px-4">
+        {pdfReady && (
+          <a
+            href={`/api/share-pdf/${token}`}
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Download PDF
+          </a>
+        )}
         <PrintButton label="Print / Save PDF" />
       </div>
 

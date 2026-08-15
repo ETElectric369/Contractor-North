@@ -5,6 +5,9 @@ import { parseAiJson } from "@/lib/ai-json";
 import { statedLaborRate } from "@/lib/estimate/stated-rate";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
+import { headers } from "next/headers";
+import { bustDocPdf, warmDocPdf } from "@/lib/pdf-cache";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
 import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
@@ -73,6 +76,16 @@ export async function textQuote(
   if (["draft"].includes((quote as any).status ?? "")) {
     await supabase.from("quotes").update({ status: "sent" }).eq("id", id);
   }
+  // Warm the stored PDF (0198) post-response so the customer's Download button works from the
+  // first minute — after() never slows the send, and the render carries this sender's cookies.
+  const h = await headers();
+  const warmHost = h.get("x-forwarded-host") ?? h.get("host");
+  const warmProto = h.get("x-forwarded-proto") ?? "https";
+  const warmCookie = h.get("cookie");
+  // Headers are read BEFORE after() — request APIs inside the callback are on borrowed time.
+  after(async () => {
+    if (warmHost) await warmDocPdf("quote", id, `${warmProto}://${warmHost}`, warmCookie);
+  });
   revalidatePath(`/quotes/${id}`);
   revalidatePath("/quotes");
   return { ok: true };
@@ -133,6 +146,16 @@ export async function emailQuote(
   if (["draft"].includes(quote.status)) {
     await supabase.from("quotes").update({ status: "sent" }).eq("id", id);
   }
+  // Warm the stored PDF (0198) post-response so the customer's Download button works from the
+  // first minute — after() never slows the send, and the render carries this sender's cookies.
+  const h = await headers();
+  const warmHost = h.get("x-forwarded-host") ?? h.get("host");
+  const warmProto = h.get("x-forwarded-proto") ?? "https";
+  const warmCookie = h.get("cookie");
+  // Headers are read BEFORE after() — request APIs inside the callback are on borrowed time.
+  after(async () => {
+    if (warmHost) await warmDocPdf("quote", id, `${warmProto}://${warmHost}`, warmCookie);
+  });
   revalidatePath(`/quotes/${id}`);
   return { ok: true };
 }
@@ -228,6 +251,9 @@ async function recalcQuote(supabase: any, quoteId: string) {
     .from("quotes")
     .update({ subtotal, tax, total })
     .eq("id", quoteId);
+  // A sent quote stays editable (unlike an invoice), so every content write funnels here —
+  // drop the stored PDF (0198) or the customer's Download button would hand out old numbers.
+  await bustDocPdf("quote", quoteId);
 }
 
 export async function addQuoteItem(

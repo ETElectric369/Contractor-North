@@ -2,6 +2,9 @@
 import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
+import { headers } from "next/headers";
+import { warmDocPdf } from "@/lib/pdf-cache";
 import { revalidateMoney } from "@/lib/revalidate-money";
 import { createClient } from "@/lib/supabase/server";
 import { deliverInvoiceEmail } from "@/lib/invoice-email";
@@ -180,6 +183,16 @@ export async function textInvoice(
     // Same reason as setInvoiceStatus: a prepaid draft must land on paid/partial, not 'sent'.
     await recalcInvoice(supabase, id);
   }
+  // Warm the stored PDF (0198) post-response so the customer's Download button works from
+  // the first minute — after() never slows the send; the render carries the sender's cookies.
+  const h = await headers();
+  const warmHost = h.get("x-forwarded-host") ?? h.get("host");
+  const warmProto = h.get("x-forwarded-proto") ?? "https";
+  const warmCookie = h.get("cookie");
+  // Headers are read BEFORE after() — request APIs inside the callback are on borrowed time.
+  after(async () => {
+    if (warmHost) await warmDocPdf("invoice", id, `${warmProto}://${warmHost}`, warmCookie);
+  });
   return { ok: true };
 }
 
@@ -189,7 +202,19 @@ export async function emailInvoice(
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const res = await deliverInvoiceEmail(ctx.supabase, id);
-  if (res.ok) revalidateMoney(id);
+  if (res.ok) {
+    revalidateMoney(id);
+    // Warm the stored PDF (0198) post-response so the customer's Download button works from
+    // the first minute — after() never slows the send; the render carries the sender's cookies.
+    const h = await headers();
+    const warmHost = h.get("x-forwarded-host") ?? h.get("host");
+    const warmProto = h.get("x-forwarded-proto") ?? "https";
+    const warmCookie = h.get("cookie");
+    // Headers are read BEFORE after() — request APIs inside the callback are on borrowed time.
+    after(async () => {
+      if (warmHost) await warmDocPdf("invoice", id, `${warmProto}://${warmHost}`, warmCookie);
+    });
+  }
   return res;
 }
 
