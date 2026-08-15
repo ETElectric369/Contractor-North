@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useOrgPublicBase } from "@/components/use-org-public-base";
 import { useRouter } from "next/navigation";
-import { CalendarPlus, Check, Copy, FileText, MessageSquare } from "lucide-react";
+import { UserPlus, CalendarPlus, Check, Copy, FileText, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented";
 import { Modal, ModalActions } from "@/components/ui/modal";
@@ -60,8 +60,27 @@ export function ConvertMenu({
   const [timeNote, setTimeNote] = useState("");
   const [link, setLink] = useState<{ token: string; phone: string | null } | null>(null);
   const [copied, setCopied] = useState(false);
-  const [busy, setBusy] = useState<null | "estimate" | "inspection">(null);
+  const [busy, setBusy] = useState<null | "estimate" | "inspection" | "contact">(null);
   const [error, setError] = useState<string | null>(null);
+
+  /**
+   * SAVE AS CONTACT — a card, not a verdict. Erik: "a lead can convert to a contact anytime if
+   * the person wants to create one … it shouldnt be required and should auto convert when the
+   * lead gets accepted. i just dont want a wall up anywhere unnecessarily."
+   * The server's "customer" target no longer closes the lead: it mints (or opens) the contact
+   * and the lead stays in the pipeline with its follow-ups intact.
+   */
+  async function saveContact() {
+    setBusy("contact");
+    setError(null);
+    const res = await convertInquiry(inquiryId, "customer", {});
+    if (res.ok && res.redirect) {
+      router.push(res.redirect);
+      return;
+    }
+    setError(res.error ?? "Something went wrong.");
+    setBusy(null);
+  }
 
   async function run(target: "estimate" | "inspection") {
     setBusy(target);
@@ -133,6 +152,9 @@ export function ConvertMenu({
         </Button>
         <Button size="sm" onClick={() => run("estimate")} disabled={busy !== null}>
           <FileText className="h-4 w-4" /> {busy === "estimate" ? "Opening…" : "Create estimate"}
+        </Button>
+        <Button size="sm" variant="ghost" onClick={saveContact} disabled={busy !== null} title="Make a contact card now — the lead stays open either way; winning the estimate does this automatically">
+          <UserPlus className="h-4 w-4" /> {busy === "contact" ? "Saving…" : "Save as contact"}
         </Button>
       </div>
       {error && !inspectOpen && <p className="mt-1 text-xs text-red-600">{error}</p>}

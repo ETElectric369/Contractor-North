@@ -276,7 +276,12 @@ export async function convertInquiry(
   // This matters now because the provenance backlink deliberately re-surfaces converted leads on
   // /leads with a live Convert menu — so this is the backstop. Inspection is exempt: it leaves the
   // lead OPEN (converted_at stays null) so an inspected lead can still go on to become an estimate.
-  if (inq.converted_at && target !== "inspection") {
+  // "Save as contact" on an already-converted lead just OPENS the card it already has — the
+  // guard below exists to stop double-minting, and opening isn't minting.
+  if (target === "customer" && inq.customer_id) {
+    return { ok: true, id: inq.customer_id, redirect: `/crm/${inq.customer_id}` };
+  }
+  if (inq.converted_at && target !== "inspection" && target !== "customer") {
     return { ok: false, error: "This lead was already converted — open its customer or estimate instead." };
   }
 
@@ -417,6 +422,11 @@ export async function convertInquiry(
 
   // Resolve the customer: link the chosen existing one, or create from inquiry.
   // (Reached only by the commit-now targets: customer / estimate-job / job.)
+  // A lead that already carries a contact opens it — "save as contact" twice must never mean
+  // two cards for one person.
+  if (target === "customer" && inq.customer_id) {
+    return { ok: true, id: inq.customer_id, redirect: `/crm/${inq.customer_id}` };
+  }
   let customerId = opts.customerId || null;
   if (!customerId) {
     const { data: cust, error: cErr } = await supabase
@@ -469,14 +479,30 @@ export async function convertInquiry(
     redirect = `/jobs/${job.id}`;
   }
 
+  /**
+   * SAVING A CONTACT IS NOT WINNING THE LEAD. Erik: "a lead can convert to a contact anytime if
+   * the person wants to create one, but if its a lead that doesnt accept then its wasted space so
+   * it shouldnt be required, and should auto convert when the lead gets accepted."
+   *
+   * The three legs of that ruling, and where each lives:
+   *   · AUTO on acceptance — already the law (cn-v477): updateQuoteStatus('accepted') and
+   *     accept_public_quote mint the customer, with dedup.
+   *   · NEVER REQUIRED — every picker got an inline create in cn-v721, and estimates/invoices
+   *     work customerless, carrying inquiry_id.
+   *   · ANYTIME, WITHOUT CLOSING — this branch. It used to stamp converted_at and force status
+   *     "won", so making a contact card ended the lead's life in the pipeline. A contact is a
+   *     card, not a verdict: the lead stays open, keeps its follow-ups, and can still lose —
+   *     at which point the card is just a person you know, which is what a contact book is for.
+   */
+  const isContactOnly = target === "customer";
   const { error: uErr } = await supabase
     .from("inquiries")
     .update({
       customer_id: customerId,
-      converted_to: target,
-      converted_at: new Date().toISOString(),
-      status: newStatus,
       updated_at: new Date().toISOString(),
+      ...(isContactOnly
+        ? {}
+        : { converted_to: target, converted_at: new Date().toISOString(), status: newStatus }),
     })
     .eq("id", id);
   if (uErr) return { ok: false, error: uErr.message };
