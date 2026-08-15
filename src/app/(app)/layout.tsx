@@ -168,7 +168,23 @@ export default async function AppLayout({
   } catch (e) {
     reportError("app-layout:action-items", e);
   }
-  const badges = { "/planner": needsAction };
+  // THE RED DOT ANDREW ASKED FOR: uncontacted leads on the Sales icon. The dock's badge sum
+  // already reads per-href counts (dock.tsx:75) — this was wired for exactly one href since the
+  // day it shipped. Same degrade rule as needsAction: a count is cosmetic, never a crash.
+  let freshLeads = 0;
+  if (isStaff) {
+    try {
+      const { count } = await supabase
+        .from("inquiries")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "new")
+        .is("converted_at", null);
+      freshLeads = count ?? 0;
+    } catch (e) {
+      reportError("app-layout:lead-badge", e);
+    }
+  }
+  const badges = { "/planner": needsAction, "/leads": freshLeads };
 
   return (
     <div

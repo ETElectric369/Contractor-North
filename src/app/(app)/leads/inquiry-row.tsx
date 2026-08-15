@@ -9,7 +9,7 @@ import { InquiryModal } from "./inquiry-modal";
 import { ConvertMenu } from "./convert-menu";
 import { markInquiryContacted, setInquiryStatus } from "./actions";
 import { useToast } from "@/components/toast";
-import { formatDate } from "@/lib/utils";
+import { formatDateTime, formatDate } from "@/lib/utils";
 import type { Inquiry, LeadBucket } from "@/lib/types";
 import { INQUIRY_STATUSES } from "@/lib/statuses";
 import { LEAD_BUCKETS } from "@/lib/lead-triage";
@@ -154,7 +154,10 @@ export function InquiryRow({
           {inquiry.email && (
             <span className="flex items-center gap-1"><Mail className="h-3 w-3" /> {inquiry.email}</span>
           )}
-          <span>Added {formatDate(inquiry.created_at)}</span>
+          {/* TIME, not just the date. Andrew: "maybe the time that it was submitted versus just
+              the date" — fresh leads are triaged by recency, and a same-day lead looked identical
+              at 8am and 8pm. */}
+          <span>Added {formatDateTime(inquiry.created_at)}</span>
           {inquiry.last_contacted_at && <span>· Contacted {formatDate(inquiry.last_contacted_at)}</span>}
           {inquiry.intake?.reason && <span className="text-slate-400">· {inquiry.intake.reason}</span>}
         </div>

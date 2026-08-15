@@ -9,6 +9,7 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronUp,
+  CopyPlus,
   Loader2,
   Plus,
   RotateCcw,
@@ -284,6 +285,24 @@ export function PlaybookManager({
   };
 
   /**
+   * DUPLICATE, RIGHT BELOW. Andrew: "it'd be great to have a copy function so that I could just
+   * copy a similar" — his forms are chains of near-identical conditionals (designer first name,
+   * last name, company, email, city, phone…), and rebuilding each from a blank card is the whole
+   * cost of authoring them. A FRESH KEY, always: the key is the answer's storage address, so a
+   * cloned key would make two questions silently share one answer. The `when` rules copy as-is —
+   * they name questions ABOVE this one, and the copy sits below the original, so every rule still
+   * resolves.
+   */
+  const duplicate = (i: number) => {
+    const key = `q_${Date.now().toString(36)}`;
+    const src = needs[i];
+    const copy = { ...src, key, label: `${src.label} (copy)` };
+    setNeeds([...needs.slice(0, i + 1), copy, ...needs.slice(i + 1)]);
+    setOpenKey(key);
+    setDirty(true);
+  };
+
+  /**
    * `resyncs` = this operation REPLACED the questions server-side (install a starter, go back to
    * the plain sheet), so the editor's local copy is now a lie.
    *
@@ -410,6 +429,10 @@ export function PlaybookManager({
                     <button type="button" onClick={() => move(i, 1)} disabled={i === needs.length - 1}
                             className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 disabled:opacity-30">
                       <ChevronDown className="h-4 w-4" />
+                    </button>
+                    <button type="button" onClick={() => duplicate(i)} title="Duplicate this question"
+                            className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100">
+                      <CopyPlus className="h-4 w-4" />
                     </button>
                     <button type="button" onClick={() => remove(i)} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100">
                       <Trash2 className="h-4 w-4" />

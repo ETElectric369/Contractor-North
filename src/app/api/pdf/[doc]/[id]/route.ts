@@ -125,11 +125,22 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ doc: string
     });
     const pdf = await page.pdf({ format: "letter", printBackground: true });
 
-    // Friendly filename for invoices ("Invoice INV-048.pdf"); generic for the rest.
+    // Friendly filename for invoices — WITH THE JOB NAME. Erik: "we need to add the job name to
+    // the file name when sharing or exporting a file". A folder of "Invoice INV-048.pdf" tells an
+    // accountant nothing; "Invoice INV-048 — Moraine Rd.pdf" files itself. The header sanitizer
+    // below strips anything a job name could smuggle into Content-Disposition.
     let filename = `${doc}-${id.slice(0, 8)}.pdf`;
     if (doc === "invoice") {
-      const { data: inv } = await supabase.from("invoices").select("invoice_number").eq("id", id).maybeSingle();
-      if (inv?.invoice_number) filename = `Invoice ${inv.invoice_number}.pdf`;
+      const { data: inv } = await supabase
+        .from("invoices")
+        .select("invoice_number, jobs(name)")
+        .eq("id", id)
+        .maybeSingle();
+      if (inv?.invoice_number) {
+        const job = ((inv as { jobs?: { name?: string | null } | { name?: string | null }[] }).jobs ?? null);
+        const jobName = String((Array.isArray(job) ? job[0]?.name : job?.name) ?? "").trim();
+        filename = `Invoice ${inv.invoice_number}${jobName ? ` — ${jobName.slice(0, 60)}` : ""}.pdf`;
+      }
     }
 
     return new NextResponse(Buffer.from(pdf), {
