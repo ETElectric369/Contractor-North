@@ -44,7 +44,12 @@ export function JobPhotoQuick({
 
   return (
     <>
-      <input ref={inputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onFiles} />
+      {/* NO `capture` ATTRIBUTE — that is the whole fix. Erik: "Photo button only for taking
+          picture, can only upload from phone from sub menu." capture="environment" forces iOS
+          straight into the camera with no way to reach the photo library; without it the OS asks
+          "Camera / Photo Library / Choose File", which is BOTH verbs on the button he already
+          taps. Desktop behaviour is unchanged (a file picker either way). */}
+      <input ref={inputRef} type="file" accept="image/*" multiple className="hidden" onChange={onFiles} />
       <button
         type="button"
         onClick={() => inputRef.current?.click()}

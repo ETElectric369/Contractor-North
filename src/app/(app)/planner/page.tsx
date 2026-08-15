@@ -505,10 +505,14 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           </div>
           {i.sub && <div className="truncate text-xs text-slate-400">{i.sub}</div>}
         </Link>
-        <div className="flex shrink-0 items-center gap-1">
+        {/* WRAP, don't cover. Andrew (mobile): "the Navigate field/button covers up the other
+            items on the Today view." A shrink-0 no-wrap cluster of up to four 44px buttons ate the
+            row's text at 375px. Wrapping keeps every verb reachable and the words readable; below
+            sm the Navigate label drops to the icon so the common case never wraps at all. */}
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
           {i.address && (
             <NavLink address={i.address} className={navBtnCls}>
-              <Navigation className="h-4 w-4 shrink-0" /> Navigate
+              <Navigation className="h-4 w-4 shrink-0" /> <span className="hidden sm:inline">Navigate</span>
             </NavLink>
           )}
           {/* Row verbs (staff): the edit pencil kills the old dead-end (appt row →

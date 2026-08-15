@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { NewCustomerInline } from "@/components/new-customer-inline";
 import { useRouter } from "next/navigation";
 import { Plus, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -38,6 +39,10 @@ export function RecurringButton({
   const router = useRouter();
   const editing = !!template;
   const [open, setOpen] = useState(false);
+  // Inline-created customers + a remount key so the UNCONTROLLED selects can adopt the new id
+  // (defaultValue only reads on mount; the key forces the one remount that matters).
+  const [addedCustomers, setAddedCustomers] = useState<{ id: string; name: string }[]>([]);
+  const [forcedCustomer, setForcedCustomer] = useState<string | null>(null);
   const [kind, setKind] = useState(template?.kind ?? "job");
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -142,10 +147,11 @@ export function RecurringButton({
             <>
               <div>
                 <Label htmlFor="r-cust">Customer</Label>
-                <Select id="r-cust" name="customer_id" defaultValue={template?.customer_id ?? ""}>
+                <Select key={forcedCustomer ?? "init"} id="r-cust" name="customer_id" defaultValue={forcedCustomer ?? template?.customer_id ?? ""}>
                   <option value="">—</option>
-                  {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  {[...addedCustomers, ...customers].map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </Select>
+                <NewCustomerInline className="mt-1.5" onCreated={(c) => { setAddedCustomers((p) => [c, ...p]); setForcedCustomer(c.id); }} />
               </div>
               <div>
                 <Label htmlFor="r-desc">Description</Label>
@@ -156,10 +162,13 @@ export function RecurringButton({
             <>
               <div>
                 <Label htmlFor="r-icust">Customer</Label>
-                <Select id="r-icust" name="customer_id" defaultValue={template?.customer_id ?? ""} required>
+                {/* This one is `required`, which made an empty contact book a form that could not
+                    be submitted AT ALL — the hardest version of the dead end. */}
+                <Select key={forcedCustomer ?? "init"} id="r-icust" name="customer_id" defaultValue={forcedCustomer ?? template?.customer_id ?? ""} required>
                   <option value="">—</option>
-                  {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  {[...addedCustomers, ...customers].map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </Select>
+                <NewCustomerInline className="mt-1.5" onCreated={(c) => { setAddedCustomers((p) => [c, ...p]); setForcedCustomer(c.id); }} />
               </div>
               <div>
                 <Label>Line items</Label>

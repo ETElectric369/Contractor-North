@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { NewCustomerInline } from "@/components/new-customer-inline";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2, Pencil, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -137,6 +138,8 @@ export function InvoiceDetail({
   // draft-only customer/job correction
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkCustomer, setLinkCustomer] = useState(invoice.customer_id ?? "");
+  // Customers created inline from the link modal, merged ahead of the server list.
+  const [addedCustomers, setAddedCustomers] = useState<CustomerLite[]>([]);
   const [linkJob, setLinkJob] = useState(invoice.job_id ?? "");
   const [linkError, setLinkError] = useState<string | null>(null);
   function openLink() {
@@ -858,12 +861,23 @@ export function InvoiceDetail({
               onChange={(e) => setLinkCustomer(e.target.value)}
             >
               <option value="">No customer</option>
-              {customers.map((c) => (
+              {[...addedCustomers, ...customers].map((c) => (
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </Select>
-            {linkJobObj?.customer_id && (
+            {linkJobObj?.customer_id ? (
               <p className="mt-1 text-xs text-slate-400">Set from the selected job.</p>
+            ) : (
+              /* Erik, on this exact modal: "ive got to be able to add a new customer or at least
+                 type someones name on the invoice from here." A brand-new invoice for a brand-new
+                 customer was a dead end — leave, create, come back. */
+              <NewCustomerInline
+                className="mt-1.5"
+                onCreated={(c) => {
+                  setAddedCustomers((prev) => [c, ...prev]);
+                  setLinkCustomer(c.id);
+                }}
+              />
             )}
           </div>
         </div>

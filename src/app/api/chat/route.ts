@@ -1,7 +1,8 @@
 import type Anthropic from "@anthropic-ai/sdk";
+import { NORT_PRODUCT_MAP } from "@/lib/nort-product-map";
 import { isStaffRole } from "@/lib/actions/perms";
 import { asRegister, clampHumor, clampNotes, standingOrders, toneDirective } from "@/lib/nort/tone";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import {
   getAnthropic,
   ASSISTANT_SYSTEM_PROMPT,
@@ -271,6 +272,11 @@ export async function POST(req: Request) {
   const playbook = orgS.quote_playbook?.trim();
   const catalogMode = orgS.estimating_mode === "catalog";
   let systemPrompt = ASSISTANT_SYSTEM_PROMPT;
+  // WHAT THE PRODUCT SHIPS + WHOSE TRADE THIS IS. Both are per-org-stable, so they belong in the
+  // cached block. The trade line kills a bias that has now bitten twice (Nort pitched electrical
+  // fields to a general contractor); the map kills "I can't do that" about features that shipped
+  // — on 8/7 Nort declared the embed snippet impossible two days after it went live.
+  systemPrompt += `\n\n${NORT_PRODUCT_MAP}`;
   // SUB-CACHING SPLIT: `systemPrompt` accumulates only the STABLE core (frozen instructions +
   // org-config estimating method + playbook + write-tool rules) — byte-identical per org/role, so
   // it becomes a CACHED system block (tools cache with it, since tools render before system). Every
@@ -287,6 +293,12 @@ export async function POST(req: Request) {
     clampHumor((prof as { nort_humor?: unknown } | null)?.nort_humor),
     asRegister((prof as { nort_register?: unknown } | null)?.nort_register),
   )}`;
+  // THE COMPANY'S TRADE, IN THE PROMPT — never left to be guessed from data. The base prompt says
+  // "figure out their trade from their jobs" and a fresh org HAS no jobs, which is exactly when
+  // Nort offered panel-and-EV-charger fields to a general contractor.
+  if (orgS.trade_label?.trim())
+    systemPrompt += `\n\nTHIS COMPANY'S TRADE: ${orgS.trade_label.trim()}. Every example, field suggestion and rule of thumb you offer is in THIS trade unless they ask about another.`;
+
   // THE ESTIMATING METHOD — mode-aware. "catalog" companies (deck/carpentry & preset-price
   // shops) bid from their OWN price list + kits, quantities from the customer's measurements,
   // NO web research. "research" (default, electrical) prices materials by LIVE market research
@@ -463,6 +475,39 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
 
   if (messages.length === 0) {
     return new Response("No messages", { status: 400 });
+  }
+
+  // ── THE RETURN LEG (0196) ───────────────────────────────────────────────────────────────
+  // Andrew filed the address-split ask THREE TIMES, because nothing ever told him what happened
+  // to a filing. On the FIRST message of a fresh conversation, Nort now opens with what shipped
+  // from this caller's own reports since they last heard. Stamped on injection: if they close the
+  // tab mid-sentence they miss one digest, which is cheaper than knowing what a person read.
+  // Best-effort — a failure here must never cost the conversation.
+  try {
+    if (messages.length <= 1) {
+      const { data: shipped } = await supabase
+        .from("bug_reports")
+        .select("id, note, status")
+        .eq("reported_by", user.id)
+        .in("status", ["fixed", "closed"])
+        .is("filer_notified_at", null)
+        .order("created_at", { ascending: false })
+        .limit(8);
+      if (shipped?.length) {
+        const lines = (shipped as { note: string | null; status: string }[])
+          .map((r) => `- ${String(r.note ?? "").replace(/\s+/g, " ").slice(0, 140)}${r.status === "closed" ? " (closed — see note)" : ""}`)
+          .join("\n");
+        volatilePrompt += `\n\nTHEIR BUG REPORTS THAT WERE RESOLVED SINCE THEY LAST HEARD — open your FIRST reply with one short line telling them these shipped (a compact list, their wording, no ceremony), then answer whatever they asked:\n${lines}`;
+        // Service client, filtered BY HAND to this caller's own rows (service clients bypass RLS).
+        await createServiceClient()
+          .from("bug_reports")
+          .update({ filer_notified_at: new Date().toISOString() })
+          .in("id", (shipped as { id: string }[]).map((r) => r.id))
+          .eq("reported_by", user.id);
+      }
+    }
+  } catch {
+    /* the digest is a courtesy; the conversation is the job */
   }
 
   // CROSS-SESSION MEMORY: Nort persists every turn to conversations/messages, but until now it never

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
+import { NewCustomerInline } from "@/components/new-customer-inline";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -49,6 +50,7 @@ export function NewInvoiceButton({
   );
   const [quoteId, setQuoteId] = useState("");
   const [customerId, setCustomerId] = useState("");
+  const [addedCustomers, setAddedCustomers] = useState<{ id: string; name: string }[]>([]);
   const [jobId, setJobId] = useState("");
   const [title, setTitle] = useState("");
   // Seeded from the org's default tax rate on open (a fraction, e.g. 0.0825) so a
@@ -244,12 +246,22 @@ export function NewInvoiceButton({
                   }}
                 >
                   <option value="">— None —</option>
-                  {customers.map((c) => (
+                  {[...addedCustomers, ...customers].map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
                     </option>
                   ))}
                 </Select>
+                {/* A brand-new invoice for a brand-new customer was a dead end — leave the modal,
+                    lose the draft, dig through Contacts, come back. */}
+                <NewCustomerInline
+                  className="mt-1.5"
+                  onCreated={(c) => {
+                    setAddedCustomers((prev) => [c, ...prev]);
+                    setCustomerId(c.id);
+                    setJobId("");
+                  }}
+                />
               </div>
               {jobs.length > 0 && (
                 <div>

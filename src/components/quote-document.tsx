@@ -112,6 +112,16 @@ export function QuoteDocument({
       )}
 
       {title && <div className="mt-5 text-base font-semibold text-slate-900">{title}</div>}
+      {/* WHICH KIND OF NUMBER THIS IS, said on the paper. Andrew: "time and material estimate vs.
+          fixed bid estimate. it doesn't mean anything.. It needs to have a statement at the top of
+          each differentiating." The toggle has existed since cn-v517; the document never said the
+          words, so the customer had only a one-word label ("Estimate"/"Quote") to infer a legal
+          difference from. One factual line, no sales language — it prints on customer paper. */}
+      <p className="mt-1 text-xs italic text-slate-500">
+        {docLabel.toLowerCase() === "quote"
+          ? "This is a fixed price for the scope described below."
+          : "This is an estimate of costs — final billing reflects actual time and materials."}
+      </p>
       {description && <DocDescription text={description} />}
 
       {/* Line items — a multi-line/comma-list description renders extra lines as

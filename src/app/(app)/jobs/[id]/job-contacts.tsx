@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { NewCustomerInline } from "@/components/new-customer-inline";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Plus, Trash2, HardHat } from "lucide-react";
@@ -30,6 +31,7 @@ export function JobContacts({
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [customerId, setCustomerId] = useState("");
+  const [added, setAdded] = useState<{ id: string; name: string; type: string | null }[]>([]);
   const [role, setRole] = useState("Subcontractor");
 
   function add() {
@@ -65,7 +67,7 @@ export function JobContacts({
               <Label htmlFor="jc-cust">Contact</Label>
               <Select id="jc-cust" value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
                 <option value="">— pick a contact —</option>
-                {options.map((o) => (
+                {[...added, ...options].map((o) => (
                   <option key={o.id} value={o.id}>
                     {o.name}
                     {o.type === "subcontractor" ? " (sub)" : ""}
@@ -84,7 +86,11 @@ export function JobContacts({
               </Select>
             </div>
           </div>
-          <p className="text-[11px] text-slate-400">Add a contact to the book first (Contacts → New customer → type Subcontractor), then link them here.</p>
+          {/* This line used to read "Add a contact to the book first (Contacts → New customer →
+              type Subcontractor), then link them here" — an instruction to LEAVE, which is the
+              missing button written down as prose. */}
+          <NewCustomerInline onCreated={(c) => { setAdded((p) => [{ ...c, type: null }, ...p]); setCustomerId(c.id); }} />
+          <p className="text-[11px] text-slate-400">Mark them a Subcontractor later on their contact page if that&rsquo;s what they are.</p>
           <div className="flex justify-end gap-2">
             <Button size="sm" variant="outline" onClick={() => setAdding(false)}>Cancel</Button>
             <Button size="sm" onClick={add} disabled={pending || !customerId}>{pending ? "Linking…" : "Link"}</Button>

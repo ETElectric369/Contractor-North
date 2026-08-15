@@ -597,7 +597,11 @@ export async function importLaborIntoInvoice(invoiceId: string): Promise<ImportR
       // line whose hours grow. Re-importing refreshes it — unless the office negotiated
       // the number, in which case `edited` protects it and a NEW person still appends.
       import_key: `labor:${l.personId}`,
-      description: `Labor — ${l.name}`,
+      // THE RATE'S PROVENANCE, ON THE LINE. Erik, staring at an import: "still importing at 150"
+      // — the number was his tech's own bill_rate doing exactly its job, and nothing said so, so
+      // it read as a bug. A line that names its source explains itself; one that doesn't becomes
+      // a report.
+      description: `Labor — ${l.name}${levelRate && levelRate > 0 ? " (customer rate)" : l.rate !== defaultRate ? ` (${l.name}'s bill rate)` : ""}`,
       quantity: l.quantity,
       unit: "hr",
       unit_price: l.rate,

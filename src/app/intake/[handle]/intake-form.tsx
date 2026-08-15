@@ -21,9 +21,44 @@ import { submitIntake } from "./actions";
  * Deliberately boring: fixed contact block, one column, no accounts, no progress bar. A customer
  * gives a contractor two minutes; every extra control here is a lead that closes the tab.
  */
+
+/**
+ * CITY / STATE / ZIP, VISIBLE AND HIS OWN TO TYPE.
+ *
+ * Andrew asked for this three times across four days ("break out the residential address to have
+ * all the fields associated"), which read as a conflict with 0177's law — "a guessed city is worse
+ * than a blank one; city/state/zip are filled ONLY by the picker." It is not a conflict. 0177
+ * forbids the APP inventing parts by parsing a typed blob. A customer typing their own city into a
+ * CITY BOX is not a guess — it is the first-party answer, from the one person who cannot be wrong
+ * about where they live. What the law actually bought was refusing to DERIVE; showing three boxes
+ * the picker fills (and a person can correct) keeps that entirely.
+ *
+ * It also closes the silent case the hidden columns created: type an address WITHOUT picking a
+ * suggestion and the parts stayed empty forever, invisibly — the lead arrived with a street and no
+ * town, and nobody on either side could see that it had. Now the blanks are on screen, where a
+ * person fills them without being asked.
+ */
+function AddressParts({
+  value,
+  onChange,
+}: {
+  value: { city: string; state: string; zip: string };
+  onChange: (patch: Partial<{ city: string; state: string; zip: string }>) => void;
+}) {
+  return (
+    <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <div className="col-span-2">
+        <Input placeholder="City" autoComplete="address-level2" value={value.city} onChange={(e) => onChange({ city: e.target.value })} />
+      </div>
+      <Input placeholder="State" autoComplete="address-level1" maxLength={2} value={value.state} onChange={(e) => onChange({ state: e.target.value.toUpperCase() })} />
+      <Input placeholder="ZIP" autoComplete="postal-code" inputMode="numeric" value={value.zip} onChange={(e) => onChange({ zip: e.target.value })} />
+    </div>
+  );
+}
+
 export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: PublicNeed[]; orgName: string }) {
-  // city/state/zip are filled ONLY by the picker — a typed line leaves them empty, which is
-  // 0177's law: a guessed city is worse than a blank one.
+  // city/state/zip are filled by the picker AND visible/typable (see AddressParts) — 0177's law
+  // forbids the app DERIVING them from a typed blob, not the customer stating them.
   const [contact, setContact] = useState({ name: "", phone: "", email: "", address: "", city: "", state: "", zip: "" });
   // THE SECOND ADDRESS (0189). `contact.address` is where the PERSON is; this is where the WORK is,
   // and it is the one that becomes the job. Ticked by default so a residential service call is
@@ -159,11 +194,12 @@ export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: 
             streetOnly
             placeholder="Street address"
             defaultValue={contact.address}
-            onTextChange={(v) => setContact({ ...contact, address: v, city: "", state: "", zip: "" })}
+            onTextChange={(v) => setContact((c) => ({ ...c, address: v }))}
             onResolved={(p) =>
               setContact((c) => ({ ...c, address: p.line1 || c.address, city: p.city ?? "", state: p.state ?? "", zip: p.zip ?? "" }))
             }
           />
+          <AddressParts value={contact} onChange={(patch) => setContact((c) => ({ ...c, ...patch }))} />
         </div>
       </div>
 
@@ -193,11 +229,12 @@ export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: 
               streetOnly
               placeholder="Where the work happens"
               defaultValue={site.address}
-              onTextChange={(v) => setSite({ address: v, city: "", state: "", zip: "" })}
+              onTextChange={(v) => setSite((x) => ({ ...x, address: v }))}
               onResolved={(p) =>
                 setSite((x) => ({ address: p.line1 || x.address, city: p.city ?? "", state: p.state ?? "", zip: p.zip ?? "" }))
               }
             />
+            <AddressParts value={site} onChange={(patch) => setSite((x) => ({ ...x, ...patch }))} />
           </div>
         )}
       </div>

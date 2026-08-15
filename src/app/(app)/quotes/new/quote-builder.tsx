@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { NewCustomerInline } from "@/components/new-customer-inline";
 import { Plus, Trash2, Sparkles, Loader2, ChevronDown, ChevronRight, Check, X, FileUp, ListPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -116,6 +117,11 @@ export function QuoteBuilder({
   const router = useRouter();
   const defaultRate = taxRates.find((t) => t.is_default);
   const [customerId, setCustomerId] = useState(preselected ?? "");
+  // Customers created inline, merged into the server-provided list. The FIRST screen of the whole
+  // estimate flow had a picker and no way to create what it picks — cn-v677 fixed the SAVED-quote
+  // picker and never this, its sibling one screen earlier.
+  const [addedCustomers, setAddedCustomers] = useState<CustomerOption[]>([]);
+  const allCustomers = [...addedCustomers, ...customers];
   // The customer-facing document word — Estimate (T&M) by default, toggle to a
   // fixed-price Quote per document. Same control as the saved-quote editor.
   const [docType, setDocType] = useState<QuoteDocType>("estimate");
@@ -139,7 +145,7 @@ export function QuoteBuilder({
 
   // Resolve the markup via THE one rule (effectiveMarkupPct): the selected customer's
   // pricing-level markup → the item's own markup when > 0 → the org default → 0.
-  const selectedCust = customers.find((c) => c.id === customerId);
+  const selectedCust = allCustomers.find((c) => c.id === customerId);
   const levelMarkup = selectedCust?.level_markup;
   // The customer's pricing level can also carry its own labor rate (e.g. Local = $125/hr);
   // when set, the estimator uses it instead of the org default.
@@ -704,13 +710,20 @@ export function QuoteBuilder({
                 onChange={(e) => setCustomerId(e.target.value)}
               >
                 <option value="">— Select customer —</option>
-                {customers.map((c) => (
+                {allCustomers.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
                     {c.company_name ? ` (${c.company_name})` : ""}
                   </option>
                 ))}
               </Select>
+              <NewCustomerInline
+                className="mt-1.5"
+                onCreated={(c) => {
+                  setAddedCustomers((prev) => [{ id: c.id, name: c.name, company_name: null }, ...prev]);
+                  setCustomerId(c.id);
+                }}
+              />
             </div>
             <div>
               <Label htmlFor="title">Title</Label>
