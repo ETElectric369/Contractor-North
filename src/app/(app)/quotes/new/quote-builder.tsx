@@ -21,6 +21,7 @@ import {
   saveQuote,
   generateQuoteDraft,
   generateQuoteDraftFromPlan,
+  generateQuoteDraftFromSupplier,
   type DraftLineItem,
 } from "../actions";
 import { AddLineItems } from "@/components/add-line-items";
@@ -348,6 +349,24 @@ export function QuoteBuilder({
     });
   }
 
+  // Upload a SUPPLIER QUOTE (CED etc.) → transcribed faithfully, marked up in code off the same
+  // ladder as every other material line, and PROPOSED — never taken off, never re-priced from
+  // history: the net on the quote is the buy price by definition.
+  function onUploadSupplier(file: File) {
+    setAiError(null);
+    startUpload(async () => {
+      const fd = new FormData();
+      fd.set("file", file);
+      if (levelMarkup != null) fd.set("markupPct", String(levelMarkup));
+      const res = await generateQuoteDraftFromSupplier(fd);
+      if (!res.ok) {
+        setAiError(res.error);
+        return;
+      }
+      applyDraft(res);
+    });
+  }
+
   // Upload a plan PDF → Claude reads it natively (legend, schedules, notes, drawing) and takes it
   // off into the same price-book-priced lines + review questions.
   function onUploadPlan(file: File) {
@@ -457,6 +476,20 @@ export function QuoteBuilder({
                     const f = e.target.files?.[0];
                     if (f) onUploadPlan(f);
                     e.target.value = ""; // let the same file be re-picked after an undo
+                  }}
+                />
+              </label>
+              <label className={`inline-flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-slate-300 bg-white/60 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 ${uploading ? "pointer-events-none opacity-60" : ""}`}>
+                <FileUp className="h-4 w-4" /> Supplier quote
+                <input
+                  type="file"
+                  accept="application/pdf,text/csv,.csv,.txt"
+                  className="hidden"
+                  disabled={uploading || generating}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) onUploadSupplier(f);
+                    e.target.value = "";
                   }}
                 />
               </label>

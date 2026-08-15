@@ -12,6 +12,7 @@ import { createNotifications } from "@/lib/notifications";
 import { subtotalTaxTotal } from "@/lib/invoice-math";
 import { QUOTE_STATUSES } from "@/lib/statuses";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
+import { effectiveMarkupPct } from "@/lib/pricing/markup";
 import { CALC_TOOLS, runCalc } from "@/lib/electrical-calc";
 import { recordAiUsage, aiSpendExceeded, currentOrgId } from "@/lib/ai-cost";
 import { rateLimited } from "@/lib/rate-limit";
@@ -1195,6 +1196,94 @@ export async function generateQuoteDraft(
  * a plan never says the garage is finished or the panel's already in), and optional `markupPct` +
  * `laborRate` (the selected customer's pricing level — material markup and labor $/hr).
  */
+/**
+ * A SUPPLIER QUOTE BECOMES LINE ITEMS — transcription, never a take-off.
+ *
+ * Erik: "I need to upload an estimate from CED so they can be inserted as line items with a mark
+ * up." A supplier quote is the opposite document to a plan: the plan needs everything DERIVED
+ * (counts, wire sizes, code calcs), the CED quote already IS the answer — descriptions,
+ * quantities, and his real net prices, on paper. So the model's only job here is to read it out
+ * faithfully. No take-off, no NEC, no inventing lines the paper doesn't carry, and it never
+ * touches the price book or the ladder: the net ON THE QUOTE is the buy price, by definition —
+ * re-pricing it from history would replace today's quoted number with an older one.
+ *
+ * THE MARKUP IS APPLIED IN CODE, off the same ladder every other material line uses (customer
+ * level → org default), and each line's flag shows the net it came from — so the office can see
+ * at a glance what CED charged versus what the customer is asked.
+ *
+ * Lands in the cn-v716 PROPOSAL list like every other generate: nothing on the estimate until
+ * he ticks and adds.
+ */
+export async function generateQuoteDraftFromSupplier(
+  formData: FormData,
+): Promise<{ ok: true; items: DraftLineItem[]; questions: string[]; description: string } | { ok: false; error: string }> {
+  const gate = await guardEstimator();
+  if (!gate.ok) return { ok: false, error: gate.error };
+  try {
+    const file = formData.get("file");
+    if (!(file instanceof File) || file.size === 0) return { ok: false, error: "Choose the supplier quote to upload." };
+    if (file.size > 20 * 1024 * 1024) return { ok: false, error: "File is too large (max 20 MB)." };
+    const isPdf = file.type === "application/pdf";
+    const isText = /csv|text|plain/.test(file.type) || /\.(csv|txt)$/i.test(file.name);
+    if (!isPdf && !isText) return { ok: false, error: "Upload the supplier quote as a PDF or CSV." };
+
+    const mk = formData.get("markupPct");
+    const levelPct = mk != null && String(mk) !== "" ? Number(mk) : null;
+
+    const supabase = await createClient();
+    const { data: org } = await supabase.from("organizations").select("id, settings").limit(1).maybeSingle();
+    const orgS = getOrgSettings((org as { settings?: unknown } | null)?.settings);
+
+    const instruction =
+      "This is a SUPPLIER QUOTE (a materials price quote from a supply house). TRANSCRIBE its line items " +
+      "faithfully — do not take off, derive, or add anything that is not printed on it. For each line: " +
+      '{"description": string (the supplier\'s wording, plus the part number if printed), "quantity": number, ' +
+      '"unit": string (ea/ft/box/roll/lot — as printed, ea if unstated), "unit_cost": number (the NET/each price ' +
+      "printed for that line — never the extended total)}. Skip subtotal, tax, freight and total rows. " +
+      'Respond with ONLY a JSON object {"items": [...]}. No prose.';
+
+    const content: unknown[] = isPdf
+      ? [
+          { type: "document", source: { type: "base64", media_type: "application/pdf", data: Buffer.from(await file.arrayBuffer()).toString("base64") } },
+          { type: "text", text: instruction },
+        ]
+      : [{ type: "text", text: `${instruction}\n\nTHE QUOTE:\n${(await file.text()).slice(0, 200_000)}` }];
+
+    const client = getAnthropic();
+    const msg = await client.messages.create({
+      model: DEFAULT_MODEL,
+      max_tokens: 8192,
+      messages: [{ role: "user", content: content as never }],
+    });
+    void recordAiUsage({ orgId: (org as { id?: string } | null)?.id, model: DEFAULT_MODEL, surface: "estimator", usage: msg.usage as never });
+    if (msg.stop_reason === "max_tokens")
+      return { ok: false, error: "That quote ran longer than one pass — split the file and try again." };
+    const text = msg.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("\n");
+    const parsed = (await parseAiJson(client, text, (org as { id?: string } | null)?.id)) as { items?: unknown[] };
+
+    // MARKUP IN CODE, provenance on the flag. The transcription is the model's; the money is not.
+    const pct = effectiveMarkupPct({ levelPct, itemPct: 0, orgDefaultPct: orgS.default_markup_pct });
+    const items: DraftLineItem[] = (Array.isArray(parsed.items) ? parsed.items : [])
+      .map((raw) => {
+        const i = (raw ?? {}) as Record<string, unknown>;
+        const net = Math.max(0, Number(i.unit_cost) || 0);
+        const qty = Number(i.quantity);
+        return {
+          description: String(i.description ?? "").trim(),
+          quantity: Number.isFinite(qty) && qty > 0 ? qty : 1,
+          unit: String(i.unit ?? "ea").trim() || "ea",
+          unit_price: Math.round(net * (1 + pct / 100) * 100) / 100,
+          flag: `supplier net $${net.toFixed(2)} + ${pct}%`,
+        };
+      })
+      .filter((l) => l.description);
+    if (!items.length) return { ok: false, error: "Couldn't read any line items off that quote — is it the itemized page?" };
+    return { ok: true, items, questions: [], description: "" };
+  } catch (e) {
+    return estimatorError(e);
+  }
+}
+
 export async function generateQuoteDraftFromPlan(
   formData: FormData,
 ): Promise<{ ok: true; items: DraftLineItem[]; questions: string[]; description: string } | { ok: false; error: string }> {
