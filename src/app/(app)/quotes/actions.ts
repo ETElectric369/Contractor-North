@@ -1239,8 +1239,9 @@ export async function generateQuoteDraftFromSupplier(
       "faithfully — do not take off, derive, or add anything that is not printed on it. For each line: " +
       '{"description": string (the supplier\'s wording, plus the part number if printed), "quantity": number, ' +
       '"unit": string (ea/ft/box/roll/lot — as printed, ea if unstated), "unit_cost": number (the NET/each price ' +
-      "printed for that line — never the extended total)}. Skip subtotal, tax, freight and total rows. " +
-      'Respond with ONLY a JSON object {"items": [...]}. No prose.';
+      "printed for that line — never the extended total)}. Do not turn subtotal, tax, freight or total rows into items. " +
+      'If the quote prints a SALES TAX amount, report it once as "tax_total" (the dollar amount); null if none is printed. ' +
+      'Respond with ONLY a JSON object {"items": [...], "tax_total": number|null}. No prose.';
 
     const content: unknown[] = isPdf
       ? [
@@ -1259,21 +1260,51 @@ export async function generateQuoteDraftFromSupplier(
     if (msg.stop_reason === "max_tokens")
       return { ok: false, error: "That quote ran longer than one pass — split the file and try again." };
     const text = msg.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("\n");
-    const parsed = (await parseAiJson(client, text, (org as { id?: string } | null)?.id)) as { items?: unknown[] };
+    const parsed = (await parseAiJson(client, text, (org as { id?: string } | null)?.id)) as {
+      items?: unknown[];
+      tax_total?: unknown;
+    };
 
     // MARKUP IN CODE, provenance on the flag. The transcription is the model's; the money is not.
+    //
+    // ── AND THE SALES TAX HE PAID IS COST, NOT MARGIN ─────────────────────────────────────────
+    // Erik: "we do need to account for the tax somehow, it does get covered in the markup but not
+    // sure how it should be done properly." Properly is LANDED COST: the tax CED charges him is as
+    // much a part of what the material cost as the freight is, so it folds into the buy price
+    // BEFORE markup — spread across the lines in proportion to their value, which is exactly how
+    // the supplier computed it. Leaving it "in the markup" means the margin quietly eats ~8%, and
+    // for an org billing at 0% markup (Vivian Builders' default) it means literally billing below
+    // cost on every taxed line. The flag says when a line carries its tax share, so nothing about
+    // the number is a mystery. (An org buying on a resale certificate pays no tax and nothing
+    // changes; if one ever wants quoted-tax IGNORED on principle, that's a one-line org setting
+    // when they ask.)
+    const rawItems = (Array.isArray(parsed.items) ? parsed.items : []).map((raw) => {
+      const i = (raw ?? {}) as Record<string, unknown>;
+      const qty0 = Number(i.quantity);
+      return {
+        description: String(i.description ?? "").trim(),
+        quantity: Number.isFinite(qty0) && qty0 > 0 ? qty0 : 1,
+        unit: String(i.unit ?? "ea").trim() || "ea",
+        net: Math.max(0, Number(i.unit_cost) || 0),
+      };
+    });
+    const extended = rawItems.reduce((t, l) => t + l.net * l.quantity, 0);
+    const taxTotal = Math.max(0, Number(parsed.tax_total) || 0);
+    // Proportional-by-value: a single factor on every net reproduces the supplier's own math.
+    const taxFactor = extended > 0 && taxTotal > 0 ? taxTotal / extended : 0;
+
     const pct = effectiveMarkupPct({ levelPct, itemPct: 0, orgDefaultPct: orgS.default_markup_pct });
-    const items: DraftLineItem[] = (Array.isArray(parsed.items) ? parsed.items : [])
-      .map((raw) => {
-        const i = (raw ?? {}) as Record<string, unknown>;
-        const net = Math.max(0, Number(i.unit_cost) || 0);
-        const qty = Number(i.quantity);
+    const items: DraftLineItem[] = rawItems
+      .map((l) => {
+        const landed = l.net * (1 + taxFactor);
         return {
-          description: String(i.description ?? "").trim(),
-          quantity: Number.isFinite(qty) && qty > 0 ? qty : 1,
-          unit: String(i.unit ?? "ea").trim() || "ea",
-          unit_price: Math.round(net * (1 + pct / 100) * 100) / 100,
-          flag: `supplier net $${net.toFixed(2)} + ${pct}%`,
+          description: l.description,
+          quantity: l.quantity,
+          unit: l.unit,
+          unit_price: Math.round(landed * (1 + pct / 100) * 100) / 100,
+          flag: taxFactor
+            ? `supplier net $${l.net.toFixed(2)} + tax share + ${pct}%`
+            : `supplier net $${l.net.toFixed(2)} + ${pct}%`,
         };
       })
       .filter((l) => l.description);
