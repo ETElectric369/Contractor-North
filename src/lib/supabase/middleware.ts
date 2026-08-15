@@ -24,6 +24,7 @@ const PUBLIC_PATHS = [
   "/api/weather", // same-origin Google proxy (server key) — safe read-only, rate-limited; usable on public pages
   "/api/geocode", // same-origin Google proxy (server key) — safe read-only, rate-limited
   "/api/pay",
+  "/api/share-pdf/", // the customer's stored-PDF door (0198) — token IS the credential, like /i and /q
   "/api/stripe",
   "/api/contracts",
   "/api/timeclock",
