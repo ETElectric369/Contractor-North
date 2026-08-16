@@ -24,7 +24,10 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0b57c4",
+  // The installed app paints its WINDOW TITLE BAR with this (Erik's screenshot: a thick
+  // out-of-place blue stripe over the sea-glass top bar, "this keeps happening"). White
+  // matches the topbar's rgba(255,255,255,.8)-on-white so the chrome disappears into the app.
+  themeColor: "#ffffff",
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",

@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
+import { mirrorAnswers, mirrorValue, siteAddressWhens } from "@/lib/playbook/address-mirror";
 import { Check, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
@@ -76,6 +77,14 @@ export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: 
 
   const pb = useMemo(() => ({ needs: needs as Need[] }), [needs]);
   const visible = useMemo(() => applicableNeeds(pb, answers), [pb, answers]);
+
+  // ── THE FORM OWNS THE PROJECT ADDRESS (Erik: "it shouldnt pop up if the box is checked —
+  // it should autopopulate … and display it uneditable"). A playbook question that IS the
+  // project address (or its City/State/Zip riding the same trigger) renders as a read-only
+  // mirror of the form's own value instead of a second empty box. See address-mirror.ts.
+  const effSite = siteSame ? { address: contact.address, city: contact.city, state: contact.state, zip: contact.zip } : site;
+  const mirrorWhens = useMemo(() => siteAddressWhens(needs as Need[]), [needs]);
+  const mirrorOf = (n: Need) => mirrorValue(n, mirrorWhens, effSite);
 
   const set = (key: string, v: Answers[string]) => setAnswers((a) => ({ ...a, [key]: v }));
 
@@ -158,7 +167,14 @@ export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: 
           // Send button retries. The uploads already happened, so nothing is re-uploaded.
           let r: Awaited<ReturnType<typeof submitIntake>>;
           try {
-            r = await submitIntake(handle, { hp, contact, site: siteSame ? null : site, answers });
+            r = await submitIntake(handle, {
+              hp,
+              contact,
+              site: siteSame ? null : site,
+              // Mirrored address questions land their values here — the mirror WINS over
+              // anything typed into those keys before the tick was flipped.
+              answers: { ...answers, ...mirrorAnswers(needs as Need[], effSite) },
+            });
           } catch {
             return setErr("That didn't send — check your connection and tap Send again. Nothing you typed is lost.");
           }
@@ -250,10 +266,18 @@ export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: 
         className="absolute -left-[9999px] h-0 w-0 opacity-0"
       />
 
-      {visible.map((n) => (
+      {visible.map((n) => {
+        const mv = mirrorOf(n);
+        return (
         <div key={n.key}>
           <Label className="mb-1.5">{n.ask}</Label>
-          {n.slot?.type === "file" ? (
+          {mv !== null ? (
+            // A mirrored address question — shown, never typed into. Empty until the address
+            // above is, then it fills itself; the value rides into the answers at submit.
+            <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700">
+              {mv.trim() ? mv : <span className="text-slate-400">Fills in from the address above</span>}
+            </p>
+          ) : n.slot?.type === "file" ? (
             <div className="rounded-lg border border-dashed border-slate-300 p-3">
               <input
                 type="file"
@@ -408,7 +432,8 @@ export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: 
             <Input value={typeof answers[n.key] === "string" ? (answers[n.key] as string) : ""} onChange={(e) => set(n.key, e.target.value || null)} />
           )}
         </div>
-      ))}
+        );
+      })}
 
       <div className="flex flex-wrap items-center gap-3">
         <Button type="submit" disabled={pending}>
