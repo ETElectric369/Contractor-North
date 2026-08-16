@@ -64,7 +64,10 @@ export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: 
   // THE SECOND ADDRESS (0189). `contact.address` is where the PERSON is; this is where the WORK is,
   // and it is the one that becomes the job. Ticked by default so a residential service call is
   // still one address typed once — which is every lead ET Electric and TAHOE DECK have ever had.
-  const [siteSame, setSiteSame] = useState(true);
+  // UNCHECKED BY DEFAULT (Erik, after the mirror shipped): a builder's lead is usually a
+  // project that is NOT at home, so the project-address block shows first and the tick is
+  // the shortcut for when they are the same place.
+  const [siteSame, setSiteSame] = useState(false);
   const [site, setSite] = useState({ address: "", city: "", state: "", zip: "" });
   const [answers, setAnswers] = useState<Answers>({});
   const [hp, setHp] = useState(""); // honeypot — hidden from people, filled by bots
@@ -236,7 +239,7 @@ export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: 
               if (e.target.checked) setSite({ address: "", city: "", state: "", zip: "" });
             }}
           />
-          The work is at my home address
+          The project address is the same as my home address
         </label>
         {!siteSame && (
           <div className="mt-3">
