@@ -335,46 +335,75 @@ export function PlaybookManager({
       }
     });
 
+  // TWO DOORS, PAINTED DIFFERENT COLORS (Erik + Andrew: "we dont like the dropdown … two
+  // seaglass buttons left and right on the top always visible … and a background color
+  // differentiation matching the button color so its painfully obvious which set of questions
+  // we are working on"). The walk-through wears teal; the website form wears amber — and the
+  // whole workspace below is washed in the active hue, so the answer to "which list am I
+  // editing" is the color of the page, not a line of text.
+  const hueOf = (f: PlaybookForm) => (f.isWebsite ? "amber" : "teal");
+  const activeHue = hueOf(form);
+
   return (
-    <div className="space-y-4">
+    <div
+      className={`space-y-4 rounded-2xl border p-3 sm:p-4 ${
+        activeHue === "amber" ? "border-amber-200 bg-amber-50/70" : "border-teal-200 bg-teal-50/60"
+      }`}
+    >
       {forms.length > 1 && (
-        <div>
-          <Label className="mb-1.5">Which set of questions</Label>
-          <Select
-            value={formId}
-            onChange={(e) => {
-              // SWITCHING THE PICKER DISCARDS EVERYTHING UNSAVED, silently — the render-time sync
-              // below reloads the other form's needs and resets `dirty`. That is the right
-              // behaviour (an edit must never be carried onto a different question set) and the
-              // wrong way to reach it: Andrew has TWO forms and the editor opens on the private
-              // one, so "delete Budget, flick to the other list to check something, flick back"
-              // loses the delete and looks exactly like a form that refuses to change.
-              if (dirty && !confirm("You haven't saved your changes to these questions. Switch anyway and lose them?")) return;
-              setFormId(e.target.value);
-            }}
-          >
-            {forms.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.name}
-                {f.isWebsite ? " — your website" : ""}
-              </option>
-            ))}
-          </Select>
+        // ALWAYS VISIBLE: sticks to the top of the viewport once the page scrolls. Solid-ish
+        // glass background so questions sliding underneath never bleed through the buttons.
+        <div className="sticky top-0 z-20 -mx-3 -mt-3 rounded-t-2xl bg-white/85 px-3 pb-2 pt-3 backdrop-blur sm:-mx-4 sm:-mt-4 sm:px-4">
+          <div className="grid grid-cols-2 gap-2">
+            {forms.map((f) => {
+              const active = f.id === formId;
+              const hue = hueOf(f);
+              return (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => {
+                    if (f.id === formId) return;
+                    // SWITCHING DISCARDS EVERYTHING UNSAVED, silently — the render-time sync
+                    // below reloads the other form's needs and resets `dirty`. Right behaviour
+                    // (an edit must never be carried onto a different question set), so the
+                    // confirm is the guard: Andrew's "frozen playbook" morning started with a
+                    // flick to the other list and back.
+                    if (dirty && !confirm("You haven't saved your changes to these questions. Switch anyway and lose them?")) return;
+                    setFormId(f.id);
+                  }}
+                  aria-pressed={active}
+                  className={`btn-gloss min-h-[44px] rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
+                    active
+                      ? hue === "amber"
+                        ? "bg-amber-500 text-white shadow-sm"
+                        : "bg-teal-600 text-white shadow-sm"
+                      : "border border-slate-200 bg-white/70 text-slate-600 hover:bg-white"
+                  }`}
+                >
+                  {f.name}
+                  <span className={`block text-[11px] font-normal ${active ? "text-white/85" : "text-slate-400"}`}>
+                    {f.isWebsite ? "your website — customers see these" : "your walk-through — only you see these"}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 
       {/* WHO IS GOING TO READ THESE. The whole confusion is that both lists are "questions", and
           one of them is answered by a stranger on a phone who will never see the rest of the app. */}
       {form.isWebsite ? (
-        <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+        <p className="rounded-lg bg-amber-100/80 px-3 py-2 text-sm text-amber-900">
           <strong className="font-medium">These are the questions on your website.</strong> A customer
           answers them at your public &ldquo;request an estimate&rdquo; link and lands on your Leads
-          board. Keep them short — every question is a chance to leave.
+          board. Keep them short &mdash; every question is a chance to leave.
         </p>
       ) : (
-        <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
+        <p className="rounded-lg bg-teal-100/70 px-3 py-2 text-sm text-teal-900">
           Your own walk-through — what you ask yourself standing on the job. Never shown to a customer.
-          {forms.some((f) => f.isWebsite) ? " Your website's questions are a separate set in the picker above." : ""}
+          {forms.some((f) => f.isWebsite) ? " Your website's questions live behind the amber button above." : ""}
         </p>
       )}
 
