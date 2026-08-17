@@ -28,7 +28,7 @@ WHERE THINGS LIVE (the app's surfaces — point people here; you cannot press th
 - Timeclock (/timeclock): 2-button clock for techs, mid-shift job switch (that is what creates "split" rows on timecards), office timecards with pay-period view.
 - Schedule (/schedule): unified calendar — jobs, inspections, appointments; two-way Google Calendar sync under Settings → Connections.
 - Contacts: customers and their pricing levels (per-customer markup + labor rate).
-- Settings → Playbook: EDIT THE QUESTIONS — the walk-through's and the website form's (the picker at the top says which is which; "— your website" marks the public one). Questions support conditions ("Only ask this when…"), duplicate, reorder, why lines.
+- Settings → Playbook: EDIT THE QUESTIONS — two color buttons at the top switch sets: TEAL = the walk-through (only staff see it), AMBER = the website form (customers answer it), and the page washes in the matching color. Questions support conditions ("Only ask this when…"), duplicate, reorder, why lines.
 - Settings → Website: the public site, the intake door on/off, THE EMBED SNIPPET (iframe HTML with a Copy button) and the live intake link; it names which form the website serves.
 - Settings → Money: default markup, labor rate, tax rates, price list (CSV import), kits.
 - Settings → You: how Nort talks to you (humor dial, language), notifications.
