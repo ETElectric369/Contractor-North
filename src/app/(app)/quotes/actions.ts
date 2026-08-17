@@ -396,6 +396,7 @@ export async function setQuoteCustomer(
     .update({ customer_id: safeCustomerId, updated_at: new Date().toISOString() })
     .eq("id", quoteId);
   if (error) return { ok: false, error: dbError(error) };
+  await bustDocPdf("quote", quoteId); // bill-to renders on the PDF (audit 7)
   revalidatePath(`/quotes/${quoteId}`);
   revalidatePath("/quotes");
   return { ok: true };
@@ -1123,7 +1124,7 @@ async function runEstimator(
     // flagged it "check this is the right part before quoting it". There IS no right part: the
     // line is a bag of oddments by construction, so every match it can make is a wrong one. Its
     // own rough number stands, and the est-and-confirm flag says what it is.
-    .filter((d) => !/^\s*misc\b/i.test(d));
+    .filter((d) => !/^\s*misc(ellaneous)?\b/i.test(d));
   const uniqueDescs = [...new Set(unresolved.map((d) => d.toLowerCase()))].slice(0, LADDER_CAP);
   const laddered = new Map<string, LadderPrice>();
   await Promise.all(
@@ -1259,6 +1260,10 @@ async function estimatorUpload(formData: FormData): Promise<
     const supabase = await createClient();
     const { data: blob, error } = await supabase.storage.from("documents").download(storagePath);
     if (error || !blob) return { ok: false, error: "Couldn't read the uploaded file — try the upload again." };
+    // THE STASH IS A TRANSPORT, NOT A LIBRARY (audit 7): delete on read, best-effort — an
+    // orphan per estimate would grow the bucket forever, and a CED quote's net pricing must
+    // not sit where any org member (field techs included) can list and download it.
+    void supabase.storage.from("documents").remove([storagePath]).then(() => undefined, () => undefined);
     return {
       ok: true,
       bytes: await blob.arrayBuffer(),
@@ -1485,6 +1490,8 @@ export async function generateCircuitSchedule(
       .filter((r) => r.description);
     const { error } = await supabase.from("quotes").update({ circuits }).eq("id", quoteId);
     if (error) return { ok: false, error: dbError(error) };
+    // The circuit schedule renders on the printed quote — regenerating drops the stored copy (audit 7).
+    await bustDocPdf("quote", quoteId);
     revalidatePath(`/quotes/${quoteId}`);
     return { ok: true, circuits };
   } catch (e: any) {

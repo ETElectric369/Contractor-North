@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { UserPlus } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { getOrgSettings } from "@/lib/org-settings";
+import { todayBoundsInTz } from "@/lib/tz";
 import { INSPECTION_TYPES } from "@/lib/statuses";
 import { listCustomerOptions } from "@/lib/schedule-options";
 import { PageHeader, EmptyState } from "@/components/page-header";
@@ -87,15 +89,19 @@ export default async function InquiriesPage({
   // list (cn-v612); this is the first surface that shows it as one.
   const dueOnly = due === "1";
   // Same cutoff as the dueToday tile below — the lens and the number it sits on must agree.
-  const dueCutoff = new Date(new Date().toDateString());
+  // "Due" means due by the end of TODAY in the ORG's day, not the server's UTC day (audit 7:
+  // from 5 PM Pacific the old server-local cutoff counted tomorrow's follow-ups as due — a
+  // 7-hour phantom-overdue window every evening).
+  const { data: tzRow } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+  const { dayEnd: dueCutoff } = todayBoundsInTz(getOrgSettings((tzRow as { settings?: unknown } | null)?.settings).timezone);
   const base = focusExtra ? [focusExtra, ...inquiries] : inquiries;
   const rows = dueOnly
-    ? base.filter((i) => i.next_follow_up_at && new Date(i.next_follow_up_at) <= dueCutoff)
+    ? base.filter((i) => i.next_follow_up_at && new Date(i.next_follow_up_at) < dueCutoff)
     : base;
 
-  const today = new Date(new Date().toDateString());
+  // The tile and the ?due=1 lens MUST share one cutoff, or the count and the list disagree.
   const dueToday = inquiries.filter(
-    (i) => i.next_follow_up_at && new Date(i.next_follow_up_at) <= today,
+    (i) => i.next_follow_up_at && new Date(i.next_follow_up_at) < dueCutoff,
   ).length;
 
   return (

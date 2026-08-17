@@ -1065,6 +1065,9 @@ export async function updateTimeEntry(input: {
   if (co <= ci) return { ok: false, error: "End must be after start." };
 
   const patch: Record<string, unknown> = {
+    // The office just LOOKED at this entry — the "system closed this by itself" flag has done
+    // its job and comes off, or the Needs-attention strip grows forever (audit 7).
+    auto_closed_reason: null,
     clock_in: ci.toISOString(),
     clock_out: co.toISOString(),
     lunch_minutes: input.lunch_minutes || 0,

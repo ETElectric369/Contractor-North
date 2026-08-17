@@ -58,7 +58,8 @@ export function mirrorAnswers(needs: Need[], eff: EffectiveSite): Record<string,
     const v = mirrorValue(n, whens, eff);
     if (v == null || !String(v).trim()) continue;
     const t = String(v).trim();
-    out[n.key] = n.slot?.type === "number" && /^\d+(\.\d+)?$/.test(t) ? Number(t) : t;
+    // A leading zero is DATA in a ZIP (02134 — all of New England); Number() would eat it.
+    out[n.key] = n.slot?.type === "number" && /^[1-9]\d*(\.\d+)?$/.test(t) ? Number(t) : t;
   }
   return out;
 }

@@ -98,6 +98,7 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
         // as slow as its last page; the rest keep painting into the already-visible list.
         if (n === 1) setState("ready");
       }
+      if (seq !== renderSeq.current) return; // a margin change mid-paint owns the screen now
       setState("ready");
       setAllPainted(true);
     } catch (e: any) {

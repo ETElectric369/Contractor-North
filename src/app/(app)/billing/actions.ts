@@ -4,7 +4,7 @@ import { dbError } from "@/lib/db-error";
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { headers } from "next/headers";
-import { warmDocPdf } from "@/lib/pdf-cache";
+import { bustDocPdf, warmDocPdf } from "@/lib/pdf-cache";
 import { revalidateMoney } from "@/lib/revalidate-money";
 import { createClient } from "@/lib/supabase/server";
 import { deliverInvoiceEmail } from "@/lib/invoice-email";
@@ -1407,6 +1407,7 @@ export async function setInvoiceTitle(
     .update({ title: title.trim() || null })
     .eq("id", invoiceId);
   if (error) return { ok: false, error: dbError(error) };
+  await bustDocPdf("invoice", invoiceId); // the title renders on the PDF (audit 7)
   revalidateMoney(invoiceId);
   revalidateMoney();
   return { ok: true };
@@ -1427,6 +1428,7 @@ export async function setInvoiceDueDate(
     .update({ due_date: dueDate })
     .eq("id", invoiceId);
   if (error) return { ok: false, error: dbError(error) };
+  await bustDocPdf("invoice", invoiceId); // the due date renders on the PDF (audit 7)
   revalidateMoney(invoiceId);
   revalidateMoney();
   return { ok: true };
