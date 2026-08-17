@@ -25,20 +25,31 @@
  * the safe direction to fail.
  */
 
-/** Rates outside this are a typo or a misread, not a decision. */
-const MIN = 1;
+/** Rates outside this are a typo or a misread, not a decision. No trade bills under $25/hr,
+ *  and "a 4 hour minimum" must never survive as a $4 rate (audit 7). */
+const MIN = 25;
 const MAX = 2000;
 
 const RATE = /(?:\$\s*)?(\d[\d,]*(?:\.\d{1,2})?)\s*(?:\/\s*|per\s+|an\s+|a\s+)?(?:hr|hrs|hour|hourly)\b/gi;
 const SAYS_RATE = /(?:\$|\brate\b|\blabor\b|\blabour\b|\bhourly\b|\bbill(?:ed|ing)?\b|\bcharge\b)/i;
+/** What follows "N hour(s)" when it is a POLICY, not a price: "4 hour minimum", "1 hour
+ *  increments", "24 hour response/callout/notice". Rejecting these fails toward the company
+ *  default — the safe direction (audit 7: "We bill a 4 hour minimum" priced a draft at $4/hr). */
+const AFTER_NOT_RATE = /^[\s,.-]*(?:minimums?|min\b|increments?|windows?|response|callouts?|blocks?|notice|turnaround|on[\s-]*site)/i;
 
 export function statedLaborRate(scope: unknown): number | null {
   const text = typeof scope === "string" ? scope : "";
   if (!text) return null;
   for (const m of text.matchAll(RATE)) {
-    // The forty characters in front of the number decide whether it is money or a measurement.
-    const before = text.slice(Math.max(0, (m.index ?? 0) - 40), m.index ?? 0);
-    if (!SAYS_RATE.test(before + m[0])) continue;
+    const start = m.index ?? 0;
+    // A literal $ on the number is evidence by itself; otherwise the forty characters in FRONT
+    // decide (before ONLY — letting "hourly" inside the match self-satisfy is how "a 4 hour
+    // minimum" after the word "bill" read as a rate).
+    const before = text.slice(Math.max(0, start - 40), start);
+    if (!/^\$/.test(m[0]) && !SAYS_RATE.test(before)) continue;
+    // …and the words BEHIND it can veto: "minimum/increment/response" means hours-as-policy.
+    // The loop continues, so "…4 hour minimum. Rate is $185/hr" still finds the 185.
+    if (AFTER_NOT_RATE.test(text.slice(start + m[0].length, start + m[0].length + 24))) continue;
     const n = Number(String(m[1]).replace(/,/g, ""));
     if (Number.isFinite(n) && n >= MIN && n <= MAX) return Math.round(n * 100) / 100;
   }

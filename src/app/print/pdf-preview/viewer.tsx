@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, Download, Loader2, Printer, RefreshCw } from "lucide-react";
+import { Download, Loader2, Printer, RefreshCw } from "lucide-react";
+import { BackLink } from "@/components/back-link";
 
 const MARGINS = [
   { v: 0.5, label: "Narrow · ½ in" },
@@ -18,6 +19,10 @@ const MARGINS = [
 export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: string }) {
   const [m, setM] = useState(0.75);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  // Print stays disabled until EVERY page is on canvas (audit 7: enabling it at page 1 let a
+  // fast tap print a money document with blank tail pages). Reset at the top of every load —
+  // a stale true from the previous render re-opened the same window on each margin change.
+  const [allPainted, setAllPainted] = useState(false);
   const [error, setError] = useState("");
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [filename, setFilename] = useState("document.pdf");
@@ -27,6 +32,7 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
   const load = useCallback(async () => {
     const seq = ++renderSeq.current;
     setState("loading");
+    setAllPainted(false);
     setError("");
     try {
       const res = await fetch(`/api/pdf/${doc}/${id}?m=${m}`, { credentials: "same-origin" });
@@ -93,6 +99,7 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
         if (n === 1) setState("ready");
       }
       setState("ready");
+      setAllPainted(true);
     } catch (e: any) {
       if (seq !== renderSeq.current) return;
       setError(e?.message ?? "Couldn't build the PDF.");
@@ -133,32 +140,19 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
   // redirect wearing the app's URL — and this page is reached straight from a money document.
   const safeBack = back && /^\/(?!\/)/.test(back) ? back : "/";
 
-  // GO BACK, don't push forward (Erik: "the pdf generator gets stuck in a loop and i cant get
-  // out of it with the back button"). The old <a href={back}> PUSHED the document page on top,
-  // so the history read doc → preview → doc → preview…, and every browser-back landed on this
-  // page again — which re-ran the whole render. When we arrived here from inside the app, Back
-  // now means history.back(), which unwinds the stack instead of growing it; the href stays as
-  // the fallback for a preview opened cold (new tab, shared link), where back() would leave the
-  // app entirely.
-  const goBack = (e: React.MouseEvent) => {
-    let cameFromApp = false;
-    try {
-      cameFromApp = window.history.length > 1 && !!document.referrer && new URL(document.referrer).origin === window.location.origin;
-    } catch {
-      cameFromApp = false;
-    }
-    if (cameFromApp) {
-      e.preventDefault();
-      window.history.back();
-    }
-  };
-
+  // GO BACK, don't push forward — via the house detector, not document.referrer (audit 7:
+  // client-side navigation never sets referrer, so the cn-v730 heuristic was DEAD in the
+  // installed PWA — the exact environment Erik reported the loop from). BackLinkTracker in the
+  // root layout already tracks in-app navigation for every route including /print/*; BackLink
+  // unwinds history when the arrival was in-app and falls back to the href on a cold open.
   return (
     <div className="pdf-preview-root flex h-screen flex-col bg-slate-200">
       <div className="no-print flex flex-wrap items-center justify-between gap-3 border-b border-slate-300 bg-white px-4 py-2.5">
-        <a href={safeBack} onClick={goBack} className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900">
-          <ArrowLeft className="h-4 w-4" /> Back
-        </a>
+        <BackLink
+          fallback={safeBack}
+          fallbackLabel="Back"
+          className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900"
+        />
         <div className="flex items-center gap-2">
           <label htmlFor="pdf-margin" className="text-xs font-medium text-slate-500">Margins</label>
           <select
@@ -175,7 +169,8 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
           <button
             type="button"
             onClick={printPdf}
-            disabled={state !== "ready"}
+            disabled={state !== "ready" || !allPainted}
+            title={state === "ready" && !allPainted ? "Preparing pages…" : undefined}
             className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 disabled:opacity-50"
           >
             <Printer className="h-4 w-4" /> Print

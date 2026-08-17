@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /**
  * PRESS TO TALK, PRESS TO STOP — one implementation, used by the inspector and by the tour.
@@ -20,6 +20,10 @@ export function useDictation(onText: (text: string) => void) {
   const [error, setError] = useState<string | null>(null);
   const rec = useRef<MediaRecorder | null>(null);
   const chunks = useRef<BlobPart[]>([]);
+  // cancel() flips this so onstop releases the mic but SKIPS transcription — audio recorded on a
+  // path that's leaving the screen must be discarded, not billed through Whisper into a callback
+  // that can no longer land (audit 7: the lesson tour held the mic forever).
+  const aborted = useRef(false);
 
   async function start() {
     setError(null);
@@ -33,6 +37,7 @@ export function useDictation(onText: (text: string) => void) {
         // Release the mic the moment the turn ends. A live indicator that outlives the recording
         // reads as "this thing is listening to me" — and it would be right.
         stream.getTracks().forEach((t) => t.stop());
+        if (aborted.current) return; // cancelled — mic released above, audio discarded
         const blob = new Blob(chunks.current, { type: type || "audio/webm" });
         if (blob.size < 800) return;
         setTranscribing(true);
@@ -51,6 +56,7 @@ export function useDictation(onText: (text: string) => void) {
           setTranscribing(false);
         }
       };
+      aborted.current = false;
       r.start();
       rec.current = r;
       setRecording(true);
@@ -69,5 +75,18 @@ export function useDictation(onText: (text: string) => void) {
     setRecording(false);
   }
 
-  return { recording, transcribing, error, setError, start, stop };
+  /** Stop AND discard: mic released, nothing transcribed. For any path that leaves the screen. */
+  function cancel() {
+    aborted.current = true;
+    stop();
+  }
+
+  // THE HOOK OWNS THE STREAM, SO THE HOOK RELEASES IT (audit 7 — a driver-side cleanup fixes one
+  // consumer; this fixes the mechanism for every present and future consumer). Unmounting any
+  // component mid-recording kills the mic and discards the audio.
+  const cancelRef = useRef(cancel);
+  cancelRef.current = cancel;
+  useEffect(() => () => cancelRef.current(), []);
+
+  return { recording, transcribing, error, setError, start, stop, cancel };
 }

@@ -65,3 +65,21 @@ describe("which rate reaches the line", () => {
     expect(mapEstimatorLine(labor as never, { ...ctx, rate: 0, statedRate: 200 }).flag).toBeUndefined();
   });
 });
+
+describe("statedLaborRate — audit 7: policies are not prices", () => {
+  it("a billing minimum is not a rate, and the real rate later in the text still wins", () => {
+    expect(statedLaborRate("We bill a 4 hour minimum for service calls. Replace 6 outlets in kitchen.")).toBeNull();
+    expect(statedLaborRate("We bill a 4 hour minimum. Our rate is $185/hr.")).toBe(185);
+  });
+  it("increments, response windows and callouts are policies too", () => {
+    expect(statedLaborRate("billed in 1 hour increments")).toBeNull();
+    expect(statedLaborRate("24 hour response, bill on completion")).toBeNull();
+    expect(statedLaborRate("charge a 2 hour callout")).toBeNull();
+  });
+  it("a bare $-prefixed rate needs no context words", () => {
+    expect(statedLaborRate("Panel swap at $185/hr, two days")).toBe(185);
+  });
+  it("sub-$25 'rates' are hours misread, not prices", () => {
+    expect(statedLaborRate("we bill 4 per hour")).toBeNull();
+  });
+});

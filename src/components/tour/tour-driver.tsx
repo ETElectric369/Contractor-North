@@ -230,6 +230,10 @@ export function TourDriver({
     advance.current = null;
     stopSpeaking();
     if (to >= steps.length) {
+      // The mic dies WITH the tour (audit 7: lessons auto-advance to completion with the mic
+      // still open — no stop control ever shown, recording forever). Discard, never transcribe:
+      // there is no next question for the words to land in.
+      dictation.cancel();
       setBusy(true);
       await commit();
       setBusy(false);
@@ -248,7 +252,9 @@ export function TourDriver({
 
   const exit = () => {
     stopSpeaking();
-    dictation.stop();
+    // cancel, not stop: a post-exit transcription could only feed an unmounted component —
+    // pure Whisper spend for words that land nowhere.
+    dictation.cancel();
     void commit();
     onClose(false);
   };
@@ -258,12 +264,22 @@ export function TourDriver({
   // your business". One instruction, one button, nothing else. It is also the tap iOS requires
   // before it will play a sound OR open a microphone — so doing both here is what lets everything
   // after it be hands-free.
+  // A LESSON ASKS NOTHING, SO A LESSON OPENS NO MIC (audit 7: the lesson start card said
+  // "state your name and your business" and left the mic recording through five auto-advancing
+  // steps with no stop control). The mic belongs to scripts with questions.
+  const asksAnything = steps.some((st) => st.ask);
   if (!started)
     return (
       <TourSpotlight anchor="nort" title="Two minutes, out loud" onExit={() => onClose(false)} step={1} total={steps.length}>
         <p className="text-sm leading-relaxed text-slate-600">
-          I&rsquo;m Nort. I&rsquo;d rather talk than make you type — press the button and{" "}
-          <strong className="font-medium text-slate-900">state your name and your business</strong>.
+          {asksAnything ? (
+            <>
+              I&rsquo;m Nort. I&rsquo;d rather talk than make you type — press the button and{" "}
+              <strong className="font-medium text-slate-900">state your name and your business</strong>.
+            </>
+          ) : (
+            <>Two minutes — I&rsquo;ll talk you through it, nothing to answer.</>
+          )}
         </p>
         <Button
           type="button"
@@ -271,18 +287,20 @@ export function TourDriver({
           onClick={() => {
             unlockAudio();
             setStarted(true);
-            void dictation.start(); // same tap — iOS refuses a mic opened any later
+            if (asksAnything) void dictation.start(); // same tap — iOS refuses a mic opened any later
           }}
         >
-          <Mic className="h-4 w-4" /> Start — press and talk
+          {asksAnything ? (<><Mic className="h-4 w-4" /> Start — press and talk</>) : (<>Start</>)}
         </Button>
-        <button
-          type="button"
-          onClick={() => { setStarted(true); setTyping(true); }}
-          className="mt-3 w-full text-center text-xs text-slate-400 underline-offset-2 hover:underline"
-        >
-          No microphone? Type instead.
-        </button>
+        {asksAnything && (
+          <button
+            type="button"
+            onClick={() => { setStarted(true); setTyping(true); }}
+            className="mt-3 w-full text-center text-xs text-slate-400 underline-offset-2 hover:underline"
+          >
+            No microphone? Type instead.
+          </button>
+        )}
       </TourSpotlight>
     );
 

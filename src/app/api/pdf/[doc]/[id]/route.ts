@@ -112,13 +112,36 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ doc: string
       const tL = Date.now();
       const { data: hit } = await svc
         .from("doc_pdf_cache")
-        .select("fingerprint, path")
+        .select("fingerprint, path, doc_status")
         .eq("doc", doc)
         .eq("doc_id", id)
         .eq("margin", m)
         .maybeSingle();
       phases.lookup = Date.now() - tL;
       if (hit?.fingerprint === fingerprint && hit.path) {
+        // RE-STAMP ON HIT (audit 7): the fingerprint proves these bytes match the document as
+        // it is RIGHT NOW, so the stored doc_status is pure metadata — and without this, a
+        // status-only flip (draft→sent on send; the print pages render no status) stranded the
+        // stamp forever: every staff view HIT and returned early, the warm no-oped, and the
+        // customer door refused the copy indefinitely. Advancing the stamp here is what makes
+        // the send-time warm heal the natural preview-then-send flow.
+        if (doc === "invoice" || doc === "quote") {
+          try {
+            const { data: cur } = await svc.from(doc === "invoice" ? "invoices" : "quotes").select("status").eq("id", id).maybeSingle();
+            const curStatus = String((cur as { status?: string } | null)?.status ?? "");
+            if (curStatus && curStatus !== String((hit as { doc_status?: string }).doc_status ?? "")) {
+              const { data: upd } = await svc
+                .from("doc_pdf_cache")
+                .update({ doc_status: curStatus })
+                .eq("doc", doc)
+                .eq("doc_id", id)
+                .select("doc_id");
+              if (!upd?.length) console.error("doc_status re-stamp wrote 0 rows", { doc, id });
+            }
+          } catch (e) {
+            console.error("doc_status re-stamp failed", e instanceof Error ? e.message : e);
+          }
+        }
         const tD = Date.now();
         const { data: blob } = await svc.storage.from("doc-pdfs").download(hit.path);
         phases.download = Date.now() - tD;

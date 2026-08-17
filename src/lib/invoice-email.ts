@@ -4,6 +4,7 @@ import { getOrgSettings, accentHex, orgPublicBaseUrl } from "@/lib/org-settings"
 import { companyFromOrg } from "@/components/doc-letterhead";
 import { companyBlock } from "@/lib/company-lines";
 import { invoiceBalance } from "@/lib/invoice-math";
+import { recalcInvoice } from "@/lib/invoice-recalc";
 
 /**
  * Render + send an invoice email to the customer and mark a draft "sent".
@@ -71,6 +72,10 @@ export async function deliverInvoiceEmail(
   if (!res.ok) return res;
   if (invoice.status === "draft") {
     await supabase.from("invoices").update({ status: "sent" }).eq("id", id);
+    // Mirror textInvoice (audit 7): the recalc advances a PREPAID draft to paid/partial instead
+    // of stranding it on 'sent', and its bustDocPdf drops the draft-era stored copy so the
+    // send-time warm stores a fresh one the customer door will serve.
+    await recalcInvoice(supabase, id);
   }
   return { ok: true };
 }

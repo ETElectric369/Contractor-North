@@ -66,8 +66,6 @@ export async function createForm(input: {
       ...showIfFrom(f),
     }));
 
-  if (schema.length === 0)
-    return { ok: false, error: "Add at least one field." };
 
   /**
    * THE WRITE BOUNDARY. The editor already shows every problem as advice while you type
@@ -195,16 +193,6 @@ export async function updateForm(
   if (schema.length === 0)
     return { ok: false, error: "Add at least one field." };
 
-  // Same guard as createForm, and this is the path that actually matters: a broken sheet is far
-  // more often EDITED into existence than authored that way in one go. TAHOE DECK's six dead
-  // rules almost certainly arrived by someone renaming a router option and leaving the rules
-  // pointing at the old wording — which is a save, not a create.
-  const severe = input.is_inspection ? severeSheetProblems(schema) : [];
-  if (severe.length)
-    return {
-      ok: false,
-      error: `${severe[0].message}${severe.length > 1 ? ` (+${severe.length - 1} more)` : ""}`,
-    };
 
   /**
    * A PLAYBOOK-BACKED FORM CANNOT BE EDITED HERE, AND SAYING SO IS NOT ENOUGH.
@@ -225,20 +213,58 @@ export async function updateForm(
    */
   const { data: existing } = await supabase.from("forms").select("playbook, schema").eq("id", id).maybeSingle();
   const isPlaybook = parsePlaybook((existing as { playbook?: unknown } | null)?.playbook).needs.length > 0;
-  if (isPlaybook && JSON.stringify(schema) !== JSON.stringify((existing as { schema?: unknown } | null)?.schema))
-    return {
-      ok: false,
-      error: "These questions live in the playbook now — this page only shows a copy. Edit them in Settings → Playbook.",
-    };
 
-  // RLS isolates by org; the id match scopes the update to this form.
+  /**
+   * AUDIT 7: the old guard compared JSON BYTES of a rebuilt schema against the stored mirror —
+   * but the editor round-trip is LOSSY (keys re-slugged from labels, multi/other/measured props
+   * dropped, jsonb key order), so the compare tripped on EVERY save and playbook-backed forms
+   * were un-renamable. Compare at the level the editor actually round-trips instead: label,
+   * type, options, and the show-rule with its key resolved to the LABEL it points at (keys are
+   * incomparable across the two key spaces; labels are what survive). A genuine field edit
+   * still refuses honestly — Andrew's Budget deletion stays refused, never silently dropped —
+   * while a rename passes and writes NAME ONLY, never the lossy rebuilt schema.
+   * The severe-sheet lint runs only on the non-playbook branch: a playbook form's fields are
+   * not being written, so linting the lossy rebuild produced false orphan-rule refusals.
+   */
+  if (isPlaybook) {
+    type Fld = { key: string; label: string; type: string; options?: string[]; showIf?: { key: string; in: string[] } };
+    const project = (fields: Fld[]) => {
+      const labelByKey = new Map(fields.map((f) => [f.key, f.label.trim().toLowerCase()]));
+      return fields.map((f) => ({
+        label: f.label.trim().toLowerCase(),
+        type: f.type,
+        options: (f.options ?? []).map((o) => o.trim()).filter(Boolean),
+        show: f.showIf ? { q: labelByKey.get(f.showIf.key) ?? f.showIf.key, in: [...f.showIf.in].map((v) => v.trim()) } : null,
+      }));
+    };
+    const stored = Array.isArray((existing as { schema?: unknown } | null)?.schema)
+      ? ((existing as { schema: Fld[] }).schema)
+      : [];
+    if (JSON.stringify(project(schema as Fld[])) !== JSON.stringify(project(stored)))
+      return {
+        ok: false,
+        error: "These questions live in the playbook now — this page only shows a copy. Edit them in Settings → Playbook.",
+      };
+  } else {
+    if (schema.length === 0) return { ok: false, error: "Add at least one field." };
+    const severe = input.is_inspection ? severeSheetProblems(schema) : [];
+    if (severe.length)
+      return {
+        ok: false,
+        error: `${severe[0].message}${severe.length > 1 ? ` (+${severe.length - 1} more)` : ""}`,
+      };
+  }
+
+  // RLS isolates by org; the id match scopes the update to this form. A playbook form's write
+  // OMITS schema — the mirror belongs to savePlaybook, and writing the lossy rebuild over it
+  // would re-key every field and orphan the show-rules and submission data.
   const { data: wrote, error } = await supabase
     .from("forms")
     .update({
       name,
       description: input.description.trim() || null,
       is_inspection: !!input.is_inspection,
-      schema,
+      ...(isPlaybook ? {} : { schema }),
     })
     .eq("id", id)
     .select("id");

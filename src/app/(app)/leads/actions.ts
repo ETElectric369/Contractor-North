@@ -375,7 +375,10 @@ export async function convertInquiry(
   // 'quoted' so it leaves the open list (exactly as before), but its customer_id stays null until the
   // estimate is accepted. (An org that explicitly links an existing customer still can, via opts.)
   if (target === "quote") {
-    const linkedCustomer = opts.customerId ?? null;
+    // A contact SAVED FROM THIS LEAD rides along (audit 7: 'Save as contact' then 'Create
+    // estimate' nulled the very link the first button minted — acceptance then fell back to
+    // fuzzy dedup and could mint a duplicate). Mirrors the inspection branch's pattern.
+    const linkedCustomer = opts.customerId ?? inq.customer_id ?? null;
     let redirect: string;
     const lines = estimateLinesFromIntake(inq.intake);
     if (lines.length) {

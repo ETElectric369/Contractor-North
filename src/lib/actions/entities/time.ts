@@ -7,6 +7,18 @@ import { visibleJobIdOrNull } from "@/lib/job-visibility";
 import { resolveJobId, resolveProfileId } from "../resolve-id";
 import { tzNaiveIsoToUtc } from "@/lib/tz";
 import { getOrgSettings } from "@/lib/org-settings";
+
+/**
+ * ONE CONVERTER FOR EVERY TIME VERB (audit 7). cn-v728 converted addEntry and left fixEntry and
+ * clockIn's backdate writing model wall-clock times as UTC — the exact half-fix a copy-paste
+ * sibling pair produces. The org-tz lookup + tzNaiveIsoToUtc now live here; every handler that
+ * accepts a model-supplied timestamp goes through it, and a fourth verb can't skip it by accident.
+ */
+async function orgLocalConverter(supabase: Awaited<ReturnType<typeof createClient>>): Promise<(v?: string) => string | undefined> {
+  const { data: orgRow } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+  const tz = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone || "America/Los_Angeles";
+  return (v?: string) => tzNaiveIsoToUtc(v, tz);
+}
 import type { ActionDef } from "../types";
 
 // Time-logging, finally in the registry — so voice ("clock me in / out / add 2 hours
@@ -17,7 +29,7 @@ export const timeActions: Record<string, ActionDef> = {
     name: "time.clockIn",
     group: "time",
     label: "Clock in",
-    description: "Start the clock for the current user, optionally on a job. clock_in_at backdates the start (e.g. forgot to clock in).",
+    description: "Start the clock for the current user, optionally on a job. clock_in_at backdates the start (e.g. forgot to clock in) — a NAIVE local timestamp, YYYY-MM-DDTHH:MM in the company's own timezone, NO Z, NO offset; the app converts.",
     input: z.object({
       job_id: z.string().nullable().optional(),
       job_code: z.string().nullable().optional(),
@@ -25,8 +37,11 @@ export const timeActions: Record<string, ActionDef> = {
     }),
     auth: "any", // a tech clocks themselves in
     effect: "write",
-    handler: (i) =>
-      clockIn({ job_id: i.job_id ?? null, job_code: i.job_code ?? null, gps: null, clock_in_at: i.clock_in_at ?? null }),
+    handler: async (i) => {
+      // The backdate is a model-supplied wall-clock time — third sibling, same conversion.
+      const toUtc = i.clock_in_at ? await orgLocalConverter(await createClient()) : null;
+      return clockIn({ job_id: i.job_id ?? null, job_code: i.job_code ?? null, gps: null, clock_in_at: (toUtc ? toUtc(i.clock_in_at ?? undefined) : null) ?? null });
+    },
   },
   "time.clockOut": {
     name: "time.clockOut",
@@ -118,9 +133,7 @@ export const timeActions: Record<string, ActionDef> = {
        * offset) is taken as org-local and converted here; a timestamp that carries an explicit
        * offset is honored as-is, because stripping a correct one would double-shift it.
        */
-      const { data: orgRow } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
-      const tz = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone || "America/Los_Angeles";
-      const localToUtc = (v?: string) => tzNaiveIsoToUtc(v, tz);
+      const localToUtc = await orgLocalConverter(supabase);
       return createManualEntry({
         profile_id: person.id ?? "",
         clock_in: localToUtc(i.clock_in),
@@ -141,7 +154,7 @@ export const timeActions: Record<string, ActionDef> = {
     group: "time",
     label: "Fix timecard entry",
     description:
-      "Fix a crew member's EXISTING timecard entry the user described ('Brian left at 4:30', 'close Brian's open entry', 'his lunch was 45 minutes'). Sets the clock-out (closing an open entry), corrects the clock-in, the lunch minutes, or the entry's job — anything not passed stays exactly as stored. Times and lunch must come FROM THE USER, never inferred (this is payroll); if they didn't say the time, ASK. Resolve entry_id via hours_summary / listed-entries context first — if no entry id is in context or more than one entry could match, say so and ask instead of guessing.",
+      "Fix a crew member's EXISTING timecard entry the user described ('Brian left at 4:30', 'close Brian's open entry', 'his lunch was 45 minutes'). Sets the clock-out (closing an open entry), corrects the clock-in, the lunch minutes, or the entry's job — anything not passed stays exactly as stored. clock_in/clock_out are NAIVE local timestamps, YYYY-MM-DDTHH:MM in the company's own timezone — NO Z, NO offset; the app converts. Times and lunch must come FROM THE USER, never inferred (this is payroll); if they didn't say the time, ASK. Resolve entry_id via hours_summary / listed-entries context first — if no entry id is in context or more than one entry could match, say so and ask instead of guessing.",
     // The other person's-timecard edit (time.addEntry is the CREATE): closing Brian's
     // still-open shift is the headline case. Fragment-first with the payroll boundary —
     // at least one CHANGE must be stated; the "Required" message rides the same
@@ -198,7 +211,14 @@ export const timeActions: Record<string, ActionDef> = {
         profiles?: { full_name: string | null } | { full_name: string | null }[] | null;
       };
 
-      const clockOut = i.clock_out ?? e.clock_out;
+      // "4:30" MEANS 4:30 WHERE THE CREW WORKS (audit 7 — the cn-v728 fix, applied to the
+      // sibling verb it missed). Model-supplied times convert ONCE, up front; stored values
+      // already carry offsets and pass through tzNaiveIsoToUtc untouched, so the merges below
+      // can never double-shift.
+      const toUtc = await orgLocalConverter(supabase);
+      const ciIn = toUtc(i.clock_in);
+      const coIn = toUtc(i.clock_out);
+      const clockOut = coIn ?? e.clock_out;
       if (!clockOut) {
         // Open entry and the user didn't say when they left — NEVER invent a clock-out
         // (the payroll boundary). missingFields lets the surface ask for exactly this.
@@ -221,12 +241,12 @@ export const timeActions: Record<string, ActionDef> = {
       const lunchMinutes =
         i.lunch_minutes ??
         (closingOpenEntry && !(e.lunch_minutes && e.lunch_minutes > 0)
-          ? autoLunchMinutes(hoursBetween(i.clock_in ?? e.clock_in, clockOut, 0))
+          ? autoLunchMinutes(hoursBetween(ciIn ?? e.clock_in, clockOut, 0))
           : (e.lunch_minutes ?? 0));
 
       const res = await updateTimeEntry({
         id: i.entry_id,
-        clock_in: i.clock_in ?? e.clock_in,
+        clock_in: ciIn ?? e.clock_in,
         clock_out: clockOut,
         lunch_minutes: lunchMinutes,
         ...(i.job_id !== undefined ? { job_id: i.job_id } : {}), // omitted = leave the job alone; null clears it
