@@ -1241,6 +1241,37 @@ export async function generateQuoteDraft(
  * Lands in the cn-v716 PROPOSAL list like every other generate: nothing on the estimate until
  * he ticks and adds.
  */
+
+/**
+ * THE UPLOAD ARRIVES BY STORAGE, NOT BY REQUEST BODY (#116). Vercel caps any request at
+ * ~4.5MB — beneath a single sheet of Andrew's plan sets — so the browser now uploads to the
+ * org's own folder in the `documents` bucket (0013 RLS: org members only) and the action gets
+ * a PATH. The download below runs on the USER's client, so a crafted cross-org path dies at
+ * RLS instead of at a hand-rolled check. The legacy `file` field still works for any open tab
+ * from before this shipped.
+ */
+async function estimatorUpload(formData: FormData): Promise<
+  | { ok: true; bytes: ArrayBuffer; size: number; name: string; mime: string }
+  | { ok: false; error: string }
+> {
+  const storagePath = String(formData.get("storagePath") ?? "").trim();
+  if (storagePath) {
+    const supabase = await createClient();
+    const { data: blob, error } = await supabase.storage.from("documents").download(storagePath);
+    if (error || !blob) return { ok: false, error: "Couldn't read the uploaded file — try the upload again." };
+    return {
+      ok: true,
+      bytes: await blob.arrayBuffer(),
+      size: blob.size,
+      name: String(formData.get("fileName") ?? "") || storagePath.split("/").pop() || "upload",
+      mime: blob.type || "",
+    };
+  }
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) return { ok: false, error: "Choose a file to upload." };
+  return { ok: true, bytes: await file.arrayBuffer(), size: file.size, name: file.name, mime: file.type };
+}
+
 export async function generateQuoteDraftFromSupplier(
   formData: FormData,
 ): Promise<
@@ -1250,11 +1281,11 @@ export async function generateQuoteDraftFromSupplier(
   const gate = await guardEstimator();
   if (!gate.ok) return { ok: false, error: gate.error };
   try {
-    const file = formData.get("file");
-    if (!(file instanceof File) || file.size === 0) return { ok: false, error: "Choose the supplier quote to upload." };
-    if (file.size > 20 * 1024 * 1024) return { ok: false, error: "File is too large (max 20 MB)." };
-    const isPdf = file.type === "application/pdf";
-    const isText = /csv|text|plain/.test(file.type) || /\.(csv|txt)$/i.test(file.name);
+    const up = await estimatorUpload(formData);
+    if (!up.ok) return up;
+    if (up.size > 20 * 1024 * 1024) return { ok: false, error: "File is too large (max 20 MB — the reader's ceiling)." };
+    const isPdf = up.mime === "application/pdf" || /\.pdf$/i.test(up.name);
+    const isText = /csv|text|plain/.test(up.mime) || /\.(csv|txt)$/i.test(up.name);
     if (!isPdf && !isText) return { ok: false, error: "Upload the supplier quote as a PDF or CSV." };
 
     const mk = formData.get("markupPct");
@@ -1280,10 +1311,10 @@ export async function generateQuoteDraftFromSupplier(
 
     const content: unknown[] = isPdf
       ? [
-          { type: "document", source: { type: "base64", media_type: "application/pdf", data: Buffer.from(await file.arrayBuffer()).toString("base64") } },
+          { type: "document", source: { type: "base64", media_type: "application/pdf", data: Buffer.from(up.bytes).toString("base64") } },
           { type: "text", text: instruction },
         ]
-      : [{ type: "text", text: `${instruction}\n\nTHE QUOTE:\n${(await file.text()).slice(0, 200_000)}` }];
+      : [{ type: "text", text: `${instruction}\n\nTHE QUOTE:\n${new TextDecoder().decode(up.bytes).slice(0, 200_000)}` }];
 
     const client = getAnthropic();
     const msg = await client.messages.create({
@@ -1367,17 +1398,17 @@ export async function generateQuoteDraftFromPlan(
   const gate = await guardEstimator();
   if (!gate.ok) return { ok: false, error: gate.error };
   try {
-    const file = formData.get("file");
-    if (!(file instanceof File) || file.size === 0) return { ok: false, error: "Choose a plan PDF to upload." };
-    if (file.type !== "application/pdf") return { ok: false, error: "Upload the plan as a PDF." };
+    const up = await estimatorUpload(formData);
+    if (!up.ok) return { ok: false, error: up.error === "Choose a file to upload." ? "Choose a plan PDF to upload." : up.error };
+    if (up.mime !== "application/pdf" && !/\.pdf$/i.test(up.name)) return { ok: false, error: "Upload the plan as a PDF." };
     // Cap at 20 MB: base64 inflates ~33%, and Anthropic's per-request ceiling is 32 MB.
-    if (file.size > 20 * 1024 * 1024) return { ok: false, error: "Plan is too large (max 20 MB)." };
+    if (up.size > 20 * 1024 * 1024) return { ok: false, error: "Plan is too large (max 20 MB — the reader's ceiling)." };
     const mk = formData.get("markupPct");
     const markupPct = mk != null && String(mk) !== "" ? Number(mk) : undefined;
     const lr = formData.get("laborRate");
     const laborRate = lr != null && String(lr) !== "" ? Number(lr) : undefined;
     const note = String(formData.get("scope") ?? "").trim();
-    const b64 = Buffer.from(await file.arrayBuffer()).toString("base64");
+    const b64 = Buffer.from(up.bytes).toString("base64");
     const content = [
       { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } },
       {

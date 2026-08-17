@@ -21,6 +21,9 @@ export default async function NewQuotePage({
 }) {
   const { customer, job, inquiry, capture } = await searchParams;
   const supabase = await createClient();
+  // For the builder's storage-first uploads (#116) — RLS returns only the caller's own org.
+  const { data: ownOrg } = await supabase.from("organizations").select("id").limit(1).maybeSingle();
+  const orgId = String((ownOrg as { id?: string } | null)?.id ?? "");
 
   // ?capture=<appointment id> — an inspection's field capture prefills the
   // estimator scope (like importing labor into an invoice). RLS scopes the read;
@@ -187,6 +190,7 @@ export default async function NewQuotePage({
         {!capture && <NewInspectionButton inquiryId={inquiry} size="sm" variant="outline" />}
       </PageHeader>
       <QuoteBuilder
+        orgId={orgId}
         measured={measured}
         customers={(customers ?? []).map((c: any) => ({
           id: c.id,

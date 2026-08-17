@@ -230,13 +230,17 @@ function beginTurn() {
       silenceStart = 0;
     } else if (spoke) {
       if (!silenceStart) silenceStart = now;
-      else if (now - silenceStart > 1300) {
-        stopTurn(); // ~1.3s of quiet after speech → end of the utterance
+      else if (now - silenceStart > 2400) {
+        // ~2.4s of quiet after speech → end of the utterance. Was 1300 — a contractor pausing
+        // to think mid-scope got CUT OFF and the tail of the sentence was never heard (Erik:
+        // "cuts us off mid sentence… isnt catching everything").
+        stopTurn();
         return;
       }
     }
     // Safety caps: never run a single turn forever; give up a turn with no speech at all.
-    if (now - startedAt > 18000 || (!spoke && now - startedAt > 9000)) {
+    // 18s truncated a real dictated scope — 45s holds a whole thought; Whisper is fine with it.
+    if (now - startedAt > 45000 || (!spoke && now - startedAt > 9000)) {
       stopTurn();
       return;
     }

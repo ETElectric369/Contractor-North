@@ -195,8 +195,12 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
         {state === "loading" && (
           <div className="flex flex-col items-center gap-3 py-24 text-slate-500">
             <Loader2 className="h-8 w-8 animate-spin" />
-            <p className="text-sm font-medium">Building your PDF…</p>
-            <p className="text-xs text-slate-400">First one can take a few seconds.</p>
+            {/* HONEST THEATER (Erik: "pdf still seems to be regenerating every time" — the log
+                said HIT, 0.9s; this screen said "Building… takes a few seconds" either way, so a
+                stored copy LOOKED like a rebuild). Neutral line first; the slow-warning only
+                appears once it's actually being slow. */}
+            <p className="text-sm font-medium">Opening…</p>
+            <p className="pdf-slow-note text-xs text-slate-400">Rebuilding this one — a few seconds.</p>
           </div>
         )}
         {state === "error" && (

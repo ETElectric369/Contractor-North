@@ -6,6 +6,7 @@ import { NewCustomerInline } from "@/components/new-customer-inline";
 import { applyPriceBookReview } from "../../price-list/actions";
 import type { BookUpdate, BookAddition } from "@/lib/pricing/book-review";
 import { Plus, Trash2, Sparkles, Loader2, ChevronDown, ChevronRight, Check, X, FileUp, ListPlus } from "lucide-react";
+import { createClient as createBrowserClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
@@ -87,7 +88,10 @@ export function QuoteBuilder({
   defaultMarkupPct = 0,
   deckRateRows,
   measured,
+  orgId = "",
 }: {
+  /** For storage-first uploads (#116): the org folder the documents bucket's RLS admits. */
+  orgId?: string;
   customers: CustomerOption[];
   /** Measurements the inspector already took on the walk-through (?capture=). They prefill the
    *  kit picker's sizing boxes, so nobody types a number twice — which is the whole reason the
@@ -354,11 +358,26 @@ export function QuoteBuilder({
   // Upload a SUPPLIER QUOTE (CED etc.) → transcribed faithfully, marked up in code off the same
   // ladder as every other material line, and PROPOSED — never taken off, never re-priced from
   // history: the net on the quote is the buy price by definition.
+
+  /** #116: the file goes to STORAGE, the action gets a PATH — Vercel caps request bodies at
+   *  ~4.5MB, under one sheet of a real plan set. Org folder, so 0013's RLS owns access. */
+  async function stashUpload(file: File): Promise<{ ok: true; path: string } | { ok: false; error: string }> {
+    if (!orgId) return { ok: false, error: "Couldn't start the upload — reload the page and try again." };
+    const supabase = createBrowserClient();
+    const safe = file.name.replace(/[^\w.\-]+/g, "_").slice(-80);
+    const path = `${orgId}/ai-uploads/${crypto.randomUUID()}-${safe}`;
+    const { error } = await supabase.storage.from("documents").upload(path, file, { contentType: file.type || undefined });
+    if (error) return { ok: false, error: "Upload didn't finish — check your connection and try again." };
+    return { ok: true, path };
+  }
   function onUploadSupplier(file: File) {
     setAiError(null);
     startUpload(async () => {
+      const stashed = await stashUpload(file);
+      if (!stashed.ok) return setAiError(stashed.error);
       const fd = new FormData();
-      fd.set("file", file);
+      fd.set("storagePath", stashed.path);
+      fd.set("fileName", file.name);
       if (levelMarkup != null) fd.set("markupPct", String(levelMarkup));
       const res = await generateQuoteDraftFromSupplier(fd);
       if (!res.ok) {
@@ -411,8 +430,11 @@ export function QuoteBuilder({
   function onUploadPlan(file: File) {
     setAiError(null);
     startUpload(async () => {
+      const stashed = await stashUpload(file);
+      if (!stashed.ok) return setAiError(stashed.error);
       const fd = new FormData();
-      fd.set("file", file);
+      fd.set("storagePath", stashed.path);
+      fd.set("fileName", file.name);
       // The scope box rides along as a note that OVERRIDES the drawing — this is where you tell it
       // "garage's already done, panel & 2in conduit in, 12 cans + 10 inserts + 2 gimbals" so it
       // doesn't re-bill finished work the plan still shows.
