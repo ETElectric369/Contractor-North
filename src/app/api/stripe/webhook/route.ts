@@ -192,20 +192,51 @@ export async function POST(req: Request) {
       // is their business with their customers, not our paywall.
       if (!fromConnectedAccount) await syncSubscription(event.data.object as Stripe.Subscription);
       break;
+    case "checkout.session.async_payment_succeeded":
     case "checkout.session.completed": {
       const session = event.data.object as Stripe.Checkout.Session;
       if (session.metadata?.kind === "invoice_payment") {
-        await recordInvoicePayment(
-          session.metadata.invoice_id,
-          session.metadata.org_id,
-          (session.amount_total ?? 0) / 100,
-          event.id,
-        );
+        /**
+         * MONEY IS RECORDED WHEN IT SETTLES, NOT WHEN THE PAGE FINISHES (audit 8).
+         *
+         * `completed` only means the customer finished the Checkout flow. For a delayed method
+         * — US bank debit, which a tenant can switch on in their own Express dashboard without
+         * telling us — the funds are days away and can still FAIL. Recording it as paid marks
+         * the invoice settled, stops the reminders, and shows the customer a paid receipt for
+         * money that never arrives. payment_status is the settlement fact; Stripe sends either
+         * completed(paid) OR completed(unpaid) followed by an async event, so this gate — not
+         * the event-id unique index — is what keeps one payment from being booked twice.
+         */
+        if (session.payment_status === "paid") {
+          await recordInvoicePayment(
+            session.metadata.invoice_id,
+            session.metadata.org_id,
+            (session.amount_total ?? 0) / 100,
+            event.id,
+          );
+        }
       } else if (session.subscription && !fromConnectedAccount) {
         const sub = await getStripe().subscriptions.retrieve(
           session.subscription as string,
         );
         await syncSubscription(sub);
+      }
+      break;
+    }
+    case "checkout.session.async_payment_failed": {
+      // Nothing to unwind — the payment_status gate above means nothing was ever recorded.
+      // But the customer believes they paid, so the office has to hear it (audit 8).
+      const session = event.data.object as Stripe.Checkout.Session;
+      if (session.metadata?.kind === "invoice_payment" && session.metadata.org_id) {
+        try {
+          await sendPushToProfiles(await orgStaffIds(session.metadata.org_id), "invoice_paid", {
+            title: "A customer's payment failed",
+            body: "Their bank declined the transfer after checkout — the invoice is still open.",
+            url: `/billing/${session.metadata.invoice_id}`,
+          });
+        } catch {
+          /* the push is a courtesy; never fail the webhook on it */
+        }
       }
       break;
     }

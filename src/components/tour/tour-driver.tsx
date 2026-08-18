@@ -221,8 +221,9 @@ export function TourDriver({
     //
     // saveSetup is idempotent (it writes the same four settings keys), so the honest fix is to let
     // it run whenever the tour reaches a commit point.
-    await saveSetup(answers);
+    const r = await saveSetup(answers);
     router.refresh();
+    return r;
   }, [answers, router]);
 
   const go = async (to: number) => {
@@ -235,8 +236,16 @@ export function TourDriver({
       // there is no next question for the words to land in.
       dictation.cancel();
       setBusy(true);
-      await commit();
+      const saved = await commit();
       setBusy(false);
+      // A DISCARDED RESULT IS A LOST SETUP (audit 8): commit() ignored saveSetup's Result at
+      // every point, so a refused write ended with "That's the whole thing" and an empty
+      // settings page. Stay on the step, say what happened, keep the resume key so the answers
+      // survive a retry.
+      if (saved && !saved.ok) {
+        setNote(saved.error ?? "That didn't save — try again.");
+        return;
+      }
       sessionStorage.removeItem(storageKey);
       router.refresh();
       // NOT finishOnboarding() — "shown" means shown the why lines too, and those are the next
@@ -244,7 +253,10 @@ export function TourDriver({
       return onClose(true);
     }
     // Leaving the last question → save what was said.
-    if (steps[i].ask && !steps[to]?.ask) await commit();
+    if (steps[i].ask && !steps[to]?.ask) {
+      const saved = await commit();
+      if (saved && !saved.ok) return setNote(saved.error ?? "That didn't save — try again.");
+    }
     setNote(null);
     setReply(null);
     setI(Math.max(0, to));

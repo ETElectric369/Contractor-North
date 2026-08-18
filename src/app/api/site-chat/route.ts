@@ -20,7 +20,7 @@ export const runtime = "nodejs";
  * model, bounded tool loop, input caps, and a distributed (Postgres-backed) per-IP rate limit keep
  * cost + abuse down. The LLM runs the conversation; prices come from the org's real catalog, not the model.
  */
-const MODEL = process.env.SITE_CHAT_MODEL || "claude-haiku-4-5-20251001";
+const MODEL = process.env.SITE_CHAT_MODEL || "claude-haiku-4-5";
 const MAX_ROUNDS = 6; // headroom for web_search pause_turn continuations on research-mode orgs
 const MAX_MESSAGES = 24;
 const MAX_LEN = 4000;

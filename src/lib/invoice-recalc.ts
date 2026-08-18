@@ -28,12 +28,12 @@ export async function recalcInvoice(supabase: any, invoiceId: string): Promise<v
 
   const { subtotal, tax, total, amountPaid, status } = recalcTotals(
     (items ?? []).map((i: any) => Number(i.line_total ?? 0)),
-    [
-      ...(pays ?? []).map((p: any) => Number(p.amount ?? 0)),
-      ...(credits ?? []).map((c: any) => Number(c.amount ?? 0)),
-    ],
+    (pays ?? []).map((p: any) => Number(p.amount ?? 0)),
     Number(inv?.tax_rate ?? 0),
     inv?.status ?? "draft",
+    // Credits ride in their own argument now: they may reduce a balance, never inflate a
+    // payment past the total (audit 8 — the compounding overpay-credit bug).
+    (credits ?? []).map((c: any) => Number(c.amount ?? 0)),
   );
 
   const { error } = await supabase

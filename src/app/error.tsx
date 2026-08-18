@@ -5,6 +5,7 @@ import Link from "next/link";
 import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { reportClientError } from "@/app/report-client-error";
+import { recoverFromChunkError } from "@/lib/chunk-reload";
 
 export default function Error({
   error,
@@ -14,6 +15,11 @@ export default function Error({
   reset: () => void;
 }) {
   useEffect(() => {
+    // A STALE TAB ACROSS A DEPLOY IS NOT AN ERROR, IT IS AN UPDATE (audit 8). This boundary
+    // covers /login, /estimate, /intake, /i, /q, /portal, /print — every page a CUSTOMER sees.
+    // The (app) boundary has recovered from renamed chunks since cn-v536; this one showed a
+    // dead red card on the money paper instead, and reported it as a crash.
+    if (recoverFromChunkError(error)) return;
     console.error(error);
     void reportClientError("error-boundary", error?.message ?? String(error), {
       digest: error?.digest,

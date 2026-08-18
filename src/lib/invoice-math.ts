@@ -49,7 +49,8 @@ export function invoiceBalance(total: number | null | undefined, amountPaid: num
  * one way and displayed another.
  *
  * The Stripe webhook is the only payment writer with NO cap — recordPayment refuses to exceed the
- * balance, credits are capped, but a customer who taps Pay twice on a slow connection mints two
+ * balance and recalcTotals caps credits at the shortfall (audit 8), but a customer who taps Pay
+ * twice on a slow connection mints two
  * checkout sessions that each read a full balance. Both settle, both post, and the invoice reads
  * $0 owed with no sign that it took double.
  */
@@ -96,9 +97,29 @@ export function recalcTotals(
   paymentAmounts: number[],
   taxRate: number,
   currentStatus: string,
+  /**
+   * OPEN ACCOUNT CREDITS linked to this invoice — passed SEPARATELY from cash, because a
+   * credit may only ever reduce what is still OWED (audit 8).
+   *
+   * They used to arrive concatenated onto payments, which is right in the one direction the
+   * feature was built for (a $200 credit + an $800 card payment settles a $1,000 invoice) and
+   * catastrophically wrong in the other: the Stripe webhook tells the office an overpaid
+   * invoice should be "credited", the Credit button posts a credit FROM that invoice — money
+   * moving OFF it — and the sum folded it back IN as payment. amount_paid grew, the
+   * overpayment banner grew with it, and each attempt to clear it doubled the number. The same
+   * dollar also sat on the customer's account, counted twice.
+   *
+   * Capping at the shortfall keeps the intended direction exact and makes the wrong one a
+   * no-op, in the ONE place every money path funnels through — call-site guards would have
+   * left the row to be re-summed by the next recalc from anywhere else.
+   */
+  creditAmounts: number[] = [],
 ): { subtotal: number; tax: number; total: number; amountPaid: number; status: string } {
   const { subtotal, tax, total } = subtotalTaxTotal(lineTotals, taxRate);
-  const amountPaid = cents(paymentAmounts.reduce((s, n) => s + fin(n), 0));
+  const cash = cents(paymentAmounts.reduce((s, n) => s + fin(n), 0));
+  const credits = cents(creditAmounts.reduce((s, n) => s + fin(n), 0));
+  const creditApplied = cents(Math.max(0, Math.min(credits, total - cash)));
+  const amountPaid = cents(cash + creditApplied);
   const status = paidStatus(total, amountPaid, currentStatus);
   return { subtotal, tax, total, amountPaid, status };
 }

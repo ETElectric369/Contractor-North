@@ -1371,6 +1371,12 @@ export async function setInvoiceTaxRate(
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  // THE ONE MONEY MUTATION THAT HAD NO DRAFT LOCK (audit 8): every item edit and importer
+  // refuses a sent invoice, but the tax dropdown stayed live — so a mis-tap on a PAID invoice
+  // silently re-totalled it, flipped it back to partial, and put a different number on the
+  // document the customer already holds.
+  const draftBlock = await requireDraftInvoice(supabase, invoiceId);
+  if (draftBlock) return draftBlock;
   const rate = Number.isFinite(ratePercent) ? ratePercent / 100 : 0;
   const { error } = await supabase.from("invoices").update({ tax_rate: rate }).eq("id", invoiceId);
   if (error) return { ok: false, error: dbError(error) };

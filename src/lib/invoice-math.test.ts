@@ -307,3 +307,28 @@ describe("invoiceOverpayment — the inverse of invoiceBalance", () => {
     }
   });
 });
+
+describe("recalcTotals credits — audit 8: a credit reduces a balance, never inflates a payment", () => {
+  it("the intended direction still settles exactly: $800 card + $200 credit on a $1,000 invoice", () => {
+    const r = recalcTotals([1000], [800], 0, "sent", [200]);
+    expect(r.amountPaid).toBeCloseTo(1000, 2);
+    expect(r.status).toBe("paid");
+  });
+  it("an overpay-sourced credit contributes NOTHING — no compounding", () => {
+    // The cn-v705 scenario: customer double-paid $1,000, office posts the prescribed $1,000
+    // credit. amount_paid must stay $2,000, not climb to $3,000 (and $4,000 on the next try).
+    const r = recalcTotals([1000], [1000, 1000], 0, "paid", [1000]);
+    expect(r.amountPaid).toBeCloseTo(2000, 2);
+  });
+  it("a credit larger than the shortfall applies only up to the balance", () => {
+    const r = recalcTotals([1000], [900], 0, "sent", [500]);
+    expect(r.amountPaid).toBeCloseTo(1000, 2);
+    expect(r.status).toBe("paid");
+  });
+  it("credits alone can settle an unpaid invoice", () => {
+    expect(recalcTotals([500], [], 0, "sent", [500]).status).toBe("paid");
+  });
+  it("no credits behaves exactly as before", () => {
+    expect(recalcTotals([1000], [400], 0, "sent").amountPaid).toBeCloseTo(400, 2);
+  });
+});

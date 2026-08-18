@@ -37,7 +37,11 @@ export type TokenUsage = {
 /** Dollar cost of one call. Cache classes are priced separately — collapsing them
  *  would misstate an agentic loop's cost by an order of magnitude. */
 export function costOf(model: string, u: TokenUsage): number {
-  const p = PRICES[model] ?? FALLBACK;
+  // Strip a trailing date snapshot before the lookup (audit 8): "claude-haiku-4-5-20251001" is
+  // the same model as "claude-haiku-4-5", but the exact-key miss fell through to FALLBACK and
+  // metered the public site-chat at ~10x — the org's AI ceiling tripped at a tenth of real
+  // spend and the lead-capture assistant went dark.
+  const p = PRICES[model.replace(/-\d{8}$/, "")] ?? FALLBACK;
   const input = Number(u.input_tokens ?? 0);
   const read = Number(u.cache_read_input_tokens ?? 0);
   const write = Number(u.cache_creation_input_tokens ?? 0);

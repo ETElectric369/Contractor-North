@@ -76,7 +76,27 @@ export default async function PrelimNoticePage({ params }: { params: Promise<{ j
     hiredBy: { name: l?.hired_by_name || cu?.name || undefined },
     gc: l?.gc_name ? { name: l.gc_name, address: l?.gc_address || undefined } : undefined,
     lender: l?.lender_name ? { name: l.lender_name, address: l?.lender_address || undefined } : undefined,
-    propertyAddress: siteText({ source: "job", parts: j }, { source: "customer", parts: cu }),
+    /**
+     * A PRELIMINARY NOTICE WITH THE WRONG PROPERTY IS LEGALLY DEFECTIVE (audit 8).
+     *
+     * When the job carries no address of its own — every job started from a fragment — this
+     * fell back to the CUSTOMER'S MAILING address and printed it under PROJECT / JOBSITE with
+     * nothing to say it had. For a landlord or property-manager customer that is a different
+     * building entirely, and a 20-day notice naming the wrong property protects nothing.
+     *
+     * The marker goes IN the document text, not in a banner: the only route into this page is
+     * the PDF preview, and the PDF render strips .no-print, so a screen-only warning would
+     * never be seen by the person about to serve it. Same inline convention the template
+     * already uses for its other must-fill blanks.
+     */
+    propertyAddress: (() => {
+      const site = pickSite([{ source: "job", parts: j }, { source: "customer", parts: cu }]);
+      const text = siteLines(site).join(", ") || undefined;
+      if (!text) return undefined;
+      return site?.source === "customer"
+        ? `${text} (from customer on file — VERIFY THE JOBSITE BEFORE SERVING)`
+        : text;
+    })(),
     description: j.description || undefined,
     estimatedAmount: estimated,
   });

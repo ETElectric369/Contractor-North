@@ -1,3 +1,4 @@
+import { askFromLabel } from "@/lib/playbook/from-sheet";
 import { WHY_ASK, whyHint } from "@/lib/playbook/why";
 import type { Need, Playbook } from "@/lib/playbook/types";
 
@@ -106,7 +107,10 @@ export function applyDraft(pb: Playbook, raw: unknown): Playbook {
         // An ask they already wrote is theirs too — only a mechanical one (a label with a question
         // mark bolted on) is worth replacing, and a need with a real why is a need they've been
         // through. Leave the whole thing alone.
-        ...(d?.ask && !mine ? { ask: d.ask } : {}),
+        // …and now the code actually TESTS "mechanical" (audit 8): it replaced any ask whose
+        // need had no why, so a contractor who reworded three questions in his own voice and
+        // wrote no why lines lost that wording the next time he re-took the walk-through.
+        ...(d?.ask && !mine && n.ask.trim() === askFromLabel(n.label).trim() ? { ask: d.ask } : {}),
         ...(d?.why && !mine ? { why: d.why } : {}),
       };
     }),

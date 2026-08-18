@@ -147,23 +147,9 @@ const REQUEST_CONTACT_TOOL = {
   },
 } as const;
 
-// STANDING ORDERS: the durable home for "keep it short". A correction said in chat used to live
-// only in conversation history — capped, framed as continuity, gone in days. Erik: "hes not
-// remembering to shut the fuck up." Now a durable instruction gets WRITTEN to their own profile
-// row and injected into every future session. The full current text is always passed back, so
-// editing and removing an order is the same call as adding one.
-const REMEMBER_STYLE_TOOL = {
-  name: "remember_style",
-  description:
-    "Save a STANDING ORDER about how this person wants you to work with them, so you still know it next week — call this whenever they tell you how to behave GOING FORWARD: 'keep it short', 'stop reading lists back', 'always call me E', 'never suggest weekend work'. Pass `notes` as the FULL updated set of standing orders (short lines, one per rule) — you'll see the current set in your instructions; add, reword or drop lines and send the whole thing. Not for facts about jobs or customers (those go in real records), only for how to work with THEM. Confirm in a few words once saved.",
-  input_schema: {
-    type: "object",
-    properties: {
-      notes: { type: "string", description: "The complete standing orders after this change — short lines, one rule per line. Empty string clears them." },
-    },
-    required: ["notes"],
-  },
-} as const;
+// (The remember_style tool was replaced by the registry's confirm-gated memory.standingOrders
+// in audit 8 — same job, but the human reads the exact text on a card before it becomes an
+// instruction that outranks Nort's defaults in every future prompt.)
 
 // A friendly "what I'm doing right now" label for the transient tool-status pill — so a silent
 // read doesn't feel like the app froze (especially in voice mode in the field).
@@ -681,7 +667,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
             // LIVE prices, specs, and code while estimating — the core "do it like Claude
             // did the Tao Zhu quote" capability. Results are untrusted web text (the
             // input-is-data rule in the system prompt covers them).
-            tools: [...dataTools, ...writeTools, ...CALC_TOOLS, OPEN_MAPS_TOOL, QUOTE_DRAFT_TOOL, SHOW_CARD_TOOL, REMEMBER_STYLE_TOOL, ...(isStaffCaller ? [REQUEST_CONTACT_TOOL] : []), { type: "web_search_20250305", name: "web_search", max_uses: 6 }] as any,
+            tools: [...dataTools, ...writeTools, ...CALC_TOOLS, OPEN_MAPS_TOOL, QUOTE_DRAFT_TOOL, SHOW_CARD_TOOL, ...(isStaffCaller ? [REQUEST_CONTACT_TOOL] : []), { type: "web_search_20250305", name: "web_search", max_uses: 6 }] as any,
             messages: markCacheTail(convo),
           });
           // Strip the directive markers from MODEL text so a prompt-injection can't forge a
@@ -789,27 +775,9 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
               results.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify({ ok: true, picker_open: true }) });
               break;
             }
-            // STANDING ORDERS write. Their OWN row, through the request-scoped RLS client — the
-            // same boundary as saveNortTone, and the same silent-write law: .select("id") because
-            // a zero-row update is a 204 and "saved" without a row is the worst lie Nort can tell.
-            if (tu.name === "remember_style") {
-              const notes = clampNotes((tu.input as { notes?: unknown })?.notes);
-              const { data: saved, error: nErr } = await supabase
-                .from("profiles")
-                .update({ nort_notes: notes })
-                .eq("id", user.id)
-                .select("id");
-              results.push({
-                type: "tool_result",
-                tool_use_id: tu.id,
-                content: JSON.stringify(
-                  nErr || !saved?.length
-                    ? { ok: false, error: nErr?.message ?? "didn't land" }
-                    : { ok: true, standing_orders: notes ?? "(cleared)" },
-                ),
-              });
-              continue;
-            }
+            // (Standing orders moved to the registry action memory.standingOrders — audit 8:
+            // the inline write skipped the chokepoint, so instruction-authority text persisted
+            // with no confirm card, no audit row and no write cap.)
             // Engineering calculators (pure NEC math, no DB/auth) — the model CALLS these for exact
             // wire size / voltage drop / conduit fill / box fill instead of reasoning the tables itself.
             if (CALC_TOOL_NAMES.has(tu.name)) {

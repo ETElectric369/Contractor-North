@@ -632,7 +632,9 @@ export function InvoiceDetail({
               <span>{formatCurrency(invoice.subtotal)}</span>
             </div>
             <div className="flex items-center justify-between gap-2 text-slate-600">
-              {taxRates.length > 0 ? (
+              {/* The picker is a DRAFT control (audit 8) — a sent invoice shows its rate as text,
+                  matching every other line-item edit on this page. */}
+              {taxRates.length > 0 && isDraft ? (
                 <Select
                   className="h-8 w-44 text-xs"
                   value={taxRates.find((t) => Math.abs(Number(t.rate) / 100 - Number(invoice.tax_rate)) < 1e-9)?.id ?? ""}

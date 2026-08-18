@@ -114,6 +114,8 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   // MAX_WRITES check) no blast-radius cap either, while writing text that gets injected into
   // every crew member's system prompt forever. It's a write; it belongs in the write set.
   "memory.remember",
+  // Confirm-gated: its payload becomes instruction authority in every future prompt (audit 8).
+  "memory.standingOrders",
 ]);
 
 // Registry names are group.verb (a dot); Anthropic tool names can't contain dots.
