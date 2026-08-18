@@ -64,6 +64,16 @@ export function TourDriver({
     return Number.isFinite(n) && n > 0 && n < steps.length ? n : 0;
   });
   const [answers, setAnswers] = useState<Answers>(initial);
+  /**
+   * THE NEWEST ANSWERS, READABLE FROM A STALE CLOSURE (audit 8).
+   *
+   * commit() is a useCallback over `answers`, and the ask-boundary commit fires from inside
+   * go() — which the auto-advance timer captured one render earlier. So the boundary save wrote
+   * the answer set as it was BEFORE the rate the user had just spoken, and only the later
+   * completion/exit commit healed it. A ref has no vintage.
+   */
+  const answersRef = useRef<Answers>(initial);
+  answersRef.current = answers;
   const [typed, setTyped] = useState("");
   const [muted, setMuted] = useState(() => typeof window !== "undefined" && sessionStorage.getItem(MUTE) === "1");
   const [busy, setBusy] = useState(false);
@@ -78,6 +88,8 @@ export function TourDriver({
   const [note, setNote] = useState<string | null>(null);
   // What Nort just SAID back — shown as speech, not as a status line.
   const [reply, setReply] = useState<string | null>(null);
+  /** Questions this turn answered that belong to OTHER steps — shown, not silently saved. */
+  const [alsoFilled, setAlsoFilled] = useState<string[]>([]);
   // The auto-advance fires from inside a callback that closed over an older render, so it reads
   // the step and the mute flag from refs rather than from a stale closure.
   const iRef = useRef(0);
@@ -191,6 +203,14 @@ export function TourDriver({
       setAnswers(r.answers);
       setTyped("");
       setReply(r.say);
+      // WHAT LANDED SOMEWHERE ELSE (audit 8). One sentence can answer a question three steps
+      // ahead; those fills were saved on exit having never appeared on screen. Name them here,
+      // where the person can still say "no, that's wrong" — same why-line as the green check.
+      const elsewhere = (r.filled ?? []).filter((label) => {
+        const n = SETUP_PLAYBOOK.needs.find((x) => (x.label ?? x.key) === label);
+        return n && n.key !== step.ask;
+      });
+      setAlsoFilled(elsewhere);
       if (!mutedRef.current && r.say) speakSmart(r.say);
 
       // MOVE ON ONLY WHEN THIS QUESTION IS ACTUALLY ANSWERED. Advancing on any reply would carry
@@ -229,10 +249,11 @@ export function TourDriver({
     //
     // saveSetup is idempotent (it writes the same four settings keys), so the honest fix is to let
     // it run whenever the tour reaches a commit point.
-    const r = await saveSetup(answers);
+    const r = await saveSetup(answersRef.current);
     router.refresh();
     return r;
-  }, [answers, router]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router, steps]);
 
   const go = async (to: number) => {
     if (advance.current) clearTimeout(advance.current);
@@ -407,6 +428,11 @@ export function TourDriver({
           {reply && (
             <p className="mt-2 rounded-lg bg-brand-light px-3 py-2 text-sm leading-relaxed text-slate-700">
               {reply}
+            </p>
+          )}
+          {alsoFilled.length > 0 && (
+            <p className="mt-2 text-xs text-slate-500">
+              Also got: {alsoFilled.join(", ")} — I&rsquo;ll show you those in a moment.
             </p>
           )}
           {(note || dictation.error) && (

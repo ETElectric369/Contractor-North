@@ -1,5 +1,8 @@
 "use client";
 
+/** How soon after load a controllerchange still counts as the SW's initial claim (audit 8). */
+const FIRST_CLAIM_WINDOW_MS = 10_000;
+
 import { useEffect } from "react";
 
 /**
@@ -15,6 +18,7 @@ export function PwaRegister() {
 
     const hadController = !!navigator.serviceWorker.controller;
     let sawFirstClaim = false;
+    const mountedAt = Date.now();
     let refreshing = false;
 
     // A deploy reload must never eat what the user is typing. If a modal is up
@@ -50,7 +54,13 @@ export function PwaRegister() {
     const onControllerChange = () => {
       // On a fresh, uncontrolled first load the very first controllerchange is
       // just the SW claiming this page — not an update. Skip that one only.
-      if (!hadController && !sawFirstClaim) {
+      //
+      // …AND ONLY IF IT ARRIVES LIKE ONE (audit 8). A genuine first claim lands within a second
+      // or two of registration. Without the window, a page loaded uncontrolled (a hard reload)
+      // banked its skip indefinitely, so the REAL takeover hours later — the deploy this whole
+      // component exists to pick up — was swallowed as "just the first claim" and the tab kept
+      // running the old build against renamed chunks.
+      if (!hadController && !sawFirstClaim && Date.now() - mountedAt < FIRST_CLAIM_WINDOW_MS) {
         sawFirstClaim = true;
         return;
       }

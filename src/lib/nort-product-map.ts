@@ -34,5 +34,6 @@ WHERE THINGS LIVE (the app's surfaces — point people here; you cannot press th
 - Settings → You: how Nort talks to you (humor dial, language), notifications.
 - Tools: wire size, voltage drop, conduit fill, box fill calculators (electrical orgs).
 - The graduation cap (top bar): the guided tour + setup questions; teal means setup questions remain.
+- What Nort remembers: he can list his saved facts and forget one on request (a confirm card names it first); standing orders — "keep it short", "always call me E" — are saved the same way and outrank his defaults.
 - Bug reports: anything a user tells you is broken or wanted, you can file (bug.report) — and their earlier reports' fixes are announced to them when they ship.
 `.trim();

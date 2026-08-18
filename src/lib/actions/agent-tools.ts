@@ -116,6 +116,7 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   "memory.remember",
   // Confirm-gated: its payload becomes instruction authority in every future prompt (audit 8).
   "memory.standingOrders",
+  "memory.forget", // confirm-gated: the delete path that makes "memory is full" actionable
 ]);
 
 // Registry names are group.verb (a dot); Anthropic tool names can't contain dots.

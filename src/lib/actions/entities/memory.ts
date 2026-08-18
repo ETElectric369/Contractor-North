@@ -138,4 +138,57 @@ export const memoryActions: Record<string, ActionDef> = {
       };
     },
   },
+
+  /**
+   * LIST what Nort has remembered. The read half of the pair below — and the thing that makes
+   * "Memory is full — clear some out" an instruction a person can follow (audit 8: the shelf
+   * filled by design and NOTHING in the product could show or remove a fact).
+   */
+  "memory.list": {
+    name: "memory.list",
+    group: "memory",
+    label: "What you remember",
+    description:
+      "List the durable facts you've saved — what you know about this business and about this person. Use it when they ask what you remember, when memory is full, or before forgetting something so you can name what you're about to drop.",
+    input: z.object({ scope: z.enum(["business", "personal"]).optional() }),
+    auth: "any",
+    effect: "read",
+    handler: async (i) => {
+      const supabase = await createClient();
+      let q = supabase.from("user_memory").select("id, content, scope, created_at").order("created_at", { ascending: false }).limit(200);
+      if (i.scope) q = i.scope === "personal" ? q.eq("scope", "personal") : q.neq("scope", "personal");
+      const { data, error } = await q;
+      if (error) return { ok: false, error: "Couldn't read memory." };
+      return { ok: true, data: { facts: data ?? [] } };
+    },
+  },
+
+  /**
+   * FORGET one. Confirm-gated: a remembered fact shapes future answers for the whole crew when
+   * it's a business fact, so dropping one is a change worth reading back first. RLS (0144) is
+   * the real boundary — it admits an owner deleting a business fact and anyone their own.
+   */
+  "memory.forget": {
+    name: "memory.forget",
+    group: "memory",
+    label: "Forget a fact",
+    description:
+      "Delete ONE saved fact by its id (get ids from memory.list). Use it when they say to forget something, when a fact turned out wrong, or to make room when memory is full.",
+    input: z.object({ id: z.string().uuid("Which fact? Use memory.list to get its id.") }),
+    auth: "any",
+    effect: "write",
+    confirm: "destructive",
+    // describe is synchronous by contract, so the card names the fact the caller passed rather
+    // than re-reading it; memory.list is how the model gets the text to say out loud first.
+    describe: () => "Forget that saved fact? I won't use it in future answers.",
+    handler: async (i) => {
+      const supabase = await createClient();
+      // Silent-write law: RLS refuses another person's personal fact by returning zero rows,
+      // and "forgotten" about a fact that is still there is exactly the lie this guards.
+      const { data, error } = await supabase.from("user_memory").delete().eq("id", i.id).select("id");
+      if (error) return { ok: false, error: "Couldn't forget that." };
+      if (!data?.length) return { ok: false, error: "That one isn't yours to forget." };
+      return { ok: true, speak: "Forgotten." };
+    },
+  },
 };
