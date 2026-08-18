@@ -9,6 +9,32 @@ export function qboConfigured(): boolean {
 const ENV = process.env.QBO_ENVIRONMENT || "production"; // or "sandbox"
 const AUTH_BASE = "https://appcenter.intuit.com/connect/oauth2";
 const TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer";
+const REVOKE_URL = "https://developer.api.intuit.com/v2/oauth2/tokens/revoke";
+
+/**
+ * REVOKE THE GRANT AT INTUIT, not just our copy of it (audit 9).
+ *
+ * Disconnect deleted our row and showed the disconnected state, while Intuit still held a valid
+ * grant: the refresh token stayed usable, so anyone with the stored token — the exact thing an
+ * owner offboarding a bookkeeper or reacting to a suspected compromise is trying to kill — kept
+ * access to the books. Best-effort by design: if Intuit is unreachable we still remove our row
+ * (leaving the app connected to something the user asked to disconnect is worse), but the caller
+ * is told, so "revoked" is never claimed when it wasn't.
+ */
+export async function revokeQboToken(refreshToken: string): Promise<boolean> {
+  if (!qboConfigured() || !refreshToken) return false;
+  try {
+    const basic = Buffer.from(`${process.env.QBO_CLIENT_ID}:${process.env.QBO_CLIENT_SECRET}`).toString("base64");
+    const res = await fetch(REVOKE_URL, {
+      method: "POST",
+      headers: { Authorization: `Basic ${basic}`, "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ token: refreshToken }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
 const API_BASE =
   ENV === "sandbox"
     ? "https://sandbox-quickbooks.api.intuit.com"

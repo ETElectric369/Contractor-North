@@ -2,6 +2,7 @@
 import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
+import { revokeQboToken } from "@/lib/quickbooks";
 import { bustOrgPdfs } from "@/lib/pdf-cache";
 import { emptyToNull } from "@/lib/forms";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
@@ -26,9 +27,21 @@ export async function disconnectQuickbooks(): Promise<Result> {
     return { ok: false, error: "Not allowed." };
   }
   const svc = createServiceClient();
-  await svc.from("accounting_connections").delete().eq("org_id", me.org_id);
+  // Kill it at INTUIT first (audit 9) — deleting our row alone left a live grant behind, which
+  // is precisely what an owner offboarding a bookkeeper is trying to prevent.
+  const { data: conn } = await svc
+    .from("accounting_connections")
+    .select("refresh_token")
+    .eq("org_id", me.org_id)
+    .maybeSingle();
+  const revoked = await revokeQboToken(String((conn as { refresh_token?: string } | null)?.refresh_token ?? ""));
+  const { error } = await svc.from("accounting_connections").delete().eq("org_id", me.org_id);
   revalidatePath("/settings");
-  return { ok: true };
+  if (error) return { ok: false, error: dbError(error) };
+  // We still disconnect on a failed revoke — but we say so rather than implying the grant is dead.
+  return revoked || !conn
+    ? { ok: true }
+    : { ok: true, error: "Disconnected here, but QuickBooks didn't confirm the revoke — remove Contractor North under Apps in QuickBooks to be certain." };
 }
 
 export type Result = { ok: boolean; error?: string };

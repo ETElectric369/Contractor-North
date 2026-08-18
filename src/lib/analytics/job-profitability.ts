@@ -113,7 +113,7 @@ async function fetchProfitInputs(supabase: any, jobId?: string): Promise<ProfitI
       paymentsQ,
       posQ,
       billsQ,
-      supabase.from("customer_credits").select("amount, invoices(job_id)").eq("disposition", "refund"),
+      supabase.from("customer_credits").select("amount, invoices(job_id)").eq("disposition", "refund").limit(50000),
       supabase
         .from("time_entries")
         .select("job_id, clock_in, clock_out, lunch_minutes, status, rate_override, profiles(hourly_rate), time_allocations(job_id, hours)")

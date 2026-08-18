@@ -68,10 +68,13 @@ export default async function AnalyticsPage() {
       // order isn't a cost, and a PO paid by a bill is superseded by it (no double-charge).
       supabase.from("purchase_orders").select("id, job_id, total, status").limit(50000),
       supabase.from("bills").select("job_id, amount, category, po_id").limit(50000),
-      supabase.from("customer_credits").select("amount, created_at").eq("disposition", "refund").gte("created_at", windowStart),
+      // Cap BOTH sides of the trend (audit 9): bounding the payments that ADD money while leaving
+      // the refunds that SUBTRACT it unbounded would overstate collected at exactly the volume
+      // where the cap starts to bite.
+      supabase.from("customer_credits").select("amount, created_at").eq("disposition", "refund").gte("created_at", windowStart).order("created_at", { ascending: false }).limit(50000),
       // Per-job refunds (all-time, with the invoice they reversed) so job profitability
       // nets refunds the SAME way the job hub does — keyed to a job via its invoice.
-      supabase.from("customer_credits").select("amount, invoices(job_id)").eq("disposition", "refund"),
+      supabase.from("customer_credits").select("amount, invoices(job_id)").eq("disposition", "refund").limit(50000),
       // Per-job CASH collected (all-time): the payments ledger with each payment's invoice
       // job + status, so job profitability sums real cash (net of void invoices) — THE
       // computeCollected definition — not invoices.amount_paid (which folds non-cash credits

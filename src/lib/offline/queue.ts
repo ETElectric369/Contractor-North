@@ -83,15 +83,41 @@ function open(): Promise<IDBDatabase> {
   });
 }
 
+/**
+ * SETTLE ON THE TRANSACTION, NOT THE REQUEST (audit 9).
+ *
+ * `req.onsuccess` fires when IndexedDB accepts the operation — the write is still uncommitted and
+ * can be aborted afterwards (quota exhaustion on a phone near its storage ceiling is the ordinary
+ * case). Resolving there let `enqueue` report a punch as held on the phone that was never
+ * actually stored: the tech is told his morning is safe by the one mechanism designed to make it
+ * safe. A READ can settle on the request; a WRITE waits for the commit.
+ */
 function tx<T>(mode: IDBTransactionMode, run: (s: IDBObjectStore) => IDBRequest<T>): Promise<T> {
   return open().then(
     (db) =>
       new Promise<T>((resolve, reject) => {
         const t = db.transaction(STORE, mode);
         const req = run(t.objectStore(STORE));
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
-        t.oncomplete = () => db.close();
+        let result: T;
+        let settled = false;
+        const done = (fn: () => void) => {
+          if (settled) return;
+          settled = true;
+          try {
+            db.close();
+          } catch {
+            /* already closing */
+          }
+          fn();
+        };
+        req.onsuccess = () => {
+          result = req.result;
+          if (mode === "readonly") done(() => resolve(result));
+        };
+        req.onerror = () => done(() => reject(req.error));
+        t.oncomplete = () => done(() => resolve(result));
+        t.onabort = () => done(() => reject(t.error ?? new Error("aborted")));
+        t.onerror = () => done(() => reject(t.error ?? new Error("transaction failed")));
       }),
   );
 }
@@ -243,6 +269,9 @@ export async function drain(currentUserId?: string | null): Promise<DrainResult>
 }
 
 /** Drain now, and again whenever the connection returns. Returns an unsubscribe. */
+/** One drain at a time: overlapping runs replay the same op twice (audit 9). */
+let draining: Promise<DrainResult> | null = null;
+
 export function startAutoDrain(
   onChange?: (r: DrainResult) => void,
   currentUserId?: string | null,
@@ -250,8 +279,13 @@ export function startAutoDrain(
   let stopped = false;
   const run = () => {
     if (stopped) return;
-    drain(currentUserId).then((r) => {
-      if (!stopped) onChange?.(r);
+    // `online` and `visibilitychange` fire milliseconds apart when a phone reaches the edge of
+    // coverage — without this, two drains replay the same op concurrently.
+    draining = (draining ?? Promise.resolve(null as unknown as DrainResult))
+      .catch(() => null as unknown as DrainResult)
+      .then(() => drain(currentUserId));
+    draining.then((r) => {
+      if (!stopped && r) onChange?.(r);
     });
   };
   run();
