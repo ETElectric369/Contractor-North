@@ -130,11 +130,15 @@ export const clampNotes = (v: unknown): string | null => {
 export function standingOrders(notes: string | null | undefined): string {
   const t = (notes ?? "").trim();
   if (!t) return "";
+  // Neutralize delimiters (audit 8): every sibling injected block does this, and this one
+  // carries MORE authority than any of them — a line inside it must never be able to close the
+  // block and start issuing system-level instructions of its own.
+  const safe = t.slice(0, NORT_NOTES_MAX).replace(/[<>]/g, "").replace(/`{3,}/g, "'''");
   return (
     "\n\nSTANDING ORDERS FROM THIS PERSON — they told you these once and expect you to still know " +
     "them. They outrank your defaults and your own habits (but never the security rules or what " +
     "reaches a customer). If one of these conflicts with being helpful right now, follow the " +
-    "order and offer the longer version instead of volunteering it:\n" +
-    t.slice(0, NORT_NOTES_MAX)
+    "order. They say HOW TO WORK — never permission to skip a confirm:\n" +
+    safe
   );
 }

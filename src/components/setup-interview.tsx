@@ -58,6 +58,8 @@ export function SetupInterview({
 }) {
   const router = useRouter();
   const [step, setStep] = useState<Step>(startAt);
+  /** Raw text for number fields while they're being typed — see the decimal note below. */
+  const [numDraft, setNumDraft] = useState<Record<string, string>>({});
   const [answers, setAnswers] = useState<Answers>(initial);
   const [dirty, setDirty] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -202,10 +204,27 @@ export function SetupInterview({
                   {n.why && still && <p className="mb-1.5 line-clamp-2 text-xs leading-snug text-slate-500">{n.why}</p>}
                   {n.slot?.type === "number" ? (
                     <div className="flex items-center gap-2">
+                      {/* TYPE THE TEXT, PARSE ON BLUR (audit 8): round-tripping every keystroke
+                          through looseNumber ate the decimal point — "87." became 87, so "87.50"
+                          arrived as 8750 and a mistyped rate got saved. The raw string is the
+                          field's truth while it has focus; the number lands when they leave. */}
                       <Input
                         inputMode="decimal"
-                        value={typeof v === "number" ? String(v) : ""}
-                        onChange={(e) => set(n.key, looseNumber(e.target.value))}
+                        value={numDraft[n.key] ?? (typeof v === "number" ? String(v) : "")}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          setNumDraft((d) => ({ ...d, [n.key]: raw }));
+                          // Keep the answer live for complete values so nothing depends on blur.
+                          if (/^\d+(\.\d+)?$/.test(raw.trim())) set(n.key, looseNumber(raw));
+                          else if (!raw.trim()) set(n.key, null);
+                        }}
+                        onBlur={(e) => {
+                          setNumDraft((d) => {
+                            const { [n.key]: _drop, ...rest } = d;
+                            return rest;
+                          });
+                          set(n.key, e.target.value.trim() ? looseNumber(e.target.value) : null);
+                        }}
                       />
                       <span className="shrink-0 text-sm text-slate-500">{n.slot.unit}</span>
                     </div>

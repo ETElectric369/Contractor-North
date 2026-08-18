@@ -212,6 +212,14 @@ export function TourDriver({
   // The company facts are committed ONCE, when the questions are behind them — not per keystroke.
   // Saying things changed nothing; this is the write. (fill-vs-execute)
   const commit = useCallback(async () => {
+    /**
+     * A LESSON WRITES NOTHING (audit 8). `initial` is a snapshot taken when the LAYOUT
+     * rendered — possibly days ago in a PWA left open — and a lesson asks no questions, so
+     * committing on its completion rewrote today's org settings with that stale snapshot:
+     * a rate the office raised on Tuesday went back to Monday's number on Wednesday because
+     * somebody replayed a lesson about invoices.
+     */
+    if (!steps.some((st) => st.ask)) return { ok: true as const };
     // NO ONCE-ONLY GUARD. It used to early-return on a `savedRef` boolean that was set the first
     // time the questions were behind him and never reset — so the recap step, which says out loud
     // "if any of that's wrong, go back a step and say it again", solicited a correction, showed a

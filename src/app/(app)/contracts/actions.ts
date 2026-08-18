@@ -67,7 +67,7 @@ export async function generateContractFromJob(jobId: string): Promise<Result> {
       ? supabase.from("customers").select("name, company_name, address, unit, city, state, zip").eq("id", j.customer_id).maybeSingle()
       : Promise.resolve({ data: null }),
     supabase.from("organizations").select("name, license, address_line1, address_line2, city, state, zip, phone, email, settings").maybeSingle(),
-    supabase.from("quotes").select("total, status").eq("job_id", jobId),
+    supabase.from("quotes").select("total, status, created_at").eq("job_id", jobId),
     supabase.from("payment_milestones").select("*").eq("job_id", jobId).order("sort_order"),
   ]);
 

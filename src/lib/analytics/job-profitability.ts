@@ -99,10 +99,10 @@ async function fetchProfitInputs(supabase: any, jobId?: string): Promise<ProfitI
   // a billed PO is superseded by its bill).
   const posQ = jobId
     ? supabase.from("purchase_orders").select("id, job_id, total, status").eq("job_id", jobId)
-    : supabase.from("purchase_orders").select("id, job_id, total, status");
+    : supabase.from("purchase_orders").select("id, job_id, total, status").limit(50000);
   const billsQ = jobId
     ? supabase.from("bills").select("job_id, amount, po_id").eq("job_id", jobId)
-    : supabase.from("bills").select("job_id, amount, po_id");
+    : supabase.from("bills").select("job_id, amount, po_id").limit(50000);
 
   const [{ data: jobs }, { data: payments }, { data: pos }, { data: bills }, { data: jobRefunds }, { data: entries }] =
     await Promise.all([
@@ -114,7 +114,12 @@ async function fetchProfitInputs(supabase: any, jobId?: string): Promise<ProfitI
       supabase
         .from("time_entries")
         .select("job_id, clock_in, clock_out, lunch_minutes, status, rate_override, profiles(hourly_rate), time_allocations(job_id, hours)")
-        .eq("status", "closed"),
+        .eq("status", "closed")
+        // Explicit high limit + a stable order (audit 8): no .limit() means PostgREST's silent
+        // 1000-row default, which truncated LABOR while revenue came back whole — every job
+        // read more profitable than it is, and unstably so with no ORDER BY.
+        .order("clock_in", { ascending: false })
+        .limit(50000),
         // NB: no `.not("job_id","is",null)` — a job-less clock-in whose hours were split
         // ONTO jobs via allocations was dropped here while the job hub costed it, so the
         // same job showed two different labor numbers. laborCostForJob already ignores

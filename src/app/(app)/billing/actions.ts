@@ -833,11 +833,14 @@ export async function createProgressReportInvoice(
   // drafts and void excluded) so they only pay for work since the last bill.
   const { data: priorInvs } = await supabase
     .from("invoices")
-    .select("total, status")
+    .select("subtotal, status")
     .eq("job_id", jobId)
     .neq("id", inv.id);
+  // SUBTOTAL, not total (audit 8): the credit line is inserted INSIDE this draw's subtotal, so
+  // netting a tax-INCLUSIVE prior against pre-tax work credited the customer their own tax and
+  // then taxed the inflated remainder — the draw came out over the true cumulative bill.
   const priorBilled = (priorInvs ?? []).reduce(
-    (s: number, i: any) => (i.status !== "void" && i.status !== "draft" ? s + Number(i.total ?? 0) : s),
+    (s: number, i: any) => (i.status !== "void" && i.status !== "draft" ? s + Number(i.subtotal ?? 0) : s),
     0,
   );
 
@@ -879,7 +882,7 @@ export async function createProgressReportInvoice(
 
 /** Contract total for a job = the agreed amount (shared rule — see contractTotalFromQuotes). */
 async function jobContractTotal(supabase: any, jobId: string): Promise<number> {
-  const { data: quotes } = await supabase.from("quotes").select("total, status").eq("job_id", jobId);
+  const { data: quotes } = await supabase.from("quotes").select("total, status, created_at").eq("job_id", jobId);
   return contractTotalFromQuotes((quotes ?? []) as any);
 }
 
@@ -1344,10 +1347,14 @@ export async function deleteInvoice(id: string): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
-  const { count } = await supabase
+  const { count, error: countErr } = await supabase
     .from("payments")
     .select("id", { count: "exact", head: true })
     .eq("invoice_id", id);
+  // FAIL CLOSED (audit 8): a transient error made `count` undefined, the guard fell through,
+  // and the CASCADE took the payment rows with the invoice — the money simply vanished from
+  // the books with nothing to reconcile against.
+  if (countErr) return { ok: false, error: dbError(countErr) };
   if (count && count > 0) {
     return { ok: false, error: "This invoice has recorded payments — delete those first or mark the invoice void." };
   }

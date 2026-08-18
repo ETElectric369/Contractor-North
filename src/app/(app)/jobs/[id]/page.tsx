@@ -9,6 +9,7 @@ import {
   ClipboardCheck, FileText, DollarSign, Receipt as ReceiptTab, StickyNote, Stamp, FileDiff,
 } from "./job-tab-icons";
 import { createClient } from "@/lib/supabase/server";
+import { acceptedQuoteTotal } from "@/lib/payment-schedule-math";
 import { invoiceBalance, isDrawKind } from "@/lib/invoice-math";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
@@ -910,7 +911,10 @@ export default async function JobDetailPage({
             defaults={{
               ownerName: (j.customers as any)?.name ?? undefined,
               ownerAddress: formatFullAddress((j.customers as any)?.address, (j.customers as any)?.city, (j.customers as any)?.state, (j.customers as any)?.zip) || undefined,
-              estimatedAmount: contractTotal,
+              // ACCEPTED-only, matching what the notice itself prints (audit 8): this prefilled
+              // the sum of every quote, so a job with two unaccepted revisions handed staff a
+              // doubled figure to serve on a legal notice, one Save away from being sworn to.
+              estimatedAmount: acceptedQuoteTotal((quotes ?? []) as any),
             }}
           />
         </div>

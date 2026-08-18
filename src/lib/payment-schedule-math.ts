@@ -26,11 +26,32 @@ export type Milestone = {
  *  if none are accepted yet fall back to the sum of all quotes (so a revised quote
  *  doesn't double the contract once one is accepted). One rule, shared by the job
  *  page, billing actions, and contract generation so they never diverge. */
-export function contractTotalFromQuotes(quotes: { total?: number | null; status?: string | null }[]): number {
+export function contractTotalFromQuotes(
+  quotes: { total?: number | null; status?: string | null; created_at?: string | null }[],
+): number {
   const all = quotes ?? [];
   const accepted = all.filter((q) => q.status === "accepted");
-  const base = accepted.length ? accepted : all;
-  return cents(base.reduce((s, q) => s + fin(q.total), 0));
+  // ACCEPTED quotes sum — a job legitimately wins phase 1 and phase 2, and both are the deal.
+  if (accepted.length) return cents(accepted.reduce((s, q) => s + fin(q.total), 0));
+  /**
+   * NOTHING ACCEPTED YET: the newest proposal stands ALONE (audit 8).
+   *
+   * Summing them all made a revision ADD to the estimate it replaced — write $10k, revise to
+   * $12k, and the generated contract said "Contract price: $22,000" with a deposit computed on
+   * it. The customer signs a number that was never quoted, and the draws bill against the same
+   * inflated base (jobContractTotal shares this rule, which is why it lives here and not in
+   * either caller). A revision supersedes; it never accumulates.
+   */
+  const newest = [...all].sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")))[0];
+  return cents(fin(newest?.total));
+}
+
+/** ACCEPTED quotes only — the legal-figure rule (audit 8). A preliminary notice's "estimated
+ *  total" and the lien editor's prefill must agree, and neither may include a proposal the
+ *  customer never accepted; contractTotalFromQuotes' newest-quote fallback is right for a
+ *  CONTRACT (a price you are about to offer) and wrong for a figure served under oath. */
+export function acceptedQuoteTotal(quotes: { total?: number | null; status?: string | null }[]): number {
+  return cents((quotes ?? []).filter((q) => q.status === "accepted").reduce((s, q) => s + fin(q.total), 0));
 }
 
 /** The $ a milestone bills: percent of the contract when a percent is set, else the

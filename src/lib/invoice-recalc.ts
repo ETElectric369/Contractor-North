@@ -19,12 +19,31 @@ import { reportError } from "@/lib/observe";
  *  Works with any client (RLS-scoped user client or the service client) — the credits
  *  SELECT needs whatever visibility the caller already has on the invoice. */
 export async function recalcInvoice(supabase: any, invoiceId: string): Promise<void> {
-  const [{ data: items }, { data: pays }, { data: credits }, { data: inv }] = await Promise.all([
+  const [itemsRes, paysRes, creditsRes, invRes] = await Promise.all([
     supabase.from("invoice_items").select("line_total").eq("invoice_id", invoiceId),
     supabase.from("payments").select("amount").eq("invoice_id", invoiceId),
     supabase.from("customer_credits").select("amount").eq("invoice_id", invoiceId).eq("disposition", "credit").eq("status", "open"),
     supabase.from("invoices").select("tax_rate, status").eq("id", invoiceId).single(),
   ]);
+
+  /**
+   * A FAILED READ IS NOT AN EMPTY TABLE (audit 8).
+   *
+   * Every one of these destructured `data` to null on error, and null mapped to [] — so ONE
+   * transient PostgREST timeout on the payments select, with the UPDATE still succeeding,
+   * rewrote a fully-paid $5,000 invoice as amount_paid 0 / status 'sent': aged into A/R,
+   * dunned by the reminder cron, and payable a second time on the public page. Money is only
+   * ever rewritten from a complete picture; anything else leaves the row exactly as it was.
+   */
+  const readErr = itemsRes.error || paysRes.error || creditsRes.error || invRes.error;
+  if (readErr || !invRes.data) {
+    reportError("recalcInvoice:read", readErr ?? new Error("invoice not found"), { invoiceId });
+    return; // nothing computed, so nothing written — and the stored PDF stays valid
+  }
+  const items = itemsRes.data;
+  const pays = paysRes.data;
+  const credits = creditsRes.data;
+  const inv = invRes.data;
 
   const { subtotal, tax, total, amountPaid, status } = recalcTotals(
     (items ?? []).map((i: any) => Number(i.line_total ?? 0)),

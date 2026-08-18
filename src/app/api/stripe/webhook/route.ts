@@ -59,7 +59,15 @@ export async function POST(req: Request) {
       stripe_event_id: eventId,
     });
     if (insErr) {
-      if ((insErr as { code?: string }).code === "23505") return; // already recorded this event
+      if ((insErr as { code?: string }).code === "23505") {
+        // Already recorded this event — but the FIRST attempt may have died between the insert
+        // and the recalc (cold-start timeout, deploy, OOM), leaving the payment row with an
+        // invoice header still reading $0 owed-in-full (audit 8). recalc is idempotent, so
+        // running it on every benign retry is free and it heals the crashed case. Deliberately
+        // NOT the push: that one isn't idempotent and the duplicate is usually benign.
+        await recalcInvoice(supabase, invoiceId);
+        return;
+      }
       throw new Error(insErr.message);
     }
     // Settle through THE shared recalc (items + payments + open customer credits) instead

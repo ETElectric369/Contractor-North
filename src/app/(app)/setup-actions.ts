@@ -99,11 +99,22 @@ export async function talkSetup(needKey: string | null, answers: Answers, said: 
     .filter((f) => !rejected.includes(f))
     .map((f) => SETUP_PLAYBOOK.needs.find((n) => n.key === f.key)?.label ?? f.key);
 
+  // THE ANSWERS THAT ACTUALLY SURVIVE — computed BEFORE `filled` is reported (audit 8).
+  // clearInapplicable drops answers whose question no longer applies (skip the city question
+  // and "I cover all of Nevada County" is inapplicable), so Nort said "got it — how far you go"
+  // and confirmed a value that had already been nulled on its way out the door.
+  const survived = clearInapplicable(SETUP_PLAYBOOK, coerceByPlaybook(SETUP_PLAYBOOK, next));
+  const landed = filled.filter((label) =>
+    SETUP_PLAYBOOK.needs.some(
+      (n) => (n.label ?? n.key) === label && survived[n.key] !== null && survived[n.key] !== undefined && String(survived[n.key]).trim() !== "",
+    ),
+  );
+
   return {
     ok: true,
-    say: spoken.say || fallbackSay(need, filled.length > 0, first),
-    answers: clearInapplicable(SETUP_PLAYBOOK, coerceByPlaybook(SETUP_PLAYBOOK, next)),
-    filled,
+    say: spoken.say || fallbackSay(need, landed.length > 0, first),
+    answers: survived,
+    filled: landed,
   };
 }
 

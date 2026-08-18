@@ -41,18 +41,28 @@ export default async function AnalyticsPage() {
       supabase.from("payments").select("amount, paid_at, invoices(status)").gte("paid_at", windowStart),
       supabase.from("invoices").select("id, invoice_number, job_id, status, total, amount_paid, due_date, created_at, customers(name)"),
       supabase.from("quotes").select("status, total"),
-      // No .limit() — job profitability must rank over ALL jobs, not just the 100 newest
-      // (the slice to the top 8 happens AFTER sorting on profit, below).
-      supabase.from("jobs").select("id, job_number, name, status").order("created_at", { ascending: false }),
+      /**
+       * .limit(50000) ON EVERY SIDE, NOT JUST THE CASH ONE (audit 8).
+       *
+       * Omitting .limit() does NOT mean "all rows" — PostgREST answers with its 1000-row
+       * default and says nothing. Payments already carried an explicit high limit; jobs,
+       * time entries, POs and bills did not, so past ~1000 closed time entries (three techs,
+       * under a year) revenue was read WHOLE against a truncated slice of labor cost and
+       * EVERY job looked more profitable than it is. Worse, with no ORDER BY the truncation
+       * point isn't even stable — the same job could show two different margins on two loads.
+       */
+      supabase.from("jobs").select("id, job_number, name, status").order("created_at", { ascending: false }).limit(50000),
       supabase
         .from("time_entries")
         .select("job_id, clock_in, clock_out, lunch_minutes, status, rate_override, profiles(hourly_rate), time_allocations(job_id, hours)")
         .eq("status", "closed")
-        .not("job_id", "is", null),
+        .not("job_id", "is", null)
+        .order("clock_in", { ascending: false })
+        .limit(50000),
       // id + status + po_id feed computeJobProfitRows' shared live-PO rule: a draft/cancelled
       // order isn't a cost, and a PO paid by a bill is superseded by it (no double-charge).
-      supabase.from("purchase_orders").select("id, job_id, total, status"),
-      supabase.from("bills").select("job_id, amount, category, po_id"),
+      supabase.from("purchase_orders").select("id, job_id, total, status").limit(50000),
+      supabase.from("bills").select("job_id, amount, category, po_id").limit(50000),
       supabase.from("customer_credits").select("amount, created_at").eq("disposition", "refund").gte("created_at", windowStart),
       // Per-job refunds (all-time, with the invoice they reversed) so job profitability
       // nets refunds the SAME way the job hub does — keyed to a job via its invoice.
