@@ -371,7 +371,15 @@ export function QuoteBuilder({
     const safe = file.name.replace(/[^\w.\-]+/g, "_").slice(-80);
     const path = `${orgId}/ai-uploads/${crypto.randomUUID()}-${safe}`;
     const { error } = await supabase.storage.from("documents").upload(path, file, { contentType: file.type || undefined });
-    if (error) return { ok: false, error: "Upload didn't finish — check your connection and try again." };
+    if (error)
+      return {
+        ok: false,
+        // Say what STORAGE said (audit 7): a project-cap refusal blamed the jobsite connection,
+        // prompting doomed retries. The connection wording stays only for the errors that ARE one.
+        error: /fetch|network|load failed/i.test(error.message ?? "")
+          ? "Upload didn't finish — check your connection and try again."
+          : `Upload refused: ${String(error.message ?? "storage error").slice(0, 140)}`,
+      };
     return { ok: true, path };
   }
   function onUploadSupplier(file: File) {

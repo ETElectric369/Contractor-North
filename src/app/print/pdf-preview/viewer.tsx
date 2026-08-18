@@ -119,6 +119,9 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
   useEffect(() => {
     const host = pagesHost.current;
     return () => {
+      // Abort any in-flight fetch/paint loop (audit 7): tapping Back mid-load still rasterized
+      // every page into detached canvases and leaked the multi-MB blob on the page you fled to.
+      renderSeq.current++;
       setBlobUrl((old) => {
         if (old) URL.revokeObjectURL(old);
         return null;

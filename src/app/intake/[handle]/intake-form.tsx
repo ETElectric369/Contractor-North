@@ -79,7 +79,6 @@ export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: 
   const [pending, start] = useTransition();
 
   const pb = useMemo(() => ({ needs: needs as Need[] }), [needs]);
-  const visible = useMemo(() => applicableNeeds(pb, answers), [pb, answers]);
 
   // ── THE FORM OWNS THE PROJECT ADDRESS (Erik: "it shouldnt pop up if the box is checked —
   // it should autopopulate … and display it uneditable"). A playbook question that IS the
@@ -88,6 +87,14 @@ export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: 
   const effSite = siteSame ? { address: contact.address, city: contact.city, state: contact.state, zip: contact.zip } : site;
   const mirrorWhens = useMemo(() => siteAddressWhens(needs as Need[]), [needs]);
   const mirrorOf = (n: Need) => mirrorValue(n, mirrorWhens, effSite);
+  // The when-engine sees mirrored answers LIVE (audit 7): a question gated on "project address
+  // known" was unreachable — the mirror only landed values at submit, so its dependents never
+  // rendered and the server then cleared whatever the customer had typed into them.
+  const effAnswers = useMemo(
+    () => ({ ...answers, ...mirrorAnswers(needs as Need[], effSite) }),
+    [answers, needs, effSite.address, effSite.city, effSite.state, effSite.zip],
+  );
+  const visible = useMemo(() => applicableNeeds(pb, effAnswers), [pb, effAnswers]);
 
   const set = (key: string, v: Answers[string]) => setAnswers((a) => ({ ...a, [key]: v }));
 

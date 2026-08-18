@@ -83,3 +83,12 @@ describe("statedLaborRate — audit 7: policies are not prices", () => {
     expect(statedLaborRate("we bill 4 per hour")).toBeNull();
   });
 });
+
+describe("statedLaborRate — two rates is a decision, not a dictation", () => {
+  it("two different stated rates stand down to the company default", () => {
+    expect(statedLaborRate("journeyman at $120/hr and foreman billed at $185/hr")).toBeNull();
+  });
+  it("the same rate said twice is still one instruction", () => {
+    expect(statedLaborRate("billed at $145/hr — again, rate is $145/hr")).toBe(145);
+  });
+});

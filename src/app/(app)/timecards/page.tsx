@@ -528,7 +528,12 @@ export default async function TimecardsPage({
                       <span className="text-slate-500"> · in {formatDateTimeTz(e.clock_in, tz)}</span>
                       {e.job && <span className="text-slate-500"> · {jobLabel(e.job)}</span>}
                       <Badge tone="amber" className="ml-2">
-                        {pastDay ? `open ${formatDuration(openHrs)} · past day` : `open ${formatDuration(openHrs)}`}
+                        {/* A zero-closed row is NOT open (audit 7: "Brian · open 98h" on a shift
+                            0193 closed at zero on Monday was a lie that grew by the hour). Say
+                            what the system actually did, with its reason. */}
+                        {e.auto_closed_reason
+                          ? `auto-closed — ${String(e.auto_closed_reason).replace(/_/g, " ")}`
+                          : pastDay ? `open ${formatDuration(openHrs)} · past day` : `open ${formatDuration(openHrs)}`}
                       </Badge>
                     </div>
                     <EditEntryButton

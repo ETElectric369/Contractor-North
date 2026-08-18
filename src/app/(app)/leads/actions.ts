@@ -2,6 +2,7 @@
 import { dbError } from "@/lib/db-error";
 
 import { customerAddressFrom } from "@/lib/inquiries/lead-address";
+import { findMatchingCustomerId, type DupCustomer } from "@/lib/crm/duplicates";
 import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
 import { requireStaff } from "@/lib/staff-guard";
@@ -442,6 +443,16 @@ export async function convertInquiry(
     return { ok: true, id: inq.customer_id, redirect: `/crm/${inq.customer_id}` };
   }
   let customerId = opts.customerId || null;
+  if (!customerId) {
+    // CROSSCHECK THE BOOK before minting (audit 7): "Save as contact" on a lead from an
+    // EXISTING customer silently minted a second card — future jobs then split across the two.
+    // Same phone/email/normalized-name keys the CRM's duplicate finder and acceptance use.
+    const { data: book } = await supabase.from("customers").select("id, name, company_name, email, phone");
+    customerId = findMatchingCustomerId(
+      { name: inq.name, email: inq.email, phone: inq.phone },
+      (book ?? []) as DupCustomer[],
+    );
+  }
   if (!customerId) {
     const { data: cust, error: cErr } = await supabase
       .from("customers")

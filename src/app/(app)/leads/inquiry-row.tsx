@@ -215,7 +215,11 @@ export function InquiryRow({
               type="button"
               disabled={pending}
               onClick={() => {
-                if (!confirm(`Delete "${inquiry.name}" completely? A lead that said no should be marked Lost instead — delete keeps nothing.`)) return;
+                // A CONVERTED lead is an estimate's provenance (audit 7): deleting it severs
+                // the estimate's only link back to the person. Say so before the click.
+                if (!confirm(inquiry.converted_at
+                  ? `Delete "${inquiry.name}" completely? An estimate came from this lead — deleting cuts that estimate's link to the person and cancels any un-confirmed booking links. Mark it Lost instead unless it was junk.`
+                  : `Delete "${inquiry.name}" completely? A lead that said no should be marked Lost instead — delete keeps nothing.`)) return;
                 start(async () => {
                   const r = await deleteInquiry(inquiry.id);
                   if (!r.ok) toast(r.error ?? "Couldn't delete that.", "error");

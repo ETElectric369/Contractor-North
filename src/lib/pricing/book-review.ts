@@ -66,12 +66,17 @@ const norm = (s: unknown): string =>
     .trim();
 
 /** A part number embedded in the transcribed description ("QO120 ..." or "... [QO120]"). */
+/** "20A", "240V", "12AWG", "3/4IN" — sizes and ratings that LEAD countless supplier lines and
+ *  are also short enough to collide with a book code column (audit 7: a '20A' code row got a
+ *  GFCI's price proposed onto a breaker). A rating token is never treated as a part number. */
+const RATING_TOKEN = /^\d+(?:\/\d+)?(?:A|V|W|KW|HP|AWG|GA|FT|IN|MM|CM)$/i;
+
 const codeCandidates = (desc: string): string[] => {
   const out: string[] = [];
   const bracket = desc.match(/\[([^\]]{2,20})\]/);
-  if (bracket) out.push(bracket[1]);
+  if (bracket) out.push(bracket[1]); // explicit brackets are the transcriber SAYING "part number"
   const first = desc.trim().split(/\s+/)[0];
-  if (first && /^[A-Za-z0-9][A-Za-z0-9-]{1,19}$/.test(first)) out.push(first);
+  if (first && /^[A-Za-z0-9][A-Za-z0-9-]{1,19}$/.test(first) && !RATING_TOKEN.test(first)) out.push(first);
   return out.map((c) => c.toUpperCase());
 };
 

@@ -7,6 +7,7 @@ import { createTriagedInquiry } from "@/lib/inquiries/create-triaged-inquiry";
 import { clientIp, rateLimited } from "@/lib/rate-limit";
 import { coerceByPlaybook } from "@/lib/playbook/answers";
 import { clearInapplicable } from "@/lib/playbook/resolve";
+import { publicIntakeNeeds } from "@/lib/playbook/public-intake";
 import { isOwnIntakePath, uploadDisplayName } from "@/lib/playbook/uploads";
 import { playbookForForm } from "@/lib/playbook/parse";
 import type { Answers } from "@/lib/playbook/types";
@@ -82,7 +83,12 @@ export async function submitIntake(
     .maybeSingle();
   if (!form) return { ok: false, error: "This form isn't available right now." };
 
-  const pb = playbookForForm(form as { schema?: unknown; playbook?: unknown });
+  // THE PLAYBOOK THE CUSTOMER ACTUALLY ANSWERED (audit 7): the public form serves
+  // publicIntakeNeeds(pb) — internal-only needs pruned, their `when` clauses stripped — so
+  // clearing against the UN-pruned playbook destroyed answers to questions the pruned form
+  // deliberately shows unconditionally. Prune HERE too, or the two doors disagree forever.
+  const pbFull = playbookForForm(form as { schema?: unknown; playbook?: unknown });
+  const pb = { ...pbFull, needs: publicIntakeNeeds(pbFull) };
   // COERCE, THEN CLEAR — in that order, and the clear is not optional. The client hides a
   // conditional follow-up when its trigger changes, but `set` only ever merges keys, so answering
   // "do you have plans? yes", typing the detail, then switching to "no" still SUBMITTED the

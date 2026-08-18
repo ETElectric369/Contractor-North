@@ -40,6 +40,7 @@ const AFTER_NOT_RATE = /^[\s,.-]*(?:minimums?|min\b|increments?|windows?|respons
 export function statedLaborRate(scope: unknown): number | null {
   const text = typeof scope === "string" ? scope : "";
   if (!text) return null;
+  const found: number[] = [];
   for (const m of text.matchAll(RATE)) {
     const start = m.index ?? 0;
     // A literal $ on the number is evidence by itself; otherwise the forty characters in FRONT
@@ -51,7 +52,12 @@ export function statedLaborRate(scope: unknown): number | null {
     // The loop continues, so "…4 hour minimum. Rate is $185/hr" still finds the 185.
     if (AFTER_NOT_RATE.test(text.slice(start + m[0].length, start + m[0].length + 24))) continue;
     const n = Number(String(m[1]).replace(/,/g, ""));
-    if (Number.isFinite(n) && n >= MIN && n <= MAX) return Math.round(n * 100) / 100;
+    if (Number.isFinite(n) && n >= MIN && n <= MAX) found.push(Math.round(n * 100) / 100);
   }
-  return null;
+  // TWO different dictated rates is a two-tier crew (audit 7): flattening every labor line onto
+  // whichever matched first systematically underbills exactly the scopes where he was most
+  // explicit. One rate is an instruction; two is a pricing decision the builder must make —
+  // stand down to the company rate, which the readout shows and he edits per line.
+  const distinct = [...new Set(found)];
+  return distinct.length === 1 ? distinct[0] : null;
 }

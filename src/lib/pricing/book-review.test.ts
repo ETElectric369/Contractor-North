@@ -65,3 +65,17 @@ describe("reviewAgainstBook — conservative on purpose", () => {
     ]);
   });
 });
+
+describe("book-review — audit 7: ratings are not part numbers", () => {
+  it("a leading size/rating token never claims a book row that happens to use it as a code", () => {
+    const book: BookRowLite[] = [{ id: "x", code: "20A", description: "20A 1-pole breaker", unit: "ea", buy_price: 11.95 }];
+    const r = reviewAgainstBook(book, [line("20A GFCI RECEPTACLE WR TR", 18.4)]);
+    expect(r.updates).toEqual([]);
+    expect(r.additions).toHaveLength(1);
+  });
+  it("a bracketed token is an explicit part number and still matches", () => {
+    const book: BookRowLite[] = [{ id: "x", code: "20A", description: "weird code row", unit: "ea", buy_price: 5 }];
+    const r = reviewAgainstBook(book, [line("thing [20A]", 6)]);
+    expect(r.updates).toHaveLength(1);
+  });
+});
