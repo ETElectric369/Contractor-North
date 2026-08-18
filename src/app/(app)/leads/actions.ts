@@ -199,9 +199,20 @@ export async function deleteInquiry(id: string): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  // "Delete keeps nothing" has to include the lead's OUTSTANDING BOOKING LINKS (audit 7): a
+  // deleted spam lead's /pick/<token> stayed live, and the recipient could still confirm a
+  // "Site inspection" onto the org's real calendar. Cancel this lead's un-scheduled proposals
+  // first; a proposal already CONFIRMED is a real appointment and deliberately survives.
+  const { error: aErr } = await supabase
+    .from("appointments")
+    .delete()
+    .eq("inquiry_id", id)
+    .eq("status", "proposed");
+  if (aErr) return { ok: false, error: dbError(aErr) };
   const { error } = await supabase.from("inquiries").delete().eq("id", id);
   if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/leads");
+  revalidatePath("/schedule");
   return { ok: true };
 }
 

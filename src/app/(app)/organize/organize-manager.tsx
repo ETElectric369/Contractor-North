@@ -30,6 +30,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Tabs } from "@/components/tabs";
 import { CameraCapture } from "@/components/camera-capture";
+import { useDictation } from "@/lib/use-dictation";
 import { useToast } from "@/components/toast";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { prepareImageForUpload } from "@/lib/image-prep";
@@ -96,13 +97,11 @@ export function OrganizeManager({
   const toast = useToast();
   const [uploads, setUploads] = useState<UploadState[]>([]);
   const [showCamera, setShowCamera] = useState(false);
-  const [listening, setListening] = useState(false);
   const [aiBusy, setAiBusy] = useState<string | null>(null);
   const [aiMsg, setAiMsg] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState<OrganizedItemRow | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const captureRef = useRef<HTMLInputElement>(null);
-  const recogRef = useRef<any>(null);
 
   function takePhoto() {
     const touchy =
@@ -114,41 +113,22 @@ export function OrganizeManager({
     else setShowCamera(true);
   }
 
-  // Voice note: tap to start, tap again to stop; the transcript becomes a note
-  // in the needs-attention tray (where AI review can file it for you).
+  // Voice note: tap to start, tap again to stop; the transcript becomes a note in the
+  // needs-attention tray. Ported off webkitSpeechRecognition (Andrew: "the Speak it button
+  // does not activate a microphone" — that API simply doesn't exist on iOS/Safari) onto the
+  // SAME MediaRecorder → /api/transcribe path the inspector and tour use everywhere.
+  const dictation = useDictation((text) =>
+    start(async () => {
+      const res = await saveVoiceNote(text);
+      if (!res?.ok) { toast(res?.error ?? "Couldn't save voice note — try again.", "error"); return; }
+      toast("Voice note saved", "success");
+      router.refresh();
+    }),
+  );
+  const listening = dictation.recording;
   function voiceNote() {
-    if (listening) {
-      recogRef.current?.stop();
-      return;
-    }
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) {
-      alert("Voice notes need a browser with speech recognition (Chrome, or desktop Safari).");
-      return;
-    }
-    const r = new SR();
-    r.continuous = true;
-    r.interimResults = false;
-    r.lang = "en-US";
-    let acc = "";
-    r.onresult = (e: any) => {
-      for (let i = e.resultIndex; i < e.results.length; i++) acc += e.results[i][0].transcript;
-    };
-    r.onerror = () => setListening(false);
-    r.onend = () => {
-      setListening(false);
-      const text = acc.trim();
-      if (text)
-        start(async () => {
-          const res = await saveVoiceNote(text);
-          if (!res?.ok) { toast(res?.error ?? "Couldn't save voice note — try again.", "error"); return; }
-          toast("Voice note saved", "success");
-          router.refresh();
-        });
-    };
-    r.start();
-    recogRef.current = r;
-    setListening(true);
+    if (dictation.recording) dictation.stop();
+    else void dictation.start();
   }
 
   const busy = uploads.some((u) => u.status === "uploading" || u.status === "reading");

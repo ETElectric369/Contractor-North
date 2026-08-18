@@ -363,6 +363,10 @@ export function QuoteBuilder({
    *  ~4.5MB, under one sheet of a real plan set. Org folder, so 0013's RLS owns access. */
   async function stashUpload(file: File): Promise<{ ok: true; path: string } | { ok: false; error: string }> {
     if (!orgId) return { ok: false, error: "Couldn't start the upload — reload the page and try again." };
+    // The reader's ceiling, checked BEFORE the upload (audit 7): a 100MB plan set used to
+    // upload for minutes and then die server-side with a message blaming the connection.
+    if (file.size > 20 * 1024 * 1024)
+      return { ok: false, error: `That file is ${Math.round(file.size / 1024 / 1024)}MB — the plan reader's ceiling is 20MB. Split the PDF (Preview → Print → page range) and upload the sheets that matter.` };
     const supabase = createBrowserClient();
     const safe = file.name.replace(/[^\w.\-]+/g, "_").slice(-80);
     const path = `${orgId}/ai-uploads/${crypto.randomUUID()}-${safe}`;
