@@ -58,7 +58,10 @@ export default async function AnalyticsPage() {
         .from("time_entries")
         .select("job_id, clock_in, clock_out, lunch_minutes, status, rate_override, profiles(hourly_rate), time_allocations(job_id, hours)")
         .eq("status", "closed")
-        .not("job_id", "is", null)
+        // NO job_id FILTER (audit 9): a clock-in with no job whose hours were SPLIT onto jobs via
+        // allocations is real labor — the job page and Nort both cost it, and dropping it here
+        // meant one job carried two different labor numbers depending on which screen you asked.
+        // laborCostForJob already ignores entries that don't touch the job.
         .order("clock_in", { ascending: false })
         .limit(50000),
       // id + status + po_id feed computeJobProfitRows' shared live-PO rule: a draft/cancelled

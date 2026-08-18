@@ -8,7 +8,11 @@ export const runtime = "nodejs";
 
 /** OAuth redirect target: exchange the code and store the org's connection. */
 export async function GET(req: Request) {
-  const site = process.env.NEXT_PUBLIC_SITE_URL || "";
+  // The REQUEST's host, not a build-time env (audit 9) — the same dead-end its Google twin was
+  // fixed for at the app.contractornorth.com cutover: an org connecting from the canonical host
+  // was bounced to whatever NEXT_PUBLIC_SITE_URL was baked in, landing signed-out on a stranger
+  // of a domain with the connection half-made.
+  const site = oauthRedirectBase(req);
   const { searchParams } = new URL(req.url);
   // CSRF: the returned state must match the cookie set at connect-time, or this is a
   // forged code (binding an attacker's QuickBooks realm to the signed-in user's org).

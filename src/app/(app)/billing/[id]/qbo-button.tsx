@@ -14,11 +14,19 @@ export function QboInvoiceButton({ id, menuItem = false }: { id: string; menuIte
   async function send() {
     setState("busy");
     setMsg(null);
-    const res = await sendInvoiceToQuickbooks(id);
-    if (res.ok) setState("done");
-    else {
+    // THE ONE UNCONDITIONAL GUARD (audit 9): a dead QuickBooks refresh token threw out of the
+    // action before its own try, so the promise rejected and this spinner ran forever with no
+    // message. Server-side hardening only covers the throws you predicted; this covers the rest.
+    try {
+      const res = await sendInvoiceToQuickbooks(id);
+      if (res.ok) setState("done");
+      else {
+        setState("error");
+        setMsg(res.error ?? "Could not send.");
+      }
+    } catch {
       setState("error");
-      setMsg(res.error ?? "Could not send.");
+      setMsg("Couldn't reach QuickBooks — try again, or reconnect it in Settings.");
     }
   }
 

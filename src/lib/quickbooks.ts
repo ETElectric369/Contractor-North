@@ -118,14 +118,15 @@ export async function qboFetch(conn: QboConnection, path: string, init?: Request
 
 /** Ensure a QBO customer exists; returns its QBO Id, caching on the row. */
 async function ensureCustomer(conn: QboConnection, customer: any): Promise<string> {
-  if (customer.qbo_id) return customer.qbo_id;
+  // A mapping is only valid inside the company file it was made in (audit 9, 0203).
+  if (customer.qbo_id && customer.qbo_realm_id === conn.realm_id) return customer.qbo_id;
   const created = await qboFetch(conn, "/customer?minorversion=65", {
     method: "POST",
     body: JSON.stringify({ DisplayName: customer.name || "Customer" }),
   });
   const id = created?.Customer?.Id;
   const supabase = createServiceClient();
-  await supabase.from("customers").update({ qbo_id: id }).eq("id", customer.id);
+  await supabase.from("customers").update({ qbo_id: id, qbo_realm_id: conn.realm_id }).eq("id", customer.id);
   return id;
 }
 
@@ -142,6 +143,9 @@ async function ensureCustomer(conn: QboConnection, customer: any): Promise<strin
  * Same law as every other service-client read: [[tenant-isolation-root-cause]] — a rule applied at
  * one read path is a convention, not a boundary. A service client has no boundary but this line.
  */
+/** Plain dollars for an error a human reads. */
+const formatUsd = (n: number) => `$${(Math.round(n * 100) / 100).toFixed(2)}`;
+
 export async function pushInvoiceToQbo(
   invoiceId: string,
   orgId: string,
@@ -151,7 +155,7 @@ export async function pushInvoiceToQbo(
 
   const { data: inv } = await supabase
     .from("invoices")
-    .select("*, customers(id, name, qbo_id)")
+    .select("*, customers(id, name, qbo_id, qbo_realm_id)")
     .eq("id", invoiceId)
     .eq("org_id", orgId)
     .maybeSingle();
@@ -160,7 +164,15 @@ export async function pushInvoiceToQbo(
   if (!inv) return { ok: false, error: "Invoice not found." };
   if (!inv.customers) return { ok: false, error: "Invoice has no customer." };
 
-  const conn = await getConnection(inv.org_id);
+  // getConnection REFRESHES, and a revoked/expired grant makes that throw — outside the try
+  // below, so it escaped as an unhandled rejection (audit 9). A dead connection is a normal
+  // answer with a next step, not a crash.
+  let conn: QboConnection | null = null;
+  try {
+    conn = await getConnection(inv.org_id);
+  } catch {
+    return { ok: false, error: "QuickBooks needs reconnecting — Settings → Connections." };
+  }
   if (!conn) return { ok: false, error: "Connect QuickBooks first (Settings)." };
 
   try {
@@ -197,7 +209,9 @@ export async function pushInvoiceToQbo(
       Line,
       DocNumber: inv.invoice_number,
     };
-    if (inv.qbo_id) {
+    // Only sparse-update a mapping made in THIS company file (audit 9, 0203) — an id from a
+    // previous realm points at a stranger's invoice, and updating it would overwrite their books.
+    if (inv.qbo_id && inv.qbo_realm_id === conn.realm_id) {
       // sparse update of an existing QBO invoice
       const existing = await qboFetch(conn, `/invoice/${inv.qbo_id}?minorversion=65`);
       payload.Id = inv.qbo_id;
@@ -210,7 +224,30 @@ export async function pushInvoiceToQbo(
       body: JSON.stringify(payload),
     });
     const qboId = created?.Invoice?.Id;
-    await supabase.from("invoices").update({ qbo_id: qboId }).eq("id", invoiceId);
+    // Write the mapping FIRST, even on a mismatch: without it the next attempt creates a
+    // DUPLICATE invoice in the live book instead of correcting this one.
+    await supabase.from("invoices").update({ qbo_id: qboId, qbo_realm_id: conn.realm_id }).eq("id", invoiceId);
+
+    /**
+     * RECONCILE THE TOTAL, DON'T ASSUME IT (audit 9).
+     *
+     * The payload carries line items only — no tax — so an $10,825 invoice posted as $10,000 and
+     * "Sent to QuickBooks" was reported as success: $825 of collected sales tax existed in CN,
+     * on the customer's PDF, and nowhere in the books. Patching the payload isn't enough on its
+     * own either, because a US Automated-Sales-Tax realm computes its OWN tax from the ship-to
+     * address and can come back higher. Comparing what QuickBooks actually recorded to what this
+     * invoice says is the check that holds in every realm mode — and a mismatch is the office's
+     * to resolve, so it is told plainly instead of being congratulated.
+     */
+    const qboTotal = Number(created?.Invoice?.TotalAmt);
+    const ourTotal = Number(inv.total ?? 0);
+    if (Number.isFinite(qboTotal) && Math.abs(qboTotal - ourTotal) > 0.005) {
+      return {
+        ok: false,
+        qbo_id: qboId,
+        error: `QuickBooks recorded ${formatUsd(qboTotal)} for this invoice; Contractor North has it at ${formatUsd(ourTotal)}${Number(inv.tax ?? 0) > 0.005 ? ` (sales tax of ${formatUsd(Number(inv.tax))} isn't carried by the sync yet)` : ""}. Fix it in QuickBooks — the invoice is linked, so sending again will update that same one.`,
+      };
+    }
     return { ok: true, qbo_id: qboId };
   } catch (e: any) {
     return { ok: false, error: e?.message?.slice(0, 300) ?? "QuickBooks error" };

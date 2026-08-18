@@ -568,14 +568,18 @@ export async function fileItem(id: string, dest: FileDestination): Promise<Resul
   const { data: item } = await supabase.from("organized_items").select("*").eq("id", id).maybeSingle();
   if (!item) return { ok: false, error: "Item not found." };
 
-  // Tear down the previous filing.
+  // Tear down the previous filing. The petty-cash row is torn down HERE too (audit 9, 0202):
+  // without a back-link, re-filing a receipt left the first petty_cash row standing and the
+  // same disbursement was counted twice in the drawer.
   if (item.document_id) await supabase.from("documents").delete().eq("id", item.document_id);
   if (item.bill_id) await supabase.from("bills").delete().eq("id", item.bill_id);
+  if (item.petty_cash_id) await supabase.from("petty_cash").delete().eq("id", item.petty_cash_id);
   const prevJob = item.job_id;
   const lines = cleanLines(item.line_items);
 
   let documentId: string | null = null;
   let billId: string | null = null;
+  let pettyCashId: string | null = null;
   let jobId: string | null = null;
   let category: string | null = item.category;
 
@@ -615,20 +619,27 @@ export async function fileItem(id: string, dest: FileDestination): Promise<Resul
     );
   } else if (dest.type === "petty_cash") {
     category = "Petty cash";
-    const { error: pcErr } = await supabase.from("petty_cash").insert({
-      tx_date: item.item_date ?? new Date().toISOString().slice(0, 10),
-      kind: "expense",
-      amount: item.amount ?? 0,
-      category: item.kind === "receipt" ? "Receipt" : "Other",
-      description: item.title,
-      created_by: ctx.userId,
-    });
+    const { data: pc, error: pcErr } = await supabase
+      .from("petty_cash")
+      .insert({
+        tx_date: item.item_date ?? new Date().toISOString().slice(0, 10),
+        kind: "expense",
+        amount: item.amount ?? 0,
+        category: item.kind === "receipt" ? "Receipt" : "Other",
+        description: item.title,
+        created_by: ctx.userId,
+      })
+      .select("id")
+      .single();
     if (pcErr) return { ok: false, error: pcErr.message };
+    pettyCashId = pc?.id ?? null;
   }
 
   const { error } = await supabase
     .from("organized_items")
-    .update({ job_id: jobId, document_id: documentId, bill_id: billId, category, status: "filed" })
+    // petty_cash_id rides in the SAME write as the others, so moving a receipt from petty cash
+    // to a job clears the stale link instead of leaving it to be torn down twice (audit 9).
+    .update({ job_id: jobId, document_id: documentId, bill_id: billId, petty_cash_id: pettyCashId, category, status: "filed" })
     .eq("id", id);
   if (error) return { ok: false, error: dbError(error) };
 
@@ -650,6 +661,9 @@ export async function deleteOrganizedItem(id: string): Promise<Result> {
 
   if (item.document_id) await supabase.from("documents").delete().eq("id", item.document_id);
   if (item.bill_id) await supabase.from("bills").delete().eq("id", item.bill_id);
+  // The petty-cash disbursement this filing created goes with it (audit 9, 0202) — deleting the
+  // item used to orphan real spend in the drawer with nothing behind it.
+  if (item.petty_cash_id) await supabase.from("petty_cash").delete().eq("id", item.petty_cash_id);
   if (item.file_url) await supabase.storage.from("documents").remove([item.file_url]);
   const { error } = await supabase.from("organized_items").delete().eq("id", id);
   if (error) return { ok: false, error: dbError(error) };
@@ -821,13 +835,19 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
   const action = String(parsed?.action ?? "unsure");
   const reason = typeof parsed?.reason === "string" ? parsed.reason : "";
   try {
+    // CHECK WHAT fileItem SAID (audit 9). It refuses for a non-staff caller — bills and petty
+    // cash are staff-gated — and this reported "Filed to <job>" regardless, so a tech watched
+    // the AI confidently file a receipt that stayed exactly where it was. The task and note
+    // branches below are genuinely open to techs and keep working.
     if (action === "file_job" && jobList.some((j) => j.id === parsed.job_id)) {
-      await fileItem(id, { type: "job", jobId: parsed.job_id });
+      const r = await fileItem(id, { type: "job", jobId: parsed.job_id });
+      if (!r.ok) return { ok: false, message: r.error ?? "Couldn't file that one — ask the office." };
       return { ok: true, message: `Filed to ${jobList.find((j) => j.id === parsed.job_id)?.label}. ${reason}`.trim() };
     }
     if (action === "overhead") {
       const cat = OVERHEAD_CATEGORIES.includes(parsed.overhead_category) ? parsed.overhead_category : "Other";
-      await fileItem(id, { type: "overhead", category: cat });
+      const r = await fileItem(id, { type: "overhead", category: cat });
+      if (!r.ok) return { ok: false, message: r.error ?? "Couldn't file that one — ask the office." };
       return { ok: true, message: `Filed as overhead (${cat}). ${reason}`.trim() };
     }
     if (action === "task") {
