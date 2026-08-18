@@ -192,9 +192,23 @@ export async function sendContract(id: string): Promise<Result> {
     bcc: ownerBcc(getOrgSettings((org as any)?.settings).copy_owner_on_emails, org?.email),
   });
   if (!res.ok) return res;
-  // Freeze the body by flipping draft -> sent only after the email actually went out.
-  await supabase.from("contracts").update({ status: "sent", updated_at: new Date().toISOString() }).eq("id", id).eq("status", "draft");
+  // Freeze the body by flipping draft -> sent only after the email actually went out — and
+  // CHECK IT (audit 8). Fire-and-forget meant a failed freeze left the contract 'draft', so
+  // public_contract (which serves only sent/signed) returned null and the customer who had
+  // just been told "your contract is ready to review" landed on nothing. A resend legitimately
+  // matches zero rows (the row is already 'sent'), so zero rows is only a failure when the row
+  // we read moments ago WAS a draft.
+  const wasDraft = (c as any).status === "draft";
+  const { data: frozen, error: freezeErr } = await supabase
+    .from("contracts")
+    .update({ status: "sent", updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("status", "draft")
+    .select("id");
   revalidatePath(`/jobs/${(c as any).job_id}`);
+  if (freezeErr) return { ok: false, error: dbError(freezeErr) };
+  if (wasDraft && !frozen?.length)
+    return { ok: false, error: "The email went out, but the contract didn't lock — open it and send again so the customer can see it." };
   return { ok: true };
 }
 

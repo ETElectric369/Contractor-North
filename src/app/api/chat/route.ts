@@ -396,11 +396,24 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
   // PERSONAL facts, so it adapts to the company AND the individual. Split them so a teammate's style
   // is never assumed for someone else; don't recite either back unprompted.
   try {
-    const { data: mem } = await supabase
-      .from("user_memory")
-      .select("content, scope")
-      .order("created_at", { ascending: false })
-      .limit(60);
+    // TWO SHELVES, TWO READS (audit 8): one newest-60 across both scopes let a busy company's
+    // business facts push every personal fact out of the window (or the reverse) — Nort simply
+    // stopped knowing one whole category, silently and unpredictably. Each scope gets its own.
+    const [bizRes, persRes] = await Promise.all([
+      supabase
+        .from("user_memory")
+        .select("content, scope")
+        .neq("scope", "personal")
+        .order("created_at", { ascending: false })
+        .limit(40),
+      supabase
+        .from("user_memory")
+        .select("content, scope")
+        .eq("scope", "personal")
+        .order("created_at", { ascending: false })
+        .limit(20),
+    ]);
+    const mem = [...(bizRes.data ?? []), ...(persRes.data ?? [])];
     // Sanitize on READ (house law). The fence below is only as strong as its delimiters:
     // a fact whose text contains a newline plus ">>" (or a forged "<<MEMORY" header) can
     // close the block early and continue in SYSTEM authority. Facts are single-line claims,

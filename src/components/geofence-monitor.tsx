@@ -149,6 +149,8 @@ export function GeofenceMonitor({
   const [pickedIso, setPickedIso] = useState<string | null>(null);
   const [closedAt, setClosedAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Location permission is off/revoked — the fence can't watch, and he needs to know. */
+  const [watchOff, setWatchOff] = useState(false);
 
   // The fence anchor. Depend on PRIMITIVE lat/lng everywhere — the layout re-renders on
   // every navigation and hands us a fresh gpsIn object ref, which would otherwise tear
@@ -219,6 +221,24 @@ export function GeofenceMonitor({
       navigator.vibrate?.(40);
     } catch {}
   }
+
+  /**
+   * A PROMISE ON SCREEN NEEDS A CLOCK BEHIND IT (audit 8).
+   *
+   * Both the fallback check and this label used to run only when a GPS fix arrived. Pocket the
+   * phone at the fence line and the stream stops: nothing re-evaluated, so the sheet kept
+   * saying "we'll clock you out at 3:00" — a promise no code was going to keep — and the tech
+   * trusted it. This heartbeat re-renders while the prompt is open so the label tells the truth
+   * (and disappears when the observation goes stale), on a timer that doesn't depend on the
+   * thing that died. It only ever ADDS evaluations; the conditions for an auto-close are
+   * unchanged, so it cannot cause one that wasn't already earned.
+   */
+  const [, forcePromptTick] = useState(0);
+  useEffect(() => {
+    if (phase !== "prompt") return;
+    const t = setInterval(() => forcePromptTick((n) => n + 1), 30_000);
+    return () => clearInterval(t);
+  }, [phase]);
 
   // What the un-answered fallback WOULD write, in his words — null when it cannot fire (a wake
   // prompt, or an observation we no longer trust). Same source as the submit() call below, so the
@@ -377,6 +397,11 @@ export function GeofenceMonitor({
       // Don't swallow: a watch that never arms (GPS off / permission revoked mid-shift)
       // means the fence can't track movement. The wake check still runs its own fixes.
       console.warn(`[geofence] location watch error: ${s} — live exit tracking degraded`);
+      // AND TELL THE PERSON RELYING ON IT (audit 8). A safety net that quietly stopped
+      // existing is worse than no safety net: he drives home assuming he'll be prompted, and
+      // finds an open shift on Friday. Permission problems say so on the clock surface; a
+      // transient timeout stays in the console where it belongs.
+      if (/denied|permission/i.test(s)) setWatchOff(true);
     };
     const opts: PositionOptions = { enableHighAccuracy: true, maximumAge: 30_000, timeout: 60_000 };
 
@@ -511,7 +536,14 @@ export function GeofenceMonitor({
     checkRef.current();
   }, [pathname]);
 
-  if (phase === "idle") return null;
+  // The one thing worth saying while nothing else is happening: the net is down.
+  if (phase === "idle")
+    return watchOff ? (
+      <div className="mx-auto mb-3 max-w-2xl rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        Location is off for this app, so I can&rsquo;t offer to clock you out when you leave. Clock out
+        yourself, or turn location back on in Settings.
+      </div>
+    ) : null;
 
   const closedTime = closedAt
     ? new Date(closedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })

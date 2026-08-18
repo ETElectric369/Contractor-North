@@ -4,11 +4,15 @@
 // so a SW bug can't trap users on old code. We only cache hashed/immutable
 // static assets and an offline fallback page. API and auth requests are never
 // touched. Bump VERSION to invalidate the static cache.
-const VERSION = "cn-v744";
+const VERSION = "cn-v745";
 const STATIC_CACHE = `static-${VERSION}`;
 // Pages visited while online, kept so a dead zone shows the real page instead of /offline.
 // SEPARATE from the static cache because it holds ORG DATA and has to be purgeable on sign-out.
-const PAGE_CACHE = `pages-${VERSION}`;
+// DELIBERATELY NOT VERSION-KEYED (audit 8): keying it to VERSION wiped every visited page on
+// EVERY deploy — nine in one day this week — so the dead-zone fallback was empty exactly when a
+// tech needed it. A page one deploy old still beats /offline, and the sign-out purge below (the
+// reason this cache is separate at all) is unaffected.
+const PAGE_CACHE = "pages";
 const PRECACHE = ["/offline", "/icon-192.png", "/icon-512.png", "/apple-touch-icon.png"];
 
 self.addEventListener("install", (event) => {
@@ -25,6 +29,7 @@ self.addEventListener("activate", (event) => {
     caches
       .keys()
       .then((keys) =>
+        // (Old `pages-cn-vNNN` caches from before the unversioned switch are swept by this too.)
         Promise.all(keys.filter((k) => k !== STATIC_CACHE && k !== PAGE_CACHE).map((k) => caches.delete(k))),
       )
       .then(() => self.clients.claim()),

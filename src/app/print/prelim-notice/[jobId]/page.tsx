@@ -69,10 +69,26 @@ export default async function PrelimNoticePage({ params }: { params: Promise<{ j
       address: [o?.address_line1, o?.address_line2, csz(o)].filter(Boolean).join(", ") || undefined,
       license: o?.license || undefined,
     },
-    owner: {
-      name: l?.owner_name || cu?.name || undefined,
-      address: l?.owner_address || siteText({ source: "customer", parts: cu }),
-    },
+    owner: (() => {
+      /**
+       * A DIFFERENT OWNER DOESN'T LIVE AT THE CUSTOMER'S ADDRESS (audit 8).
+       *
+       * When staff record a landlord or property manager as the property owner and leave the
+       * address blank, this printed the TENANT'S mailing address beside the owner's name —
+       * a served notice asserting something false about who owns what. The fallback is only
+       * honest when the owner IS the customer (the common case: staff type the same name).
+       */
+      const ownerName = l?.owner_name || cu?.name || undefined;
+      const ownerIsCustomer =
+        !l?.owner_name ||
+        (!!cu?.name && String(l.owner_name).trim().toLowerCase() === String(cu.name).trim().toLowerCase());
+      return {
+        name: ownerName,
+        address:
+          l?.owner_address ||
+          (ownerIsCustomer ? siteText({ source: "customer", parts: cu }) : "(owner's address — fill in before serving)"),
+      };
+    })(),
     hiredBy: { name: l?.hired_by_name || cu?.name || undefined },
     gc: l?.gc_name ? { name: l.gc_name, address: l?.gc_address || undefined } : undefined,
     lender: l?.lender_name ? { name: l.lender_name, address: l?.lender_address || undefined } : undefined,

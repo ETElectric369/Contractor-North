@@ -231,6 +231,43 @@ export async function POST(req: Request) {
       }
       break;
     }
+    /**
+     * MONEY THAT WENT BACK OUT (audit 8). A contractor refunds an online payment from their own
+     * Stripe dashboard, or a customer disputes one — CN never heard about either, so the invoice
+     * still read paid-in-full while the cash was gone: A/R, job profitability, the customer's
+     * own paid invoice, all asserting money the org no longer has. We do NOT rewrite the
+     * invoice from here (a refund is a business decision with its own disposition, and the
+     * office owns that call) — we make sure a human is told the moment it happens.
+     */
+    case "charge.refunded":
+    case "charge.dispute.created": {
+      const charge = event.data.object as Stripe.Charge & { payment_intent?: string | null };
+      try {
+        const { data: pay } = await supabase
+          .from("payments")
+          .select("invoice_id, org_id, amount")
+          .eq("stripe_event_id", (charge as { payment_intent?: string | null }).payment_intent ?? "")
+          .maybeSingle();
+        // The payment row is keyed by the checkout event, not the charge, so a direct match is
+        // best-effort — the alert still has to go out even when we can't name the invoice.
+        const orgId = (pay as { org_id?: string } | null)?.org_id ?? null;
+        if (orgId) {
+          const disputed = event.type === "charge.dispute.created";
+          await sendPushToProfiles(await orgStaffIds(orgId), "invoice_paid", {
+            title: disputed ? "A card payment was disputed" : "An online payment was refunded",
+            body: disputed
+              ? "The customer's bank opened a dispute — the invoice still reads paid until you decide how to record it."
+              : "The refund left Stripe — the invoice still reads paid until you record it here.",
+            url: (pay as { invoice_id?: string } | null)?.invoice_id
+              ? `/billing/${(pay as { invoice_id?: string }).invoice_id}`
+              : "/billing",
+          });
+        }
+      } catch {
+        /* alerting is best-effort; never fail the webhook */
+      }
+      break;
+    }
     case "checkout.session.async_payment_failed": {
       // Nothing to unwind — the payment_status gate above means nothing was ever recorded.
       // But the customer believes they paid, so the office has to hear it (audit 8).
