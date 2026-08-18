@@ -4,11 +4,13 @@ import { dbError } from "@/lib/db-error";
 import { revalidatePath } from "next/cache";
 import { stampNeeds } from "@/lib/playbook/stamp";
 import { createClient } from "@/lib/supabase/server";
-import { parsePlaybook } from "@/lib/playbook/parse";
+import { parsePlaybook, playbookForForm } from "@/lib/playbook/parse";
 import { playbookStarter } from "@/lib/playbook/starters";
 import { sheetFromPlaybook } from "@/lib/playbook/from-sheet";
 
-type Result = { ok: true } | { ok: false; error: string };
+import type { Need } from "@/lib/playbook/types";
+
+type Result = { ok: true; needs?: Need[] } | { ok: false; error: string };
 
 type Staff =
   | { ok: true; supabase: Awaited<ReturnType<typeof createClient>> }
@@ -91,7 +93,9 @@ export async function installPlaybookStarter(formId: string, starterKey: string)
   if (!ctx.ok) return { ok: false, error: ctx.error };
   const pb = playbookStarter(starterKey);
   if (!pb) return { ok: false, error: "That starter doesn't exist." };
-  return savePlaybook(formId, pb.needs);
+  const r = await savePlaybook(formId, pb.needs);
+  // Hand the editor the questions it just installed — the deterministic resync (audit 7).
+  return r.ok ? { ok: true, needs: pb.needs } : r;
 }
 
 /**
@@ -136,5 +140,8 @@ export async function clearPlaybook(formId: string): Promise<Result> {
   if (!wrote?.length) return { ok: false, error: "That didn't save — check your access and try again." };
   revalidatePath("/settings");
   revalidatePath("/appointments", "layout");
-  return { ok: true };
+  // Hand the editor the sheet-converted questions it is falling back to (audit 7 resync fix) —
+  // computed server-side from the mirror this call just wrote; the client cannot derive them.
+  const sheet = current.needs.length ? sheetFromPlaybook(current) : null;
+  return { ok: true, needs: playbookForForm({ schema: sheet, playbook: null }).needs };
 }

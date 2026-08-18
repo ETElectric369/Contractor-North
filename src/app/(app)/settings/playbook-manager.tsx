@@ -151,6 +151,8 @@ export function PlaybookManager({
   // walk-through. Default to the private one; orgs with a single form are unaffected.
   /** The last option list each question carried, so a kind round trip can put it back. */
   const lastOptions = useRef(new Map<string, string[]>());
+  /** Option value at focus time, keyed need:index — what a blur-commit rename renames FROM. */
+  const optionRenameFrom = useRef(new Map<string, string>());
   // ?form=<id> WINS. The default below is a guess about which set you probably meant; a link that
   // names one is not a guess. /forms/[id]'s "edit it in Settings → Playbook" banner carries the id,
   // because without it Andrew followed that link from his WEBSITE form and landed on the
@@ -162,7 +164,11 @@ export function PlaybookManager({
   // What this form looked like when the page loaded. Sent on save so a concurrent edit is
   // REFUSED instead of overwritten — see stampNeeds in lib/playbook/stamp.
   const baseStamps = useMemo(
-    () => new Map(forms.map((f) => [f.id, f.owned ? stampNeeds(f.needs) : undefined])),
+    // stampNeeds([]) for un-owned forms, NOT undefined (audit 7): undefined skipped the server's
+    // conflict guard entirely, so two people promoting the same sheet-form clobbered silently.
+    // The server hashes parsePlaybook(stored) — [] for a null playbook — so the first save
+    // passes and a stale post-promotion save is refused into the "Reload their version" path.
+    () => new Map(forms.map((f) => [f.id, stampNeeds(f.owned ? f.needs : [])])),
     [forms],
   );
   const form = forms.find((f) => f.id === formId) ?? forms[0];
@@ -313,7 +319,7 @@ export function PlaybookManager({
    * the one place the resync is already written correctly.
    */
   const run = (
-    fn: () => Promise<{ ok: boolean; error?: string }>,
+    fn: () => Promise<{ ok: boolean; error?: string; needs?: Need[] }>,
     done: string,
     resyncs = false,
   ) =>
@@ -325,7 +331,15 @@ export function PlaybookManager({
         if (!r.ok) return setErr(r.error ?? "Couldn't save that.");
         setDirty(false);
         setMsg(done);
-        if (resyncs) setLoadedFor("");
+        // ADOPT THE SERVER'S NEEDS FROM THE RESPONSE (audit 7): setLoadedFor("") re-latched to
+        // the PRE-refresh props (post-await state updates aren't part of the transition in React
+        // 19), so a starter install left the old questions on screen, one save from clobbering
+        // the starter. The response is deterministic; router.refresh() still updates the rest,
+        // and a save in the brief stale-baseStamp window is REFUSED by the stamp, never clobbers.
+        if (resyncs && r.needs) {
+          setNeeds(r.needs);
+          setOpenKey(null);
+        }
         router.refresh();
       } catch {
         // A rejected server action left NOTHING on screen — the button spun, came back, and said
@@ -540,6 +554,19 @@ export function PlaybookManager({
                             <div key={oi} className="flex items-center gap-2">
                               <Input
                                 value={o}
+                                onFocus={() => {
+                                  // Capture what the rules currently point at. The rename commits
+                                  // ON BLUR against THIS value (audit 7): the per-keystroke chase
+                                  // dragged dependent rules through every intermediate string and
+                                  // orphaned them at one character when an option was cleared and
+                                  // retyped ("New Construction" → "N" → "" → "New Build").
+                                  optionRenameFrom.current.set(`${n.key}:${oi}`, o);
+                                }}
+                                onBlur={(e) => {
+                                  const from = optionRenameFrom.current.get(`${n.key}:${oi}`);
+                                  if (from !== undefined && from !== e.target.value) renameOptionInRules(n.key, from, e.target.value);
+                                  optionRenameFrom.current.delete(`${n.key}:${oi}`);
+                                }}
                                 onChange={(e) => {
                                   const options = (n.slot as { options: string[] }).options.map((x, k) => (k === oi ? e.target.value : x));
                                   // RENAMING A CHIP RENAMES THE RULES THAT POINT AT IT.
@@ -554,7 +581,6 @@ export function PlaybookManager({
                                   // THIS KEYSTROKE IS THE ONLY PLACE THE INTENT IS KNOWABLE: it
                                   // holds both the old string and the new one. A minute later
                                   // there is nothing left to tell a rename from a delete-and-add.
-                                  renameOptionInRules(n.key, o, e.target.value);
                                   edit(i, { slot: { ...(n.slot as NeedSlot & { type: "select" }), options } });
                                 }}
                               />

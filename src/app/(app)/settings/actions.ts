@@ -2,6 +2,7 @@
 import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
+import { bustOrgPdfs } from "@/lib/pdf-cache";
 import { emptyToNull } from "@/lib/forms";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
@@ -803,6 +804,8 @@ export async function setPublicHandle(
   const { data: org } = await supabase.from("organizations").select("settings").eq("id", orgId).single();
   const merged = { ...(org?.settings ?? {}), public_handle: handle };
   const { error } = await supabase.from("organizations").update({ settings: merged }).eq("id", orgId);
+  // Letterhead-level settings render on every stored customer PDF — drop them all (audit 7).
+  if (!error) await bustOrgPdfs(orgId);
   if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/settings");
   revalidatePath("/", "layout");
@@ -844,6 +847,8 @@ export async function setCustomDomain(
   const { data: org } = await supabase.from("organizations").select("settings").eq("id", orgId).single();
   const merged = { ...(org?.settings ?? {}), custom_domain: domain };
   const { error } = await supabase.from("organizations").update({ settings: merged }).eq("id", orgId);
+  // Letterhead-level settings render on every stored customer PDF — drop them all (audit 7).
+  if (!error) await bustOrgPdfs(orgId);
   if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/settings");
   revalidatePath("/", "layout");

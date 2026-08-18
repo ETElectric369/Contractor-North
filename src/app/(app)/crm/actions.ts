@@ -2,6 +2,7 @@
 import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
+import { bustCustomerPdfs } from "@/lib/pdf-cache";
 import { emptyToNull } from "@/lib/forms";
 import { createClient } from "@/lib/supabase/server";
 import { formatPhone, formatState, formatZip, titleCase } from "@/lib/utils";
@@ -134,6 +135,9 @@ export async function updateCustomer(
       pricing_level_id: emptyToNull(formData.get("pricing_level_id")),
     })
     .eq("id", id);
+  // The bill-to block renders this person's name/address on every stored customer PDF —
+  // drop their documents' copies so the next view/send re-renders (audit 7).
+  if (!error) void bustCustomerPdfs(id);
   if (error) return { ok: false, error: dbError(error) };
 
   revalidatePath(`/crm/${id}`);
