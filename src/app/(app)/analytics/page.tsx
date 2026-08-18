@@ -38,9 +38,11 @@ export default async function AnalyticsPage() {
 
   const [{ data: payments }, { data: invoices }, { data: quotes }, { data: jobs }, { data: entries }, { data: pos }, { data: bills }, { data: refunds }, { data: jobRefunds }, { data: jobPayments }] =
     await Promise.all([
-      supabase.from("payments").select("amount, paid_at, invoices(status)").gte("paid_at", windowStart),
-      supabase.from("invoices").select("id, invoice_number, job_id, status, total, amount_paid, due_date, created_at, customers(name)"),
-      supabase.from("quotes").select("status, total"),
+      supabase.from("payments").select("amount, paid_at, invoices(status)").gte("paid_at", windowStart).order("paid_at", { ascending: false }).limit(50000),
+      // A/R aging reads the WHOLE book or it isn't aging (audit 9) — unbounded meant the 1000
+      // newest, so the oldest unpaid invoices, which are exactly what aging is FOR, fell out.
+      supabase.from("invoices").select("id, invoice_number, job_id, status, total, amount_paid, due_date, created_at, customers(name)").order("created_at", { ascending: false }).limit(50000),
+      supabase.from("quotes").select("status, total").order("created_at", { ascending: false }).limit(50000),
       /**
        * .limit(50000) ON EVERY SIDE, NOT JUST THE CASH ONE (audit 8).
        *

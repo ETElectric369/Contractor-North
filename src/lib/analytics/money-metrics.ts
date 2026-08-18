@@ -276,9 +276,12 @@ export function computeCustomerValue(
 
 export async function getCustomerValue(supabase: any, limit = 15): Promise<CustomerValue[]> {
   const [{ data: payments }, { data: jobs }, { data: customers }] = await Promise.all([
-    supabase.from("payments").select("amount, paid_at, invoices(customer_id, status)"),
-    supabase.from("jobs").select("customer_id"),
-    supabase.from("customers").select("id, name"),
+    // Lifetime value truncated at 1000 payments and 1000 jobs (audit 9): a long-standing
+    // customer's history simply stopped being counted, so the "best customers" ranking was a
+    // ranking of the recent thousand rows.
+    supabase.from("payments").select("amount, paid_at, invoices(customer_id, status)").order("paid_at", { ascending: false }).limit(50000),
+    supabase.from("jobs").select("customer_id").order("created_at", { ascending: false }).limit(50000),
+    supabase.from("customers").select("id, name").limit(50000),
   ]);
   const jobCount = new Map<string, number>();
   for (const j of (jobs ?? []) as any[]) if (j.customer_id) jobCount.set(j.customer_id, (jobCount.get(j.customer_id) ?? 0) + 1);

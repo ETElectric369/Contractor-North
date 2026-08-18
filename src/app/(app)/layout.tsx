@@ -11,6 +11,7 @@ import { getActionItemsCount } from "@/lib/action-items/query";
 import { reportError } from "@/lib/observe";
 import { todayStrInTz } from "@/lib/tz";
 import { GeofenceMonitor } from "@/components/geofence-monitor";
+import { OfflineDrain } from "@/components/offline-drain";
 import { BugReporter } from "@/components/bug-reporter";
 import { SectionSubnav } from "@/components/section-subnav";
 import { ToastProvider } from "@/components/toast";
@@ -220,6 +221,8 @@ export default async function AppLayout({
         </main>
       </div>
       <CommandBar isStaff={isStaff} />
+      {/* Queued field work files itself from ANY screen, and says so (audit 9). */}
+      <OfflineDrain userId={profile.id} />
       {isStaff && <BugReporter orgId={profile.org_id} />}
       {openEntry && (
         <GeofenceMonitor

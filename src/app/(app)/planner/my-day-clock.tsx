@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { getPosition } from "@/lib/geo";
 import type { GeoPoint } from "@/lib/types";
-import { enqueue, remove as removeQueued, registerReplayer, startAutoDrain } from "@/lib/offline/queue";
+import { enqueue, listPending, remove as removeQueued } from "@/lib/offline/queue";
 import { clockIn, clockOut } from "../timeclock/actions";
 
 /** Best-effort on-gesture GPS with a short cap (the timeclock panel's race pattern):
@@ -54,16 +54,22 @@ export function MyDayClock({
 
   // Tick once a second only while on the clock.
   // Replay a held punch the moment the connection returns (or the app is reopened).
+  // THE DRAIN MOVED TO THE SHELL (audit 9, OfflineDrain): mounted here it only ran while this
+  // card was on screen, so "it'll file itself when you have signal" was a promise that expired
+  // the moment the tech navigated away. This card keeps its own banner for the punch it just
+  // took; the shell owns replay, the pending count, and the quarantine notice.
   useEffect(() => {
-    registerReplayer("time.clockIn", async (args, clientOpId) => {
-      const a = args as Parameters<typeof clockIn>[0];
-      return clockIn({ ...a, clock_in_at: null, clientOpId });
-    });
-    // `remaining - blocked`: a quarantined op is parked, not pending, so it must not keep the
-    // "held on this phone" banner up forever.
-    return startAutoDrain((r) => {
-      if (r.remaining - r.blocked === 0) setHeld(false);
-    }, userId);
+    let alive = true;
+    const sync = async () => {
+      const ops = await listPending();
+      if (alive) setHeld(ops.some((o) => !o.blocked));
+    };
+    void sync();
+    const t = setInterval(sync, 15_000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
   }, [userId]);
 
   useEffect(() => {
@@ -108,16 +114,21 @@ export function MyDayClock({
       // phone back 13 hours and tap Clock In" (0169). A device clock is only ever a fallback for
       // a punch that genuinely couldn't be delivered.
       const queued = { job_id: null, job_code: null, gps, offline_pressed_at: pressedAt };
-      const op = await enqueue("time.clockIn", queued, "Clock in", userId);
+      // `persisted` is whether the phone actually holds it — the banner below may only promise
+      // what is true (audit 9). The op (and its idempotency key) comes back either way, so the
+      // live attempt still de-dupes a double tap.
+      const { op, persisted } = await enqueue("time.clockIn", queued, "Clock in", userId);
       try {
         const res = await clockIn({ job_id: null, job_code: null, gps, clock_in_at: null, clientOpId: op.clientOpId });
-        await removeQueued(op.clientOpId);
+        if (persisted) await removeQueued(op.clientOpId);
         if (!res.ok) setErr(res.error ?? "Could not clock in.");
         else setHeld(false);
       } catch {
         // Network only. The punch is on the phone with its real time — say that instead of
-        // telling someone standing in a dead zone to try again when they have bars.
-        setHeld(true);
+        // telling someone standing in a dead zone to try again when they have bars. But if the
+        // phone REFUSED to hold it, there is nothing to file later and saying so is the whole job.
+        if (persisted) setHeld(true);
+        else setErr(OFFLINE_MSG);
       }
     });
   }

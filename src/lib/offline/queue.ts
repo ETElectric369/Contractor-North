@@ -96,8 +96,28 @@ function tx<T>(mode: IDBTransactionMode, run: (s: IDBObjectStore) => IDBRequest<
   );
 }
 
-/** Add an operation to the queue. Returns the op (its clientOpId is the idempotency key). */
-export async function enqueue(action: string, args: unknown, label: string, ownerId?: string | null): Promise<QueuedOp> {
+/**
+ * Add an operation to the queue. ALWAYS returns the op — `persisted` says whether it actually
+ * reached IndexedDB (audit 9).
+ *
+ * This was the one export that could throw: on a device where IndexedDB is unavailable or wedged
+ * (Safari with all cookies blocked, an iOS WKWebView with website data off, a corrupt store), the
+ * rejection escaped the caller's try and killed a punch on a phone WITH FULL SIGNAL — the queue
+ * that exists to make a dead zone survivable was the thing that lost the work.
+ *
+ * It still returns the op when the write fails, because `clientOpId` is the idempotency key the
+ * LIVE call needs (0167 runOnce); dropping it would let a double-tap file two entries. The caller
+ * uses `persisted` to decide what it may honestly TELL the user — "saved on your phone" is only
+ * true when it is.
+ */
+export type EnqueueResult = { op: QueuedOp; persisted: boolean };
+
+export async function enqueue(
+  action: string,
+  args: unknown,
+  label: string,
+  ownerId?: string | null,
+): Promise<EnqueueResult> {
   const op: QueuedOp = {
     clientOpId: newOpId(),
     ownerId: ownerId ?? null,
@@ -107,8 +127,12 @@ export async function enqueue(action: string, args: unknown, label: string, owne
     attempts: 0,
     label,
   };
-  await tx("readwrite", (s) => s.put(op));
-  return op;
+  try {
+    await tx("readwrite", (s) => s.put(op));
+    return { op, persisted: true };
+  } catch {
+    return { op, persisted: false };
+  }
 }
 
 export async function listPending(): Promise<QueuedOp[]> {
@@ -150,7 +174,9 @@ async function noteFailure(op: QueuedOp, message: string): Promise<void> {
 
 /** How a queued action is actually performed. Registered by the app so this module stays free of
  *  server-action imports (and therefore usable from anywhere). */
-export type Replayer = (args: unknown, clientOpId: string) => Promise<{ ok: boolean; error?: string }>;
+/** `retryable` marks a refusal that TIME can fix (a stale auth token after hours offline, a
+ *  transient DB error) — the drain waits instead of quarantining the work forever (audit 9). */
+export type Replayer = (args: unknown, clientOpId: string) => Promise<{ ok: boolean; error?: string; retryable?: boolean }>;
 
 const replayers = new Map<string, Replayer>();
 
@@ -191,6 +217,14 @@ export async function drain(currentUserId?: string | null): Promise<DrainResult>
       if (res.ok) {
         await remove(op.clientOpId);
         sent++;
+      } else if (res.retryable) {
+        // The SERVER answered, but with something time will fix — an auth token that hadn't
+        // refreshed yet after hours offline, a transient DB error (audit 9). Quarantining these
+        // threw away a real morning's work permanently: nothing in the product ever un-blocks an
+        // op. Treat it exactly like a network failure — stop, keep order, try the next drain.
+        await noteFailure(op, res.error ?? "not yet");
+        failed++;
+        break;
       } else {
         // A REJECTION, not a connectivity problem. Retrying is pointless and it must not become
         // a permanent blockage — quarantine it and carry on with the rest.

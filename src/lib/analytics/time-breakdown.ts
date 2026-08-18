@@ -59,8 +59,12 @@ export async function getHoursBreakdown(supabase: any, sinceDays = 30): Promise<
       .from("time_entries")
       .select("job_id, job_code, clock_in, clock_out, lunch_minutes, status, time_allocations(job_id, job_code, hours)")
       .eq("status", "closed")
-      .gte("clock_in", since.toISOString()),
-    supabase.from("jobs").select("id, job_number, name"),
+      .gte("clock_in", since.toISOString())
+      // Crew hours and job labels truncated at 1000 rows (audit 9) — the same unbounded read
+      // cn-v744 fixed on the profit surfaces, in the breakdown Nort reads out loud.
+      .order("clock_in", { ascending: false })
+      .limit(50000),
+    supabase.from("jobs").select("id, job_number, name").limit(50000),
   ]);
   const labelById = new Map<string, string>();
   for (const j of (jobs ?? []) as any[]) labelById.set(j.id, `${j.job_number} — ${j.name}`);

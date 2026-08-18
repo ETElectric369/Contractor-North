@@ -89,7 +89,10 @@ export function computeJobProfitRows(inp: ProfitInputs): JobProfitRow[] {
 async function fetchProfitInputs(supabase: any, jobId?: string): Promise<ProfitInputs> {
   const jobsQ = jobId
     ? supabase.from("jobs").select("id, job_number, name, status").eq("id", jobId)
-    : supabase.from("jobs").select("id, job_number, name, status").order("created_at", { ascending: false });
+    // The one query cn-v744 missed (audit 9): the JOB LIST itself. Truncated, an org's older
+    // jobs vanish from profitability entirely — their revenue and cost both gone, so the board
+    // silently ranks a subset while claiming to rank the business.
+    : supabase.from("jobs").select("id, job_number, name, status").order("created_at", { ascending: false }).limit(50000);
   // Cash collected per job = the PAYMENTS ledger net of voided invoices (THE computeCollected
   // definition), NOT invoices.amount_paid (which folds in non-cash account credits). Embedded
   // filters aren't reliable (same note as jobRefunds below), so a scoped call fetches all
@@ -318,7 +321,7 @@ export function computeProfitByType(rows: JobProfitRow[], typeOf: Map<string, st
  *  "Service call", "Deck build"…). Jobs with no template group under "Uncategorized". */
 export async function listProfitByType(supabase: any): Promise<ProfitByType[]> {
   const rows = computeJobProfitRows(await fetchProfitInputs(supabase));
-  const { data: jobTypes } = await supabase.from("jobs").select("id, job_code_templates(name)");
+  const { data: jobTypes } = await supabase.from("jobs").select("id, job_code_templates(name)").order("created_at", { ascending: false }).limit(50000);
   const typeOf = new Map<string, string>();
   for (const j of (jobTypes ?? []) as any[]) typeOf.set(j.id, j.job_code_templates?.name ?? "Uncategorized");
   return computeProfitByType(rows, typeOf);

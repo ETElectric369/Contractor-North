@@ -71,7 +71,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "list_invoices",
     description:
-      "List invoices with status, total, amount paid, remaining balance, and an OVERDUE flag (past its due date with a balance). Use for 'who owes me money', 'show unpaid invoices', 'what's outstanding', 'what's overdue' (pass overdue_only), 'what does Jackie owe' (pass customer_id). Overdue invoices sort first; the result carries total_overdue.",
+      "List invoices with status, total, amount paid, remaining balance, and an OVERDUE flag (past its due date with a balance). Use for 'show unpaid invoices', 'what does Jackie owe' (pass customer_id), or to see WHICH invoices are overdue (pass overdue_only). Returns the NEWEST 40 only — for a TOTAL ('what's outstanding', 'how much am I owed', 'what's overdue in total') call ar_aging instead: it reads the whole book. Overdue invoices sort first.",
     input_schema: {
       type: "object",
       properties: {
@@ -727,12 +727,20 @@ export async function runDataTool(
         if (input.unpaid_only) rows = rows.filter((r: any) => r.balance > 0.005);
         if (input.overdue_only) rows = rows.filter((r: any) => r.overdue);
         rows.sort((a: any, b: any) => (a.overdue === b.overdue ? 0 : a.overdue ? -1 : 1)); // overdue first
-        const outstanding = rows.reduce((s: number, r: any) => s + (r.balance > 0 ? r.balance : 0), 0);
-        const overdueTotal = rows.reduce((s: number, r: any) => s + (r.overdue ? r.balance : 0), 0);
+        /**
+         * NO MONEY HEADLINE FROM A PAGE OF FORTY (audit 9).
+         *
+         * These totals summed the 40 NEWEST invoices and were returned as
+         * `total_outstanding` / `total_overdue` — the tool description routes "what's
+         * outstanding?" straight here, so an org whose only unpaid invoice is older than its
+         * 40 newest was told "$0 outstanding" while /billing and Nort's own ar_aging said
+         * $12,400. A total computed over a page is a wrong number wearing a right name; the
+         * aging report is the SSOT and this tool now says so instead of guessing.
+         */
         return JSON.stringify({
           count: rows.length,
-          total_outstanding: money(outstanding),
-          total_overdue: money(overdueTotal),
+          page_of_newest: 40,
+          note: "These are the newest invoices, not the whole book. For what's outstanding or overdue in total, call ar_aging — it reads every invoice.",
           invoices: rows.slice(0, lim),
         });
       }
