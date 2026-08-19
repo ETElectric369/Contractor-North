@@ -1122,7 +1122,7 @@ async function createMilestoneDraw(
 export async function updateInvoiceItem(
   itemId: string,
   invoiceId: string,
-  item: { description?: string; quantity?: number; unit_price?: number },
+  item: { description?: string; quantity?: number; unit?: string; unit_price?: number },
 ): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -1138,6 +1138,10 @@ export async function updateInvoiceItem(
     clean.description = item.description.trim();
   }
   if (item.quantity !== undefined) clean.quantity = item.quantity || 1;
+  // The UNIT is the contractor's own word for what he sold — hrs, lot, ea, ft, days (Erik,
+  // 8/18: "when i add a new line item i dont have a choice to label it differently"). It was
+  // writable only by the importers, so every hand-added line said "ea" forever.
+  if (item.unit !== undefined) clean.unit = String(item.unit).trim().slice(0, 12) || "ea";
   if (item.unit_price !== undefined) clean.unit_price = item.unit_price || 0;
   if (Object.keys(clean).length === 0) return { ok: false, error: "Nothing to update." };
   const { error } = await supabase

@@ -275,12 +275,14 @@ export function InvoiceDetail({
   const [editDesc, setEditDesc] = useState("");
   const [editQty, setEditQty] = useState(1);
   const [editPrice, setEditPrice] = useState(0);
+  const [editUnit, setEditUnit] = useState("ea");
 
   function startEdit(it: InvoiceItem) {
     setEditId(it.id);
     setEditDesc(it.description);
     setEditQty(Number(it.quantity));
     setEditPrice(Number(it.unit_price));
+    setEditUnit(it.unit || "ea");
   }
 
   function saveEdit() {
@@ -289,6 +291,7 @@ export function InvoiceDetail({
       const res = await updateInvoiceItem(editId, invoice.id, {
         description: editDesc,
         quantity: editQty,
+        unit: editUnit,
         unit_price: editPrice,
       });
       if (!res?.ok) { toast(res?.error ?? "Couldn't save the line item — try again.", "error"); return; }
@@ -576,7 +579,15 @@ export function InvoiceDetail({
                 <li key={it.id} className="space-y-2 bg-slate-50/80 px-4 py-3 text-sm">
                   <Input value={editDesc} onChange={(e) => setEditDesc(e.target.value)} placeholder="Description" />
                   <div className="flex items-center gap-2">
-                    <NumberInput value={editQty} onValueChange={setEditQty} className="w-20 text-center" />
+                    <NumberInput value={editQty} onValueChange={setEditQty} className="w-16 text-center" />
+                    <Input
+                      value={editUnit}
+                      onChange={(e) => setEditUnit(e.target.value)}
+                      className="w-16 text-center"
+                      placeholder="unit"
+                      aria-label="Unit"
+                      list="cn-units"
+                    />
                     <span className="text-slate-400">×</span>
                     <NumberInput value={editPrice} onValueChange={setEditPrice} className="flex-1 text-right" />
                     <button
@@ -636,6 +647,12 @@ export function InvoiceDetail({
               <li className="px-4 py-6 text-center text-slate-400">No line items yet.</li>
             )}
           </ul>
+          {/* The words a contractor actually bills in — suggestions, never a limit. */}
+          <datalist id="cn-units">
+            {["ea", "hrs", "hr", "lot", "ft", "day", "days", "sq ft", "roll", "box", "trip"].map((u) => (
+              <option key={u} value={u} />
+            ))}
+          </datalist>
           {/* Add line item */}
           <div className="space-y-2 border-t border-slate-100 bg-slate-50/60 p-3">
             <Input
@@ -645,7 +662,19 @@ export function InvoiceDetail({
               onKeyDown={(e) => e.key === "Enter" && addItem()}
             />
             <div className="flex items-center gap-2">
-              <NumberInput value={qty} onValueChange={setQty} className="w-20 text-center" placeholder="Qty" />
+              <NumberInput value={qty} onValueChange={setQty} className="w-16 text-center" placeholder="Qty" />
+              {/* THE UNIT, TYPEABLE (Erik 8/18). "hrs" is not "ea", and a line that says the
+                  wrong word is a line he has to explain to a customer. Free text with a
+                  suggestion list — his trade's words are his, not a dropdown we curate. */}
+              <Input
+                value={unit}
+                onChange={(e) => setUnit(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addItem()}
+                className="w-16 text-center"
+                placeholder="unit"
+                aria-label="Unit"
+                list="cn-units"
+              />
               <span className="text-slate-400">×</span>
               <NumberInput value={price} onValueChange={setPrice} className="flex-1 text-right" placeholder="Price" />
               <Button onClick={addItem} disabled={pending || !desc.trim()}>
