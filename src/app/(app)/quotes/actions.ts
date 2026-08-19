@@ -877,6 +877,33 @@ export async function updateQuoteStatus(id: string, status: string) {
   const { error } = await supabase.from("quotes").update(patch).eq("id", id);
   if (error) return { ok: false as const, error: dbError(error) };
 
+  /**
+   * ONE DECISION, RECORDED WHEREVER IT IS MADE (Erik, 8/19: "it would be the one in the same
+   * with the estimate acceptance").
+   *
+   * The walk-through behind this estimate is asking the same question the status dropdown just
+   * answered — so answer it there too (0205). Best-effort: the estimate's own status is the
+   * fact that matters, and a missing appointment link must never fail the save.
+   */
+  try {
+    const outcome = status === "accepted" ? "won" : status === "declined" || status === "expired" ? "lost" : null;
+    if (outcome) {
+      const { data: q } = await supabase.from("quotes").select("inquiry_id, job_id").eq("id", id).maybeSingle();
+      const links = q as { inquiry_id?: string | null; job_id?: string | null } | null;
+      if (links?.inquiry_id || links?.job_id) {
+        let upd = supabase.from("appointments").update({ outcome, outcome_at: new Date().toISOString() }).is("outcome", null);
+        upd = links.inquiry_id && links.job_id
+          ? upd.or(`inquiry_id.eq.${links.inquiry_id},job_id.eq.${links.job_id}`)
+          : links.inquiry_id
+            ? upd.eq("inquiry_id", links.inquiry_id)
+            : upd.eq("job_id", links.job_id as string);
+        await upd;
+      }
+    }
+  } catch {
+    /* the estimate's status is the decision; stamping the visit is a courtesy */
+  }
+
   if (status === "accepted") {
     await createJobFromQuote(id).catch(() => {}); // links quotes.job_id + spins up WO/materials
     await pushQuoteAccepted(id);

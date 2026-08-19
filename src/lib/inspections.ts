@@ -19,6 +19,8 @@ export interface InspectionBucketRow {
   inquiry_id: string | null;
   job_id: string | null;
   capture?: unknown;
+  /** How it ended, when somebody said so: won / lost / no_bid (0205). */
+  outcome?: string | null;
 }
 
 /** The estimate this inspection was written up into, stamped on the capture jsonb by
@@ -61,16 +63,31 @@ export function bucketInspections<T extends InspectionBucketRow>(
   /** Ids of quotes that still EXIST — matched against capture.quote_id so the lead-less
    *  "Inspect now" write-up files away too (and truthfully un-files if the quote is deleted). */
   estimateQuoteIds: ReadonlySet<string> = new Set(),
+  /** Job ids that have real billing on them — a visit that became BILLED WORK is finished,
+   *  estimate or no estimate (0205). Empty set keeps the old behaviour for callers that
+   *  don't care (e.g. a pure calendar view). */
+  billedJobIds: ReadonlySet<string> = new Set(),
 ): InspectionBuckets<T> {
   const out: InspectionBuckets<T> = { toWriteUp: [], upcoming: [], filed: [] };
   const time = (r: T) => (r.starts_at ? new Date(r.starts_at).getTime() : 0);
 
   for (const r of rows) {
     const capQuote = captureQuoteId(r.capture);
-    const writtenUp =
+    /**
+     * FOUR WAYS A VISIT ENDS, not one (0205).
+     *
+     * This asked only "does an estimate exist?", so a walk-through that turned into billed,
+     * paid work still nagged (Mineral Springs: job complete, invoice paid, no estimate ever
+     * written) and a lost bid could never leave at all (Donner Pass, which has no customer,
+     * inquiry, job or estimate to hang anything on). Money is an outcome; so is a decision.
+     */
+    const settled =
       (!!r.inquiry_id && estimateInquiryIds.has(r.inquiry_id)) ||
       (!!r.job_id && estimateJobIds.has(r.job_id)) ||
-      (!!capQuote && estimateQuoteIds.has(capQuote));
+      (!!capQuote && estimateQuoteIds.has(capQuote)) ||
+      (!!r.job_id && billedJobIds.has(r.job_id)) ||
+      !!r.outcome;
+    const writtenUp = settled;
     const past = !!r.starts_at && new Date(r.starts_at).getTime() < now.getTime();
 
     if (r.status === "cancelled") out.filed.push(r);

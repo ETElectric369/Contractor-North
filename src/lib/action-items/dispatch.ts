@@ -44,6 +44,11 @@ function resolve(
     if (kind === "inquiry") return { name: "inquiry.delete", input: { id } };
     if (kind === "appointment") return { name: "appointment.setStatus", input: { id, status: "cancelled" } };
     if (kind === "organize") return { name: "organize.archive", input: { id } };
+    // THE TWO ENDINGS THE MONEY FEEDERS NEVER HAD (0205). Both write a real domain fact — a
+    // declined estimate, a walk-through's outcome — so the inbox stays a projection of reality
+    // and never becomes a list of things somebody clicked away.
+    if (kind === "quote_awaiting") return { name: "quote.setStatus", input: { id, status: "declined" } };
+    if (kind === "inspection_writeup") return { name: "appointment.setOutcome", input: { id, outcome: "lost" } };
   }
   return null;
 }

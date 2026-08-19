@@ -50,7 +50,7 @@ export default async function InspectionsPage({
     supabase
       .from("appointments")
       .select(
-        "id, type, title, status, starts_at, location, capture, inquiry_id, job_id, customers(name), inquiries(name)",
+        "id, type, title, status, starts_at, location, capture, inquiry_id, job_id, outcome, customers(name), inquiries(name)",
       )
       .in("type", [...INSPECTION_TYPES])
       .order("starts_at", { ascending: false })
@@ -69,12 +69,21 @@ export default async function InspectionsPage({
   );
   const estimateJobIds = new Set<string>((quoteLinks ?? []).map((q: any) => q.job_id).filter(Boolean));
   const estimateQuoteIds = new Set<string>((quoteLinks ?? []).map((q: any) => q.id).filter(Boolean));
+  // Same four endings as the inbox (0205) — this list and Needs-action must never disagree
+  // about what is outstanding, which is why they share bucketInspections.
+  const { data: billedJobs } = await supabase
+    .from("invoices")
+    .select("job_id")
+    .not("job_id", "is", null)
+    .not("status", "in", "(draft,void)")
+    .limit(5000);
   const { toWriteUp, upcoming, filed } = bucketInspections(
     rows,
     estimateInquiryIds,
     estimateJobIds,
     new Date(),
     estimateQuoteIds,
+    new Set(((billedJobs ?? []) as { job_id: string }[]).map((r) => r.job_id).filter(Boolean)),
   );
 
   const pill = (active: boolean) =>

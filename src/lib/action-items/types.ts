@@ -141,17 +141,20 @@ export const AFFORDANCES: Record<ActionKind, Affordance[]> = {
   job_to_schedule: ["schedule", "assign", "open"],
   inquiry: ["do", "schedule", "convert", "snooze", "dismiss", "open"],
   appointment: ["do", "dismiss", "open"],
-  // One verb on purpose: the href opens the estimate builder already prefilled with the
-  // walk-through. A "do" here would mark it handled without the estimate existing.
-  inspection_writeup: ["open"],
+  // The href opens the estimate builder prefilled with the walk-through — still the main road.
+  // "dismiss" is now the OTHER honest ending (0205): most bids lose, and until this verb existed
+  // a lost walk-through could never leave the inbox at all (Erik's Donner Pass). It writes a real
+  // field — appointments.outcome — never a hidden "I clicked this away" flag.
+  inspection_writeup: ["dismiss", "open"],
   organize: ["dismiss", "open"],
   // Money/legal items drill into their own surface to act (record a payment, serve a
   // notice, chase a signature) — no generic "do"/"dismiss" that would mislabel them.
   invoice_overdue: ["open"],
   // No snooze on quotes: valid_until is the CUSTOMER-facing offer window (it's on the
-  // public share), so bumping it would change the offer, not defer the reminder —
-  // open-only until quotes grow a follow-up field.
-  quote_awaiting: ["open"],
+  // public share), so bumping it would change the offer, not defer the reminder. But LOSING
+  // a bid is a real outcome the app had no word for — "dismiss" marks the estimate declined,
+  // which is the same decision the quote page's status dropdown makes, one tap closer.
+  quote_awaiting: ["dismiss", "open"],
   // Open-only: tapping lands on the JOB, where the inline schedule editor sets the date
   // (which self-clears this item). A dedicated "schedule" verb comes with the funnel wave.
   quote_accepted: ["open"],

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { APPOINTMENT_TYPES } from "@/lib/statuses";
-import { createAppointment, setAppointmentStatus, rescheduleAppointment } from "@/app/(app)/appointments/actions";
+import { createAppointment, setAppointmentOutcome, setAppointmentStatus, rescheduleAppointment } from "@/app/(app)/appointments/actions";
 import { createClient } from "@/lib/supabase/server";
 import { resolveCustomerId, resolveJobId } from "../resolve-id";
 import type { ActionDef } from "../types";
@@ -82,6 +82,18 @@ export const appointmentActions: Record<string, ActionDef> = {
     confirm: "destructive",
     describe: (i) => `${statusVerb(i.status)} this appointment? Check the details below before you confirm.`,
     handler: (i) => setAppointmentStatus(i.id, i.status),
+  },
+  /** How a walk-through ended (0205) — the exit the inbox was missing. */
+  "appointment.setOutcome": {
+    name: "appointment.setOutcome",
+    group: "appointment",
+    label: "Record how it ended",
+    description:
+      "Record how a walk-through ended: 'lost' (didn't win the bid), 'no_bid' (decided not to quote it), or 'won'. Use it when the user says they lost a bid, aren't pursuing it, or already handled the work — it clears the visit from Needs action without inventing an estimate.",
+    input: z.object({ id: z.string(), outcome: z.enum(["won", "lost", "no_bid"]) }),
+    auth: "staff",
+    effect: "write",
+    handler: (i) => setAppointmentOutcome(i.id, i.outcome),
   },
 };
 

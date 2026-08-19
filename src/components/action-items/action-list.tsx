@@ -128,8 +128,15 @@ export function ActionList({
   // Dismiss is a HARD DELETE for tasks/inquiries (it can't be undone) — confirm first.
   // For appointments/organize it just cancels/archives (reversible), so run it straight.
   const HARD_DELETE_KINDS = new Set(["task", "work_order", "inquiry"]);
+  /**
+   * THE ENDINGS THAT AREN'T DELETIONS (0205). "Didn't win it" marks the estimate declined or
+   * stamps the walk-through's outcome — a real fact about the deal, reversible on its own page.
+   * It must not be confirmed with "this permanently deletes", which is what the row would have
+   * said, and it deserves a confirm of its own because it records a LOSS.
+   */
+  const OUTCOME_KINDS = new Set(["quote_awaiting", "inspection_writeup"]);
   function onDismiss(item: ActionItem) {
-    if (HARD_DELETE_KINDS.has(item.kind)) {
+    if (HARD_DELETE_KINDS.has(item.kind) || OUTCOME_KINDS.has(item.kind)) {
       setDismissing(item);
       return;
     }
@@ -268,14 +275,30 @@ export function ActionList({
       <Modal
         open={!!dismissing}
         onClose={() => setDismissing(null)}
-        title="Delete this?"
+        title={dismissing && OUTCOME_KINDS.has(dismissing.kind) ? "Didn't win it?" : "Delete this?"}
         size="sm"
         footer={
-          <ModalActions onCancel={() => setDismissing(null)} onSave={confirmDismiss} saveLabel="Delete" destructive />
+          <ModalActions
+            onCancel={() => setDismissing(null)}
+            onSave={confirmDismiss}
+            saveLabel={dismissing && OUTCOME_KINDS.has(dismissing.kind) ? "Mark it lost" : "Delete"}
+            destructive
+          />
         }
       >
         <p className="text-sm text-slate-600">
-          This permanently deletes <span className="font-medium text-slate-900">{dismissing?.title}</span>. It can&apos;t be undone.
+          {dismissing && OUTCOME_KINDS.has(dismissing.kind) ? (
+            <>
+              Records <span className="font-medium text-slate-900">{dismissing?.title}</span> as lost, so it stops
+              asking. {dismissing?.kind === "quote_awaiting" ? "The estimate is marked declined" : "The walk-through is marked lost"} —
+              you can change it back on its own page.
+            </>
+          ) : (
+            <>
+              This permanently deletes <span className="font-medium text-slate-900">{dismissing?.title}</span>. It
+              can&apos;t be undone.
+            </>
+          )}
         </p>
       </Modal>
     </>
@@ -306,7 +329,7 @@ export function ActionList({
             return (
               <div
                 key={item.id}
-                className={`flex items-center gap-2 rounded-xl border bg-white px-3 py-2 ${
+                className={`flex items-start gap-2 rounded-xl border bg-white px-3 py-2 ${
                   item.done ? "border-slate-100 opacity-55" : "border-slate-200"
                 }`}
               >
@@ -314,7 +337,7 @@ export function ActionList({
                   <button
                     onClick={() => onDo(item)}
                     disabled={busyId === item.id || item.done}
-                    className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border ${
+                    className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border ${
                       item.done ? "border-brand bg-brand text-white" : "border-slate-300 hover:border-brand"
                     }`}
                     title="Mark done"
@@ -324,18 +347,28 @@ export function ActionList({
                   </button>
                 )}
 
-                <button onClick={() => router.push(item.href)} className="min-w-0 flex-1 text-left">
-                  <div className={`truncate text-sm ${item.done ? "text-slate-400 line-through" : "font-medium text-slate-900"}`}>
-                    {item.urgency >= 2 && !item.done && <span className="mr-1 text-red-500">!</span>}
-                    {item.title}
-                  </div>
-                  <div className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-slate-500">
-                    <Badge tone={meta.tone}>{meta.label}</Badge>
-                    {item.subtitle && <span className="truncate">{item.subtitle}</span>}
-                    {when && <span className={overdue ? "font-medium text-red-600" : ""}>· {when}</span>}
-                    {item.who && <span className="truncate">· {item.who}</span>}
-                  </div>
-                </button>
+                {/* TWO LINES, THE LEAD-BOARD SHAPE (Erik: "i kind of like the idea of using the
+                    same new lead layout"). Line 1 is WHO/WHAT with the date hard right in mono
+                    so the column reads down the page; line 2 is the context and the verbs. Same
+                    decision surface, same shape, so neither has to be learned twice. */}
+                <div className="min-w-0 flex-1">
+                  <button onClick={() => router.push(item.href)} className="flex w-full min-w-0 items-baseline gap-2 text-left">
+                    <span className={`min-w-0 flex-1 truncate text-sm ${item.done ? "text-slate-400 line-through" : "font-medium text-slate-900"}`}>
+                      {item.urgency >= 2 && !item.done && <span className="mr-1 text-red-500">!</span>}
+                      {item.title}
+                    </span>
+                    {when && (
+                      <span className={`shrink-0 font-mono text-[11px] tabular-nums ${overdue ? "font-semibold text-red-600" : "text-slate-400"}`}>
+                        {when}
+                      </span>
+                    )}
+                  </button>
+                  <div className="mt-0.5 flex items-center gap-1.5">
+                    <button onClick={() => router.push(item.href)} className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-left text-xs text-slate-500">
+                      <Badge tone={meta.tone}>{meta.label}</Badge>
+                      {item.subtitle && <span className="truncate">{item.subtitle}</span>}
+                      {item.who && <span className="truncate">· {item.who}</span>}
+                    </button>
 
                 <div className="flex shrink-0 items-center gap-0.5">
                   {can("schedule") && (
@@ -374,6 +407,8 @@ export function ActionList({
                   <button onClick={() => router.push(item.href)} className="rounded-md p-1.5 text-slate-300 hover:bg-slate-100 hover:text-slate-600" title="Open">
                     <ChevronRight className="h-4 w-4" />
                   </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             );

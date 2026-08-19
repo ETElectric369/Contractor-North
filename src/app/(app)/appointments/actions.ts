@@ -744,6 +744,37 @@ export async function updateAppointment(id: string, formData: FormData): Promise
   return { ok: true };
 }
 
+/**
+ * HOW THE WALK-THROUGH ENDED (0205) — the missing exit.
+ *
+ * Erik lost the Donner Pass bid and had nowhere to say so: that visit has no customer, no
+ * inquiry, no job, no capture and no estimate, so "mark the estimate Declined" had nothing to
+ * write to — which is exactly why it "didn't save". The outcome lives on the APPOINTMENT so an
+ * orphaned visit can still be settled by the person who was standing there.
+ *
+ * Same concept as accepting or declining the estimate (his words: "it would be the one in the
+ * same"), which stamps this column too — one decision, recorded wherever it is made.
+ */
+export async function setAppointmentOutcome(
+  id: string,
+  outcome: "won" | "lost" | "no_bid" | null,
+): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { data, error } = await ctx.supabase
+    .from("appointments")
+    .update({ outcome, outcome_at: outcome ? new Date().toISOString() : null })
+    .eq("id", id)
+    .select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  // Silent-write law: a zero-row update is a 204, and "saved" without a row is the failure
+  // this whole fix exists to end.
+  if (!data?.length) return { ok: false, error: "That didn't save — check your access and try again." };
+  revalidatePath("/planner");
+  revalidatePath("/inspections");
+  return { ok: true };
+}
+
 export async function setAppointmentStatus(id: string, status: string): Promise<Result> {
   // Spine guard (mirrors the 0052 check constraint) so a bad value reads as a clean
   // message instead of a raw Postgres constraint error.

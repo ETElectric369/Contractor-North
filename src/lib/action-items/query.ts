@@ -79,7 +79,7 @@ export async function getActionItems(ctx: {
 
   const empty = Promise.resolve({ data: [] as any[] });
 
-  const [jobsR, inqR, apptR, orgR, invR, quoteR, acceptedR, draftR, conR, lienR, bugR, openTimeR, recentTimeR, matJobsR, matSegR, inspR, inspQuoteR] = await Promise.all([
+  const [jobsR, inqR, apptR, orgR, invR, quoteR, acceptedR, draftR, conR, lienR, bugR, openTimeR, recentTimeR, matJobsR, matSegR, inspR, inspQuoteR, billedJobR] = await Promise.all([
     // Unscheduled jobs — staff only (the "resting place" for things needing a date).
     // EVERY still-in-flight dateless job, not just estimate/scheduled: an in_progress
     // or on_hold job whose date was cleared must not vanish from every scheduling
@@ -163,7 +163,7 @@ export async function getActionItems(ctx: {
     isStaff
       ? supabase
           .from("quotes")
-          .select("id, quote_number, doc_type, accepted_at, job_id, customers(name), jobs:job_id(scheduled_start)")
+          .select("id, quote_number, doc_type, accepted_at, job_id, customers(name), jobs:job_id(scheduled_start, status)")
           .eq("status", "accepted")
           .order("accepted_at", { ascending: false })
           .limit(50)
@@ -251,7 +251,7 @@ export async function getActionItems(ctx: {
     isStaff
       ? supabase
           .from("appointments")
-          .select("id, type, title, status, starts_at, capture, inquiry_id, job_id, customers(name), inquiries(name)")
+          .select("id, type, title, status, starts_at, capture, inquiry_id, job_id, outcome, customers(name), inquiries(name)")
           .in("type", [...INSPECTION_TYPES])
           .gte("starts_at", daysAgoStr(todayStr, 60))
           .lte("starts_at", endOfToday)
@@ -261,6 +261,12 @@ export async function getActionItems(ctx: {
     // The "written up" signal — an estimate linked to the lead, the job, or (for a
     // lead-less Inspect-now) the capture's own quote id.
     isStaff ? supabase.from("quotes").select("id, inquiry_id, job_id").limit(2000) : empty,
+    // MONEY IS AN OUTCOME (0205): a walk-through whose job carries real billing is finished,
+    // whether or not an estimate was ever written. Draft invoices don't count — a draft is
+    // work in progress, not a decision.
+    isStaff
+      ? supabase.from("invoices").select("job_id").not("job_id", "is", null).not("status", "in", "(draft,void)").limit(5000)
+      : empty,
   ]);
 
   // Built without `stream`, stamped once at the return from KIND_STREAM — one
@@ -296,6 +302,11 @@ export async function getActionItems(ctx: {
   // top of the inbox, so a "yes" can never again slip by unseen.
   for (const a of (acceptedR.data ?? []) as any[]) {
     if (a.jobs?.scheduled_start) continue; // scheduled → win captured, item self-clears
+    // …AND A JOB THAT'S OVER DOESN'T NEED A DATE. The same join twenty lines up already had
+    // `status` available and never asked: a same-day service call that was accepted, driven to
+    // and finished without anyone setting a date kept shouting "schedule the job" at urgency 2
+    // from the top of the money stream, forever. Work ending is an outcome (0205).
+    if (a.jobs?.status === "complete" || a.jobs?.status === "cancelled") continue;
     items.push({
       id: a.id,
       kind: "quote_accepted",
@@ -348,6 +359,8 @@ export async function getActionItems(ctx: {
       new Set(qs.map((q) => q.job_id).filter(Boolean)),
       new Date(),
       new Set(qs.map((q) => q.id).filter(Boolean)),
+      // Jobs with real (non-draft, non-void) billing — the visit already turned into money.
+      new Set(((billedJobR.data ?? []) as { job_id: string }[]).map((r) => r.job_id).filter(Boolean)),
     );
     for (const a of toWriteUp) {
       const who = (a as any).customers?.name ?? (a as any).inquiries?.name ?? null;
@@ -417,7 +430,11 @@ export async function getActionItems(ctx: {
     const daysOverDue = inv.due_date ? Math.floor((todayMs - Date.parse(inv.due_date)) / 86_400_000) : null;
     const daysOld = inv.created_at ? Math.floor((todayMs - Date.parse(inv.created_at)) / 86_400_000) : 0;
     const pastDue = daysOverDue != null && daysOverDue > 0;
-    const stale = daysOld >= INVOICE_STALE_DAYS;
+    // AGE ONLY SPEAKS WHEN THE DUE DATE DOESN'T. The age path was written when invoices had no
+    // due-date UI ("chase it after 30 days"); that field shipped, so a net-60 invoice was being
+    // labelled "Overdue" on day 30 while it was not yet due — the app saying something false
+    // about money. A set, future due date is the answer; age is the fallback when there isn't one.
+    const stale = daysOld >= INVOICE_STALE_DAYS && !(daysOverDue != null && daysOverDue <= 0);
     if (!pastDue && !stale) continue; // not yet worth chasing
     // Urgency tracks the worse of the two clocks: very overdue, or very old.
     const overWindow = Math.max(daysOverDue ?? 0, stale ? daysOld - INVOICE_STALE_DAYS : 0);
