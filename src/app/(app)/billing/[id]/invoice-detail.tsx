@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { NewCustomerInline } from "@/components/new-customer-inline";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Pencil, Check, X } from "lucide-react";
+import { Plus, Trash2, Pencil, Check, X, ChevronUp, ChevronDown, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
@@ -18,6 +18,7 @@ import type { Invoice, InvoiceItem, Payment } from "@/lib/types";
 import {
   addInvoiceItem,
   updateInvoiceItem,
+  reorderInvoiceItems,
   deleteInvoiceItem,
   setInvoiceStatus,
   setInvoiceTaxRate,
@@ -322,6 +323,52 @@ export function InvoiceDetail({
     });
   }
 
+  /**
+   * MOVE ONE LINE (Erik: "just like the playbook"). The whole sequence is written every time —
+   * one atomic order rather than two rows swapping numbers and racing.
+   */
+  function moveItem(id: string, dir: -1 | 1) {
+    const ids = items.map((i) => i.id);
+    const at = ids.indexOf(id);
+    const to = at + dir;
+    if (at < 0 || to < 0 || to >= ids.length) return;
+    [ids[at], ids[to]] = [ids[to], ids[at]];
+    start(async () => {
+      const res = await reorderInvoiceItems(invoice.id, ids);
+      if (!res?.ok) { toast(res?.error ?? "Couldn't move that line — try again.", "error"); return; }
+      refresh();
+    });
+  }
+
+  /**
+   * GROUP THE LABOR TOGETHER (Erik: "itll be showing up at the bottom of the list").
+   *
+   * Sorts into the SAME buckets the customer's copy already prints its breakdown from
+   * (groupInvoiceLines) — materials, then labor, then everything else, credits last — while
+   * keeping each bucket's existing internal order, so a tidy never scrambles a sequence he set
+   * by hand. It is one button, and the arrows still win afterwards.
+   */
+  function groupByKind() {
+    const rank = (it: (typeof items)[number]) => {
+      const src = (it as { import_source?: string | null }).import_source;
+      const d = it.description ?? "";
+      if (src === "draw_credit" || /less previous billings/i.test(d)) return 3;
+      if (src === "labor" || /^labor — /i.test(d)) return 1;
+      if (src === "costs" || /^materials — /i.test(d)) return 0;
+      return 2;
+    };
+    const ids = items
+      .map((it, i) => ({ it, i }))
+      .sort((a, b) => rank(a.it) - rank(b.it) || a.i - b.i)
+      .map(({ it }) => it.id);
+    start(async () => {
+      const res = await reorderInvoiceItems(invoice.id, ids);
+      if (!res?.ok) { toast(res?.error ?? "Couldn't group the lines — try again.", "error"); return; }
+      toast("Grouped — materials, then labor", "success");
+      refresh();
+    });
+  }
+
   function pay() {
     setPayError(null);
     start(async () => {
@@ -622,6 +669,30 @@ export function InvoiceDetail({
                     </div>
                   </button>
                   <div className="shrink-0 font-medium text-slate-900">{formatCurrency(it.line_total)}</div>
+                  {isDraft && items.length > 1 && (
+                    <div className="flex shrink-0 flex-col">
+                      <button
+                        type="button"
+                        onClick={() => moveItem(it.id, -1)}
+                        disabled={pending || items[0]?.id === it.id}
+                        className="rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-25"
+                        aria-label="Move up"
+                        title="Move up"
+                      >
+                        <ChevronUp className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => moveItem(it.id, 1)}
+                        disabled={pending || items[items.length - 1]?.id === it.id}
+                        className="rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-25"
+                        aria-label="Move down"
+                        title="Move down"
+                      >
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  )}
                   <button
                     onClick={() => startEdit(it)}
                     disabled={pending}
@@ -647,6 +718,19 @@ export function InvoiceDetail({
               <li className="px-4 py-6 text-center text-slate-400">No line items yet.</li>
             )}
           </ul>
+          {isDraft && items.length > 1 && (
+            <div className="flex items-center justify-end border-t border-slate-100 px-3 py-2">
+              <button
+                type="button"
+                onClick={groupByKind}
+                disabled={pending}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                title="Materials together, then labor — keeps the order you set inside each group"
+              >
+                <Layers className="h-3.5 w-3.5" /> Group materials & labor
+              </button>
+            </div>
+          )}
           {/* The words a contractor actually bills in — suggestions, never a limit. */}
           <datalist id="cn-units">
             {["ea", "hrs", "hr", "lot", "ft", "day", "days", "sq ft", "roll", "box", "trip"].map((u) => (

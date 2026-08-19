@@ -362,6 +362,53 @@ export async function createBlankInvoice(input: {
   return { ok: true, id: data.id };
 }
 
+/**
+ * PUT THE LINES IN THE ORDER HE READS THEM IN (Erik, 8/18).
+ *
+ * "id really like to be able to move line items up and down just like the playbook so … if i
+ * delete something and realize i want it i dont need to reimport", and "id like to be able to
+ * group the labor together since itll be showing up at the bottom of the list."
+ *
+ * An invoice is a document a customer reads top to bottom, and until now its order was an
+ * accident of when each line was imported or typed. sort_order existed and nothing could change
+ * it. This writes the whole sequence in one call — the same shape the playbook's reorder uses —
+ * so a move is atomic and can't leave two lines fighting over one position.
+ *
+ * Draft-only (the customer's copy is fixed once sent) and every id must belong to THIS invoice:
+ * a crafted list can neither reach another tenant's line nor drag one invoice's item onto
+ * another's. Ordering is presentation — it never touches an amount, so nothing here recalcs.
+ */
+export async function reorderInvoiceItems(invoiceId: string, orderedIds: string[]): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const block = await requireDraftInvoice(supabase, invoiceId);
+  if (block) return block;
+
+  const { data: mine } = await supabase.from("invoice_items").select("id").eq("invoice_id", invoiceId);
+  const own = new Set(((mine ?? []) as { id: string }[]).map((r) => r.id));
+  const ids = (orderedIds ?? []).filter((id) => own.has(id));
+  // Any line the caller didn't name keeps its place at the end, so a stale tab can never
+  // silently drop a row out of the document.
+  const rest = [...own].filter((id) => !ids.includes(id));
+  const finalOrder = [...ids, ...rest];
+  if (!finalOrder.length) return { ok: true };
+
+  for (let i = 0; i < finalOrder.length; i++) {
+    const { data: wrote, error } = await supabase
+      .from("invoice_items")
+      .update({ sort_order: i })
+      .eq("id", finalOrder[i])
+      .eq("invoice_id", invoiceId)
+      .select("id");
+    if (error) return { ok: false, error: dbError(error) };
+    // Silent-write law: an RLS-refused reorder must not report success.
+    if (!wrote?.length) return { ok: false, error: "That didn't save — check your access and try again." };
+  }
+  revalidateMoney(invoiceId);
+  return { ok: true };
+}
+
 export async function addInvoiceItem(
   invoiceId: string,
   item: { description: string; quantity: number; unit: string; unit_price: number },
@@ -382,12 +429,31 @@ export async function addInvoiceItem(
     const conflict = await standardInvoiceOnDrawJob(supabase, inv, invoiceId);
     if (conflict) return conflict; // H4: can't add billable lines to a standard invoice on a draw job
   }
+  /**
+   * A NEW LINE GOES AT THE END (Erik, 8/18: "i just added a line item for labor - brian and it
+   * automatically sent it to the top").
+   *
+   * The insert never set sort_order, so the column default of 0 applied — and 0 sorts ABOVE
+   * every imported line (the importer numbers them as it goes). So every line typed by hand
+   * jumped to the top of the customer's document, which reads as the app rearranging his
+   * invoice behind his back. Append, then let him move it with the arrows.
+   */
+  const { data: last } = await supabase
+    .from("invoice_items")
+    .select("sort_order")
+    .eq("invoice_id", invoiceId)
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const nextSort = Number((last as { sort_order?: number } | null)?.sort_order ?? -1) + 1;
+
   const { error } = await supabase.from("invoice_items").insert({
     invoice_id: invoiceId,
     description: item.description,
     quantity: item.quantity || 1,
     unit: item.unit || "ea",
     unit_price: item.unit_price || 0,
+    sort_order: nextSort,
   });
   if (error) return { ok: false, error: dbError(error) };
   await recalcInvoice(supabase, invoiceId);
