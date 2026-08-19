@@ -392,6 +392,36 @@ export async function createBlankInvoice(input: {
  * a crafted list can neither reach another tenant's line nor drag one invoice's item onto
  * another's. Ordering is presentation — it never touches an amount, so nothing here recalcs.
  */
+/**
+ * PARK A DRAFT (0206) — the ending that doesn't destroy anything.
+ *
+ * A draft waiting on a change order or the customer's go-ahead had only two exits: Void (which
+ * unlinks the payment milestones) or Delete (which throws away the line items). Both record
+ * something false about a bill that is simply not ready. This sets a date the office chooses;
+ * the invoice leaves Needs action and comes BACK when the date passes — because "parked
+ * forever" is how a real bill gets forgotten, which is the failure the feeder exists to prevent.
+ */
+export async function parkInvoice(invoiceId: string, until: string | null, reason?: string): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  // Parking is a DRAFTING decision — a sent invoice is the customer's, and it owes money.
+  const block = await requireDraftInvoice(supabase, invoiceId);
+  if (block) return block;
+  if (until && !/^\d{4}-\d{2}-\d{2}$/.test(until)) return { ok: false, error: "Pick a date." };
+
+  const { data: wrote, error } = await supabase
+    .from("invoices")
+    .update({ hold_until: until, hold_reason: until ? (reason?.trim() || null) : null })
+    .eq("id", invoiceId)
+    .select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!wrote?.length) return { ok: false, error: "That didn't save — check your access and try again." };
+  revalidateMoney(invoiceId);
+  revalidatePath("/planner");
+  return { ok: true };
+}
+
 export async function reorderInvoiceItems(invoiceId: string, orderedIds: string[]): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };

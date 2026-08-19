@@ -19,6 +19,7 @@ import {
   addInvoiceItem,
   updateInvoiceItem,
   reorderInvoiceItems,
+  parkInvoice,
   deleteInvoiceItem,
   setInvoiceStatus,
   setInvoiceTaxRate,
@@ -181,6 +182,8 @@ export function InvoiceDetail({
   /** An import that could not touch ANYTHING — every line edited, or the deleted ones tombstoned.
    *  Naming the source arms the "start over" button beside the message (0204). */
   const [stuckSource, setStuckSource] = useState<"labor" | "costs" | "quote" | null>(null);
+  /** A draft deliberately waiting — leaves Needs action until this date (0206). */
+  const [hold, setHold] = useState<string>((invoice as { hold_until?: string | null }).hold_until ?? "");
   const [markup, setMarkup] = useState(materialMarkup); // material markup % for the costs import
   // The % now applies ONLY when an import button is deliberately tapped — see the block below
   // where the auto-reapply used to live. It seeds from the customer's pricing level, or the org
@@ -517,6 +520,31 @@ export function InvoiceDetail({
             )}
             <option value="void">Void</option>
           </Select>
+          {/* PARK IT (0206) — the ending that destroys nothing. A draft waiting on a change
+              order or an approval had only Void (which unlinks the payment milestones) or
+              Delete (which throws away the line items); both record something false about a
+              bill that is simply not ready. It leaves Needs action and comes back on the date. */}
+          {isDraft && (
+            <div className="flex items-center gap-1.5">
+              <Input
+                type="date"
+                aria-label="Park this draft until"
+                value={hold}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setHold(v);
+                  start(async () => {
+                    const res = await parkInvoice(invoice.id, v || null);
+                    if (!res?.ok) { toast(res?.error ?? "Couldn't park it — try again.", "error"); return; }
+                    toast(v ? `Parked until ${v} — it'll come back then` : "Back on the list", "success");
+                    refresh();
+                  });
+                }}
+                className="h-9 w-40 text-sm"
+              />
+              <span className="text-xs text-slate-400">{hold ? "parked until" : "park until…"}</span>
+            </div>
+          )}
         </div>
 
         {/* THE SAME PICKER AS THE COMPOSER. This surface had its own thinner copy: it returned

@@ -172,8 +172,10 @@ export async function getActionItems(ctx: {
     isStaff
       ? supabase
           .from("invoices")
-          .select("id, invoice_number, total, status, created_at, customers(name)")
+          .select("id, invoice_number, total, status, created_at, hold_until, customers(name)")
           .eq("status", "draft")
+          // A PARKED draft is not forgotten work (0206) — it comes back when its date passes.
+          .or(`hold_until.is.null,hold_until.lte.${todayStr}`)
           .order("created_at", { ascending: true })
           .limit(50)
       : empty,

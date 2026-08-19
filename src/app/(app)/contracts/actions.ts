@@ -212,6 +212,66 @@ export async function sendContract(id: string): Promise<Result> {
   return { ok: true };
 }
 
+/**
+ * SIGNED ON PAPER — the ending a contract could not have (audit of the Needs-action feeders).
+ *
+ * `status = 'signed'` had exactly ONE writer in the entire codebase: the public sign_contract
+ * RPC, i.e. the customer typing their name on /c/<token>. So a wet-ink signature in the truck,
+ * a scanned PDF emailed back, or a DocuSign left the contract "sent" forever — and the only exit
+ * the app offered was VOID, which records that the agreement does not exist on a job where it
+ * very much does. Contractors sign on paper constantly; this is the normal case, not an edge.
+ *
+ * ATTRIBUTED, NEVER INFERRED: the office types who signed and when. Nothing guesses a signature
+ * from a job status — that would be the estimator's mistake in a legal document. The signature
+ * record notes it was recorded by staff, so an executed-on-paper contract can never be mistaken
+ * for one the customer clicked.
+ *
+ * The DB's own freeze trigger (0068) keeps it honest afterwards: once signed, the wording and
+ * the signature record are immutable, whichever route wrote them.
+ */
+export async function recordPaperSignature(
+  id: string,
+  input: { name: string; signedOn?: string | null },
+): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const name = input.name.trim();
+  if (!name) return { ok: false, error: "Who signed it?" };
+
+  const { data: c } = await supabase
+    .from("contracts")
+    .select("job_id, status, body")
+    .eq("id", id)
+    .maybeSingle();
+  if (!c) return { ok: false, error: "Contract not found." };
+  const status = (c as { status?: string }).status;
+  if (status === "signed") return { ok: false, error: "This contract is already signed." };
+  if (status === "void") return { ok: false, error: "This contract was voided." };
+  if (status === "draft")
+    return { ok: false, error: "Send the contract first — a draft's wording can still change." };
+
+  // The signed_body is the frozen text they actually signed, exactly as the public route does.
+  const signedOn = input.signedOn?.trim() ? new Date(`${input.signedOn}T12:00:00`).toISOString() : new Date().toISOString();
+  const { data: wrote, error } = await supabase
+    .from("contracts")
+    .update({
+      status: "signed",
+      signed_at: signedOn,
+      signed_name: name,
+      signed_body: (c as { body?: string }).body ?? null,
+      signed_user_agent: `recorded by office (paper/other) — ${ctx.userId}`,
+    })
+    .eq("id", id)
+    .eq("status", "sent") // never overwrite a signature that already landed
+    .select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!wrote?.length) return { ok: false, error: "That didn't save — reload and check the contract's status." };
+  revalidatePath(`/jobs/${(c as { job_id?: string }).job_id ?? ""}`);
+  revalidatePath("/planner");
+  return { ok: true };
+}
+
 /** Void a contract (e.g. superseded). */
 export async function voidContract(id: string): Promise<Result> {
   const ctx = await requireStaff();

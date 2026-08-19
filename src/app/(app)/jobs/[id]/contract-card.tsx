@@ -5,11 +5,11 @@ import { useRouter } from "next/navigation";
 import { FileSignature } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
-import { Input } from "@/components/ui/input";
+import { Input, Label } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
-import { generateContractFromJob, updateContract, sendContract, voidContract } from "../../contracts/actions";
+import { generateContractFromJob, updateContract, recordPaperSignature, sendContract, voidContract } from "../../contracts/actions";
 
 type ContractRow = {
   id: string;
@@ -30,6 +30,10 @@ export function ContractCard({ jobId, contract }: { jobId: string; contract: Con
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  /** Recording a signature that happened off-screen (paper, DocuSign, a scanned PDF). */
+  const [paperFor, setPaperFor] = useState<string | null>(null);
+  const [paperName, setPaperName] = useState("");
+  const [paperDate, setPaperDate] = useState("");
 
   function run(fn: () => Promise<{ ok: boolean; error?: string }>) {
     setError(null);
@@ -46,8 +50,48 @@ export function ContractCard({ jobId, contract }: { jobId: string; contract: Con
   const c = contract;
   const link = c ? `/c/${c.public_token}` : "#";
 
+  const paperModal = (
+    <Modal
+      open={!!paperFor}
+      onClose={() => setPaperFor(null)}
+      title="Signed on paper"
+      size="sm"
+      footer={
+        <ModalActions
+          onCancel={() => setPaperFor(null)}
+          onSave={() => {
+            const id = paperFor;
+            if (!id) return;
+            setPaperFor(null);
+            run(() => recordPaperSignature(id, { name: paperName, signedOn: paperDate || null }));
+            setPaperName("");
+            setPaperDate("");
+          }}
+          saveLabel="Record it"
+        />
+      }
+    >
+      <div className="space-y-3">
+        <p className="text-sm text-slate-600">
+          Records this contract as signed. The wording is frozen exactly as sent, and the signature
+          is marked as recorded by the office — never mistaken for one the customer clicked.
+        </p>
+        <div>
+          <Label className="mb-1.5">Who signed it</Label>
+          <Input value={paperName} onChange={(e) => setPaperName(e.target.value)} placeholder="Name on the signature" />
+        </div>
+        <div>
+          <Label className="mb-1.5">Date signed</Label>
+          <Input type="date" value={paperDate} onChange={(e) => setPaperDate(e.target.value)} />
+          <p className="mt-1 text-xs text-slate-400">Leave blank for today.</p>
+        </div>
+      </div>
+    </Modal>
+  );
+
   return (
-    <Card>
+    <>
+    {paperModal}    <Card>
       <CardContent className="py-4">
         <div className="mb-2 flex items-center justify-between">
           <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
@@ -87,6 +131,11 @@ export function ContractCard({ jobId, contract }: { jobId: string; contract: Con
               <Button variant="outline" size="sm" onClick={() => run(() => sendContract(c.id))} disabled={pending}>
                 Resend
               </Button>
+              {/* SIGNED ON PAPER — the normal case in this trade, and until now the only way to
+                  record it was Void, which says the agreement doesn't exist (audit R3). */}
+              <Button variant="outline" size="sm" onClick={() => setPaperFor(c.id)} disabled={pending}>
+                Signed on paper
+              </Button>
               <Button variant="ghost" size="sm" onClick={() => run(() => voidContract(c.id))} disabled={pending}>
                 Void
               </Button>
@@ -122,6 +171,7 @@ export function ContractCard({ jobId, contract }: { jobId: string; contract: Con
         />
       )}
     </Card>
+    </>
   );
 }
 
