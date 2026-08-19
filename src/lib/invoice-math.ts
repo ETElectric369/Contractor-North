@@ -190,7 +190,13 @@ export function progressSummary(
   return { pctComplete, balance };
 }
 
-export type InvoiceLine = { description?: string | null; line_total?: number | null; import_source?: string | null };
+export type InvoiceLine = {
+  description?: string | null;
+  line_total?: number | null;
+  import_source?: string | null;
+  /** The unit the contractor billed in. A line sold in HOURS is labor, whoever typed it. */
+  unit?: string | null;
+};
 export type LineBreakdown = {
   labor: { lines: InvoiceLine[]; subtotal: number };
   materials: { lines: InvoiceLine[]; subtotal: number };
@@ -224,20 +230,47 @@ export function groupInvoiceLines(items: InvoiceLine[]): LineBreakdown {
     // "Labor - extra hour" isn't mistaken for imported labor. Only the genuine
     // prior-billings credit goes to `credits`; other negatives (manual discounts /
     // adjustments) stay in `other`, never mislabeled as "Less previous billings".
+    /**
+     * A HAND-TYPED LABOR LINE IS LABOR (Erik, 8/18 — "dedupe", pointing at a breakdown that
+     * read Labor $1,160 / Materials $390.98 / OTHER $760).
+     *
+     * The $760 was "Labor - Brian", typed by hand with a HYPHEN. This matched only the
+     * importer's exact "Labor — " (em dash), so his own labor line landed in Other and the
+     * document told the customer his crew's hours were something else. The old tightness was
+     * deliberate — it kept a stray "Labor - extra hour" from being mistaken for imported
+     * labor — but that reasoning predates the unit box: now that a line can say what it is,
+     * the honest test is what the line IS, not who typed it.
+     *
+     * So: any dash after the word (— – -), and — the strongest signal — anything billed in
+     * HOURS. A line sold by the hour is labor no matter how it was worded.
+     */
+    const unit = String(it.unit ?? "").trim().toLowerCase();
+    const billedInHours = /^(hr|hrs|hour|hours|man-?hour|man-?hours)$/.test(unit);
     const bucket: keyof LineBreakdown =
-      src === "labor" || /^labor — /i.test(desc)
-        ? "labor"
-        : src === "costs" || /^materials — /i.test(desc)
-          ? "materials"
-          : src === "draw_credit" || /less previous billings/i.test(desc)
-            ? "credits"
+      src === "draw_credit" || /less previous billings/i.test(desc)
+        ? "credits"
+        : src === "labor" || /^labor\s*[—–-]\s/i.test(desc) || billedInHours
+          ? "labor"
+          : src === "costs" || /^materials\s*[—–-]\s/i.test(desc)
+            ? "materials"
             : "other";
     (g[bucket] as { lines: InvoiceLine[]; subtotal: number }).lines.push(it);
     (g[bucket] as { lines: InvoiceLine[]; subtotal: number }).subtotal = cents(
       (g[bucket] as { lines: InvoiceLine[]; subtotal: number }).subtotal + amt,
     );
   }
-  g.hasBreakdown = g.labor.lines.length > 0 || g.materials.lines.length > 0;
+  /**
+   * A BREAKDOWN EARNS ITS BOX BY SPLITTING SOMETHING (audit of Erik's 8/18 "dedupe").
+   *
+   * Widening the labor test means a one-line "Labor - extra hour" invoice now HAS a labor line —
+   * and the old rule would have grown a Cost Breakdown panel that just restates the only line on
+   * the page. The panel exists to show a SPLIT, so it appears when at least two of the buckets
+   * carry something (or when an import genuinely produced the lines, which is the case the panel
+   * was built for).
+   */
+  const filled = [g.labor, g.materials, g.other, g.credits].filter((b) => b.lines.length > 0).length;
+  const fromImport = (items ?? []).some((it) => it.import_source === "labor" || it.import_source === "costs");
+  g.hasBreakdown = (g.labor.lines.length > 0 || g.materials.lines.length > 0) && (filled > 1 || fromImport);
   return g;
 }
 

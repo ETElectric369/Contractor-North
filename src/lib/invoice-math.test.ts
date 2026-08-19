@@ -128,11 +128,18 @@ describe("groupInvoiceLines (progress-report labor/material breakdown)", () => {
     expect(g.hasBreakdown).toBe(false);
     expect(g.other.subtotal).toBe(200);
   });
-  it("does NOT treat a hand-typed 'Labor - extra' (hyphen, no source) as imported labor", () => {
+  // REVISED 8/18 (Erik: "dedupe"). This used to assert that a hand-typed "Labor - extra hour"
+  // was NOT labor — deliberate, to keep loose text out of the importer's buckets. His live
+  // invoice proved the cost: "Labor - Brian", typed by hand with a hyphen, printed under OTHER
+  // on the customer's copy, so the document said his crew's hours were something else. A
+  // hand-typed labor line IS labor. What the old test was really protecting — a simple manual
+  // invoice not sprouting a breakdown panel that restates its only line — is now protected by
+  // hasBreakdown itself, and is still asserted here.
+  it("counts a hand-typed 'Labor - extra' as labor, without growing a pointless breakdown box", () => {
     const g = groupInvoiceLines([{ description: "Labor - extra hour", line_total: 90, import_source: null }]);
-    expect(g.labor.lines.length).toBe(0);
-    expect(g.other.subtotal).toBe(90);
-    expect(g.hasBreakdown).toBe(false);
+    expect(g.labor.subtotal).toBeCloseTo(90, 2);
+    expect(g.other.subtotal).toBe(0);
+    expect(g.hasBreakdown).toBe(false); // one bucket, nothing to split — no panel
   });
   it("coerces bad amounts to 0 and handles empty", () => {
     expect(groupInvoiceLines([]).hasBreakdown).toBe(false);
@@ -330,5 +337,42 @@ describe("recalcTotals credits — audit 8: a credit reduces a balance, never in
   });
   it("no credits behaves exactly as before", () => {
     expect(recalcTotals([1000], [400], 0, "sent").amountPaid).toBeCloseTo(400, 2);
+  });
+});
+
+describe("groupInvoiceLines — a hand-typed labor line is labor (the Badger Lane 'Other $760')", () => {
+  const line = (description: string, line_total: number, extra: Record<string, unknown> = {}) =>
+    ({ description, line_total, ...extra });
+
+  it("a HYPHEN after Labor counts, not just the importer's em dash", () => {
+    const g = groupInvoiceLines([line("Labor - Brian", 760)]);
+    expect(g.labor.subtotal).toBeCloseTo(760, 2);
+    expect(g.other.subtotal).toBe(0);
+  });
+
+  it("anything billed in hours is labor, however it's worded", () => {
+    const g = groupInvoiceLines([line("Saturday callout", 400, { unit: "hrs" })]);
+    expect(g.labor.subtotal).toBeCloseTo(400, 2);
+  });
+
+  it("the imported forms still classify as they always did", () => {
+    const g = groupInvoiceLines([
+      line("Labor — Erik", 1160, { import_source: "labor", unit: "hr" }),
+      line("Materials — Ace", 390.98, { import_source: "costs", unit: "lot" }),
+    ]);
+    expect(g.labor.subtotal).toBeCloseTo(1160, 2);
+    expect(g.materials.subtotal).toBeCloseTo(390.98, 2);
+    expect(g.other.subtotal).toBe(0);
+  });
+
+  it("a genuine 'other' line stays other", () => {
+    const g = groupInvoiceLines([line("Permit fee", 120, { unit: "ea" })]);
+    expect(g.other.subtotal).toBeCloseTo(120, 2);
+  });
+
+  it("the prior-billings credit is still a credit, even billed in hours", () => {
+    const g = groupInvoiceLines([line("Less previous billings", -500, { import_source: "draw_credit", unit: "hr" })]);
+    expect(g.credits.subtotal).toBeCloseTo(-500, 2);
+    expect(g.labor.subtotal).toBe(0);
   });
 });
