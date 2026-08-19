@@ -576,6 +576,38 @@ async function billedOnAnotherStandardInvoice(
   return null;
 }
 
+/**
+ * START ONE IMPORT SOURCE OVER (0204) — the release for 0175's three protections.
+ *
+ * Erik: "i tried to reimport the timcard entries so i could get the order right … but its not
+ * working." Every guard was doing its job: the crew member's line he deleted was TOMBSTONED so
+ * no import would resurrect it, and the lines that survived were `edited`, which an import must
+ * never overwrite. So the import ran, changed nothing, and said so in numbers nobody reads as a
+ * refusal. Deleting a line to re-import it in a different order is an ordinary thing to want;
+ * without this there was no way back at all.
+ *
+ * Draft-only and staff-only (the RPC re-checks both), scoped to ONE source, and it drops the
+ * lines as the IMPORTER so they aren't tombstoned again on the way out. The caller then runs
+ * the importer, which rebuilds the source from scratch, in source order.
+ */
+export async function reimportFromScratch(
+  invoiceId: string,
+  source: "labor" | "costs" | "quote",
+): Promise<ImportResult> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const { error } = await supabase.rpc("reset_import_source", { p_invoice_id: invoiceId, p_source: source });
+  if (error) return { ok: false, error: dbError(error) };
+  const run =
+    source === "labor"
+      ? importLaborIntoInvoice(invoiceId)
+      : source === "costs"
+        ? importCostsIntoInvoice(invoiceId)
+        : importQuoteItemsIntoInvoice(invoiceId);
+  return run;
+}
+
 export async function importLaborIntoInvoice(invoiceId: string): Promise<ImportResult> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };

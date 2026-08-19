@@ -28,6 +28,7 @@ import {
   recordPayment,
   importQuoteItemsIntoInvoice,
   importLaborIntoInvoice,
+  reimportFromScratch,
   importCostsIntoInvoice,
   updatePayment,
   deletePayment,
@@ -176,6 +177,9 @@ export function InvoiceDetail({
 
   // import state
   const [importMsg, setImportMsg] = useState<string | null>(null);
+  /** An import that could not touch ANYTHING — every line edited, or the deleted ones tombstoned.
+   *  Naming the source arms the "start over" button beside the message (0204). */
+  const [stuckSource, setStuckSource] = useState<"labor" | "costs" | "quote" | null>(null);
   const [markup, setMarkup] = useState(materialMarkup); // material markup % for the costs import
   // The % now applies ONLY when an import button is deliberately tapped — see the block below
   // where the auto-reapply used to live. It seeds from the customer's pricing level, or the org
@@ -196,6 +200,7 @@ export function InvoiceDetail({
     fn: (id: string) => Promise<{ ok: boolean; error?: string }>,
     label: string,
     replacing = 0,
+    sourceKey: "labor" | "costs" | "quote" | null = null,
   ) {
     if (replacing > 0) {
       const ok = confirm(
@@ -208,6 +213,7 @@ export function InvoiceDetail({
       if (!ok) return;
     }
     setImportMsg(null);
+    setStuckSource(null);
     start(async () => {
       const res = await fn(invoice.id);
       if (!res.ok) {
@@ -228,6 +234,11 @@ export function InvoiceDetail({
             st.removed ? `${st.removed} removed` : "",
           ].filter(Boolean).join(" · ") || "nothing changed"
         : "";
+      // "nothing changed" is the sentence that sent Erik looking for a bug (8/18). When an
+      // import genuinely can't touch anything — every line edited, or the ones he deleted are
+      // tombstoned — say WHY, and put the way out right next to it.
+      const stuck = !!st && !st.inserted && !st.updated && !st.removed;
+      setStuckSource(stuck ? sourceKey : null);
       setImportMsg(said ? `${label}: ${said}.` : `${label} imported.`);
       toast(said ? `${label} — ${said}` : `${label} imported`, "success");
       setTimeout(() => setImportMsg(null), 5000);
@@ -515,16 +526,16 @@ export function InvoiceDetail({
           !isDrawKind((invoice as any).invoice_kind) && (
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50/60 px-3 py-2.5">
             <span className="text-xs font-medium text-slate-500">Import:</span>
-            <Button size="sm" variant="outline" onClick={() => runImport(importQuoteItemsIntoInvoice, "Estimate items", items.filter((i) => i.import_source === "quote").length)} disabled={pending}>
+            <Button size="sm" variant="outline" onClick={() => runImport(importQuoteItemsIntoInvoice, "Estimate items", items.filter((i) => i.import_source === "quote").length, "quote")} disabled={pending}>
               From Estimate
             </Button>
             {invoice.job_id && (
               <>
-                <Button size="sm" variant="outline" onClick={() => runImport(importLaborIntoInvoice, "Labor", items.filter((i) => i.import_source === "labor").length)} disabled={pending}>
+                <Button size="sm" variant="outline" onClick={() => runImport(importLaborIntoInvoice, "Labor", items.filter((i) => i.import_source === "labor").length, "labor")} disabled={pending}>
                   Labor From Timecards
                 </Button>
                 <div className="flex items-center gap-1.5">
-                  <Button size="sm" variant="outline" onClick={() => runImport((id) => importCostsIntoInvoice(id, markup), "Materials", items.filter((i) => i.import_source === "costs").length)} disabled={pending}>
+                  <Button size="sm" variant="outline" onClick={() => runImport((id) => importCostsIntoInvoice(id, markup), "Materials", items.filter((i) => i.import_source === "costs").length, "costs")} disabled={pending}>
                     Materials From Costs
                   </Button>
                   <NumberInput value={markup} onValueChange={(v) => setMarkup(v)} className="h-8 w-14 text-center text-sm" aria-label="Material markup percent" />
@@ -533,6 +544,28 @@ export function InvoiceDetail({
               </>
             )}
             {importMsg && <span className="text-xs text-slate-500">{importMsg}</span>}
+            {stuckSource && (
+              <span className="flex items-center gap-1.5 text-xs text-amber-700">
+                Lines you edited or removed are protected, so nothing came in.
+                <button
+                  type="button"
+                  disabled={pending}
+                  onClick={() => {
+                    if (
+                      !confirm(
+                        "Start this import over? Every line from this import is removed and rebuilt from the source — including ones you edited or deleted. Hand-entered lines are untouched.",
+                      )
+                    )
+                      return;
+                    const src = stuckSource;
+                    runImport((id) => reimportFromScratch(id, src), src === "labor" ? "Labor" : src === "costs" ? "Materials" : "Estimate items", 0, src);
+                  }}
+                  className="rounded-md border border-amber-300 bg-white px-2 py-1 font-medium text-amber-800 hover:bg-amber-50 disabled:opacity-50"
+                >
+                  Start it over
+                </button>
+              </span>
+            )}
           </div>
         )}
 
