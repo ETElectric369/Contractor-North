@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
+import { contentDisposition } from "@/lib/content-disposition";
 import { headers } from "next/headers";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { isStaffRole } from "@/lib/actions/perms";
@@ -53,7 +54,8 @@ function pdfResponse(bytes: Uint8Array, filename: string) {
       "Content-Type": "application/pdf",
       // Quote/newline-strip: invoice_number is settable via a direct PostgREST PATCH, and a
       // raw quote or CRLF in a header value is a response-splitting primitive.
-      "Content-Disposition": `inline; filename="${filename.replace(/[\r\n"\\]/g, "")}"`,
+      // ASCII fallback + RFC 5987 UTF-8 (audit: the Badger Lane em-dash killed the response).
+      "Content-Disposition": contentDisposition(filename),
       // no-store at the HTTP layer on purpose: the caching lives server-side, behind the
       // fingerprint check, where staleness is impossible. A browser-cached copy could go stale.
       "Cache-Control": "no-store",

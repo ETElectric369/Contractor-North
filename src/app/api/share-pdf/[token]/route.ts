@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { contentDisposition } from "@/lib/content-disposition";
 import { createServiceClient } from "@/lib/supabase/server";
 import { CUSTOMER_VISIBLE_STATUSES } from "@/lib/pdf-cache";
 
@@ -67,7 +68,8 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ token: str
   return new NextResponse(Buffer.from(await blob.arrayBuffer()) as unknown as BodyInit, {
     headers: {
       "Content-Type": "application/pdf",
-      "Content-Disposition": `inline; filename="${filename.replace(/[\r\n"\\]/g, "")}"`,
+      // ASCII fallback + RFC 5987 UTF-8 (audit: the Badger Lane em-dash killed the response).
+      "Content-Disposition": contentDisposition(filename),
       "Cache-Control": "private, no-store",
       "X-Robots-Tag": "noindex",
     },
