@@ -272,7 +272,21 @@ export async function createInvoiceFromQuote(quoteId: string): Promise<Result> {
       job_id: quote.job_id,
       quote_id: quote.id,
       title: quote.title,
-      notes: quote.notes,
+      /**
+       * THE ESTIMATE'S NOTES DO NOT BECOME THE BILL'S (Erik, 8/18: "dont forget about all the
+       * notes at the bottom from the estimate that shouldnt be there").
+       *
+       * A quote's notes describe an OFFER — "OPTIONS — not included in the total above",
+       * A/B upgrades the customer didn't take, "this estimate is based on the assumption
+       * that no obstacles arise". Copied onto an invoice they read as things being billed,
+       * on a document that bills work already finished. Badger Lane's invoice carried its
+       * estimate's options block verbatim, three weeks after the work was done.
+       *
+       * The invoice starts with its own empty notes. The work narrative has its own field
+       * (description, printed above the line items) and the payment wording comes from the
+       * org's invoice terms — neither is touched here.
+       */
+      notes: null,
       tax_rate: quote.tax_rate,
       subtotal: quote.subtotal,
       tax: quote.tax,
