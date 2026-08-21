@@ -419,17 +419,11 @@ export async function convertInquiry(
         ? `/quotes/new?customer=${linkedCustomer}&inquiry=${id}`
         : `/quotes/new?inquiry=${id}`;
     }
-    const { error: uErr } = await supabase
-      .from("inquiries")
-      .update({
-        customer_id: linkedCustomer, // stays null until the estimate is accepted
-        converted_to: "quote",
-        converted_at: new Date().toISOString(),
-        status: "quoted",
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", id);
-    if (uErr) return { ok: false, error: uErr.message };
+    // NO STAMP HERE. The lead converts when the estimate actually LANDS — saveQuote stamps it
+    // (converted_to/at + status, first-deed-only). Andrew's lead was stamped 'quoted' at this
+    // click, then the blank builder was abandoned: no quote existed, the lead had left the
+    // inbox, and the plan set he'd uploaded became unreachable. The seeded branch above already
+    // went through saveQuote; the blank branch converts on the builder's own save.
     revalidatePath("/leads");
     revalidatePath("/quotes");
     return { ok: true, redirect };

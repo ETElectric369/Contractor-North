@@ -604,6 +604,27 @@ export async function saveQuote(input: SaveQuoteInput) {
     }
   }
 
+  // THE DEED STAMPS THE RECORD (Andrew's orphaned lead). Converting a lead to a BLANK builder
+  // used to stamp it 'quoted' at click time — abandon the builder and the lead left the inbox
+  // with no quote existing, taking its intake attachments with it. The lead now converts at the
+  // moment an estimate for it actually lands, whichever door built it (seeded conversion, blank
+  // builder, walk-through write-up). `.is(converted_at, null)` keeps it first-deed-only: the
+  // zero-row update on an already-converted lead is the intended no-op, not a silent failure.
+  if (inquiryId) {
+    await supabase
+      .from("inquiries")
+      .update({
+        ...(input.customer_id ? { customer_id: input.customer_id } : {}),
+        converted_to: "quote",
+        converted_at: new Date().toISOString(),
+        status: "quoted",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", inquiryId)
+      .is("converted_at", null);
+    revalidatePath("/leads");
+  }
+
   revalidatePath("/quotes");
   // Return the SAVED money figures (the subtotalTaxTotal rollup that was written) +
   // the trigger-assigned number, so every caller — Nort's quote.create especially —
