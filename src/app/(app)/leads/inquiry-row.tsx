@@ -14,6 +14,7 @@ import type { Inquiry, LeadBucket } from "@/lib/types";
 import { INQUIRY_STATUSES } from "@/lib/statuses";
 import { LEAD_BUCKETS } from "@/lib/lead-triage";
 import { IntakeFiles } from "./intake-files";
+import { PlanBriefPanel } from "./plan-brief-panel";
 import { intakePaths } from "@/lib/playbook/uploads";
 
 // Named INQUIRY_STATUS_TONE (not `statusTone`) so it can't shadow the shared badge
@@ -175,6 +176,7 @@ export function InquiryRow({
         <div className="mt-1 space-y-3 rounded-lg bg-slate-50/70 p-3">
           {inquiry.message && <p className="whitespace-pre-wrap text-sm text-slate-600">{inquiry.message}</p>}
           <IntakeFiles inquiryId={inquiry.id} paths={intakePaths(inquiry.intake)} />
+          <PlanBriefPanel inquiryId={inquiry.id} intake={inquiry.intake} />
           <div className="flex flex-wrap items-end gap-3">
             <div>
               <label className="mb-0.5 block text-[10px] uppercase tracking-wide text-slate-400">Follow up</label>

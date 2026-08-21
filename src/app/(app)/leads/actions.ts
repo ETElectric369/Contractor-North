@@ -17,7 +17,9 @@ import { saveQuote } from "../quotes/actions";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { INTAKE_BUCKET, isOwnIntakePath } from "@/lib/playbook/uploads";
 import { playbookForForm } from "@/lib/playbook/parse";
-import { answersFromIntake } from "@/lib/inquiries/carry-intake-answers";
+import { briefNote, carriedNote, carryForInquiry } from "@/lib/inquiries/carry-intake-answers";
+import { runPlanBrief } from "@/lib/plan-brief-run";
+import { rateLimited } from "@/lib/rate-limit";
 
 export type Result = {
   ok: boolean;
@@ -229,33 +231,8 @@ export async function deleteInquiry(id: string): Promise<Result> {
  *
  * Returns nulls when there is nothing to carry, so both booking paths can spread it unconditionally.
  */
-async function intakeCarry(
-  supabase: SupabaseClient,
-  inq: { intake?: { intake_answers?: unknown } | null },
-): Promise<{ inspectionTemplateId: string | null; inspectionAnswers: Record<string, unknown>; carried: string[] }> {
-  const none = { inspectionTemplateId: null, inspectionAnswers: {}, carried: [] };
-  const stored = inq.intake?.intake_answers;
-  if (!stored || typeof stored !== "object") return none;
-  // THE walk-through, singular: `is_inspection` is what distinguishes it from the safety checklist
-  // and from the public intake form, and every org has exactly one. Read on the caller's own RLS
-  // client, so this can only ever find their own org's.
-  const { data: form } = await supabase
-    .from("forms")
-    .select("id, schema, playbook")
-    .eq("is_inspection", true)
-    .limit(1)
-    .maybeSingle();
-  if (!form) return none;
-  const pb = playbookForForm(form as { schema?: unknown; playbook?: unknown });
-  const { answers, carried } = answersFromIntake(pb, stored);
-  if (!carried.length) return none;
-  return { inspectionTemplateId: (form as { id: string }).id, inspectionAnswers: answers, carried };
-}
-
-/** One line for the appointment's notes. A pre-filled answer that looks like the contractor's own
- *  is worse than no pre-fill: he has to know which of these came from a stranger. */
-const carriedNote = (carried: string[]): string | null =>
-  carried.length ? `Already answered by the customer online (confirm on site): ${carried.join(", ")}.` : null;
+// The lead → walk-through carry (intake answers + plan brief, person outranks machine) lives in
+// lib/inquiries/carry-intake-answers so the one-tap Inspect-now door inherits the identical seed.
 
 /**
  * Explicitly convert an inquiry. Nothing happens automatically — the caller
@@ -309,7 +286,7 @@ export async function convertInquiry(
     // it also withdraws any earlier still-pending link for this same lead).
     const slots = cleanSlots(opts.slots, "09:00");
     if (slots.length) {
-      const carry = await intakeCarry(supabase, inq);
+      const carry = await carryForInquiry(supabase, inq);
       const res = await createProposalCore(supabase, {
         type: "inspection",
         title: `Site inspection: ${inq.name}`,
@@ -318,7 +295,10 @@ export async function convertInquiry(
         inquiryId: id,
         customerId: null, // deferred-customer doctrine: no contact row before the win
         location: inq.address,
-        notes: [inq.message ?? inq.notes ?? null, carriedNote(carry.carried)].filter(Boolean).join("\n\n") || null,
+        notes:
+          [inq.message ?? inq.notes ?? null, carriedNote(carry.carried), briefNote(carry.briefCarried)]
+            .filter(Boolean)
+            .join("\n\n") || null,
         inspectionTemplateId: carry.inspectionTemplateId,
         inspectionAnswers: carry.inspectionAnswers,
         createdBy: ctx.userId,
@@ -348,13 +328,16 @@ export async function convertInquiry(
     const startDate = opts.startDate || ymdAddDays(todayStrInTz(tz), 2);
     const startsAtIso = tzDateTimeUtc(startDate, "09:00", tz);
     if (!startsAtIso) return { ok: false, error: "Pick a valid inspection date." };
-    const carry = await intakeCarry(supabase, inq);
+    const carry = await carryForInquiry(supabase, inq);
     const { error: aErr } = await supabase.from("appointments").insert({
       type: "inspection",
       title: `Site inspection: ${inq.name}`,
       starts_at: startsAtIso,
       location: inq.address,
-      notes: [inq.message ?? inq.notes ?? null, carriedNote(carry.carried)].filter(Boolean).join("\n\n") || null,
+      notes:
+        [inq.message ?? inq.notes ?? null, carriedNote(carry.carried), briefNote(carry.briefCarried)]
+          .filter(Boolean)
+          .join("\n\n") || null,
       // The customer's own answers, on the walk-through, so the inspector CONFIRMS rather than
       // re-asks — which is what the Tahoe Deck starter has claimed since it was written.
       inspection_template_id: carry.inspectionTemplateId,
@@ -540,6 +523,30 @@ export async function convertInquiry(
  * folder, so a guessed path from another tenant resolves to nothing. Ten minutes is enough to open
  * a drawing and short enough that a copied URL dies before it travels.
  */
+/**
+ * READ (or re-read) a lead's plans into the preliminary report — the staff door to the same
+ * runner the intake submit kicks in the background. Covers every lead the automatic pass missed:
+ * uploads from before the feature shipped, a run that died mid-read, a re-read after the
+ * customer sends a corrected set.
+ *
+ * Synchronous on purpose: the person tapping the button wants the report, and an honest wait
+ * with a result beats a fire-and-forget that may have failed. Membership is proven by the
+ * RLS-scoped read; the runner itself re-pins org_id on every query.
+ */
+export async function refreshPlanBrief(id: string): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error ?? "This action is staff-only." };
+  const { data: inq } = await ctx.supabase.from("inquiries").select("id, org_id").eq("id", id).maybeSingle();
+  if (!inq) return { ok: false, error: "Lead not found." };
+  if (await rateLimited(`plan-brief-manual:${ctx.userId}`, 10, 900, { failClosed: true })) {
+    return { ok: false, error: "A lot of readings in a row — give it a few minutes." };
+  }
+  const r = await runPlanBrief(String((inq as { org_id?: string }).org_id ?? ""), id);
+  revalidatePath("/leads");
+  revalidatePath("/planner");
+  return r.ok ? { ok: true } : { ok: false, error: r.error };
+}
+
 export async function intakeFileUrl(
   inquiryId: string,
   path: string,

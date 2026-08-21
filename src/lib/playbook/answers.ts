@@ -246,6 +246,23 @@ function needText(n: Need, v: AnswerValue): string {
  * stale measurement handed over as a given is the exact failure the resolver exists to prevent.
  */
 export function factsForEstimator(pb: Playbook, answers: Answers): string {
+  return factsForEstimatorByProvenance(pb, answers, EMPTY_KEYS).hand;
+}
+
+const EMPTY_KEYS: ReadonlySet<string> = new Set();
+
+/**
+ * The same facts, PARTITIONED BY WHO SAID THEM. `machineKeys` names the answers that are still a
+ * model's verbatim reading of the customer's plans (see briefProvenanceKeys) — those must not
+ * cross into the estimator under the "his words — take them as given" header, because a
+ * machine's unverified count wearing the contractor's voice is exactly the stale-measurement
+ * failure this function's fixed-point clear exists to prevent, with a worse author.
+ */
+export function factsForEstimatorByProvenance(
+  pb: Playbook,
+  answers: Answers,
+  machineKeys: ReadonlySet<string>,
+): { hand: string; machine: string } {
   // CLEAR TO A FIXED POINT FIRST. applicableNeeds is ONE pass: with work="Troubleshoot" it
   // correctly drops power_source, but a stale power_source value keeps `feed` applicable, and a
   // stale feed keeps run_ft applicable — so a 25-ft feeder from an abandoned branch was handed to
@@ -255,7 +272,8 @@ export function factsForEstimator(pb: Playbook, answers: Answers): string {
   const retired = retiredAnswers(pb, answers);
   answers = clearInapplicable(pb, answers);
 
-  const lines: string[] = [];
+  const hand: string[] = [];
+  const machine: string[] = [];
   for (const n of applicableNeeds(pb, answers)) {
     const t = needText(n, answers[n.key]);
     if (!t.trim()) continue;
@@ -265,12 +283,12 @@ export function factsForEstimator(pb: Playbook, answers: Answers): string {
     // line, so the other seven arrived unbulleted and unattached, and we then asked a model to
     // reconstruct the structure he had already typed. Indent the continuations so one need stays
     // one bullet and his rows stay rows.
-    lines.push(`- ${n.label}: ${t.split("\n").join("\n  ")}`);
+    (machineKeys.has(n.key) ? machine : hand).push(`- ${n.label}: ${t.split("\n").join("\n  ")}`);
   }
   // AND WHAT HE ANSWERED UNDER A QUESTION HE HAS SINCE RETIRED. Preserving it on the row but
   // hiding it from the estimator would be the same loss wearing a better disguise — 725
   // Granlibakken's wire list is a materials line whatever the question that caught it was called.
   for (const [k, t] of Object.entries(retired))
-    lines.push(`- ${retiredLabel(k)}: ${t.split("\n").join("\n  ")}`);
-  return lines.join("\n");
+    (machineKeys.has(k) ? machine : hand).push(`- ${retiredLabel(k)}: ${t.split("\n").join("\n  ")}`);
+  return { hand: hand.join("\n"), machine: machine.join("\n") };
 }

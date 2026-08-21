@@ -13,7 +13,8 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { tzDateTimeUtc, todayStrInTz } from "@/lib/tz";
 import { createProposalCore, cleanSlots } from "@/lib/appointments/proposal";
 import { endAfterStart } from "@/lib/appointments/times";
-import { APPOINTMENT_STATUSES, APPOINTMENT_TYPES } from "@/lib/statuses";
+import { APPOINTMENT_STATUSES, APPOINTMENT_TYPES, INSPECTION_TYPES } from "@/lib/statuses";
+import { briefNote, carriedNote, carryForInquiry } from "@/lib/inquiries/carry-intake-answers";
 import { coerceByPlaybook, retiredAnswers, retiredOptions } from "@/lib/playbook/answers";
 import { playbookForForm } from "@/lib/playbook/parse";
 import { clearInapplicable } from "@/lib/playbook/resolve";
@@ -168,17 +169,26 @@ export async function createInspectionNow(
     message: string | null;
     notes: string | null;
     customer_id: string | null;
+    intake?: { intake_answers?: unknown } | null;
   };
   let inq: LeadCtx | null = null;
   if (opts.inquiryId) {
     const { data } = await supabase
       .from("inquiries")
-      .select("id, name, address, city, state, zip, message, notes, customer_id")
+      .select("id, name, address, city, state, zip, message, notes, customer_id, intake")
       .eq("id", opts.inquiryId)
       .maybeSingle();
     if (!data) return { ok: false, error: "Lead not found." };
     inq = data as LeadCtx;
   }
+
+  // THE SAME SEED AS THE BOOKED PATHS. This one-tap door used to copy only message/notes, so an
+  // inspection started from the lead row opened BLANK while a scheduled one opened pre-filled —
+  // the customer's intake answers and the plan brief both carry here now, person over machine,
+  // each named in the notes (Erik: "open the inspector right there with the data all filled in").
+  const carry = inq
+    ? await carryForInquiry(supabase, inq)
+    : { inspectionTemplateId: null, inspectionAnswers: {}, carried: [], briefCarried: [] };
 
   const { data: appt, error } = await supabase
     .from("appointments")
@@ -193,7 +203,12 @@ export async function createInspectionNow(
       city: inq?.city ?? null,
       state: inq?.state ?? null,
       zip: inq?.zip ?? null,
-      notes: inq?.message ?? inq?.notes ?? null,
+      notes:
+        [inq?.message ?? inq?.notes ?? null, carriedNote(carry.carried), briefNote(carry.briefCarried)]
+          .filter(Boolean)
+          .join("\n\n") || null,
+      inspection_template_id: carry.inspectionTemplateId,
+      inspection_answers: carry.inspectionAnswers,
       customer_id: inq?.customer_id ?? null, // deferred-customer doctrine: no contact row before the win
       inquiry_id: inq?.id ?? null,
       assigned_to: ctx.userId, // whoever tapped is the one standing onsite
@@ -228,6 +243,29 @@ export async function createInspectionNow(
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   revalidatePath("/inspections");
   return { ok: true, id: appt.id };
+}
+
+/**
+ * THE LEAD'S ONE DOOR INTO ITS WALK-THROUGH (Erik: "a preliminary inspection report button on
+ * the lead page itself so i can open the inspector right there with the data all filled in").
+ * Opens the lead's EXISTING inspection when one is live — a second tap must never mint a second
+ * walk-through — and otherwise starts one now through createInspectionNow, which seeds the
+ * intake answers and the plan brief.
+ */
+export async function openLeadInspection(inquiryId: string): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { data: existing } = await ctx.supabase
+    .from("appointments")
+    .select("id")
+    .eq("inquiry_id", inquiryId)
+    .in("type", [...INSPECTION_TYPES])
+    .neq("status", "cancelled")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (existing) return { ok: true, id: (existing as { id: string }).id };
+  return createInspectionNow({ inquiryId });
 }
 
 /** Create a TENTATIVE appointment + a customer pick-a-time link (up to 3 date+

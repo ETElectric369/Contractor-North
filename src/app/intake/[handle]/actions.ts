@@ -8,7 +8,9 @@ import { clientIp, rateLimited } from "@/lib/rate-limit";
 import { coerceByPlaybook } from "@/lib/playbook/answers";
 import { clearInapplicable } from "@/lib/playbook/resolve";
 import { publicIntakeNeeds } from "@/lib/playbook/public-intake";
-import { isOwnIntakePath, uploadDisplayName } from "@/lib/playbook/uploads";
+import { after } from "next/server";
+import { extOf, intakePaths, isOwnIntakePath, uploadDisplayName } from "@/lib/playbook/uploads";
+import { runPlanBrief } from "@/lib/plan-brief-run";
 import { playbookForForm } from "@/lib/playbook/parse";
 import type { Answers } from "@/lib/playbook/types";
 
@@ -123,8 +125,9 @@ export async function submitIntake(
     .filter(Boolean) as string[];
 
   const hasPlans = String(answers["has_plans"] ?? "").toLowerCase() === "yes";
+  let inquiryId: string | null = null;
   try {
-    await createTriagedInquiry(supabase, orgId, {
+    const created = await createTriagedInquiry(supabase, orgId, {
     name,
     phone: phone || null,
     email: email || null,
@@ -153,8 +156,24 @@ export async function submitIntake(
     // their way onto the contractor's calendar. Booking stays a one-tap action on the Leads board.
       autoBookInspection: false,
     });
+    inquiryId = created.id;
   } catch {
     return { ok: false, error: "Something went wrong — please call us instead." };
+  }
+
+  // THE PRELIMINARY REPORT (Erik + Andrew, 8/21): a lead that arrives with plan PDFs gets them
+  // read into a walk-through brief in the background, so the report is waiting when the office
+  // opens the lead. after() — the customer's confirmation never waits on a model. The runner
+  // carries its own harness (org AI ceiling, fail-closed daily cap, meter) because this is the
+  // one model call a stranger's form post can start. Values are snapshotted; the callback
+  // touches no request APIs (the house rule at quotes/actions.ts:85).
+  const uploadedPdf = intakePaths({ intake_answers: answers }).some((p) => extOf(p) === "pdf");
+  if (inquiryId && uploadedPdf) {
+    const bgOrgId = orgId;
+    const bgInquiryId = inquiryId;
+    after(async () => {
+      await runPlanBrief(bgOrgId, bgInquiryId).catch(() => undefined);
+    });
   }
   return { ok: true };
 }

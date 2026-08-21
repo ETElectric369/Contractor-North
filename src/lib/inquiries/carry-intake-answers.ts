@@ -1,4 +1,7 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { coerceByPlaybook } from "@/lib/playbook/answers";
+import { playbookForForm } from "@/lib/playbook/parse";
+import { answersFromBrief, layerBriefAnswers, parsePlanBrief } from "@/lib/plan-brief";
 import type { Answers, Playbook } from "@/lib/playbook/types";
 
 /**
@@ -84,3 +87,54 @@ export function answersFromIntake(
   const carried = pb.needs.filter((n) => kept[n.key] != null).map((n) => n.label);
   return { answers: kept, carried };
 }
+
+/**
+ * EVERYTHING A NEW WALK-THROUGH INHERITS FROM ITS LEAD, in one place — the customer's own intake
+ * answers plus the plan brief's, layered so the person always outranks the machine. Shared by
+ * every door that mints an inspection from a lead (the booked paths on the Leads board AND the
+ * one-tap Inspect-now), because two doors carrying different halves is how Andrew's plans got
+ * read into a report the inspector then opened blank.
+ *
+ * Reads THE org walk-through (is_inspection, singular) on the CALLER's client — RLS-scoped
+ * callers can only ever find their own org's.
+ */
+export async function carryForInquiry(
+  supabase: SupabaseClient,
+  inq: { intake?: { intake_answers?: unknown } | null },
+): Promise<{
+  inspectionTemplateId: string | null;
+  inspectionAnswers: Answers;
+  carried: string[];
+  briefCarried: string[];
+}> {
+  const none = { inspectionTemplateId: null, inspectionAnswers: {}, carried: [], briefCarried: [] };
+  const stored = inq.intake?.intake_answers;
+  const brief = parsePlanBrief(inq.intake);
+  const hasIntake = !!stored && typeof stored === "object";
+  const hasBrief = brief?.status === "ready" && !!brief.answers && Object.keys(brief.answers).length > 0;
+  if (!hasIntake && !hasBrief) return none;
+  const { data: form } = await supabase
+    .from("forms")
+    .select("id, schema, playbook")
+    .eq("is_inspection", true)
+    .limit(1)
+    .maybeSingle();
+  if (!form) return none;
+  const pb = playbookForForm(form as { schema?: unknown; playbook?: unknown });
+  const { answers: fromCustomer, carried } = hasIntake
+    ? answersFromIntake(pb, stored)
+    : { answers: {}, carried: [] as string[] };
+  const fromBrief = hasBrief ? answersFromBrief(pb, brief!.answers) : {};
+  const { answers, briefCarried } = layerBriefAnswers(pb, fromCustomer, fromBrief);
+  if (!carried.length && !briefCarried.length) return none;
+  return { inspectionTemplateId: (form as { id: string }).id, inspectionAnswers: answers, carried, briefCarried };
+}
+
+/** One line for the appointment's notes. A pre-filled answer that looks like the contractor's own
+ *  is worse than no pre-fill: he has to know which of these came from a stranger. */
+export const carriedNote = (carried: string[]): string | null =>
+  carried.length ? `Already answered by the customer online (confirm on site): ${carried.join(", ")}.` : null;
+
+/** Same law for the machine's answers — and these came from a document, so: verify on site. */
+export const briefNote = (briefCarried: string[]): string | null =>
+  briefCarried.length ? `Read from the customer's plans (verify on site): ${briefCarried.join(", ")}.` : null;

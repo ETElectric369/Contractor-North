@@ -8,6 +8,9 @@ import { publicIntakeNeeds } from "@/lib/playbook/public-intake";
 import { IntakeForm } from "./intake-form";
 
 export const dynamic = "force-dynamic";
+// The segment's server actions inherit this budget. submitIntake finishes fast for the customer;
+// the allowance is for the after() plan reading, which shares the same invocation.
+export const maxDuration = 300;
 
 /**
  * THE PUBLIC INTAKE DOOR — /intake/<handle>. The link a contractor puts on his own website

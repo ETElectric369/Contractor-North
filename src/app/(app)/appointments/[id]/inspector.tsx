@@ -16,6 +16,7 @@ import { scopeTotal, type ScopePick } from "@/lib/playbook/scopes";
 import { playbookForForm } from "@/lib/playbook/parse";
 import { applicableNeeds, clearInapplicable, isAnswered, isOpen, isSettled, missingNeeds, splitAsk } from "@/lib/playbook/resolve";
 import type { Answers, AnswerValue, Need, Playbook } from "@/lib/playbook/types";
+import { computeBriefFills, type PlanBrief } from "@/lib/plan-brief";
 import {
   captureId,
   inspectorReadiness,
@@ -143,6 +144,7 @@ export function Inspector({
   estimateHref,
   initialLocation,
   linked,
+  planBrief = null,
 }: {
   appointmentId: string;
   templates: InspectionTemplate[];
@@ -160,6 +162,9 @@ export function Inspector({
   initialLocation: string;
   /** What this visit is already connected to — a lead, a customer or a job. */
   linked: { kind: "lead" | "customer" | "job"; name: string } | null;
+  /** The lead's preliminary plan report (ready only) — server-parsed, so the card is in the
+   *  initial HTML and Zone A's height never shifts after mount (the iOS keyboard law). */
+  planBrief?: PlanBrief | null;
 }) {
   const router = useRouter();
   const stored = useMemo(() => parseInspectorCapture(initialCapture), [initialCapture]);
@@ -501,6 +506,36 @@ export function Inspector({
     // one pass leaves an abandoned branch's measurement alive all the way into a price.
     setAnswers((a) => clearInapplicable(playbook, { ...a, [key]: value }));
     queueAnswers();
+  };
+
+  // ── THE PRELIMINARY REPORT'S ANSWERS ─────────────────────────────────────────────────────
+  // What the plan reading prepared that THIS sheet still has open. Booking an inspection from
+  // the lead seeds these server-side; this covers the other orderings — a walk-through booked
+  // before the reading finished, or a sheet switched after. FILLS HOLES ONLY, through the same
+  // setAnswers/clearInapplicable spine as every other write — never a second write path.
+  // computeBriefFills re-coerces against the CURRENT playbook (the brief was coerced against the
+  // sheet as it stood at reading time) and simulates the apply, so the count equals exactly what
+  // a tap leaves answered — see its doc for the two review findings behind that.
+  const rawBriefAnswers = planBrief?.status === "ready" ? (planBrief.answers ?? null) : null;
+  const briefFills = useMemo(
+    () => (rawBriefAnswers ? computeBriefFills(playbook, rawBriefAnswers, answers) : []),
+    [rawBriefAnswers, playbook, answers],
+  );
+  // MOUNT-STABLE presence (the iOS keyboard law): the card and button exist based on what the
+  // brief could fill AT LOAD — filling the last hole disables the button in place, it never
+  // unmounts it, because collapsing the card mid-gesture shifts every chip grid below it.
+  const briefHadFills = useMemo(
+    () => (rawBriefAnswers ? computeBriefFills(playbook, rawBriefAnswers, initialAnswers).length > 0 : false),
+    [rawBriefAnswers, playbook, initialAnswers],
+  );
+  const applyBrief = () => {
+    setAnswers((a) => {
+      let next = { ...a };
+      for (const f of briefFills) if (!isAnswered(next[f.key])) next = { ...next, [f.key]: f.value };
+      return clearInapplicable(playbook, next);
+    });
+    queueAnswers();
+    setSavedAt(null);
   };
 
   // ── PHOTOS ─────────────────────────────────────────────────────────────────────────────────
@@ -919,6 +954,58 @@ export function Inspector({
         </div>
 
         <LinkPicker appointmentId={appointmentId} linked={linked} seed={place} />
+
+        {/* THE PRELIMINARY REPORT — what the plans already said, above the questions, because it
+            answers some of them before anyone asks. Server-parsed prop (height-stable at mount),
+            renders only when a ready brief exists (available is not visible), survives the green
+            "that's everything" branch by sitting outside the ternary below. */}
+        {planBrief?.status === "ready" && (planBrief.summary || briefHadFills) && (
+          <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50/60 p-3">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-sky-700">
+              Preliminary report — from the customer&apos;s plans
+            </p>
+            {planBrief.summary && <p className="mt-1 text-sm text-slate-700">{planBrief.summary}</p>}
+            {!!planBrief.scope_included?.length && (
+              <p className="mt-1 text-xs text-slate-600">
+                <span className="font-semibold">Includes:</span> {planBrief.scope_included.join(" · ")}
+              </p>
+            )}
+            {!!planBrief.scope_excluded?.length && (
+              <p className="mt-0.5 text-xs text-slate-600">
+                <span className="font-semibold">Excludes:</span> {planBrief.scope_excluded.join(" · ")}
+              </p>
+            )}
+            {!!planBrief.cautions?.length && (
+              <p className="mt-1 text-xs text-amber-700">
+                <span className="font-semibold">Verify on site:</span> {planBrief.cautions.join(" · ")}
+              </p>
+            )}
+            {!!planBrief.observations?.length && (
+              <details className="mt-1">
+                <summary className="cursor-pointer text-xs font-medium text-sky-700">
+                  More from the plans ({planBrief.observations.length})
+                </summary>
+                <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-slate-600">
+                  {planBrief.observations.map((o, i) => (
+                    <li key={i}>{o}</li>
+                  ))}
+                </ul>
+              </details>
+            )}
+            {briefHadFills && (
+              <button
+                type="button"
+                onClick={applyBrief}
+                disabled={!briefFills.length}
+                className="mt-2 rounded-lg bg-sky-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-sky-700 disabled:bg-slate-300"
+              >
+                {briefFills.length
+                  ? `Fill ${briefFills.length} answer${briefFills.length === 1 ? "" : "s"} from the plans`
+                  : "Filled from the plans"}
+              </button>
+            )}
+          </div>
+        )}
 
         {/* SAY IT, OR TAP IT — the same boxes either way. Above the questions because that is the
             order it happens on a job: he talks first, and what's left over is what gets asked. */}

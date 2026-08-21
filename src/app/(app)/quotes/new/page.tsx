@@ -3,7 +3,8 @@ import { BackLink } from "@/components/back-link";
 import { PageHeader } from "@/components/page-header";
 import { getOrgSettings } from "@/lib/org-settings";
 import { measurementsFromAnswers, tolerateMissingColumns } from "@/lib/inspection/schema";
-import { factsForEstimator } from "@/lib/playbook/answers";
+import { factsForEstimatorByProvenance } from "@/lib/playbook/answers";
+import { briefProvenanceKeys, parsePlanBrief } from "@/lib/plan-brief";
 import { coerceScopes, ownScopes, scopeLines, type ScopePick } from "@/lib/playbook/scopes";
 import type { DraftLineItem } from "@/lib/estimate/line-map";
 import { sheetFromPlaybook } from "@/lib/playbook/from-sheet";
@@ -59,10 +60,10 @@ export default async function NewQuotePage({
       // is a re-derivation that can silently come back with a different number. Facts above prose.
       // Read tolerantly — a deploy precedes its migration, and naming an absent column fails the
       // whole query. Pre-migration this yields no measured block and the prose prefill is unchanged.
-      const insp = await tolerateMissingColumns<{ inspection_answers: unknown; forms: unknown }>(() =>
+      const insp = await tolerateMissingColumns<{ inspection_answers: unknown; forms: unknown; inquiry: unknown }>(() =>
         supabase
           .from("appointments")
-          .select("inspection_answers, forms:inspection_template_id(schema, playbook)")
+          .select("inspection_answers, forms:inspection_template_id(schema, playbook), inquiry:inquiry_id(intake)")
           .eq("id", capture)
           .maybeSingle(),
       );
@@ -72,7 +73,17 @@ export default async function NewQuotePage({
       // because the sheet's checkbox branch only asks whether the value is truthy — and "No" is.
       const pb = playbookForForm(Array.isArray(rel) ? rel[0] : rel);
       const answers = ((insp as any)?.inspection_answers ?? {}) as never;
-      const measuredText = factsForEstimator(pb, answers);
+      // WHO SAID EACH FACT. An answer the plan brief seeded and nobody edited is a MACHINE's
+      // reading of the customer's documents — it must not cross into the estimator wearing "his
+      // words — take them as given". Equality against the brief is the provenance test: the
+      // moment he edits a value it stops matching and becomes his.
+      const inqRel = (insp as any)?.inquiry;
+      const leadBrief = parsePlanBrief((Array.isArray(inqRel) ? inqRel[0] : inqRel)?.intake);
+      const machineKeys =
+        leadBrief?.status === "ready" && leadBrief.answers
+          ? briefProvenanceKeys(pb, leadBrief.answers, answers)
+          : new Set<string>();
+      const { hand: measuredText, machine: machineText } = factsForEstimatorByProvenance(pb, answers, machineKeys);
       // Kit sizing still reads the sheet shape; every measured need is a number slot, so the
       // projection back down loses nothing that sizes anything.
       measured = measurementsFromAnswers(sheetFromPlaybook(pb), answers);
@@ -90,6 +101,11 @@ export default async function NewQuotePage({
         // estimator that eight lines means eight line items — so his list arrived as one blob.
         measuredText
           ? `FROM THE WALK-THROUGH (his words — take them as given). Where he wrote a list, quote ONE LINE ITEM PER LINE:\n${measuredText}`
+          : "",
+        // The machine's answers cross under their own flag, never as his words: a model's
+        // unverified count from a stranger's PDF must be a claim to confirm, not a given.
+        machineText
+          ? `READ FROM THE CUSTOMER'S PLANS BY MACHINE (unverified — treat as claims to check against the drawings, and the walk-through notes above override them):\n${machineText}`
           : "",
         cap?.notes?.trim() ? `Notes:\n${cap.notes.trim()}` : "",
         cap?.measurements?.trim() ? `Measurements:\n${cap.measurements.trim()}` : "",

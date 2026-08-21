@@ -17,6 +17,7 @@ import { hasCaptureData } from "@/lib/inspections";
 import { ApptQuickActions } from "../appointment-status";
 import { IntakeFiles } from "../../leads/intake-files";
 import { intakePaths } from "@/lib/playbook/uploads";
+import { parsePlanBrief } from "@/lib/plan-brief";
 
 export const dynamic = "force-dynamic";
 
@@ -221,6 +222,17 @@ export default async function AppointmentCapturePage({
                 : null
         }
         estimateHref={`/quotes/new?capture=${a.id}${a.inquiry_id ? `&inquiry=${a.inquiry_id}` : ""}`}
+        // The linked lead's preliminary plan report — parsed server-side so the card is in the
+        // initial HTML (Zone A must not grow after mount). Ready briefs only; the lead row owns
+        // the pending/failed lifecycle.
+        planBrief={
+          a.inquiry_id
+            ? (() => {
+                const b = parsePlanBrief((a.inquiries as { intake?: unknown } | null)?.intake);
+                return b?.status === "ready" ? b : null;
+              })()
+            : null
+        }
       />
     </div>
   );
