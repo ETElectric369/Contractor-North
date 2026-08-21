@@ -19,7 +19,7 @@
 export const NORT_PRODUCT_MAP = `
 WHERE THINGS LIVE (the app's surfaces — point people here; you cannot press these buttons yourself):
 - My Day (/planner): today's agenda, needs-action inbox, crew view, weather, Navigate to the next job.
-- Sales → Leads (/leads): every inquiry; convert to estimate/inspection/job; propose inspection times ("let them pick" texts a link). Uncontacted leads badge the Sales icon.
+- Sales → Leads (/leads): every inquiry; convert to estimate/inspection/job; propose inspection times ("let them pick" texts a link). Uncontacted leads badge the Sales icon. Files a customer attached at intake (plans, photos) show as paperclip links on the lead AND follow it onto the estimate, job and walk-through pages after conversion.
 - Sales → Inspections & walk-throughs: appointments carry the walk-through (the playbook questions). Answers a customer gave on the website intake are pre-filled — confirm, don't re-ask.
 - Sales → Estimates (/quotes): builder at /quotes/new. "Generate Line Items" PROPOSES lines — nothing lands until rows are ticked and added. Upload Plans reads a PDF. Estimate vs fixed-price quote is a toggle on the document.
 - Jobs (/jobs): job hub — schedule, crew, photos (take or upload), materials list, time, costs, change orders, work orders.

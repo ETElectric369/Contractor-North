@@ -61,6 +61,8 @@ import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { computeJobLaborBilling, customerLaborRateForJob, fetchJobLaborRows, laborCostForJob } from "@/lib/labor-billing";
 import { formatDateTz } from "@/lib/tz";
 import { NavLink } from "@/components/nav-link";
+import { IntakeFiles } from "../../leads/intake-files";
+import { intakePaths } from "@/lib/playbook/uploads";
 import type { Customer } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -121,7 +123,7 @@ export default async function JobDetailPage({
 
   const { data: job, error: jobErr } = await supabase
     .from("jobs")
-    .select("*, customers(*), inquiry:inquiry_id(id, name)")
+    .select("*, customers(*), inquiry:inquiry_id(id, name, intake)")
     .eq("id", id)
     .maybeSingle();
   if (jobErr) throw jobErr; // a real failure shouldn't masquerade as 404
@@ -1011,6 +1013,11 @@ export default async function JobDetailPage({
             </Link>
           )}
         </div>
+        {/* What the customer attached at intake (plans, photos) — carried the whole trail, because
+            the lead leaves the inbox on conversion and the crew builds from these. */}
+        {(j as any).inquiry && (
+          <IntakeFiles inquiryId={(j as any).inquiry.id} paths={intakePaths((j as any).inquiry.intake)} />
+        )}
       </div>
 
       {/* The action dock — one sticky glass bar replacing the old 7-control row:

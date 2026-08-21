@@ -70,3 +70,19 @@ export const uploadDisplayName = (path: string): string => {
   const m = base.match(/^\d+-[0-9a-f-]{36}-(.+)$/i);
   return m ? m[1] : base;
 };
+
+/**
+ * Every file path across a lead's intake answers, in answer order.
+ *
+ * Shared because an upload must stay reachable along the lead's whole conversion trail (Andrew's
+ * plan set "disappeared" the moment his lead converted — the inbox row was the only surface that
+ * showed it). Anywhere a record carries a real inquiry link, this is how it finds the files.
+ */
+export function intakePaths(intake: unknown): string[] {
+  const answers = (intake as { intake_answers?: Record<string, unknown> } | null)?.intake_answers;
+  if (!answers || typeof answers !== "object") return [];
+  return Object.values(answers)
+    .filter(Array.isArray)
+    .flat()
+    .filter((v): v is string => typeof v === "string" && v.includes("/intake/"));
+}

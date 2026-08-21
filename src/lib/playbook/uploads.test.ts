@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
 import { coerceNeed } from "./answers";
-import { ACCEPT_ATTR, MAX_UPLOAD_MB, extOf, isAllowedUpload, isOwnIntakePath, uploadDisplayName } from "./uploads";
+import { ACCEPT_ATTR, MAX_UPLOAD_MB, extOf, intakePaths, isAllowedUpload, isOwnIntakePath, uploadDisplayName } from "./uploads";
 import { parsePlaybook } from "./parse";
 import type { Need } from "./types";
 
@@ -65,6 +66,43 @@ describe("the file answer shape", () => {
 
   it("shows the customer's own filename, not our storage key", () => {
     expect(uploadDisplayName(`${ORG}/intake/1754500000000-0f1e2d3c-4b5a-6789-abcd-ef0123456789-Deck_Plans.pdf`)).toBe("Deck_Plans.pdf");
+  });
+});
+
+describe("AN UPLOAD MUST SURVIVE CONVERSION — Andrew's plan set 'disappeared' when his lead became a quote", () => {
+  const intake = {
+    reason: "Bucket A",
+    intake_answers: {
+      has_plans: "Yes",
+      plan_files: [`${ORG}/intake/1-a-plan.pdf`, `${ORG}/intake/2-b-site.dwg`],
+      photos: null,
+      q_x: 96161,
+    },
+  };
+
+  it("intakePaths finds every file across the answers, and only files", () => {
+    expect(intakePaths(intake)).toEqual([`${ORG}/intake/1-a-plan.pdf`, `${ORG}/intake/2-b-site.dwg`]);
+    expect(intakePaths(null)).toEqual([]);
+    expect(intakePaths({ intake_answers: { a: "text", b: 3 } })).toEqual([]);
+  });
+
+  /**
+   * THE PROJECTION LAW, pinned. The lead leaves the inbox on conversion (`.is("converted_at",
+   * null)`), so the estimate, job and walk-through pages are the only remaining doors to the
+   * customer's files — and each reaches them through `inquiry.intake`. A select list that drops
+   * `intake` doesn't error; it renders an empty list and the upload silently "disappears" again.
+   */
+  it("every conversion-trail page projects the inquiry's intake", () => {
+    const pages = [
+      "src/app/(app)/quotes/[id]/page.tsx",
+      "src/app/(app)/jobs/[id]/page.tsx",
+      "src/app/(app)/appointments/[id]/page.tsx",
+    ];
+    for (const p of pages) {
+      const src = readFileSync(p, "utf8");
+      expect(/inquir(y:inquiry_id|ies)\([^)]*intake[^)]*\)/.test(src), `${p} must select inquiry intake`).toBe(true);
+      expect(src.includes("IntakeFiles"), `${p} must render IntakeFiles`).toBe(true);
+    }
   });
 });
 

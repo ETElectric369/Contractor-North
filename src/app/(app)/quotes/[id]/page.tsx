@@ -19,6 +19,8 @@ import { createJobFromQuote, deleteQuote } from "../actions";
 import { createMaterialListFromQuote } from "../../materials/actions";
 import { createWorkOrderFromQuote } from "../../work-orders/actions";
 import { createInvoiceFromQuote } from "../../billing/actions";
+import { IntakeFiles } from "../../leads/intake-files";
+import { intakePaths } from "@/lib/playbook/uploads";
 import type { Quote, QuoteLineItem } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -36,7 +38,7 @@ export default async function QuoteDetailPage({
     // pricing_levels nested INSIDE customers(*) — the star stays, because CustomerSelect's
     // `customer` prop needs the full row for EditCustomerButton. Narrowing it to a field list
     // would fix the markup and break that card.
-    .select("*, customers(*, pricing_levels(markup_pct)), inquiry:inquiry_id(id, name)")
+    .select("*, customers(*, pricing_levels(markup_pct)), inquiry:inquiry_id(id, name, intake)")
     .eq("id", id)
     .maybeSingle();
 
@@ -135,6 +137,11 @@ export default async function QuoteDetailPage({
             <Link href={`/leads?focus=${(q as any).inquiry.id}`} className="mt-1 inline-block text-sm text-brand hover:underline">
               ← from lead: {(q as any).inquiry.name}
             </Link>
+          )}
+          {/* What the customer attached at intake. The lead leaves the inbox on conversion, so
+              this estimate — the thing being priced FROM those plans — must carry them itself. */}
+          {(q as any).inquiry && (
+            <IntakeFiles inquiryId={(q as any).inquiry.id} paths={intakePaths((q as any).inquiry.intake)} />
           )}
           <p className="mt-1 text-sm text-slate-400">
             Created {formatDate(q.created_at)}

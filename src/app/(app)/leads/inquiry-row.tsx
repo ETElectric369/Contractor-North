@@ -14,6 +14,7 @@ import type { Inquiry, LeadBucket } from "@/lib/types";
 import { INQUIRY_STATUSES } from "@/lib/statuses";
 import { LEAD_BUCKETS } from "@/lib/lead-triage";
 import { IntakeFiles } from "./intake-files";
+import { intakePaths } from "@/lib/playbook/uploads";
 
 // Named INQUIRY_STATUS_TONE (not `statusTone`) so it can't shadow the shared badge
 // statusTone helper. Values cover every INQUIRY_STATUSES entry.
@@ -30,15 +31,6 @@ const BUCKET_TONE: Record<LeadBucket, "green" | "amber" | "blue"> = { A: "green"
 const BUCKET_DOT: Record<LeadBucket, string> = { A: "🟢", B: "🟡", C: "🔵" };
 
 
-/** Every file path across the lead's intake answers, in answer order. */
-function intakePaths(intake: unknown): string[] {
-  const answers = (intake as { intake_answers?: Record<string, unknown> } | null)?.intake_answers;
-  if (!answers || typeof answers !== "object") return [];
-  return Object.values(answers)
-    .filter(Array.isArray)
-    .flat()
-    .filter((v): v is string => typeof v === "string" && v.includes("/intake/"));
-}
 
 export function InquiryRow({
   inquiry,

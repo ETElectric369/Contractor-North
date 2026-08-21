@@ -15,6 +15,8 @@ import { MarkCompleteButton } from "./mark-complete-button";
 import { DeleteEmptyInspectionButton } from "./delete-empty-button";
 import { hasCaptureData } from "@/lib/inspections";
 import { ApptQuickActions } from "../appointment-status";
+import { IntakeFiles } from "../../leads/intake-files";
+import { intakePaths } from "@/lib/playbook/uploads";
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +44,7 @@ export default async function AppointmentCapturePage({
     supabase
       .from("appointments")
       .select(
-        "id, org_id, type, title, status, starts_at, ends_at, job_id, assigned_to, location, notes, customer_id, inquiry_id, capture, customers(name), inquiries(name, phone)",
+        "id, org_id, type, title, status, starts_at, ends_at, job_id, assigned_to, location, notes, customer_id, inquiry_id, capture, customers(name), inquiries(name, phone, intake)",
       )
       .eq("id", id)
       .maybeSingle(),
@@ -180,6 +182,11 @@ export default async function AppointmentCapturePage({
           )}
         </div>
         {a.notes && <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{a.notes}</p>}
+        {/* What the customer attached at intake — the plans this walk-through prices from. The
+            lead leaves the inbox once it converts, so every linked surface carries its files. */}
+        {a.inquiry_id && (
+          <IntakeFiles inquiryId={a.inquiry_id} paths={intakePaths((a.inquiries as { intake?: unknown } | null)?.intake)} />
+        )}
       </div>
 
       {/* ONE SURFACE. This used to be two components stacked — a three-textarea capture card and,
