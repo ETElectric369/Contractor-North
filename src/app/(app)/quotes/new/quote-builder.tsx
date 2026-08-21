@@ -89,6 +89,7 @@ export function QuoteBuilder({
   deckRateRows,
   measured,
   orgId = "",
+  leadPlans = [],
 }: {
   /** For storage-first uploads (#116): the org folder the documents bucket's RLS admits. */
   orgId?: string;
@@ -102,6 +103,8 @@ export function QuoteBuilder({
   jobId?: string;
   /** When launched from a lead conversion, the quote keeps the provenance backlink. */
   inquiryId?: string;
+  /** The linked lead's own plan PDFs (intake uploads) — one-tap take-off, no re-upload. */
+  leadPlans?: { path: string; name: string }[];
   /** The inspection appointment being written up (?capture=) — saveQuote stamps the new
    *  quote's id onto its capture jsonb so /inspections files the row (lead-less path). */
   captureId?: string;
@@ -463,6 +466,28 @@ export function QuoteBuilder({
     });
   }
 
+  // The customer's OWN plan, already in storage on the lead — same take-off, no re-upload.
+  // The server re-verifies the lead actually carries this path before a byte moves.
+  function onReadLeadPlan(p: { path: string; name: string }) {
+    setAiError(null);
+    startUpload(async () => {
+      const fd = new FormData();
+      fd.set("intakePath", p.path);
+      fd.set("inquiryId", inquiryId ?? "");
+      fd.set("fileName", p.name);
+      if (scope.trim()) fd.set("scope", scope.trim());
+      if (levelMarkup != null) fd.set("markupPct", String(levelMarkup));
+      if (levelRate != null) fd.set("laborRate", String(levelRate));
+      const res = await generateQuoteDraftFromPlan(fd);
+      if (!res.ok) {
+        setAiError(res.error);
+        return;
+      }
+      applyDraft(res);
+      toast(`Read ${p.name} — review the drafted lines`, "success");
+    });
+  }
+
   function onSave() {
     setSaveError(null);
     const cleaned = items.filter((i) => i.description.trim());
@@ -570,6 +595,25 @@ export function QuoteBuilder({
                 <span className="text-xs text-slate-400">applies your note above to the plan</span>
               )}
             </div>
+
+            {/* THE PLANS THE CUSTOMER ALREADY SENT — one tap, no re-upload (Andrew's estimate
+                said "attached but I can't open it" while the PDF sat on the lead). */}
+            {leadPlans.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 pt-2">
+                <span className="text-xs font-medium text-slate-500">The customer&apos;s plans are already here:</span>
+                {leadPlans.map((p) => (
+                  <button
+                    key={p.path}
+                    type="button"
+                    disabled={uploading || generating}
+                    onClick={() => onReadLeadPlan(p)}
+                    className={`inline-flex items-center gap-1.5 rounded-lg border border-dashed border-brand/40 bg-white/60 px-2.5 py-1.5 text-xs font-medium text-brand hover:bg-brand-light/40 ${uploading ? "pointer-events-none opacity-60" : ""}`}
+                  >
+                    <FileUp className="h-3.5 w-3.5" /> Read {p.name}
+                  </button>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
 

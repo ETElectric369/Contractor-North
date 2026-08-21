@@ -16,7 +16,7 @@ import { scopeTotal, type ScopePick } from "@/lib/playbook/scopes";
 import { playbookForForm } from "@/lib/playbook/parse";
 import { applicableNeeds, clearInapplicable, isAnswered, isOpen, isSettled, missingNeeds, splitAsk } from "@/lib/playbook/resolve";
 import type { Answers, AnswerValue, Need, Playbook } from "@/lib/playbook/types";
-import { computeBriefFills, type PlanBrief } from "@/lib/plan-brief";
+import { briefProvenanceKeys, computeBriefFills, type PlanBrief } from "@/lib/plan-brief";
 import {
   captureId,
   inspectorReadiness,
@@ -528,6 +528,15 @@ export function Inspector({
     () => (rawBriefAnswers ? computeBriefFills(playbook, rawBriefAnswers, initialAnswers).length > 0 : false),
     [rawBriefAnswers, playbook, initialAnswers],
   );
+  // What the report ALREADY filled before this page opened (the booking seeded it server-side).
+  // Andrew read the empty ask-list as "nothing was filled" while his six pre-filled answers sat
+  // in Answered below — an answered question leaves the ask by design, so the card must SAY what
+  // it answered and where it went. Computed against initialAnswers: mount-stable, never shifts.
+  const briefSeededAtLoad = useMemo(() => {
+    if (!rawBriefAnswers) return [] as string[];
+    const keys = briefProvenanceKeys(playbook, rawBriefAnswers, initialAnswers);
+    return playbook.needs.filter((n) => keys.has(n.key)).map((n) => n.label);
+  }, [rawBriefAnswers, playbook, initialAnswers]);
   const applyBrief = () => {
     setAnswers((a) => {
       let next = { ...a };
@@ -959,7 +968,7 @@ export function Inspector({
             answers some of them before anyone asks. Server-parsed prop (height-stable at mount),
             renders only when a ready brief exists (available is not visible), survives the green
             "that's everything" branch by sitting outside the ternary below. */}
-        {planBrief?.status === "ready" && (planBrief.summary || briefHadFills) && (
+        {planBrief?.status === "ready" && (planBrief.summary || briefHadFills || briefSeededAtLoad.length > 0) && (
           <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50/60 p-3">
             <p className="text-[10px] font-semibold uppercase tracking-wide text-sky-700">
               Preliminary report — from the customer&apos;s plans
@@ -991,6 +1000,14 @@ export function Inspector({
                   ))}
                 </ul>
               </details>
+            )}
+            {briefSeededAtLoad.length > 0 && (
+              <p className="mt-1.5 text-xs text-slate-600">
+                <span className="font-semibold text-sky-700">Already filled from the plans:</span>{" "}
+                {briefSeededAtLoad.join(", ")} — they&apos;re under <span className="font-medium">Answered</span> below,
+                edit anything that&apos;s off. The questions still showing here are the ones the plans couldn&apos;t
+                answer.
+              </p>
             )}
             {briefHadFills && (
               <button

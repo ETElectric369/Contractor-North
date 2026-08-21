@@ -5,6 +5,7 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { measurementsFromAnswers, tolerateMissingColumns } from "@/lib/inspection/schema";
 import { factsForEstimatorByProvenance } from "@/lib/playbook/answers";
 import { briefProvenanceKeys, parsePlanBrief } from "@/lib/plan-brief";
+import { extOf, intakePaths, uploadDisplayName } from "@/lib/playbook/uploads";
 import { coerceScopes, ownScopes, scopeLines, type ScopePick } from "@/lib/playbook/scopes";
 import type { DraftLineItem } from "@/lib/estimate/line-map";
 import { sheetFromPlaybook } from "@/lib/playbook/from-sheet";
@@ -135,6 +136,20 @@ export default async function NewQuotePage({
       captureJobId = (appt as any).job_id ?? undefined;
     }
   }
+
+  // THE CUSTOMER'S PLANS, OFFERED WHERE THE TAKE-OFF HAPPENS. Andrew's estimate told him "the
+  // plan set is attached but I can't open it" — true, and absurd: the PDF was sitting on the
+  // lead the whole time, reachable only by downloading it and re-uploading it here. A linked
+  // lead's plan PDFs become one-tap read chips beside Upload Plans (server re-verifies the
+  // lead carries each path before a byte moves).
+  let leadPlans: { path: string; name: string }[] = [];
+  const effInquiryId = inquiry ?? captureInquiryId;
+  if (effInquiryId) {
+    const { data: leadRow } = await supabase.from("inquiries").select("intake").eq("id", effInquiryId).maybeSingle();
+    leadPlans = intakePaths((leadRow as { intake?: unknown } | null)?.intake)
+      .filter((p) => extOf(p) === "pdf")
+      .map((p) => ({ path: p, name: uploadDisplayName(p) }));
+  }
   const [{ data: customers }, { data: priceItems }, { data: taxRates }, { data: kits }, { data: org }] =
     await Promise.all([
       supabase.from("customers").select("id, name, company_name, pricing_levels(markup_pct, labor_rate)").order("name"),
@@ -218,6 +233,7 @@ export default async function NewQuotePage({
         preselected={customer ?? captureCustomerId}
         jobId={job ?? captureJobId}
         inquiryId={inquiry ?? captureInquiryId}
+        leadPlans={leadPlans}
         captureId={captureApptId}
         initialScope={initialScope}
         seededLines={seededLines}

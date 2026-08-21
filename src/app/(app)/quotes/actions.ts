@@ -10,6 +10,7 @@ import { headers } from "next/headers";
 import { bustDocPdf, warmDocPdf } from "@/lib/pdf-cache";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
+import { INTAKE_BUCKET, isOwnIntakePath, uploadDisplayName } from "@/lib/playbook/uploads";
 import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
 import { createNotifications } from "@/lib/notifications";
 import { subtotalTaxTotal } from "@/lib/invoice-math";
@@ -1299,6 +1300,42 @@ export async function generateQuoteDraft(
  * RLS instead of at a hand-rolled check. The legacy `file` field still works for any open tab
  * from before this shipped.
  */
+/**
+ * THE CUSTOMER'S OWN PLAN, READ WHERE IT LIVES (Andrew's estimate said "the plan set is attached
+ * but I can't open it" — the PDF sat on the LEAD in intake-uploads while the take-off could only
+ * read a file re-uploaded from the office's device). This transport hands the estimator that
+ * stored file directly: same three checks as intakeFileUrl (RLS-scoped lead read proves
+ * membership → the path must sit in that org's intake folder → the lead must actually carry it),
+ * then a service download. NO delete-on-read — the stash is a transport, but this file is the
+ * customer's record on the lead and must survive every reading.
+ */
+async function intakePlanUpload(
+  formData: FormData,
+): Promise<{ ok: true; bytes: ArrayBuffer; size: number; name: string; mime: string } | { ok: false; error: string } | null> {
+  const intakePath = String(formData.get("intakePath") ?? "").trim();
+  if (!intakePath) return null; // not this transport — fall through to the stash
+  const inquiryId = String(formData.get("inquiryId") ?? "").trim();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error ?? "Only office staff can run the estimator." };
+  const { data: inq } = await ctx.supabase.from("inquiries").select("id, org_id, intake").eq("id", inquiryId).maybeSingle();
+  if (!inq) return { ok: false, error: "The lead this plan belongs to wasn't found." };
+  const orgId = String((inq as { org_id?: string }).org_id ?? "");
+  if (!isOwnIntakePath(orgId, intakePath)) return { ok: false, error: "That file isn't on this lead." };
+  const answers = ((inq as { intake?: { intake_answers?: Record<string, unknown> } }).intake?.intake_answers ??
+    {}) as Record<string, unknown>;
+  const known = Object.values(answers).some((v) => Array.isArray(v) && v.includes(intakePath));
+  if (!known) return { ok: false, error: "That file isn't on this lead." };
+  const { data: blob } = await createServiceClient().storage.from(INTAKE_BUCKET).download(intakePath);
+  if (!blob) return { ok: false, error: "Couldn't read the customer's plan from storage." };
+  return {
+    ok: true,
+    bytes: await blob.arrayBuffer(),
+    size: blob.size,
+    name: uploadDisplayName(intakePath),
+    mime: blob.type || "application/pdf",
+  };
+}
+
 async function estimatorUpload(formData: FormData): Promise<
   | { ok: true; bytes: ArrayBuffer; size: number; name: string; mime: string }
   | { ok: false; error: string }
@@ -1451,7 +1488,8 @@ export async function generateQuoteDraftFromPlan(
   const gate = await guardEstimator();
   if (!gate.ok) return { ok: false, error: gate.error };
   try {
-    const up = await estimatorUpload(formData);
+    // The lead's stored plan first (intakePath), the office's own upload otherwise.
+    const up = (await intakePlanUpload(formData)) ?? (await estimatorUpload(formData));
     if (!up.ok) return { ok: false, error: up.error === "Choose a file to upload." ? "Choose a plan PDF to upload." : up.error };
     if (up.mime !== "application/pdf" && !/\.pdf$/i.test(up.name)) return { ok: false, error: "Upload the plan as a PDF." };
     // Cap at 20 MB: base64 inflates ~33%, and Anthropic's per-request ceiling is 32 MB.
