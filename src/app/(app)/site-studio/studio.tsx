@@ -363,10 +363,11 @@ export function SiteStudio({
             )}
           </p>
           <div className="flex items-center gap-2">
+            {/* SAME WINDOW on purpose (Erik: _blank in his app shell "keeps opening behind and
+                narrow"). The app-host site route shows him a ← Back to North chip, so viewing
+                the live site is a round trip, not a stranding and not a stray window. */}
             <a
               href={`/site/${handle}`}
-              target="_blank"
-              rel="noopener noreferrer"
               className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:underline"
             >
               <ExternalLink className="h-3.5 w-3.5" /> View live
