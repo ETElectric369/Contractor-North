@@ -84,6 +84,14 @@ export function sanitizeModelHtml(html: string): { html: string; removed: boolea
   return { html: out, removed };
 }
 
+/** THE ONE write-side wash for builder block html (review: the studio's hand-save skipped the
+ *  plain-text branch, so a non-technical owner's typed paragraphs collapsed into one line —
+ *  the exact person this exists for). HTML is sanitized; plain text becomes paragraphs. */
+export function washEditorHtml(raw: string): string {
+  const v = String(raw ?? "");
+  return /<[a-z][\s\S]*>/i.test(v) ? sanitizeHtml(v) : textToHtml(v);
+}
+
 /** Plain text (no tags) pasted into the editor becomes clean paragraphs. */
 export function textToHtml(text: string): string {
   const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");

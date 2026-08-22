@@ -4,7 +4,7 @@ import { dbError } from "@/lib/db-error";
 import { revalidatePath } from "next/cache";
 import { resolveSiteContext } from "@/lib/site-editor-guard";
 import { recordSiteRedirect } from "@/lib/site-redirects";
-import { sanitizeHtml, textToHtml } from "@/lib/sanitize-html";
+import { sanitizeHtml, textToHtml, washEditorHtml } from "@/lib/sanitize-html";
 import { normalizeBlocks, type Block } from "@/lib/site-blocks";
 import { isReservedSlug, slugifySiteSlug } from "@/lib/site-reserved";
 import { updateOrgSettings } from "./actions";
@@ -21,16 +21,9 @@ export type Result = { ok: boolean; error?: string; id?: string };
 function cleanBlocks(blocks: Block[]): Block[] {
   return normalizeBlocks(
     blocks.map((b) => {
-      if (b.type === "text") {
-        const raw = b.props.html ?? "";
-        return { type: "text", props: { html: /<[a-z][\s\S]*>/i.test(raw) ? sanitizeHtml(raw) : textToHtml(raw) }, style: b.style };
-      }
-      // split carries the same raw-HTML lane as text — same write-side wash (plain text pastes
-      // become paragraphs, exactly like the text block).
-      if (b.type === "split") {
-        const raw = b.props.html ?? "";
-        return { type: "split", props: { ...b.props, html: /<[a-z][\s\S]*>/i.test(raw) ? sanitizeHtml(raw) : textToHtml(raw) }, style: b.style };
-      }
+      if (b.type === "text") return { type: "text", props: { html: washEditorHtml(b.props.html ?? "") }, style: b.style };
+      // split carries the same raw-HTML lane as text — same write-side wash.
+      if (b.type === "split") return { type: "split", props: { ...b.props, html: washEditorHtml(b.props.html ?? "") }, style: b.style };
       return b;
     }),
   );

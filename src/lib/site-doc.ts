@@ -59,7 +59,7 @@ export interface SiteDoc {
   service_area: string;
   site_theme: "classic" | "bold" | "minimal";
   hero_align: "left" | "center" | "right";
-  hero_style: "open" | "panel" | "band";
+  hero_style: "open" | "panel" | "band" | "spread";
   site_accent: string;
   site_font: "default" | "serif" | "grotesk" | "soft";
   site_density: "default" | "compact" | "airy";
@@ -123,7 +123,7 @@ export function extractSiteDoc(rawSettings: unknown): SiteDoc {
     service_area: s(st.service_area, LIMITS.serviceArea),
     site_theme: st.site_theme === "bold" || st.site_theme === "minimal" ? st.site_theme : "classic",
     hero_align: st.hero_align === "center" || st.hero_align === "right" ? st.hero_align : "left",
-    hero_style: st.hero_style === "panel" || st.hero_style === "band" ? st.hero_style : "open",
+    hero_style: st.hero_style === "panel" || st.hero_style === "band" || st.hero_style === "spread" ? st.hero_style : "open",
     site_accent: (() => {
       const a = typeof st.site_accent === "string" ? st.site_accent.trim() : "";
       return HEX6.test(a) ? a.toLowerCase() : "";
@@ -282,7 +282,7 @@ export function coerceSiteDoc(raw: unknown, base: SiteDoc): { doc: SiteDoc; drop
           ? r.hero_align
           : base.hero_align,
       hero_style:
-        r.hero_style === "open" || r.hero_style === "panel" || r.hero_style === "band"
+        r.hero_style === "open" || r.hero_style === "panel" || r.hero_style === "band" || r.hero_style === "spread"
           ? r.hero_style
           : base.hero_style,
       site_accent:

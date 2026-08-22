@@ -173,6 +173,7 @@ describe("the main-build blocks — split obeys the image law, density is enum-o
     expect(banded.hero_align).toBe("center");
     expect(banded.hero_style).toBe("band");
     expect(coerceSiteDoc({ hero_style: "floating" }, banded).doc.hero_style).toBe("band");
+    expect(coerceSiteDoc({ hero_style: "spread" }, banded).doc.hero_style).toBe("spread");
     expect(coerceSiteDoc({ hero_align: "right", hero_style: "panel" }, banded).doc.hero_align).toBe("right");
     expect(coerceSiteDoc({}, banded).doc.hero_style).toBe("band");
   });

@@ -48,9 +48,10 @@ export function SiteStudio({
   // ARRANGE BY HAND — the hand-edit mode on the selected DRAFT's body. Seeded from the version
   // when opened; Save writes the draft (never the live site). Keyed by version so switching
   // versions never carries stale blocks across.
-  const [handOpen, setHandOpen] = useState(false);
-  const [handBlocks, setHandBlocks] = useState<Block[] | null>(null);
+  const [hand, setHand] = useState<{ versionId: string; blocks: Block[] } | null>(null);
   const [handSaving, setHandSaving] = useState(false);
+  // A hand-save must repaint the preview: same sv URL, so bump a nonce the route ignores.
+  const [previewBump, setPreviewBump] = useState(0);
   // SAY THE DESIGN (Erik: "can we put a talk button in there to have Nort design it verbally?").
   // Same press-to-talk → /api/transcribe turn as the inspector and /organize. The words land IN
   // THE BOX for review — dictation hands back text, never an action; he reads it, fixes a
@@ -81,7 +82,9 @@ export function SiteStudio({
 
   // Keyed off selectedId, NOT the row: a fresh pass sets an id that reaches the versions prop
   // only after router.refresh() lands — the preview must show the new design immediately.
-  const previewSrc = selectedId ? `/site/${handle}?preview=1&sv=${selectedId}` : `/site/${handle}?preview=1`;
+  const previewSrc = selectedId
+    ? `/site/${handle}?preview=1&sv=${selectedId}${previewBump ? `&r=${previewBump}` : ""}`
+    : `/site/${handle}?preview=1`;
 
   function runDesign() {
     const ask = instruction.trim();
@@ -153,15 +156,17 @@ export function SiteStudio({
   }
 
   function saveHandBlocks() {
-    if (!selected || handBlocks == null) return;
+    // Write to the version the editor was SEEDED from (review, high: switching versions with the
+    // editor open could have saved draft A's body onto draft B).
+    if (!hand) return;
     setHandSaving(true);
     start(async () => {
-      const r = await updateVersionBlocks(selected.id, handBlocks);
+      const r = await updateVersionBlocks(hand.versionId, hand.blocks);
       setHandSaving(false);
       if (!r.ok) return toast(r.error ?? "Couldn't save the arrangement.", "error");
       toast("Arrangement saved to this draft.", "success");
-      setHandOpen(false);
-      setHandBlocks(null);
+      setHand(null);
+      setPreviewBump((n) => n + 1);
       router.refresh();
     });
   }
@@ -190,7 +195,7 @@ export function SiteStudio({
               placeholder={`e.g. "Darker, more mountain-lodge. Lead with the ${liveDoc.splash_bullets.split("\n")[0] || "signature"} work and put the best photos up top."`}
               className="text-sm"
             />
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button onClick={runDesign} disabled={designing || pendingUi} size="sm">
                 {designing ? (
                   <>
@@ -198,7 +203,7 @@ export function SiteStudio({
                   </>
                 ) : (
                   <>
-                    <Sparkles className="h-4 w-4" /> Design a version
+                    <Sparkles className="h-4 w-4" /> Design it
                   </>
                 )}
               </Button>
@@ -208,7 +213,7 @@ export function SiteStudio({
                     <Loader2 className="h-4 w-4 animate-spin" /> Designing 4…
                   </>
                 ) : (
-                  "Show me options"
+                  "4 layouts"
                 )}
               </Button>
               <button
@@ -366,13 +371,21 @@ export function SiteStudio({
             at this version's body instead of the live site: move things, save, see the preview. */}
         {selected && selected.status === "draft" && selectedDoc && (
           <div className="mt-3">
-            {!handOpen ? (
+            {!hand || hand.versionId !== selected.id ? (
               <button
                 type="button"
-                onClick={() => {
-                  setHandBlocks(selectedDoc.home_blocks.map((b) => ({ ...b })));
-                  setHandOpen(true);
-                }}
+                onClick={() =>
+                  setHand({
+                    versionId: selected.id,
+                    // An empty body means the standard template — seed it as its section blocks
+                    // so "arrange by hand" has real things to move instead of an empty list.
+                    blocks: selectedDoc.home_blocks.length
+                      ? selectedDoc.home_blocks.map((b) => ({ ...b }))
+                      : (["specialty", "services", "portfolio", "reviews", "estimate", "contact"] as const).map(
+                          (key) => ({ type: "section" as const, props: { key } }),
+                        ),
+                  })
+                }
                 className="text-sm font-medium text-brand underline-offset-2 hover:underline"
               >
                 Arrange this version by hand →
@@ -391,8 +404,12 @@ export function SiteStudio({
                       <button
                         type="button"
                         onClick={() => {
-                          setHandOpen(false);
-                          setHandBlocks(null);
+                          if (
+                            JSON.stringify(hand?.blocks) !== JSON.stringify(selectedDoc.home_blocks) &&
+                            !confirm("Throw away this arrangement? Unsaved changes are lost.")
+                          )
+                            return;
+                          setHand(null);
                         }}
                         className="text-xs font-medium text-slate-500 hover:underline"
                       >
@@ -401,8 +418,8 @@ export function SiteStudio({
                     </div>
                   </div>
                   <BlockEditor
-                    blocks={handBlocks ?? []}
-                    onChange={setHandBlocks}
+                    blocks={hand?.blocks ?? []}
+                    onChange={(blocks) => setHand((h) => (h ? { ...h, blocks } : h))}
                     orgId={orgId}
                     sections
                   />

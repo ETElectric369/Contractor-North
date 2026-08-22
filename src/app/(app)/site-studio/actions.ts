@@ -10,7 +10,7 @@ import { rateLimited } from "@/lib/rate-limit";
 import { coerceSiteDoc, diffSiteDoc, extractSiteDoc, knownImageUrls, type SiteDoc } from "@/lib/site-doc";
 import { SECTION_KEYS, normalizeBlocks } from "@/lib/site-blocks";
 import { requireStaff } from "@/lib/staff-guard";
-import { sanitizeHtml, sanitizeModelHtml } from "@/lib/sanitize-html";
+import { sanitizeModelHtml, washEditorHtml } from "@/lib/sanitize-html";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 /**
@@ -108,7 +108,7 @@ async function runDesignModel(args: {
         "WHAT EACH FIELD ACTUALLY RENDERS (never guess these semantics — a wrong-lever change reads as 'it didn't understand me'):\n" +
         "· WHEN THE OWNER SAYS TEXT IS 'STACKED' — CHECK THE HERO FIRST. The preview opens on the hero; its headline+tagline+buttons are a text stack in the 'classic' framing, and no body block changes that. The hero-level moves: 'bold' or 'minimal' theme (text goes BESIDE the photo, two columns), a shorter headline, a one-line tagline (move the service list into the services grid below). If earlier versions pinned 'classic', SAY the tradeoff in changes — offer the two-column framings by name; never silently keep dodging the hero.\n" +
         "· 'THE HOME PAGE' MEANS THE WHOLE PAGE, HERO INCLUDED. The field named home_blocks is only the BODY below the hero — when the owner scopes an ask 'on the homepage', that does NOT mean home_blocks-only; the hero, theme, fonts and accent are all the homepage too.\n" +
-        "· site_theme is THE HERO FRAMING. 'classic' = the hero IMAGE full-bleed BEHIND the text (the photo-backdrop look) — and on classic TWO MORE LEVERS arrange the text ON the photo: hero_align ('left'|'center'|'right' — where the text block sits) and hero_style ('open' = text straight on the image, 'panel' = a translucent dark card behind the text, 'band' = the words in a solid strip across the BOTTOM with the photo breathing above). These give ~9 classic arrangements WITHOUT losing the full-bleed photo — use them FIRST when the owner wants hero text moved but the photo kept. 'bold' = dark accent-gradient background, two columns, photo as a framed card on the right. 'minimal' = light airy background, two columns, photo right. The page below the hero is identical across themes.\n" +
+        "· site_theme is THE HERO FRAMING. 'classic' = the hero IMAGE full-bleed BEHIND the text (the photo-backdrop look) — and on classic TWO MORE LEVERS arrange the text ON the photo: hero_align ('left'|'center'|'right' — where the text block sits) and hero_style ('open' = text straight on the image, 'panel' = a translucent dark card behind the text, 'band' = the words in a solid strip across the BOTTOM with the photo breathing above, 'spread' = the text PIECES separate across the photo: name+area top-left, headline lower-left, tagline+buttons lower-right — use this when the owner wants the text boxes horizontally separated over the image). These give ~9 classic arrangements WITHOUT losing the full-bleed photo — use them FIRST when the owner wants hero text moved but the photo kept. 'bold' = dark accent-gradient background, two columns, photo as a framed card on the right. 'minimal' = light airy background, two columns, photo right. The page below the hero is identical across themes.\n" +
         "· splash_bg_url = the hero image; when it is \"\", the FIRST portfolio photo is the hero AND the link-preview image — so portfolio order matters.\n" +
         "· site_accent = '#rrggbb': the ONE color every band, button and gradient leans on ('' = the default derivation). The single biggest mood lever you have.\n" +
         "· site_font = 'default'|'serif'|'grotesk'|'soft': the HEADING typeface preset (serif=editorial Fraunces, grotesk=modern Space Grotesk, soft=rounded Nunito). Headings only; body text is fixed.\n" +
@@ -291,18 +291,33 @@ export async function designSiteOptions(baseVersionId: string | null): Promise<S
     ),
   );
   const options: { id: string; note: string }[] = [];
-  for (const run of runs) {
-    if (!run.ok || run.noop) continue;
+  const cannot: string[] = [];
+  const dropped: string[] = [];
+  for (let i = 0; i < runs.length; i++) {
+    const run = runs[i];
+    const L = String.fromCharCode(65 + i);
+    if (!run.ok) {
+      cannot.push(`Option ${L} failed: ${run.error}`);
+      continue;
+    }
+    if (run.noop) {
+      cannot.push(`Option ${L} matched the current design — nothing new to show`);
+      continue;
+    }
     const ins = await insertVersion(ctx.supabase, { doc: run.doc, note: run.note, created_by: ctx.userId });
-    if ("error" in ins) continue;
+    if ("error" in ins) {
+      cannot.push(`Option ${L} was designed but couldn't be saved: ${ins.error}`);
+      continue;
+    }
     options.push({ id: ins.id, note: run.note });
+    for (const d of run.dropped) dropped.push(`Option ${L}: ${d}`);
+    for (const c of run.cannot) cannot.push(`Option ${L}: ${c}`);
   }
   if (!options.length) {
-    const firstErr = runs.find((r) => !r.ok) as { error?: string } | undefined;
-    return { ok: false, error: firstErr?.error ?? "No options came back — try again." };
+    return { ok: false, error: cannot[0] ?? "No options came back — try again." };
   }
   revalidatePath("/site-studio");
-  return { ok: true, options, note: `${options.length} options ready` };
+  return { ok: true, options, dropped, cannot, note: `${options.length} of ${runs.length} options ready` };
 }
 
 /**
@@ -352,8 +367,8 @@ export async function updateVersionBlocks(versionId: string, blocks: unknown): P
   if ((ver as { status: string }).status !== "draft")
     return { ok: false, error: "Only drafts can be hand-edited — make a new version first (Capture or a design pass)." };
   const washed = normalizeBlocks(blocks).map((b) => {
-    if (b.type === "text") return { ...b, props: { ...b.props, html: sanitizeHtml(b.props.html) } };
-    if (b.type === "split") return { ...b, props: { ...b.props, html: sanitizeHtml(b.props.html) } };
+    if (b.type === "text") return { ...b, props: { ...b.props, html: washEditorHtml(b.props.html) } };
+    if (b.type === "split") return { ...b, props: { ...b.props, html: washEditorHtml(b.props.html) } };
     return b;
   });
   const doc = extractSiteDoc((ver as { doc: unknown }).doc);

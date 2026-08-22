@@ -170,7 +170,7 @@ function Hero({
     heroAlign === "center" ? "flex justify-center text-center" : heroAlign === "right" ? "flex justify-end" : "";
   const alignInner = heroAlign === "center" ? "flex flex-col items-center" : "";
   const textBlock = (
-    <div className={`max-w-2xl ${alignInner} ${heroStyle === "panel" ? "rounded-2xl bg-slate-950/55 p-8 backdrop-blur-sm sm:p-10" : ""}`}>
+    <div className={["max-w-2xl", alignInner, heroStyle === "panel" ? "rounded-2xl bg-slate-950/55 p-8 backdrop-blur-sm sm:p-10" : ""].filter(Boolean).join(" ")}>
       {name && <p className="mb-2 text-2xl font-extrabold tracking-tight text-white drop-shadow">{name}</p>}
       {area && <p className="mb-3 text-sm font-semibold uppercase tracking-[0.2em] text-white/80">{area}</p>}
       {headline && <h1 className={`${hSize} font-extrabold leading-tight tracking-tight text-white drop-shadow`}>{headline}</h1>}
@@ -197,15 +197,51 @@ function Hero({
     />
   );
   if (heroStyle === "band") {
-    // The photo breathes on top; the words live in a solid strip across the bottom.
+    // The photo breathes on top; the words live in a solid strip across the bottom. With no
+    // photo at all the spacer would be an empty slab (review) — the strip alone carries it.
     return (
       <section id="top" className="relative isolate overflow-hidden">
-        <div className="relative min-h-[320px] sm:min-h-[440px]">
-          {heroImg}
-          <div className="absolute inset-0 -z-10" style={{ background: "linear-gradient(180deg, rgba(2,6,23,.15), rgba(2,6,23,.35))" }} />
-        </div>
+        {hero && (
+          <div className="relative min-h-[320px] sm:min-h-[440px]">
+            {heroImg}
+            <div className="absolute inset-0 -z-10" style={{ background: "linear-gradient(180deg, rgba(2,6,23,.15), rgba(2,6,23,.35))" }} />
+          </div>
+        )}
         <div className="bg-slate-950/85">
-          <div className={`mx-auto max-w-6xl px-4 py-10 sm:py-12 ${alignWrap}`}>{textBlock}</div>
+          <div className={["mx-auto max-w-6xl px-4 py-10 sm:py-12", alignWrap].filter(Boolean).join(" ")}>{textBlock}</div>
+        </div>
+      </section>
+    );
+  }
+  if (heroStyle === "spread") {
+    // THE PIECES SEPARATE ACROSS THE PHOTO (Erik: "TRUCKEE-NORTH TAHOE is a separate text box
+    // than CUSTOM LIGHTING ... separated horizontally"): name+area anchor top-left, the headline
+    // sits lower-left, tagline+buttons lower-right — corners of the image, not a stack on it.
+    // Phones re-stack (a 375px screen has no horizontal to separate into).
+    return (
+      <section id="top" className="relative isolate overflow-hidden">
+        {heroImg}
+        <div className="absolute inset-0 -z-10" style={{ background: "linear-gradient(180deg, rgba(2,6,23,.45), rgba(2,6,23,.62))" }} />
+        <div className="mx-auto flex min-h-[480px] max-w-6xl flex-col justify-between px-4 py-10 sm:min-h-[560px] sm:py-12">
+          <div>
+            {name && <p className="text-2xl font-extrabold tracking-tight text-white drop-shadow">{name}</p>}
+            {area && <p className="mt-2 text-sm font-semibold uppercase tracking-[0.2em] text-white/80">{area}</p>}
+          </div>
+          <div className="flex flex-col gap-8 sm:flex-row sm:items-end sm:justify-between">
+            <div className="max-w-xl">
+              {headline && <h1 className={`${hSize} font-extrabold leading-tight tracking-tight text-white drop-shadow`}>{headline}</h1>}
+            </div>
+            <div className="max-w-md sm:text-right">
+              {tagline && <p className="text-lg text-slate-100">{tagline}</p>}
+              <div className="mt-6 flex flex-wrap items-center gap-3 sm:justify-end">
+                {cta}
+                {hasPhotos && (
+                  <a href="#work" className="inline-flex items-center gap-2 rounded-lg border border-white/40 px-6 py-3.5 text-base font-semibold text-white hover:bg-white/10">See our work</a>
+                )}
+              </div>
+              {creds.length > 0 && <p className="mt-5 text-sm font-medium text-white/85">{creds.join("  ·  ")}</p>}
+            </div>
+          </div>
         </div>
       </section>
     );
@@ -214,7 +250,7 @@ function Hero({
     <section id="top" className="relative isolate overflow-hidden">
       {heroImg}
       <div className="absolute inset-0 -z-10" style={{ background: "linear-gradient(180deg, rgba(2,6,23,.55), rgba(2,6,23,.72))" }} />
-      <div className={`mx-auto max-w-6xl px-4 py-24 sm:py-32 ${alignWrap}`}>{textBlock}</div>
+      <div className={["mx-auto max-w-6xl px-4 py-24 sm:py-32", alignWrap].filter(Boolean).join(" ")}>{textBlock}</div>
     </section>
   );
 }

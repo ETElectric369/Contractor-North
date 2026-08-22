@@ -183,8 +183,10 @@ export interface OrgSettings {
   hero_align: "left" | "center" | "right";
   /** HOW the hero's text sits on the photo (classic only): open (text straight on the image —
    *  the original), panel (a translucent dark card behind the text), band (a solid strip across
-   *  the bottom with the photo breathing above it). */
-  hero_style: "open" | "panel" | "band";
+   *  the bottom with the photo breathing above it), spread (the text PIECES separate across the
+   *  photo — name+area top-left, headline lower-left, tagline+buttons lower-right; Erik:
+   *  "those text boxes overlaying the image ... separated horizontally"). */
+  hero_style: "open" | "panel" | "band" | "spread";
   /** Whole-page vertical rhythm: scoped rescale of the section paddings (site-fonts.tsx emits
    *  the overrides). "default" = untouched; per-section spacing is style.pad on section blocks. */
   site_density: "default" | "compact" | "airy";
