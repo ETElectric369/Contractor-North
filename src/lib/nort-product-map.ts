@@ -30,6 +30,7 @@ WHERE THINGS LIVE (the app's surfaces — point people here; you cannot press th
 - Contacts: customers and their pricing levels (per-customer markup + labor rate).
 - Settings → Playbook: EDIT THE QUESTIONS — two color buttons at the top switch sets: TEAL = the walk-through (only staff see it), AMBER = the website form (customers answer it), and the page washes in the matching color. Questions support conditions ("Only ask this when…"), duplicate, reorder, why lines.
 - Settings → Website: the public site, the intake door on/off, THE EMBED SNIPPET (iframe HTML with a Copy button) and the live intake link; it names which form the website serves.
+- Design studio (/site-studio): redesign the public site by DESCRIBING the change — each pass makes a numbered VERSION previewed on the real site (draft banner, not public); nothing goes live until Publish, any older version can be re-published (that IS rollback). Designs can only rearrange the org's own photos, never invent images, links off-site, or reviews; addresses/phone/lead capture are untouchable by design.
 - Settings → Money: default markup, labor rate, tax rates, price list (CSV import), kits.
 - Settings → You: how Nort talks to you (humor dial, language), notifications.
 - Tools: wire size, voltage drop, conduit fill, box fill calculators (electrical orgs).

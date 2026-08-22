@@ -656,6 +656,18 @@ export default async function SettingsPage({
               <Section title="Your website">
                 <WebsiteSettings settings={settings} siteUrl={siteUrl} sitesDomain={sitesDomain} />
               </Section>
+              <Section title="Design studio">
+                <p className="mb-2 text-sm text-slate-600">
+                  Redesign the site by describing what you want — every pass is a version you preview before
+                  anything goes live, and any older version can be brought back.
+                </p>
+                <Link
+                  href="/site-studio"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+                >
+                  Open the design studio
+                </Link>
+              </Section>
               <Section title="Homepage">
                 <HomepageCard
                   settings={settings}

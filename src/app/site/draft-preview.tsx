@@ -70,6 +70,28 @@ export const getDraftPostForPreview = cache(async (orgId: string, path: string):
   return { ...post, body_html: sanitizeHtml(post.body_html ?? "") };
 });
 
+/** A draft SITE VERSION (the design studio's homepage document), ONLY for an authorized
+ *  previewer. Same internal gate as the page/post fetchers: the service client read happens
+ *  after canPreviewDrafts, so a route that forgets the auth check still can't leak a redesign
+ *  a competitor shouldn't see. The caller overlays the doc onto org.settings before rendering. */
+export const getDraftSiteVersionForPreview = cache(
+  async (orgId: string, searchParams?: SearchParams): Promise<{ id: string; doc: unknown } | null> => {
+    const sp = searchParams ? await searchParams : undefined;
+    if (sp?.preview !== "1") return null;
+    const sv = String(sp?.sv ?? "");
+    if (!/^[0-9a-f-]{36}$/i.test(sv)) return null;
+    if (!(await canPreviewDrafts(orgId))) return null;
+    const supabase = createServiceClient();
+    const { data } = await supabase
+      .from("site_versions")
+      .select("id, doc")
+      .eq("id", sv)
+      .eq("org_id", orgId)
+      .maybeSingle();
+    return (data as { id: string; doc: unknown } | null) ?? null;
+  },
+);
+
 /** Metadata for a draft preview: the page's normal metadata, but noindex and WITHOUT the public
  *  canonical — a draft URL must never be advertised as the canonical of anything. */
 export function draftPreviewMetadata(published: Metadata): Metadata {
