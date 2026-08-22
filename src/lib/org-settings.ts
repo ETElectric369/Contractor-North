@@ -177,7 +177,10 @@ export interface OrgSettings {
   site_accent: string;
   /** The public site's HEADING typeface preset (site-fonts.tsx) — headings only, body stays the
    *  system stack. "default" = the app's Geist, i.e. render nothing extra. */
-  site_font: "default" | "serif" | "grotesk" | "soft";
+  site_font: "default" | "serif" | "grotesk" | "soft" | "condensed";
+  /** The BUSINESS NAME's typeface everywhere it renders (top bar, hero, footer) — the wordmark
+   *  lever, separate from the headings. "default" = inherit. */
+  brand_font: "default" | "serif" | "grotesk" | "soft" | "condensed";
   /** WHERE the hero's text sits over the photo (classic framing only): left (the original),
    *  center, or right. The two-column framings ignore it. */
   hero_align: "left" | "center" | "right";
@@ -283,6 +286,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   site_theme: "classic",
   site_accent: "",
   site_font: "default",
+  brand_font: "default",
   site_density: "default",
   hero_align: "left",
   hero_style: "open",

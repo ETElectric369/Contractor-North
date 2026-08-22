@@ -120,7 +120,7 @@ export function SiteHeader({
         <img src={sizedImage(org.logo_url, LOGO_HEADER_W)} alt={org.name} className="h-9 w-auto" />
       )}
       {(!org.logo_url || showName) && (
-        <span className="whitespace-nowrap text-lg font-extrabold tracking-tight">{org.name}</span>
+        <span className="site-brand whitespace-nowrap text-lg font-extrabold tracking-tight">{org.name}</span>
       )}
     </>
   );
@@ -248,7 +248,7 @@ export function SiteFooter({ chrome }: { chrome: SiteChrome }) {
             <img src={sizedImage(org.logo_url, LOGO_FOOTER_W)} alt={org.name} className="h-10 w-auto brightness-0 invert" />
           )}
           {(!org.logo_url || showName) && (
-            <span className={`text-xl font-extrabold text-white ${org.logo_url ? "mt-2 block" : ""}`}>{org.name}</span>
+            <span className={`site-brand text-xl font-extrabold text-white ${org.logo_url ? "mt-2 block" : ""}`}>{org.name}</span>
           )}
           {s.splash_tagline && <p className="mt-3 max-w-sm text-sm text-slate-400">{s.splash_tagline}</p>}
           {creds.length > 0 && <p className="mt-4 text-xs text-slate-500">{creds.join("  ·  ")}</p>}

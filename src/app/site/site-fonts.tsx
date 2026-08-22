@@ -24,11 +24,16 @@ export const SITE_FONTS = {
     css: "https://fonts.googleapis.com/css2?family=Nunito:wght@700;800&display=swap",
     family: `"Nunito", system-ui, sans-serif`,
   },
+  condensed: {
+    label: "Condensed wordmark (Oswald)",
+    css: "https://fonts.googleapis.com/css2?family=Oswald:wght@500;600&display=swap",
+    family: `"Oswald", system-ui, sans-serif`,
+  },
 } as const;
 export type SiteFontKey = keyof typeof SITE_FONTS;
 
 export function siteFontKey(v: unknown): SiteFontKey {
-  return v === "serif" || v === "grotesk" || v === "soft" ? v : "default";
+  return v === "serif" || v === "grotesk" || v === "soft" || v === "condensed" ? v : "default";
 }
 
 /**
@@ -70,8 +75,12 @@ export function siteDensityKey(v: unknown): "default" | "compact" | "airy" {
  *  for the default presets, so existing sites are byte-identical until an org chooses. */
 export function SiteFonts({ settings }: { settings: OrgSettings }) {
   const preset = SITE_FONTS[siteFontKey(settings.site_font)];
+  // THE BUSINESS NAME'S OWN FACE (Erik: "change the font for ET Electric on the top only") —
+  // every spot the name renders carries the `site-brand` class; this styles them all at once,
+  // independent of the headings.
+  const brandPreset = SITE_FONTS[siteFontKey(settings.brand_font)];
   const density = DENSITY_SCALES[siteDensityKey(settings.site_density)];
-  if (!preset && !density) return null;
+  if (!preset && !brandPreset && !density) return null;
   // Bare classes AND their sm: responsive variants: Tailwind v4 layers mean these unlayered
   // rules beat every utility, so without the sm block a responsive step-up (py-20 sm:py-24)
   // would FLATTEN to the base scale instead of rescaling (review). The sm: selector needs the
@@ -86,14 +95,17 @@ export function SiteFonts({ settings }: { settings: OrgSettings }) {
         .join("\n") +
       "\n}"
     : "";
+  // One <link> per distinct family (heading + brand may share or differ).
+  const cssLinks = [...new Set([preset?.css, brandPreset?.css])].filter((x): x is NonNullable<typeof x> => !!x);
   return (
     <>
-      {preset && (
+      {cssLinks.map((href) => (
         // eslint-disable-next-line @next/next/no-page-custom-font
-        <link rel="stylesheet" href={preset.css} />
-      )}
+        <link key={href} rel="stylesheet" href={href} />
+      ))}
       <style>
         {(preset ? `.site-shell h1, .site-shell h2, .site-shell h3 { font-family: ${preset.family}; }\n` : "") +
+          (brandPreset ? `.site-shell .site-brand { font-family: ${brandPreset.family}; }\n` : "") +
           densityCss}
       </style>
     </>

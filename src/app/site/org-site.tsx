@@ -94,7 +94,7 @@ function Hero({
       <section id="top" className="relative isolate overflow-hidden text-white" style={{ background: `linear-gradient(135deg, ${brand} 0%, #0f172a 100%)` }}>
         <div className="mx-auto grid max-w-6xl items-center gap-10 px-4 py-20 sm:py-24 lg:grid-cols-2">
           <div>
-            {name && <p className="mb-2 text-2xl font-black tracking-tight">{name}</p>}
+            {name && <p className="site-brand mb-2 text-2xl font-black tracking-tight">{name}</p>}
             {area && <p className="mb-4 inline-block rounded-full bg-white/15 px-3 py-1 text-xs font-bold uppercase tracking-[0.2em]">{area}</p>}
             {headline && <h1 className={`${hSize} font-black leading-[1.05] tracking-tight`}>{headline}</h1>}
             {tagline && <p className="mt-5 max-w-xl text-lg text-white/85">{tagline}</p>}
@@ -130,7 +130,7 @@ function Hero({
       <section id="top" className="border-b border-slate-100" style={{ background: `linear-gradient(180deg, ${brand}0a, #ffffff 65%)` }}>
         <div className="mx-auto grid max-w-6xl items-center gap-12 px-4 py-20 sm:py-28 lg:grid-cols-2">
           <div>
-            {name && <p className="mb-2 text-2xl font-bold tracking-tight text-slate-900">{name}</p>}
+            {name && <p className="site-brand mb-2 text-2xl font-bold tracking-tight text-slate-900">{name}</p>}
             {area && <p className="mb-4 text-sm font-semibold uppercase tracking-[0.25em]" style={{ color: brand }}>{area}</p>}
             {headline && <h1 className={`${hSize} font-semibold leading-[1.1] tracking-tight text-slate-900`}>{headline}</h1>}
             {tagline && <p className="mt-5 max-w-xl text-lg text-slate-600">{tagline}</p>}
@@ -171,7 +171,7 @@ function Hero({
   const alignInner = heroAlign === "center" ? "flex flex-col items-center" : "";
   const textBlock = (
     <div className={["max-w-2xl", alignInner, heroStyle === "panel" ? "rounded-2xl bg-slate-950/55 p-8 backdrop-blur-sm sm:p-10" : ""].filter(Boolean).join(" ")}>
-      {name && <p className="mb-2 text-2xl font-extrabold tracking-tight text-white drop-shadow">{name}</p>}
+      {name && <p className="site-brand mb-2 text-2xl font-extrabold tracking-tight text-white drop-shadow">{name}</p>}
       {area && <p className="mb-3 text-sm font-semibold uppercase tracking-[0.2em] text-white/80">{area}</p>}
       {headline && <h1 className={`${hSize} font-extrabold leading-tight tracking-tight text-white drop-shadow`}>{headline}</h1>}
       {tagline && <p className="mt-4 max-w-xl text-lg text-slate-100">{tagline}</p>}
@@ -224,7 +224,7 @@ function Hero({
         <div className="absolute inset-0 -z-10" style={{ background: "linear-gradient(180deg, rgba(2,6,23,.45), rgba(2,6,23,.62))" }} />
         <div className="mx-auto flex min-h-[480px] max-w-6xl flex-col justify-between px-4 py-10 sm:min-h-[560px] sm:py-12">
           <div>
-            {name && <p className="text-2xl font-extrabold tracking-tight text-white drop-shadow">{name}</p>}
+            {name && <p className="site-brand text-2xl font-extrabold tracking-tight text-white drop-shadow">{name}</p>}
             {area && <p className="mt-2 text-sm font-semibold uppercase tracking-[0.2em] text-white/80">{area}</p>}
           </div>
           <div className="flex flex-col gap-8 sm:flex-row sm:items-end sm:justify-between">

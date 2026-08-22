@@ -35,6 +35,7 @@ export const SITE_DOC_KEYS = [
   "hero_style",
   "site_accent",
   "site_font",
+  "brand_font",
   "site_density",
   "estimate_cta_label",
   "social_instagram",
@@ -61,7 +62,8 @@ export interface SiteDoc {
   hero_align: "left" | "center" | "right";
   hero_style: "open" | "panel" | "band" | "spread";
   site_accent: string;
-  site_font: "default" | "serif" | "grotesk" | "soft";
+  site_font: "default" | "serif" | "grotesk" | "soft" | "condensed";
+  brand_font: "default" | "serif" | "grotesk" | "soft" | "condensed";
   site_density: "default" | "compact" | "airy";
   estimate_cta_label: string;
   social_instagram: string;
@@ -128,7 +130,14 @@ export function extractSiteDoc(rawSettings: unknown): SiteDoc {
       const a = typeof st.site_accent === "string" ? st.site_accent.trim() : "";
       return HEX6.test(a) ? a.toLowerCase() : "";
     })(),
-    site_font: st.site_font === "serif" || st.site_font === "grotesk" || st.site_font === "soft" ? st.site_font : "default",
+    site_font:
+      st.site_font === "serif" || st.site_font === "grotesk" || st.site_font === "soft" || st.site_font === "condensed"
+        ? st.site_font
+        : "default",
+    brand_font:
+      st.brand_font === "serif" || st.brand_font === "grotesk" || st.brand_font === "soft" || st.brand_font === "condensed"
+        ? st.brand_font
+        : "default",
     site_density: st.site_density === "compact" || st.site_density === "airy" ? st.site_density : "default",
     estimate_cta_label: s(st.estimate_cta_label, LIMITS.ctaLabel),
     social_instagram: s(st.social_instagram, LIMITS.handle),
@@ -292,9 +301,13 @@ export function coerceSiteDoc(raw: unknown, base: SiteDoc): { doc: SiteDoc; drop
             ? String(r.site_accent).trim().toLowerCase()
             : base.site_accent,
       site_font:
-        r.site_font === "default" || r.site_font === "serif" || r.site_font === "grotesk" || r.site_font === "soft"
+        r.site_font === "default" || r.site_font === "serif" || r.site_font === "grotesk" || r.site_font === "soft" || r.site_font === "condensed"
           ? r.site_font
           : base.site_font,
+      brand_font:
+        r.brand_font === "default" || r.brand_font === "serif" || r.brand_font === "grotesk" || r.brand_font === "soft" || r.brand_font === "condensed"
+          ? r.brand_font
+          : base.brand_font,
       site_density:
         r.site_density === "default" || r.site_density === "compact" || r.site_density === "airy"
           ? r.site_density
@@ -330,6 +343,7 @@ export function diffSiteDoc(a: SiteDoc, b: SiteDoc): string[] {
     hero_style: "Hero text treatment",
     site_accent: "Accent color",
     site_font: "Heading typeface",
+    brand_font: "Business-name typeface",
     site_density: "Page density",
     estimate_cta_label: "Estimate button label",
     social_instagram: "Instagram",

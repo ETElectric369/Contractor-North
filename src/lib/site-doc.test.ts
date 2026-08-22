@@ -132,6 +132,15 @@ describe("the night-one levers — CTA label and heading typeface", () => {
     expect(coerceSiteDoc({ estimate_cta_label: "" }, withLabel).doc.estimate_cta_label).toBe("");
   });
 
+  it("brand_font — the wordmark lever — is enum-or-base and independent of headings", () => {
+    const b = extractSiteDoc({ site_font: "serif", brand_font: "condensed" });
+    expect(b.site_font).toBe("serif");
+    expect(b.brand_font).toBe("condensed");
+    expect(coerceSiteDoc({ brand_font: "wingdings" }, b).doc.brand_font).toBe("condensed");
+    expect(coerceSiteDoc({ brand_font: "default" }, b).doc.brand_font).toBe("default");
+    expect(coerceSiteDoc({}, b).doc.brand_font).toBe("condensed");
+  });
+
   it("site_font is enum-or-base", () => {
     expect(extractSiteDoc({ site_font: "serif" }).site_font).toBe("serif");
     expect(extractSiteDoc({ site_font: "comic sans" }).site_font).toBe("default");
