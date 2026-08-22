@@ -84,14 +84,8 @@ export default async function QuotesPage({
         <EmptyState
           icon={FileText}
           title="No estimates yet"
-          description="Create your first estimate — the AI can draft line items from a scope of work."
-        >
-          <Link href="/quotes/new">
-            <Button>
-              <Plus className="h-4 w-4" /> New Estimate
-            </Button>
-          </Link>
-        </EmptyState>
+          description="Create your first estimate with New Estimate above — the AI can draft line items from a scope of work."
+        />
       ) : (
         <QuotesList quotes={quotes} clusters={clusters} isStaff={isStaff} />
       )}

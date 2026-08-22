@@ -29,7 +29,7 @@ export const timeActions: Record<string, ActionDef> = {
     name: "time.clockIn",
     group: "time",
     label: "Clock in",
-    description: "Start the clock for the current user, optionally on a job. clock_in_at backdates the start (e.g. forgot to clock in) — a NAIVE local timestamp, YYYY-MM-DDTHH:MM in the company's own timezone, NO Z, NO offset; the app converts.",
+    description: "Start the clock for the current user, optionally on a job — ONLY for work happening NOW (or a still-running shift that started earlier TODAY, via clock_in_at backdate). NEVER use clockIn+clockOut to record FINISHED past work ('3 hours yesterday') — that is time.addEntry (work_date + hours); a clockIn/clockOut pair fired together records a seconds-long entry on today, not the stated hours. clock_in_at is a NAIVE local timestamp, YYYY-MM-DDTHH:MM in the company's own timezone, NO Z, NO offset; the app converts.",
     input: z.object({
       job_id: z.string().nullable().optional(),
       job_code: z.string().nullable().optional(),
@@ -48,7 +48,7 @@ export const timeActions: Record<string, ActionDef> = {
     group: "time",
     label: "Clock out",
     description:
-      "Close the current user's open time entry. A FIELD TECH must say which job code(s) they worked and the hours — pass them as `allocations` (each {job_code, hours, optional job_id, optional description}); if they don't give them, ASK before clocking out (use list_job_codes to map a spoken name like 'rough-in' to its code). miles = round-trip job mileage; lunch_minutes = unpaid lunch taken.",
+      "Close the current user's open time entry — the end of a LIVE shift, never a way to log finished past work (that is time.addEntry). A FIELD TECH must say which job code(s) they worked and the hours — pass them as `allocations` (each {job_code, hours, optional job_id, optional description}); if they don't give them, ASK before clocking out (use list_job_codes to map a spoken name like 'rough-in' to its code). miles = round-trip job mileage; lunch_minutes = unpaid lunch taken. ALWAYS announce what the RESULT says was recorded (span and date) — not what you intended.",
     input: z.object({
       miles: z.number().optional(),
       notes: z.string().optional(),
@@ -66,8 +66,39 @@ export const timeActions: Record<string, ActionDef> = {
     }),
     auth: "any",
     effect: "write",
-    handler: (i) =>
-      clockOutCurrent({ miles: i.miles, notes: i.notes, lunch_minutes: i.lunch_minutes, allocations: i.allocations }),
+    handler: async (i) => {
+      const res = await clockOutCurrent({ miles: i.miles, notes: i.notes, lunch_minutes: i.lunch_minutes, allocations: i.allocations });
+      if (!res || (res as { ok?: boolean }).ok === false) return res;
+      // ANNOUNCE THE DEED, NOT THE INTENT (Erik's phantom "3 hours yesterday": the model
+      // clocked in and straight out — a 3.4-second entry on the wrong day with no job — then
+      // announced the hours it meant to log). Read back what was actually recorded; a
+      // seconds-long entry gets an explicit warning the model must surface.
+      try {
+        const supabase = await createClient();
+        const { data: last } = await supabase
+          .from("time_entries")
+          .select("clock_in, clock_out, job_id")
+          .not("clock_out", "is", null)
+          .order("clock_out", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (last?.clock_in && last?.clock_out) {
+          const hrs = hoursBetween(new Date(last.clock_in), new Date(last.clock_out));
+          const recorded = `Recorded: ${last.clock_in} → ${last.clock_out} (${hrs.toFixed(2)}h${last.job_id ? "" : ", NO job attached"}).`;
+          if (hrs < 0.05) {
+            return {
+              ...res,
+              warning:
+                `${recorded} That is a seconds-long LIVE entry — if the user asked to log past work hours, this was the wrong tool: use time.addEntry (work_date + hours) and fix this stub with time.updateEntry. Do NOT tell the user their hours were logged.`,
+            };
+          }
+          return { ...res, recorded };
+        }
+      } catch {
+        /* read-back is best-effort */
+      }
+      return res;
+    },
   },
   "time.addEntry": {
     name: "time.addEntry",

@@ -74,6 +74,69 @@ const blankItem = (): DraftLineItem => ({
 
 const sellPrice = (buy: number, markup: number) => buy * (1 + (markup || 0) / 100);
 
+/** SWAP A LINE AGAINST THE BOOK (Andrew, live-testing the plan take-off: "we ended up going
+ *  with a metal roof ... had that been a drop down, I would have just dropped it in there —
+ *  or at the very least an autocomplete"): the description input of every line autocompletes
+ *  against the org's price book; picking a match RE-PRICES the line in place — description,
+ *  unit, and unit $ at this customer's markup, the same math as the Add picker. */
+function LineDescInput({
+  value,
+  onText,
+  onPick,
+  priceItems,
+  priced,
+}: {
+  value: string;
+  onText: (v: string) => void;
+  onPick: (p: PriceItemLite) => void;
+  priceItems: PriceItemLite[];
+  priced: (p: PriceItemLite) => number;
+}) {
+  const [open, setOpen] = useState(false);
+  const matches = useMemo(() => {
+    const q = value.trim().toLowerCase();
+    if (q.length < 2) return [];
+    return priceItems
+      .filter((p) => [p.code, p.description, p.category].some((v) => (v ?? "").toLowerCase().includes(q)))
+      .slice(0, 8);
+  }, [value, priceItems]);
+  return (
+    <div className="relative">
+      <Input
+        placeholder="Description"
+        value={value}
+        onChange={(e) => {
+          onText(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+      />
+      {open && matches.length > 0 && (
+        <ul className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+          {matches.map((p) => (
+            <li key={p.id}>
+              <button
+                type="button"
+                className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-sm hover:bg-slate-50"
+                onMouseDown={(e) => {
+                  // mousedown beats the input's blur — the pick must land before the list hides
+                  e.preventDefault();
+                  onPick(p);
+                  setOpen(false);
+                }}
+              >
+                <span className="truncate">{p.code ? `${p.code} — ${p.description}` : p.description}</span>
+                <span className="shrink-0 text-slate-500">{formatCurrency(priced(p))}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export function QuoteBuilder({
   customers,
   preselected,
@@ -171,6 +234,8 @@ export function QuoteBuilder({
   const levelRate = selectedCust?.level_rate;
   const markupFor = (p: PriceItemLite) =>
     effectiveMarkupPct({ levelPct: levelMarkup, itemPct: p.markup_pct, orgDefaultPct: defaultMarkupPct });
+  // The one sell-price rule, shared with the Add picker: buy × (1 + markup%) rounded to cents.
+  const priced = (p: PriceItemLite) => Math.round(p.buy_price * (1 + (markupFor(p) || 0) / 100) * 100) / 100;
 
   // Deck generator rates through the SAME rule as markupFor — D-code lines honor the selected
   // customer's level + the org default exactly like a hand-picked line, and re-price when the
@@ -977,7 +1042,19 @@ export function QuoteBuilder({
                         {entries.map(({ it, idx }) => (
                           <div key={idx} className="grid grid-cols-12 items-start gap-2 rounded-lg border border-slate-100 p-2">
                             <div className="col-span-12 sm:col-span-5">
-                              <Input placeholder="Description" value={it.description} onChange={(e) => updateItem(idx, { description: e.target.value })} />
+                              <LineDescInput
+                                value={it.description}
+                                onText={(v) => updateItem(idx, { description: v })}
+                                onPick={(pi) =>
+                                  updateItem(idx, {
+                                    description: pi.code ? `${pi.code} — ${pi.description}` : pi.description,
+                                    unit: pi.unit || "ea",
+                                    unit_price: priced(pi),
+                                  })
+                                }
+                                priceItems={priceItems}
+                                priced={priced}
+                              />
                               {it.flag && (
                                 <span className="mt-1 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-800">
                                   {it.flag}

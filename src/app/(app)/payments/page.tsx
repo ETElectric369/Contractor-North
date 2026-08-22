@@ -68,10 +68,8 @@ export default async function PaymentsPage() {
         <EmptyState
           icon={CreditCard}
           title="No payments yet"
-          description="Record a payment here or on any invoice — either way it shows up in this ledger."
-        >
-          <RecordPaymentButton invoices={openInvoices} paymentMethods={orgSettings.payment_methods} />
-        </EmptyState>
+          description="Record a payment with the button above or on any invoice — either way it shows up in this ledger."
+        />
       ) : (
         <>
           <FactsGrid cols={2} className="mb-4 sm:max-w-md">

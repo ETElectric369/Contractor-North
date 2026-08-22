@@ -31,10 +31,8 @@ export default async function FormsPage() {
         <EmptyState
           icon={FileSpreadsheet}
           title="No forms yet"
-          description="Build a custom form your crew can fill out in the field."
-        >
-          <NewFormButton />
-        </EmptyState>
+          description="Build a custom form your crew can fill out in the field — New Form above."
+        />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {list.map((f: any) => (

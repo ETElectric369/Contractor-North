@@ -58,10 +58,8 @@ export default async function MaterialsPage({
         <EmptyState
           icon={ListChecks}
           title="No material lists yet"
-          description="Generate a take-off from a scope of work, or start an empty list."
-        >
-          <NewListButton jobs={jobs ?? []} />
-        </EmptyState>
+          description="Generate a take-off from a scope of work, or start an empty list — New List above."
+        />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {materialLists.map((l: any) => (

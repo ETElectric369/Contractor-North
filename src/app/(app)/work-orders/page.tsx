@@ -51,10 +51,8 @@ export default async function WorkOrdersPage({
         <EmptyState
           icon={ClipboardList}
           title="No work orders yet"
-          description="Create a work order to dispatch field work."
-        >
-          <NewWorkOrderButton jobs={jobs ?? []} techs={techs ?? []} defaultJob={job} />
-        </EmptyState>
+          description="Create a work order with the button above to dispatch field work."
+        />
       ) : (
         <Card className="overflow-hidden">
           <DataTable<any>
