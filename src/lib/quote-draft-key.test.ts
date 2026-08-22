@@ -28,11 +28,16 @@ describe("quoteDraftKey — two inspections must never share a slot", () => {
   });
 
   it("a genuinely blank estimate still gets the shared slot, and only it", () => {
-    expect(quoteDraftKey({})).toBe("quote-builder:v2:new");
+    expect(quoteDraftKey({})).toBe("quote-builder:v3:anon:new");
+  });
+
+  it("v3 namespaces per USER — a shared office machine's next sign-in must not restore the previous staff user's draft", () => {
+    expect(quoteDraftKey({ userId: "u1" })).toBe("quote-builder:v3:u1:new");
+    expect(quoteDraftKey({ userId: "u1", inquiryId: "i1" })).not.toBe(quoteDraftKey({ userId: "u2", inquiryId: "i1" }));
   });
 
   it("the version prefix evicts pre-fix drafts", () => {
-    expect(quoteDraftKey({ jobId: "j1" }).startsWith("quote-builder:v2:")).toBe(true);
+    expect(quoteDraftKey({ jobId: "j1" }).startsWith("quote-builder:v3:")).toBe(true);
   });
 });
 
@@ -52,7 +57,9 @@ describe("quoteDraftLegacyKeys — a rename must not strand unsaved work", () =>
 
   it("a capture-sourced estimate that ALSO had a job checks both old homes", () => {
     const keys = quoteDraftLegacyKeys({ captureId: "a1", jobId: "j1" });
-    expect(keys).toEqual(["quote-builder:j1", "quote-builder:new"]);
+    // Newest legacy home first: the v2 slot (pre-user-namespacing — where recoverable session
+    // drafts live), then the pre-v2 schemes.
+    expect(keys).toEqual(["quote-builder:v2:a1", "quote-builder:j1", "quote-builder:new"]);
   });
 
   it("never returns the current key — that would make the fallback a no-op loop", () => {

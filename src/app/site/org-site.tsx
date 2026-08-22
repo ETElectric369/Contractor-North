@@ -29,7 +29,7 @@ export function orgSiteMetadata(org: PublicOrg): Metadata {
   const s = org.settings;
   // A deliberate two-line hero headline is still ONE line here — a <title> has no line breaks.
   const title = `${org.name} — ${flattenHeadline(s.splash_headline) || "Licensed contractor"}`;
-  const description = s.splash_tagline || `${org.name} — quality craftsmanship. Get a free estimate.`;
+  const description = flattenHeadline(s.splash_tagline) || `${org.name} — quality craftsmanship. Get a free estimate.`;
   const hero = socialImage(s.splash_bg_url || s.portfolio[0]?.url);
   return {
     title,

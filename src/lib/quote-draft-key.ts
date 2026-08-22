@@ -24,12 +24,15 @@ export function quoteDraftKey(ids: {
   jobId?: string | null;
   customerId?: string | null;
   inquiryId?: string | null;
+  /** The signed-in user — v3 namespaces slots per user so a shared machine's next sign-in
+      can't restore (and silently autosave over) the previous staff user's draft. */
+  userId?: string | null;
 }): string {
   const own = ids.captureId || ids.jobId || ids.customerId || ids.inquiryId || "new";
   // The version prefix is a one-time eviction of every pre-fix draft, including the poisoned
   // shared "new" slot. useDraft is sessionStorage, so that entry would otherwise survive until the
   // browser is quit — no use to somebody who is mid-estimate right now.
-  return `quote-builder:v2:${own}`;
+  return `quote-builder:v3:${ids.userId || "anon"}:${own}`;
 }
 
 /**
@@ -48,9 +51,13 @@ export function quoteDraftLegacyKeys(ids: {
   jobId?: string | null;
   customerId?: string | null;
   inquiryId?: string | null;
+  userId?: string | null;
 }): string[] {
   const preV2 = ids.jobId || ids.customerId || ids.inquiryId || "new";
-  const keys = [`quote-builder:${preV2}`];
+  // v2 (pre-user-namespacing) adopts forward — Andrew's possibly-recoverable 45-line session
+  // draft lives there; evicting it to gain the namespace would eat the very work being rescued.
+  const v2own = ids.captureId || ids.jobId || ids.customerId || ids.inquiryId || "new";
+  const keys = [`quote-builder:v2:${v2own}`, `quote-builder:${preV2}`];
   // A walk-through-sourced estimate wrote to the shared slot under the old key even when it had a
   // capture id, because the old key never looked at one.
   if (ids.captureId && preV2 !== "new") keys.push("quote-builder:new");

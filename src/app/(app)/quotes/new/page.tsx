@@ -26,6 +26,23 @@ export default async function NewQuotePage({
   // For the builder's storage-first uploads (#116) — RLS returns only the caller's own org.
   const { data: ownOrg } = await supabase.from("organizations").select("id").limit(1).maybeSingle();
   const orgId = String((ownOrg as { id?: string } | null)?.id ?? "");
+  // ADOPT-AT-MOUNT (review of cn-v796): if this lead already has an autosaved DRAFT, seed the
+  // builder with its id — a cross-session re-entry (or a different door) must update that one
+  // row, not mint a numbered twin. RLS-scoped; newest draft wins; sessionStorage still refines.
+  const { data: auth } = await supabase.auth.getUser();
+  const draftUserId = auth?.user?.id ?? null;
+  let adoptedDraftId: string | null = null;
+  if (inquiry) {
+    const { data: existing } = await supabase
+      .from("quotes")
+      .select("id")
+      .eq("inquiry_id", inquiry)
+      .eq("status", "draft")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    adoptedDraftId = (existing as { id?: string } | null)?.id ?? null;
+  }
 
   // ?capture=<appointment id> — an inspection's field capture prefills the
   // estimator scope (like importing labor into an invoice). RLS scopes the read;
@@ -221,6 +238,8 @@ export default async function NewQuotePage({
         {!capture && <NewInspectionButton inquiryId={inquiry} size="sm" variant="outline" />}
       </PageHeader>
       <QuoteBuilder
+        initialQuoteId={adoptedDraftId}
+        draftUserId={draftUserId}
         orgId={orgId}
         measured={measured}
         customers={(customers ?? []).map((c: any) => ({

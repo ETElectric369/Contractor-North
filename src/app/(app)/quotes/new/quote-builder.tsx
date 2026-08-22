@@ -80,6 +80,8 @@ export function QuoteBuilder({
   jobId,
   inquiryId,
   captureId,
+  initialQuoteId,
+  draftUserId,
   initialScope,
   seededLines,
   priceItems = [],
@@ -104,6 +106,12 @@ export function QuoteBuilder({
   jobId?: string;
   /** When launched from a lead conversion, the quote keeps the provenance backlink. */
   inquiryId?: string;
+  /** An existing DRAFT for this lead/walk-through, found server-side at mount — the builder
+      adopts it so cross-session re-entry (or a different door) updates ONE row instead of
+      minting twins (review of cn-v796). */
+  initialQuoteId?: string | null;
+  /** Signed-in user id — namespaces the sessionStorage draft slot (quoteDraftKey v3). */
+  draftUserId?: string | null;
   /** The linked lead's own plan PDFs (intake uploads) — one-tap take-off, no re-upload. */
   leadPlans?: { path: string; name: string }[];
   /** The inspection appointment being written up (?capture=) — saveQuote stamps the new
@@ -190,6 +198,7 @@ export function QuoteBuilder({
   // The deck generator and the Kit Picker both drop their lines in (tagged with a group),
   // keeping any real lines already entered — the one append rule.
   function addGeneratedLines(lines: DraftLineItem[]) {
+    dirtyRef.current = true;
     const real = items.filter((i) => i.description.trim());
     setItems([...real, ...lines]);
   }
@@ -228,12 +237,23 @@ export function QuoteBuilder({
   // NO SAVE GAME (the Andrew law: "I said yes and then there's nowhere to be found" — his 45
   // accepted plan lines lived only in this component and died on navigation): once the estimate
   // has substance it AUTOSAVES as a real draft row, so the Estimates tab always has it.
-  const [quoteId, setQuoteId] = useState<string | null>(null);
-  const [autoState, setAutoState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [quoteId, setQuoteId] = useState<string | null>(initialQuoteId ?? null);
+  const [autoState, setAutoState] = useState<"idle" | "pending" | "saving" | "saved" | "error">("idle");
   const [autoNumber, setAutoNumber] = useState<string | null>(null);
+  const [autoError, setAutoError] = useState<string | null>(null);
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autosaveBusy = useRef(false);
+  const autosaveAgain = useRef(false);
   const navigatedAway = useRef(false);
+  // THE RACE KILLERS (review of cn-v796 — the twin-minting CRITICAL): timers fire with
+  // render-time closures, so every value a save decision depends on lives in a ref read at
+  // FIRE time. quoteIdRef is the one identity every save path shares — whichever save lands
+  // first hands its row id to all the others.
+  const quoteIdRef = useRef<string | null>(initialQuoteId ?? null);
+  const savingRef = useRef(false);
+  // A restored/prefilled session must not autosave (and stamp a lead) with ZERO user edits —
+  // opening a link is not intent (review: "mints a numbered draft with zero interaction").
+  const dirtyRef = useRef(false);
   const [generating, startGenerate] = useTransition();
   const [uploading, startUpload] = useTransition();
   const [saving, startSave] = useTransition();
@@ -269,7 +289,7 @@ export function QuoteBuilder({
     //
     // The appointment is the MOST specific identity here (a job can hold several walk-throughs), so
     // it goes first. Precedence + the one-time eviction prefix live in quoteDraftKey, tested.
-    quoteDraftKey({ captureId, jobId, customerId: preselected, inquiryId }),
+    quoteDraftKey({ captureId, jobId, customerId: preselected, inquiryId, userId: draftUserId }),
     draftState,
     (d) => {
       setCustomerId(d.customerId ?? preselected ?? "");
@@ -284,12 +304,15 @@ export function QuoteBuilder({
       if (Array.isArray(d.items) && d.items.length) setItems(d.items);
       if (Array.isArray(d.proposed) && d.proposed.length) setProposed(d.proposed);
       if (Array.isArray(d.questions) && d.questions.length) setQuestions(d.questions);
-      if (typeof d.quoteId === "string" && d.quoteId) setQuoteId(d.quoteId);
+      if (typeof d.quoteId === "string" && d.quoteId) {
+        setQuoteId(d.quoteId);
+        quoteIdRef.current = d.quoteId;
+      }
       // A restored draft wins, but an EMPTY drafted scope must not blank a fresh
       // inspection-capture prefill (?capture=) — that's the whole point of the link.
       setScope(d.scope ? d.scope : (initialScope ?? ""));
     },
-    quoteDraftLegacyKeys({ captureId, jobId, customerId: preselected, inquiryId }),
+    quoteDraftLegacyKeys({ captureId, jobId, customerId: preselected, inquiryId, userId: draftUserId }),
   );
   // The builder is a full page (not a modal), so say it out loud when a draft
   // comes back — otherwise the refilled form just looks like déjà vu.
@@ -323,6 +346,7 @@ export function QuoteBuilder({
   }, [items]);
 
   function updateItem(idx: number, patch: Partial<DraftLineItem>) {
+    dirtyRef.current = true;
     setItems((prev) =>
       prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)),
     );
@@ -351,6 +375,7 @@ export function QuoteBuilder({
   function acceptProposals() {
     const taking = proposed.filter((p) => p.keep);
     if (!taking.length) return;
+    dirtyRef.current = true;
     const real = items.filter((i) => i.description.trim());
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     setItems([...real, ...taking.map(({ pid, keep, ...line }) => line)]);
@@ -511,7 +536,7 @@ export function QuoteBuilder({
   }
 
   const quotePayload = (cleaned: DraftLineItem[]) => ({
-    id: quoteId || undefined,
+    id: quoteIdRef.current || undefined,
     customer_id: customerId || null,
     job_id: jobId || null,
     inquiry_id: inquiryId || null,
@@ -525,32 +550,60 @@ export function QuoteBuilder({
     items: cleaned,
   });
 
-  // AUTOSAVE: debounced, substance-gated (no junk rows from an empty builder), single-flight,
-  // and silent about transient failures — the explicit Save button still surfaces errors.
+  // AUTOSAVE: debounced, substance- AND intent-gated (a restored or link-prefilled builder
+  // must not mint a row with zero user edits), single-flight through refs (a timer fires with
+  // its arming render's closure — every guard reads current refs instead), coalescing (an
+  // edit landing during a save's flight re-arms instead of being dropped), and HONEST: the
+  // "saved" badge demotes to "Unsaved changes" the moment anything changes, and failures show.
+  const runAutosave = async () => {
+    if (autosaveBusy.current || savingRef.current || navigatedAway.current) {
+      autosaveAgain.current = true;
+      return;
+    }
+    const cleaned = itemsRef.current.filter((i) => i.description.trim());
+    if (!cleaned.length && !quoteIdRef.current) return;
+    autosaveBusy.current = true;
+    setAutoState("saving");
+    try {
+      const res = await saveQuote(quotePayload(cleaned));
+      if (res.ok) {
+        quoteIdRef.current = res.id;
+        setQuoteId(res.id);
+        setAutoNumber(res.quote_number ?? null);
+        setAutoError(null);
+        setAutoState("saved");
+      } else if ((res as { code?: string }).code === "not_editable") {
+        // The draft was sent from another surface — stop autosaving it; offer a fresh start.
+        setAutoError(res.error ?? "This draft was sent — it can't be autosaved anymore.");
+        setAutoState("error");
+      } else {
+        setAutoError(res.error ?? "Autosave failed — recent edits aren't saved yet.");
+        setAutoState("error");
+      }
+    } catch {
+      setAutoError("Autosave failed — recent edits aren't saved yet.");
+      setAutoState("error");
+    } finally {
+      autosaveBusy.current = false;
+      if (autosaveAgain.current && !navigatedAway.current) {
+        autosaveAgain.current = false;
+        if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
+        autosaveTimer.current = setTimeout(() => void runAutosave(), 800);
+      }
+    }
+  };
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  const runAutosaveRef = useRef(runAutosave);
+  runAutosaveRef.current = runAutosave;
   useEffect(() => {
     const cleaned = items.filter((i) => i.description.trim());
-    if (!cleaned.length && !quoteId) return; // nothing worth a row yet
+    if (!cleaned.length && !quoteIdRef.current) return; // nothing worth a row yet
+    if (!dirtyRef.current) return; // no user intent yet — restores/prefills don't count
     if (navigatedAway.current) return;
+    setAutoState((prev) => (prev === "saved" ? "pending" : prev));
     if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
-    autosaveTimer.current = setTimeout(async () => {
-      if (autosaveBusy.current || navigatedAway.current || saving) return;
-      autosaveBusy.current = true;
-      setAutoState("saving");
-      try {
-        const res = await saveQuote(quotePayload(cleaned));
-        if (res.ok) {
-          setQuoteId(res.id);
-          setAutoNumber(res.quote_number ?? null);
-          setAutoState("saved");
-        } else {
-          setAutoState("error");
-        }
-      } catch {
-        setAutoState("error");
-      } finally {
-        autosaveBusy.current = false;
-      }
-    }, 1500);
+    autosaveTimer.current = setTimeout(() => void runAutosaveRef.current(), 1500);
     return () => {
       if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
     };
@@ -565,8 +618,16 @@ export function QuoteBuilder({
       return;
     }
     startSave(async () => {
+      // Kill any pending/in-flight autosave BEFORE saving — the explicit-save-vs-timer race
+      // was minting twin numbered drafts (review, HIGH). savingRef is the shared guard the
+      // timer reads at fire time; the busy-wait drains an autosave already on the wire so
+      // its returned id is adopted instead of racing a second insert.
+      savingRef.current = true;
+      if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
+      for (let i = 0; i < 40 && autosaveBusy.current; i++) await new Promise((r) => setTimeout(r, 100));
       const res = await saveQuote(quotePayload(cleaned));
       if (!res.ok) {
+        savingRef.current = false;
         setSaveError(res.error ?? "Could not save the quote.");
         return;
       }
@@ -579,7 +640,7 @@ export function QuoteBuilder({
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-3">
+    <div className="grid gap-6 lg:grid-cols-3" onInputCapture={() => (dirtyRef.current = true)}>
       <div className="space-y-6 lg:col-span-2">
         {/* AI drafting */}
         <Card className="border-brand/30 bg-brand-light/40">
@@ -935,7 +996,10 @@ export function QuoteBuilder({
                             <div className="col-span-2 flex items-center justify-end gap-1 sm:col-span-2">
                               <span className="text-sm font-medium text-slate-700">{formatCurrency(it.quantity * it.unit_price)}</span>
                               <button
-                                onClick={() => setItems((p) => p.filter((_, i) => i !== idx))}
+                                onClick={() => {
+                                  dirtyRef.current = true;
+                                  setItems((p) => p.filter((_, i) => i !== idx));
+                                }}
                                 className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
                                 aria-label="Remove line"
                               >
@@ -1090,7 +1154,30 @@ export function QuoteBuilder({
                 Draft {autoNumber ?? ""} autosaved — it&apos;s on the Estimates list even if you leave.
               </p>
             )}
+            {autoState === "pending" && <p className="pt-1 text-xs text-slate-400">Unsaved changes…</p>}
             {autoState === "saving" && <p className="pt-1 text-xs text-slate-400">Autosaving…</p>}
+            {autoState === "error" && (
+              <div className="pt-1 text-xs text-amber-700">
+                {autoError ?? "Autosave failed — recent edits aren't saved yet."}{" "}
+                <button
+                  type="button"
+                  className="font-semibold underline"
+                  onClick={() => {
+                    // A sent/stale draft gets a fresh identity; a transient failure just retries.
+                    if (autoError?.includes("sent")) {
+                      quoteIdRef.current = null;
+                      setQuoteId(null);
+                      setAutoNumber(null);
+                    }
+                    setAutoError(null);
+                    setAutoState("idle");
+                    void runAutosaveRef.current();
+                  }}
+                >
+                  {autoError?.includes("sent") ? "Continue as a new draft" : "Retry"}
+                </button>
+              </div>
+            )}
             <Button className="mt-2 w-full" onClick={onSave} disabled={saving}>
               {saving ? "Saving…" : `Save ${docLabel({ doc_type: docType })}`}
             </Button>

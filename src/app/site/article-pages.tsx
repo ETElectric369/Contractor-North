@@ -119,7 +119,7 @@ export function BlogIndex({ org, posts, base, nav }: { org: PublicOrg; posts: Pu
           </div>
         )}
       </main>
-      <SiteFooter chrome={chrome} />
+      <SiteFooter chrome={chrome} extInPlace={base !== ""} />
     </div>
   );
 }
@@ -194,7 +194,7 @@ export function ArticlePage({ org, post, base, nav }: { org: PublicOrg; post: Pu
           </Link>
         </div>
       </main>
-      <SiteFooter chrome={chrome} />
+      <SiteFooter chrome={chrome} extInPlace={base !== ""} />
     </div>
   );
 }

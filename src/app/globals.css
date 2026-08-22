@@ -197,6 +197,12 @@ body.modal-open .app-bottom-nav {
     inset 0 1px 0 rgba(255, 255, 255, 0.7),
     0 6px 18px -12px rgba(15, 23, 42, 0.35);
 }
+.seaglass-btn:hover {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.12)),
+    linear-gradient(rgb(var(--glass-tint) / 0.34), rgb(var(--glass-tint) / 0.34)),
+    rgba(255, 255, 255, 0.86);
+}
 .seaglass-btn::before {
   content: "";
   position: absolute;

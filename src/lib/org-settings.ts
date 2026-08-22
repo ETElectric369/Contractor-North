@@ -458,7 +458,7 @@ export function getOrgSettings(raw: unknown): OrgSettings {
   for (const k of ["hero_scale", "spread_area_scale", "spread_head_scale", "spread_tag_scale"] as const) {
     merged[k] = lever(merged[k], 50, 200);
   }
-  for (const k of ["splash_headline_color", "splash_tagline_color", "service_area_color"] as const) {
+  for (const k of ["site_accent", "splash_headline_color", "splash_tagline_color", "service_area_color"] as const) {
     const v = typeof merged[k] === "string" ? merged[k].trim() : "";
     merged[k] = /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : "";
   }

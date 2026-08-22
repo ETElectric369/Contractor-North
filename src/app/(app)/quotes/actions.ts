@@ -471,8 +471,27 @@ export async function deleteQuote(id: string): Promise<{ ok: boolean; error?: st
   const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  // THE STAMP FOLLOWS THE DEED, IN REVERSE (review of cn-v796): autosave stamps a lead
+  // 'quoted' the moment a draft exists — so deleting that draft must un-stamp it when no
+  // other quote remains, or the lead leaves the inbox pointing at nothing (the exact
+  // Andrew-orphan class the stamp was moved to prevent).
+  const { data: victim } = await supabase.from("quotes").select("id, inquiry_id").eq("id", id).maybeSingle();
   const { error } = await supabase.from("quotes").delete().eq("id", id);
   if (error) return { ok: false, error: dbError(error) };
+  if (victim?.inquiry_id) {
+    const { count } = await supabase
+      .from("quotes")
+      .select("id", { count: "exact", head: true })
+      .eq("inquiry_id", victim.inquiry_id);
+    if (!count) {
+      await supabase
+        .from("inquiries")
+        .update({ converted_to: null, converted_at: null, status: "open", updated_at: new Date().toISOString() })
+        .eq("id", victim.inquiry_id)
+        .eq("converted_to", "quote");
+      revalidatePath("/leads");
+    }
+  }
   revalidatePath("/quotes");
   return { ok: true };
 }
@@ -558,25 +577,44 @@ export async function saveQuote(input: SaveQuoteInput) {
     // The builder's Estimate|Quote toggle; absent (Nort, duplicates of old rows) = Estimate (T&M).
     doc_type: input.doc_type === "quote" ? "quote" : "estimate",
   };
-  let quote: { id: string; quote_number?: string | null };
+  let quote: { id: string; quote_number?: string | null } | null = null;
+  let updateItemsDone = false;
   if (input.id) {
-    // AUTOSAVE UPDATE — draft-only (the accepted-quote lock's little sibling: a sent or
-    // accepted document must never be rewritten by a builder session), RLS-scoped,
-    // zero-row-checked (the silent-write law).
-    const { data: upd, error: updErr } = await supabase
-      .from("quotes")
-      .update(fields)
-      .eq("id", input.id)
-      .eq("status", "draft")
-      .select("id, quote_number");
-    if (updErr) return { ok: false as const, error: dbError(updErr) };
-    if (!upd?.length) return { ok: false as const, error: "That draft is no longer editable — it may have been sent." };
-    quote = upd[0] as { id: string; quote_number?: string | null };
-    // Items are replaced wholesale — the builder's list IS the document (draft-only, so no
-    // frozen billing math depends on these rows yet).
-    const { error: delErr } = await supabase.from("quote_line_items").delete().eq("quote_id", quote.id);
-    if (delErr) return { ok: false as const, error: delErr.message };
-  } else {
+    // AUTOSAVE UPDATE — one TRANSACTION via save_quote_draft (0211): row-locked,
+    // draft-locked, header + wholesale line replace atomically. The old three-REST-call
+    // shape let two writers interleave into doubled lines under a single-set total, and a
+    // failed insert left a zero-line draft (review of cn-v796, 3 confirmed HIGHs).
+    const { data: rpc, error: rpcErr } = await supabase.rpc("save_quote_draft", {
+      p_id: input.id,
+      p_fields: { ...fields, subtotal, tax, total },
+      p_items: input.items.map((it, idx) => ({
+        description: it.description,
+        quantity: it.quantity,
+        unit: it.unit || "ea",
+        unit_price: it.unit_price,
+        category: it.group ?? null,
+        sort_order: idx,
+      })),
+    });
+    if (rpcErr) {
+      const msg = rpcErr.message ?? "";
+      if (msg.includes("QUOTE_NOT_DRAFT")) {
+        // Sent/accepted: the builder must stop and say so — never rewrite a live document.
+        return { ok: false as const, code: "not_editable" as const, error: "That draft was sent — it can't be edited from the builder anymore." };
+      }
+      if (msg.includes("QUOTE_GONE")) {
+        // Deleted (or never ours): fall through and mint a fresh draft — a stale restored
+        // quoteId must not brick the session (review: "permanent no-save black hole").
+      } else {
+        return { ok: false as const, error: dbError(rpcErr) };
+      }
+    } else {
+      const row = Array.isArray(rpc) ? rpc[0] : rpc;
+      quote = row as { id: string; quote_number?: string | null };
+      updateItemsDone = true;
+    }
+  }
+  if (!quote) {
     const { data: ins, error } = await supabase
       .from("quotes")
       .insert({ ...fields, created_by: ctx.userId })
@@ -587,8 +625,9 @@ export async function saveQuote(input: SaveQuoteInput) {
     if (error) return { ok: false as const, error: dbError(error) };
     quote = ins as { id: string; quote_number?: string | null };
   }
+  if (!quote) return { ok: false as const, error: "The save didn't land." };
 
-  if (input.items.length) {
+  if (input.items.length && !updateItemsDone) {
     const rows = input.items.map((it, idx) => ({
       quote_id: quote.id,
       description: it.description,
@@ -622,11 +661,15 @@ export async function saveQuote(input: SaveQuoteInput) {
     if (appt) {
       const existing =
         appt.capture && typeof appt.capture === "object" ? (appt.capture as Record<string, unknown>) : {};
-      await supabase
-        .from("appointments")
-        .update({ capture: { ...existing, quote_id: quote.id }, updated_at: new Date().toISOString() })
-        .eq("id", appt.id);
-      revalidatePath("/inspections");
+      // Stamp ONCE: autosave calls this every ~2s — a read-modify-write of the capture jsonb
+      // on every tick would clobber concurrent inspector writes (review) and churn revalidates.
+      if (existing.quote_id !== quote.id) {
+        await supabase
+          .from("appointments")
+          .update({ capture: { ...existing, quote_id: quote.id }, updated_at: new Date().toISOString() })
+          .eq("id", appt.id);
+        revalidatePath("/inspections");
+      }
     }
   }
 
@@ -640,7 +683,6 @@ export async function saveQuote(input: SaveQuoteInput) {
     await supabase
       .from("inquiries")
       .update({
-        ...(input.customer_id ? { customer_id: input.customer_id } : {}),
         converted_to: "quote",
         converted_at: new Date().toISOString(),
         status: "quoted",
@@ -648,6 +690,15 @@ export async function saveQuote(input: SaveQuoteInput) {
       })
       .eq("id", inquiryId)
       .is("converted_at", null);
+    // The customer link attaches separately, attach-once — the first-deed-only stamp used to
+    // carry it, so a customer picked AFTER the first autosave never reached the lead (review).
+    if (input.customer_id) {
+      await supabase
+        .from("inquiries")
+        .update({ customer_id: input.customer_id, updated_at: new Date().toISOString() })
+        .eq("id", inquiryId)
+        .is("customer_id", null);
+    }
     revalidatePath("/leads");
   }
 

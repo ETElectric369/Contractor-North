@@ -1,3 +1,4 @@
+import { flattenHeadline } from "@/lib/site-doc";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { assertOrgServable, orgIsServable } from "@/lib/serve-org";
@@ -28,8 +29,9 @@ export async function generateMetadata({ params }: { params: Promise<{ handle: s
   if (org.settings.estimating_mode !== "catalog") return {}; // ditto — non-catalog orgs 404 below
   if (!(await orgIsServable(org.settings))) return {}; // wrong host → the page 404s below
   const s = org.settings;
-  const title = s.splash_headline || `${org.name} — Deck Estimate`;
-  const description = s.splash_tagline || "Answer a few quick questions for an instant ballpark.";
+  // A deliberate two-line hero is still one line HERE — titles and descriptions have no \n.
+  const title = flattenHeadline(s.splash_headline) || `${org.name} — Deck Estimate`;
+  const description = flattenHeadline(s.splash_tagline) || "Answer a few quick questions for an instant ballpark.";
   const url = `${orgPublicBaseUrl(s)}/estimate/${handle}`;
   const img = socialImage(s.splash_bg_url || s.portfolio?.[0]?.url || org.logo_url || null);
   return {

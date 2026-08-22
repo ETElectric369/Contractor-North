@@ -73,7 +73,7 @@ export function CustomPageView({ org, page, base, nav }: { org: PublicOrg; page:
         </div>
         <BlockRenderer blocks={page.blocks} brand={chrome.brand} />
       </main>
-      <SiteFooter chrome={chrome} />
+      <SiteFooter chrome={chrome} extInPlace={base !== ""} />
     </div>
   );
 }
