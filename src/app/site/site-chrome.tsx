@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Phone, Mail, MapPin, ArrowRight, Instagram, Star, Menu } from "lucide-react";
+import { Phone, Mail, MapPin, ArrowRight, Instagram, Star, Menu, ChevronDown } from "lucide-react";
 import { siteAccentHex } from "@/lib/org-settings";
 import type { PublicOrg } from "@/lib/public-org";
 import { navPageLinks, pageSlugFromHref, sectionAnchor, type SiteNavLink } from "@/lib/site-nav";
@@ -120,7 +120,7 @@ export function SiteHeader({
         <img src={sizedImage(org.logo_url, LOGO_HEADER_W)} alt={org.name} className="h-9 w-auto" />
       )}
       {(!org.logo_url || showName) && (
-        <span className="text-lg font-extrabold tracking-tight">{org.name}</span>
+        <span className="whitespace-nowrap text-lg font-extrabold tracking-tight">{org.name}</span>
       )}
     </>
   );
@@ -128,39 +128,64 @@ export function SiteHeader({
     <header className="sticky top-0 z-40 border-b border-slate-200/70 bg-white/85 backdrop-blur">
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
         {onHomepage ? (
-          <a href="#top" className="flex items-center gap-2">{logo}</a>
+          <a href="#top" className="flex shrink-0 items-center gap-2">{logo}</a>
         ) : (
-          <Link href={home} className="flex items-center gap-2">{logo}</Link>
+          <Link href={home} className="flex shrink-0 items-center gap-2">{logo}</Link>
         )}
+        {/* THE CLEAN TOP BAR (Erik: "cleaner with a dropdown menu for the additional pages ...
+            keep the pertinent information up there"). The anchors a visitor acts on stay inline;
+            Articles + the builder pages fold into one "More" dropdown once there are enough of
+            them to crowd the name and the phone number — the two things that must never wrap. */}
         <nav className="hidden items-center gap-6 text-sm font-medium text-slate-600 md:flex">
-          {chrome.showWorkLink && <a href={sectionAnchor(anchorBase, "#work")} className="hover:text-slate-900">Our work</a>}
+          {chrome.showWorkLink && <a href={sectionAnchor(anchorBase, "#work")} className="whitespace-nowrap hover:text-slate-900">Our work</a>}
           {chrome.showServicesLink && <a href={sectionAnchor(anchorBase, "#services")} className="hover:text-slate-900">Services</a>}
           {chrome.showReviewsLink && <a href={sectionAnchor(anchorBase, "#reviews")} className="hover:text-slate-900">Reviews</a>}
-          {articlesHref && (
-            <Link
-              href={articlesHref}
-              aria-current={current === "articles" ? "page" : undefined}
-              className={current === "articles" ? "font-semibold text-slate-900" : "hover:text-slate-900"}
-            >
-              Articles
-            </Link>
-          )}
-          {pageLinks.map((p) => (
-            <Link
-              key={p.href}
-              href={p.href}
-              aria-current={isCurrent(p, current) ? "page" : undefined}
-              className={isCurrent(p, current) ? "font-semibold text-slate-900" : "hover:text-slate-900"}
-            >
-              {p.label}
-            </Link>
-          ))}
+          {(() => {
+            const extra: { href: string; label: string; cur: boolean }[] = [
+              ...(articlesHref ? [{ href: articlesHref, label: "Articles", cur: current === "articles" }] : []),
+              ...pageLinks.map((p) => ({ href: p.href, label: p.label, cur: isCurrent(p, current) })),
+            ];
+            if (extra.length === 0) return null;
+            if (extra.length <= 2)
+              return extra.map((p) => (
+                <Link
+                  key={p.href}
+                  href={p.href}
+                  aria-current={p.cur ? "page" : undefined}
+                  className={p.cur ? "font-semibold text-slate-900" : "hover:text-slate-900"}
+                >
+                  {p.label}
+                </Link>
+              ));
+            const moreCurrent = extra.some((p) => p.cur);
+            return (
+              <details className="relative">
+                <summary
+                  className={`flex cursor-pointer list-none items-center gap-1 [&::-webkit-details-marker]:hidden ${moreCurrent ? "font-semibold text-slate-900" : "hover:text-slate-900"}`}
+                >
+                  More <ChevronDown className="h-4 w-4" />
+                </summary>
+                <nav className="absolute left-0 top-full z-50 mt-2 flex w-52 flex-col rounded-xl border border-slate-200 bg-white py-2 shadow-lg">
+                  {extra.map((p) => (
+                    <Link
+                      key={p.href}
+                      href={p.href}
+                      aria-current={p.cur ? "page" : undefined}
+                      className={`px-4 py-2 hover:bg-slate-50 ${p.cur ? "font-semibold text-slate-900" : ""}`}
+                    >
+                      {p.label}
+                    </Link>
+                  ))}
+                </nav>
+              </details>
+            );
+          })()}
           {/* "#contact" targets the footer, which is part of this chrome — resolves on EVERY page. */}
           <a href="#contact" className="hover:text-slate-900">Contact</a>
         </nav>
         <div className="flex items-center gap-2">
           {telHref && (
-            <a href={telHref} className="hidden items-center gap-1.5 text-sm font-semibold text-slate-700 sm:flex">
+            <a href={telHref} className="hidden items-center gap-1.5 whitespace-nowrap text-sm font-semibold text-slate-700 sm:flex">
               <Phone className="h-4 w-4" style={{ color: brand }} /> {org.phone}
             </a>
           )}
