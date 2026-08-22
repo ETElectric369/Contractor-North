@@ -62,6 +62,9 @@ export async function parseAiJson(client: Anthropic, raw: string, orgId?: string
   // METER THE MODEL THAT ACTUALLY RAN, never the constant — costOf() prices from this string, so
   // naming the wrong one overstates or understates the org's month.
   void recordAiUsage({ orgId, model, surface: "json-repair", usage: fix.usage as never });
+  // A repair that ran out of tokens "closed the open arrays" mid-amputation — that is a
+  // DIFFERENT document wearing valid syntax, worse than the parse error it replaced.
+  if (fix.stop_reason === "max_tokens") throw new Error("The response was too large to repair.");
   const t = fix.content.find((b) => b.type === "text") as { text: string } | undefined;
   return JSON.parse(extractJsonObject(t?.text ?? ""));
 }

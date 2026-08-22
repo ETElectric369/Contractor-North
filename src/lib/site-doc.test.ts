@@ -78,6 +78,51 @@ describe("the site document boundary — what a design may NEVER do", () => {
   });
 });
 
+describe("REVIEWS SURVIVE THE ROUND TRIP VERBATIM — publish must never delete or truncate one", () => {
+  it("13 reviews, one very long, come through capture→publish byte-identical", () => {
+    const reviews = Array.from({ length: 13 }, (_, i) => ({
+      name: `Customer ${i}`,
+      text: i === 0 ? "x".repeat(900) : `Great work ${i}`,
+      rating: 5,
+    }));
+    const doc = extractSiteDoc({ reviews });
+    expect(doc.reviews).toEqual(reviews);
+    expect(applySiteDoc({ reviews }, doc).reviews).toEqual(reviews);
+  });
+
+  it("and the drift diff SEES a 13th review added outside the studio", () => {
+    const twelve = Array.from({ length: 12 }, (_, i) => ({ name: `C${i}`, text: `t${i}` }));
+    const a = extractSiteDoc({ reviews: twelve });
+    const b = extractSiteDoc({ reviews: [...twelve, { name: "New", text: "Added outside" }] });
+    expect(diffSiteDoc(a, b)).toContain("Reviews");
+  });
+
+  it("a model echoing reviews back re-serialized is NOT a false refusal", () => {
+    const withR = extractSiteDoc({ reviews: [{ name: "Pat", text: "Nice", rating: 5 }] });
+    const { dropped } = coerceSiteDoc(
+      { ...withR, reviews: [{ rating: 5, text: "Nice", name: "Pat" }] }, // key order shuffled
+      withR,
+    );
+    expect(dropped.some((d) => /review/.test(d))).toBe(false);
+  });
+});
+
+describe("AN ABSENT KEY KEEPS THE BASE — a partial proposal must not erase the site", () => {
+  it("a doc returning only the headline keeps everything else", () => {
+    const { doc } = coerceSiteDoc({ splash_headline: "New headline" }, base);
+    expect(doc.splash_headline).toBe("New headline");
+    expect(doc.splash_tagline).toBe(base.splash_tagline);
+    expect(doc.splash_bullets).toBe(base.splash_bullets);
+    expect(doc.portfolio).toEqual(base.portfolio);
+    expect(doc.home_blocks).toEqual(base.home_blocks);
+  });
+
+  it("an explicit empty string is an intentional clear and passes through", () => {
+    const { doc } = coerceSiteDoc({ splash_tagline: "" }, base);
+    expect(doc.splash_tagline).toBe("");
+  });
+});
+
 describe("materialize + diff", () => {
   it("applySiteDoc touches only the doc's keys", () => {
     const raw = { public_handle: "et-electric", estimating_mode: "research", splash_headline: "Old" };

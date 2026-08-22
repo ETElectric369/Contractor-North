@@ -70,12 +70,25 @@ const LIMITS = {
   handle: 100,
   url: 600,
   caption: 300,
-  reviewName: 80,
-  reviewText: 600,
-  reviews: 12,
+  // Parity with update_site_content's 200-element array cap (0118) — a bound, not a target.
+  portfolioItems: 200,
 } as const;
 
 const s = (v: unknown, max: number) => String(v ?? "").slice(0, max);
+
+/**
+ * Reviews are WIRING, carried VERBATIM (review finding, high): the first cut clamped them to
+ * 12×600 chars in extractSiteDoc — which meant capture→publish would silently DELETE a 13th
+ * review and truncate long ones, and the drift banner (which compares extracts) was blind to
+ * exactly the same data. A design may never write reviews, so nothing model-shaped ever reaches
+ * this path — structural coercion only, no truncation.
+ */
+const normalizeReviews = (raw: unknown): SiteDoc["reviews"] =>
+  (Array.isArray(raw) ? raw : []).map((r) => ({
+    name: String((r as { name?: unknown })?.name ?? ""),
+    text: String((r as { text?: unknown })?.text ?? ""),
+    ...(typeof (r as { rating?: unknown })?.rating === "number" ? { rating: (r as { rating: number }).rating } : {}),
+  }));
 
 /** The live site's current doc — read through the merged settings view, so shape is stable. */
 export function extractSiteDoc(rawSettings: unknown): SiteDoc {
@@ -95,14 +108,8 @@ export function extractSiteDoc(rawSettings: unknown): SiteDoc {
     social_instagram: s(st.social_instagram, LIMITS.handle),
     google_business_url: s(st.google_business_url, LIMITS.url),
     calendly_url: s(st.calendly_url, LIMITS.url),
-    reviews: (Array.isArray(st.reviews) ? st.reviews : [])
-      .slice(0, LIMITS.reviews)
-      .map((r) => ({
-        name: s((r as { name?: unknown }).name, LIMITS.reviewName),
-        text: s((r as { text?: unknown }).text, LIMITS.reviewText),
-        ...(typeof (r as { rating?: unknown }).rating === "number" ? { rating: (r as { rating: number }).rating } : {}),
-      })),
-    portfolio: (Array.isArray(st.portfolio) ? st.portfolio : []).map((p) => ({
+    reviews: normalizeReviews(st.reviews),
+    portfolio: (Array.isArray(st.portfolio) ? st.portfolio : []).slice(0, LIMITS.portfolioItems).map((p) => ({
       url: s((p as { url?: unknown }).url, LIMITS.url),
       ...(typeof (p as { src?: unknown }).src === "string" ? { src: s((p as { src: string }).src, LIMITS.url) } : {}),
       ...(typeof (p as { caption?: unknown }).caption === "string"
@@ -151,6 +158,12 @@ export function coerceSiteDoc(raw: unknown, base: SiteDoc): { doc: SiteDoc; drop
   const known = knownImageUrls(base);
   const knownPortfolio = new Map(base.portfolio.map((p) => [p.url, p]));
 
+  // AN ABSENT KEY KEEPS THE BASE VALUE (review, medium): the first cut blanked every string the
+  // model didn't return — a pass that answered "make the hero darker" with only the changed
+  // fields would silently erase the tagline, the services, the whole portfolio. Absent means
+  // untouched; an explicit "" is an intentional clear and passes through.
+  const sOr = (v: unknown, fallback: string, max: number) => (v === undefined ? fallback : s(v, max));
+
   const img = (v: unknown, label: string): string => {
     const u = s(v, LIMITS.url);
     if (!u) return "";
@@ -159,10 +172,11 @@ export function coerceSiteDoc(raw: unknown, base: SiteDoc): { doc: SiteDoc; drop
     return "";
   };
 
-  // Portfolio: reorder / recaption / subset of the EXISTING photos only.
+  // Portfolio: reorder / recaption / subset of the EXISTING photos only. Absent = untouched.
   const portfolio: SiteDoc["portfolio"] = [];
   if (Array.isArray(r.portfolio)) {
     for (const p of r.portfolio) {
+      if (portfolio.length >= LIMITS.portfolioItems) break;
       const u = s((p as { url?: unknown })?.url, LIMITS.url);
       const own = knownPortfolio.get(u);
       if (!own) {
@@ -207,8 +221,9 @@ export function coerceSiteDoc(raw: unknown, base: SiteDoc): { doc: SiteDoc; drop
     }
   }
 
-  // Reviews: carried from base VERBATIM. If the model tried to change them, say so.
-  if (r.reviews !== undefined && JSON.stringify(r.reviews) !== JSON.stringify(base.reviews)) {
+  // Reviews: carried from base VERBATIM. If the model tried to CHANGE them (compared after the
+  // same structural normalization, so a re-serialized echo isn't a false refusal), say so.
+  if (r.reviews !== undefined && JSON.stringify(normalizeReviews(r.reviews)) !== JSON.stringify(base.reviews)) {
     dropped.push("changes to your reviews (a design may restyle testimonials, never write them)");
   }
 
@@ -216,23 +231,23 @@ export function coerceSiteDoc(raw: unknown, base: SiteDoc): { doc: SiteDoc; drop
   const theme = r.site_theme;
   return {
     doc: {
-      splash_headline: s(r.splash_headline, LIMITS.headline),
-      splash_tagline: s(r.splash_tagline, LIMITS.tagline),
-      splash_bg_url: img(r.splash_bg_url, "the hero background"),
-      splash_bullets: s(r.splash_bullets, LIMITS.bullets),
-      splash_credentials: s(r.splash_credentials, LIMITS.credentials),
+      splash_headline: sOr(r.splash_headline, base.splash_headline, LIMITS.headline),
+      splash_tagline: sOr(r.splash_tagline, base.splash_tagline, LIMITS.tagline),
+      splash_bg_url: r.splash_bg_url === undefined ? base.splash_bg_url : img(r.splash_bg_url, "the hero background"),
+      splash_bullets: sOr(r.splash_bullets, base.splash_bullets, LIMITS.bullets),
+      splash_credentials: sOr(r.splash_credentials, base.splash_credentials, LIMITS.credentials),
       splash_headline_size: size === "s" || size === "m" || size === "l" ? size : base.splash_headline_size,
       show_name_with_logo: typeof r.show_name_with_logo === "boolean" ? r.show_name_with_logo : base.show_name_with_logo,
-      specialty_headline: s(r.specialty_headline, LIMITS.headline),
-      specialty_blurb: s(r.specialty_blurb, LIMITS.specialtyBlurb),
-      service_area: s(r.service_area, LIMITS.serviceArea),
+      specialty_headline: sOr(r.specialty_headline, base.specialty_headline, LIMITS.headline),
+      specialty_blurb: sOr(r.specialty_blurb, base.specialty_blurb, LIMITS.specialtyBlurb),
+      service_area: sOr(r.service_area, base.service_area, LIMITS.serviceArea),
       site_theme: theme === "classic" || theme === "bold" || theme === "minimal" ? theme : base.site_theme,
-      social_instagram: s(r.social_instagram, LIMITS.handle),
+      social_instagram: sOr(r.social_instagram, base.social_instagram, LIMITS.handle),
       google_business_url: base.google_business_url, // a design never rewrites the GBP link
       calendly_url: base.calendly_url, // nor the booking link — both are wiring, not styling
       reviews: base.reviews,
-      portfolio,
-      home_blocks: blocks,
+      portfolio: r.portfolio === undefined ? base.portfolio : portfolio,
+      home_blocks: r.home_blocks === undefined ? base.home_blocks : blocks,
     },
     dropped,
   };
@@ -292,6 +307,20 @@ export function siteDocSeoChecks(doc: SiteDoc, published: SiteDoc | null): SeoCh
     });
   if (!doc.splash_bg_url && !doc.portfolio.length)
     out.push({ level: "warn", msg: "No hero photo and no portfolio — the page opens with no imagery at all." });
+  // Tahoe Deck's shape: no hero image set, so the FIRST portfolio photo IS the hero (and the
+  // link-preview image) — a reorder quietly changes the face of the site. Say so.
+  if (
+    published &&
+    !doc.splash_bg_url &&
+    doc.portfolio.length &&
+    published.portfolio.length &&
+    !published.splash_bg_url &&
+    doc.portfolio[0].url !== published.portfolio[0].url
+  )
+    out.push({
+      level: "warn",
+      msg: "The hero photo changes — with no hero image set, the first portfolio photo is the hero (and the link preview).",
+    });
   if (!out.length) out.push({ level: "ok", msg: "Looks good — nothing risky in this publish." });
   return out;
 }

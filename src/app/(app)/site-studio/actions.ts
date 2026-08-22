@@ -7,13 +7,7 @@ import { parseAiJson } from "@/lib/ai-json";
 import { dbError } from "@/lib/db-error";
 import { getOrgSettings } from "@/lib/org-settings";
 import { rateLimited } from "@/lib/rate-limit";
-import {
-  applySiteDoc,
-  coerceSiteDoc,
-  diffSiteDoc,
-  extractSiteDoc,
-  type SiteDoc,
-} from "@/lib/site-doc";
+import { coerceSiteDoc, extractSiteDoc, knownImageUrls, type SiteDoc } from "@/lib/site-doc";
 import { SECTION_KEYS } from "@/lib/site-blocks";
 import { requireStaff } from "@/lib/staff-guard";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -31,14 +25,33 @@ export type StudioResult =
 
 type VersionRow = { id: string; v: number; doc: unknown; status: string };
 
-async function nextVersionNumber(supabase: SupabaseClient): Promise<number> {
-  const { data } = await supabase
-    .from("site_versions")
-    .select("v")
-    .order("v", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  return Number((data as { v?: number } | null)?.v ?? 0) + 1;
+/**
+ * Insert a version with a per-org sequence number. select-max+1 races against a concurrent
+ * insert and the unique(org_id, v) makes the loser ERROR — which must never cost the caller
+ * the work (a design pass has already paid for its model call by the time it inserts), so the
+ * loser re-reads and retries a couple of times before giving up.
+ */
+async function insertVersion(
+  supabase: SupabaseClient,
+  fields: { doc: unknown; note: string; created_by: string | null },
+): Promise<{ id: string } | { error: string }> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { data: top } = await supabase
+      .from("site_versions")
+      .select("v")
+      .order("v", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const v = Number((top as { v?: number } | null)?.v ?? 0) + 1;
+    const { data: row, error } = await supabase
+      .from("site_versions")
+      .insert({ v, doc: fields.doc, status: "draft", note: fields.note, created_by: fields.created_by })
+      .select("id")
+      .single();
+    if (!error) return { id: (row as { id: string }).id };
+    if ((error as { code?: string }).code !== "23505") return { error: dbError(error) };
+  }
+  return { error: "Couldn't number the new version — try again." };
 }
 
 /** Snapshot the LIVE site as a new draft version — the seed of every studio session, and the
@@ -49,15 +62,14 @@ export async function captureSiteVersion(note?: string): Promise<StudioResult> {
   const { data: org } = await ctx.supabase.from("organizations").select("id, settings").limit(1).maybeSingle();
   if (!org) return { ok: false, error: "Organization not found." };
   const doc = extractSiteDoc((org as { settings?: unknown }).settings);
-  const v = await nextVersionNumber(ctx.supabase);
-  const { data: row, error } = await ctx.supabase
-    .from("site_versions")
-    .insert({ v, doc, status: "draft", note: (note ?? "Captured from the live site").slice(0, 200), created_by: ctx.userId })
-    .select("id")
-    .single();
-  if (error) return { ok: false, error: dbError(error) };
+  const ins = await insertVersion(ctx.supabase, {
+    doc,
+    note: (note ?? "Captured from the live site").slice(0, 200),
+    created_by: ctx.userId,
+  });
+  if ("error" in ins) return { ok: false, error: ins.error };
   revalidatePath("/site-studio");
-  return { ok: true, id: (row as { id: string }).id };
+  return { ok: true, id: ins.id };
 }
 
 /**
@@ -99,10 +111,11 @@ export async function designSitePass(instruction: string, baseVersionId: string 
     base = extractSiteDoc((org as { settings?: unknown }).settings);
   }
 
-  const library = [
-    ...(base.splash_bg_url ? [{ url: base.splash_bg_url, caption: "(current hero background)" }] : []),
-    ...base.portfolio.map((p) => ({ url: p.url, caption: p.caption ?? "" })),
-  ];
+  // EVERY image the org owns on its site — hero, portfolio, and images already placed in blocks
+  // by the old builder (review: the first cut omitted block images, so a pass would lose them).
+  const captions = new Map(base.portfolio.map((p) => [p.url, p.caption ?? ""]));
+  if (base.splash_bg_url && !captions.has(base.splash_bg_url)) captions.set(base.splash_bg_url, "(current hero background)");
+  const library = [...knownImageUrls(base)].map((url) => ({ url, caption: captions.get(url) ?? "" }));
 
   try {
     const client = getAnthropic();
@@ -117,7 +130,7 @@ export async function designSitePass(instruction: string, baseVersionId: string 
         "· LINKS in buttons/banners must be on-site: '#contact-form' (the lead form anchor) or a path starting '/'. Never external.\n" +
         "· reviews, google_business_url and calendly_url are wiring — return them EXACTLY as given.\n" +
         "· Never remove the customer's ability to make contact: if you compose home_blocks, include a {type:'section',props:{key:'contact'}} block (and 'estimate' where it fits).\n" +
-        "DOCUMENT FIELDS: splash_headline (the H1 + Google title — keep it keyword-real: trade + place), splash_tagline (the meta-description-ish line, ≤160 chars ideally), splash_bg_url (hero image url from library or \"\"), splash_bullets (the services list, ONE service per line, plain text), splash_credentials (license/insurance line), splash_headline_size ('s'|'m'|'l'), show_name_with_logo (bool), specialty_headline + specialty_blurb (the signature-work section), service_area (towns, ' · ' separated), site_theme ('classic'|'bold'|'minimal' — hero framing), social_instagram (handle only), portfolio (ordered [{url, caption}] from the library — order matters, first is the fallback hero), home_blocks (the page body below the hero; [] means the standard template: specialty, services grid, photos, reviews, estimate, contact).\n" +
+        "DOCUMENT FIELDS: splash_headline (the H1 + Google title — keep it keyword-real: trade + place), splash_tagline (the meta-description-ish line, ≤160 chars ideally), splash_bg_url (hero image url from library or \"\"), splash_bullets (the services list, ONE service per line, plain text), splash_credentials (license/insurance line), splash_headline_size ('s'|'m'|'l'), show_name_with_logo (bool), specialty_headline + specialty_blurb (the signature-work section), service_area (towns, ' · ' separated), site_theme ('classic'|'bold'|'minimal' — hero framing), social_instagram (handle only), portfolio (ordered [{url, caption}] from the library — order matters: when splash_bg_url is empty the FIRST portfolio photo IS the hero and the link-preview image), home_blocks (the page body below the hero; [] means the standard template: specialty, services grid, photos, reviews, estimate, contact).\n" +
         "HOME_BLOCKS PALETTE: {type:'heading',props:{text,align?}}, {type:'text',props:{html}} (simple p/strong/em/ul/li html only), {type:'image',props:{url,alt,caption}}, {type:'button',props:{label,href,align?}}, {type:'gallery',props:{images:[{url,alt}]}}, {type:'banner',props:{bgUrl,heading,text?,buttonLabel?,buttonHref?}}, {type:'section',props:{key:'" +
         SECTION_KEYS.join("'|'") +
         "'}} (live org sections). Optional style per block: {align,size:'s'|'m'|'l'|'xl',font:'sans'|'serif'|'mono',color:'#rrggbb'}.\n" +
@@ -154,15 +167,10 @@ export async function designSitePass(instruction: string, baseVersionId: string 
       : [];
     const note = String(parsed.note ?? "Design pass").replace(/\s+/g, " ").trim().slice(0, 120) || "Design pass";
 
-    const v = await nextVersionNumber(ctx.supabase);
-    const { data: row, error } = await ctx.supabase
-      .from("site_versions")
-      .insert({ v, doc, status: "draft", note, created_by: ctx.userId })
-      .select("id")
-      .single();
-    if (error) return { ok: false, error: dbError(error) };
+    const ins = await insertVersion(ctx.supabase, { doc, note, created_by: ctx.userId });
+    if ("error" in ins) return { ok: false, error: ins.error };
     revalidatePath("/site-studio");
-    return { ok: true, id: (row as { id: string }).id, changes, dropped, note };
+    return { ok: true, id: ins.id, changes, dropped, note };
   } catch (e) {
     const message = e instanceof Error ? e.message : "The design pass failed.";
     return {
@@ -186,27 +194,16 @@ export async function publishSiteVersion(versionId: string): Promise<StudioResul
     .eq("id", versionId)
     .maybeSingle();
   if (!ver) return { ok: false, error: "That version wasn't found." };
+  // extractSiteDoc bounds the doc to the site-document keys and shapes, HOWEVER the row was
+  // written — a direct PostgREST insert can't smuggle protected keys through this merge.
   const doc = extractSiteDoc((ver as VersionRow).doc);
+  if (JSON.stringify(doc).length > 1_600_000) return { ok: false, error: "This version is too large to publish." };
 
-  const { data: org } = await ctx.supabase.from("organizations").select("id, settings").limit(1).maybeSingle();
-  if (!org) return { ok: false, error: "Organization not found." };
-  const merged = applySiteDoc((org as { settings?: unknown }).settings, doc);
-
-  const { data: wrote, error: wErr } = await ctx.supabase
-    .from("organizations")
-    .update({ settings: merged, updated_at: new Date().toISOString() })
-    .eq("id", (org as { id: string }).id)
-    .select("id");
-  if (wErr) return { ok: false, error: dbError(wErr) };
-  if (!wrote?.length) return { ok: false, error: "The publish didn't land — try again." };
-
-  // Old live version steps down, this one steps up. Order matters for the partial unique index.
-  await ctx.supabase.from("site_versions").update({ status: "archived" }).eq("status", "published");
-  const { error: pErr } = await ctx.supabase
-    .from("site_versions")
-    .update({ status: "published", published_at: new Date().toISOString() })
-    .eq("id", versionId);
-  if (pErr) return { ok: false, error: `The site is live, but the version bookkeeping failed: ${dbError(pErr)}` };
+  // One transaction (0209): settings merge + archive old + mark new, RLS-enforced, zero-row
+  // writes RAISE. Replaces three interleavable PostgREST writes whose half-failures left the
+  // drift banner blaming "edits made outside the studio".
+  const { error } = await ctx.supabase.rpc("publish_site_version", { p_version_id: versionId, p_doc: doc });
+  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/site-studio");
   return { ok: true };
 }
@@ -225,42 +222,4 @@ export async function discardSiteVersion(versionId: string): Promise<StudioResul
   if (!data?.length) return { ok: false, error: "Only drafts can be discarded — published versions are the history." };
   revalidatePath("/site-studio");
   return { ok: true };
-}
-
-/** The studio page's data: versions + the live doc + drift vs the published version. */
-export async function studioState(): Promise<
-  | {
-      ok: true;
-      handle: string | null;
-      versions: { id: string; v: number; note: string | null; status: string; created_at: string }[];
-      liveDrift: string[];
-    }
-  | { ok: false; error: string }
-> {
-  const ctx = await requireStaff();
-  if ("error" in ctx) return { ok: false, error: ctx.error ?? "Staff only." };
-  const [{ data: org }, { data: versions }] = await Promise.all([
-    ctx.supabase.from("organizations").select("settings").limit(1).maybeSingle(),
-    ctx.supabase
-      .from("site_versions")
-      .select("id, v, note, status, created_at, doc")
-      .order("v", { ascending: false })
-      .limit(50),
-  ]);
-  const settings = getOrgSettings((org as { settings?: unknown } | null)?.settings);
-  const liveDoc = extractSiteDoc((org as { settings?: unknown } | null)?.settings);
-  const published = (versions ?? []).find((r) => (r as VersionRow).status === "published") as VersionRow | undefined;
-  const liveDrift = published ? diffSiteDoc(extractSiteDoc(published.doc), liveDoc) : [];
-  return {
-    ok: true,
-    handle: settings.public_handle?.trim() || null,
-    versions: (versions ?? []).map((r) => ({
-      id: (r as VersionRow).id,
-      v: (r as VersionRow).v,
-      note: (r as { note?: string | null }).note ?? null,
-      status: (r as VersionRow).status,
-      created_at: String((r as { created_at?: string }).created_at ?? ""),
-    })),
-    liveDrift,
-  };
 }

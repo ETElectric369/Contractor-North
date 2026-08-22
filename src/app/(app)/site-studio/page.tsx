@@ -1,5 +1,7 @@
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getOrgSettings } from "@/lib/org-settings";
+import { isStaffRole } from "@/lib/actions/perms";
 import { extractSiteDoc } from "@/lib/site-doc";
 import { PageHeader } from "@/components/page-header";
 import { SiteStudio } from "./studio";
@@ -13,13 +15,28 @@ export const dynamic = "force-dynamic";
  */
 export default async function SiteStudioPage() {
   const supabase = await createClient();
-  const [{ data: org }, { data: versions }] = await Promise.all([
+  // Staff surface, gated like payroll/analytics — the actions are staff-gated anyway; the page
+  // matching them keeps a tech from landing on an empty husk of a studio.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const { data: me } = await supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle();
+  if (!me || !isStaffRole((me as { role?: string }).role)) redirect("/timeclock");
+
+  const [{ data: org }, { data: versions }, { data: publishedRow }] = await Promise.all([
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),
     supabase
       .from("site_versions")
       .select("id, v, note, status, created_at, doc")
       .order("v", { ascending: false })
       .limit(50),
+    // The published version explicitly — after enough passes it falls off the latest-50 window,
+    // and everything downstream (drift banner, "live" badge, publish-diff) keys off it.
+    supabase
+      .from("site_versions")
+      .select("id, v, note, status, created_at, doc")
+      .eq("status", "published")
+      .maybeSingle(),
   ]);
   const settings = getOrgSettings((org as { settings?: unknown } | null)?.settings);
   const liveDoc = extractSiteDoc((org as { settings?: unknown } | null)?.settings);
@@ -33,14 +50,20 @@ export default async function SiteStudioPage() {
       <SiteStudio
         handle={settings.public_handle?.trim() || null}
         liveDoc={liveDoc}
-        versions={(versions ?? []).map((r: Record<string, unknown>) => ({
-          id: String(r.id),
-          v: Number(r.v),
-          note: (r.note as string | null) ?? null,
-          status: String(r.status),
-          created_at: String(r.created_at ?? ""),
-          doc: r.doc,
-        }))}
+        versions={(() => {
+          const rows = [...(versions ?? [])];
+          // Keep the published row visible even when it ages out of the window.
+          if (publishedRow && !rows.some((r) => (r as { id?: unknown }).id === (publishedRow as { id?: unknown }).id))
+            rows.push(publishedRow);
+          return rows.map((r: Record<string, unknown>) => ({
+            id: String(r.id),
+            v: Number(r.v),
+            note: (r.note as string | null) ?? null,
+            status: String(r.status),
+            created_at: String(r.created_at ?? ""),
+            doc: r.doc,
+          }));
+        })()}
       />
     </div>
   );

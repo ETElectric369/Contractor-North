@@ -59,7 +59,9 @@ export function SiteStudio({
     );
   }
 
-  const previewSrc = selected ? `/site/${handle}?preview=1&sv=${selected.id}` : `/site/${handle}?preview=1`;
+  // Keyed off selectedId, NOT the row: a fresh pass sets an id that reaches the versions prop
+  // only after router.refresh() lands — the preview must show the new design immediately.
+  const previewSrc = selectedId ? `/site/${handle}?preview=1&sv=${selectedId}` : `/site/${handle}?preview=1`;
 
   function runDesign() {
     const ask = instruction.trim();
@@ -187,41 +189,37 @@ export function SiteStudio({
             )}
             <ul className="space-y-1">
               {versions.map((r) => (
+                // A row is a plain flex DIV with two REAL buttons inside — a button nested in a
+                // button is invalid HTML and reads as one mystery tab-stop to a screen reader.
                 <li key={r.id}>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedId(r.id)}
-                    className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-slate-50 ${r.id === selectedId ? "bg-slate-100" : ""}`}
+                  <div
+                    className={`flex w-full items-center gap-2 rounded-lg px-2 py-1 text-sm hover:bg-slate-50 ${r.id === selectedId ? "bg-slate-100" : ""}`}
                   >
-                    <span className="font-mono text-xs text-slate-400">v{r.v}</span>
-                    <span className="min-w-0 flex-1 truncate">{r.note ?? "—"}</span>
-                    {r.status === "published" ? (
-                      <Badge tone="green">live</Badge>
-                    ) : r.status === "archived" ? (
-                      <span className="text-[10px] uppercase text-slate-400">was live</span>
-                    ) : null}
-                    <span className="shrink-0 text-[10px] text-slate-400">{formatDateTime(r.created_at)}</span>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedId(r.id)}
+                      className="flex min-w-0 flex-1 items-center gap-2 py-0.5 text-left"
+                    >
+                      <span className="font-mono text-xs text-slate-400">v{r.v}</span>
+                      <span className="min-w-0 flex-1 truncate">{r.note ?? "—"}</span>
+                      {r.status === "published" ? (
+                        <Badge tone="green">live</Badge>
+                      ) : r.status === "archived" ? (
+                        <span className="text-[10px] uppercase text-slate-400">was live</span>
+                      ) : null}
+                      <span className="shrink-0 text-[10px] text-slate-400">{formatDateTime(r.created_at)}</span>
+                    </button>
                     {r.status === "draft" && (
-                      <span
-                        role="button"
-                        tabIndex={0}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          runDiscard(r);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.stopPropagation();
-                            runDiscard(r);
-                          }
-                        }}
-                        className="shrink-0 text-slate-300 hover:text-rose-500"
+                      <button
+                        type="button"
+                        onClick={() => runDiscard(r)}
+                        className="shrink-0 p-1 text-slate-300 hover:text-rose-500"
                         aria-label={`Discard draft v${r.v}`}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
-                      </span>
+                      </button>
                     )}
-                  </button>
+                  </div>
                 </li>
               ))}
             </ul>
