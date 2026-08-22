@@ -36,6 +36,10 @@ export const SITE_DOC_KEYS = [
   "hero_dx",
   "hero_dy",
   "hero_w",
+  "hero_scale",
+  "spread_area_scale",
+  "spread_head_scale",
+  "spread_tag_scale",
   "spread_area_dx",
   "spread_area_dy",
   "spread_head_dx",
@@ -75,6 +79,10 @@ export interface SiteDoc {
   hero_dx: number;
   hero_dy: number;
   hero_w: number;
+  hero_scale: number;
+  spread_area_scale: number;
+  spread_head_scale: number;
+  spread_tag_scale: number;
   spread_area_dx: number;
   spread_area_dy: number;
   spread_head_dx: number;
@@ -122,6 +130,12 @@ const nudge = (v: unknown, fallback: number): number => {
 };
 
 /** Box width % — 0 means "the framing's default", else clamped to a readable 30-100. */
+/** Text zoom %: 0 = default, else clamped 50-200. Same total-function shape as boxW. */
+const zoom = (v: unknown, fallback: number): number => {
+  const n = typeof v === "number" && Number.isFinite(v) ? Math.round(v) : NaN;
+  if (n === 0) return 0;
+  return Number.isFinite(n) ? Math.min(200, Math.max(50, n)) : fallback;
+};
 const boxW = (v: unknown, fallback: number): number => {
   const n = typeof v === "number" && Number.isFinite(v) ? Math.round(v) : fallback;
   return n <= 0 ? 0 : Math.min(100, Math.max(30, n));
@@ -167,6 +181,10 @@ export function extractSiteDoc(rawSettings: unknown): SiteDoc {
     hero_dx: nudge(st.hero_dx, 0),
     hero_dy: nudge(st.hero_dy, 0),
     hero_w: boxW(st.hero_w, 0),
+    hero_scale: zoom(st.hero_scale, 0),
+    spread_area_scale: zoom(st.spread_area_scale, 0),
+    spread_head_scale: zoom(st.spread_head_scale, 0),
+    spread_tag_scale: zoom(st.spread_tag_scale, 0),
     spread_area_dx: nudge(st.spread_area_dx, 0),
     spread_area_dy: nudge(st.spread_area_dy, 0),
     spread_head_dx: nudge(st.spread_head_dx, 0),
@@ -346,6 +364,10 @@ export function coerceSiteDoc(raw: unknown, base: SiteDoc): { doc: SiteDoc; drop
       hero_dx: r.hero_dx === undefined ? base.hero_dx : nudge(r.hero_dx, base.hero_dx),
       hero_dy: r.hero_dy === undefined ? base.hero_dy : nudge(r.hero_dy, base.hero_dy),
       hero_w: r.hero_w === undefined ? base.hero_w : boxW(r.hero_w, base.hero_w),
+      hero_scale: r.hero_scale === undefined ? base.hero_scale : zoom(r.hero_scale, base.hero_scale),
+      spread_area_scale: r.spread_area_scale === undefined ? base.spread_area_scale : zoom(r.spread_area_scale, base.spread_area_scale),
+      spread_head_scale: r.spread_head_scale === undefined ? base.spread_head_scale : zoom(r.spread_head_scale, base.spread_head_scale),
+      spread_tag_scale: r.spread_tag_scale === undefined ? base.spread_tag_scale : zoom(r.spread_tag_scale, base.spread_tag_scale),
       spread_area_dx: r.spread_area_dx === undefined ? base.spread_area_dx : nudge(r.spread_area_dx, base.spread_area_dx),
       spread_area_dy: r.spread_area_dy === undefined ? base.spread_area_dy : nudge(r.spread_area_dy, base.spread_area_dy),
       spread_head_dx: r.spread_head_dx === undefined ? base.spread_head_dx : nudge(r.spread_head_dx, base.spread_head_dx),
@@ -404,6 +426,10 @@ export function diffSiteDoc(a: SiteDoc, b: SiteDoc): string[] {
     hero_dx: "Hero text nudge (across)",
     hero_dy: "Hero text nudge (down)",
     hero_w: "Hero text box width",
+    hero_scale: "Hero text zoom",
+    spread_area_scale: "Area piece zoom",
+    spread_head_scale: "Headline piece zoom",
+    spread_tag_scale: "Tagline piece zoom",
     spread_area_dx: "Area piece nudge (across)",
     spread_area_dy: "Area piece nudge (down)",
     spread_head_dx: "Headline piece nudge (across)",

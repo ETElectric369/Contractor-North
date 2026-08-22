@@ -208,6 +208,16 @@ describe("the main-build blocks — split obeys the image law, density is enum-o
     expect(coerceSiteDoc({}, d).doc.spread_head_dx).toBe(-40);
   });
 
+  it("text zoom clamps 50-200 with 0 = default", () => {
+    const d = extractSiteDoc({ hero_scale: 340, spread_head_scale: 5, spread_tag_scale: 125 });
+    expect(d.hero_scale).toBe(200);
+    expect(d.spread_head_scale).toBe(50);
+    expect(d.spread_tag_scale).toBe(125);
+    expect(d.spread_area_scale).toBe(0);
+    expect(coerceSiteDoc({ hero_scale: "huge" }, d).doc.hero_scale).toBe(200);
+    expect(coerceSiteDoc({ hero_scale: 0 }, d).doc.hero_scale).toBe(0);
+  });
+
   it("a headline is ONE LINE — newlines become commas (the v29 mangle)", () => {
     expect(extractSiteDoc({ splash_headline: "Custom Lighting \nTruckee" }).splash_headline).toBe("Custom Lighting, Truckee");
     const base2 = extractSiteDoc({});

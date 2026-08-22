@@ -67,7 +67,8 @@ function Hero({
   heroDx = 0,
   heroDy = 0,
   heroW = 0,
-  spreadOff = { areaDx: 0, areaDy: 0, headDx: 0, headDy: 0, headW: 0, tagDx: 0, tagDy: 0, tagW: 0 },
+  heroS = 0,
+  spreadOff = { areaDx: 0, areaDy: 0, areaS: 0, headDx: 0, headDy: 0, headW: 0, headS: 0, tagDx: 0, tagDy: 0, tagW: 0, tagS: 0 },
 }: {
   theme: OrgSettings["site_theme"];
   headline: string;
@@ -85,14 +86,17 @@ function Hero({
   heroDx?: number;
   heroDy?: number;
   heroW?: number;
-  spreadOff?: { areaDx: number; areaDy: number; headDx: number; headDy: number; headW: number; tagDx: number; tagDy: number; tagW: number };
+  heroS?: number;
+  spreadOff?: { areaDx: number; areaDy: number; areaS: number; headDx: number; headDy: number; headW: number; headS: number; tagDx: number; tagDy: number; tagW: number; tagS: number };
 }) {
   // A Corners piece's inline style exists ONLY when a lever is set — all-zero stays byte-
   // identical to the pre-lever markup (the public-site stability law).
-  const pieceStyle = (dx: number, dy: number, w: number) =>
-    dx || dy || w
+  const pieceStyle = (dx: number, dy: number, w: number, sc: number) =>
+    dx || dy || w || sc
       ? {
-          ...(dx || dy ? { transform: `translate(${dx}%, ${dy}%)` } : {}),
+          ...(dx || dy || sc
+            ? { transform: [dx || dy ? `translate(${dx}%, ${dy}%)` : "", sc ? `scale(${sc / 100})` : ""].filter(Boolean).join(" ") }
+            : {}),
           ...(w ? { maxWidth: `${w}%` } : {}),
         }
       : undefined;
@@ -185,9 +189,15 @@ function Hero({
   // The drag/arrow/resize levers land here as plain CSS — transform moves the box, maxWidth
   // resizes it. Zero values emit no style at all (byte-identical defaults).
   const boxStyle =
-    heroDx || heroDy || heroW
+    heroDx || heroDy || heroW || heroS
       ? {
-          ...(heroDx || heroDy ? { transform: `translate(${heroDx}%, ${heroDy}%)` } : {}),
+          ...(heroDx || heroDy || heroS
+            ? {
+                transform: [heroDx || heroDy ? `translate(${heroDx}%, ${heroDy}%)` : "", heroS ? `scale(${heroS / 100})` : ""]
+                  .filter(Boolean)
+                  .join(" "),
+              }
+            : {}),
           ...(heroW ? { maxWidth: `${heroW}%` } : {}),
         }
       : undefined;
@@ -244,14 +254,14 @@ function Hero({
         {heroImg}
         <div className="absolute inset-0 -z-10" style={{ background: "linear-gradient(180deg, rgba(2,6,23,.45), rgba(2,6,23,.62))" }} />
         <div className="mx-auto flex min-h-[480px] max-w-6xl flex-col justify-between px-4 py-10 sm:min-h-[560px] sm:py-12">
-          <div data-spread-piece="area" style={pieceStyle(spreadOff.areaDx, spreadOff.areaDy, 0)}>
+          <div data-spread-piece="area" style={pieceStyle(spreadOff.areaDx, spreadOff.areaDy, 0, spreadOff.areaS)}>
             {area && <p data-e="service_area" className="text-sm font-semibold uppercase tracking-[0.2em] text-white/80">{area}</p>}
           </div>
           <div className="flex flex-col gap-8 sm:flex-row sm:items-end sm:justify-between">
-            <div className="max-w-xl" data-spread-piece="headline" style={pieceStyle(spreadOff.headDx, spreadOff.headDy, spreadOff.headW)}>
+            <div className="max-w-xl" data-spread-piece="headline" style={pieceStyle(spreadOff.headDx, spreadOff.headDy, spreadOff.headW, spreadOff.headS)}>
               {headline && <h1 data-e="splash_headline" className={`${hSize} font-extrabold leading-tight tracking-tight text-white drop-shadow`}>{headline}</h1>}
             </div>
-            <div className="max-w-md sm:text-right" data-spread-piece="tagline" style={pieceStyle(spreadOff.tagDx, spreadOff.tagDy, spreadOff.tagW)}>
+            <div className="max-w-md sm:text-right" data-spread-piece="tagline" style={pieceStyle(spreadOff.tagDx, spreadOff.tagDy, spreadOff.tagW, spreadOff.tagS)}>
               {tagline && <p data-e="splash_tagline" className="text-lg text-slate-100">{tagline}</p>}
               <div className="mt-6 flex flex-wrap items-center gap-3 sm:justify-end">
                 {cta}
@@ -377,15 +387,19 @@ export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg;
             heroDx={s.hero_dx}
             heroDy={s.hero_dy}
             heroW={s.hero_w}
+            heroS={s.hero_scale}
             spreadOff={{
               areaDx: s.spread_area_dx,
               areaDy: s.spread_area_dy,
+              areaS: s.spread_area_scale,
               headDx: s.spread_head_dx,
               headDy: s.spread_head_dy,
               headW: s.spread_head_w,
+              headS: s.spread_head_scale,
               tagDx: s.spread_tag_dx,
               tagDy: s.spread_tag_dy,
               tagW: s.spread_tag_w,
+              tagS: s.spread_tag_scale,
             }}
           />
 

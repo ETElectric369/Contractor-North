@@ -200,6 +200,12 @@ export interface OrgSettings {
   /** Per-piece nudges/widths for the Corners (spread) layout — each corner piece is its own
    *  movable unit (Erik: "still cant resize or any of that jazz" on spread). Same clamps as
    *  the hero box: dx/dy ±40 (% of the piece), w 30-100 (% of the row) with 0 = default. */
+  /** Text zoom per movable unit, as % (50-200); 0 = default size. The corner-handle lever —
+   *  Erik: "the resize works horizontally but not vertically". Rendered as transform scale. */
+  hero_scale: number;
+  spread_area_scale: number;
+  spread_head_scale: number;
+  spread_tag_scale: number;
   spread_area_dx: number;
   spread_area_dy: number;
   spread_head_dx: number;
@@ -311,6 +317,10 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   hero_dx: 0,
   hero_dy: 0,
   hero_w: 0,
+  hero_scale: 0,
+  spread_area_scale: 0,
+  spread_head_scale: 0,
+  spread_tag_scale: 0,
   spread_area_dx: 0,
   spread_area_dy: 0,
   spread_head_dx: 0,
