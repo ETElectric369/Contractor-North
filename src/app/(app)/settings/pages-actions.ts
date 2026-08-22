@@ -25,6 +25,12 @@ function cleanBlocks(blocks: Block[]): Block[] {
         const raw = b.props.html ?? "";
         return { type: "text", props: { html: /<[a-z][\s\S]*>/i.test(raw) ? sanitizeHtml(raw) : textToHtml(raw) }, style: b.style };
       }
+      // split carries the same raw-HTML lane as text — same write-side wash (plain text pastes
+      // become paragraphs, exactly like the text block).
+      if (b.type === "split") {
+        const raw = b.props.html ?? "";
+        return { type: "split", props: { ...b.props, html: /<[a-z][\s\S]*>/i.test(raw) ? sanitizeHtml(raw) : textToHtml(raw) }, style: b.style };
+      }
       return b;
     }),
   );

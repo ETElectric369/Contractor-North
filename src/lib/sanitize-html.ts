@@ -11,6 +11,9 @@ import sanitizeLib, { type IOptions } from "sanitize-html";
  * Allowed: editorial markup only. Dropped: script/style/iframe/form/…, ALL event handlers, any
  * non-http(s)/mailto/tel URL scheme (checked after entity-decoding), the `style` attribute.
  */
+// Keep in lockstep with the section anchors the chrome/bands render (site-chrome, org-site).
+const RESERVED_ANCHOR_IDS = new Set(["top", "work", "services", "reviews", "contact", "contact-form"]);
+
 const OPTIONS: IOptions = {
   allowedTags: [
     "h1", "h2", "h3", "h4", "h5", "h6",
@@ -35,6 +38,17 @@ const OPTIONS: IOptions = {
   // Protocol-relative "//host" is external. Scheme safety is enforced by allowedSchemes above
   // either way — this transform only decides rel/target, never what may load.
   transformTags: {
+    // The chrome's load-bearing anchors (header/footer links, the contact CTA) must never be
+    // hijackable by content html carrying the same id — first-in-DOM wins an anchor jump, and a
+    // block sits above the footer (review: id="contact-form" in a text block strands the lead
+    // CTA). Article/TOC deep links keep working; only these ids are reserved.
+    "*": (tagName, attribs) => {
+      if (attribs.id && RESERVED_ANCHOR_IDS.has(attribs.id.trim().toLowerCase())) {
+        const { id: _reserved, ...rest } = attribs;
+        return { tagName, attribs: rest };
+      }
+      return { tagName, attribs };
+    },
     a: (tagName, attribs) => {
       const href = attribs.href || "";
       const internal = (href.startsWith("/") && !href.startsWith("//")) || href.startsWith("#");
@@ -47,6 +61,27 @@ const OPTIONS: IOptions = {
 
 export function sanitizeHtml(html: string): string {
   return sanitizeLib(String(html || ""), OPTIONS).trim();
+}
+
+/**
+ * THE MODEL LANE'S wash — stricter than the human editor's. The design pass's html must obey the
+ * same laws as every other model output: no images (the own-library law has no way to check an
+ * <img> URL buried in html) and no links (the on-site-link law likewise) — plain editorial
+ * markup only, exactly what the studio prompt promises. Returns what survived plus whether
+ * anything was removed, so the refusal can be NAMED (no silent drops).
+ */
+const MODEL_OPTIONS: IOptions = {
+  allowedTags: ["p", "strong", "em", "b", "i", "u", "ul", "ol", "li", "br", "h3"],
+  allowedAttributes: {},
+  disallowedTagsMode: "discard",
+};
+
+export function sanitizeModelHtml(html: string): { html: string; removed: boolean } {
+  const input = String(html || "");
+  const out = sanitizeLib(input, MODEL_OPTIONS).trim();
+  // Tag-scan for what the strict pass ate — links, images, or anything scripty.
+  const removed = /<\s*(a|img|script|iframe|style|form|svg|video|audio|object|embed)\b/i.test(input);
+  return { html: out, removed };
 }
 
 /** Plain text (no tags) pasted into the editor becomes clean paragraphs. */

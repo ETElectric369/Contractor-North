@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import Link from "next/link";
 import type { Block, BlockStyle } from "@/lib/site-blocks";
 import { imageSrcSet, sizedImage } from "@/lib/site-image";
@@ -32,8 +33,8 @@ const PAD_CLS = { s: "py-0", m: "py-6", l: "py-14" } as const;
 
 /**
  * Renders a page's blocks. Every block is a typed component — no freeform HTML — so collaborator- or
- * owner-authored page content is safe by construction: text is sanitized at write AND read (the ONLY
- * dangerouslySetInnerHTML sink); all other values render through React (escaped); link/image URLs are
+ * owner-authored page content is safe by construction: the text and split blocks' html is sanitized
+ * at write AND read (the only two dangerouslySetInnerHTML sinks); all other values render through React (escaped); link/image URLs are
  * scheme-checked; and the styling toolbox (align/size/font/color) is enum + hex-validated.
  */
 export function BlockRenderer({ blocks, brand }: { blocks: Block[]; brand: string }) {
@@ -41,11 +42,14 @@ export function BlockRenderer({ blocks, brand }: { blocks: Block[]; brand: strin
     <div className="mx-auto max-w-3xl space-y-8 px-4 py-12">
       {blocks.map((b, i) => {
         const st = b.style;
+        // style.pad wraps EVERY block uniformly (review: it was advertised for all, rendered on
+        // one — the exact "it didn't listen" failure the studio wave exists to kill). "s"/absent
+        // adds nothing, so existing pages render byte-identically.
+        const node = (() => {
         switch (b.type) {
           case "heading":
             return (
               <h2
-                key={i}
                 className={`font-bold tracking-tight text-slate-900 ${HEADING_SIZE[st?.size ?? "l"]} ${fontCls(st)} ${alignCls(st ?? { align: b.props.align })}`}
                 style={{ color: safeColor(st) }}
               >
@@ -56,7 +60,6 @@ export function BlockRenderer({ blocks, brand }: { blocks: Block[]; brand: strin
             return (
               // Sanitized at write AND on read (getPublicPageBySlug) — the single raw-HTML sink.
               <div
-                key={i}
                 className={`space-y-4 leading-relaxed text-slate-700 ${TEXT_SIZE[st?.size ?? "l"]} ${fontCls(st)} ${alignCls(st)} [&_a]:underline [&_h3]:mt-6 [&_h3]:text-xl [&_h3]:font-semibold [&_li]:ml-5 [&_ol]:list-decimal [&_ul]:list-disc`}
                 style={{ color: safeColor(st) }}
                 dangerouslySetInnerHTML={{ __html: b.props.html }}
@@ -66,7 +69,7 @@ export function BlockRenderer({ blocks, brand }: { blocks: Block[]; brand: strin
             const src = safeImg(b.props.url);
             if (!src) return null;
             return (
-              <figure key={i} className="space-y-2">
+              <figure className="space-y-2">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={sizedImage(src, 1280)}
@@ -85,7 +88,7 @@ export function BlockRenderer({ blocks, brand }: { blocks: Block[]; brand: strin
             if (!b.props.label) return null;
             const align = alignCls(st ?? { align: b.props.align });
             return (
-              <div key={i} className={align}>
+              <div className={align}>
                 <Link
                   href={safeHref(b.props.href)}
                   className={`inline-block rounded-lg font-semibold text-white shadow-sm ${BUTTON_SIZE[st?.size ?? "l"]} ${fontCls(st)}`}
@@ -100,7 +103,7 @@ export function BlockRenderer({ blocks, brand }: { blocks: Block[]; brand: strin
             const imgs = b.props.images.map((im) => ({ src: safeImg(im.url), alt: im.alt || "" })).filter((im) => im.src);
             if (!imgs.length) return null;
             return (
-              <div key={i} className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 {imgs.map((im, j) => (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
@@ -121,7 +124,7 @@ export function BlockRenderer({ blocks, brand }: { blocks: Block[]; brand: strin
             const bg = safeImg(b.props.bgUrl);
             if (!b.props.heading && !b.props.text && !bg) return null;
             return (
-              <div key={i} className="relative isolate overflow-hidden rounded-2xl bg-slate-800">
+              <div className="relative isolate overflow-hidden rounded-2xl bg-slate-800">
                 {bg && (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
@@ -164,8 +167,8 @@ export function BlockRenderer({ blocks, brand }: { blocks: Block[]; brand: strin
               />
             );
             return (
-              <div key={i} className={`grid items-center gap-6 sm:grid-cols-2 ${PAD_CLS[st?.pad ?? "s"] === "py-0" ? "" : PAD_CLS[st?.pad ?? "s"]}`}>
-                {b.props.imageSide !== "right" && <div className="max-h-96 overflow-hidden rounded-2xl">{img}</div>}
+              <div className={`grid items-center gap-6 ${src ? "sm:grid-cols-2" : ""}`}>
+                {src && b.props.imageSide !== "right" && <div className="max-h-96 overflow-hidden rounded-2xl">{img}</div>}
                 <div>
                   {b.props.heading && (
                     <h2 className={`font-bold tracking-tight text-slate-900 ${HEADING_SIZE[st?.size ?? "l"]} ${fontCls(st)}`} style={{ color: safeColor(st) }}>
@@ -181,7 +184,7 @@ export function BlockRenderer({ blocks, brand }: { blocks: Block[]; brand: strin
                     />
                   )}
                 </div>
-                {b.props.imageSide === "right" && <div className="max-h-96 overflow-hidden rounded-2xl">{img}</div>}
+                {src && b.props.imageSide === "right" && <div className="max-h-96 overflow-hidden rounded-2xl">{img}</div>}
               </div>
             );
           }
@@ -190,13 +193,23 @@ export function BlockRenderer({ blocks, brand }: { blocks: Block[]; brand: strin
             // homepage via HomeBlockRenderer (which has org data); here (editor preview / a stray
             // section on a plain page) show a labeled placeholder so it's clear what will appear.
             return (
-              <div key={i} className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-10 text-center text-sm font-medium text-slate-400">
+              <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-10 text-center text-sm font-medium text-slate-400">
                 {b.props.key === "portfolio" ? "Photo gallery" : b.props.key === "reviews" ? "Reviews" : b.props.key === "contact" ? "Contact form" : b.props.key === "services" ? "Services grid" : b.props.key === "specialty" ? "Specialty showcase" : "Estimate button"} — shown live on your homepage
               </div>
             );
           default:
             return null;
         }
+        })();
+        if (!node) return null;
+        const pad = st?.pad;
+        return pad === "m" || pad === "l" ? (
+          <div key={i} className={PAD_CLS[pad]}>
+            {node}
+          </div>
+        ) : (
+          <Fragment key={i}>{node}</Fragment>
+        );
       })}
     </div>
   );

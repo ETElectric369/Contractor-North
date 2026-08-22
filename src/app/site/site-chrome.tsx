@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Phone, Mail, MapPin, ArrowRight, Instagram, Star, Menu } from "lucide-react";
-import { accentHex } from "@/lib/org-settings";
+import { siteAccentHex } from "@/lib/org-settings";
 import type { PublicOrg } from "@/lib/public-org";
 import { navPageLinks, pageSlugFromHref, sectionAnchor, type SiteNavLink } from "@/lib/site-nav";
 import { renderReadyBlocks, getNavPages } from "@/lib/public-pages";
@@ -49,7 +49,7 @@ export type SiteChrome = ReturnType<typeof deriveSiteChrome>;
 export function deriveSiteChrome(org: PublicOrg, { base = "", onHomepage = false }: { base?: string; onHomepage?: boolean }) {
   const s = org.settings;
   // The studio's accent wins when set (validated hex); otherwise the pre-studio derivation.
-  const brand = /^#[0-9a-f]{6}$/i.test(s.site_accent?.trim() ?? "") ? s.site_accent.trim() : accentHex(s.glass_tint);
+  const brand = siteAccentHex(s);
   const home = base || "/";
   const anchorBase = onHomepage ? "" : home;
   // Show the business NAME as text (not just the logo image) when the org opts in — so the name is
@@ -71,7 +71,7 @@ export function deriveSiteChrome(org: PublicOrg, { base = "", onHomepage = false
   // so no link ever points at a section the block homepage left out.
   const blockSections = new Set(homeBlocks.flatMap((b) => (b.type === "section" ? [b.props.key] : [])));
   const showWorkLink = portfolio.length > 0 && (!hasBlocks || blockSections.has("portfolio"));
-  const showServicesLink = services.length > 0 && !hasBlocks;
+  const showServicesLink = services.length > 0 && (!hasBlocks || blockSections.has("services"));
   const showReviewsLink = reviews.length > 0 && (!hasBlocks || blockSections.has("reviews"));
   // Primary CTA: orgs that price from a catalog get the instant configurator; everyone else routes
   // to the homepage contact form (or the footer when a block homepage carries no contact-form
@@ -81,7 +81,9 @@ export function deriveSiteChrome(org: PublicOrg, { base = "", onHomepage = false
   const estimateHref = hasConfigurator ? `/estimate/${s.public_handle}` : sectionAnchor(anchorBase, contactAnchor);
   // The owner's own wording wins everywhere the estimate CTA renders (the studio's lever);
   // empty keeps the built-in pair. shortCta is the compact header/footer variant.
-  const ownCta = s.estimate_cta_label?.trim() ?? "";
+  // typeof-guarded: settings jsonb is spread-merged raw, so a stored non-string here would
+  // 500 the PUBLIC site (review: optional chaining only guards nullish, not a number).
+  const ownCta = typeof s.estimate_cta_label === "string" ? s.estimate_cta_label.trim() : "";
   const ctaLabel = ownCta || (hasConfigurator ? "Get your free instant estimate" : "Request a free estimate");
   const shortCta = ownCta || "Get an estimate";
   return {

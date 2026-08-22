@@ -10,6 +10,7 @@ import { rateLimited } from "@/lib/rate-limit";
 import { coerceSiteDoc, diffSiteDoc, extractSiteDoc, knownImageUrls, type SiteDoc } from "@/lib/site-doc";
 import { SECTION_KEYS } from "@/lib/site-blocks";
 import { requireStaff } from "@/lib/staff-guard";
+import { sanitizeModelHtml } from "@/lib/sanitize-html";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 /**
@@ -172,6 +173,17 @@ export async function designSitePass(instruction: string, baseVersionId: string 
       note?: unknown;
     };
     const { doc, dropped } = coerceSiteDoc(parsed.doc, base);
+    // THE MODEL LANE'S HTML obeys the same laws as its urls (review: an <img>/<a> INSIDE
+    // text/split html walked around the own-library and on-site-link checks). Server-side here —
+    // site-doc is client-bundled, the sanitizer is not. Removals are NAMED.
+    let htmlStripped = false;
+    doc.home_blocks = doc.home_blocks.map((b) => {
+      if (b.type !== "text" && b.type !== "split") return b;
+      const { html, removed } = sanitizeModelHtml(b.props.html);
+      if (removed) htmlStripped = true;
+      return b.type === "text" ? { ...b, props: { ...b.props, html } } : { ...b, props: { ...b.props, html } };
+    });
+    if (htmlStripped) dropped.push("links or images written inside block html (use image blocks and buttons instead)");
     const changes = Array.isArray(parsed.changes)
       ? parsed.changes.map((c) => String(c).trim()).filter(Boolean).slice(0, 20)
       : [];

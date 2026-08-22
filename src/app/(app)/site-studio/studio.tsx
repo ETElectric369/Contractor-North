@@ -76,8 +76,13 @@ export function SiteStudio({
       setLastChanges(r.changes ?? []);
       setLastDropped(r.dropped ?? []);
       setLastCannot(r.cannot ?? []);
-      if (r.id) setSelectedId(r.id);
-      toast(`New version ready — ${r.note ?? "design pass"}.`, "success");
+      if (r.id) {
+        setSelectedId(r.id);
+        toast(`New version ready — ${r.note ?? "design pass"}.`, "success");
+      } else {
+        // The no-op guard answered without minting a version — say that, not "ready".
+        toast("No version created — nothing in that request maps to a design field.", "error");
+      }
       router.refresh();
     });
   }

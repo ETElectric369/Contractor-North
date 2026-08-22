@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sanitizeHtml, textToHtml } from "./sanitize-html";
+import { sanitizeHtml, textToHtml, sanitizeModelHtml } from "./sanitize-html";
 
 describe("sanitizeHtml", () => {
   it("keeps editorial markup", () => {
@@ -67,5 +67,21 @@ describe("textToHtml", () => {
   });
   it("keeps single newlines as breaks", () => {
     expect(textToHtml("line one\nline two")).toBe("<p>line one<br/>line two</p>");
+  });
+});
+
+describe("the model lane's wash + reserved anchors (studio review wave)", () => {
+  it("sanitizeModelHtml strips links/images and says so", () => {
+    const { html, removed } = sanitizeModelHtml('<p>Fine.</p><img src="https://evil.example/x.jpg"><a href="https://spam.example">click</a>');
+    expect(html).toBe("<p>Fine.</p>click");
+    expect(removed).toBe(true);
+    const clean = sanitizeModelHtml("<p>Just <strong>words</strong>.</p>");
+    expect(clean.removed).toBe(false);
+  });
+
+  it("content html cannot hijack the chrome's anchors", () => {
+    const out = sanitizeHtml('<h2 id="contact-form">Fake</h2><h2 id="my-section">Real</h2>');
+    expect(out).not.toContain('id="contact-form"');
+    expect(out).toContain('id="my-section"');
   });
 });

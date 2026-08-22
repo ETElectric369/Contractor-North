@@ -424,6 +424,13 @@ export const TIMEZONES = [
  * darkened "ink" the app chrome uses (--glass-ink). There is no separate brand_color
  * anymore: the tint is the brand. Returns a hex string.
  */
+/** The public SITE's one accent: the studio's validated pick when set, else the app-tint
+ *  derivation. Total over hostile jsonb — a stored non-string must not 500 the public site. */
+export function siteAccentHex(s: OrgSettings): string {
+  const a = typeof s.site_accent === "string" ? s.site_accent.trim() : "";
+  return /^#[0-9a-f]{6}$/i.test(a) ? a : accentHex(s.glass_tint);
+}
+
 export function accentHex(glassTintHex?: string | null): string {
   const h = (glassTintHex || DEFAULT_SETTINGS.glass_tint).replace("#", "");
   const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;

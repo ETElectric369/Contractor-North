@@ -156,6 +156,29 @@ function BlockFields({ block, orgId, onChange }: { block: Block; orgId?: string;
         </div>
       </div>
     );
+  if (block.type === "split")
+    // The image-beside-text block (review: the palette offered it with no field editor — a
+    // dead-end block the studio could write but no hand could touch).
+    return (
+      <div className="space-y-2">
+        <ImageField value={block.props.url} onChange={(url) => onChange({ url })} orgId={orgId} placeholder="Image URL (https://…)" />
+        <Input value={block.props.heading} onChange={(e) => onChange({ heading: e.target.value })} placeholder="Heading (shown beside the image)" />
+        <Textarea rows={4} value={block.props.html} onChange={(e) => onChange({ html: e.target.value })} placeholder="The copy beside the image — plain text or HTML." />
+        <div className="flex items-center gap-1.5 text-xs">
+          <span className="text-slate-400">Image side</span>
+          {(["left", "right"] as const).map((side) => (
+            <button
+              key={side}
+              type="button"
+              onClick={() => onChange({ imageSide: side })}
+              className={`rounded px-2 py-0.5 font-medium ${(block.props.imageSide ?? "left") === side ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+            >
+              {side}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
   return null;
 }
 

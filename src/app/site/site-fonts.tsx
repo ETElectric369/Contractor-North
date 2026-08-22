@@ -48,6 +48,7 @@ const DENSITY_SCALES: Record<string, Record<string, string> | null> = {
     "py-20": "3.25rem",
     "py-24": "4rem",
     "py-28": "4.5rem",
+    "py-32": "5.25rem",
   },
   airy: {
     "py-10": "3.5rem",
@@ -57,6 +58,7 @@ const DENSITY_SCALES: Record<string, Record<string, string> | null> = {
     "py-20": "7.25rem",
     "py-24": "8.5rem",
     "py-28": "10rem",
+    "py-32": "11.5rem",
   },
 };
 
@@ -70,10 +72,19 @@ export function SiteFonts({ settings }: { settings: OrgSettings }) {
   const preset = SITE_FONTS[siteFontKey(settings.site_font)];
   const density = DENSITY_SCALES[siteDensityKey(settings.site_density)];
   if (!preset && !density) return null;
+  // Bare classes AND their sm: responsive variants: Tailwind v4 layers mean these unlayered
+  // rules beat every utility, so without the sm block a responsive step-up (py-20 sm:py-24)
+  // would FLATTEN to the base scale instead of rescaling (review). The sm: selector needs the
+  // escaped colon.
   const densityCss = density
     ? Object.entries(density)
         .map(([cls, pad]) => `.site-shell .${cls} { padding-top: ${pad}; padding-bottom: ${pad}; }`)
-        .join("\n")
+        .join("\n") +
+      "\n@media (min-width: 640px) {\n" +
+      Object.entries(density)
+        .map(([cls, pad]) => `.site-shell .sm\\:${cls} { padding-top: ${pad}; padding-bottom: ${pad}; }`)
+        .join("\n") +
+      "\n}"
     : "";
   return (
     <>

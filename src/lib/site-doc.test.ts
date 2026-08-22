@@ -218,8 +218,15 @@ describe("materialize + diff", () => {
     expect(diffSiteDoc(base, changed).sort()).toEqual(["Headline", "Theme"]);
   });
 
-  it("knownImageUrls collects every legitimate url across the doc", () => {
+  it("knownImageUrls collects every legitimate url across the doc — split blocks included", () => {
     expect([...knownImageUrls(base)].sort()).toEqual([PHOTO_A, PHOTO_B].sort());
+    // Review HIGH: a split's image was invisible to the library, so the NEXT pass would drop the
+    // whole block. Every block type that carries a url must appear here.
+    const withSplit = extractSiteDoc({
+      portfolio: [],
+      home_blocks: [{ type: "split", props: { url: "https://x.supabase.co/storage/v1/object/public/branding/org/split-a.jpg", heading: "h", html: "" } }],
+    });
+    expect([...knownImageUrls(withSplit)]).toContain("https://x.supabase.co/storage/v1/object/public/branding/org/split-a.jpg");
   });
 
   it("a portfolio entry's extra keys (path — the storage delete key) survive extract AND a design pass", () => {

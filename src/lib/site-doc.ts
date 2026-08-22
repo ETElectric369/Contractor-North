@@ -118,7 +118,10 @@ export function extractSiteDoc(rawSettings: unknown): SiteDoc {
     specialty_blurb: s(st.specialty_blurb, LIMITS.specialtyBlurb),
     service_area: s(st.service_area, LIMITS.serviceArea),
     site_theme: st.site_theme === "bold" || st.site_theme === "minimal" ? st.site_theme : "classic",
-    site_accent: HEX6.test(st.site_accent?.trim() ?? "") ? st.site_accent.trim().toLowerCase() : "",
+    site_accent: (() => {
+      const a = typeof st.site_accent === "string" ? st.site_accent.trim() : "";
+      return HEX6.test(a) ? a.toLowerCase() : "";
+    })(),
     site_font: st.site_font === "serif" || st.site_font === "grotesk" || st.site_font === "soft" ? st.site_font : "default",
     site_density: st.site_density === "compact" || st.site_density === "airy" ? st.site_density : "default",
     estimate_cta_label: s(st.estimate_cta_label, LIMITS.ctaLabel),
@@ -158,6 +161,7 @@ export function knownImageUrls(base: SiteDoc): Set<string> {
     if (b.type === "image" && b.props.url) known.add(b.props.url);
     if (b.type === "banner" && b.props.bgUrl) known.add(b.props.bgUrl);
     if (b.type === "gallery") for (const img of b.props.images) if (img.url) known.add(img.url);
+    if (b.type === "split" && b.props.url) known.add(b.props.url);
   }
   return known;
 }

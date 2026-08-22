@@ -496,7 +496,8 @@ function HomeBlockRenderer({
   // spacing lever Erik asked for twice on night one (the bands' own paddings stay untouched).
   const padWrap = (k: string, pad: "s" | "m" | "l" | undefined, node: React.ReactNode) =>
     pad && pad !== "s" ? (
-      <div key={k} className={pad === "l" ? "py-14" : "py-6"}>
+      // empty:hidden — a band that renders null must not leave a padded ghost gap (review).
+      <div key={k} className={pad === "l" ? "py-14 empty:hidden" : "py-6 empty:hidden"}>
         {node}
       </div>
     ) : (

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { assertOrgServable, orgIsServable } from "@/lib/serve-org";
 import { createServiceClient } from "@/lib/supabase/server";
-import { accentHex, orgPublicBaseUrl } from "@/lib/org-settings";
+import { siteAccentHex, orgPublicBaseUrl } from "@/lib/org-settings";
 import { getPublicOrgByHandle } from "@/lib/public-org";
 import { socialImage } from "@/lib/site-image";
 import { orgIcons } from "../../site/site-base";
@@ -68,7 +68,7 @@ export default async function EstimatePage({ params }: { params: Promise<{ handl
   await assertOrgServable(org.settings);
 
   const settings = org.settings;
-  const brand = accentHex(settings.glass_tint);
+  const brand = siteAccentHex(settings);
 
   const supabase = createServiceClient();
   const { data: catalog } = await supabase
