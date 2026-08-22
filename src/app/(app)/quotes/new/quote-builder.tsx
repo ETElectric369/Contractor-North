@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { NewCustomerInline } from "@/components/new-customer-inline";
 import { applyPriceBookReview } from "../../price-list/actions";
@@ -225,6 +225,15 @@ export function QuoteBuilder({
   const [questions, setQuestions] = useState<string[]>([]);
   const [aiError, setAiError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // NO SAVE GAME (the Andrew law: "I said yes and then there's nowhere to be found" — his 45
+  // accepted plan lines lived only in this component and died on navigation): once the estimate
+  // has substance it AUTOSAVES as a real draft row, so the Estimates tab always has it.
+  const [quoteId, setQuoteId] = useState<string | null>(null);
+  const [autoState, setAutoState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [autoNumber, setAutoNumber] = useState<string | null>(null);
+  const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autosaveBusy = useRef(false);
+  const navigatedAway = useRef(false);
   const [generating, startGenerate] = useTransition();
   const [uploading, startUpload] = useTransition();
   const [saving, startSave] = useTransition();
@@ -236,8 +245,10 @@ export function QuoteBuilder({
   // orphan the draft) so quotes started from different jobs/customers never
   // share.
   const draftState = useMemo(
-    () => ({ customerId, docType, title, description, notes, taxRate, taxChoice, validUntil, items, scope }),
-    [customerId, docType, title, description, notes, taxRate, taxChoice, validUntil, items, scope],
+    // proposed/questions ride too (Andrew's 45 plan lines lived ONLY in this state), and
+    // quoteId keeps a refreshed tab autosaving the same draft row instead of minting twins.
+    () => ({ customerId, docType, title, description, notes, taxRate, taxChoice, validUntil, items, scope, proposed, questions, quoteId }),
+    [customerId, docType, title, description, notes, taxRate, taxChoice, validUntil, items, scope, proposed, questions, quoteId],
   );
   const draft = useDraft(
     // inquiryId is in the key because a lead-sourced estimate (cn-v477 defers the customer, so it
@@ -271,6 +282,9 @@ export function QuoteBuilder({
       setTaxChoice(d.taxChoice ?? "");
       if (d.validUntil) setValidUntil(d.validUntil);
       if (Array.isArray(d.items) && d.items.length) setItems(d.items);
+      if (Array.isArray(d.proposed) && d.proposed.length) setProposed(d.proposed);
+      if (Array.isArray(d.questions) && d.questions.length) setQuestions(d.questions);
+      if (typeof d.quoteId === "string" && d.quoteId) setQuoteId(d.quoteId);
       // A restored draft wins, but an EMPTY drafted scope must not blank a fresh
       // inspection-capture prefill (?capture=) — that's the whole point of the link.
       setScope(d.scope ? d.scope : (initialScope ?? ""));
@@ -496,6 +510,53 @@ export function QuoteBuilder({
     });
   }
 
+  const quotePayload = (cleaned: DraftLineItem[]) => ({
+    id: quoteId || undefined,
+    customer_id: customerId || null,
+    job_id: jobId || null,
+    inquiry_id: inquiryId || null,
+    capture_appointment_id: captureId || null,
+    title,
+    description,
+    notes,
+    tax_rate: taxRate,
+    valid_until: validUntil || null,
+    doc_type: docType,
+    items: cleaned,
+  });
+
+  // AUTOSAVE: debounced, substance-gated (no junk rows from an empty builder), single-flight,
+  // and silent about transient failures — the explicit Save button still surfaces errors.
+  useEffect(() => {
+    const cleaned = items.filter((i) => i.description.trim());
+    if (!cleaned.length && !quoteId) return; // nothing worth a row yet
+    if (navigatedAway.current) return;
+    if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
+    autosaveTimer.current = setTimeout(async () => {
+      if (autosaveBusy.current || navigatedAway.current || saving) return;
+      autosaveBusy.current = true;
+      setAutoState("saving");
+      try {
+        const res = await saveQuote(quotePayload(cleaned));
+        if (res.ok) {
+          setQuoteId(res.id);
+          setAutoNumber(res.quote_number ?? null);
+          setAutoState("saved");
+        } else {
+          setAutoState("error");
+        }
+      } catch {
+        setAutoState("error");
+      } finally {
+        autosaveBusy.current = false;
+      }
+    }, 1500);
+    return () => {
+      if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, title, description, notes, taxRate, validUntil, docType, customerId, jobId]);
+
   function onSave() {
     setSaveError(null);
     const cleaned = items.filter((i) => i.description.trim());
@@ -504,24 +565,14 @@ export function QuoteBuilder({
       return;
     }
     startSave(async () => {
-      const res = await saveQuote({
-        customer_id: customerId || null,
-        job_id: jobId || null,
-        inquiry_id: inquiryId || null,
-        capture_appointment_id: captureId || null,
-        title,
-        description,
-        notes,
-        tax_rate: taxRate,
-        valid_until: validUntil || null,
-        doc_type: docType,
-        items: cleaned,
-      });
+      const res = await saveQuote(quotePayload(cleaned));
       if (!res.ok) {
         setSaveError(res.error ?? "Could not save the quote.");
         return;
       }
-      // Saved — drop the draft so the next visit to the builder starts clean.
+      // Saved — stop the autosaver and drop the session draft so the next visit starts clean.
+      navigatedAway.current = true;
+      if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
       draft.clear();
       router.push(`/quotes/${res.id}`);
     });
@@ -1034,6 +1085,12 @@ export function QuoteBuilder({
             {saveError && (
               <p className="pt-2 text-sm text-red-600">{saveError}</p>
             )}
+            {autoState === "saved" && quoteId && (
+              <p className="pt-1 text-xs text-emerald-700">
+                Draft {autoNumber ?? ""} autosaved — it&apos;s on the Estimates list even if you leave.
+              </p>
+            )}
+            {autoState === "saving" && <p className="pt-1 text-xs text-slate-400">Autosaving…</p>}
             <Button className="mt-2 w-full" onClick={onSave} disabled={saving}>
               {saving ? "Saving…" : `Save ${docLabel({ doc_type: docType })}`}
             </Button>

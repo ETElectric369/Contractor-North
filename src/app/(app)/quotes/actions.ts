@@ -167,6 +167,10 @@ export async function emailQuote(
 export type { DraftLineItem } from "@/lib/estimate/line-map";
 
 export interface SaveQuoteInput {
+  /** An existing DRAFT to update in place — the builder's autosave (Andrew's 45 accepted
+      plan lines lived only in client state and vanished; a draft row is the fix). Absent =
+      insert a new quote. Update is draft-locked: sent/accepted rows refuse it. */
+  id?: string | null;
   customer_id: string | null;
   job_id?: string | null;
   /** The lead this estimate was seeded from (provenance backlink) — set when a lead is
@@ -539,30 +543,50 @@ export async function saveQuote(input: SaveQuoteInput) {
     if (!inq) inquiryId = null;
   }
 
-  const { data: quote, error } = await supabase
-    .from("quotes")
-    .insert({
-      customer_id: input.customer_id,
-      job_id: input.job_id || null,
-      inquiry_id: inquiryId,
-      title: input.title || null,
-      description: input.description || null,
-      notes: input.notes || null,
-      tax_rate: input.tax_rate || 0,
-      subtotal,
-      tax,
-      total,
-      valid_until: input.valid_until,
-      // The builder's Estimate|Quote toggle; absent (Nort, duplicates of old rows) = Estimate (T&M).
-      doc_type: input.doc_type === "quote" ? "quote" : "estimate",
-      created_by: ctx.userId,
-    })
-    // quote_number is stamped by the BEFORE-INSERT trigger (0004 next_doc_number),
-    // so insert-returning carries the real document number.
-    .select("id, quote_number")
-    .single();
-
-  if (error) return { ok: false as const, error: dbError(error) };
+  const fields = {
+    customer_id: input.customer_id,
+    job_id: input.job_id || null,
+    inquiry_id: inquiryId,
+    title: input.title || null,
+    description: input.description || null,
+    notes: input.notes || null,
+    tax_rate: input.tax_rate || 0,
+    subtotal,
+    tax,
+    total,
+    valid_until: input.valid_until,
+    // The builder's Estimate|Quote toggle; absent (Nort, duplicates of old rows) = Estimate (T&M).
+    doc_type: input.doc_type === "quote" ? "quote" : "estimate",
+  };
+  let quote: { id: string; quote_number?: string | null };
+  if (input.id) {
+    // AUTOSAVE UPDATE — draft-only (the accepted-quote lock's little sibling: a sent or
+    // accepted document must never be rewritten by a builder session), RLS-scoped,
+    // zero-row-checked (the silent-write law).
+    const { data: upd, error: updErr } = await supabase
+      .from("quotes")
+      .update(fields)
+      .eq("id", input.id)
+      .eq("status", "draft")
+      .select("id, quote_number");
+    if (updErr) return { ok: false as const, error: dbError(updErr) };
+    if (!upd?.length) return { ok: false as const, error: "That draft is no longer editable — it may have been sent." };
+    quote = upd[0] as { id: string; quote_number?: string | null };
+    // Items are replaced wholesale — the builder's list IS the document (draft-only, so no
+    // frozen billing math depends on these rows yet).
+    const { error: delErr } = await supabase.from("quote_line_items").delete().eq("quote_id", quote.id);
+    if (delErr) return { ok: false as const, error: delErr.message };
+  } else {
+    const { data: ins, error } = await supabase
+      .from("quotes")
+      .insert({ ...fields, created_by: ctx.userId })
+      // quote_number is stamped by the BEFORE-INSERT trigger (0004 next_doc_number),
+      // so insert-returning carries the real document number.
+      .select("id, quote_number")
+      .single();
+    if (error) return { ok: false as const, error: dbError(error) };
+    quote = ins as { id: string; quote_number?: string | null };
+  }
 
   if (input.items.length) {
     const rows = input.items.map((it, idx) => ({
