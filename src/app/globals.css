@@ -186,7 +186,7 @@ body.modal-open .app-bottom-nav {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.12)),
     linear-gradient(rgb(var(--glass-tint) / 0.24), rgb(var(--glass-tint) / 0.24)),
-    rgba(255, 255, 255, 0.55);
+    rgba(255, 255, 255, 0.78);
   -webkit-backdrop-filter: blur(14px) saturate(1.5);
   backdrop-filter: blur(14px) saturate(1.5);
   color: rgb(var(--glass-ink));
