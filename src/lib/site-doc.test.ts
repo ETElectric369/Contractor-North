@@ -3,6 +3,7 @@ import {
   applySiteDoc,
   coerceSiteDoc,
   diffSiteDoc,
+  flattenHeadline,
   extractSiteDoc,
   knownImageUrls,
   siteDocSeoChecks,
@@ -218,10 +219,17 @@ describe("the main-build blocks — split obeys the image law, density is enum-o
     expect(coerceSiteDoc({ hero_scale: 0 }, d).doc.hero_scale).toBe(0);
   });
 
-  it("a headline is ONE LINE — newlines become commas (the v29 mangle)", () => {
-    expect(extractSiteDoc({ splash_headline: "Custom Lighting \nTruckee" }).splash_headline).toBe("Custom Lighting, Truckee");
+  it("a headline keeps DELIBERATE line breaks, normalized to single \\n", () => {
+    expect(extractSiteDoc({ splash_headline: "Custom Lighting \nTruckee" }).splash_headline).toBe("Custom Lighting\nTruckee");
+    expect(extractSiteDoc({ splash_headline: "A\r\n\r\n\nB" }).splash_headline).toBe("A\nB");
     const base2 = extractSiteDoc({});
-    expect(coerceSiteDoc({ splash_headline: "A\nB" }, base2).doc.splash_headline).toBe("A, B");
+    expect(coerceSiteDoc({ splash_headline: "A \n B" }, base2).doc.splash_headline).toBe("A\nB");
+  });
+
+  it("the metadata boundary flattens headline breaks to one line", () => {
+    expect(flattenHeadline("Custom Lighting Design & Electrical\nTruckee & Lake Tahoe")).toBe(
+      "Custom Lighting Design & Electrical, Truckee & Lake Tahoe",
+    );
   });
 
   it("site_density: enum lands, garbage keeps base, absent keeps", () => {

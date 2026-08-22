@@ -1,3 +1,4 @@
+import { flattenHeadline } from "@/lib/site-doc";
 import React from "react";
 import type { Metadata } from "next";
 import { SiteFonts } from "./site-fonts";
@@ -26,7 +27,8 @@ import { AskNort } from "./ask-nort";
  */
 export function orgSiteMetadata(org: PublicOrg): Metadata {
   const s = org.settings;
-  const title = `${org.name} — ${s.splash_headline || "Licensed contractor"}`;
+  // A deliberate two-line hero headline is still ONE line here — a <title> has no line breaks.
+  const title = `${org.name} — ${flattenHeadline(s.splash_headline) || "Licensed contractor"}`;
   const description = s.splash_tagline || `${org.name} — quality craftsmanship. Get a free estimate.`;
   const hero = socialImage(s.splash_bg_url || s.portfolio[0]?.url);
   return {
@@ -114,7 +116,7 @@ function Hero({
         <div className="mx-auto grid max-w-6xl items-center gap-10 px-4 py-20 sm:py-24 lg:grid-cols-2">
           <div>
               {area && <p data-e="service_area" className="mb-4 inline-block rounded-full bg-white/15 px-3 py-1 text-xs font-bold uppercase tracking-[0.2em]">{area}</p>}
-            {headline && <h1 data-e="splash_headline" className={`${hSize} font-black leading-[1.05] tracking-tight`}>{headline}</h1>}
+            {headline && <h1 data-e="splash_headline" className={`${hSize} whitespace-pre-line font-black leading-[1.05] tracking-tight`}>{headline}</h1>}
             {tagline && <p data-e="splash_tagline" className="mt-5 max-w-xl text-lg text-white/85">{tagline}</p>}
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Link href={estimateHref} className="inline-flex items-center gap-2 rounded-lg bg-white px-6 py-3.5 text-base font-bold shadow-lg" style={{ color: brand }}>
@@ -149,7 +151,7 @@ function Hero({
         <div className="mx-auto grid max-w-6xl items-center gap-12 px-4 py-20 sm:py-28 lg:grid-cols-2">
           <div>
               {area && <p className="mb-4 text-sm font-semibold uppercase tracking-[0.25em]" style={{ color: brand }}>{area}</p>}
-            {headline && <h1 data-e="splash_headline" className={`${hSize} font-semibold leading-[1.1] tracking-tight text-slate-900`}>{headline}</h1>}
+            {headline && <h1 data-e="splash_headline" className={`${hSize} whitespace-pre-line font-semibold leading-[1.1] tracking-tight text-slate-900`}>{headline}</h1>}
             {tagline && <p data-e="splash_tagline" className="mt-5 max-w-xl text-lg text-slate-600">{tagline}</p>}
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Link href={estimateHref} className="inline-flex items-center gap-2 rounded-full px-6 py-3.5 text-base font-semibold text-white shadow-sm" style={{ backgroundColor: brand }}>
@@ -204,7 +206,7 @@ function Hero({
   const textBlock = (
     <div data-hero-text style={boxStyle} className={["max-w-2xl", alignInner, heroStyle === "panel" ? "rounded-2xl bg-slate-950/55 p-8 backdrop-blur-sm sm:p-10" : ""].filter(Boolean).join(" ")}>
       {area && <p data-e="service_area" className="mb-3 text-sm font-semibold uppercase tracking-[0.2em] text-white/80">{area}</p>}
-      {headline && <h1 data-e="splash_headline" className={`${hSize} font-extrabold leading-tight tracking-tight text-white drop-shadow`}>{headline}</h1>}
+      {headline && <h1 data-e="splash_headline" className={`${hSize} whitespace-pre-line font-extrabold leading-tight tracking-tight text-white drop-shadow`}>{headline}</h1>}
       {tagline && <p data-e="splash_tagline" className="mt-4 max-w-xl text-lg text-slate-100">{tagline}</p>}
       <div className="mt-8 flex flex-wrap items-center gap-3">
         {cta}
@@ -259,7 +261,7 @@ function Hero({
           </div>
           <div className="flex flex-col gap-8 sm:flex-row sm:items-end sm:justify-between">
             <div className="max-w-xl" data-spread-piece="headline" style={pieceStyle(spreadOff.headDx, spreadOff.headDy, spreadOff.headW, spreadOff.headS)}>
-              {headline && <h1 data-e="splash_headline" className={`${hSize} font-extrabold leading-tight tracking-tight text-white drop-shadow`}>{headline}</h1>}
+              {headline && <h1 data-e="splash_headline" className={`${hSize} whitespace-pre-line font-extrabold leading-tight tracking-tight text-white drop-shadow`}>{headline}</h1>}
             </div>
             <div className="max-w-md sm:text-right" data-spread-piece="tagline" style={pieceStyle(spreadOff.tagDx, spreadOff.tagDy, spreadOff.tagW, spreadOff.tagS)}>
               {tagline && <p data-e="splash_tagline" className="text-lg text-slate-100">{tagline}</p>}

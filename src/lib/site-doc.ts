@@ -143,7 +143,15 @@ const boxW = (v: unknown, fallback: number): number => {
 
 /** A headline is ONE LINE by nature — contentEditable Enter keys must not smuggle newlines into
  *  the H1/<title> (the v29 lesson: "Electrical \nTruckee" rendered and would have titled). */
-const oneLine = (v: string): string => v.replace(/\s*\n+\s*/g, ", ").replace(/,\s*,/g, ",");
+/** A headline may carry DELIBERATE line breaks (Erik shaped a two-line hero and "it keeps
+ *  resetting" — the old flatten-to-commas law fought him). Normalize instead: \r\n → \n,
+ *  no spaces hugging a break, at most single breaks, trimmed. The ONE-LINE rule still holds
+ *  where it matters — flattenHeadline() at the metadata/SEO boundary (<title>, og:title). */
+const headlineText = (v: string): string =>
+  v.replace(/\r\n?/g, "\n").replace(/[ \t]*\n[ \t]*/g, "\n").replace(/\n{2,}/g, "\n").trim();
+
+/** The metadata boundary's view of a headline: breaks become ", " (a <title> is one line). */
+export const flattenHeadline = (v: string): string => v.replace(/\s*\n+\s*/g, ", ").replace(/,\s*,/g, ",");
 
 const s = (v: unknown, max: number) => String(v ?? "").slice(0, max);
 
@@ -165,7 +173,7 @@ const normalizeReviews = (raw: unknown): SiteDoc["reviews"] =>
 export function extractSiteDoc(rawSettings: unknown): SiteDoc {
   const st: OrgSettings = getOrgSettings(rawSettings);
   return {
-    splash_headline: oneLine(s(st.splash_headline, LIMITS.headline)),
+    splash_headline: headlineText(s(st.splash_headline, LIMITS.headline)),
     splash_tagline: s(st.splash_tagline, LIMITS.tagline),
     splash_bg_url: s(st.splash_bg_url, LIMITS.url),
     splash_bullets: s(st.splash_bullets, LIMITS.bullets),
@@ -342,7 +350,7 @@ export function coerceSiteDoc(raw: unknown, base: SiteDoc): { doc: SiteDoc; drop
   const theme = r.site_theme;
   return {
     doc: {
-      splash_headline: oneLine(sOr(r.splash_headline, base.splash_headline, LIMITS.headline)),
+      splash_headline: headlineText(sOr(r.splash_headline, base.splash_headline, LIMITS.headline)),
       splash_tagline: sOr(r.splash_tagline, base.splash_tagline, LIMITS.tagline),
       splash_bg_url: r.splash_bg_url === undefined ? base.splash_bg_url : img(r.splash_bg_url, "the hero background"),
       splash_bullets: sOr(r.splash_bullets, base.splash_bullets, LIMITS.bullets),

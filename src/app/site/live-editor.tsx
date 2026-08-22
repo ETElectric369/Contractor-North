@@ -277,9 +277,13 @@ export function LiveEditor({
     sess.el.removeAttribute("contenteditable");
     setEditingText(false);
     const raw = sess.el.innerText;
-    // A headline is one line — Enter must not smuggle newlines into the H1/<title> (v29).
+    // A headline may carry DELIBERATE line breaks (Erik: "id like to see it like this and it
+    // keeps resetting") — normalize instead of flattening: single \n breaks, no hugging
+    // spaces. The <title>/SEO boundary flattens for itself server-side.
     const clean =
-      sess.f === "splash_headline" ? raw.replace(/\s*\n+\s*/g, ", ").replace(/,\s*,/g, ",").trim() : raw.trim();
+      sess.f === "splash_headline"
+        ? raw.replace(/\r\n?/g, "\n").replace(/[ \t]*\n[ \t]*/g, "\n").replace(/\n{2,}/g, "\n").trim()
+        : raw.trim();
     if (clean !== raw) sess.el.innerText = clean;
     if (clean !== sess.before) {
       recordPrev(sess.f, sess.before);
