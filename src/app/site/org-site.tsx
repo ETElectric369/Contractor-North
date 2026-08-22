@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { SiteFonts } from "./site-fonts";
 import Link from "next/link";
 import { MapPin, ArrowRight, Check, ShieldCheck, Clock, Zap, Star } from "lucide-react";
 import { orgPublicBaseUrl, parseGeoFromMapUrl, type OrgSettings } from "@/lib/org-settings";
@@ -255,7 +256,8 @@ export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg;
   };
 
   return (
-    <div className="min-h-screen bg-white text-slate-900">
+    <div className="site-shell min-h-screen bg-white text-slate-900">
+      <SiteFonts settings={s} />
       {/* jsonLdSafe escapes `<` so a collaborator-writable field (service_area, google_business_url,
           social, hero URL) containing `</script>` can't break out and execute — stored-XSS guard. */}
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLdSafe(jsonLd) }} />

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { SiteFonts } from "./site-fonts";
 import { orgPublicBaseUrl } from "@/lib/org-settings";
 import { jsonLdSafe } from "@/lib/jsonld";
 import type { PublicOrg } from "@/lib/public-org";
@@ -61,7 +62,8 @@ export function CustomPageView({ org, page, base, nav }: { org: PublicOrg; page:
     ],
   };
   return (
-    <div className="min-h-screen bg-white text-slate-900">
+    <div className="site-shell min-h-screen bg-white text-slate-900">
+      <SiteFonts settings={org.settings} />
       {/* jsonLdSafe escapes `<` so a title containing `</script>` can't break out of the block. */}
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLdSafe(breadcrumbs) }} />
       <SiteHeader chrome={chrome} articlesHref={nav.articlesHref} pageLinks={nav.pageLinks} current={page.slug} />

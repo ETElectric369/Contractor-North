@@ -175,6 +175,13 @@ export interface OrgSettings {
    *  Empty = derived from glass_tint (accentHex), the pre-studio behavior. A separate key so a
    *  site redesign can restyle the SITE without recoloring the office's app skin. */
   site_accent: string;
+  /** The public site's HEADING typeface preset (site-fonts.tsx) — headings only, body stays the
+   *  system stack. "default" = the app's Geist, i.e. render nothing extra. */
+  site_font: "default" | "serif" | "grotesk" | "soft";
+  /** The estimate buttons' label, everywhere they render (header, hero, bands, footer).
+   *  Empty = the built-in wording ("Get your free instant estimate" / "Request a free estimate"
+   *  / "Get an estimate" for the compact spots). */
+  estimate_cta_label: string;
   /** Instagram handle (no @) for the public site footer. Empty = no Instagram link. */
   social_instagram: string;
   /** A custom domain the org has pointed at North for its public site (e.g. "tahoedeck.com",
@@ -263,6 +270,8 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   public_zip: "",
   site_theme: "classic",
   site_accent: "",
+  site_font: "default",
+  estimate_cta_label: "",
   social_instagram: "",
   custom_domain: "",
   google_business_url: "",

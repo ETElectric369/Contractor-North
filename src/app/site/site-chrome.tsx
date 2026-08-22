@@ -79,9 +79,13 @@ export function deriveSiteChrome(org: PublicOrg, { base = "", onHomepage = false
   const hasConfigurator = s.estimating_mode === "catalog" && !!s.public_handle;
   const contactAnchor: `#${string}` = !hasBlocks || blockSections.has("contact") ? "#contact-form" : "#contact";
   const estimateHref = hasConfigurator ? `/estimate/${s.public_handle}` : sectionAnchor(anchorBase, contactAnchor);
-  const ctaLabel = hasConfigurator ? "Get your free instant estimate" : "Request a free estimate";
+  // The owner's own wording wins everywhere the estimate CTA renders (the studio's lever);
+  // empty keeps the built-in pair. shortCta is the compact header/footer variant.
+  const ownCta = s.estimate_cta_label?.trim() ?? "";
+  const ctaLabel = ownCta || (hasConfigurator ? "Get your free instant estimate" : "Request a free estimate");
+  const shortCta = ownCta || "Get an estimate";
   return {
-    org, onHomepage, brand, home, anchorBase, showName, telHref,
+    org, onHomepage, brand, home, anchorBase, showName, telHref, shortCta,
     portfolio, services, creds, reviews, area, ig, gbpUrl,
     homeBlocks, hasBlocks, blockSections,
     showWorkLink, showServicesLink, showReviewsLink,
@@ -159,7 +163,7 @@ export function SiteHeader({
             </a>
           )}
           <Link href={estimateHref} className="rounded-lg px-4 py-2 text-sm font-semibold text-white" style={{ backgroundColor: brand }}>
-            Get an estimate
+            {chrome.shortCta}
           </Link>
           {/* Mobile nav — the link row above is hidden below md, which stranded builder pages on
               phones. A <details> disclosure keeps this a server component (no client JS). */}
@@ -234,7 +238,7 @@ export function SiteFooter({ chrome }: { chrome: SiteChrome }) {
             </a>
           )}
           <Link href={estimateHref} className="mt-2 inline-flex items-center gap-2 rounded-lg px-4 py-2 font-semibold text-white" style={{ backgroundColor: brand }}>
-            Get an estimate <ArrowRight className="h-4 w-4" />
+            {chrome.shortCta} <ArrowRight className="h-4 w-4" />
           </Link>
         </div>
       </div>

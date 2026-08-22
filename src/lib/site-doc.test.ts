@@ -123,6 +123,24 @@ describe("AN ABSENT KEY KEEPS THE BASE — a partial proposal must not erase the
   });
 });
 
+describe("the night-one levers — CTA label and heading typeface", () => {
+  it("estimate_cta_label clamps to 40, absent keeps, '' clears", () => {
+    const withLabel = extractSiteDoc({ estimate_cta_label: "Price my project" });
+    expect(withLabel.estimate_cta_label).toBe("Price my project");
+    expect(coerceSiteDoc({ estimate_cta_label: "x".repeat(99) }, base).doc.estimate_cta_label.length).toBe(40);
+    expect(coerceSiteDoc({}, withLabel).doc.estimate_cta_label).toBe("Price my project");
+    expect(coerceSiteDoc({ estimate_cta_label: "" }, withLabel).doc.estimate_cta_label).toBe("");
+  });
+
+  it("site_font is enum-or-base", () => {
+    expect(extractSiteDoc({ site_font: "serif" }).site_font).toBe("serif");
+    expect(extractSiteDoc({ site_font: "comic sans" }).site_font).toBe("default");
+    const serif = extractSiteDoc({ site_font: "serif" });
+    expect(coerceSiteDoc({ site_font: "papyrus" }, serif).doc.site_font).toBe("serif");
+    expect(coerceSiteDoc({ site_font: "soft" }, serif).doc.site_font).toBe("soft");
+  });
+});
+
 describe("site_accent — the mood lever, hex or nothing", () => {
   it("a valid hex lands lowercased; garbage keeps the base; '' clears; absent keeps", () => {
     const withAccent = extractSiteDoc({ site_accent: "#1B3A5C" });

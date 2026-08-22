@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { SiteFonts } from "./site-fonts";
 import Link from "next/link";
 import { ArrowRight, ArrowLeft } from "lucide-react";
 import { orgPublicBaseUrl } from "@/lib/org-settings";
@@ -71,7 +72,8 @@ export function BlogIndex({ org, posts, base, nav }: { org: PublicOrg; posts: Pu
   const chrome = deriveSiteChrome(org, { base, onHomepage: false });
   const brand = chrome.brand;
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
+    <div className="site-shell min-h-screen bg-slate-50 text-slate-900">
+      <SiteFonts settings={org.settings} />
       <SiteHeader chrome={chrome} articlesHref={nav.articlesHref} pageLinks={nav.pageLinks} current="articles" />
       <section className="border-b border-slate-100 bg-white">
         <div className="mx-auto max-w-6xl px-4 py-14">
@@ -149,7 +151,8 @@ export function ArticlePage({ org, post, base, nav }: { org: PublicOrg; post: Pu
     ],
   };
   return (
-    <div className="min-h-screen bg-white text-slate-900">
+    <div className="site-shell min-h-screen bg-white text-slate-900">
+      <SiteFonts settings={org.settings} />
       {/* jsonLdSafe escapes `<` so a title/description containing `</script>` can't break out of
           the JSON-LD block (title/description aren't HTML-sanitized — they render as text elsewhere). */}
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLdSafe(jsonLd) }} />
