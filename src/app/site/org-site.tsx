@@ -74,6 +74,7 @@ function Hero({
   headlineColor = "",
   taglineColor = "",
   areaColor = "",
+  ghostTint = "",
 }: {
   theme: OrgSettings["site_theme"];
   headline: string;
@@ -96,7 +97,44 @@ function Hero({
   headlineColor?: string;
   taglineColor?: string;
   areaColor?: string;
+  /** The org's own accent, when one is set — washes the ghost "See our work" buttons at ~5%
+   *  (Erik: "i love the almost transparent see our work button over the rocks, maybe apply
+   *  the sea glass to that as well i bet its at 5% opacity or something"). Empty = the
+   *  untouched white/slate ghost, byte-identical. */
+  ghostTint?: string;
 }) {
+  // THE DOCK'S OWN LIQUID GLASS, transplanted (Erik: "same tint same glassiness"): the
+  // ~5% tint wash he guessed, the dock's blur(14px) saturate(1.5), an inset top highlight,
+  // and the btn-gloss specular sheen. Still almost transparent — the photo does the work.
+  const ghost = ghostTint
+    ? {
+        backgroundColor: `${ghostTint}14`,
+        borderColor: `${ghostTint}80`,
+        backdropFilter: "blur(14px) saturate(1.5)",
+        WebkitBackdropFilter: "blur(14px) saturate(1.5)",
+        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.35), 0 10px 28px -14px rgba(15,23,42,0.35)",
+      }
+    : undefined;
+  const ghostCls = ghostTint ? " btn-gloss" : "";
+  // THE ESTIMATE BUTTON IS A DOCK CHIP (Erik: "should be like the dock on the estimate
+  // button"): the .glass-tint recipe verbatim — white specular gradient over a 24% tint
+  // wash, dock blur, white border, inset highlight — with the dock's darker-ink text
+  // derived from the accent (the #1b9488 → #0d6e64 relationship, computed).
+  const ink = (hex: string) => {
+    const n = parseInt(hex.slice(1), 16);
+    const d = (x: number) => Math.round(x * 0.55);
+    return `rgb(${d((n >> 16) & 255)}, ${d((n >> 8) & 255)}, ${d(n & 255)})`;
+  };
+  const dockCta = ghostTint
+    ? {
+        background: `linear-gradient(180deg, rgba(255,255,255,0.55), rgba(255,255,255,0.12)), ${ghostTint}3d`,
+        backdropFilter: "blur(14px) saturate(1.5)",
+        WebkitBackdropFilter: "blur(14px) saturate(1.5)",
+        border: "1px solid rgba(255,255,255,0.6)",
+        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.9), 0 10px 28px -14px rgba(15,23,42,0.3)",
+        color: ink(ghostTint),
+      }
+    : undefined;
   // Palette overrides: a style attr exists ONLY when a color is set (byte-identical defaults).
   const tColor = (c: string) => (c ? { color: c } : undefined);
   // A lever'd unit carries CSS custom properties + the cn-lever classes; the actual transform/
@@ -115,7 +153,11 @@ function Hero({
   const leverCls = (vars: React.CSSProperties | undefined, w: number) =>
     vars ? (w ? "cn-lever cn-lever-w" : "cn-lever") : "";
   const cta = (
-    <Link href={estimateHref} className="inline-flex items-center gap-2 rounded-lg px-6 py-3.5 text-base font-semibold text-white shadow-lg" style={{ backgroundColor: brand }}>
+    <Link
+      href={estimateHref}
+      className={`inline-flex items-center gap-2 rounded-lg px-6 py-3.5 text-base font-semibold shadow-lg${dockCta ? ghostCls : " text-white"}`}
+      style={dockCta ?? { backgroundColor: brand }}
+    >
       <span data-e="estimate_cta_label">{ctaLabel}</span> <ArrowRight className="h-5 w-5" />
     </Link>
   );
@@ -135,7 +177,7 @@ function Hero({
                 <span data-e="estimate_cta_label">{ctaLabel}</span> <ArrowRight className="h-5 w-5" />
               </Link>
               {hasPhotos && (
-                <a href="#work" className="inline-flex items-center gap-2 rounded-lg border border-white/40 px-6 py-3.5 text-base font-semibold hover:bg-white/10">See our work</a>
+                <a href="#work" style={ghost} className={`inline-flex items-center gap-2 rounded-lg border border-white/40 px-6 py-3.5 text-base font-semibold hover:bg-white/10${ghostCls}`}>See our work</a>
               )}
             </div>
             {creds.length > 0 && <p className="mt-6 text-sm font-medium text-white/75">{creds.join("  ·  ")}</p>}
@@ -170,7 +212,7 @@ function Hero({
                 <span data-e="estimate_cta_label">{ctaLabel}</span> <ArrowRight className="h-5 w-5" />
               </Link>
               {hasPhotos && (
-                <a href="#work" className="inline-flex items-center gap-2 rounded-full border border-slate-300 px-6 py-3.5 text-base font-semibold text-slate-700 hover:border-slate-400">See our work</a>
+                <a href="#work" style={ghost} className={`inline-flex items-center gap-2 rounded-full border border-slate-300 px-6 py-3.5 text-base font-semibold text-slate-700 hover:border-slate-400${ghostCls}`}>See our work</a>
               )}
             </div>
             {creds.length > 0 && <p className="mt-6 text-sm font-medium text-slate-500">{creds.join("  ·  ")}</p>}
@@ -210,7 +252,7 @@ function Hero({
       <div className="mt-8 flex flex-wrap items-center gap-3">
         {cta}
         {hasPhotos && (
-          <a href="#work" className="inline-flex items-center gap-2 rounded-lg border border-white/40 px-6 py-3.5 text-base font-semibold text-white hover:bg-white/10">See our work</a>
+          <a href="#work" style={ghost} className={`inline-flex items-center gap-2 rounded-lg border border-white/40 px-6 py-3.5 text-base font-semibold text-white hover:bg-white/10${ghostCls}`}>See our work</a>
         )}
       </div>
       {creds.length > 0 && <p className="mt-6 text-sm font-medium text-white/85">{creds.join("  ·  ")}</p>}
@@ -272,7 +314,7 @@ function Hero({
               <div className="mt-6 flex flex-wrap items-center gap-3 sm:justify-end">
                 {cta}
                 {hasPhotos && (
-                  <a href="#work" className="inline-flex items-center gap-2 rounded-lg border border-white/40 px-6 py-3.5 text-base font-semibold text-white hover:bg-white/10">See our work</a>
+                  <a href="#work" style={ghost} className={`inline-flex items-center gap-2 rounded-lg border border-white/40 px-6 py-3.5 text-base font-semibold text-white hover:bg-white/10${ghostCls}`}>See our work</a>
                 )}
               </div>
               {creds.length > 0 && <p className="mt-5 text-sm font-medium text-white/85">{creds.join("  ·  ")}</p>}
@@ -410,6 +452,7 @@ export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg;
             headlineColor={s.splash_headline_color}
             taglineColor={s.splash_tagline_color}
             areaColor={s.service_area_color}
+            ghostTint={s.site_accent}
           />
 
           {/* Trust band */}
