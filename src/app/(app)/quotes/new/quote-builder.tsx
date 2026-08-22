@@ -23,6 +23,7 @@ import { useToast } from "@/components/toast";
 import {
   saveQuote,
   generateQuoteDraft,
+  generateQuoteDraftFromLeadPlans,
   generateQuoteDraftFromPlan,
   generateQuoteDraftFromSupplier,
   type DraftLineItem,
@@ -349,7 +350,14 @@ export function QuoteBuilder({
     setAiError(null);
     startGenerate(async () => {
       // Price against THIS customer's level — markup AND labor rate (else the org defaults on the server).
-      const res = await generateQuoteDraft(scope, levelMarkup ?? undefined, levelRate ?? undefined);
+      // WHEN THE LEAD SENT PLANS, GENERATE READS THEM (Andrew: "It acknowledges the plans exist,
+      // but nothing further…?"). The text path names the attached PDFs while telling the model it
+      // can't open them, so it honestly returns questions instead of lines — the one button
+      // everyone reaches for must do the whole job. The scope box still overrides the drawings.
+      const res =
+        leadPlans.length && inquiryId
+          ? await generateQuoteDraftFromLeadPlans(inquiryId, scope, levelMarkup ?? undefined, levelRate ?? undefined)
+          : await generateQuoteDraft(scope, levelMarkup ?? undefined, levelRate ?? undefined);
       if (!res.ok) {
         setAiError(res.error);
         return;
@@ -553,6 +561,13 @@ export function QuoteBuilder({
                   </>
                 )}
               </Button>
+              {/* Say out loud that Generate will read the plans — Andrew expected exactly that
+                  and the button gave no sign either way. */}
+              {leadPlans.length > 0 && !generating && (
+                <span className="text-xs text-slate-500">
+                  reads the customer&apos;s plans ({leadPlans.map((p) => p.name).join(", ")})
+                </span>
+              )}
             </div>
 
             {/* …or take off a plan. Claude reads the PDF natively (legend, schedules, notes, and

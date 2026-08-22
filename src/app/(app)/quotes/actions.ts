@@ -10,7 +10,8 @@ import { headers } from "next/headers";
 import { bustDocPdf, warmDocPdf } from "@/lib/pdf-cache";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
-import { INTAKE_BUCKET, isOwnIntakePath, uploadDisplayName } from "@/lib/playbook/uploads";
+import { INTAKE_BUCKET, extOf, intakePaths, isOwnIntakePath, uploadDisplayName } from "@/lib/playbook/uploads";
+import { pickReadablePlans } from "@/lib/plan-brief";
 import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
 import { createNotifications } from "@/lib/notifications";
 import { subtotalTaxTotal } from "@/lib/invoice-math";
@@ -1502,19 +1503,93 @@ export async function generateQuoteDraftFromPlan(
     const b64 = Buffer.from(up.bytes).toString("base64");
     const content = [
       { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } },
-      {
-        type: "text",
-        text:
-          "Take off this electrical plan into estimate line items. Read the LEGEND, schedules, general notes, AND the drawing itself; count every device and calculate quantities per NEC (wire size, box/conduit fill, breaker/feeder, loads). Only exclude work the plan explicitly marks as existing/complete. Price per the rules, and in 'questions' list what to review — uncertain counts (say the drawing is dense), plan callouts that imply extra scope (e.g. data/TV outlets needing a home-run Cat6 to a central data box), and owner decisions." +
-          // The contractor's note OVERRIDES the drawing. A plan can't show what's already been done
-          // or a field decision — so honor exclusions like "garage is finished" or "panel & 2in
-          // conduit already in" and DON'T bill that work, even though the drawing still depicts it.
-          (note
-            ? `\n\nTHE CONTRACTOR ADDED THIS SCOPE NOTE — it OVERRIDES the drawing. Apply it strictly: exclude anything called out as already done/existing, honor stated counts and corrections, and DO NOT bill work the note says is complete even if the plan still shows it:\n"""${note}"""`
-            : ""),
-      },
+      { type: "text", text: planTakeoffInstruction(note) },
     ];
     return { ok: true, ...(await runEstimator(content, markupPct, laborRate)) };
+  } catch (e) {
+    return estimatorError(e);
+  }
+}
+
+/**
+ * The plan-path instruction, shared by every door that hands the estimator a drawing. TRADE-
+ * NEUTRAL, deliberately: this text used to open "Take off this electrical plan … per NEC", which
+ * was redundant for Erik (the system prompt already orders code-calculated quantities for his
+ * trade) and WRONG the moment Vivian Builders' plans arrived — the same one-word-at-a-time
+ * regression the runEstimator prompt was rewritten to prevent. The trade lives in ONE place: the
+ * system prompt.
+ */
+function planTakeoffInstruction(note: string): string {
+  return (
+    "Take off this plan set into estimate line items. Read the LEGEND, schedules, general notes, AND the drawings themselves; count what the sheets show and calculate quantities per the QUANTITIES rules. Only exclude work the plans explicitly mark as existing/complete. Price per the rules, and in 'questions' list what to review — uncertain counts (say if a sheet is too dense to count reliably), plan callouts that imply extra scope, and owner decisions." +
+    // The contractor's note OVERRIDES the drawing. A plan can't show what's already been done
+    // or a field decision — so honor exclusions like "garage is finished" or "panel & 2in
+    // conduit already in" and DON'T bill that work, even though the drawing still depicts it.
+    (note
+      ? `\n\nTHE CONTRACTOR ADDED THIS SCOPE NOTE — it OVERRIDES the drawings. Apply it strictly: exclude anything called out as already done/existing, honor stated counts and corrections, and DO NOT bill work the note says is complete even if the plans still show it:\n"""${note}"""`
+      : "")
+  );
+}
+
+/**
+ * "GENERATE" READS THE PLANS THE CUSTOMER ALREADY SENT (Andrew: "Still not creating … any line
+ * items at all. It acknowledges the plans exist, but nothing further…?"). He was right to expect
+ * that: his Generate taps ran the TEXT path, whose prefill NAMES the attached plan set while
+ * telling the model it cannot open it — so the model honestly asked for the scope in writing
+ * instead of inventing lines. When the linked lead carries plan PDFs, the take-off now reads
+ * them: every readable PDF inside the same 20MB budget as every other reading, skips named out
+ * loud as a review question, the scope box still overriding the drawings.
+ */
+export async function generateQuoteDraftFromLeadPlans(
+  inquiryId: string,
+  scope: string,
+  markupPct?: number,
+  laborRate?: number,
+): Promise<{ ok: true; items: DraftLineItem[]; questions: string[]; description: string } | { ok: false; error: string }> {
+  const gate = await guardEstimator();
+  if (!gate.ok) return { ok: false, error: gate.error };
+  try {
+    const ctx = await requireStaff();
+    if ("error" in ctx) return { ok: false, error: ctx.error ?? "Only office staff can run the estimator." };
+    const { data: inq } = await ctx.supabase.from("inquiries").select("id, org_id, intake").eq("id", inquiryId).maybeSingle();
+    if (!inq) return { ok: false, error: "The lead these plans belong to wasn't found." };
+    const orgId = String((inq as { org_id?: string }).org_id ?? "");
+    const paths = intakePaths((inq as { intake?: unknown }).intake).filter((p) => isOwnIntakePath(orgId, p));
+    if (!paths.length) return { ok: false, error: "This lead has no uploaded plans." };
+
+    const svc = createServiceClient();
+    const sized: { path: string; bytes: number | null }[] = [];
+    for (const p of paths) {
+      if (extOf(p) !== "pdf") {
+        sized.push({ path: p, bytes: null });
+        continue;
+      }
+      const { data: meta, error } = await svc.storage.from(INTAKE_BUCKET).info(p);
+      sized.push({ path: p, bytes: error ? null : Number((meta as { size?: number } | null)?.size ?? 0) });
+    }
+    const { read, skipped } = pickReadablePlans(sized);
+    if (!read.length) return { ok: false, error: "None of the customer's uploads is a readable plan PDF." };
+
+    const docs: any[] = [];
+    for (const p of read) {
+      const { data: blob } = await svc.storage.from(INTAKE_BUCKET).download(p);
+      if (!blob) {
+        skipped.push({ name: uploadDisplayName(p), reason: "file no longer in storage" });
+        continue;
+      }
+      docs.push({
+        type: "document",
+        source: { type: "base64", media_type: "application/pdf", data: Buffer.from(await blob.arrayBuffer()).toString("base64") },
+      });
+    }
+    if (!docs.length) return { ok: false, error: "Couldn't read the customer's plans from storage." };
+
+    const content = [...docs, { type: "text", text: planTakeoffInstruction(scope.trim()) }];
+    const out = await runEstimator(content, markupPct, laborRate);
+    // NO SILENT CAPS: what didn't ride is a review item, not a secret.
+    if (skipped.length)
+      out.questions = [`Not read: ${skipped.map((s) => `${s.name} (${s.reason})`).join("; ")}`, ...out.questions];
+    return { ok: true, ...out };
   } catch (e) {
     return estimatorError(e);
   }
