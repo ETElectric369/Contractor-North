@@ -130,13 +130,14 @@ export default async function InquiriesPage({
       )}
 
       {rows.length === 0 ? (
+        // No duplicate "New lead" here (Andrew, 8/21: "leave the new lead button on the top
+        // right and get rid of the button in the center its redundant") — the header's button
+        // is always on screen, including over this empty state.
         <EmptyState
           icon={UserPlus}
           title="No open leads"
-          description="Web submissions and manually-added leads show up here to follow up and convert."
-        >
-          <InquiryModal />
-        </EmptyState>
+          description="Web submissions and manually-added leads show up here to follow up and convert — or add one with New Lead above."
+        />
       ) : (
         <Card>
           <ul className="divide-y divide-slate-100">
