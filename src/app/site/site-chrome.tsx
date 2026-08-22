@@ -189,7 +189,11 @@ export function SiteHeader({
               <Phone className="h-4 w-4" style={{ color: brand }} /> {org.phone}
             </a>
           )}
-          <Link href={estimateHref} className="rounded-lg px-4 py-2 text-sm font-semibold text-white" style={{ backgroundColor: brand }}>
+          <Link
+            href={estimateHref}
+            className={`rounded-lg px-4 py-2 text-sm font-semibold${org.settings.site_accent ? " seaglass-btn" : " text-white"}`}
+            style={org.settings.site_accent ? seaGlassVars(org.settings.site_accent) : { backgroundColor: brand }}
+          >
             {chrome.shortCta}
           </Link>
           {/* Mobile nav — the link row above is hidden below md, which stranded builder pages on
@@ -236,6 +240,18 @@ export function SiteHeader({
   );
 }
 
+/** The org's accent as the SAME CSS vars the app shell feeds the dock (--glass-tint/--glass-ink,
+ *  space-separated rgb; ink = the app's darker-teal relationship at 0.55 luminance). One tint
+ *  lever, everywhere ("people can adjust the tint simplified"). */
+export function seaGlassVars(hex: string): React.CSSProperties {
+  const n = parseInt(hex.slice(1), 16);
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  const d = (x: number) => Math.round(x * 0.55);
+  return { "--glass-tint": `${r} ${g} ${b}`, "--glass-ink": `${d(r)} ${d(g)} ${d(b)}` } as React.CSSProperties;
+}
+
 export function SiteFooter({ chrome, extInPlace = false }: { chrome: SiteChrome; extInPlace?: boolean }) {
   const { org, brand, showName, telHref, area, ig, gbpUrl, creds, estimateHref } = chrome;
   // On the APP-HOST view (what the North shell shows) external links navigate IN PLACE —
@@ -268,7 +284,11 @@ export function SiteFooter({ chrome, extInPlace = false }: { chrome: SiteChrome;
               <Star className="h-4 w-4" style={{ color: brand }} /> Review us on Google
             </a>
           )}
-          <Link href={estimateHref} className="mt-2 inline-flex items-center gap-2 rounded-lg px-4 py-2 font-semibold text-white" style={{ backgroundColor: brand }}>
+          <Link
+            href={estimateHref}
+            className={`mt-2 inline-flex items-center gap-2 rounded-lg px-4 py-2 font-semibold${s.site_accent ? " seaglass-btn" : " text-white"}`}
+            style={s.site_accent ? seaGlassVars(s.site_accent) : { backgroundColor: brand }}
+          >
             {chrome.shortCta} <ArrowRight className="h-4 w-4" />
           </Link>
         </div>

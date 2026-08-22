@@ -12,7 +12,7 @@ import { orgIcons } from "./site-base";
 import { jsonLdSafe } from "@/lib/jsonld";
 import type { Block } from "@/lib/site-blocks";
 import { BlockRenderer } from "./block-renderer";
-import { deriveSiteChrome, SiteHeader, SiteFooter } from "./site-chrome";
+import { deriveSiteChrome, seaGlassVars, SiteHeader, SiteFooter } from "./site-chrome";
 import { PortfolioGallery } from "../estimate/[handle]/portfolio-gallery";
 import { SpecialtyShowcase } from "./specialty-showcase";
 import { ContactForm } from "./contact-form";
@@ -157,7 +157,7 @@ function Hero({
   const cta = (
     <Link
       href={estimateHref}
-      className={`inline-flex items-center gap-2 rounded-lg px-6 py-3.5 text-base font-semibold shadow-lg${dockCta ? ghostCls : " text-white"}`}
+      className={`inline-flex items-center gap-2 rounded-lg px-6 py-3.5 text-base font-semibold${dockCta ? ghostCls : " text-white shadow-lg"}`}
       style={dockCta ?? { backgroundColor: brand }}
     >
       <span data-e="estimate_cta_label">{ctaLabel}</span> <ArrowRight className="h-5 w-5" />
