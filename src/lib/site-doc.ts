@@ -154,10 +154,11 @@ const boxW = (v: unknown, fallback: number): number => {
  *  the H1/<title> (the v29 lesson: "Electrical \nTruckee" rendered and would have titled). */
 /** A headline may carry DELIBERATE line breaks (Erik shaped a two-line hero and "it keeps
  *  resetting" — the old flatten-to-commas law fought him). Normalize instead: \r\n → \n,
- *  no spaces hugging a break, at most single breaks, trimmed. The ONE-LINE rule still holds
+ *  no spaces hugging a break, at most ONE BLANK LINE in a row (Erik: "i want a line
+ *  inbetween those two lines thats it" — a deliberate gap is a design choice), trimmed. The ONE-LINE rule still holds
  *  where it matters — flattenHeadline() at the metadata/SEO boundary (<title>, og:title). */
 const headlineText = (v: string): string =>
-  v.replace(/\r\n?/g, "\n").replace(/[ \t]*\n[ \t]*/g, "\n").replace(/\n{2,}/g, "\n").trim();
+  v.replace(/\r\n?/g, "\n").replace(/[ \t]*\n[ \t]*/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
 
 /** The metadata boundary's view of a headline: breaks become ", " (a <title> is one line). */
 export const flattenHeadline = (v: string): string => v.replace(/\s*\n+\s*/g, ", ").replace(/,\s*,/g, ",");

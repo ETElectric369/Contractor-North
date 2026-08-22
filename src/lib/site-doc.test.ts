@@ -231,7 +231,8 @@ describe("the main-build blocks — split obeys the image law, density is enum-o
 
   it("a headline keeps DELIBERATE line breaks, normalized to single \\n", () => {
     expect(extractSiteDoc({ splash_headline: "Custom Lighting \nTruckee" }).splash_headline).toBe("Custom Lighting\nTruckee");
-    expect(extractSiteDoc({ splash_headline: "A\r\n\r\n\nB" }).splash_headline).toBe("A\nB");
+    expect(extractSiteDoc({ splash_headline: "A\r\n\r\n\nB" }).splash_headline).toBe("A\n\nB"); // one blank line survives
+    expect(extractSiteDoc({ splash_headline: "A\n\n\n\nB" }).splash_headline).toBe("A\n\nB");
     const base2 = extractSiteDoc({});
     expect(coerceSiteDoc({ splash_headline: "A \n B" }, base2).doc.splash_headline).toBe("A\nB");
   });

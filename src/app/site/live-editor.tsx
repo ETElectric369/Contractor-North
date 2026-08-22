@@ -368,7 +368,7 @@ export function LiveEditor({
     const raw = sess.el.innerText;
     // A headline may carry deliberate line breaks — normalize, never flatten (cn-v787).
     const clean = BREAK_FIELDS.includes(sess.f)
-      ? raw.replace(/\r\n?/g, "\n").replace(/[ \t]*\n[ \t]*/g, "\n").replace(/\n{2,}/g, "\n").trim()
+      ? raw.replace(/\r\n?/g, "\n").replace(/[ \t]*\n[ \t]*/g, "\n").replace(/\n{3,}/g, "\n\n").trim()
       : raw.trim();
     if (clean !== raw) sess.el.innerText = clean;
     if (clean !== sess.before) {
@@ -490,17 +490,43 @@ export function LiveEditor({
       // entirely, so he pushed words apart with spaces and the render collapsed them). In a
       // break field Enter inserts a real \n; elsewhere it finishes the edit like an input.
       // keydown AND beforeinput both guard it — engines differ on which fires usably.
+      // ENGINE-PROOF BREAK INSERT: execCommand first (plays the undo stack), and when an
+      // engine ignores it (his app shell is WebKit — different editing rules than the
+      // Chromium this was first verified in), raw Range surgery that no engine can refuse.
+      const insertBreak = () => {
+        const beforeText = el.textContent ?? "";
+        let ok = false;
+        try {
+          ok = document.execCommand("insertText", false, "\n");
+        } catch {
+          ok = false;
+        }
+        if (ok && (el.textContent ?? "") !== beforeText) return;
+        const sel = window.getSelection();
+        if (sel && sel.rangeCount > 0 && el.contains(sel.getRangeAt(0).commonAncestorContainer)) {
+          const range = sel.getRangeAt(0);
+          range.deleteContents();
+          const tn = document.createTextNode("\n");
+          range.insertNode(tn);
+          range.setStartAfter(tn);
+          range.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        } else {
+          el.appendChild(document.createTextNode("\n"));
+        }
+      };
       const onEnterKey = (ke: KeyboardEvent) => {
         if (ke.key !== "Enter") return;
         ke.preventDefault();
-        if (BREAK_FIELDS.includes(f)) document.execCommand("insertText", false, "\n");
+        if (BREAK_FIELDS.includes(f)) insertBreak();
         else el.blur();
       };
       const onBeforeInput = (ie: Event) => {
         const t = (ie as InputEvent).inputType;
         if (t !== "insertParagraph" && t !== "insertLineBreak") return;
         ie.preventDefault();
-        if (BREAK_FIELDS.includes(f)) document.execCommand("insertText", false, "\n");
+        if (BREAK_FIELDS.includes(f)) insertBreak();
         else el.blur();
       };
       el.addEventListener("keydown", onEnterKey);
