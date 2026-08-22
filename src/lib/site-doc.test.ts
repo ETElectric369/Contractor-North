@@ -140,6 +140,15 @@ describe("materialize + diff", () => {
   it("knownImageUrls collects every legitimate url across the doc", () => {
     expect([...knownImageUrls(base)].sort()).toEqual([PHOTO_A, PHOTO_B].sort());
   });
+
+  it("a portfolio entry's extra keys (path — the storage delete key) survive extract AND a design pass", () => {
+    const doc = extractSiteDoc({ portfolio: [{ url: PHOTO_A, path: "org/portfolio-a.jpg", src: "a.jpg" }] });
+    expect(doc.portfolio[0].path).toBe("org/portfolio-a.jpg");
+    // …and through coerceSiteDoc, which rebuilds entries from the base by url.
+    const { doc: designed } = coerceSiteDoc({ portfolio: [{ url: PHOTO_A, caption: "New cap" }] }, doc);
+    expect(designed.portfolio[0].path).toBe("org/portfolio-a.jpg");
+    expect(designed.portfolio[0].caption).toBe("New cap");
+  });
 });
 
 describe("the pre-publish checklist speaks plain words and never blocks", () => {

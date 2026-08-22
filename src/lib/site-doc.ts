@@ -56,7 +56,9 @@ export interface SiteDoc {
   google_business_url: string;
   calendly_url: string;
   reviews: { name: string; text: string; rating?: number }[];
-  portfolio: { url: string; src?: string; caption?: string }[];
+  /** Extra keys ride verbatim — PortfolioManager stores `path` (the storage key it deletes by),
+   *  and the live publish test caught extract dropping it (the projection law, in a jsonb). */
+  portfolio: ({ url: string; src?: string; caption?: string } & Record<string, unknown>)[];
   home_blocks: Block[];
 }
 
@@ -109,7 +111,11 @@ export function extractSiteDoc(rawSettings: unknown): SiteDoc {
     google_business_url: s(st.google_business_url, LIMITS.url),
     calendly_url: s(st.calendly_url, LIMITS.url),
     reviews: normalizeReviews(st.reviews),
+    // SPREAD THE ORIGINAL ENTRY FIRST: the first cut projected {url,src,caption} and the live
+    // publish test caught it stripping `path` — the storage key PortfolioManager deletes by.
+    // Extract only ever reads the org's own stored data, so unknown keys are theirs to keep.
     portfolio: (Array.isArray(st.portfolio) ? st.portfolio : []).slice(0, LIMITS.portfolioItems).map((p) => ({
+      ...(p && typeof p === "object" ? (p as Record<string, unknown>) : {}),
       url: s((p as { url?: unknown }).url, LIMITS.url),
       ...(typeof (p as { src?: unknown }).src === "string" ? { src: s((p as { src: string }).src, LIMITS.url) } : {}),
       ...(typeof (p as { caption?: unknown }).caption === "string"
