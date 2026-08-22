@@ -103,40 +103,14 @@ function Hero({
    *  untouched white/slate ghost, byte-identical. */
   ghostTint?: string;
 }) {
-  // THE DOCK'S OWN LIQUID GLASS, transplanted (Erik: "same tint same glassiness"): the
-  // ~5% tint wash he guessed, the dock's blur(14px) saturate(1.5), an inset top highlight,
-  // and the btn-gloss specular sheen. Still almost transparent — the photo does the work.
-  const ghost = ghostTint
-    ? {
-        backgroundColor: `${ghostTint}14`,
-        borderColor: `${ghostTint}80`,
-        backdropFilter: "blur(14px) saturate(1.5)",
-        WebkitBackdropFilter: "blur(14px) saturate(1.5)",
-        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.35), 0 10px 28px -14px rgba(15,23,42,0.35)",
-      }
-    : undefined;
-  const ghostCls = ghostTint ? " btn-gloss" : "";
-  // THE ESTIMATE BUTTON IS A DOCK CHIP (Erik: "should be like the dock on the estimate
-  // button"): the .glass-tint recipe verbatim — white specular gradient over a 24% tint
-  // wash, dock blur, white border, inset highlight — with the dock's darker-ink text
-  // derived from the accent (the #1b9488 → #0d6e64 relationship, computed).
-  const ink = (hex: string) => {
-    const n = parseInt(hex.slice(1), 16);
-    const d = (x: number) => Math.round(x * 0.55);
-    return `rgb(${d((n >> 16) & 255)}, ${d((n >> 8) & 255)}, ${d(n & 255)})`;
-  };
-  const dockCta = ghostTint
-    ? {
-        background: `linear-gradient(180deg, rgba(255,255,255,0.55), rgba(255,255,255,0.12)), ${ghostTint}3d`,
-        backdropFilter: "blur(14px) saturate(1.5)",
-        WebkitBackdropFilter: "blur(14px) saturate(1.5)",
-        // CLEAN EDGES (Erik: "maybe the outline needs to go away") — no border ring; the
-        // sheen and a soft drop shadow define the chip, like the dock itself.
-        border: "0",
-        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.45), 0 10px 28px -14px rgba(15,23,42,0.3)",
-        color: ink(ghostTint),
-      }
-    : undefined;
+  // THE DOCK BUTTON, LITERALLY (Erik: "the idea is simple match the dock buttons on the
+  // website and people can adjust the tint"): every CTA carries the shared .seaglass-btn
+  // class — the dock tile's own layers, sheen and ink over a white glass base — with the
+  // org's accent arriving as the SAME --glass-tint/--glass-ink vars the app shell uses.
+  // No hand-rolled approximations; one recipe, one place (globals.css).
+  const ghost = ghostTint ? seaGlassVars(ghostTint) : undefined;
+  const ghostCls = ghostTint ? " seaglass-btn" : "";
+  const dockCta = ghost;
   // Palette overrides: a style attr exists ONLY when a color is set (byte-identical defaults).
   const tColor = (c: string) => (c ? { color: c } : undefined);
   // A lever'd unit carries CSS custom properties + the cn-lever classes; the actual transform/
