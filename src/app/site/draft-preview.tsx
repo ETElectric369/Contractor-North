@@ -32,6 +32,11 @@ const canPreviewDrafts = cache(async (orgId: string): Promise<boolean> => {
   return !("error" in ctx);
 });
 
+/** Public alias for chrome-level affordances (the app-host "Back to North" chip): may THIS
+ *  caller see editor conveniences? Anonymous visitors always get false — and the chip only
+ *  renders on the app-host route, never the custom-domain one. */
+export const canPreviewSiteDrafts = canPreviewDrafts;
+
 /** A draft (or published — state may flip mid-session) builder page, ONLY for an authorized
  *  previewer. Mirrors getPublicPageBySlug minus the published filter, gate included. */
 export const getDraftPageForPreview = cache(async (orgId: string, slug: string): Promise<PublicPage | null> => {

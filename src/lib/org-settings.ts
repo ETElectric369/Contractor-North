@@ -190,6 +190,13 @@ export interface OrgSettings {
    *  photo — name+area top-left, headline lower-left, tagline+buttons lower-right; Erik:
    *  "those text boxes overlaying the image ... separated horizontally"). */
   hero_style: "open" | "panel" | "band" | "spread";
+  /** Free nudge of the hero text block over the photo, in percent of the block's own size —
+   *  the drag/arrow lever ("move it with the mouse"). Clamped ±40; 0/0 = the framing's spot. */
+  hero_dx: number;
+  hero_dy: number;
+  /** The hero text BOX's width as % of the hero (30-100); 0 = the framing's default width.
+   *  The resize-handle lever. */
+  hero_w: number;
   /** Whole-page vertical rhythm: scoped rescale of the section paddings (site-fonts.tsx emits
    *  the overrides). "default" = untouched; per-section spacing is style.pad on section blocks. */
   site_density: "default" | "compact" | "airy";
@@ -290,6 +297,9 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   site_density: "default",
   hero_align: "left",
   hero_style: "open",
+  hero_dx: 0,
+  hero_dy: 0,
+  hero_w: 0,
   estimate_cta_label: "",
   social_instagram: "",
   custom_domain: "",

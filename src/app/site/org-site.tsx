@@ -64,6 +64,9 @@ function Hero({
   creds,
   heroAlign = "left",
   heroStyle = "open",
+  heroDx = 0,
+  heroDy = 0,
+  heroW = 0,
 }: {
   theme: OrgSettings["site_theme"];
   headline: string;
@@ -78,6 +81,9 @@ function Hero({
   creds: string[];
   heroAlign?: OrgSettings["hero_align"];
   heroStyle?: OrgSettings["hero_style"];
+  heroDx?: number;
+  heroDy?: number;
+  heroW?: number;
 }) {
   const cta = (
     <Link href={estimateHref} className="inline-flex items-center gap-2 rounded-lg px-6 py-3.5 text-base font-semibold text-white shadow-lg" style={{ backgroundColor: brand }}>
@@ -165,8 +171,17 @@ function Hero({
   const alignWrap =
     heroAlign === "center" ? "flex justify-center text-center" : heroAlign === "right" ? "flex justify-end" : "";
   const alignInner = heroAlign === "center" ? "flex flex-col items-center" : "";
+  // The drag/arrow/resize levers land here as plain CSS — transform moves the box, maxWidth
+  // resizes it. Zero values emit no style at all (byte-identical defaults).
+  const boxStyle =
+    heroDx || heroDy || heroW
+      ? {
+          ...(heroDx || heroDy ? { transform: `translate(${heroDx}%, ${heroDy}%)` } : {}),
+          ...(heroW ? { maxWidth: `${heroW}%` } : {}),
+        }
+      : undefined;
   const textBlock = (
-    <div className={["max-w-2xl", alignInner, heroStyle === "panel" ? "rounded-2xl bg-slate-950/55 p-8 backdrop-blur-sm sm:p-10" : ""].filter(Boolean).join(" ")}>
+    <div data-hero-text style={boxStyle} className={["max-w-2xl", alignInner, heroStyle === "panel" ? "rounded-2xl bg-slate-950/55 p-8 backdrop-blur-sm sm:p-10" : ""].filter(Boolean).join(" ")}>
       {area && <p data-e="service_area" className="mb-3 text-sm font-semibold uppercase tracking-[0.2em] text-white/80">{area}</p>}
       {headline && <h1 data-e="splash_headline" className={`${hSize} font-extrabold leading-tight tracking-tight text-white drop-shadow`}>{headline}</h1>}
       {tagline && <p data-e="splash_tagline" className="mt-4 max-w-xl text-lg text-slate-100">{tagline}</p>}
@@ -348,6 +363,9 @@ export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg;
             creds={creds}
             heroAlign={s.hero_align}
             heroStyle={s.hero_style}
+            heroDx={s.hero_dx}
+            heroDy={s.hero_dy}
+            heroW={s.hero_w}
           />
 
           {/* Trust band */}

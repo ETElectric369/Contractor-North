@@ -33,6 +33,9 @@ export const SITE_DOC_KEYS = [
   "site_theme",
   "hero_align",
   "hero_style",
+  "hero_dx",
+  "hero_dy",
+  "hero_w",
   "site_accent",
   "site_font",
   "brand_font",
@@ -61,6 +64,9 @@ export interface SiteDoc {
   site_theme: "classic" | "bold" | "minimal";
   hero_align: "left" | "center" | "right";
   hero_style: "open" | "panel" | "band" | "spread";
+  hero_dx: number;
+  hero_dy: number;
+  hero_w: number;
   site_accent: string;
   site_font: "default" | "serif" | "grotesk" | "soft" | "condensed";
   brand_font: "default" | "serif" | "grotesk" | "soft" | "condensed";
@@ -93,6 +99,22 @@ const LIMITS = {
 
 const HEX6 = /^#[0-9a-f]{6}$/i;
 
+/** ±40% of the text block's own size — enough to reposition, never enough to fling it off-page. */
+const nudge = (v: unknown, fallback: number): number => {
+  const n = typeof v === "number" && Number.isFinite(v) ? Math.round(v) : fallback;
+  return Math.min(40, Math.max(-40, n));
+};
+
+/** Box width % — 0 means "the framing's default", else clamped to a readable 30-100. */
+const boxW = (v: unknown, fallback: number): number => {
+  const n = typeof v === "number" && Number.isFinite(v) ? Math.round(v) : fallback;
+  return n <= 0 ? 0 : Math.min(100, Math.max(30, n));
+};
+
+/** A headline is ONE LINE by nature — contentEditable Enter keys must not smuggle newlines into
+ *  the H1/<title> (the v29 lesson: "Electrical \nTruckee" rendered and would have titled). */
+const oneLine = (v: string): string => v.replace(/\s*\n+\s*/g, ", ").replace(/,\s*,/g, ",");
+
 const s = (v: unknown, max: number) => String(v ?? "").slice(0, max);
 
 /**
@@ -113,7 +135,7 @@ const normalizeReviews = (raw: unknown): SiteDoc["reviews"] =>
 export function extractSiteDoc(rawSettings: unknown): SiteDoc {
   const st: OrgSettings = getOrgSettings(rawSettings);
   return {
-    splash_headline: s(st.splash_headline, LIMITS.headline),
+    splash_headline: oneLine(s(st.splash_headline, LIMITS.headline)),
     splash_tagline: s(st.splash_tagline, LIMITS.tagline),
     splash_bg_url: s(st.splash_bg_url, LIMITS.url),
     splash_bullets: s(st.splash_bullets, LIMITS.bullets),
@@ -126,6 +148,9 @@ export function extractSiteDoc(rawSettings: unknown): SiteDoc {
     site_theme: st.site_theme === "bold" || st.site_theme === "minimal" ? st.site_theme : "classic",
     hero_align: st.hero_align === "center" || st.hero_align === "right" ? st.hero_align : "left",
     hero_style: st.hero_style === "panel" || st.hero_style === "band" || st.hero_style === "spread" ? st.hero_style : "open",
+    hero_dx: nudge(st.hero_dx, 0),
+    hero_dy: nudge(st.hero_dy, 0),
+    hero_w: boxW(st.hero_w, 0),
     site_accent: (() => {
       const a = typeof st.site_accent === "string" ? st.site_accent.trim() : "";
       return HEX6.test(a) ? a.toLowerCase() : "";
@@ -275,7 +300,7 @@ export function coerceSiteDoc(raw: unknown, base: SiteDoc): { doc: SiteDoc; drop
   const theme = r.site_theme;
   return {
     doc: {
-      splash_headline: sOr(r.splash_headline, base.splash_headline, LIMITS.headline),
+      splash_headline: oneLine(sOr(r.splash_headline, base.splash_headline, LIMITS.headline)),
       splash_tagline: sOr(r.splash_tagline, base.splash_tagline, LIMITS.tagline),
       splash_bg_url: r.splash_bg_url === undefined ? base.splash_bg_url : img(r.splash_bg_url, "the hero background"),
       splash_bullets: sOr(r.splash_bullets, base.splash_bullets, LIMITS.bullets),
@@ -294,6 +319,9 @@ export function coerceSiteDoc(raw: unknown, base: SiteDoc): { doc: SiteDoc; drop
         r.hero_style === "open" || r.hero_style === "panel" || r.hero_style === "band" || r.hero_style === "spread"
           ? r.hero_style
           : base.hero_style,
+      hero_dx: r.hero_dx === undefined ? base.hero_dx : nudge(r.hero_dx, base.hero_dx),
+      hero_dy: r.hero_dy === undefined ? base.hero_dy : nudge(r.hero_dy, base.hero_dy),
+      hero_w: r.hero_w === undefined ? base.hero_w : boxW(r.hero_w, base.hero_w),
       site_accent:
         r.site_accent === undefined
           ? base.site_accent
@@ -341,6 +369,9 @@ export function diffSiteDoc(a: SiteDoc, b: SiteDoc): string[] {
     site_theme: "Theme",
     hero_align: "Hero text position",
     hero_style: "Hero text treatment",
+    hero_dx: "Hero text nudge (across)",
+    hero_dy: "Hero text nudge (down)",
+    hero_w: "Hero text box width",
     site_accent: "Accent color",
     site_font: "Heading typeface",
     brand_font: "Business-name typeface",

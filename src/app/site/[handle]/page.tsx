@@ -6,7 +6,7 @@ import { applySiteDoc, extractSiteDoc } from "@/lib/site-doc";
 import { OrgSite, orgSiteMetadata } from "../org-site";
 import { getSiteNav } from "../site-chrome";
 import { handleLinkBase } from "../site-base";
-import { DraftPreviewBanner, draftPreviewMetadata, getDraftSiteVersionForPreview, previewRequested } from "../draft-preview";
+import { DraftPreviewBanner, canPreviewSiteDrafts, draftPreviewMetadata, getDraftSiteVersionForPreview, previewRequested } from "../draft-preview";
 import { LiveEditor } from "../live-editor";
 
 export const dynamic = "force-dynamic";
@@ -58,8 +58,21 @@ export default async function SiteHome({
   const nav = await getSiteNav(org.id, base);
   const sp = await searchParams;
   const liveEdit = !!draft && sp?.edit === "1";
+  // "View live" inside the desktop app swallows target=_blank and strands the owner on the
+  // site with no way back (Erik: "i got this with no way out"). Anyone authorized to preview
+  // drafts gets a small fixed escape chip on the APP-HOST view; the public (and the custom
+  // domain, which uses the by-domain route) never sees it.
+  const showBackChip = !liveEdit && (await canPreviewSiteDrafts(org.id));
   return (
     <>
+      {showBackChip && (
+        <a
+          href="/site-studio"
+          className="fixed bottom-4 left-4 z-50 rounded-full bg-slate-900/90 px-3.5 py-2 text-sm font-semibold text-white shadow-lg backdrop-blur hover:bg-slate-800"
+        >
+          ← Back to North
+        </a>
+      )}
       {draft && !liveEdit && <DraftPreviewBanner />}
       {/* The on-page editor: only inside an AUTHORIZED draft preview (draft is null for anyone
           who fails the internal gate), and the save action re-checks staff + draft anyway. */}
@@ -72,6 +85,9 @@ export default async function SiteHome({
             hero_style: effOrg.settings.hero_style,
             site_font: effOrg.settings.site_font,
             brand_font: effOrg.settings.brand_font,
+            hero_dx: effOrg.settings.hero_dx,
+            hero_dy: effOrg.settings.hero_dy,
+            hero_w: effOrg.settings.hero_w,
           }}
         />
       )}

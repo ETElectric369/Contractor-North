@@ -187,6 +187,23 @@ describe("the main-build blocks — split obeys the image law, density is enum-o
     expect(coerceSiteDoc({}, banded).doc.hero_style).toBe("band");
   });
 
+  it("hero_dx/dy/w — the move/resize levers — clamp and keep-base", () => {
+    const moved = extractSiteDoc({ hero_dx: 12, hero_dy: -99, hero_w: 250 });
+    expect(moved.hero_dx).toBe(12);
+    expect(moved.hero_dy).toBe(-40); // clamped
+    expect(moved.hero_w).toBe(100); // clamped
+    expect(extractSiteDoc({}).hero_w).toBe(0); // 0 = the framing's default width
+    expect(coerceSiteDoc({ hero_dx: "far left" }, moved).doc.hero_dx).toBe(12);
+    expect(coerceSiteDoc({ hero_dx: -6 }, moved).doc.hero_dx).toBe(-6);
+    expect(coerceSiteDoc({}, moved).doc.hero_dy).toBe(-40);
+  });
+
+  it("a headline is ONE LINE — newlines become commas (the v29 mangle)", () => {
+    expect(extractSiteDoc({ splash_headline: "Custom Lighting \nTruckee" }).splash_headline).toBe("Custom Lighting, Truckee");
+    const base2 = extractSiteDoc({});
+    expect(coerceSiteDoc({ splash_headline: "A\nB" }, base2).doc.splash_headline).toBe("A, B");
+  });
+
   it("site_density: enum lands, garbage keeps base, absent keeps", () => {
     const airy = extractSiteDoc({ site_density: "airy" });
     expect(airy.site_density).toBe("airy");

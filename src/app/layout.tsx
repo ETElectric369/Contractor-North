@@ -45,6 +45,16 @@ export default function RootLayout({
   return (
     <html lang="en" className={geist.variable}>
       <body className="font-sans antialiased">
+        {/* SELF-HEAL AN UNSTYLED PAINT: a hard refresh racing a deploy can land HTML whose hashed
+            CSS just vanished (Erik: option-shift-R showed the raw page). One guarded reload
+            fetches matching HTML+CSS; the guard stops loops if styles are genuinely broken. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              'window.addEventListener("load",function(){try{if(document.styleSheets.length===0&&!sessionStorage.getItem("cn-css-heal")){sessionStorage.setItem("cn-css-heal","1");location.reload();}else if(document.styleSheets.length>0){sessionStorage.removeItem("cn-css-heal");}}catch(e){}});',
+          }}
+        />
+        
         {children}
         <PwaRegister />
         {/* Watches client-side route changes so <BackLink> knows real in-app
