@@ -368,31 +368,39 @@ export async function publishSiteVersion(versionId: string): Promise<StudioResul
 export async function updateVersionBlocks(versionId: string, blocks: unknown): Promise<StudioResult> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error ?? "Staff only." };
-  const { data: ver } = await ctx.supabase
-    .from("site_versions")
-    .select("id, status, doc")
-    .eq("id", versionId)
-    .maybeSingle();
-  if (!ver) return { ok: false, error: "That version wasn't found." };
-  if ((ver as { status: string }).status !== "draft")
-    return { ok: false, error: "Only drafts can be hand-edited — make a new version first (Capture or a design pass)." };
   const washed = normalizeBlocks(blocks).map((b) => {
     if (b.type === "text") return { ...b, props: { ...b.props, html: washEditorHtml(b.props.html) } };
     if (b.type === "split") return { ...b, props: { ...b.props, html: washEditorHtml(b.props.html) } };
     return b;
   });
-  const doc = extractSiteDoc((ver as { doc: unknown }).doc);
-  doc.home_blocks = washed;
-  const { data: upd, error } = await ctx.supabase
-    .from("site_versions")
-    .update({ doc })
-    .eq("id", versionId)
-    .eq("status", "draft")
-    .select("id");
-  if (error) return { ok: false, error: dbError(error) };
-  if (!upd?.length) return { ok: false, error: "The save didn't land — the version may have just been published." };
-  revalidatePath("/site-studio");
-  return { ok: true, id: versionId };
+  // Same CAS protocol as the on-page editor's updateVersionFields (doc_rev, 0210) — the two
+  // writers can race on one draft, and a lost update here would eat an autosaved field patch.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { data: ver } = await ctx.supabase
+      .from("site_versions")
+      .select("id, status, doc, doc_rev")
+      .eq("id", versionId)
+      .maybeSingle();
+    if (!ver) return { ok: false, error: "That version wasn't found." };
+    if ((ver as { status: string }).status !== "draft")
+      return { ok: false, error: "Only drafts can be hand-edited — make a new version first (Capture or a design pass)." };
+    const rev = Number((ver as { doc_rev?: unknown }).doc_rev) || 0;
+    const doc = extractSiteDoc((ver as { doc: unknown }).doc);
+    doc.home_blocks = washed;
+    const { data: upd, error } = await ctx.supabase
+      .from("site_versions")
+      .update({ doc, doc_rev: rev + 1 })
+      .eq("id", versionId)
+      .eq("status", "draft")
+      .eq("doc_rev", rev)
+      .select("id");
+    if (error) return { ok: false, error: dbError(error) };
+    if (upd?.length) {
+      revalidatePath("/site-studio");
+      return { ok: true, id: versionId };
+    }
+  }
+  return { ok: false, error: "The save collided with another change — try again." };
 }
 
 /** A draft that didn't work out. Draft-only — published/archived rows are the history. */

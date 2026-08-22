@@ -437,6 +437,20 @@ export function getOrgSettings(raw: unknown): OrgSettings {
   // wide open. Fixing it here also heals any row already poisoned, and covers every writer added
   // later without anyone remembering to.
   if (!isValidTz(merged.timezone)) merged.timezone = DEFAULT_SETTINGS.timezone;
+  // SANITIZE THE LEVER FIELDS ON READ (same doctrine as the timezone heal above): the studio
+  // write path clamps via site-doc, but settings has other writers — a hostile or drifted
+  // jsonb value must not reach the renderer's inline styles. Total functions, 0 = default.
+  const lever = (v: unknown, lo: number, hi: number): number => {
+    const n = typeof v === "number" && Number.isFinite(v) ? Math.round(v) : 0;
+    return n === 0 ? 0 : Math.min(hi, Math.max(lo, n));
+  };
+  for (const k of ["hero_dx", "hero_dy", "spread_area_dx", "spread_area_dy", "spread_head_dx", "spread_head_dy", "spread_tag_dx", "spread_tag_dy"] as const) {
+    merged[k] = lever(merged[k], -400, 400);
+  }
+  for (const k of ["hero_w", "spread_head_w", "spread_tag_w"] as const) merged[k] = lever(merged[k], 30, 100);
+  for (const k of ["hero_scale", "spread_area_scale", "spread_head_scale", "spread_tag_scale"] as const) {
+    merged[k] = lever(merged[k], 50, 200);
+  }
   return merged;
 }
 

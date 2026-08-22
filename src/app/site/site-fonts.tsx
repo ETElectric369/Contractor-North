@@ -80,7 +80,12 @@ export function SiteFonts({ settings }: { settings: OrgSettings }) {
   // independent of the headings.
   const brandPreset = SITE_FONTS[siteFontKey(settings.brand_font)];
   const density = DENSITY_SCALES[siteDensityKey(settings.site_density)];
-  if (!preset && !brandPreset && !density) return null;
+  // THE LEVER RULE — always present so the on-page editor's live paint and any lever'd unit
+  // resolve the same one place. Desktop-scoped: under 640px phones keep the untouched
+  // re-stack, whatever the levers say.
+  const leverRule =
+    "@media (min-width:640px){.site-shell .cn-lever{transform:var(--cn-t,none);transform-origin:var(--cn-o,center)}.site-shell .cn-lever-w{max-width:var(--cn-w,none)}}";
+  if (!preset && !brandPreset && !density) return <style>{leverRule}</style>;
   // Bare classes AND their sm: responsive variants: Tailwind v4 layers mean these unlayered
   // rules beat every utility, so without the sm block a responsive step-up (py-20 sm:py-24)
   // would FLATTEN to the base scale instead of rescaling (review). The sm: selector needs the
@@ -106,7 +111,9 @@ export function SiteFonts({ settings }: { settings: OrgSettings }) {
       <style>
         {(preset ? `.site-shell h1, .site-shell h2, .site-shell h3 { font-family: ${preset.family}; }\n` : "") +
           (brandPreset ? `.site-shell .site-brand { font-family: ${brandPreset.family}; }\n` : "") +
-          densityCss}
+          densityCss +
+          "\n" +
+          leverRule}
       </style>
     </>
   );

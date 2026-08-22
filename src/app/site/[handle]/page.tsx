@@ -6,7 +6,7 @@ import { applySiteDoc, extractSiteDoc } from "@/lib/site-doc";
 import { OrgSite, orgSiteMetadata } from "../org-site";
 import { getSiteNav } from "../site-chrome";
 import { handleLinkBase } from "../site-base";
-import { DraftPreviewBanner, canPreviewSiteDrafts, draftPreviewMetadata, getDraftSiteVersionForPreview, previewRequested } from "../draft-preview";
+import { canEditSiteLive, DraftPreviewBanner, canPreviewSiteDrafts, draftPreviewMetadata, getDraftSiteVersionForPreview, previewRequested } from "../draft-preview";
 import { LiveEditor } from "../live-editor";
 
 export const dynamic = "force-dynamic";
@@ -57,12 +57,15 @@ export default async function SiteHome({
   const base = await handleLinkBase(handle);
   const nav = await getSiteNav(org.id, base);
   const sp = await searchParams;
-  const liveEdit = !!draft && sp?.edit === "1";
+  const liveEdit = !!draft && sp?.edit === "1" && (await canEditSiteLive(org.id));
   // "View live" inside the desktop app swallows target=_blank and strands the owner on the
   // site with no way back (Erik: "i got this with no way out"). Anyone authorized to preview
   // drafts gets a small fixed escape chip on the APP-HOST view; the public (and the custom
   // domain, which uses the by-domain route) never sees it.
-  const showBackChip = !liveEdit && (await canPreviewSiteDrafts(org.id));
+  // Chip gates: never inside the studio's own preview iframe (?preview=1 — clicking it there
+  // would nest the whole app in the 75vh pane), and only on the APP HOST (base !== "" — the
+  // free-subdomain public homepage is not an app surface).
+  const showBackChip = !liveEdit && base !== "" && !(await previewRequested(searchParams)) && (await canPreviewSiteDrafts(org.id));
   return (
     <>
       {showBackChip && (

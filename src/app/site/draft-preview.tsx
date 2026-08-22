@@ -32,6 +32,14 @@ const canPreviewDrafts = cache(async (orgId: string): Promise<boolean> => {
   return !("error" in ctx);
 });
 
+/** May the caller USE THE ON-PAGE EDITOR? Staff only — an external site collaborator can
+ *  preview drafts but updateVersionFields (requireStaff) would fail their every save, which
+ *  is a dead end, not a boundary. Gate the mount, not just the write. */
+export const canEditSiteLive = cache(async (orgId: string): Promise<boolean> => {
+  const ctx = await resolveSiteContext(orgId);
+  return !("error" in ctx) && !ctx.isCollaborator;
+});
+
 /** Public alias for chrome-level affordances (the app-host "Back to North" chip): may THIS
  *  caller see editor conveniences? Anonymous visitors always get false — and the chip only
  *  renders on the app-host route, never the custom-domain one. */

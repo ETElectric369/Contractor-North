@@ -15,26 +15,43 @@ import { requireStaff } from "@/lib/staff-guard";
 export async function updateVersionFields(
   versionId: string,
   patch: Record<string, unknown>,
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<{ ok: true; values: Record<string, unknown>; dropped: string[] } | { ok: false; error: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error ?? "Staff only." };
-  const { data: ver } = await ctx.supabase
-    .from("site_versions")
-    .select("id, status, doc")
-    .eq("id", versionId)
-    .maybeSingle();
-  if (!ver) return { ok: false, error: "That version wasn't found." };
-  if ((ver as { status: string }).status !== "draft")
-    return { ok: false, error: "Only drafts can be edited on the page." };
-  const base = extractSiteDoc((ver as { doc: unknown }).doc);
-  const { doc } = coerceSiteDoc(patch, base);
-  const { data: upd, error } = await ctx.supabase
-    .from("site_versions")
-    .update({ doc })
-    .eq("id", versionId)
-    .eq("status", "draft")
-    .select("id");
-  if (error) return { ok: false, error: dbError(error) };
-  if (!upd?.length) return { ok: false, error: "The save didn't land — the version may have just been published." };
-  return { ok: true };
+  // Read-coerce-write under a CAS token (doc_rev, 0210): two writers (a second tab, the studio's
+  // block editor) can no longer silently lose the earlier patch — a collision re-reads and
+  // re-applies this patch on the fresh doc, bounded at 3 attempts.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { data: ver } = await ctx.supabase
+      .from("site_versions")
+      .select("id, status, doc, doc_rev")
+      .eq("id", versionId)
+      .maybeSingle();
+    if (!ver) return { ok: false, error: "That version wasn't found." };
+    if ((ver as { status: string }).status !== "draft")
+      return { ok: false, error: "Only drafts can be edited on the page." };
+    const rev = Number((ver as { doc_rev?: unknown }).doc_rev) || 0;
+    const base = extractSiteDoc((ver as { doc: unknown }).doc);
+    const { doc, dropped } = coerceSiteDoc(patch, base);
+    const { data: upd, error } = await ctx.supabase
+      .from("site_versions")
+      .update({ doc, doc_rev: rev + 1 })
+      .eq("id", versionId)
+      .eq("status", "draft")
+      .eq("doc_rev", rev)
+      .select("id");
+    if (error) return { ok: false, error: dbError(error) };
+    if (upd?.length) {
+      // Echo the server's answer for the patched keys — clamps and refusals must reach the
+      // editor's screen, or its live paint drifts from the draft under a green "Saved".
+      const values = Object.fromEntries(
+        Object.keys(patch)
+          .filter((k) => k in doc)
+          .map((k) => [k, (doc as unknown as Record<string, unknown>)[k]]),
+      );
+      return { ok: true, values, dropped };
+    }
+    // zero rows: doc_rev moved (concurrent write) or the draft was just published — loop re-reads.
+  }
+  return { ok: false, error: "The save collided with another change — try again." };
 }

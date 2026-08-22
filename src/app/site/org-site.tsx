@@ -91,17 +91,21 @@ function Hero({
   heroS?: number;
   spreadOff?: { areaDx: number; areaDy: number; areaS: number; headDx: number; headDy: number; headW: number; headS: number; tagDx: number; tagDy: number; tagW: number; tagS: number };
 }) {
-  // A Corners piece's inline style exists ONLY when a lever is set — all-zero stays byte-
-  // identical to the pre-lever markup (the public-site stability law).
-  const pieceStyle = (dx: number, dy: number, w: number, sc: number) =>
+  // A lever'd unit carries CSS custom properties + the cn-lever classes; the actual transform/
+  // max-width live in ONE desktop-scoped rule (site-fonts.tsx) so phones keep the untouched
+  // re-stack (a nudge tuned on a 1200px hero is nonsense at 375px). transform-origin pins the
+  // zoom to the unit's natural corner — "like any mac window", not ballooning from the center.
+  // All-zero emits nothing: byte-identical to the pre-lever markup.
+  const leverVars = (dx: number, dy: number, w: number, sc: number, origin: string) =>
     dx || dy || w || sc
-      ? {
-          ...(dx || dy || sc
-            ? { transform: [dx || dy ? `translate(${dx}%, ${dy}%)` : "", sc ? `scale(${sc / 100})` : ""].filter(Boolean).join(" ") }
-            : {}),
-          ...(w ? { maxWidth: `${w}%` } : {}),
-        }
+      ? ({
+          "--cn-t": [dx || dy ? `translate(${dx}%, ${dy}%)` : "", sc ? `scale(${sc / 100})` : ""].filter(Boolean).join(" ") || "none",
+          ...(w ? { "--cn-w": `${w}%` } : {}),
+          "--cn-o": origin,
+        } as React.CSSProperties)
       : undefined;
+  const leverCls = (vars: React.CSSProperties | undefined, w: number) =>
+    vars ? (w ? "cn-lever cn-lever-w" : "cn-lever") : "";
   const cta = (
     <Link href={estimateHref} className="inline-flex items-center gap-2 rounded-lg px-6 py-3.5 text-base font-semibold text-white shadow-lg" style={{ backgroundColor: brand }}>
       <span data-e="estimate_cta_label">{ctaLabel}</span> <ArrowRight className="h-5 w-5" />
@@ -120,7 +124,7 @@ function Hero({
             {tagline && <p data-e="splash_tagline" className="mt-5 max-w-xl text-lg text-white/85">{tagline}</p>}
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Link href={estimateHref} className="inline-flex items-center gap-2 rounded-lg bg-white px-6 py-3.5 text-base font-bold shadow-lg" style={{ color: brand }}>
-                {ctaLabel} <ArrowRight className="h-5 w-5" />
+                <span data-e="estimate_cta_label">{ctaLabel}</span> <ArrowRight className="h-5 w-5" />
               </Link>
               {hasPhotos && (
                 <a href="#work" className="inline-flex items-center gap-2 rounded-lg border border-white/40 px-6 py-3.5 text-base font-semibold hover:bg-white/10">See our work</a>
@@ -150,12 +154,12 @@ function Hero({
       <section id="top" className="border-b border-slate-100" style={{ background: `linear-gradient(180deg, ${brand}0a, #ffffff 65%)` }}>
         <div className="mx-auto grid max-w-6xl items-center gap-12 px-4 py-20 sm:py-28 lg:grid-cols-2">
           <div>
-              {area && <p className="mb-4 text-sm font-semibold uppercase tracking-[0.25em]" style={{ color: brand }}>{area}</p>}
+              {area && <p data-e="service_area" className="mb-4 text-sm font-semibold uppercase tracking-[0.25em]" style={{ color: brand }}>{area}</p>}
             {headline && <h1 data-e="splash_headline" className={`${hSize} whitespace-pre-line font-semibold leading-[1.1] tracking-tight text-slate-900`}>{headline}</h1>}
             {tagline && <p data-e="splash_tagline" className="mt-5 max-w-xl text-lg text-slate-600">{tagline}</p>}
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Link href={estimateHref} className="inline-flex items-center gap-2 rounded-full px-6 py-3.5 text-base font-semibold text-white shadow-sm" style={{ backgroundColor: brand }}>
-                {ctaLabel} <ArrowRight className="h-5 w-5" />
+                <span data-e="estimate_cta_label">{ctaLabel}</span> <ArrowRight className="h-5 w-5" />
               </Link>
               {hasPhotos && (
                 <a href="#work" className="inline-flex items-center gap-2 rounded-full border border-slate-300 px-6 py-3.5 text-base font-semibold text-slate-700 hover:border-slate-400">See our work</a>
@@ -188,23 +192,10 @@ function Hero({
   const alignWrap =
     heroAlign === "center" ? "flex justify-center text-center" : heroAlign === "right" ? "flex justify-end" : "";
   const alignInner = heroAlign === "center" ? "flex flex-col items-center" : "";
-  // The drag/arrow/resize levers land here as plain CSS — transform moves the box, maxWidth
-  // resizes it. Zero values emit no style at all (byte-identical defaults).
-  const boxStyle =
-    heroDx || heroDy || heroW || heroS
-      ? {
-          ...(heroDx || heroDy || heroS
-            ? {
-                transform: [heroDx || heroDy ? `translate(${heroDx}%, ${heroDy}%)` : "", heroS ? `scale(${heroS / 100})` : ""]
-                  .filter(Boolean)
-                  .join(" "),
-              }
-            : {}),
-          ...(heroW ? { maxWidth: `${heroW}%` } : {}),
-        }
-      : undefined;
+  // The box zooms pinned at its aligned edge (left-aligned grows rightward, etc.).
+  const boxVars = leverVars(heroDx, heroDy, heroW, heroS, `${heroAlign} top`);
   const textBlock = (
-    <div data-hero-text style={boxStyle} className={["max-w-2xl", alignInner, heroStyle === "panel" ? "rounded-2xl bg-slate-950/55 p-8 backdrop-blur-sm sm:p-10" : ""].filter(Boolean).join(" ")}>
+    <div data-hero-text style={boxVars} className={["max-w-2xl", leverCls(boxVars, heroW), alignInner, heroStyle === "panel" ? "rounded-2xl bg-slate-950/55 p-8 backdrop-blur-sm sm:p-10" : ""].filter(Boolean).join(" ")}>
       {area && <p data-e="service_area" className="mb-3 text-sm font-semibold uppercase tracking-[0.2em] text-white/80">{area}</p>}
       {headline && <h1 data-e="splash_headline" className={`${hSize} whitespace-pre-line font-extrabold leading-tight tracking-tight text-white drop-shadow`}>{headline}</h1>}
       {tagline && <p data-e="splash_tagline" className="mt-4 max-w-xl text-lg text-slate-100">{tagline}</p>}
@@ -256,14 +247,19 @@ function Hero({
         {heroImg}
         <div className="absolute inset-0 -z-10" style={{ background: "linear-gradient(180deg, rgba(2,6,23,.45), rgba(2,6,23,.62))" }} />
         <div className="mx-auto flex min-h-[480px] max-w-6xl flex-col justify-between px-4 py-10 sm:min-h-[560px] sm:py-12">
-          <div data-spread-piece="area" style={pieceStyle(spreadOff.areaDx, spreadOff.areaDy, 0, spreadOff.areaS)}>
+          {(() => {
+            const v = leverVars(spreadOff.areaDx, spreadOff.areaDy, 0, spreadOff.areaS, "left top");
+            return (
+          <div data-spread-piece="area" style={v} className={["w-fit", leverCls(v, 0)].filter(Boolean).join(" ")}>
             {area && <p data-e="service_area" className="text-sm font-semibold uppercase tracking-[0.2em] text-white/80">{area}</p>}
           </div>
+            );
+          })()}
           <div className="flex flex-col gap-8 sm:flex-row sm:items-end sm:justify-between">
-            <div className="max-w-xl" data-spread-piece="headline" style={pieceStyle(spreadOff.headDx, spreadOff.headDy, spreadOff.headW, spreadOff.headS)}>
+            <div className={["max-w-xl", leverCls(leverVars(spreadOff.headDx, spreadOff.headDy, spreadOff.headW, spreadOff.headS, "left bottom"), spreadOff.headW)].filter(Boolean).join(" ")} data-spread-piece="headline" style={leverVars(spreadOff.headDx, spreadOff.headDy, spreadOff.headW, spreadOff.headS, "left bottom")}>
               {headline && <h1 data-e="splash_headline" className={`${hSize} whitespace-pre-line font-extrabold leading-tight tracking-tight text-white drop-shadow`}>{headline}</h1>}
             </div>
-            <div className="max-w-md sm:text-right" data-spread-piece="tagline" style={pieceStyle(spreadOff.tagDx, spreadOff.tagDy, spreadOff.tagW, spreadOff.tagS)}>
+            <div className={["max-w-md sm:text-right", leverCls(leverVars(spreadOff.tagDx, spreadOff.tagDy, spreadOff.tagW, spreadOff.tagS, "right bottom"), spreadOff.tagW)].filter(Boolean).join(" ")} data-spread-piece="tagline" style={leverVars(spreadOff.tagDx, spreadOff.tagDy, spreadOff.tagW, spreadOff.tagS, "right bottom")}>
               {tagline && <p data-e="splash_tagline" className="text-lg text-slate-100">{tagline}</p>}
               <div className="mt-6 flex flex-wrap items-center gap-3 sm:justify-end">
                 {cta}

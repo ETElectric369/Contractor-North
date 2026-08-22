@@ -189,24 +189,24 @@ describe("the main-build blocks — split obeys the image law, density is enum-o
   });
 
   it("hero_dx/dy/w — the move/resize levers — clamp and keep-base", () => {
-    const moved = extractSiteDoc({ hero_dx: 12, hero_dy: -99, hero_w: 250 });
+    const moved = extractSiteDoc({ hero_dx: 12, hero_dy: -555, hero_w: 250 });
     expect(moved.hero_dx).toBe(12);
-    expect(moved.hero_dy).toBe(-40); // clamped
+    expect(moved.hero_dy).toBe(-400); // clamped
     expect(moved.hero_w).toBe(100); // clamped
     expect(extractSiteDoc({}).hero_w).toBe(0); // 0 = the framing's default width
     expect(coerceSiteDoc({ hero_dx: "far left" }, moved).doc.hero_dx).toBe(12);
     expect(coerceSiteDoc({ hero_dx: -6 }, moved).doc.hero_dx).toBe(-6);
-    expect(coerceSiteDoc({}, moved).doc.hero_dy).toBe(-40);
+    expect(coerceSiteDoc({}, moved).doc.hero_dy).toBe(-400);
   });
 
   it("spread-piece levers clamp and keep-base like the hero box", () => {
-    const d = extractSiteDoc({ spread_head_dx: -55, spread_tag_w: 61, spread_area_dy: 8 });
-    expect(d.spread_head_dx).toBe(-40);
+    const d = extractSiteDoc({ spread_head_dx: -455, spread_tag_w: 61, spread_area_dy: 8 });
+    expect(d.spread_head_dx).toBe(-400);
     expect(d.spread_tag_w).toBe(61);
     expect(d.spread_area_dy).toBe(8);
     expect(d.spread_head_w).toBe(0);
     expect(coerceSiteDoc({ spread_tag_w: 999 }, d).doc.spread_tag_w).toBe(100);
-    expect(coerceSiteDoc({}, d).doc.spread_head_dx).toBe(-40);
+    expect(coerceSiteDoc({}, d).doc.spread_head_dx).toBe(-400);
   });
 
   it("text zoom clamps 50-200 with 0 = default", () => {

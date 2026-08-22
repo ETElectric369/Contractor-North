@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Rocket, Sparkles, Camera, Trash2, ExternalLink, Mic, Square } from "lucide-react";
 import { useDictation } from "@/lib/use-dictation";
@@ -88,24 +88,62 @@ export function SiteStudio({
     ? `/site/${handle}?preview=1&sv=${selectedId}${pageEdit && selected?.status === "draft" ? "&edit=1" : ""}${previewBump ? `&r=${previewBump}` : ""}`
     : `/site/${handle}?preview=1`;
 
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const flushDone = useRef<(() => void) | null>(null);
+  const pageEditRef = useRef(pageEdit);
+  pageEditRef.current = pageEdit;
+  /** Ask the live editor inside the iframe to commit + save everything, and wait for its
+   *  answer (bounded). Any studio action that remounts the iframe or acts on the draft's doc
+   *  MUST pass through this first — a remount aborts in-flight autosaves ("auto reverts"). */
+  const flushLiveEdits = (): Promise<void> => {
+    const win = iframeRef.current?.contentWindow;
+    if (!win || !pageEditRef.current) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      flushDone.current = resolve;
+      try {
+        win.postMessage({ type: "cn-live-flush" }, "*");
+      } catch {
+        resolve();
+      }
+      setTimeout(resolve, 1200);
+    });
+  };
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
-      if ((e.data as { type?: string })?.type === "cn-live-saved") {
+      const t = (e.data as { type?: string })?.type;
+      if (t === "cn-live-saved") {
         // Autosave ping: refresh the version list's edited-state, but NEVER remount the
         // preview iframe — the person is mid-edit inside it (drag in progress, text focused).
         router.refresh();
+      }
+      if (t === "cn-live-flushed") {
+        flushDone.current?.();
+        flushDone.current = null;
       }
     };
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // A typed-but-unsent instruction or an open hand-arrangement is real work — same-window
+  // navigation ("View live", the Back chip round trip) must not eat it silently.
+  useEffect(() => {
+    const guard = (e: BeforeUnloadEvent) => {
+      if (instruction.trim() || hand) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", guard);
+    return () => window.removeEventListener("beforeunload", guard);
+  }, [instruction, hand]);
 
   function runDesign() {
     const ask = instruction.trim();
     if (!ask) return toast("Tell it what to change first.", "error");
     setDesigning(true);
     start(async () => {
+      await flushLiveEdits();
       const r = await designSitePass(ask, selectedId);
       setDesigning(false);
       if (!r.ok) return toast(r.error ?? "The design pass failed.", "error");
@@ -131,6 +169,7 @@ export function SiteStudio({
     // variations, the box is his standing direction until he clears it).
     setOptioning(true);
     start(async () => {
+      await flushLiveEdits();
       const r = await designSiteOptions(selectedId, instruction.trim() || undefined);
       setOptioning(false);
       if (!r.ok) return toast(r.error ?? "The options pass failed.", "error");
@@ -165,6 +204,7 @@ export function SiteStudio({
       "Your addresses, phone links and lead capture are never touched by a design — and any older version can be published again.";
     if (!confirm(msg)) return;
     start(async () => {
+      await flushLiveEdits();
       const r = await publishSiteVersion(selected.id);
       if (!r.ok) return toast(r.error ?? "Publish failed.", "error");
       toast(`v${selected.v} is live.`, "success");
@@ -318,7 +358,7 @@ export function SiteStudio({
                   >
                     <button
                       type="button"
-                      onClick={() => setSelectedId(r.id)}
+                      onClick={() => void flushLiveEdits().then(() => setSelectedId(r.id))}
                       className="flex min-w-0 flex-1 items-center gap-2 py-0.5 text-left"
                     >
                       <span className="font-mono text-xs text-slate-400">v{r.v}</span>
@@ -380,6 +420,7 @@ export function SiteStudio({
           </div>
         </div>
         <iframe
+          ref={iframeRef}
           key={previewSrc}
           src={previewSrc}
           title="Site preview"
@@ -391,10 +432,10 @@ export function SiteStudio({
           <div className="mt-3 flex flex-wrap items-center gap-4">
             <button
               type="button"
-              onClick={() => setPageEdit((v) => !v)}
+              onClick={() => void flushLiveEdits().then(() => setPageEdit((v) => !v))}
               className={`text-sm font-medium underline-offset-2 hover:underline ${pageEdit ? "text-amber-600" : "text-brand"}`}
             >
-              {pageEdit ? "✕ Close on-page editing" : "Edit on the page →"}
+{pageEdit ? "✕ Close on-page editing" : "Edit on the page →"}
             </button>
           </div>
         )}

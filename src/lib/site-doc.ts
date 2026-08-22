@@ -126,7 +126,10 @@ const HEX6 = /^#[0-9a-f]{6}$/i;
 /** ±40% of the text block's own size — enough to reposition, never enough to fling it off-page. */
 const nudge = (v: unknown, fallback: number): number => {
   const n = typeof v === "number" && Number.isFinite(v) ? Math.round(v) : fallback;
-  return Math.min(40, Math.max(-40, n));
+  // ±400% of the unit's own size — a small corner piece needs hundreds of its own heights to
+  // travel the hero (Erik: "why are there walls up ... i cant move the top anywhere outside
+  // its tiny assigned zone"). The clamp is an anti-garbage bound, not a design opinion.
+  return Math.min(400, Math.max(-400, n));
 };
 
 /** Box width % — 0 means "the framing's default", else clamped to a readable 30-100. */

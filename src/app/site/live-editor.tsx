@@ -16,22 +16,23 @@ import { SITE_FONTS, siteFontKey, type SiteFontKey } from "./site-fonts";
 import { updateVersionFields } from "./live-edit-actions";
 
 /**
- * EDIT IT ON THE PAGE, v4 — AN OLD-SCHOOL ICON TOOLBAR (Erik: "i want icons like an old school
- * editor, easy af" / "this layout thing is throwing everything off and changing things i dont
- * want changed and shouldnt be there period").
+ * EDIT IT ON THE PAGE, v5 — the adversarial-review hardening of the v4 icon toolbar, plus two
+ * of Erik's design calls:
  *
- * On top of v3's laws (no save game: everything acts instantly and autosaves; nothing silent:
- * a named undo trail survives reloads):
- *   · NO LAYOUT SWITCHER IN THE TOOLBAR. A whole-banner restructure has no business sitting
- *     next to per-text tools where a stray click rearranges the page — layout changes belong
- *     to the designer conversation in the studio.
- *   · ICONS, GROUPED LIKE 1997: size steppers, a font menu that shows each face in itself,
- *     alignment, text zoom, width, one big Undo.
- *   · RESIZE IS TWO-DIMENSIONAL: the right-edge handle (and ⌥ ←/→) sets width; the corner
- *     handle (and ⌥ ↑/↓) zooms the text ("the resize works horizontally but not vertically").
- *   · AN EDIT NEVER DIES UNCOMMITTED: leaving the window (clicking into the studio panel)
- *     commits the text edit and flushes it immediately ("the text edits didnt save" — element
- *     blur never fires when the whole iframe loses focus).
+ *   · ZOOM PINS THE NATURAL CORNER ("these boxes resize from the center vs pinned at the
+ *     appropriate opposing corner ... like any mac window"): every unit has a transform-origin
+ *     (left-aligned box grows rightward, the lower-right tagline piece grows up-left) and its
+ *     handles sit at the corner OPPOSITE the pin.
+ *   · THE WALLS ARE DOWN ("i cant move the top anywhere outside its tiny assigned zone"):
+ *     nudges clamp at ±400% of the unit's own size, and arrow steps are pixel-true (8px, ⇧
+ *     32px) whatever the unit's size.
+ *
+ * Review fixes baked in: drag state lives in dragRef (stale DOM datasets re-committed old
+ * drags on plain clicks); double-click mid-edit is caret word-selection, never a new session
+ * (the "box saves but not the text" bug); flushes are single-flight and the server write is
+ * CAS-guarded; a structural save owns its reload even via Retry; pointercancel/Escape cancel
+ * a drag cleanly; clamps and refusals echo back onto the screen; levers paint through the
+ * same desktop-scoped CSS vars the renderer uses, so phones keep the untouched re-stack.
  */
 
 type FieldKey = "splash_headline" | "splash_tagline" | "service_area" | "estimate_cta_label" | "__brand";
@@ -79,6 +80,9 @@ const FONT_NAME: Record<SiteFontKey, string> = {
   soft: "Rounded",
   condensed: "Condensed",
 };
+// The site shell's own face (layout.tsx Geist) — "Standard" must PAINT, not merely clear,
+// because the server's SiteFonts rule for a non-default draft font would otherwise still win.
+const DEFAULT_FAMILY = "var(--font-geist-sans), system-ui, sans-serif";
 const SIZES = ["s", "m", "l"] as const;
 // Mirrors HEAD_SIZE in org-site.tsx — the live class swap for headline size.
 const HEAD_SIZE_CLS: Record<string, string[]> = {
@@ -87,25 +91,38 @@ const HEAD_SIZE_CLS: Record<string, string[]> = {
   l: ["text-4xl", "sm:text-5xl"],
 };
 
-/** The movable/resizable units. Whichever one contains the selected text is what drag, the
- *  arrow keys, and the handles act on — the classic box OR a Corners piece. */
-const UNITS: { sel: string; dx: string; dy: string; w: string | null; sc: string }[] = [
-  { sel: "[data-hero-text]", dx: "hero_dx", dy: "hero_dy", w: "hero_w", sc: "hero_scale" },
-  { sel: '[data-spread-piece="area"]', dx: "spread_area_dx", dy: "spread_area_dy", w: null, sc: "spread_area_scale" },
-  { sel: '[data-spread-piece="headline"]', dx: "spread_head_dx", dy: "spread_head_dy", w: "spread_head_w", sc: "spread_head_scale" },
-  { sel: '[data-spread-piece="tagline"]', dx: "spread_tag_dx", dy: "spread_tag_dy", w: "spread_tag_w", sc: "spread_tag_scale" },
+/** The movable/resizable units. zx/zy: which way the zoom handle's corner points (opposite
+ *  the transform-origin pin); wx: which edge the width handle lives on. The hero box's pin
+ *  follows its alignment, resolved at selection time. */
+const UNITS: { sel: string; dx: string; dy: string; w: string | null; sc: string; origin: string; zx: 1 | -1; zy: 1 | -1; wx: 1 | -1 }[] = [
+  { sel: "[data-hero-text]", dx: "hero_dx", dy: "hero_dy", w: "hero_w", sc: "hero_scale", origin: "left top", zx: 1, zy: 1, wx: 1 },
+  { sel: '[data-spread-piece="area"]', dx: "spread_area_dx", dy: "spread_area_dy", w: null, sc: "spread_area_scale", origin: "left top", zx: 1, zy: 1, wx: 1 },
+  { sel: '[data-spread-piece="headline"]', dx: "spread_head_dx", dy: "spread_head_dy", w: "spread_head_w", sc: "spread_head_scale", origin: "left bottom", zx: 1, zy: -1, wx: 1 },
+  { sel: '[data-spread-piece="tagline"]', dx: "spread_tag_dx", dy: "spread_tag_dy", w: "spread_tag_w", sc: "spread_tag_scale", origin: "right bottom", zx: -1, zy: -1, wx: -1 },
 ];
-type Unit = { el: HTMLElement; dx: string; dy: string; w: string | null; sc: string };
+type Unit = { el: HTMLElement; dx: string; dy: string; w: string | null; sc: string; origin: string; zx: 1 | -1; zy: 1 | -1; wx: 1 | -1 };
 
-const clampNudge = (n: number) => Math.min(40, Math.max(-40, Math.round(n)));
+const clampNudge = (n: number) => Math.min(400, Math.max(-400, Math.round(n)));
 const clampW = (n: number) => Math.min(100, Math.max(30, Math.round(n)));
 const clampZoom = (n: number) => Math.min(200, Math.max(50, Math.round(n)));
 // Fields whose change restructures the banner server-side: save, then repaint via reload.
-// hero_style is no longer settable HERE (the layout switcher left the toolbar), but old trail
-// entries may still carry it — undo must keep taking the reload path.
+// hero_style is not settable here anymore, but old trail entries may still carry it.
 const STRUCTURAL = new Set(["hero_style", "hero_align"]);
 
 type TrailEntry = { k: string; prev: unknown };
+type Drag = {
+  mode: "move" | "width" | "zoom";
+  pointerId: number;
+  startX: number;
+  startY: number;
+  dx0: number;
+  dy0: number;
+  w0: number;
+  s0: number;
+  // Live values ride HERE, never on the DOM — stale dataset attrs re-committed old drags on
+  // plain clicks (review): pending state must die with the drag by construction.
+  pend: { dx?: number; dy?: number; w?: number; s?: number };
+};
 
 export function LiveEditor({
   versionId,
@@ -142,23 +159,30 @@ export function LiveEditor({
   const [fontMenu, setFontMenu] = useState<null | "site_font" | "brand_font">(null);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "rearranging" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const stateRef = useRef({ selected, editingText });
   stateRef.current = { selected, editingText };
-  // Current value of every field (seeded from the draft, updated on each edit) — the single
-  // truth the painters and undo read. Autosave means "pending" and "current" are the same idea.
   const valuesRef = useRef<Record<string, unknown>>({ ...initial });
   const pendingRef = useRef<Record<string, unknown>>({});
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flightRef = useRef<Promise<boolean> | null>(null);
   const trailRef = useRef<TrailEntry[]>([]);
   const unitRef = useRef<Unit | null>(null);
   const editingRef = useRef<{ el: HTMLElement; f: FieldKey; before: string } | null>(null);
-  const dragRef = useRef<{ mode: "move" | "width" | "zoom"; startX: number; startY: number; dx0: number; dy0: number; w0: number; s0: number } | null>(null);
+  const dragRef = useRef<Drag | null>(null);
 
   const trailKey = `cn-live-trail:${versionId}`;
   const cur = <T,>(k: string): T => valuesRef.current[k] as T;
   const num = (k: string) => Number(cur<number>(k)) || 0;
 
-  // ── AUTOSAVE — the save game is gone; edits land on the draft on their own ───────────────
+  function say(msg: string) {
+    setNotice(msg);
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    noticeTimer.current = setTimeout(() => setNotice(null), 5000);
+  }
+
+  // ── AUTOSAVE — single-flight; a structural save owns its reload ──────────────────────────
   function persistTrail(next: TrailEntry[]) {
     trailRef.current = next;
     setTrail(next);
@@ -169,10 +193,16 @@ export function LiveEditor({
     }
   }
   function recordPrev(k: string, prev: unknown) {
-    if (trailRef.current.some((t) => t.k === k)) return;
+    const existing = trailRef.current.find((t) => t.k === k);
+    if (existing) {
+      // Recency order for "Undo last", keeping the ORIGINAL prev — re-touching a field moves
+      // its one entry to the end instead of leaving Undo pointing at the wrong change.
+      persistTrail([...trailRef.current.filter((t) => t.k !== k), existing]);
+      return;
+    }
     persistTrail([...trailRef.current, { k, prev }]);
   }
-  async function flush(): Promise<boolean> {
+  async function doFlush(): Promise<boolean> {
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);
       saveTimer.current = null;
@@ -180,41 +210,93 @@ export function LiveEditor({
     const snap = pendingRef.current;
     if (Object.keys(snap).length === 0) return true;
     pendingRef.current = {};
-    setSaveState((s) => (s === "rearranging" ? s : "saving"));
+    const structural = Object.keys(snap).some((k) => STRUCTURAL.has(k));
+    setSaveState(structural ? "rearranging" : "saving");
     const r = await updateVersionFields(versionId, snap);
     if (!r.ok) {
-      // Put the unsaved values back so Retry (or the next edit) carries them.
+      // Newer unsent edits win over the failed snapshot's values.
       pendingRef.current = { ...snap, ...pendingRef.current };
       setSaveState("error");
       setError(r.error);
       return false;
     }
-    setError(null);
-    setSaveState((s) => (s === "rearranging" ? s : "saved"));
+    // The server's answer is the truth — a clamp or refusal must reach the screen, or the
+    // page drifts from the draft under a green "Saved".
+    for (const [k, v] of Object.entries(r.values)) {
+      if (k in pendingRef.current) continue; // re-edited since — theirs is newer
+      if (valuesRef.current[k] !== v) {
+        valuesRef.current[k] = v;
+        paint(k);
+      }
+    }
+    if (r.dropped.length) say(`Not kept: ${r.dropped.join(", ")}`);
     try {
       window.parent?.postMessage({ type: "cn-live-saved" }, "*");
     } catch {
       /* not framed */
     }
+    if (structural) {
+      setSaveState("rearranging");
+      window.location.reload();
+      return true;
+    }
+    if (Object.keys(pendingRef.current).length > 0) {
+      // Edits arrived while this save flew — they are NOT saved yet; don't say they are.
+      scheduleSave();
+      return true;
+    }
+    setError(null);
+    setSaveState("saved");
     return true;
+  }
+  /** Single-flight: a second flush chains behind the first — overlapping saves were a
+   *  lost-update race (and the DB write is CAS-guarded for other-tab writers). */
+  function flush(): Promise<boolean> {
+    const run = (flightRef.current ?? Promise.resolve(true)).then(() => doFlush(), () => doFlush());
+    flightRef.current = run.finally(() => {
+      if (flightRef.current === run) flightRef.current = null;
+    });
+    return run;
   }
   function scheduleSave() {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => void flush(), 700);
   }
 
-  // ── LIVE PAINTERS ────────────────────────────────────────────────────────────────────────
+  // ── LIVE PAINTERS — through the same desktop-scoped CSS vars the renderer emits ──────────
+  function paintLever(el: HTMLElement, u: { dx: string; dy: string; w: string | null; sc: string; origin: string }, live?: { dx?: number; dy?: number; w?: number; s?: number }) {
+    const dx = live?.dx ?? num(u.dx);
+    const dy = live?.dy ?? num(u.dy);
+    const sc = live?.s ?? num(u.sc);
+    const w = u.w ? (live?.w ?? num(u.w)) : 0;
+    const t = [dx || dy ? `translate(${dx}%, ${dy}%)` : "", sc ? `scale(${sc / 100})` : ""].filter(Boolean).join(" ") || "none";
+    el.style.setProperty("--cn-t", t);
+    el.style.setProperty("--cn-o", u.origin);
+    el.classList.add("cn-lever");
+    if (u.w) {
+      if (w) {
+        el.style.setProperty("--cn-w", `${w}%`);
+        el.classList.add("cn-lever-w");
+      } else {
+        el.style.removeProperty("--cn-w");
+        el.classList.remove("cn-lever-w");
+      }
+    }
+  }
+  function unitConfigByKey(k: string) {
+    return UNITS.find((x) => x.dx === k || x.dy === k || x.w === k || x.sc === k) ?? null;
+  }
   function paintUnitByKey(k: string) {
-    const u = UNITS.find((x) => x.dx === k || x.dy === k || x.w === k || x.sc === k);
+    const u = unitConfigByKey(k);
     if (!u) return;
     const el = document.querySelector<HTMLElement>(u.sel);
     if (!el) return;
-    const dx = num(u.dx);
-    const dy = num(u.dy);
-    const w = u.w ? num(u.w) : 0;
-    const sc = num(u.sc);
-    el.style.transform = [dx || dy ? `translate(${dx}%, ${dy}%)` : "", sc ? `scale(${sc / 100})` : ""].filter(Boolean).join(" ");
-    if (u.w) el.style.maxWidth = w ? `${w}%` : "";
+    paintLever(el, { ...u, origin: originFor(u) });
+  }
+  function originFor(u: { sel: string; origin: string }): string {
+    // The hero box pins at its aligned edge; the pieces have fixed natural corners.
+    if (u.sel === "[data-hero-text]") return `${String(cur("hero_align")) || "left"} top`;
+    return u.origin;
   }
   function paintHeadlineSize(size: string) {
     const h1 = document.querySelector<HTMLElement>('[data-e="splash_headline"]');
@@ -234,7 +316,7 @@ export function LiveEditor({
   function paintFont(kind: "site_font" | "brand_font", key: SiteFontKey) {
     loadFontCss(key);
     const preset = SITE_FONTS[key];
-    const family = preset ? preset.family : "";
+    const family = preset ? preset.family : DEFAULT_FAMILY;
     const targets =
       kind === "brand_font"
         ? document.querySelectorAll<HTMLElement>(".site-brand")
@@ -251,18 +333,14 @@ export function LiveEditor({
     }
   }
 
-  /** The one entry point for every change: record undo, remember, paint, save. A structural
-   *  change (alignment) saves NOW and repaints via reload — everything else is instant. */
+  /** The one entry point for every change: record undo, remember, paint, save. */
   function setValue(k: string, v: unknown, opts?: { record?: boolean }) {
     if (opts?.record !== false) recordPrev(k, valuesRef.current[k]);
     valuesRef.current[k] = v;
     pendingRef.current[k] = v;
     if (STRUCTURAL.has(k)) {
       setSaveState("rearranging");
-      void flush().then((ok) => {
-        if (ok) window.location.reload();
-        else setSaveState("error");
-      });
+      void flush(); // flush reloads on structural success — Retry included
       return;
     }
     paint(k);
@@ -277,9 +355,7 @@ export function LiveEditor({
     sess.el.removeAttribute("contenteditable");
     setEditingText(false);
     const raw = sess.el.innerText;
-    // A headline may carry DELIBERATE line breaks (Erik: "id like to see it like this and it
-    // keeps resetting") — normalize instead of flattening: single \n breaks, no hugging
-    // spaces. The <title>/SEO boundary flattens for itself server-side.
+    // A headline may carry deliberate line breaks — normalize, never flatten (cn-v787).
     const clean =
       sess.f === "splash_headline"
         ? raw.replace(/\r\n?/g, "\n").replace(/[ \t]*\n[ \t]*/g, "\n").replace(/\n{2,}/g, "\n").trim()
@@ -302,9 +378,8 @@ export function LiveEditor({
     if (last) undo(last.k);
   }
 
-  // ── WIRING: click select, double-click edit, drag move, handles, arrows ──────────────────
+  // ── WIRING ───────────────────────────────────────────────────────────────────────────────
   useEffect(() => {
-    // The undo trail survives the alignment-change reload.
     try {
       const raw = sessionStorage.getItem(trailKey);
       if (raw) {
@@ -322,7 +397,21 @@ export function LiveEditor({
     const unitFor = (el: HTMLElement): Unit | null => {
       for (const u of UNITS) {
         const host = document.querySelector<HTMLElement>(u.sel);
-        if (host && host.contains(el)) return { el: host, dx: u.dx, dy: u.dy, w: u.w, sc: u.sc };
+        if (host && host.contains(el)) {
+          const heroBox = u.sel === "[data-hero-text]";
+          const align = String(cur("hero_align")) || "left";
+          return {
+            el: host,
+            dx: u.dx,
+            dy: u.dy,
+            w: u.w,
+            sc: u.sc,
+            origin: heroBox ? `${align} top` : u.origin,
+            zx: heroBox ? (align === "right" ? -1 : 1) : u.zx,
+            zy: u.zy,
+            wx: heroBox ? (align === "right" ? -1 : 1) : u.wx,
+          };
+        }
       }
       return null;
     };
@@ -344,14 +433,17 @@ export function LiveEditor({
       if (u) {
         u.el.classList.add("cn-live-box");
         u.el.style.position = u.el.style.position || "relative";
+        // Handles live at the corner/edge OPPOSITE the zoom pin — grab and pull AWAY to grow.
         const zoomHandle = document.createElement("div");
         zoomHandle.id = "cn-zoom-handle";
         zoomHandle.title = "Drag to make the text bigger or smaller";
+        zoomHandle.style.cssText = `position:absolute;${u.zx === 1 ? "right" : "left"}:-10px;${u.zy === 1 ? "bottom" : "top"}:-10px;width:18px;height:18px;border-radius:50%;background:#f59e0b;border:2px solid white;cursor:${u.zx === u.zy ? "nwse-resize" : "nesw-resize"};z-index:55;`;
         u.el.appendChild(zoomHandle);
         if (u.w) {
           const widthHandle = document.createElement("div");
           widthHandle.id = "cn-width-handle";
           widthHandle.title = "Drag to make the box wider or narrower";
+          widthHandle.style.cssText = `position:absolute;${u.wx === 1 ? "right" : "left"}:-10px;top:50%;margin-top:-9px;width:18px;height:18px;border-radius:4px;background:#0ea5e9;border:2px solid white;cursor:ew-resize;z-index:55;`;
           u.el.appendChild(widthHandle);
         }
       }
@@ -359,8 +451,13 @@ export function LiveEditor({
     const onClick = (e: Event) => {
       const el = (e.target as HTMLElement).closest<HTMLElement>("[data-e]");
       if (!el) return;
-      // Mid-edit clicks position the caret — never re-delegated to selection (cn-v782).
-      if (el.isContentEditable) return;
+      if (el.isContentEditable) {
+        // Caret positioning inside an active edit — swallow it so an ancestor link (the
+        // estimate CTA) can't navigate the preview away mid-edit.
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
       e.preventDefault();
       e.stopPropagation();
       select(el);
@@ -368,6 +465,9 @@ export function LiveEditor({
     const onDblClick = (e: Event) => {
       const el = (e.target as HTMLElement).closest<HTMLElement>("[data-e]");
       if (!el) return;
+      // Mid-edit double-click is word-selection for the caret — re-entering here would reset
+      // the session baseline and silently discard the whole edit on blur (review).
+      if (el.isContentEditable) return;
       const f = el.dataset.e as FieldKey;
       if (!TEXT_FIELDS.includes(f)) return;
       e.preventDefault();
@@ -381,79 +481,83 @@ export function LiveEditor({
       };
       el.addEventListener("blur", onBlur);
     };
-    // DRAG TO MOVE / WIDTH / ZOOM — on whichever unit (box or corner piece) holds the selection.
     const onPointerDown = (e: PointerEvent) => {
       const t = e.target as HTMLElement;
       const active = document.activeElement as HTMLElement | null;
       if (stateRef.current.editingText || (active && active.isContentEditable) || t.isContentEditable) return;
       const u = unitRef.current;
       if (!u) return;
+      const base = { pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, dx0: 0, dy0: 0, w0: 0, s0: 0, pend: {} };
       if (t.id === "cn-width-handle" && u.w) {
         const parentW = u.el.parentElement?.getBoundingClientRect().width || u.el.getBoundingClientRect().width;
-        const w0 = num(u.w) || Math.round((u.el.getBoundingClientRect().width / parentW) * 100);
-        dragRef.current = { mode: "width", startX: e.clientX, startY: e.clientY, dx0: 0, dy0: 0, w0, s0: 0 };
+        dragRef.current = { ...base, mode: "width", w0: num(u.w) || Math.round((u.el.getBoundingClientRect().width / parentW) * 100) };
         e.preventDefault();
         return;
       }
       if (t.id === "cn-zoom-handle") {
-        dragRef.current = { mode: "zoom", startX: e.clientX, startY: e.clientY, dx0: 0, dy0: 0, w0: 0, s0: num(u.sc) || 100 };
+        dragRef.current = { ...base, mode: "zoom", s0: num(u.sc) || 100 };
         e.preventDefault();
         return;
       }
       if (!u.el.classList.contains("cn-live-box") || !u.el.contains(t)) return;
-      dragRef.current = { mode: "move", startX: e.clientX, startY: e.clientY, dx0: num(u.dx), dy0: num(u.dy), w0: 0, s0: 0 };
+      dragRef.current = { ...base, mode: "move", dx0: num(u.dx), dy0: num(u.dy) };
       e.preventDefault();
     };
     const onPointerMove = (e: PointerEvent) => {
       const d = dragRef.current;
       const u = unitRef.current;
-      if (!d || !u) return;
+      if (!d || !u || e.pointerId !== d.pointerId) return;
       const r = u.el.getBoundingClientRect();
       if (d.mode === "move") {
-        // translate % is relative to the unit's own size — convert pixel deltas accordingly.
         const dx = clampNudge(d.dx0 + ((e.clientX - d.startX) / r.width) * 100);
         const dy = clampNudge(d.dy0 + ((e.clientY - d.startY) / r.height) * 100);
-        const sc = num(u.sc);
-        u.el.style.transform = [`translate(${dx}%, ${dy}%)`, sc ? `scale(${sc / 100})` : ""].filter(Boolean).join(" ");
-        u.el.dataset.pendingDx = String(dx);
-        u.el.dataset.pendingDy = String(dy);
+        d.pend = { dx, dy };
+        paintLever(u.el, u, { dx, dy });
       } else if (d.mode === "width") {
         const parentW = u.el.parentElement?.getBoundingClientRect().width || r.width;
-        const w = clampW(d.w0 + ((e.clientX - d.startX) / parentW) * 100);
-        u.el.style.maxWidth = `${w}%`;
-        u.el.dataset.pendingW = String(w);
+        const w = clampW(d.w0 + (u.wx * (e.clientX - d.startX) * 100) / parentW);
+        d.pend = { w };
+        paintLever(u.el, u, { w });
       } else {
-        // Corner zoom: dragging away from the box grows the text, toward it shrinks — the
-        // average of both axes, so a diagonal pull feels like grabbing a photo corner.
-        const delta = (((e.clientX - d.startX) / r.width + (e.clientY - d.startY) / r.height) / 2) * 100;
-        const sc = clampZoom(d.s0 + delta);
-        const dx = num(u.dx);
-        const dy = num(u.dy);
-        u.el.style.transform = [dx || dy ? `translate(${dx}%, ${dy}%)` : "", `scale(${sc / 100})`].filter(Boolean).join(" ");
-        u.el.dataset.pendingS = String(sc);
+        // Pull AWAY from the pinned corner to grow — the sign vector points at the handle.
+        const delta = ((u.zx * (e.clientX - d.startX)) / r.width + (u.zy * (e.clientY - d.startY)) / r.height) * 50;
+        const s = clampZoom(d.s0 + delta);
+        d.pend = { s };
+        paintLever(u.el, u, { s });
       }
     };
-    const onPointerUp = () => {
+    const onPointerUp = (e: PointerEvent) => {
       const d = dragRef.current;
       const u = unitRef.current;
-      if (!d) return;
+      if (!d || e.pointerId !== d.pointerId) return;
       dragRef.current = null;
       if (!u) return;
       if (d.mode === "move") {
-        if (u.el.dataset.pendingDx) setValue(u.dx, Number(u.el.dataset.pendingDx));
-        if (u.el.dataset.pendingDy) setValue(u.dy, Number(u.el.dataset.pendingDy));
-      } else if (d.mode === "width" && u.w && u.el.dataset.pendingW) {
-        setValue(u.w, Number(u.el.dataset.pendingW));
-      } else if (d.mode === "zoom" && u.el.dataset.pendingS) {
-        setValue(u.sc, Number(u.el.dataset.pendingS));
+        if (d.pend.dx !== undefined) setValue(u.dx, d.pend.dx);
+        if (d.pend.dy !== undefined) setValue(u.dy, d.pend.dy);
+      } else if (d.mode === "width" && u.w && d.pend.w !== undefined) {
+        setValue(u.w, d.pend.w);
+      } else if (d.mode === "zoom" && d.pend.s !== undefined) {
+        setValue(u.sc, d.pend.s);
       }
+    };
+    const cancelDrag = () => {
+      const u = unitRef.current;
+      dragRef.current = null;
+      if (u) paintLever(u.el, u); // back to committed truth
+    };
+    const onPointerCancel = (e: PointerEvent) => {
+      if (dragRef.current && e.pointerId === dragRef.current.pointerId) cancelDrag();
     };
     const onKey = (e: KeyboardEvent) => {
       const { selected: f, editingText: editing } = stateRef.current;
-      // Trust the DOM, not the bookkeeping: focus in ANY contentEditable → keys are the caret's.
       const active = document.activeElement as HTMLElement | null;
       if (!f || editing || (active && active.isContentEditable)) return;
       if (e.key === "Escape") {
+        if (dragRef.current) {
+          cancelDrag(); // first Escape cancels a drag in flight
+          return;
+        }
         clearSel();
         setSelected(null);
         setFontMenu(null);
@@ -463,34 +567,48 @@ export function LiveEditor({
       const u = unitRef.current;
       if (!u) return;
       e.preventDefault();
-      const step = e.shiftKey ? 8 : 2;
+      const r = u.el.getBoundingClientRect();
+      // Pixel-true steps whatever the unit's size — 2% of a one-line piece is sub-pixel.
+      const px = e.shiftKey ? 32 : 8;
       if (e.altKey) {
-        // ⌥ + ←/→ = width, ⌥ + ↑/↓ = text zoom ("all the resizing arrows as well").
         if (u.w && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
           const parentW = u.el.parentElement?.getBoundingClientRect().width || 1;
-          const now = num(u.w) || Math.round((u.el.getBoundingClientRect().width / parentW) * 100);
-          setValue(u.w, clampW(now + (e.key === "ArrowRight" ? step : -step)));
+          const now = num(u.w) || Math.round((r.width / parentW) * 100);
+          setValue(u.w, clampW(now + ((e.key === "ArrowRight" ? 1 : -1) * px * 100) / parentW));
         }
         if (e.key === "ArrowUp" || e.key === "ArrowDown") {
           const now = num(u.sc) || 100;
-          setValue(u.sc, clampZoom(now + (e.key === "ArrowUp" ? step * 2 : -step * 2)));
+          setValue(u.sc, clampZoom(now + (e.key === "ArrowUp" ? 10 : -10)));
         }
         return;
       }
-      if (e.key === "ArrowLeft") setValue(u.dx, clampNudge(num(u.dx) - step));
-      if (e.key === "ArrowRight") setValue(u.dx, clampNudge(num(u.dx) + step));
-      if (e.key === "ArrowUp") setValue(u.dy, clampNudge(num(u.dy) - step));
-      if (e.key === "ArrowDown") setValue(u.dy, clampNudge(num(u.dy) + step));
+      const stepX = Math.max(1, Math.round((px / r.width) * 100));
+      const stepY = Math.max(1, Math.round((px / r.height) * 100));
+      if (e.key === "ArrowLeft") setValue(u.dx, clampNudge(num(u.dx) - stepX));
+      if (e.key === "ArrowRight") setValue(u.dx, clampNudge(num(u.dx) + stepX));
+      if (e.key === "ArrowUp") setValue(u.dy, clampNudge(num(u.dy) - stepY));
+      if (e.key === "ArrowDown") setValue(u.dy, clampNudge(num(u.dy) + stepY));
     };
     const onWindowBlur = () => {
-      // Clicking into the studio panel (or any other window) must commit and land the edit —
-      // element blur does NOT fire when the whole iframe loses focus ("text edits didnt save").
       endTextEdit(true);
       void flush();
     };
     const onPageHide = () => {
       endTextEdit(false);
       void flush();
+    };
+    const onParentMsg = (e: MessageEvent) => {
+      // The studio asks us to land everything before it remounts the iframe or acts on the doc.
+      if ((e.data as { type?: string })?.type === "cn-live-flush") {
+        endTextEdit(false);
+        void flush().then(() => {
+          try {
+            window.parent?.postMessage({ type: "cn-live-flushed" }, "*");
+          } catch {
+            /* not framed */
+          }
+        });
+      }
     };
     els.forEach((el) => {
       el.addEventListener("click", onClick);
@@ -499,9 +617,11 @@ export function LiveEditor({
     window.addEventListener("pointerdown", onPointerDown, true);
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerCancel);
     window.addEventListener("keydown", onKey);
     window.addEventListener("blur", onWindowBlur);
     window.addEventListener("pagehide", onPageHide);
+    window.addEventListener("message", onParentMsg);
     return () => {
       els.forEach((el) => {
         el.removeEventListener("click", onClick);
@@ -510,9 +630,11 @@ export function LiveEditor({
       window.removeEventListener("pointerdown", onPointerDown, true);
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerCancel);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("blur", onWindowBlur);
       window.removeEventListener("pagehide", onPageHide);
+      window.removeEventListener("message", onParentMsg);
       clearSel();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -546,8 +668,6 @@ export function LiveEditor({
         .cn-live-selected { outline: 2px dashed #f59e0b; outline-offset: 4px; }
         .cn-live-box { outline: 2px solid #f59e0b; outline-offset: 8px; cursor: move; }
         [data-e] { cursor: pointer; }
-        #cn-zoom-handle { position: absolute; right: -10px; bottom: -10px; width: 18px; height: 18px; border-radius: 50%; background: #f59e0b; border: 2px solid white; cursor: nwse-resize; z-index: 55; }
-        #cn-width-handle { position: absolute; right: -10px; top: 50%; margin-top: -9px; width: 18px; height: 18px; border-radius: 4px; background: #0ea5e9; border: 2px solid white; cursor: ew-resize; z-index: 55; }
       `}</style>
       <div className="fixed inset-x-0 top-0 z-[60] flex flex-wrap items-center gap-x-2 gap-y-2 bg-slate-900/95 px-4 py-2 text-sm text-white shadow-lg backdrop-blur">
         {!selected && <span className="text-white/70">Click any text to work on it · double-click to retype it</span>}
@@ -642,6 +762,7 @@ export function LiveEditor({
           </>
         )}
         <span className="ml-auto flex items-center gap-2">
+          {notice && <span className="text-xs text-amber-300">{notice}</span>}
           {saveState === "rearranging" && <span className="text-xs font-medium text-amber-300">Rearranging…</span>}
           {saveState === "saving" && <span className="text-xs text-white/60">Saving…</span>}
           {saveState === "saved" && <span className="text-xs text-emerald-300">Saved ✓</span>}
@@ -662,7 +783,6 @@ export function LiveEditor({
             </button>
           )}
         </span>
-        {/* NOTHING IS SILENT — the full trail is one tap away, each change with its own undo. */}
         {showTrail && trail.length > 0 && (
           <span className="flex w-full flex-wrap items-center gap-1.5 border-t border-white/10 pt-2">
             {trail.map((t) => (
