@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Rocket, Sparkles, Camera, Trash2, ExternalLink, Mic, Square } from "lucide-react";
 import { useDictation } from "@/lib/use-dictation";
@@ -52,6 +52,8 @@ export function SiteStudio({
   const [handSaving, setHandSaving] = useState(false);
   // A hand-save must repaint the preview: same sv URL, so bump a nonce the route ignores.
   const [previewBump, setPreviewBump] = useState(0);
+  // On-page editing: the iframe carries &edit=1; its Save posts back so the list refreshes.
+  const [pageEdit, setPageEdit] = useState(false);
   // SAY THE DESIGN (Erik: "can we put a talk button in there to have Nort design it verbally?").
   // Same press-to-talk → /api/transcribe turn as the inspector and /organize. The words land IN
   // THE BOX for review — dictation hands back text, never an action; he reads it, fixes a
@@ -83,8 +85,21 @@ export function SiteStudio({
   // Keyed off selectedId, NOT the row: a fresh pass sets an id that reaches the versions prop
   // only after router.refresh() lands — the preview must show the new design immediately.
   const previewSrc = selectedId
-    ? `/site/${handle}?preview=1&sv=${selectedId}${previewBump ? `&r=${previewBump}` : ""}`
+    ? `/site/${handle}?preview=1&sv=${selectedId}${pageEdit && selected?.status === "draft" ? "&edit=1" : ""}${previewBump ? `&r=${previewBump}` : ""}`
     : `/site/${handle}?preview=1`;
+
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      if ((e.data as { type?: string })?.type === "cn-live-saved") {
+        toast("On-page edits saved to the draft.", "success");
+        setPreviewBump((n) => n + 1);
+        router.refresh();
+      }
+    };
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function runDesign() {
     const ask = instruction.trim();
@@ -112,9 +127,11 @@ export function SiteStudio({
   // ONE TAP, FOUR ARRANGEMENTS — the see-options answer to "like i would drag and drop any old
   // editor": flip through them with your eyes instead of describing layout in words.
   function runOptions() {
+    // The typed instruction rides into all four options (and stays in the box — the options are
+    // variations, the box is his standing direction until he clears it).
     setOptioning(true);
     start(async () => {
-      const r = await designSiteOptions(selectedId);
+      const r = await designSiteOptions(selectedId, instruction.trim() || undefined);
       setOptioning(false);
       if (!r.ok) return toast(r.error ?? "The options pass failed.", "error");
       setLastChanges((r.options ?? []).map((o) => o.note));
@@ -369,6 +386,17 @@ export function SiteStudio({
         />
         {/* ARRANGE BY HAND — only on a draft. The same editor the settings page uses, pointed
             at this version's body instead of the live site: move things, save, see the preview. */}
+        {selected && selected.status === "draft" && selectedDoc && (
+          <div className="mt-3 flex flex-wrap items-center gap-4">
+            <button
+              type="button"
+              onClick={() => setPageEdit((v) => !v)}
+              className={`text-sm font-medium underline-offset-2 hover:underline ${pageEdit ? "text-amber-600" : "text-brand"}`}
+            >
+              {pageEdit ? "✕ Close on-page editing" : "Edit on the page →"}
+            </button>
+          </div>
+        )}
         {selected && selected.status === "draft" && selectedDoc && (
           <div className="mt-3">
             {!hand || hand.versionId !== selected.id ? (

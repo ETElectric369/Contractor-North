@@ -52,7 +52,6 @@ const HEAD_SIZE: Record<"s" | "m" | "l", string> = {
 
 function Hero({
   theme,
-  name,
   headline,
   headlineSize,
   tagline,
@@ -67,7 +66,6 @@ function Hero({
   heroStyle = "open",
 }: {
   theme: OrgSettings["site_theme"];
-  name?: string;
   headline: string;
   headlineSize?: OrgSettings["splash_headline_size"];
   tagline: string;
@@ -83,7 +81,7 @@ function Hero({
 }) {
   const cta = (
     <Link href={estimateHref} className="inline-flex items-center gap-2 rounded-lg px-6 py-3.5 text-base font-semibold text-white shadow-lg" style={{ backgroundColor: brand }}>
-      {ctaLabel} <ArrowRight className="h-5 w-5" />
+      <span data-e="estimate_cta_label">{ctaLabel}</span> <ArrowRight className="h-5 w-5" />
     </Link>
   );
   const hSize = HEAD_SIZE[headlineSize ?? "l"];
@@ -94,10 +92,9 @@ function Hero({
       <section id="top" className="relative isolate overflow-hidden text-white" style={{ background: `linear-gradient(135deg, ${brand} 0%, #0f172a 100%)` }}>
         <div className="mx-auto grid max-w-6xl items-center gap-10 px-4 py-20 sm:py-24 lg:grid-cols-2">
           <div>
-            {name && <p className="site-brand mb-2 text-2xl font-black tracking-tight">{name}</p>}
-            {area && <p className="mb-4 inline-block rounded-full bg-white/15 px-3 py-1 text-xs font-bold uppercase tracking-[0.2em]">{area}</p>}
-            {headline && <h1 className={`${hSize} font-black leading-[1.05] tracking-tight`}>{headline}</h1>}
-            {tagline && <p className="mt-5 max-w-xl text-lg text-white/85">{tagline}</p>}
+              {area && <p data-e="service_area" className="mb-4 inline-block rounded-full bg-white/15 px-3 py-1 text-xs font-bold uppercase tracking-[0.2em]">{area}</p>}
+            {headline && <h1 data-e="splash_headline" className={`${hSize} font-black leading-[1.05] tracking-tight`}>{headline}</h1>}
+            {tagline && <p data-e="splash_tagline" className="mt-5 max-w-xl text-lg text-white/85">{tagline}</p>}
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Link href={estimateHref} className="inline-flex items-center gap-2 rounded-lg bg-white px-6 py-3.5 text-base font-bold shadow-lg" style={{ color: brand }}>
                 {ctaLabel} <ArrowRight className="h-5 w-5" />
@@ -115,7 +112,7 @@ function Hero({
               srcSet={imageSrcSet(hero, [640, 1280, 1920])}
               sizes="(min-width: 1024px) 50vw, 100vw"
               fetchPriority="high"
-              alt={name ? `${name} — recent project` : "Recent project"}
+              alt="Recent project"
               className="aspect-[4/3] w-full rounded-2xl object-cover shadow-2xl ring-1 ring-white/20"
             />
           )}
@@ -130,10 +127,9 @@ function Hero({
       <section id="top" className="border-b border-slate-100" style={{ background: `linear-gradient(180deg, ${brand}0a, #ffffff 65%)` }}>
         <div className="mx-auto grid max-w-6xl items-center gap-12 px-4 py-20 sm:py-28 lg:grid-cols-2">
           <div>
-            {name && <p className="site-brand mb-2 text-2xl font-bold tracking-tight text-slate-900">{name}</p>}
-            {area && <p className="mb-4 text-sm font-semibold uppercase tracking-[0.25em]" style={{ color: brand }}>{area}</p>}
-            {headline && <h1 className={`${hSize} font-semibold leading-[1.1] tracking-tight text-slate-900`}>{headline}</h1>}
-            {tagline && <p className="mt-5 max-w-xl text-lg text-slate-600">{tagline}</p>}
+              {area && <p className="mb-4 text-sm font-semibold uppercase tracking-[0.25em]" style={{ color: brand }}>{area}</p>}
+            {headline && <h1 data-e="splash_headline" className={`${hSize} font-semibold leading-[1.1] tracking-tight text-slate-900`}>{headline}</h1>}
+            {tagline && <p data-e="splash_tagline" className="mt-5 max-w-xl text-lg text-slate-600">{tagline}</p>}
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Link href={estimateHref} className="inline-flex items-center gap-2 rounded-full px-6 py-3.5 text-base font-semibold text-white shadow-sm" style={{ backgroundColor: brand }}>
                 {ctaLabel} <ArrowRight className="h-5 w-5" />
@@ -151,7 +147,7 @@ function Hero({
               srcSet={imageSrcSet(hero, [640, 1280, 1920])}
               sizes="(min-width: 1024px) 50vw, 100vw"
               fetchPriority="high"
-              alt={name ? `${name} — recent project` : "Recent project"}
+              alt="Recent project"
               className="aspect-[4/3] w-full rounded-[2rem] object-cover shadow-xl lg:aspect-[4/5]"
             />
           )}
@@ -171,10 +167,9 @@ function Hero({
   const alignInner = heroAlign === "center" ? "flex flex-col items-center" : "";
   const textBlock = (
     <div className={["max-w-2xl", alignInner, heroStyle === "panel" ? "rounded-2xl bg-slate-950/55 p-8 backdrop-blur-sm sm:p-10" : ""].filter(Boolean).join(" ")}>
-      {name && <p className="site-brand mb-2 text-2xl font-extrabold tracking-tight text-white drop-shadow">{name}</p>}
-      {area && <p className="mb-3 text-sm font-semibold uppercase tracking-[0.2em] text-white/80">{area}</p>}
-      {headline && <h1 className={`${hSize} font-extrabold leading-tight tracking-tight text-white drop-shadow`}>{headline}</h1>}
-      {tagline && <p className="mt-4 max-w-xl text-lg text-slate-100">{tagline}</p>}
+      {area && <p data-e="service_area" className="mb-3 text-sm font-semibold uppercase tracking-[0.2em] text-white/80">{area}</p>}
+      {headline && <h1 data-e="splash_headline" className={`${hSize} font-extrabold leading-tight tracking-tight text-white drop-shadow`}>{headline}</h1>}
+      {tagline && <p data-e="splash_tagline" className="mt-4 max-w-xl text-lg text-slate-100">{tagline}</p>}
       <div className="mt-8 flex flex-wrap items-center gap-3">
         {cta}
         {hasPhotos && (
@@ -224,15 +219,14 @@ function Hero({
         <div className="absolute inset-0 -z-10" style={{ background: "linear-gradient(180deg, rgba(2,6,23,.45), rgba(2,6,23,.62))" }} />
         <div className="mx-auto flex min-h-[480px] max-w-6xl flex-col justify-between px-4 py-10 sm:min-h-[560px] sm:py-12">
           <div>
-            {name && <p className="site-brand text-2xl font-extrabold tracking-tight text-white drop-shadow">{name}</p>}
-            {area && <p className="mt-2 text-sm font-semibold uppercase tracking-[0.2em] text-white/80">{area}</p>}
+            {area && <p data-e="service_area" className="text-sm font-semibold uppercase tracking-[0.2em] text-white/80">{area}</p>}
           </div>
           <div className="flex flex-col gap-8 sm:flex-row sm:items-end sm:justify-between">
             <div className="max-w-xl">
-              {headline && <h1 className={`${hSize} font-extrabold leading-tight tracking-tight text-white drop-shadow`}>{headline}</h1>}
+              {headline && <h1 data-e="splash_headline" className={`${hSize} font-extrabold leading-tight tracking-tight text-white drop-shadow`}>{headline}</h1>}
             </div>
             <div className="max-w-md sm:text-right">
-              {tagline && <p className="text-lg text-slate-100">{tagline}</p>}
+              {tagline && <p data-e="splash_tagline" className="text-lg text-slate-100">{tagline}</p>}
               <div className="mt-6 flex flex-wrap items-center gap-3 sm:justify-end">
                 {cta}
                 {hasPhotos && (
@@ -338,9 +332,10 @@ export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg;
           {/* Hero — presentation varies by settings.site_theme; the copy/CTA/data are identical. */}
           <Hero
             theme={s.site_theme}
-            // No headline set → the org NAME becomes the H1 (every homepage needs exactly one),
-            // and the separate small name line is dropped so it doesn't render twice.
-            name={showName && s.splash_headline ? org.name : undefined}
+            // THE NAME RENDERS ONCE — in the sticky top bar (Erik: "i dont want to see ET
+            // Electric twice on the top"). The hero's name line only ever appeared when the
+            // header already showed the name, so it was a duplicate by construction; the
+            // headline (or, with no headline set, the name AS the H1) carries the hero.
             headline={s.splash_headline || org.name}
             headlineSize={s.splash_headline_size}
             tagline={s.splash_tagline}

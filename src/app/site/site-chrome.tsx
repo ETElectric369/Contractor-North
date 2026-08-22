@@ -120,7 +120,7 @@ export function SiteHeader({
         <img src={sizedImage(org.logo_url, LOGO_HEADER_W)} alt={org.name} className="h-9 w-auto" />
       )}
       {(!org.logo_url || showName) && (
-        <span className="site-brand whitespace-nowrap text-lg font-extrabold tracking-tight">{org.name}</span>
+        <span data-e="__brand" className="site-brand whitespace-nowrap text-lg font-extrabold tracking-tight">{org.name}</span>
       )}
     </>
   );

@@ -107,6 +107,7 @@ async function runDesignModel(args: {
         "· Never remove the customer's ability to make contact: if you compose home_blocks, include a {type:'section',props:{key:'contact'}} block (and 'estimate' where it fits).\n" +
         "WHAT EACH FIELD ACTUALLY RENDERS (never guess these semantics — a wrong-lever change reads as 'it didn't understand me'):\n" +
         "· WHEN THE OWNER SAYS TEXT IS 'STACKED' — CHECK THE HERO FIRST. The preview opens on the hero; its headline+tagline+buttons are a text stack in the 'classic' framing, and no body block changes that. The hero-level moves: 'bold' or 'minimal' theme (text goes BESIDE the photo, two columns), a shorter headline, a one-line tagline (move the service list into the services grid below). If earlier versions pinned 'classic', SAY the tradeoff in changes — offer the two-column framings by name; never silently keep dodging the hero.\n" +
+        "· THE BUSINESS NAME RENDERS ONCE — in the sticky top bar. The hero never repeats it (the headline carries the hero; with no headline, the name becomes the H1). show_name_with_logo controls the top bar only.\n" +
         "· 'THE HOME PAGE' MEANS THE WHOLE PAGE, HERO INCLUDED. The field named home_blocks is only the BODY below the hero — when the owner scopes an ask 'on the homepage', that does NOT mean home_blocks-only; the hero, theme, fonts and accent are all the homepage too.\n" +
         "· site_theme is THE HERO FRAMING. 'classic' = the hero IMAGE full-bleed BEHIND the text (the photo-backdrop look) — and on classic TWO MORE LEVERS arrange the text ON the photo: hero_align ('left'|'center'|'right' — where the text block sits) and hero_style ('open' = text straight on the image, 'panel' = a translucent dark card behind the text, 'band' = the words in a solid strip across the BOTTOM with the photo breathing above, 'spread' = the text PIECES separate across the photo: name+area top-left, headline lower-left, tagline+buttons lower-right — use this when the owner wants the text boxes horizontally separated over the image). These give ~9 classic arrangements WITHOUT losing the full-bleed photo — use them FIRST when the owner wants hero text moved but the photo kept. 'bold' = dark accent-gradient background, two columns, photo as a framed card on the right. 'minimal' = light airy background, two columns, photo right. The page below the hero is identical across themes.\n" +
         "· splash_bg_url = the hero image; when it is \"\", the FIRST portfolio photo is the hero AND the link-preview image — so portfolio order matters.\n" +
@@ -248,7 +249,7 @@ export async function designSitePass(instruction: string, baseVersionId: string 
  * lose), two show the text-beside-photo framings, all with the text mass redistributed into the
  * body. Every option obeys the same trust boundary as a single pass.
  */
-export async function designSiteOptions(baseVersionId: string | null): Promise<StudioResult> {
+export async function designSiteOptions(baseVersionId: string | null, instruction?: string): Promise<StudioResult> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error ?? "Staff only." };
   // One batch = four model calls: its own tighter limiter, fail-closed like the rest.
@@ -279,11 +280,19 @@ export async function designSiteOptions(baseVersionId: string | null): Promise<S
     base = extractSiteDoc((org as { settings?: unknown }).settings);
   }
 
+  // THE OPTIONS BUILD ON WHERE HE IS (Erik: "it doesnt build on what where we are or what im
+  // typing"): every directive varies ONLY the arrangement and carries the owner's typed
+  // instruction into all four. Copy, accent, fonts, body — everything else stays the current
+  // document's unless the instruction says otherwise.
+  const ask = String(instruction ?? "").trim().slice(0, 1500);
+  const KEEP =
+    "VARY ONLY THE HERO ARRANGEMENT DESCRIBED BELOW. Keep this document's headline wording, tagline, colors, fonts, body sections and everything else EXACTLY as they are" +
+    (ask ? " except where THE OWNER'S INSTRUCTION says otherwise — apply it in every option: \"" + ask.replace(/"/g, "'") + "\"" : ".");
   const DIRECTIVES = [
-    "OPTION A — BOTTOM BAND. Keep the classic full-bleed photo EXACTLY as is; hero_style 'band' so the words sit in a strip across the bottom and the photo breathes above; shortest true headline, one-line tagline, no service list in the hero (it lives in the services grid below). Note must start 'Option A:'.",
-    "OPTION B — FLOATING PANEL. Keep the classic photo; hero_style 'panel' with hero_align 'right' — a translucent card of text to the right of the frame; short copy. Body: specialty first, then splits. Note must start 'Option B:'.",
-    "OPTION C — CENTERED OPEN. Keep the classic photo; hero_align 'center', hero_style 'open', small headline size — a quiet centered title over the image, everything else below. Note must start 'Option C:'.",
-    "OPTION D — TEXT BESIDE PHOTO. The bold two-column hero (this one trades the full-bleed photo for a framed card beside the text — say so in changes); shortened copy, body splits kept. Note must start 'Option D:'.",
+    `${KEEP} OPTION A: classic full-bleed photo, hero_style 'band' — the words in a strip across the bottom, the photo breathing above. Note must start 'Option A:'.`,
+    `${KEEP} OPTION B: classic full-bleed photo, hero_style 'panel', hero_align 'right' — a translucent card of text to the right of the frame. Note must start 'Option B:'.`,
+    `${KEEP} OPTION C: classic full-bleed photo, hero_style 'spread' — the text pieces at the photo's corners. Note must start 'Option C:'.`,
+    `${KEEP} OPTION D: the bold two-column hero — text beside the photo as a framed card (this trades the full-bleed photo; say so in changes). Note must start 'Option D:'.`,
   ];
 
   const runs = await Promise.all(

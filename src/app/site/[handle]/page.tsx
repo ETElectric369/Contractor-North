@@ -7,6 +7,7 @@ import { OrgSite, orgSiteMetadata } from "../org-site";
 import { getSiteNav } from "../site-chrome";
 import { handleLinkBase } from "../site-base";
 import { DraftPreviewBanner, draftPreviewMetadata, getDraftSiteVersionForPreview, previewRequested } from "../draft-preview";
+import { LiveEditor } from "../live-editor";
 
 export const dynamic = "force-dynamic";
 
@@ -55,9 +56,25 @@ export default async function SiteHome({
   // base "" → root /<slug> (the public URL); app-host base → the internal /p/<slug> route.
   const base = await handleLinkBase(handle);
   const nav = await getSiteNav(org.id, base);
+  const sp = await searchParams;
+  const liveEdit = !!draft && sp?.edit === "1";
   return (
     <>
-      {draft && <DraftPreviewBanner />}
+      {draft && !liveEdit && <DraftPreviewBanner />}
+      {/* The on-page editor: only inside an AUTHORIZED draft preview (draft is null for anyone
+          who fails the internal gate), and the save action re-checks staff + draft anyway. */}
+      {liveEdit && (
+        <LiveEditor
+          versionId={draft.id}
+          initial={{
+            splash_headline_size: effOrg.settings.splash_headline_size,
+            hero_align: effOrg.settings.hero_align,
+            hero_style: effOrg.settings.hero_style,
+            site_font: effOrg.settings.site_font,
+            brand_font: effOrg.settings.brand_font,
+          }}
+        />
+      )}
       <OrgSite org={effOrg} articlesHref={nav.articlesHref} pageLinks={nav.pageLinks} />
     </>
   );
