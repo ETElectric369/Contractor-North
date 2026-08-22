@@ -166,6 +166,17 @@ describe("the main-build blocks — split obeys the image law, density is enum-o
     expect(doc.home_blocks.length).toBe(1);
   });
 
+  it("hero_align/hero_style: enum-or-base, defaults render the original", () => {
+    expect(extractSiteDoc({}).hero_align).toBe("left");
+    expect(extractSiteDoc({}).hero_style).toBe("open");
+    const banded = extractSiteDoc({ hero_align: "center", hero_style: "band" });
+    expect(banded.hero_align).toBe("center");
+    expect(banded.hero_style).toBe("band");
+    expect(coerceSiteDoc({ hero_style: "floating" }, banded).doc.hero_style).toBe("band");
+    expect(coerceSiteDoc({ hero_align: "right", hero_style: "panel" }, banded).doc.hero_align).toBe("right");
+    expect(coerceSiteDoc({}, banded).doc.hero_style).toBe("band");
+  });
+
   it("site_density: enum lands, garbage keeps base, absent keeps", () => {
     const airy = extractSiteDoc({ site_density: "airy" });
     expect(airy.site_density).toBe("airy");

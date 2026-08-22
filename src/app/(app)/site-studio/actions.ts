@@ -8,9 +8,9 @@ import { dbError } from "@/lib/db-error";
 import { getOrgSettings } from "@/lib/org-settings";
 import { rateLimited } from "@/lib/rate-limit";
 import { coerceSiteDoc, diffSiteDoc, extractSiteDoc, knownImageUrls, type SiteDoc } from "@/lib/site-doc";
-import { SECTION_KEYS } from "@/lib/site-blocks";
+import { SECTION_KEYS, normalizeBlocks } from "@/lib/site-blocks";
 import { requireStaff } from "@/lib/staff-guard";
-import { sanitizeModelHtml } from "@/lib/sanitize-html";
+import { sanitizeHtml, sanitizeModelHtml } from "@/lib/sanitize-html";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 /**
@@ -21,7 +21,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  */
 
 export type StudioResult =
-  | { ok: true; id?: string; changes?: string[]; dropped?: string[]; cannot?: string[]; note?: string }
+  | { ok: true; id?: string; changes?: string[]; dropped?: string[]; cannot?: string[]; note?: string; options?: { id: string; note: string }[] }
   | { ok: false; error: string };
 
 type VersionRow = { id: string; v: number; doc: unknown; status: string };
@@ -74,50 +74,24 @@ export async function captureSiteVersion(note?: string): Promise<StudioResult> {
 }
 
 /**
- * ONE DESIGN PASS: an instruction in plain words → a new draft version. The model proposes a
- * whole doc; coerceSiteDoc is the trust boundary (own-library images only, on-site links only,
- * reviews untouchable, every string clamped) and everything it refuses is NAMED in the result.
+ * THE MODEL CORE of one design pass — shared by the single conversational pass and the
+ * options fan-out. Returns a coerced doc + the honesty channels; never inserts, never gates.
  */
-export async function designSitePass(instruction: string, baseVersionId: string | null): Promise<StudioResult> {
-  const ctx = await requireStaff();
-  if ("error" in ctx) return { ok: false, error: ctx.error ?? "Staff only." };
-  const ask = String(instruction ?? "").trim().slice(0, 2000);
-  if (!ask) return { ok: false, error: "Tell it what to change first." };
-  if (await rateLimited(`site-designer:${ctx.userId}`, 15, 900, { failClosed: true }))
-    return { ok: false, error: "A lot of design passes in a row — give it a minute." };
-  if (await aiSpendExceeded(ctx.orgId)) {
-    return { ok: false, error: "Your company has reached this month's AI ceiling — it resets at the start of the month." };
-  }
-
-  const { data: org } = await ctx.supabase
-    .from("organizations")
-    .select("id, name, phone, license, settings")
-    .limit(1)
-    .maybeSingle();
-  if (!org) return { ok: false, error: "Organization not found." };
-  const settings = getOrgSettings((org as { settings?: unknown }).settings);
-
-  // The base: a chosen version, else the live site. Stored docs share the settings key-space,
-  // so extractSiteDoc reads them with the same tolerant merge.
-  let base: SiteDoc;
-  if (baseVersionId) {
-    const { data: ver } = await ctx.supabase
-      .from("site_versions")
-      .select("id, doc")
-      .eq("id", baseVersionId)
-      .maybeSingle();
-    if (!ver) return { ok: false, error: "That version wasn't found." };
-    base = extractSiteDoc((ver as { doc: unknown }).doc);
-  } else {
-    base = extractSiteDoc((org as { settings?: unknown }).settings);
-  }
-
-  // EVERY image the org owns on its site — hero, portfolio, and images already placed in blocks
-  // by the old builder (review: the first cut omitted block images, so a pass would lose them).
+async function runDesignModel(args: {
+  orgId: string | null;
+  org: Record<string, unknown>;
+  settings: ReturnType<typeof getOrgSettings>;
+  base: SiteDoc;
+  ask: string;
+}): Promise<
+  | { ok: true; doc: SiteDoc; changes: string[]; dropped: string[]; cannot: string[]; note: string; noop: boolean }
+  | { ok: false; error: string }
+> {
+  const { org, settings, base, ask } = args;
+  const ctx = { orgId: args.orgId };
   const captions = new Map(base.portfolio.map((p) => [p.url, p.caption ?? ""]));
   if (base.splash_bg_url && !captions.has(base.splash_bg_url)) captions.set(base.splash_bg_url, "(current hero background)");
   const library = [...knownImageUrls(base)].map((url) => ({ url, caption: captions.get(url) ?? "" }));
-
   try {
     const client = getAnthropic();
     const msg = await client.messages.create({
@@ -134,7 +108,7 @@ export async function designSitePass(instruction: string, baseVersionId: string 
         "WHAT EACH FIELD ACTUALLY RENDERS (never guess these semantics — a wrong-lever change reads as 'it didn't understand me'):\n" +
         "· WHEN THE OWNER SAYS TEXT IS 'STACKED' — CHECK THE HERO FIRST. The preview opens on the hero; its headline+tagline+buttons are a text stack in the 'classic' framing, and no body block changes that. The hero-level moves: 'bold' or 'minimal' theme (text goes BESIDE the photo, two columns), a shorter headline, a one-line tagline (move the service list into the services grid below). If earlier versions pinned 'classic', SAY the tradeoff in changes — offer the two-column framings by name; never silently keep dodging the hero.\n" +
         "· 'THE HOME PAGE' MEANS THE WHOLE PAGE, HERO INCLUDED. The field named home_blocks is only the BODY below the hero — when the owner scopes an ask 'on the homepage', that does NOT mean home_blocks-only; the hero, theme, fonts and accent are all the homepage too.\n" +
-        "· site_theme is THE HERO FRAMING and nothing else. 'classic' = the hero IMAGE full-bleed BEHIND the headline with a dark overlay (the photo-backdrop look). 'bold' = dark accent-gradient background, two columns, photo as a framed card on the right. 'minimal' = light airy background, two columns, photo right. The page below the hero is identical across themes.\n" +
+        "· site_theme is THE HERO FRAMING. 'classic' = the hero IMAGE full-bleed BEHIND the text (the photo-backdrop look) — and on classic TWO MORE LEVERS arrange the text ON the photo: hero_align ('left'|'center'|'right' — where the text block sits) and hero_style ('open' = text straight on the image, 'panel' = a translucent dark card behind the text, 'band' = the words in a solid strip across the BOTTOM with the photo breathing above). These give ~9 classic arrangements WITHOUT losing the full-bleed photo — use them FIRST when the owner wants hero text moved but the photo kept. 'bold' = dark accent-gradient background, two columns, photo as a framed card on the right. 'minimal' = light airy background, two columns, photo right. The page below the hero is identical across themes.\n" +
         "· splash_bg_url = the hero image; when it is \"\", the FIRST portfolio photo is the hero AND the link-preview image — so portfolio order matters.\n" +
         "· site_accent = '#rrggbb': the ONE color every band, button and gradient leans on ('' = the default derivation). The single biggest mood lever you have.\n" +
         "· site_font = 'default'|'serif'|'grotesk'|'soft': the HEADING typeface preset (serif=editorial Fraunces, grotesk=modern Space Grotesk, soft=rounded Nunito). Headings only; body text is fixed.\n" +
@@ -197,15 +171,7 @@ export async function designSitePass(instruction: string, baseVersionId: string 
       : [];
     const note = String(parsed.note ?? "Design pass").replace(/\s+/g, " ").trim().slice(0, 120) || "Design pass";
 
-    // A PASS THAT CHANGES NOTHING MINTS NOTHING (v6 and v8 were both empty "no change" rows —
-    // version-list noise). The honest answer rides back in `cannot`; no version is created.
-    if (diffSiteDoc(base, doc).length === 0) {
-      return { ok: true, changes: [], dropped, cannot: cannot.length ? cannot : ["Nothing in that request maps to a design field — no version created."], note };
-    }
-    const ins = await insertVersion(ctx.supabase, { doc, note, created_by: ctx.userId });
-    if ("error" in ins) return { ok: false, error: ins.error };
-    revalidatePath("/site-studio");
-    return { ok: true, id: ins.id, changes, dropped, cannot, note };
+    return { ok: true, doc, changes, dropped, cannot, note, noop: diffSiteDoc(base, doc).length === 0 };
   } catch (e) {
     const message = e instanceof Error ? e.message : "The design pass failed.";
     return {
@@ -213,6 +179,130 @@ export async function designSitePass(instruction: string, baseVersionId: string 
       error: /ANTHROPIC_API_KEY/i.test(message) ? "AI isn't configured on this server." : `Design pass failed: ${message.slice(0, 300)}`,
     };
   }
+}
+
+/**
+ * ONE DESIGN PASS: an instruction in plain words → a new draft version. The model proposes a
+ * whole doc; coerceSiteDoc is the trust boundary (own-library images only, on-site links only,
+ * reviews untouchable, every string clamped) and everything it refuses is NAMED in the result.
+ */
+export async function designSitePass(instruction: string, baseVersionId: string | null): Promise<StudioResult> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error ?? "Staff only." };
+  const ask = String(instruction ?? "").trim().slice(0, 2000);
+  if (!ask) return { ok: false, error: "Tell it what to change first." };
+  if (await rateLimited(`site-designer:${ctx.userId}`, 15, 900, { failClosed: true }))
+    return { ok: false, error: "A lot of design passes in a row — give it a minute." };
+  if (await aiSpendExceeded(ctx.orgId)) {
+    return { ok: false, error: "Your company has reached this month's AI ceiling — it resets at the start of the month." };
+  }
+
+  const { data: org } = await ctx.supabase
+    .from("organizations")
+    .select("id, name, phone, license, settings")
+    .limit(1)
+    .maybeSingle();
+  if (!org) return { ok: false, error: "Organization not found." };
+  const settings = getOrgSettings((org as { settings?: unknown }).settings);
+
+  // The base: a chosen version, else the live site. Stored docs share the settings key-space,
+  // so extractSiteDoc reads them with the same tolerant merge.
+  let base: SiteDoc;
+  if (baseVersionId) {
+    const { data: ver } = await ctx.supabase
+      .from("site_versions")
+      .select("id, doc")
+      .eq("id", baseVersionId)
+      .maybeSingle();
+    if (!ver) return { ok: false, error: "That version wasn't found." };
+    base = extractSiteDoc((ver as { doc: unknown }).doc);
+  } else {
+    base = extractSiteDoc((org as { settings?: unknown }).settings);
+  }
+
+  const run = await runDesignModel({ orgId: ctx.orgId, org: org as Record<string, unknown>, settings, base, ask });
+  if (!run.ok) return run;
+  if (run.noop) {
+    // A PASS THAT CHANGES NOTHING MINTS NOTHING — the honest answer rides back in `cannot`.
+    return {
+      ok: true,
+      changes: [],
+      dropped: run.dropped,
+      cannot: run.cannot.length ? run.cannot : ["Nothing in that request maps to a design field — no version created."],
+      note: run.note,
+    };
+  }
+  const ins = await insertVersion(ctx.supabase, { doc: run.doc, note: run.note, created_by: ctx.userId });
+  if ("error" in ins) return { ok: false, error: ins.error };
+  revalidatePath("/site-studio");
+  return { ok: true, id: ins.id, changes: run.changes, dropped: run.dropped, cannot: run.cannot, note: run.note };
+}
+
+
+/**
+ * SHOW ME OPTIONS (Erik, night one: "i want to see options for all the text moved around on the
+ * page like i would drag and drop any old editor"). Language is a bad tool for layout; eyes are
+ * the right one — so one tap runs FOUR arrangements in parallel and lands them as versions to
+ * flip through. Two keep the full-bleed photo backdrop (the thing he explicitly did not want to
+ * lose), two show the text-beside-photo framings, all with the text mass redistributed into the
+ * body. Every option obeys the same trust boundary as a single pass.
+ */
+export async function designSiteOptions(baseVersionId: string | null): Promise<StudioResult> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error ?? "Staff only." };
+  // One batch = four model calls: its own tighter limiter, fail-closed like the rest.
+  if (await rateLimited(`site-designer-options:${ctx.userId}`, 4, 900, { failClosed: true }))
+    return { ok: false, error: "A lot of option batches in a row — give it a few minutes." };
+  if (await aiSpendExceeded(ctx.orgId)) {
+    return { ok: false, error: "Your company has reached this month's AI ceiling — it resets at the start of the month." };
+  }
+
+  const { data: org } = await ctx.supabase
+    .from("organizations")
+    .select("id, name, phone, license, settings")
+    .limit(1)
+    .maybeSingle();
+  if (!org) return { ok: false, error: "Organization not found." };
+  const settings = getOrgSettings((org as { settings?: unknown }).settings);
+
+  let base: SiteDoc;
+  if (baseVersionId) {
+    const { data: ver } = await ctx.supabase
+      .from("site_versions")
+      .select("id, doc")
+      .eq("id", baseVersionId)
+      .maybeSingle();
+    if (!ver) return { ok: false, error: "That version wasn't found." };
+    base = extractSiteDoc((ver as { doc: unknown }).doc);
+  } else {
+    base = extractSiteDoc((org as { settings?: unknown }).settings);
+  }
+
+  const DIRECTIVES = [
+    "OPTION A — BOTTOM BAND. Keep the classic full-bleed photo EXACTLY as is; hero_style 'band' so the words sit in a strip across the bottom and the photo breathes above; shortest true headline, one-line tagline, no service list in the hero (it lives in the services grid below). Note must start 'Option A:'.",
+    "OPTION B — FLOATING PANEL. Keep the classic photo; hero_style 'panel' with hero_align 'right' — a translucent card of text to the right of the frame; short copy. Body: specialty first, then splits. Note must start 'Option B:'.",
+    "OPTION C — CENTERED OPEN. Keep the classic photo; hero_align 'center', hero_style 'open', small headline size — a quiet centered title over the image, everything else below. Note must start 'Option C:'.",
+    "OPTION D — TEXT BESIDE PHOTO. The bold two-column hero (this one trades the full-bleed photo for a framed card beside the text — say so in changes); shortened copy, body splits kept. Note must start 'Option D:'.",
+  ];
+
+  const runs = await Promise.all(
+    DIRECTIVES.map((ask) =>
+      runDesignModel({ orgId: ctx.orgId, org: org as Record<string, unknown>, settings, base, ask }),
+    ),
+  );
+  const options: { id: string; note: string }[] = [];
+  for (const run of runs) {
+    if (!run.ok || run.noop) continue;
+    const ins = await insertVersion(ctx.supabase, { doc: run.doc, note: run.note, created_by: ctx.userId });
+    if ("error" in ins) continue;
+    options.push({ id: ins.id, note: run.note });
+  }
+  if (!options.length) {
+    const firstErr = runs.find((r) => !r.ok) as { error?: string } | undefined;
+    return { ok: false, error: firstErr?.error ?? "No options came back — try again." };
+  }
+  revalidatePath("/site-studio");
+  return { ok: true, options, note: `${options.length} options ready` };
 }
 
 /**
@@ -241,6 +331,43 @@ export async function publishSiteVersion(versionId: string): Promise<StudioResul
   if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/site-studio");
   return { ok: true };
+}
+
+
+/**
+ * ARRANGE BY HAND (Erik: "like i would drag and drop any old editor"). The studio's hand-edit
+ * mode: the existing block editor writes the SELECTED DRAFT's body — never the live site, never
+ * a published row. Same write-side wash as every builder save (text + split html sanitized,
+ * shapes normalized); the version stays a draft you preview and publish like any other.
+ */
+export async function updateVersionBlocks(versionId: string, blocks: unknown): Promise<StudioResult> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error ?? "Staff only." };
+  const { data: ver } = await ctx.supabase
+    .from("site_versions")
+    .select("id, status, doc")
+    .eq("id", versionId)
+    .maybeSingle();
+  if (!ver) return { ok: false, error: "That version wasn't found." };
+  if ((ver as { status: string }).status !== "draft")
+    return { ok: false, error: "Only drafts can be hand-edited — make a new version first (Capture or a design pass)." };
+  const washed = normalizeBlocks(blocks).map((b) => {
+    if (b.type === "text") return { ...b, props: { ...b.props, html: sanitizeHtml(b.props.html) } };
+    if (b.type === "split") return { ...b, props: { ...b.props, html: sanitizeHtml(b.props.html) } };
+    return b;
+  });
+  const doc = extractSiteDoc((ver as { doc: unknown }).doc);
+  doc.home_blocks = washed;
+  const { data: upd, error } = await ctx.supabase
+    .from("site_versions")
+    .update({ doc })
+    .eq("id", versionId)
+    .eq("status", "draft")
+    .select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!upd?.length) return { ok: false, error: "The save didn't land — the version may have just been published." };
+  revalidatePath("/site-studio");
+  return { ok: true, id: versionId };
 }
 
 /** A draft that didn't work out. Draft-only — published/archived rows are the history. */

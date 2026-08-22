@@ -31,6 +31,8 @@ export const SITE_DOC_KEYS = [
   "specialty_blurb",
   "service_area",
   "site_theme",
+  "hero_align",
+  "hero_style",
   "site_accent",
   "site_font",
   "site_density",
@@ -56,6 +58,8 @@ export interface SiteDoc {
   specialty_blurb: string;
   service_area: string;
   site_theme: "classic" | "bold" | "minimal";
+  hero_align: "left" | "center" | "right";
+  hero_style: "open" | "panel" | "band";
   site_accent: string;
   site_font: "default" | "serif" | "grotesk" | "soft";
   site_density: "default" | "compact" | "airy";
@@ -118,6 +122,8 @@ export function extractSiteDoc(rawSettings: unknown): SiteDoc {
     specialty_blurb: s(st.specialty_blurb, LIMITS.specialtyBlurb),
     service_area: s(st.service_area, LIMITS.serviceArea),
     site_theme: st.site_theme === "bold" || st.site_theme === "minimal" ? st.site_theme : "classic",
+    hero_align: st.hero_align === "center" || st.hero_align === "right" ? st.hero_align : "left",
+    hero_style: st.hero_style === "panel" || st.hero_style === "band" ? st.hero_style : "open",
     site_accent: (() => {
       const a = typeof st.site_accent === "string" ? st.site_accent.trim() : "";
       return HEX6.test(a) ? a.toLowerCase() : "";
@@ -271,6 +277,14 @@ export function coerceSiteDoc(raw: unknown, base: SiteDoc): { doc: SiteDoc; drop
       specialty_blurb: sOr(r.specialty_blurb, base.specialty_blurb, LIMITS.specialtyBlurb),
       service_area: sOr(r.service_area, base.service_area, LIMITS.serviceArea),
       site_theme: theme === "classic" || theme === "bold" || theme === "minimal" ? theme : base.site_theme,
+      hero_align:
+        r.hero_align === "left" || r.hero_align === "center" || r.hero_align === "right"
+          ? r.hero_align
+          : base.hero_align,
+      hero_style:
+        r.hero_style === "open" || r.hero_style === "panel" || r.hero_style === "band"
+          ? r.hero_style
+          : base.hero_style,
       site_accent:
         r.site_accent === undefined
           ? base.site_accent
@@ -312,6 +326,8 @@ export function diffSiteDoc(a: SiteDoc, b: SiteDoc): string[] {
     specialty_blurb: "Specialty blurb",
     service_area: "Service area",
     site_theme: "Theme",
+    hero_align: "Hero text position",
+    hero_style: "Hero text treatment",
     site_accent: "Accent color",
     site_font: "Heading typeface",
     site_density: "Page density",

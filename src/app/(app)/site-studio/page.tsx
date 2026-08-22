@@ -24,7 +24,7 @@ export default async function SiteStudioPage() {
   if (!me || !isStaffRole((me as { role?: string }).role)) redirect("/timeclock");
 
   const [{ data: org }, { data: versions }, { data: publishedRow }] = await Promise.all([
-    supabase.from("organizations").select("settings").limit(1).maybeSingle(),
+    supabase.from("organizations").select("id, settings").limit(1).maybeSingle(),
     supabase
       .from("site_versions")
       .select("id, v, note, status, created_at, doc")
@@ -48,6 +48,7 @@ export default async function SiteStudioPage() {
         description="Describe the change; a new version appears in the preview. Nothing goes live until you publish — and any older version can be published again."
       />
       <SiteStudio
+        orgId={String((org as { id?: string } | null)?.id ?? "")}
         handle={settings.public_handle?.trim() || null}
         liveDoc={liveDoc}
         versions={(() => {

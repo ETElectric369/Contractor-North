@@ -11,7 +11,9 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/toast";
 import { formatDateTime } from "@/lib/utils";
 import { diffSiteDoc, extractSiteDoc, siteDocSeoChecks, type SiteDoc } from "@/lib/site-doc";
-import { captureSiteVersion, designSitePass, discardSiteVersion, publishSiteVersion } from "./actions";
+import { captureSiteVersion, designSiteOptions, designSitePass, discardSiteVersion, publishSiteVersion, updateVersionBlocks } from "./actions";
+import { BlockEditor } from "../settings/block-editor";
+import type { Block } from "@/lib/site-blocks";
 
 type VersionRow = { id: string; v: number; note: string | null; status: string; created_at: string; doc: unknown };
 
@@ -21,10 +23,12 @@ type VersionRow = { id: string; v: number; note: string | null; status: string; 
  * re-publishable). The chat is for taste; the buttons are for the deterministic verbs.
  */
 export function SiteStudio({
+  orgId,
   handle,
   liveDoc,
   versions,
 }: {
+  orgId?: string;
   handle: string | null;
   liveDoc: SiteDoc;
   versions: VersionRow[];
@@ -33,6 +37,7 @@ export function SiteStudio({
   const toast = useToast();
   const [pendingUi, start] = useTransition();
   const [designing, setDesigning] = useState(false);
+  const [optioning, setOptioning] = useState(false);
   const [instruction, setInstruction] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(
     versions.find((r) => r.status === "draft")?.id ?? versions[0]?.id ?? null,
@@ -40,6 +45,12 @@ export function SiteStudio({
   const [lastChanges, setLastChanges] = useState<string[]>([]);
   const [lastDropped, setLastDropped] = useState<string[]>([]);
   const [lastCannot, setLastCannot] = useState<string[]>([]);
+  // ARRANGE BY HAND — the hand-edit mode on the selected DRAFT's body. Seeded from the version
+  // when opened; Save writes the draft (never the live site). Keyed by version so switching
+  // versions never carries stale blocks across.
+  const [handOpen, setHandOpen] = useState(false);
+  const [handBlocks, setHandBlocks] = useState<Block[] | null>(null);
+  const [handSaving, setHandSaving] = useState(false);
   // SAY THE DESIGN (Erik: "can we put a talk button in there to have Nort design it verbally?").
   // Same press-to-talk → /api/transcribe turn as the inspector and /organize. The words land IN
   // THE BOX for review — dictation hands back text, never an action; he reads it, fixes a
@@ -95,6 +106,23 @@ export function SiteStudio({
     });
   }
 
+  // ONE TAP, FOUR ARRANGEMENTS — the see-options answer to "like i would drag and drop any old
+  // editor": flip through them with your eyes instead of describing layout in words.
+  function runOptions() {
+    setOptioning(true);
+    start(async () => {
+      const r = await designSiteOptions(selectedId);
+      setOptioning(false);
+      if (!r.ok) return toast(r.error ?? "The options pass failed.", "error");
+      setLastChanges((r.options ?? []).map((o) => o.note));
+      setLastDropped([]);
+      setLastCannot([]);
+      if (r.options?.[0]?.id) setSelectedId(r.options[0].id);
+      toast(`${r.options?.length ?? 0} options ready — click through the new versions.`, "success");
+      router.refresh();
+    });
+  }
+
   function runCapture() {
     start(async () => {
       const r = await captureSiteVersion();
@@ -120,6 +148,20 @@ export function SiteStudio({
       const r = await publishSiteVersion(selected.id);
       if (!r.ok) return toast(r.error ?? "Publish failed.", "error");
       toast(`v${selected.v} is live.`, "success");
+      router.refresh();
+    });
+  }
+
+  function saveHandBlocks() {
+    if (!selected || handBlocks == null) return;
+    setHandSaving(true);
+    start(async () => {
+      const r = await updateVersionBlocks(selected.id, handBlocks);
+      setHandSaving(false);
+      if (!r.ok) return toast(r.error ?? "Couldn't save the arrangement.", "error");
+      toast("Arrangement saved to this draft.", "success");
+      setHandOpen(false);
+      setHandBlocks(null);
       router.refresh();
     });
   }
@@ -158,6 +200,15 @@ export function SiteStudio({
                   <>
                     <Sparkles className="h-4 w-4" /> Design a version
                   </>
+                )}
+              </Button>
+              <Button onClick={runOptions} disabled={designing || optioning || pendingUi} size="sm" variant="outline">
+                {optioning ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" /> Designing 4…
+                  </>
+                ) : (
+                  "Show me options"
                 )}
               </Button>
               <button
@@ -311,6 +362,55 @@ export function SiteStudio({
           title="Site preview"
           className="h-[75vh] w-full rounded-xl border border-slate-200 bg-white shadow-sm"
         />
+        {/* ARRANGE BY HAND — only on a draft. The same editor the settings page uses, pointed
+            at this version's body instead of the live site: move things, save, see the preview. */}
+        {selected && selected.status === "draft" && selectedDoc && (
+          <div className="mt-3">
+            {!handOpen ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setHandBlocks(selectedDoc.home_blocks.map((b) => ({ ...b })));
+                  setHandOpen(true);
+                }}
+                className="text-sm font-medium text-brand underline-offset-2 hover:underline"
+              >
+                Arrange this version by hand →
+              </button>
+            ) : (
+              <Card key={selected.id}>
+                <CardContent className="space-y-3 py-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      Arranging v{selected.v} by hand — the page body below the hero
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <Button size="sm" onClick={saveHandBlocks} disabled={handSaving || pendingUi}>
+                        {handSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save arrangement"}
+                      </Button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setHandOpen(false);
+                          setHandBlocks(null);
+                        }}
+                        className="text-xs font-medium text-slate-500 hover:underline"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                  <BlockEditor
+                    blocks={handBlocks ?? []}
+                    onChange={setHandBlocks}
+                    orgId={orgId}
+                    sections
+                  />
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

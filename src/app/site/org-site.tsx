@@ -63,6 +63,8 @@ function Hero({
   ctaLabel,
   hasPhotos,
   creds,
+  heroAlign = "left",
+  heroStyle = "open",
 }: {
   theme: OrgSettings["site_theme"];
   name?: string;
@@ -76,6 +78,8 @@ function Hero({
   ctaLabel: string;
   hasPhotos: boolean;
   creds: string[];
+  heroAlign?: OrgSettings["hero_align"];
+  heroStyle?: OrgSettings["hero_style"];
 }) {
   const cta = (
     <Link href={estimateHref} className="inline-flex items-center gap-2 rounded-lg px-6 py-3.5 text-base font-semibold text-white shadow-lg" style={{ backgroundColor: brand }}>
@@ -156,37 +160,61 @@ function Hero({
     );
   }
 
-  // CLASSIC (default) — full-bleed photo hero with a dark overlay. The original.
+  // CLASSIC (default) — full-bleed photo hero with a dark overlay. The original — now with the
+  // TEXT ARRANGEMENT levers (Erik: "i do not want to change the background image on the top, i
+  // want to see options for all the text moved around"): hero_align places the text block
+  // left/center/right over the photo; hero_style picks how it sits on it — open (straight on
+  // the image), panel (translucent card, text legible anywhere), band (a strip across the
+  // bottom, the photo breathing above). Defaults render the original byte-identically.
+  const alignWrap =
+    heroAlign === "center" ? "flex justify-center text-center" : heroAlign === "right" ? "flex justify-end" : "";
+  const alignInner = heroAlign === "center" ? "flex flex-col items-center" : "";
+  const textBlock = (
+    <div className={`max-w-2xl ${alignInner} ${heroStyle === "panel" ? "rounded-2xl bg-slate-950/55 p-8 backdrop-blur-sm sm:p-10" : ""}`}>
+      {name && <p className="mb-2 text-2xl font-extrabold tracking-tight text-white drop-shadow">{name}</p>}
+      {area && <p className="mb-3 text-sm font-semibold uppercase tracking-[0.2em] text-white/80">{area}</p>}
+      {headline && <h1 className={`${hSize} font-extrabold leading-tight tracking-tight text-white drop-shadow`}>{headline}</h1>}
+      {tagline && <p className="mt-4 max-w-xl text-lg text-slate-100">{tagline}</p>}
+      <div className="mt-8 flex flex-wrap items-center gap-3">
+        {cta}
+        {hasPhotos && (
+          <a href="#work" className="inline-flex items-center gap-2 rounded-lg border border-white/40 px-6 py-3.5 text-base font-semibold text-white hover:bg-white/10">See our work</a>
+        )}
+      </div>
+      {creds.length > 0 && <p className="mt-6 text-sm font-medium text-white/85">{creds.join("  ·  ")}</p>}
+    </div>
+  );
+  const heroImg = hero && (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={sizedImage(hero, 1920)}
+      srcSet={imageSrcSet(hero, [960, 1920, 2560])}
+      sizes="100vw"
+      fetchPriority="high"
+      alt=""
+      aria-hidden
+      className="absolute inset-0 -z-10 h-full w-full object-cover"
+    />
+  );
+  if (heroStyle === "band") {
+    // The photo breathes on top; the words live in a solid strip across the bottom.
+    return (
+      <section id="top" className="relative isolate overflow-hidden">
+        <div className="relative min-h-[320px] sm:min-h-[440px]">
+          {heroImg}
+          <div className="absolute inset-0 -z-10" style={{ background: "linear-gradient(180deg, rgba(2,6,23,.15), rgba(2,6,23,.35))" }} />
+        </div>
+        <div className="bg-slate-950/85">
+          <div className={`mx-auto max-w-6xl px-4 py-10 sm:py-12 ${alignWrap}`}>{textBlock}</div>
+        </div>
+      </section>
+    );
+  }
   return (
     <section id="top" className="relative isolate overflow-hidden">
-      {hero && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={sizedImage(hero, 1920)}
-          srcSet={imageSrcSet(hero, [960, 1920, 2560])}
-          sizes="100vw"
-          fetchPriority="high"
-          alt=""
-          aria-hidden
-          className="absolute inset-0 -z-10 h-full w-full object-cover"
-        />
-      )}
+      {heroImg}
       <div className="absolute inset-0 -z-10" style={{ background: "linear-gradient(180deg, rgba(2,6,23,.55), rgba(2,6,23,.72))" }} />
-      <div className="mx-auto max-w-6xl px-4 py-24 sm:py-32">
-        <div className="max-w-2xl">
-          {name && <p className="mb-2 text-2xl font-extrabold tracking-tight text-white drop-shadow">{name}</p>}
-          {area && <p className="mb-3 text-sm font-semibold uppercase tracking-[0.2em] text-white/80">{area}</p>}
-          {headline && <h1 className={`${hSize} font-extrabold leading-tight tracking-tight text-white drop-shadow`}>{headline}</h1>}
-          {tagline && <p className="mt-4 max-w-xl text-lg text-slate-100">{tagline}</p>}
-          <div className="mt-8 flex flex-wrap items-center gap-3">
-            {cta}
-            {hasPhotos && (
-              <a href="#work" className="inline-flex items-center gap-2 rounded-lg border border-white/40 px-6 py-3.5 text-base font-semibold text-white hover:bg-white/10">See our work</a>
-            )}
-          </div>
-          {creds.length > 0 && <p className="mt-6 text-sm font-medium text-white/85">{creds.join("  ·  ")}</p>}
-        </div>
-      </div>
+      <div className={`mx-auto max-w-6xl px-4 py-24 sm:py-32 ${alignWrap}`}>{textBlock}</div>
     </section>
   );
 }
@@ -287,6 +315,8 @@ export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg;
             ctaLabel={ctaLabel}
             hasPhotos={showWorkLink}
             creds={creds}
+            heroAlign={s.hero_align}
+            heroStyle={s.hero_style}
           />
 
           {/* Trust band */}

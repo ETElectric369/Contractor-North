@@ -178,6 +178,13 @@ export interface OrgSettings {
   /** The public site's HEADING typeface preset (site-fonts.tsx) — headings only, body stays the
    *  system stack. "default" = the app's Geist, i.e. render nothing extra. */
   site_font: "default" | "serif" | "grotesk" | "soft";
+  /** WHERE the hero's text sits over the photo (classic framing only): left (the original),
+   *  center, or right. The two-column framings ignore it. */
+  hero_align: "left" | "center" | "right";
+  /** HOW the hero's text sits on the photo (classic only): open (text straight on the image —
+   *  the original), panel (a translucent dark card behind the text), band (a solid strip across
+   *  the bottom with the photo breathing above it). */
+  hero_style: "open" | "panel" | "band";
   /** Whole-page vertical rhythm: scoped rescale of the section paddings (site-fonts.tsx emits
    *  the overrides). "default" = untouched; per-section spacing is style.pad on section blocks. */
   site_density: "default" | "compact" | "airy";
@@ -275,6 +282,8 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   site_accent: "",
   site_font: "default",
   site_density: "default",
+  hero_align: "left",
+  hero_style: "open",
   estimate_cta_label: "",
   social_instagram: "",
   custom_domain: "",
