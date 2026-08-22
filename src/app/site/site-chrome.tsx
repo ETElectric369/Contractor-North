@@ -236,8 +236,12 @@ export function SiteHeader({
   );
 }
 
-export function SiteFooter({ chrome }: { chrome: SiteChrome }) {
+export function SiteFooter({ chrome, extInPlace = false }: { chrome: SiteChrome; extInPlace?: boolean }) {
   const { org, brand, showName, telHref, area, ig, gbpUrl, creds, estimateHref } = chrome;
+  // On the APP-HOST view (what the North shell shows) external links navigate IN PLACE —
+  // the shell eats new-tab links (Erik: "the review us on google link doesnt link"). The
+  // public domains keep the standard new-tab behavior.
+  const ext = extInPlace ? {} : ({ target: "_blank", rel: "noopener" } as const);
   const s = org.settings;
   return (
     <footer id="contact" className="border-t border-slate-200 bg-slate-900 text-slate-300">
@@ -260,7 +264,7 @@ export function SiteFooter({ chrome }: { chrome: SiteChrome }) {
           {area && <p className="flex items-center gap-2"><MapPin className="h-4 w-4" style={{ color: brand }} /> {area}</p>}
           {ig && <a href={`https://www.instagram.com/${ig}`} className="flex items-center gap-2 hover:text-white"><Instagram className="h-4 w-4" style={{ color: brand }} /> @{ig}</a>}
           {gbpUrl && (
-            <a href={gbpUrl} target="_blank" rel="noopener" className="flex items-center gap-2 hover:text-white">
+            <a href={gbpUrl} {...ext} className="flex items-center gap-2 hover:text-white">
               <Star className="h-4 w-4" style={{ color: brand }} /> Review us on Google
             </a>
           )}

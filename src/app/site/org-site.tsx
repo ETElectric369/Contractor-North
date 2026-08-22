@@ -130,8 +130,10 @@ function Hero({
         background: `linear-gradient(180deg, rgba(255,255,255,0.55), rgba(255,255,255,0.12)), ${ghostTint}3d`,
         backdropFilter: "blur(14px) saturate(1.5)",
         WebkitBackdropFilter: "blur(14px) saturate(1.5)",
-        border: "1px solid rgba(255,255,255,0.6)",
-        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.9), 0 10px 28px -14px rgba(15,23,42,0.3)",
+        // CLEAN EDGES (Erik: "maybe the outline needs to go away") — no border ring; the
+        // sheen and a soft drop shadow define the chip, like the dock itself.
+        border: "0",
+        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.45), 0 10px 28px -14px rgba(15,23,42,0.3)",
         color: ink(ghostTint),
       }
     : undefined;
@@ -333,7 +335,7 @@ function Hero({
   );
 }
 
-export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg; articlesHref?: string | null; pageLinks?: { href: string; label: string }[] }) {
+export function OrgSite({ org, articlesHref, pageLinks = [], appHost = false }: { org: PublicOrg; articlesHref?: string | null; pageLinks?: { href: string; label: string }[]; appHost?: boolean }) {
   const s = org.settings;
   const handle = s.public_handle;
   // ONE derivation of the shared header/footer inputs (brand, nav visibility, estimate CTA) —
@@ -510,14 +512,14 @@ export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg;
           <ServicesBand services={services} brand={brand} />
 
           <PortfolioBand portfolio={portfolio} brand={brand} orgName={org.name} moreHref={portfolioPageHref} />
-          <ReviewsBand reviews={reviews} brand={brand} gbpUrl={gbpUrl} />
+          <ReviewsBand reviews={reviews} brand={brand} gbpUrl={gbpUrl} appHostExt={appHost} />
           <EstimateBand hasConfigurator={hasConfigurator} estimateHref={estimateHref} ctaLabel={ctaLabel} brand={brand} />
           <ContactBand orgId={org.id} brand={brand} hasConfigurator={hasConfigurator} pageHref={contactPageHref} />
         </>
       )}
 
       {/* Footer / contact — the shared site chrome (same footer every public page wears). */}
-      <SiteFooter chrome={chrome} />
+      <SiteFooter chrome={chrome} extInPlace={appHost} />
 
       {handle && <AskNort handle={handle} orgName={org.name} brand={brand} />}
     </div>
@@ -544,14 +546,14 @@ function PortfolioBand({ portfolio, brand, orgName, moreHref }: { portfolio: { u
   );
 }
 
-function ReviewsBand({ reviews, brand, gbpUrl }: { reviews: { name: string; text: string; rating?: number }[]; brand: string; gbpUrl?: string }) {
+function ReviewsBand({ reviews, brand, gbpUrl, appHostExt = false }: { reviews: { name: string; text: string; rating?: number }[]; brand: string; gbpUrl?: string; appHostExt?: boolean }) {
   if (!reviews.length) return null;
   return (
     <section id="reviews" className="mx-auto max-w-6xl px-4 py-16">
       <div className="flex flex-wrap items-baseline justify-between gap-3">
         <h2 className="text-3xl font-extrabold tracking-tight">What our customers say</h2>
         {gbpUrl && (
-          <a href={gbpUrl} target="_blank" rel="noopener" className="inline-flex items-center gap-1.5 text-sm font-semibold hover:underline" style={{ color: brand }}>
+          <a href={gbpUrl} {...(appHostExt ? {} : { target: "_blank", rel: "noopener" })} className="inline-flex items-center gap-1.5 text-sm font-semibold hover:underline" style={{ color: brand }}>
             <Star className="h-4 w-4" fill={brand} /> Review us on Google
           </a>
         )}

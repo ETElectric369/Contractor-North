@@ -109,7 +109,7 @@ export default async function SiteHome({
           }}
         />
       )}
-      <OrgSite org={effOrg} articlesHref={nav.articlesHref} pageLinks={nav.pageLinks} />
+      <OrgSite org={effOrg} articlesHref={nav.articlesHref} pageLinks={nav.pageLinks} appHost={base !== ""} />
     </>
   );
 }
