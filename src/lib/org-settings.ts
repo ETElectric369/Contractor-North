@@ -178,6 +178,9 @@ export interface OrgSettings {
   /** The public site's HEADING typeface preset (site-fonts.tsx) — headings only, body stays the
    *  system stack. "default" = the app's Geist, i.e. render nothing extra. */
   site_font: "default" | "serif" | "grotesk" | "soft";
+  /** Whole-page vertical rhythm: scoped rescale of the section paddings (site-fonts.tsx emits
+   *  the overrides). "default" = untouched; per-section spacing is style.pad on section blocks. */
+  site_density: "default" | "compact" | "airy";
   /** The estimate buttons' label, everywhere they render (header, hero, bands, footer).
    *  Empty = the built-in wording ("Get your free instant estimate" / "Request a free estimate"
    *  / "Get an estimate" for the compact spots). */
@@ -271,6 +274,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   site_theme: "classic",
   site_accent: "",
   site_font: "default",
+  site_density: "default",
   estimate_cta_label: "",
   social_instagram: "",
   custom_domain: "",

@@ -31,16 +31,60 @@ export function siteFontKey(v: unknown): SiteFontKey {
   return v === "serif" || v === "grotesk" || v === "soft" ? v : "default";
 }
 
+/**
+ * THE DENSITY LEVER (Erik hit the spacing wall twice in one night — v6 and v8 both ended in
+ * "spacing not controllable"). Whole-page rhythm, not per-section layout: the site's vertical
+ * paddings live in seven Tailwind steps, and a scoped override rescales all of them together.
+ * compact ≈ ×0.65, airy ≈ ×1.45. "default" emits nothing — existing sites byte-identical.
+ * Per-section spacing and unstacking stay honestly impossible until the Phase 2 components.
+ */
+const DENSITY_SCALES: Record<string, Record<string, string> | null> = {
+  default: null,
+  compact: {
+    "py-10": "1.75rem",
+    "py-12": "2rem",
+    "py-14": "2.25rem",
+    "py-16": "2.75rem",
+    "py-20": "3.25rem",
+    "py-24": "4rem",
+    "py-28": "4.5rem",
+  },
+  airy: {
+    "py-10": "3.5rem",
+    "py-12": "4.25rem",
+    "py-14": "5rem",
+    "py-16": "5.75rem",
+    "py-20": "7.25rem",
+    "py-24": "8.5rem",
+    "py-28": "10rem",
+  },
+};
+
+export function siteDensityKey(v: unknown): "default" | "compact" | "airy" {
+  return v === "compact" || v === "airy" ? v : "default";
+}
+
 /** Mounted inside each public-site root (they all carry the `site-shell` class). Renders nothing
- *  for the default preset, so existing sites are byte-identical until an org chooses a face. */
+ *  for the default presets, so existing sites are byte-identical until an org chooses. */
 export function SiteFonts({ settings }: { settings: OrgSettings }) {
   const preset = SITE_FONTS[siteFontKey(settings.site_font)];
-  if (!preset) return null;
+  const density = DENSITY_SCALES[siteDensityKey(settings.site_density)];
+  if (!preset && !density) return null;
+  const densityCss = density
+    ? Object.entries(density)
+        .map(([cls, pad]) => `.site-shell .${cls} { padding-top: ${pad}; padding-bottom: ${pad}; }`)
+        .join("\n")
+    : "";
   return (
     <>
-      {/* eslint-disable-next-line @next/next/no-page-custom-font */}
-      <link rel="stylesheet" href={preset.css} />
-      <style>{`.site-shell h1, .site-shell h2, .site-shell h3 { font-family: ${preset.family}; }`}</style>
+      {preset && (
+        // eslint-disable-next-line @next/next/no-page-custom-font
+        <link rel="stylesheet" href={preset.css} />
+      )}
+      <style>
+        {(preset ? `.site-shell h1, .site-shell h2, .site-shell h3 { font-family: ${preset.family}; }\n` : "") +
+          densityCss}
+      </style>
     </>
   );
 }

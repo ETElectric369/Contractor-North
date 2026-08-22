@@ -33,6 +33,7 @@ export const SITE_DOC_KEYS = [
   "site_theme",
   "site_accent",
   "site_font",
+  "site_density",
   "estimate_cta_label",
   "social_instagram",
   "google_business_url",
@@ -57,6 +58,7 @@ export interface SiteDoc {
   site_theme: "classic" | "bold" | "minimal";
   site_accent: string;
   site_font: "default" | "serif" | "grotesk" | "soft";
+  site_density: "default" | "compact" | "airy";
   estimate_cta_label: string;
   social_instagram: string;
   google_business_url: string;
@@ -118,6 +120,7 @@ export function extractSiteDoc(rawSettings: unknown): SiteDoc {
     site_theme: st.site_theme === "bold" || st.site_theme === "minimal" ? st.site_theme : "classic",
     site_accent: HEX6.test(st.site_accent?.trim() ?? "") ? st.site_accent.trim().toLowerCase() : "",
     site_font: st.site_font === "serif" || st.site_font === "grotesk" || st.site_font === "soft" ? st.site_font : "default",
+    site_density: st.site_density === "compact" || st.site_density === "airy" ? st.site_density : "default",
     estimate_cta_label: s(st.estimate_cta_label, LIMITS.ctaLabel),
     social_instagram: s(st.social_instagram, LIMITS.handle),
     google_business_url: s(st.google_business_url, LIMITS.url),
@@ -228,6 +231,10 @@ export function coerceSiteDoc(raw: unknown, base: SiteDoc): { doc: SiteDoc; drop
       const images = b.props.images.filter((i) => known.has(i.url));
       if (images.length < b.props.images.length) dropped.push("gallery photos that aren't in your library");
       if (images.length) blocks.push({ ...b, props: { images } });
+    } else if (b.type === "split") {
+      const url = b.props.url ? img(b.props.url, "an image-and-text section") : "";
+      if (b.props.url && !url) continue; // its image was refused — the block goes with it, named
+      blocks.push({ ...b, props: { ...b.props, url } });
     } else if (b.type === "button") {
       if (!safeHref(b.props.href)) {
         dropped.push(`a button linking off your site (${b.props.label || "unlabeled"})`);
@@ -270,6 +277,10 @@ export function coerceSiteDoc(raw: unknown, base: SiteDoc): { doc: SiteDoc; drop
         r.site_font === "default" || r.site_font === "serif" || r.site_font === "grotesk" || r.site_font === "soft"
           ? r.site_font
           : base.site_font,
+      site_density:
+        r.site_density === "default" || r.site_density === "compact" || r.site_density === "airy"
+          ? r.site_density
+          : base.site_density,
       estimate_cta_label: sOr(r.estimate_cta_label, base.estimate_cta_label, LIMITS.ctaLabel),
       social_instagram: sOr(r.social_instagram, base.social_instagram, LIMITS.handle),
       google_business_url: base.google_business_url, // a design never rewrites the GBP link
@@ -299,6 +310,7 @@ export function diffSiteDoc(a: SiteDoc, b: SiteDoc): string[] {
     site_theme: "Theme",
     site_accent: "Accent color",
     site_font: "Heading typeface",
+    site_density: "Page density",
     estimate_cta_label: "Estimate button label",
     social_instagram: "Instagram",
     google_business_url: "Google Business link",

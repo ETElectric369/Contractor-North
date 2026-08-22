@@ -12,7 +12,13 @@ import { isReservedSlug } from "@/lib/site-reserved";
  * dangerouslySetInnerHTML safe no matter how the row was written. Runs AFTER normalizeBlocks.
  */
 function sanitizeTextBlocks(blocks: Block[]): Block[] {
-  return blocks.map((b) => (b.type === "text" ? { type: "text", props: { html: sanitizeHtml(b.props.html) }, style: b.style } : b));
+  return blocks.map((b) =>
+    b.type === "text"
+      ? { type: "text", props: { html: sanitizeHtml(b.props.html) }, style: b.style }
+      : b.type === "split" // split carries the same raw-HTML lane as text — same read-boundary wash
+        ? { type: "split", props: { ...b.props, html: sanitizeHtml(b.props.html) }, style: b.style }
+        : b,
+  );
 }
 
 /** Turn arbitrary stored jsonb into render-ready blocks: normalize/bound + sanitize the text sink.

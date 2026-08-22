@@ -7,7 +7,7 @@ import { parseAiJson } from "@/lib/ai-json";
 import { dbError } from "@/lib/db-error";
 import { getOrgSettings } from "@/lib/org-settings";
 import { rateLimited } from "@/lib/rate-limit";
-import { coerceSiteDoc, extractSiteDoc, knownImageUrls, type SiteDoc } from "@/lib/site-doc";
+import { coerceSiteDoc, diffSiteDoc, extractSiteDoc, knownImageUrls, type SiteDoc } from "@/lib/site-doc";
 import { SECTION_KEYS } from "@/lib/site-blocks";
 import { requireStaff } from "@/lib/staff-guard";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -135,13 +135,14 @@ export async function designSitePass(instruction: string, baseVersionId: string 
         "· splash_bg_url = the hero image; when it is \"\", the FIRST portfolio photo is the hero AND the link-preview image — so portfolio order matters.\n" +
         "· site_accent = '#rrggbb': the ONE color every band, button and gradient leans on ('' = the default derivation). The single biggest mood lever you have.\n" +
         "· site_font = 'default'|'serif'|'grotesk'|'soft': the HEADING typeface preset (serif=editorial Fraunces, grotesk=modern Space Grotesk, soft=rounded Nunito). Headings only; body text is fixed.\n" +
+        "· site_density = 'default'|'compact'|'airy': the WHOLE PAGE's vertical rhythm (all section paddings rescale together). For breathing room on ONE section, use style.pad on that section block instead.\n" +
         "· estimate_cta_label (≤40 chars) = the wording on EVERY estimate button — header, hero, bands, footer. '' = the built-in wording.\n" +
         "· home_blocks = ONLY the page body BELOW the hero. [] = the standard template (specialty, services grid, photos, reviews, estimate, contact). Non-empty replaces those bands with your blocks.\n" +
         "· splash_headline (the H1 + Google title — keyword-real: trade + place), splash_tagline (meta-description-ish, ≤160 chars ideally), splash_bullets (services, ONE per line), splash_credentials (license line), splash_headline_size ('s'|'m'|'l'), show_name_with_logo (bool), specialty_headline/specialty_blurb (signature-work section), service_area (towns, ' · ' separated), social_instagram (handle only), portfolio (ordered [{url, caption}] from the library).\n" +
-        "WHAT NO FIELD CONTROLS (be honest, never fake the nearest thing): body-text fonts and letter-spacing (headings ARE controllable via site_font), per-section spacing/padding, page backgrounds outside the hero, animations, nav layout, footer layout, the trust band, page URLs. When the owner asks for one of these, name it in \"cannot\" in plain words and change only what they ALSO asked for.\n" +
-        "HOME_BLOCKS PALETTE: {type:'heading',props:{text,align?}}, {type:'text',props:{html}} (simple p/strong/em/ul/li html only), {type:'image',props:{url,alt,caption}}, {type:'button',props:{label,href,align?}}, {type:'gallery',props:{images:[{url,alt}]}}, {type:'banner',props:{bgUrl,heading,text?,buttonLabel?,buttonHref?}}, {type:'section',props:{key:'" +
+        "WHAT NO FIELD CONTROLS (be honest, never fake the nearest thing): body-text fonts and letter-spacing (headings ARE controllable via site_font), page backgrounds outside the hero, animations, nav layout, footer layout, the trust band, page URLs. (Spacing IS controllable now: site_density for the whole page, style.pad per block/section. Side-by-side image+text IS controllable: the split block.) When the owner asks for one of these, name it in \"cannot\" in plain words and change only what they ALSO asked for.\n" +
+        "HOME_BLOCKS PALETTE: {type:'heading',props:{text,align?}}, {type:'text',props:{html}} (simple p/strong/em/ul/li html only), {type:'image',props:{url,alt,caption}}, {type:'button',props:{label,href,align?}}, {type:'gallery',props:{images:[{url,alt}]}}, {type:'banner',props:{bgUrl,heading,text?,buttonLabel?,buttonHref?}}, {type:'split',props:{url,heading,html,imageSide:'left'|'right'}} (image BESIDE text, side by side — the un-stacked layout; stacks on phones), {type:'section',props:{key:'" +
         SECTION_KEYS.join("'|'") +
-        "'}} (live org sections). Optional style per block: {align,size:'s'|'m'|'l'|'xl',font:'sans'|'serif'|'mono',color:'#rrggbb'}.\n" +
+        "'}} (live org sections — 'services' renders the what-we-do grid, 'specialty' the signature-work band; a block homepage that omits them LOSES them). Optional style per block: {align,size:'s'|'m'|'l'|'xl',font:'sans'|'serif'|'mono',color:'#rrggbb',pad:'s'|'m'|'l'} — pad adds vertical breathing room around that block or section.\n" +
         'Respond with ONLY a JSON object: {"doc": {<ONLY the fields you are CHANGING — an omitted field keeps its current value; include a field only to change it>}, "changes": ["what changed and why, one plain sentence each — the owner reads these"], "cannot": ["anything asked for that no field controls — plain words; empty array when nothing"], "note": "≤12 words naming this version"}. No prose outside the JSON.',
       messages: [
         {
@@ -182,6 +183,11 @@ export async function designSitePass(instruction: string, baseVersionId: string 
       : [];
     const note = String(parsed.note ?? "Design pass").replace(/\s+/g, " ").trim().slice(0, 120) || "Design pass";
 
+    // A PASS THAT CHANGES NOTHING MINTS NOTHING (v6 and v8 were both empty "no change" rows —
+    // version-list noise). The honest answer rides back in `cannot`; no version is created.
+    if (diffSiteDoc(base, doc).length === 0) {
+      return { ok: true, changes: [], dropped, cannot: cannot.length ? cannot : ["Nothing in that request maps to a design field — no version created."], note };
+    }
     const ins = await insertVersion(ctx.supabase, { doc, note, created_by: ctx.userId });
     if ("error" in ins) return { ok: false, error: ins.error };
     revalidatePath("/site-studio");

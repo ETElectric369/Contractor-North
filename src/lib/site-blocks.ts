@@ -4,18 +4,22 @@
  * composes pages safely with zero XSS surface. Adding a NEW block type = add one entry here + a
  * renderer case + an editor case (the only thing that ever needs a developer).
  */
-export type BlockType = "heading" | "text" | "image" | "button" | "gallery" | "banner" | "section";
+export type BlockType = "heading" | "text" | "image" | "button" | "gallery" | "banner" | "split" | "section";
 
 /** The wired homepage sections you drop into the layout as-is — they render live org data / behavior
  *  (the gallery pulls your photos, contact captures leads, etc.), so they stay "smart" instead of
  *  becoming dumb content. Only offered on the homepage builder. */
-export type SectionKey = "portfolio" | "reviews" | "contact" | "estimate";
-export const SECTION_KEYS: SectionKey[] = ["portfolio", "reviews", "contact", "estimate"];
+export type SectionKey = "portfolio" | "reviews" | "contact" | "estimate" | "services" | "specialty";
+export const SECTION_KEYS: SectionKey[] = ["portfolio", "reviews", "contact", "estimate", "services", "specialty"];
 export const SECTION_PALETTE: { key: SectionKey; label: string; hint: string }[] = [
   { key: "portfolio", label: "Photo gallery", hint: "Your portfolio photos (auto-updates)" },
   { key: "reviews", label: "Reviews", hint: "Your customer reviews" },
   { key: "contact", label: "Contact form", hint: "A lead-capture form + your contact info" },
   { key: "estimate", label: "Estimate button", hint: "A band with your get-an-estimate button" },
+  // The two default-template bands a block homepage used to LOSE — choosing blocks should never
+  // cost a band the standard layout gets for free.
+  { key: "services", label: "Services grid", hint: "The what-we-do grid from your services list" },
+  { key: "specialty", label: "Specialty showcase", hint: "Your signature-work band (headline + photos)" },
 ];
 
 /** The per-block styling "toolbox" — the safe, structured set of visual controls (no free CSS).
@@ -26,6 +30,8 @@ export type BlockStyle = {
   size?: "s" | "m" | "l" | "xl";
   font?: "sans" | "serif" | "mono";
   color?: string; // #rrggbb only (validated in normalizeBlocks AND re-checked in the renderer)
+  /** Per-block vertical breathing room — the per-section spacing lever ("s" tight, "l" airy). */
+  pad?: "s" | "m" | "l";
 };
 
 export type Block =
@@ -36,6 +42,8 @@ export type Block =
   | { type: "gallery"; props: { images: { url: string; alt?: string }[] }; style?: BlockStyle }
   // A full-width band with a background image + dark overlay + centered heading/text/button.
   | { type: "banner"; props: { bgUrl: string; heading: string; text?: string; buttonLabel?: string; buttonHref?: string }; style?: BlockStyle }
+  // Image beside text, side by side (stacks on phones) — the "unstack the text boxes" block.
+  | { type: "split"; props: { url: string; heading: string; html: string; imageSide?: "left" | "right" }; style?: BlockStyle }
   // A wired homepage section (renders live org data / behavior) — see SectionKey.
   | { type: "section"; props: { key: SectionKey }; style?: BlockStyle };
 
@@ -50,6 +58,7 @@ export function coerceStyle(raw: unknown): BlockStyle | undefined {
   if (r.size === "s" || r.size === "m" || r.size === "l" || r.size === "xl") s.size = r.size;
   if (r.font === "sans" || r.font === "serif" || r.font === "mono") s.font = r.font;
   if (typeof r.color === "string" && HEX_COLOR.test(r.color)) s.color = r.color.toLowerCase();
+  if (r.pad === "s" || r.pad === "m" || r.pad === "l") s.pad = r.pad;
   return Object.keys(s).length ? s : undefined;
 }
 
@@ -61,6 +70,7 @@ export const BLOCK_PALETTE: { type: BlockType; label: string; hint: string; make
   { type: "button", label: "Button", hint: "A call-to-action link", make: () => ({ type: "button", props: { label: "", href: "", align: "left" } }) },
   { type: "gallery", label: "Gallery", hint: "A grid of photos", make: () => ({ type: "gallery", props: { images: [] } }) },
   { type: "banner", label: "Banner", hint: "A background image with text over it", make: () => ({ type: "banner", props: { bgUrl: "", heading: "", text: "", buttonLabel: "", buttonHref: "" } }) },
+  { type: "split", label: "Image + text", hint: "A photo beside a paragraph, side by side", make: () => ({ type: "split", props: { url: "", heading: "", html: "", imageSide: "left" } }) },
 ];
 
 // Caps enforced at the normalization chokepoint that BOTH the public read (getPublicPageBySlug) and
@@ -117,6 +127,18 @@ export function normalizeBlocks(raw: unknown): Block[] {
             text: cap(String(props.text ?? ""), MAX_TEXT_LEN),
             buttonLabel: cap(String(props.buttonLabel ?? ""), MAX_TEXT_LEN),
             buttonHref: cap(String(props.buttonHref ?? ""), MAX_TEXT_LEN),
+          },
+          style,
+        });
+        break;
+      case "split":
+        out.push({
+          type,
+          props: {
+            url: cap(String(props.url ?? ""), MAX_TEXT_LEN),
+            heading: cap(String(props.heading ?? ""), MAX_TEXT_LEN),
+            html: cap(String(props.html ?? ""), MAX_HTML_LEN),
+            imageSide: props.imageSide === "right" ? "right" : "left",
           },
           style,
         });

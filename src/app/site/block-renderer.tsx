@@ -26,6 +26,9 @@ const safeColor = (s?: BlockStyle) => (s?.color && HEX.test(s.color) ? s.color :
 const HEADING_SIZE = { s: "text-lg sm:text-xl", m: "text-xl sm:text-2xl", l: "text-2xl sm:text-3xl", xl: "text-3xl sm:text-4xl" } as const;
 const TEXT_SIZE = { s: "text-sm", m: "text-base", l: "text-[1.05rem]", xl: "text-lg" } as const;
 const BUTTON_SIZE = { s: "px-4 py-2 text-sm", m: "px-5 py-2.5 text-sm", l: "px-6 py-3 text-base", xl: "px-8 py-4 text-lg" } as const;
+// Per-block vertical breathing room (style.pad) — the per-section spacing lever. Applied as extra
+// padding INSIDE the block's slot, on top of the page's uniform space-y rhythm.
+const PAD_CLS = { s: "py-0", m: "py-6", l: "py-14" } as const;
 
 /**
  * Renders a page's blocks. Every block is a typed component — no freeform HTML — so collaborator- or
@@ -145,13 +148,50 @@ export function BlockRenderer({ blocks, brand }: { blocks: Block[]; brand: strin
               </div>
             );
           }
+          case "split": {
+            const src = safeImg(b.props.url);
+            if (!src && !b.props.heading && !b.props.html) return null;
+            const img = src && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={sizedImage(src, 960)}
+                srcSet={imageSrcSet(src, [480, 960])}
+                sizes="(min-width: 768px) 384px, 100vw"
+                alt={b.props.heading || ""}
+                loading="lazy"
+                decoding="async"
+                className="h-full w-full rounded-2xl object-cover"
+              />
+            );
+            return (
+              <div key={i} className={`grid items-center gap-6 sm:grid-cols-2 ${PAD_CLS[st?.pad ?? "s"] === "py-0" ? "" : PAD_CLS[st?.pad ?? "s"]}`}>
+                {b.props.imageSide !== "right" && <div className="max-h-96 overflow-hidden rounded-2xl">{img}</div>}
+                <div>
+                  {b.props.heading && (
+                    <h2 className={`font-bold tracking-tight text-slate-900 ${HEADING_SIZE[st?.size ?? "l"]} ${fontCls(st)}`} style={{ color: safeColor(st) }}>
+                      {b.props.heading}
+                    </h2>
+                  )}
+                  {b.props.html && (
+                    // Same raw-HTML lane as the text block — sanitized at the read boundary
+                    // (renderReadyBlocks washes split.html exactly like text.html).
+                    <div
+                      className="mt-3 space-y-3 leading-relaxed text-slate-700 [&_a]:underline [&_li]:ml-5 [&_ol]:list-decimal [&_ul]:list-disc"
+                      dangerouslySetInnerHTML={{ __html: b.props.html }}
+                    />
+                  )}
+                </div>
+                {b.props.imageSide === "right" && <div className="max-h-96 overflow-hidden rounded-2xl">{img}</div>}
+              </div>
+            );
+          }
           case "section":
             // A wired section (gallery/reviews/contact/estimate). The real thing renders on the
             // homepage via HomeBlockRenderer (which has org data); here (editor preview / a stray
             // section on a plain page) show a labeled placeholder so it's clear what will appear.
             return (
               <div key={i} className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-10 text-center text-sm font-medium text-slate-400">
-                {b.props.key === "portfolio" ? "Photo gallery" : b.props.key === "reviews" ? "Reviews" : b.props.key === "contact" ? "Contact form" : "Estimate button"} — shown live on your homepage
+                {b.props.key === "portfolio" ? "Photo gallery" : b.props.key === "reviews" ? "Reviews" : b.props.key === "contact" ? "Contact form" : b.props.key === "services" ? "Services grid" : b.props.key === "specialty" ? "Specialty showcase" : "Estimate button"} — shown live on your homepage
               </div>
             );
           default:

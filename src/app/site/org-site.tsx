@@ -1,3 +1,4 @@
+import React from "react";
 import type { Metadata } from "next";
 import { SiteFonts } from "./site-fonts";
 import Link from "next/link";
@@ -322,6 +323,7 @@ export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg;
           brand={brand}
           portfolio={portfolio}
           reviews={reviews}
+          services={services}
           estimateHref={estimateHref}
           ctaLabel={ctaLabel}
           hasConfigurator={hasConfigurator}
@@ -339,22 +341,7 @@ export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg;
           )}
 
           {/* Services */}
-          {services.length > 0 && (
-            <section id="services" className="mx-auto max-w-6xl px-4 py-16">
-              <h2 className="text-3xl font-extrabold tracking-tight">What we do</h2>
-              <p className="mt-2 max-w-2xl text-slate-600">Quality craftsmanship from the smallest fix to the biggest build — done right, on time.</p>
-              <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {services.map((svc, i) => (
-                  <div key={i} className="flex items-start gap-3 rounded-2xl border border-slate-200 p-5">
-                    <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full" style={{ backgroundColor: `${brand}1a`, color: brand }}>
-                      <Check className="h-4 w-4" />
-                    </span>
-                    <span className="font-semibold text-slate-800">{svc}</span>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
+          <ServicesBand services={services} brand={brand} />
 
           <PortfolioBand portfolio={portfolio} brand={brand} orgName={org.name} moreHref={portfolioPageHref} />
           <ReviewsBand reviews={reviews} brand={brand} gbpUrl={gbpUrl} />
@@ -458,14 +445,37 @@ function ContactBand({ orgId, brand, hasConfigurator, pageHref }: { orgId: strin
 /** Render the owner's ordered home_blocks. Content blocks group into a BlockRenderer; a "section"
  *  block renders its wired band (gallery/reviews/contact/estimate) with live org data. This replaces
  *  only the DEFAULT SECTIONS below the always-on-top banner once the homepage has blocks. */
+/** The what-we-do grid — one component for the default template AND the `services` section
+ *  block, so a block homepage stops LOSING it (available is not visible: no services, no band). */
+function ServicesBand({ services, brand }: { services: string[]; brand: string }) {
+  if (!services.length) return null;
+  return (
+    <section id="services" className="mx-auto max-w-6xl px-4 py-16">
+      <h2 className="text-3xl font-extrabold tracking-tight">What we do</h2>
+      <p className="mt-2 max-w-2xl text-slate-600">Quality craftsmanship from the smallest fix to the biggest build — done right, on time.</p>
+      <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {services.map((svc, i) => (
+          <div key={i} className="flex items-start gap-3 rounded-2xl border border-slate-200 p-5">
+            <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full" style={{ backgroundColor: `${brand}1a`, color: brand }}>
+              <Check className="h-4 w-4" />
+            </span>
+            <span className="font-semibold text-slate-800">{svc}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function HomeBlockRenderer({
-  blocks, org, brand, portfolio, reviews, estimateHref, ctaLabel, hasConfigurator, gbpUrl, portfolioPageHref, contactPageHref,
+  blocks, org, brand, portfolio, reviews, services, estimateHref, ctaLabel, hasConfigurator, gbpUrl, portfolioPageHref, contactPageHref,
 }: {
   blocks: Block[];
   org: PublicOrg;
   brand: string;
   portfolio: { url: string; caption?: string }[];
   reviews: { name: string; text: string; rating?: number }[];
+  services: string[];
   estimateHref: string;
   ctaLabel: string;
   hasConfigurator: boolean;
@@ -482,14 +492,36 @@ function HomeBlockRenderer({
       run = [];
     }
   };
+  // style.pad on a SECTION block = extra breathing room around that band — the per-section
+  // spacing lever Erik asked for twice on night one (the bands' own paddings stay untouched).
+  const padWrap = (k: string, pad: "s" | "m" | "l" | undefined, node: React.ReactNode) =>
+    pad && pad !== "s" ? (
+      <div key={k} className={pad === "l" ? "py-14" : "py-6"}>
+        {node}
+      </div>
+    ) : (
+      <React.Fragment key={k}>{node}</React.Fragment>
+    );
   for (const b of blocks) {
     if (b.type === "section") {
       flush();
       const k = `s${key++}`;
-      if (b.props.key === "portfolio") out.push(<PortfolioBand key={k} portfolio={portfolio} brand={brand} orgName={org.name} moreHref={portfolioPageHref} />);
-      else if (b.props.key === "reviews") out.push(<ReviewsBand key={k} reviews={reviews} brand={brand} gbpUrl={gbpUrl} />);
-      else if (b.props.key === "contact") out.push(<ContactBand key={k} orgId={org.id} brand={brand} hasConfigurator={hasConfigurator} pageHref={contactPageHref} />);
-      else if (b.props.key === "estimate") out.push(<EstimateBand key={k} hasConfigurator={hasConfigurator} estimateHref={estimateHref} ctaLabel={ctaLabel} brand={brand} />);
+      const pad = b.style?.pad;
+      if (b.props.key === "portfolio") out.push(padWrap(k, pad, <PortfolioBand portfolio={portfolio} brand={brand} orgName={org.name} moreHref={portfolioPageHref} />));
+      else if (b.props.key === "reviews") out.push(padWrap(k, pad, <ReviewsBand reviews={reviews} brand={brand} gbpUrl={gbpUrl} />));
+      else if (b.props.key === "contact") out.push(padWrap(k, pad, <ContactBand orgId={org.id} brand={brand} hasConfigurator={hasConfigurator} pageHref={contactPageHref} />));
+      else if (b.props.key === "estimate") out.push(padWrap(k, pad, <EstimateBand hasConfigurator={hasConfigurator} estimateHref={estimateHref} ctaLabel={ctaLabel} brand={brand} />));
+      else if (b.props.key === "services") out.push(padWrap(k, pad, <ServicesBand services={services} brand={brand} />));
+      else if (b.props.key === "specialty")
+        out.push(
+          padWrap(
+            k,
+            pad,
+            org.settings.specialty_headline && portfolio.length > 0 ? (
+              <SpecialtyShowcase headline={org.settings.specialty_headline} blurb={org.settings.specialty_blurb} brand={brand} photos={portfolio.slice(0, 6)} />
+            ) : null,
+          ),
+        );
     } else {
       run.push(b);
     }

@@ -141,6 +141,58 @@ describe("the night-one levers — CTA label and heading typeface", () => {
   });
 });
 
+describe("the main-build blocks — split obeys the image law, density is enum-or-base", () => {
+  it("a split block with an off-library image is dropped whole and named", () => {
+    const { doc, dropped } = coerceSiteDoc(
+      {
+        home_blocks: [
+          { type: "split", props: { url: "https://evil.example/x.jpg", heading: "Us", html: "<p>hi</p>" } },
+          { type: "split", props: { url: PHOTO_A, heading: "Real", html: "<p>ok</p>", imageSide: "right" } },
+        ],
+      },
+      base,
+    );
+    expect(doc.home_blocks).toEqual([
+      { type: "split", props: { url: PHOTO_A, heading: "Real", html: "<p>ok</p>", imageSide: "right" } },
+    ]);
+    expect(dropped.some((d) => /image-and-text/.test(d))).toBe(true);
+  });
+
+  it("a text-only split (no image) is allowed", () => {
+    const { doc } = coerceSiteDoc(
+      { home_blocks: [{ type: "split", props: { url: "", heading: "Words", html: "<p>only</p>" } }] },
+      base,
+    );
+    expect(doc.home_blocks.length).toBe(1);
+  });
+
+  it("site_density: enum lands, garbage keeps base, absent keeps", () => {
+    const airy = extractSiteDoc({ site_density: "airy" });
+    expect(airy.site_density).toBe("airy");
+    expect(extractSiteDoc({ site_density: "cozy" }).site_density).toBe("default");
+    expect(coerceSiteDoc({ site_density: "sparse" }, airy).doc.site_density).toBe("airy");
+    expect(coerceSiteDoc({ site_density: "compact" }, airy).doc.site_density).toBe("compact");
+    expect(coerceSiteDoc({}, airy).doc.site_density).toBe("airy");
+  });
+
+  it("the new section keys survive normalization inside a doc", () => {
+    const { doc } = coerceSiteDoc(
+      {
+        home_blocks: [
+          { type: "section", props: { key: "services" } },
+          { type: "section", props: { key: "specialty" }, style: { pad: "l" } },
+          { type: "section", props: { key: "bogus" } },
+        ],
+      },
+      base,
+    );
+    expect(doc.home_blocks).toEqual([
+      { type: "section", props: { key: "services" } },
+      { type: "section", props: { key: "specialty" }, style: { pad: "l" } },
+    ]);
+  });
+});
+
 describe("site_accent — the mood lever, hex or nothing", () => {
   it("a valid hex lands lowercased; garbage keeps the base; '' clears; absent keeps", () => {
     const withAccent = extractSiteDoc({ site_accent: "#1B3A5C" });
