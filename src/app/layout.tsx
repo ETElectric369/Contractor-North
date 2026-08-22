@@ -45,13 +45,17 @@ export default function RootLayout({
   return (
     <html lang="en" className={geist.variable}>
       <body className="font-sans antialiased">
-        {/* SELF-HEAL AN UNSTYLED PAINT: a hard refresh racing a deploy can land HTML whose hashed
-            CSS just vanished (Erik: option-shift-R showed the raw page). One guarded reload
-            fetches matching HTML+CSS; the guard stops loops if styles are genuinely broken. */}
+        {/* SELF-HEAL AN UNSTYLED PAINT (Erik: hard refresh shows the raw page, "its been like
+            that for a long time" — a lockout, since nothing on that page is usable). The probe
+            asks whether the app CSS actually WORKS (does the `hidden` utility hide?) — counting
+            document.styleSheets misses a wrong-but-present sheet. Two escalating attempts:
+            reload once; if still broken, unregister service workers and empty their caches
+            (the usual pin: an old SW serving a vanished deploy's assets) and reload again.
+            The counter stops loops; any healthy paint resets it. */}
         <script
           dangerouslySetInnerHTML={{
             __html:
-              'window.addEventListener("load",function(){try{if(document.styleSheets.length===0&&!sessionStorage.getItem("cn-css-heal")){sessionStorage.setItem("cn-css-heal","1");location.reload();}else if(document.styleSheets.length>0){sessionStorage.removeItem("cn-css-heal");}}catch(e){}});',
+              'window.addEventListener("load",function(){try{var d=document.createElement("div");d.className="hidden";document.body.appendChild(d);var broken=getComputedStyle(d).display!=="none";d.remove();var n=Number(sessionStorage.getItem("cn-css-heal")||"0");if(!broken){sessionStorage.removeItem("cn-css-heal");return;}if(n>=2)return;sessionStorage.setItem("cn-css-heal",String(n+1));var go=function(){location.reload();};if(n===1&&"serviceWorker"in navigator){Promise.all([navigator.serviceWorker.getRegistrations().then(function(rs){return Promise.all(rs.map(function(r){return r.unregister();}));}),typeof caches!=="undefined"?caches.keys().then(function(ks){return Promise.all(ks.map(function(k){return caches.delete(k);}));}):Promise.resolve()]).then(go,go);}else{go();}}catch(e){}});',
           }}
         />
         
