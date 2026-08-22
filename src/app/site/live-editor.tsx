@@ -184,6 +184,10 @@ export function LiveEditor({
     const onClick = (e: Event) => {
       const el = (e.target as HTMLElement).closest<HTMLElement>("[data-e]");
       if (!el) return;
+      // MID-EDIT CLICKS POSITION THE CARET (Erik: typing, clicked to move the cursor, and the
+      // arrows went back to moving the box — this handler had silently re-selected and flipped
+      // typing mode off while the text stayed editable). An active edit owns its clicks.
+      if (el.isContentEditable) return;
       e.preventDefault();
       e.stopPropagation();
       select(el);
@@ -213,7 +217,8 @@ export function LiveEditor({
     // DRAG TO MOVE — mousedown on the selected box (outside a text-editing session).
     const onPointerDown = (e: PointerEvent) => {
       const t = e.target as HTMLElement;
-      if (stateRef.current.editingText) return;
+      const active = document.activeElement as HTMLElement | null;
+      if (stateRef.current.editingText || (active && active.isContentEditable) || t.isContentEditable) return;
       if (t.id === "cn-resize-handle") {
         const b = heroBox();
         if (!b) return;
@@ -271,7 +276,10 @@ export function LiveEditor({
     };
     const onKey = (e: KeyboardEvent) => {
       const { selected: f, editingText: editing } = stateRef.current;
-      if (!f || editing) return; // typing: arrows move the caret, never the layout
+      // Belt AND braces: trust the DOM, not the bookkeeping — if ANY contentEditable has focus,
+      // every key belongs to the text (the caret), never to the layout.
+      const active = document.activeElement as HTMLElement | null;
+      if (!f || editing || (active && active.isContentEditable)) return;
       if (e.key === "Escape") {
         clearSel();
         setSelected(null);
