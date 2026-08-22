@@ -5,21 +5,19 @@ import { SITE_FONTS, siteFontKey, type SiteFontKey } from "./site-fonts";
 import { updateVersionFields } from "./live-edit-actions";
 
 /**
- * EDIT IT ON THE PAGE, v2 — after the v29 lesson (Erik: "i just made some edits to v29 and it
- * changed everything"). v1's sins: controls acted invisibly (arrows changed values with no
- * on-page feedback), pending changes were a bare count, and the thing he actually wanted —
- * "old school using the arrows on my keyboard to move the box ... and all the resizing arrows"
- * — didn't exist. v2's laws:
+ * EDIT IT ON THE PAGE, v3 — NO SAVE GAME (Erik: "i cant see any changes when i click on the
+ * options and i cant resize anything so clearly theres a wall between me and seeing changes in
+ * real time so i/non-tech person doesnt have to play the save game").
  *
- *   · EVERYTHING VISIBLE ACTS VISIBLY. Arrows MOVE the box on screen as you press. Dragging
- *     moves it under the mouse. The resize handle stretches it live. Fonts and headline size
- *     repaint instantly. Nothing waits for Save to show itself.
- *   · EVERY PENDING CHANGE IS A NAMED CHIP with its own ✕ — removing one reverts it on screen.
- *   · Save lands the patch on THIS DRAFT through the same coerce boundary as a design pass.
- *
- * The movable/resizable unit is the hero text BOX ([data-hero-text] — classic open/panel/band).
- * The spread arrangement places its pieces at fixed corners; selecting text there still edits
- * words/fonts/sizes, and the bar says why moving is off.
+ * The v3 laws:
+ *   · EVERY CLICK ACTS INSTANTLY. There is no Save button. Cosmetic changes paint in place;
+ *     autosave lands them on the draft moments later. A layout switch (the one change that
+ *     needs the server to rebuild the banner) saves first and repaints in about a second.
+ *   · EVERYTHING IS MOVABLE. The classic hero box AND each corner piece of the Corners layout
+ *     drags, arrow-nudges, and (where a width exists) resizes — no arrangement is a dead end.
+ *   · NOTHING IS SILENT: every change is a named chip with its own undo, and the trail
+ *     survives the layout-switch reload (sessionStorage per draft).
+ *   · PLAIN WORDS ONLY. "Layout: Open / Card / Strip / Corners" — no "treatment" jargon.
  */
 
 type FieldKey = "splash_headline" | "splash_tagline" | "service_area" | "estimate_cta_label" | "__brand";
@@ -40,10 +38,18 @@ const PATCH_LABEL: Record<string, string> = {
   site_font: "Heading font",
   brand_font: "Name font",
   hero_align: "Text position",
-  hero_style: "Text treatment",
+  hero_style: "Banner layout",
   hero_dx: "Moved across",
   hero_dy: "Moved down",
   hero_w: "Box width",
+  spread_area_dx: "Area piece across",
+  spread_area_dy: "Area piece down",
+  spread_head_dx: "Headline piece across",
+  spread_head_dy: "Headline piece down",
+  spread_head_w: "Headline piece width",
+  spread_tag_dx: "Tagline piece across",
+  spread_tag_dy: "Tagline piece down",
+  spread_tag_w: "Tagline piece width",
 };
 
 const TEXT_FIELDS: FieldKey[] = ["splash_headline", "splash_tagline", "service_area", "estimate_cta_label"];
@@ -56,7 +62,13 @@ const FONT_SHORT: Record<SiteFontKey, string> = {
   condensed: "Condensed",
 };
 const SIZES = ["s", "m", "l"] as const;
-const STYLES = ["open", "panel", "band", "spread"] as const;
+// Plain words for the arrangement — "spread"/"panel" meant nothing to a non-tech owner.
+const STYLES: { key: string; label: string }[] = [
+  { key: "open", label: "Open" },
+  { key: "panel", label: "Card" },
+  { key: "band", label: "Strip" },
+  { key: "spread", label: "Corners" },
+];
 // Mirrors HEAD_SIZE in org-site.tsx — the live class swap for headline size.
 const HEAD_SIZE_CLS: Record<string, string[]> = {
   s: ["text-2xl", "sm:text-3xl"],
@@ -64,8 +76,22 @@ const HEAD_SIZE_CLS: Record<string, string[]> = {
   l: ["text-4xl", "sm:text-5xl"],
 };
 
+/** The movable/resizable units. Whichever one contains the selected text is what drag, the
+ *  arrow keys, and the resize handle act on — the classic box OR a Corners piece. */
+const UNITS: { sel: string; dx: string; dy: string; w: string | null }[] = [
+  { sel: "[data-hero-text]", dx: "hero_dx", dy: "hero_dy", w: "hero_w" },
+  { sel: '[data-spread-piece="area"]', dx: "spread_area_dx", dy: "spread_area_dy", w: null },
+  { sel: '[data-spread-piece="headline"]', dx: "spread_head_dx", dy: "spread_head_dy", w: "spread_head_w" },
+  { sel: '[data-spread-piece="tagline"]', dx: "spread_tag_dx", dy: "spread_tag_dy", w: "spread_tag_w" },
+];
+type Unit = { el: HTMLElement; dx: string; dy: string; w: string | null };
+
 const clampNudge = (n: number) => Math.min(40, Math.max(-40, Math.round(n)));
 const clampW = (n: number) => Math.min(100, Math.max(30, Math.round(n)));
+// The one field whose change restructures the banner server-side: save, then repaint via reload.
+const STRUCTURAL = new Set(["hero_style", "hero_align"]);
+
+type TrailEntry = { k: string; prev: unknown };
 
 export function LiveEditor({
   versionId,
@@ -81,34 +107,92 @@ export function LiveEditor({
     hero_dx: number;
     hero_dy: number;
     hero_w: number;
+    spread_area_dx: number;
+    spread_area_dy: number;
+    spread_head_dx: number;
+    spread_head_dy: number;
+    spread_head_w: number;
+    spread_tag_dx: number;
+    spread_tag_dy: number;
+    spread_tag_w: number;
   };
 }) {
   const [selected, setSelected] = useState<FieldKey | null>(null);
   const [editingText, setEditingText] = useState(false);
-  const [patch, setPatch] = useState<Record<string, unknown>>({});
-  const [saving, setSaving] = useState(false);
+  const [trail, setTrail] = useState<TrailEntry[]>([]);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "rearranging" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
-  const patchRef = useRef(patch);
-  patchRef.current = patch;
   const stateRef = useRef({ selected, editingText });
   stateRef.current = { selected, editingText };
-  const originalText = useRef<Record<string, string>>({});
+  // Current value of every field (seeded from the draft, updated on each edit) — the single
+  // truth the painters and undo read. Autosave means "pending" and "current" are the same idea.
+  const valuesRef = useRef<Record<string, unknown>>({ ...initial });
+  const pendingRef = useRef<Record<string, unknown>>({});
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const trailRef = useRef<TrailEntry[]>([]);
+  const unitRef = useRef<Unit | null>(null);
   const dragRef = useRef<{ mode: "move" | "resize"; startX: number; startY: number; dx0: number; dy0: number; w0: number } | null>(null);
 
-  const heroBox = () => document.querySelector<HTMLElement>("[data-hero-text]");
-  const cur = <T,>(k: string): T => (patchRef.current[k] ?? (initial as Record<string, unknown>)[k]) as T;
-  const dirty = Object.keys(patch).length > 0;
-  const canMove = initial.hero_style !== "spread";
+  const trailKey = `cn-live-trail:${versionId}`;
+  const cur = <T,>(k: string): T => valuesRef.current[k] as T;
+  const num = (k: string) => Number(cur<number>(k)) || 0;
 
-  // ── LIVE PAINTERS — every value change repaints the page immediately ─────────────────────
-  function paintBox() {
-    const box = heroBox();
-    if (!box) return;
-    const dx = Number(cur<number>("hero_dx") ?? 0);
-    const dy = Number(cur<number>("hero_dy") ?? 0);
-    const w = Number(cur<number>("hero_w") ?? 0);
-    box.style.transform = dx || dy ? `translate(${dx}%, ${dy}%)` : "";
-    box.style.maxWidth = w ? `${w}%` : "";
+  // ── AUTOSAVE — the save game is gone; edits land on the draft on their own ───────────────
+  function persistTrail(next: TrailEntry[]) {
+    trailRef.current = next;
+    setTrail(next);
+    try {
+      sessionStorage.setItem(trailKey, JSON.stringify(next));
+    } catch {
+      /* private mode */
+    }
+  }
+  function recordPrev(k: string, prev: unknown) {
+    if (trailRef.current.some((t) => t.k === k)) return;
+    persistTrail([...trailRef.current, { k, prev }]);
+  }
+  async function flush(): Promise<boolean> {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const snap = pendingRef.current;
+    if (Object.keys(snap).length === 0) return true;
+    pendingRef.current = {};
+    setSaveState((s) => (s === "rearranging" ? s : "saving"));
+    const r = await updateVersionFields(versionId, snap);
+    if (!r.ok) {
+      // Put the unsaved values back so Retry (or the next edit) carries them.
+      pendingRef.current = { ...snap, ...pendingRef.current };
+      setSaveState("error");
+      setError(r.error);
+      return false;
+    }
+    setError(null);
+    setSaveState((s) => (s === "rearranging" ? s : "saved"));
+    try {
+      window.parent?.postMessage({ type: "cn-live-saved" }, "*");
+    } catch {
+      /* not framed */
+    }
+    return true;
+  }
+  function scheduleSave() {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => void flush(), 700);
+  }
+
+  // ── LIVE PAINTERS ────────────────────────────────────────────────────────────────────────
+  function paintUnitByKey(k: string) {
+    const u = UNITS.find((x) => x.dx === k || x.dy === k || x.w === k);
+    if (!u) return;
+    const el = document.querySelector<HTMLElement>(u.sel);
+    if (!el) return;
+    const dx = num(u.dx);
+    const dy = num(u.dy);
+    const w = u.w ? num(u.w) : 0;
+    el.style.transform = dx || dy ? `translate(${dx}%, ${dy}%)` : "";
+    if (u.w) el.style.maxWidth = w ? `${w}%` : "";
   }
   function paintHeadlineSize(size: string) {
     const h1 = document.querySelector<HTMLElement>('[data-e="splash_headline"]');
@@ -131,62 +215,110 @@ export function LiveEditor({
         : document.querySelectorAll<HTMLElement>(".site-shell h1, .site-shell h2, .site-shell h3");
     targets.forEach((el) => (el.style.fontFamily = family));
   }
-  function setValue(k: string, v: unknown) {
-    setPatch((p) => ({ ...p, [k]: v }));
-    // paint AFTER state lands via patchRef in a microtask
-    queueMicrotask(() => {
-      if (k === "hero_dx" || k === "hero_dy" || k === "hero_w") paintBox();
-      if (k === "splash_headline_size") paintHeadlineSize(String(v));
-      if (k === "site_font" || k === "brand_font") paintFont(k as "site_font" | "brand_font", siteFontKey(v));
-    });
+  function paint(k: string) {
+    paintUnitByKey(k);
+    if (k === "splash_headline_size") paintHeadlineSize(String(cur(k)));
+    if (k === "site_font" || k === "brand_font") paintFont(k, siteFontKey(cur(k)));
+    if (TEXT_FIELDS.includes(k as FieldKey)) {
+      const el = document.querySelector<HTMLElement>(`[data-e="${k}"]`);
+      if (el && el.innerText !== String(cur(k))) el.innerText = String(cur(k));
+    }
   }
-  function revert(k: string) {
-    setPatch((p) => {
-      const { [k]: _gone, ...rest } = p;
-      return rest;
-    });
-    queueMicrotask(() => {
-      if (k === "hero_dx" || k === "hero_dy" || k === "hero_w") paintBox();
-      if (k === "splash_headline_size") paintHeadlineSize(String(initial.splash_headline_size));
-      if (k === "site_font" || k === "brand_font") paintFont(k as "site_font" | "brand_font", siteFontKey((initial as Record<string, unknown>)[k]));
-      if (k in originalText.current) {
-        const el = document.querySelector<HTMLElement>(`[data-e="${k}"]`);
-        if (el) el.innerText = originalText.current[k];
-      }
-    });
+
+  /** The one entry point for every change: record undo, remember, paint, save. A structural
+   *  change (banner layout) saves NOW and repaints via reload — everything else is instant. */
+  function setValue(k: string, v: unknown, opts?: { record?: boolean }) {
+    if (opts?.record !== false) recordPrev(k, valuesRef.current[k]);
+    valuesRef.current[k] = v;
+    pendingRef.current[k] = v;
+    if (STRUCTURAL.has(k)) {
+      setSaveState("rearranging");
+      void flush().then((ok) => {
+        if (ok) window.location.reload();
+        else setSaveState("error");
+      });
+      return;
+    }
+    paint(k);
+    scheduleSave();
+  }
+  function undo(k: string) {
+    const entry = trailRef.current.find((t) => t.k === k);
+    if (!entry) return;
+    persistTrail(trailRef.current.filter((t) => t.k !== k));
+    setValue(k, entry.prev, { record: false });
+  }
+  function undoAll() {
+    const entries = [...trailRef.current].reverse();
+    persistTrail([]);
+    const structural = entries.some((t) => STRUCTURAL.has(t.k));
+    for (const t of entries) {
+      valuesRef.current[t.k] = t.prev;
+      pendingRef.current[t.k] = t.prev;
+      if (!STRUCTURAL.has(t.k)) paint(t.k);
+    }
+    if (structural) {
+      setSaveState("rearranging");
+      void flush().then((ok) => {
+        if (ok) window.location.reload();
+      });
+    } else {
+      void flush();
+    }
   }
 
   // ── WIRING: click select, double-click edit, drag move, handle resize, arrows ────────────
   useEffect(() => {
+    // The undo trail survives the layout-switch reload.
+    try {
+      const raw = sessionStorage.getItem(trailKey);
+      if (raw) {
+        const parsed = JSON.parse(raw) as TrailEntry[];
+        if (Array.isArray(parsed)) {
+          trailRef.current = parsed.filter((t) => t && typeof t.k === "string");
+          setTrail(trailRef.current);
+        }
+      }
+    } catch {
+      /* fresh start */
+    }
+
     const els = Array.from(document.querySelectorAll<HTMLElement>("[data-e]"));
-    const box = heroBox();
+    const unitFor = (el: HTMLElement): Unit | null => {
+      for (const u of UNITS) {
+        const host = document.querySelector<HTMLElement>(u.sel);
+        if (host && host.contains(el)) return { el: host, dx: u.dx, dy: u.dy, w: u.w };
+      }
+      return null;
+    };
     const clearSel = () => {
       els.forEach((el) => el.classList.remove("cn-live-selected"));
-      box?.classList.remove("cn-live-box");
+      unitRef.current?.el.classList.remove("cn-live-box");
       document.getElementById("cn-resize-handle")?.remove();
+      unitRef.current = null;
     };
     const select = (el: HTMLElement) => {
       clearSel();
       el.classList.add("cn-live-selected");
-      const f = el.dataset.e as FieldKey;
-      setSelected(f);
+      setSelected(el.dataset.e as FieldKey);
       setEditingText(false);
-      // The hero box becomes the movable unit whenever a hero text is selected.
-      if (box && canMove && box.contains(el)) {
-        box.classList.add("cn-live-box");
-        box.style.position = box.style.position || "relative";
-        const handle = document.createElement("div");
-        handle.id = "cn-resize-handle";
-        handle.title = "Drag to resize";
-        box.appendChild(handle);
+      const u = unitFor(el);
+      unitRef.current = u;
+      if (u) {
+        u.el.classList.add("cn-live-box");
+        u.el.style.position = u.el.style.position || "relative";
+        if (u.w) {
+          const handle = document.createElement("div");
+          handle.id = "cn-resize-handle";
+          handle.title = "Drag to resize";
+          u.el.appendChild(handle);
+        }
       }
     };
     const onClick = (e: Event) => {
       const el = (e.target as HTMLElement).closest<HTMLElement>("[data-e]");
       if (!el) return;
-      // MID-EDIT CLICKS POSITION THE CARET (Erik: typing, clicked to move the cursor, and the
-      // arrows went back to moving the box — this handler had silently re-selected and flipped
-      // typing mode off while the text stayed editable). An active edit owns its clicks.
+      // Mid-edit clicks position the caret — never re-delegated to selection (cn-v782).
       if (el.isContentEditable) return;
       e.preventDefault();
       e.stopPropagation();
@@ -198,10 +330,10 @@ export function LiveEditor({
       const f = el.dataset.e as FieldKey;
       if (!TEXT_FIELDS.includes(f)) return;
       e.preventDefault();
-      if (!(f in originalText.current)) originalText.current[f] = el.innerText;
       el.setAttribute("contenteditable", "plaintext-only");
       el.focus();
       setEditingText(true);
+      const before = el.innerText;
       const onBlur = () => {
         el.removeAttribute("contenteditable");
         el.removeEventListener("blur", onBlur);
@@ -209,75 +341,67 @@ export function LiveEditor({
         // A headline is one line — Enter must not smuggle newlines into the H1/<title> (v29).
         const raw = el.innerText;
         const clean = f === "splash_headline" ? raw.replace(/\s*\n+\s*/g, ", ").replace(/,\s*,/g, ",").trim() : raw.trim();
-        if (f === "splash_headline" && clean !== raw) el.innerText = clean;
-        setPatch((p) => ({ ...p, [f]: clean }));
+        if (clean !== raw) el.innerText = clean;
+        if (clean !== before) {
+          recordPrev(f, before);
+          setValue(f, clean, { record: false });
+        }
       };
       el.addEventListener("blur", onBlur);
     };
-    // DRAG TO MOVE — mousedown on the selected box (outside a text-editing session).
+    // DRAG TO MOVE / RESIZE — on whichever unit (box or corner piece) holds the selection.
     const onPointerDown = (e: PointerEvent) => {
       const t = e.target as HTMLElement;
       const active = document.activeElement as HTMLElement | null;
       if (stateRef.current.editingText || (active && active.isContentEditable) || t.isContentEditable) return;
-      if (t.id === "cn-resize-handle") {
-        const b = heroBox();
-        if (!b) return;
-        const parentW = b.parentElement?.getBoundingClientRect().width || b.getBoundingClientRect().width;
-        const w0 = Number(cur<number>("hero_w")) || Math.round((b.getBoundingClientRect().width / parentW) * 100);
+      const u = unitRef.current;
+      if (!u) return;
+      if (t.id === "cn-resize-handle" && u.w) {
+        const parentW = u.el.parentElement?.getBoundingClientRect().width || u.el.getBoundingClientRect().width;
+        const w0 = num(u.w) || Math.round((u.el.getBoundingClientRect().width / parentW) * 100);
         dragRef.current = { mode: "resize", startX: e.clientX, startY: e.clientY, dx0: 0, dy0: 0, w0 };
         e.preventDefault();
         return;
       }
-      const b = heroBox();
-      if (!b || !canMove || !b.classList.contains("cn-live-box")) return;
-      if (!b.contains(t)) return;
-      dragRef.current = {
-        mode: "move",
-        startX: e.clientX,
-        startY: e.clientY,
-        dx0: Number(cur<number>("hero_dx")) || 0,
-        dy0: Number(cur<number>("hero_dy")) || 0,
-        w0: 0,
-      };
+      if (!u.el.classList.contains("cn-live-box") || !u.el.contains(t)) return;
+      dragRef.current = { mode: "move", startX: e.clientX, startY: e.clientY, dx0: num(u.dx), dy0: num(u.dy), w0: 0 };
       e.preventDefault();
     };
     const onPointerMove = (e: PointerEvent) => {
       const d = dragRef.current;
-      if (!d) return;
-      const b = heroBox();
-      if (!b) return;
-      const r = b.getBoundingClientRect();
+      const u = unitRef.current;
+      if (!d || !u) return;
+      const r = u.el.getBoundingClientRect();
       if (d.mode === "move") {
-        // translate % is relative to the box's own size — convert pixel deltas accordingly.
+        // translate % is relative to the unit's own size — convert pixel deltas accordingly.
         const dx = clampNudge(d.dx0 + ((e.clientX - d.startX) / r.width) * 100);
         const dy = clampNudge(d.dy0 + ((e.clientY - d.startY) / r.height) * 100);
-        b.style.transform = `translate(${dx}%, ${dy}%)`;
-        b.dataset.pendingDx = String(dx);
-        b.dataset.pendingDy = String(dy);
+        u.el.style.transform = `translate(${dx}%, ${dy}%)`;
+        u.el.dataset.pendingDx = String(dx);
+        u.el.dataset.pendingDy = String(dy);
       } else {
-        const parentW = b.parentElement?.getBoundingClientRect().width || r.width;
+        const parentW = u.el.parentElement?.getBoundingClientRect().width || r.width;
         const w = clampW(d.w0 + ((e.clientX - d.startX) / parentW) * 100);
-        b.style.maxWidth = `${w}%`;
-        b.dataset.pendingW = String(w);
+        u.el.style.maxWidth = `${w}%`;
+        u.el.dataset.pendingW = String(w);
       }
     };
     const onPointerUp = () => {
       const d = dragRef.current;
+      const u = unitRef.current;
       if (!d) return;
       dragRef.current = null;
-      const b = heroBox();
-      if (!b) return;
+      if (!u) return;
       if (d.mode === "move") {
-        if (b.dataset.pendingDx) setValue("hero_dx", Number(b.dataset.pendingDx));
-        if (b.dataset.pendingDy) setValue("hero_dy", Number(b.dataset.pendingDy));
-      } else if (b.dataset.pendingW) {
-        setValue("hero_w", Number(b.dataset.pendingW));
+        if (u.el.dataset.pendingDx) setValue(u.dx, Number(u.el.dataset.pendingDx));
+        if (u.el.dataset.pendingDy) setValue(u.dy, Number(u.el.dataset.pendingDy));
+      } else if (u.w && u.el.dataset.pendingW) {
+        setValue(u.w, Number(u.el.dataset.pendingW));
       }
     };
     const onKey = (e: KeyboardEvent) => {
       const { selected: f, editingText: editing } = stateRef.current;
-      // Belt AND braces: trust the DOM, not the bookkeeping — if ANY contentEditable has focus,
-      // every key belongs to the text (the caret), never to the layout.
+      // Trust the DOM, not the bookkeeping: focus in ANY contentEditable → keys are the caret's.
       const active = document.activeElement as HTMLElement | null;
       if (!f || editing || (active && active.isContentEditable)) return;
       if (e.key === "Escape") {
@@ -286,23 +410,27 @@ export function LiveEditor({
         return;
       }
       if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) return;
+      const u = unitRef.current;
+      if (!u) return;
       e.preventDefault();
       const step = e.shiftKey ? 8 : 2;
       if (e.altKey) {
-        // ⌥ + ←/→ — the keyboard resize (Erik: "all the resizing arrows as well").
-        if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-          const b = heroBox();
-          const parentW = b?.parentElement?.getBoundingClientRect().width || 1;
-          const now = Number(cur<number>("hero_w")) || (b ? Math.round((b.getBoundingClientRect().width / parentW) * 100) : 66);
-          setValue("hero_w", clampW(now + (e.key === "ArrowRight" ? step : -step)));
+        // ⌥ + ←/→ — the keyboard resize ("all the resizing arrows as well").
+        if (u.w && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+          const parentW = u.el.parentElement?.getBoundingClientRect().width || 1;
+          const now = num(u.w) || Math.round((u.el.getBoundingClientRect().width / parentW) * 100);
+          setValue(u.w, clampW(now + (e.key === "ArrowRight" ? step : -step)));
         }
         return;
       }
-      if (!canMove) return;
-      if (e.key === "ArrowLeft") setValue("hero_dx", clampNudge((Number(cur<number>("hero_dx")) || 0) - step));
-      if (e.key === "ArrowRight") setValue("hero_dx", clampNudge((Number(cur<number>("hero_dx")) || 0) + step));
-      if (e.key === "ArrowUp") setValue("hero_dy", clampNudge((Number(cur<number>("hero_dy")) || 0) - step));
-      if (e.key === "ArrowDown") setValue("hero_dy", clampNudge((Number(cur<number>("hero_dy")) || 0) + step));
+      if (e.key === "ArrowLeft") setValue(u.dx, clampNudge(num(u.dx) - step));
+      if (e.key === "ArrowRight") setValue(u.dx, clampNudge(num(u.dx) + step));
+      if (e.key === "ArrowUp") setValue(u.dy, clampNudge(num(u.dy) - step));
+      if (e.key === "ArrowDown") setValue(u.dy, clampNudge(num(u.dy) + step));
+    };
+    const onPageHide = () => {
+      // Best effort: push any 700ms-window stragglers before the tab goes away.
+      void flush();
     };
     els.forEach((el) => {
       el.addEventListener("click", onClick);
@@ -312,6 +440,7 @@ export function LiveEditor({
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
     window.addEventListener("keydown", onKey);
+    window.addEventListener("pagehide", onPageHide);
     return () => {
       els.forEach((el) => {
         el.removeEventListener("click", onClick);
@@ -321,29 +450,11 @@ export function LiveEditor({
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
       window.removeEventListener("keydown", onKey);
+      window.removeEventListener("pagehide", onPageHide);
       clearSel();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  function save() {
-    if (!dirty) return;
-    setSaving(true);
-    setError(null);
-    void updateVersionFields(versionId, patchRef.current).then((r) => {
-      if (!r.ok) {
-        setSaving(false);
-        setError(r.error);
-        return;
-      }
-      try {
-        window.parent?.postMessage({ type: "cn-live-saved" }, "*");
-      } catch {
-        /* not framed */
-      }
-      window.location.reload();
-    });
-  }
 
   const fontRow = (kind: "site_font" | "brand_font") => (
     <span className="flex items-center gap-1">
@@ -352,13 +463,15 @@ export function LiveEditor({
           key={k}
           type="button"
           onClick={() => setValue(kind, k)}
-          className={`rounded px-2 py-1 text-xs font-medium ${siteFontKey(patch[kind] ?? (initial as Record<string, unknown>)[kind]) === k ? "bg-white text-slate-900" : "bg-white/15 text-white hover:bg-white/25"}`}
+          className={`rounded px-2 py-1 text-xs font-medium ${siteFontKey(cur(kind)) === k ? "bg-white text-slate-900" : "bg-white/15 text-white hover:bg-white/25"}`}
         >
           {FONT_SHORT[k]}
         </button>
       ))}
     </span>
   );
+  const hasUnit = !!unitRef.current;
+  const unitResizes = !!unitRef.current?.w;
 
   return (
     <>
@@ -370,15 +483,14 @@ export function LiveEditor({
       `}</style>
       <div className="fixed inset-x-0 top-0 z-[60] flex flex-wrap items-center gap-x-4 gap-y-2 bg-slate-900/95 px-4 py-2.5 text-sm text-white shadow-lg backdrop-blur">
         <span className="font-semibold">On-page editing</span>
-        {!selected && <span className="text-white/70">Click a text to select it · double-click to rewrite it</span>}
+        {!selected && <span className="text-white/70">Click any text to work on it · double-click to retype it</span>}
         {selected && (
           <>
             <span className="rounded bg-amber-500/90 px-2 py-0.5 text-xs font-bold uppercase tracking-wide">{FIELD_LABEL[selected]}</span>
-            {canMove && selected !== "__brand" && (
-              <span className="text-white/60">drag the box · arrows move (⇧ bigger) · ⌥←/→ resize · handle resizes</span>
-            )}
-            {!canMove && selected !== "__brand" && (
-              <span className="text-white/60">spread places pieces at fixed corners — switch Treatment to move freely</span>
+            {hasUnit && (
+              <span className="text-white/60">
+                drag it or use the arrow keys (⇧ = bigger steps){unitResizes ? " · corner handle or ⌥ ←/→ resizes" : ""}
+              </span>
             )}
             {selected === "splash_headline" && (
               <span className="flex items-center gap-1">
@@ -388,7 +500,7 @@ export function LiveEditor({
                     key={z}
                     type="button"
                     onClick={() => setValue("splash_headline_size", z)}
-                    className={`rounded px-2 py-1 text-xs font-bold uppercase ${String(patch.splash_headline_size ?? initial.splash_headline_size) === z ? "bg-white text-slate-900" : "bg-white/15 hover:bg-white/25"}`}
+                    className={`rounded px-2 py-1 text-xs font-bold uppercase ${String(cur("splash_headline_size")) === z ? "bg-white text-slate-900" : "bg-white/15 hover:bg-white/25"}`}
                   >
                     {z}
                   </button>
@@ -404,47 +516,54 @@ export function LiveEditor({
               </span>
             )}
             <span className="flex items-center gap-1">
-              <span className="text-white/60">Treatment</span>
+              <span className="text-white/60">Layout</span>
               {STYLES.map((st) => (
                 <button
-                  key={st}
+                  key={st.key}
                   type="button"
-                  onClick={() => setValue("hero_style", st)}
-                  className={`rounded px-2 py-1 text-xs font-medium ${String(patch.hero_style ?? initial.hero_style) === st ? "bg-white text-slate-900" : "bg-white/15 hover:bg-white/25"}`}
+                  onClick={() => setValue("hero_style", st.key)}
+                  className={`rounded px-2 py-1 text-xs font-medium ${String(cur("hero_style")) === st.key ? "bg-white text-slate-900" : "bg-white/15 hover:bg-white/25"}`}
                 >
-                  {st}
+                  {st.label}
                 </button>
               ))}
-              <span className="ml-1 text-[11px] text-white/50">(applies on Save)</span>
             </span>
           </>
         )}
         <span className="ml-auto flex items-center gap-2">
-          {error && <span className="text-xs text-rose-300">{error}</span>}
-          <button
-            type="button"
-            disabled={!dirty || saving}
-            onClick={save}
-            className="rounded-lg bg-emerald-500 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-400 disabled:opacity-40"
-          >
-            {saving ? "Saving…" : "Save to draft"}
-          </button>
-          <button
-            type="button"
-            onClick={() => window.location.reload()}
-            className="rounded-lg bg-white/15 px-3 py-1.5 text-sm font-medium hover:bg-white/25"
-          >
-            Discard
-          </button>
+          {saveState === "rearranging" && <span className="text-xs font-medium text-amber-300">Rearranging…</span>}
+          {saveState === "saving" && <span className="text-xs text-white/60">Saving…</span>}
+          {saveState === "saved" && <span className="text-xs text-emerald-300">All changes saved ✓</span>}
+          {saveState === "error" && (
+            <>
+              <span className="text-xs text-rose-300">{error ?? "The save didn't land."}</span>
+              <button
+                type="button"
+                onClick={() => void flush()}
+                className="rounded-lg bg-rose-500/80 px-2.5 py-1 text-xs font-semibold hover:bg-rose-500"
+              >
+                Retry
+              </button>
+            </>
+          )}
+          {trail.length > 0 && (
+            <button
+              type="button"
+              onClick={undoAll}
+              className="rounded-lg bg-white/15 px-3 py-1.5 text-sm font-medium hover:bg-white/25"
+            >
+              Undo all
+            </button>
+          )}
         </span>
-        {/* EVERY PENDING CHANGE IS A NAMED CHIP — the v29 lesson: nothing rides along silently. */}
-        {dirty && (
+        {/* NOTHING IS SILENT — every change is a named chip with its own undo (the v29 lesson). */}
+        {trail.length > 0 && (
           <span className="flex w-full flex-wrap items-center gap-1.5 border-t border-white/10 pt-2">
-            <span className="text-[11px] uppercase tracking-wide text-white/50">Unsaved:</span>
-            {Object.entries(patch).map(([k, v]) => (
-              <span key={k} className="inline-flex items-center gap-1 rounded-full bg-white/15 px-2 py-0.5 text-xs">
-                {PATCH_LABEL[k] ?? k}: <span className="font-semibold">{String(v).slice(0, 24)}</span>
-                <button type="button" aria-label={`Undo ${PATCH_LABEL[k] ?? k}`} onClick={() => revert(k)} className="ml-0.5 text-white/60 hover:text-white">
+            <span className="text-[11px] uppercase tracking-wide text-white/50">Changed (✕ puts it back):</span>
+            {trail.map((t) => (
+              <span key={t.k} className="inline-flex items-center gap-1 rounded-full bg-white/15 px-2 py-0.5 text-xs">
+                {PATCH_LABEL[t.k] ?? t.k}
+                <button type="button" aria-label={`Undo ${PATCH_LABEL[t.k] ?? t.k}`} onClick={() => undo(t.k)} className="ml-0.5 text-white/60 hover:text-white">
                   ✕
                 </button>
               </span>

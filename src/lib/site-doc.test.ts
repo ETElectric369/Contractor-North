@@ -198,6 +198,16 @@ describe("the main-build blocks — split obeys the image law, density is enum-o
     expect(coerceSiteDoc({}, moved).doc.hero_dy).toBe(-40);
   });
 
+  it("spread-piece levers clamp and keep-base like the hero box", () => {
+    const d = extractSiteDoc({ spread_head_dx: -55, spread_tag_w: 61, spread_area_dy: 8 });
+    expect(d.spread_head_dx).toBe(-40);
+    expect(d.spread_tag_w).toBe(61);
+    expect(d.spread_area_dy).toBe(8);
+    expect(d.spread_head_w).toBe(0);
+    expect(coerceSiteDoc({ spread_tag_w: 999 }, d).doc.spread_tag_w).toBe(100);
+    expect(coerceSiteDoc({}, d).doc.spread_head_dx).toBe(-40);
+  });
+
   it("a headline is ONE LINE — newlines become commas (the v29 mangle)", () => {
     expect(extractSiteDoc({ splash_headline: "Custom Lighting \nTruckee" }).splash_headline).toBe("Custom Lighting, Truckee");
     const base2 = extractSiteDoc({});

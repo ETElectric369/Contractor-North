@@ -88,6 +88,14 @@ export default async function SiteHome({
             hero_dx: effOrg.settings.hero_dx,
             hero_dy: effOrg.settings.hero_dy,
             hero_w: effOrg.settings.hero_w,
+            spread_area_dx: effOrg.settings.spread_area_dx,
+            spread_area_dy: effOrg.settings.spread_area_dy,
+            spread_head_dx: effOrg.settings.spread_head_dx,
+            spread_head_dy: effOrg.settings.spread_head_dy,
+            spread_head_w: effOrg.settings.spread_head_w,
+            spread_tag_dx: effOrg.settings.spread_tag_dx,
+            spread_tag_dy: effOrg.settings.spread_tag_dy,
+            spread_tag_w: effOrg.settings.spread_tag_w,
           }}
         />
       )}

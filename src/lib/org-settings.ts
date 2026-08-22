@@ -197,6 +197,17 @@ export interface OrgSettings {
   /** The hero text BOX's width as % of the hero (30-100); 0 = the framing's default width.
    *  The resize-handle lever. */
   hero_w: number;
+  /** Per-piece nudges/widths for the Corners (spread) layout — each corner piece is its own
+   *  movable unit (Erik: "still cant resize or any of that jazz" on spread). Same clamps as
+   *  the hero box: dx/dy ±40 (% of the piece), w 30-100 (% of the row) with 0 = default. */
+  spread_area_dx: number;
+  spread_area_dy: number;
+  spread_head_dx: number;
+  spread_head_dy: number;
+  spread_head_w: number;
+  spread_tag_dx: number;
+  spread_tag_dy: number;
+  spread_tag_w: number;
   /** Whole-page vertical rhythm: scoped rescale of the section paddings (site-fonts.tsx emits
    *  the overrides). "default" = untouched; per-section spacing is style.pad on section blocks. */
   site_density: "default" | "compact" | "airy";
@@ -300,6 +311,14 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   hero_dx: 0,
   hero_dy: 0,
   hero_w: 0,
+  spread_area_dx: 0,
+  spread_area_dy: 0,
+  spread_head_dx: 0,
+  spread_head_dy: 0,
+  spread_head_w: 0,
+  spread_tag_dx: 0,
+  spread_tag_dy: 0,
+  spread_tag_w: 0,
   estimate_cta_label: "",
   social_instagram: "",
   custom_domain: "",

@@ -91,8 +91,8 @@ export function SiteStudio({
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
       if ((e.data as { type?: string })?.type === "cn-live-saved") {
-        toast("On-page edits saved to the draft.", "success");
-        setPreviewBump((n) => n + 1);
+        // Autosave ping: refresh the version list's edited-state, but NEVER remount the
+        // preview iframe — the person is mid-edit inside it (drag in progress, text focused).
         router.refresh();
       }
     };

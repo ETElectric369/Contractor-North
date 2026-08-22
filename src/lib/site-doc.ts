@@ -36,6 +36,14 @@ export const SITE_DOC_KEYS = [
   "hero_dx",
   "hero_dy",
   "hero_w",
+  "spread_area_dx",
+  "spread_area_dy",
+  "spread_head_dx",
+  "spread_head_dy",
+  "spread_head_w",
+  "spread_tag_dx",
+  "spread_tag_dy",
+  "spread_tag_w",
   "site_accent",
   "site_font",
   "brand_font",
@@ -67,6 +75,14 @@ export interface SiteDoc {
   hero_dx: number;
   hero_dy: number;
   hero_w: number;
+  spread_area_dx: number;
+  spread_area_dy: number;
+  spread_head_dx: number;
+  spread_head_dy: number;
+  spread_head_w: number;
+  spread_tag_dx: number;
+  spread_tag_dy: number;
+  spread_tag_w: number;
   site_accent: string;
   site_font: "default" | "serif" | "grotesk" | "soft" | "condensed";
   brand_font: "default" | "serif" | "grotesk" | "soft" | "condensed";
@@ -151,6 +167,14 @@ export function extractSiteDoc(rawSettings: unknown): SiteDoc {
     hero_dx: nudge(st.hero_dx, 0),
     hero_dy: nudge(st.hero_dy, 0),
     hero_w: boxW(st.hero_w, 0),
+    spread_area_dx: nudge(st.spread_area_dx, 0),
+    spread_area_dy: nudge(st.spread_area_dy, 0),
+    spread_head_dx: nudge(st.spread_head_dx, 0),
+    spread_head_dy: nudge(st.spread_head_dy, 0),
+    spread_head_w: boxW(st.spread_head_w, 0),
+    spread_tag_dx: nudge(st.spread_tag_dx, 0),
+    spread_tag_dy: nudge(st.spread_tag_dy, 0),
+    spread_tag_w: boxW(st.spread_tag_w, 0),
     site_accent: (() => {
       const a = typeof st.site_accent === "string" ? st.site_accent.trim() : "";
       return HEX6.test(a) ? a.toLowerCase() : "";
@@ -322,6 +346,14 @@ export function coerceSiteDoc(raw: unknown, base: SiteDoc): { doc: SiteDoc; drop
       hero_dx: r.hero_dx === undefined ? base.hero_dx : nudge(r.hero_dx, base.hero_dx),
       hero_dy: r.hero_dy === undefined ? base.hero_dy : nudge(r.hero_dy, base.hero_dy),
       hero_w: r.hero_w === undefined ? base.hero_w : boxW(r.hero_w, base.hero_w),
+      spread_area_dx: r.spread_area_dx === undefined ? base.spread_area_dx : nudge(r.spread_area_dx, base.spread_area_dx),
+      spread_area_dy: r.spread_area_dy === undefined ? base.spread_area_dy : nudge(r.spread_area_dy, base.spread_area_dy),
+      spread_head_dx: r.spread_head_dx === undefined ? base.spread_head_dx : nudge(r.spread_head_dx, base.spread_head_dx),
+      spread_head_dy: r.spread_head_dy === undefined ? base.spread_head_dy : nudge(r.spread_head_dy, base.spread_head_dy),
+      spread_head_w: r.spread_head_w === undefined ? base.spread_head_w : boxW(r.spread_head_w, base.spread_head_w),
+      spread_tag_dx: r.spread_tag_dx === undefined ? base.spread_tag_dx : nudge(r.spread_tag_dx, base.spread_tag_dx),
+      spread_tag_dy: r.spread_tag_dy === undefined ? base.spread_tag_dy : nudge(r.spread_tag_dy, base.spread_tag_dy),
+      spread_tag_w: r.spread_tag_w === undefined ? base.spread_tag_w : boxW(r.spread_tag_w, base.spread_tag_w),
       site_accent:
         r.site_accent === undefined
           ? base.site_accent
@@ -372,6 +404,14 @@ export function diffSiteDoc(a: SiteDoc, b: SiteDoc): string[] {
     hero_dx: "Hero text nudge (across)",
     hero_dy: "Hero text nudge (down)",
     hero_w: "Hero text box width",
+    spread_area_dx: "Area piece nudge (across)",
+    spread_area_dy: "Area piece nudge (down)",
+    spread_head_dx: "Headline piece nudge (across)",
+    spread_head_dy: "Headline piece nudge (down)",
+    spread_head_w: "Headline piece width",
+    spread_tag_dx: "Tagline piece nudge (across)",
+    spread_tag_dy: "Tagline piece nudge (down)",
+    spread_tag_w: "Tagline piece width",
     site_accent: "Accent color",
     site_font: "Heading typeface",
     brand_font: "Business-name typeface",
