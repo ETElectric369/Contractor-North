@@ -1,17 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import {
-  AlignCenter,
-  AlignLeft,
-  AlignRight,
-  ChevronDown,
-  ChevronsLeftRight,
-  ChevronsRightLeft,
-  Undo2,
-  ZoomIn,
-  ZoomOut,
-} from "lucide-react";
+import { AlignCenter, AlignLeft, AlignRight, ChevronDown, Undo2 } from "lucide-react";
 import { SITE_FONTS, siteFontKey, type SiteFontKey } from "./site-fonts";
 import { updateVersionFields } from "./live-edit-actions";
 
@@ -50,6 +40,9 @@ const PATCH_LABEL: Record<string, string> = {
   service_area: "Service area text",
   estimate_cta_label: "Button wording",
   splash_headline_size: "Headline size",
+  splash_headline_color: "Headline color",
+  splash_tagline_color: "Tagline color",
+  service_area_color: "Area color",
   site_font: "Heading font",
   brand_font: "Name font",
   hero_align: "Alignment",
@@ -72,6 +65,16 @@ const PATCH_LABEL: Record<string, string> = {
 };
 
 const TEXT_FIELDS: FieldKey[] = ["splash_headline", "splash_tagline", "service_area", "estimate_cta_label"];
+// Fields where Enter means A LINE BREAK (their renderers are whitespace-pre-line). Everywhere
+// else Enter finishes the edit, like any single-line input.
+const BREAK_FIELDS: FieldKey[] = ["splash_headline", "splash_tagline"];
+// The palette's target per selected field; fields without an entry have no color tool.
+const COLOR_KEY: Partial<Record<FieldKey, string>> = {
+  splash_headline: "splash_headline_color",
+  splash_tagline: "splash_tagline_color",
+  service_area: "service_area_color",
+};
+const PALETTE = ["", "#ffffff", "#f8fafc", "#fde68a", "#fbbf24", "#f59e0b", "#7dd3fc", "#0ea5e9", "#34d399", "#f87171", "#c4b5fd", "#0f172a"];
 const FONT_KEYS = Object.keys(SITE_FONTS) as SiteFontKey[];
 const FONT_NAME: Record<SiteFontKey, string> = {
   default: "Standard",
@@ -83,7 +86,6 @@ const FONT_NAME: Record<SiteFontKey, string> = {
 // The site shell's own face (layout.tsx Geist) — "Standard" must PAINT, not merely clear,
 // because the server's SiteFonts rule for a non-default draft font would otherwise still win.
 const DEFAULT_FAMILY = "var(--font-geist-sans), system-ui, sans-serif";
-const SIZES = ["s", "m", "l"] as const;
 // Mirrors HEAD_SIZE in org-site.tsx — the live class swap for headline size.
 const HEAD_SIZE_CLS: Record<string, string[]> = {
   s: ["text-2xl", "sm:text-3xl"],
@@ -139,6 +141,9 @@ export function LiveEditor({
     hero_dy: number;
     hero_w: number;
     hero_scale: number;
+    splash_headline_color: string;
+    splash_tagline_color: string;
+    service_area_color: string;
     spread_area_scale: number;
     spread_head_scale: number;
     spread_tag_scale: number;
@@ -157,6 +162,7 @@ export function LiveEditor({
   const [trail, setTrail] = useState<TrailEntry[]>([]);
   const [showTrail, setShowTrail] = useState(false);
   const [fontMenu, setFontMenu] = useState<null | "site_font" | "brand_font">(null);
+  const [colorMenu, setColorMenu] = useState(false);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "rearranging" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -325,6 +331,11 @@ export function LiveEditor({
   }
   function paint(k: string) {
     paintUnitByKey(k);
+    if (k.endsWith("_color")) {
+      const field = (Object.entries(COLOR_KEY).find(([, ck]) => ck === k) ?? [])[0];
+      const el = field ? document.querySelector<HTMLElement>(`[data-e="${field}"]`) : null;
+      if (el) el.style.color = String(cur(k) ?? "");
+    }
     if (k === "splash_headline_size") paintHeadlineSize(String(cur(k)));
     if (k === "site_font" || k === "brand_font") paintFont(k, siteFontKey(cur(k)));
     if (TEXT_FIELDS.includes(k as FieldKey)) {
@@ -356,10 +367,9 @@ export function LiveEditor({
     setEditingText(false);
     const raw = sess.el.innerText;
     // A headline may carry deliberate line breaks — normalize, never flatten (cn-v787).
-    const clean =
-      sess.f === "splash_headline"
-        ? raw.replace(/\r\n?/g, "\n").replace(/[ \t]*\n[ \t]*/g, "\n").replace(/\n{2,}/g, "\n").trim()
-        : raw.trim();
+    const clean = BREAK_FIELDS.includes(sess.f)
+      ? raw.replace(/\r\n?/g, "\n").replace(/[ \t]*\n[ \t]*/g, "\n").replace(/\n{2,}/g, "\n").trim()
+      : raw.trim();
     if (clean !== raw) sess.el.innerText = clean;
     if (clean !== sess.before) {
       recordPrev(sess.f, sess.before);
@@ -428,6 +438,7 @@ export function LiveEditor({
       setSelected(el.dataset.e as FieldKey);
       setEditingText(false);
       setFontMenu(null);
+      setColorMenu(false);
       const u = unitFor(el);
       unitRef.current = u;
       if (u) {
@@ -475,8 +486,29 @@ export function LiveEditor({
       el.focus();
       setEditingText(true);
       editingRef.current = { el, f, before: el.innerText };
+      // ENTER MUST DO SOMETHING (Erik's break "kept resetting": plaintext-only swallows Enter
+      // entirely, so he pushed words apart with spaces and the render collapsed them). In a
+      // break field Enter inserts a real \n; elsewhere it finishes the edit like an input.
+      // keydown AND beforeinput both guard it — engines differ on which fires usably.
+      const onEnterKey = (ke: KeyboardEvent) => {
+        if (ke.key !== "Enter") return;
+        ke.preventDefault();
+        if (BREAK_FIELDS.includes(f)) document.execCommand("insertText", false, "\n");
+        else el.blur();
+      };
+      const onBeforeInput = (ie: Event) => {
+        const t = (ie as InputEvent).inputType;
+        if (t !== "insertParagraph" && t !== "insertLineBreak") return;
+        ie.preventDefault();
+        if (BREAK_FIELDS.includes(f)) document.execCommand("insertText", false, "\n");
+        else el.blur();
+      };
+      el.addEventListener("keydown", onEnterKey);
+      el.addEventListener("beforeinput", onBeforeInput);
       const onBlur = () => {
         el.removeEventListener("blur", onBlur);
+        el.removeEventListener("keydown", onEnterKey);
+        el.removeEventListener("beforeinput", onBeforeInput);
         endTextEdit(false);
       };
       el.addEventListener("blur", onBlur);
@@ -644,21 +676,9 @@ export function LiveEditor({
   const btn = "inline-flex h-8 min-w-8 items-center justify-center rounded px-1.5 text-white/85 hover:bg-white/15 disabled:opacity-30";
   const btnOn = "inline-flex h-8 min-w-8 items-center justify-center rounded px-1.5 bg-white text-slate-900";
   const group = "flex items-center gap-0.5 border-l border-white/15 pl-2";
-  const stepSize = (dir: 1 | -1) => {
-    const order = SIZES as readonly string[];
-    const now = order.indexOf(String(cur("splash_headline_size")));
-    const next = order[Math.min(order.length - 1, Math.max(0, (now === -1 ? 2 : now) + dir))];
-    if (next && next !== String(cur("splash_headline_size"))) setValue("splash_headline_size", next);
-  };
   const zoomBy = (delta: number) => {
     if (!u) return;
     setValue(u.sc, clampZoom((num(u.sc) || 100) + delta));
-  };
-  const widthBy = (delta: number) => {
-    if (!u?.w) return;
-    const parentW = u.el.parentElement?.getBoundingClientRect().width || 1;
-    const now = num(u.w) || Math.round((u.el.getBoundingClientRect().width / parentW) * 100);
-    setValue(u.w, clampW(now + delta));
   };
   const fontKind: "site_font" | "brand_font" = selected === "__brand" ? "brand_font" : "site_font";
 
@@ -674,16 +694,6 @@ export function LiveEditor({
         {selected && (
           <>
             <span className="rounded bg-amber-500/90 px-2 py-0.5 text-xs font-bold uppercase tracking-wide">{FIELD_LABEL[selected]}</span>
-            {selected === "splash_headline" && (
-              <span className={group}>
-                <button type="button" title="Smaller headline" className={btn} onClick={() => stepSize(-1)}>
-                  <span className="text-xs font-bold">A−</span>
-                </button>
-                <button type="button" title="Bigger headline" className={btn} onClick={() => stepSize(1)}>
-                  <span className="text-base font-bold">A+</span>
-                </button>
-              </span>
-            )}
             <span className={`${group} relative`}>
               <button
                 type="button"
@@ -742,20 +752,59 @@ export function LiveEditor({
             {u && (
               <span className={group}>
                 <button type="button" title="Smaller text (⌥↓)" className={btn} onClick={() => zoomBy(-10)}>
-                  <ZoomOut className="h-4 w-4" />
+                  <span className="text-xs font-bold">A−</span>
                 </button>
                 <button type="button" title="Bigger text (⌥↑)" className={btn} onClick={() => zoomBy(10)}>
-                  <ZoomIn className="h-4 w-4" />
+                  <span className="text-base font-bold">A+</span>
                 </button>
-                {u.w && (
-                  <>
-                    <button type="button" title="Narrower box (⌥←)" className={btn} onClick={() => widthBy(-5)}>
-                      <ChevronsRightLeft className="h-4 w-4" />
-                    </button>
-                    <button type="button" title="Wider box (⌥→)" className={btn} onClick={() => widthBy(5)}>
-                      <ChevronsLeftRight className="h-4 w-4" />
-                    </button>
-                  </>
+              </span>
+            )}
+            {selected && COLOR_KEY[selected] && (
+              <span className={`${group} relative`}>
+                <button
+                  type="button"
+                  title="Text color"
+                  className={colorMenu ? btnOn : btn}
+                  onClick={() => setColorMenu((v) => !v)}
+                >
+                  <span className="flex flex-col items-center leading-none">
+                    <span className="text-sm font-bold">A</span>
+                    <span
+                      className="mt-0.5 h-1 w-4 rounded-sm"
+                      style={{ backgroundColor: String(cur(COLOR_KEY[selected]!) || "") || "#94a3b8" }}
+                    />
+                  </span>
+                </button>
+                {colorMenu && (
+                  <span className="absolute left-0 top-9 z-[70] grid w-44 grid-cols-4 gap-1.5 rounded-lg bg-slate-800 p-2 shadow-xl ring-1 ring-white/15">
+                    {PALETTE.map((c) => (
+                      <button
+                        key={c || "default"}
+                        type="button"
+                        title={c || "Theme default"}
+                        onClick={() => {
+                          setValue(COLOR_KEY[selected]!, c);
+                          setColorMenu(false);
+                        }}
+                        className={`h-8 w-8 rounded-md border ${String(cur(COLOR_KEY[selected]!) || "") === c ? "border-amber-400 ring-2 ring-amber-400/60" : "border-white/20"}`}
+                        style={c ? { backgroundColor: c } : { background: "repeating-conic-gradient(#475569 0 25%, #334155 0 50%) 0 0 / 12px 12px" }}
+                      />
+                    ))}
+                    <label
+                      title="Custom color"
+                      className="col-span-4 mt-1 flex h-8 cursor-pointer items-center justify-center rounded-md border border-white/20 text-xs font-medium text-white/80 hover:bg-white/10"
+                    >
+                      Custom…
+                      <input
+                        type="color"
+                        className="h-0 w-0 opacity-0"
+                        onChange={(e) => {
+                          setValue(COLOR_KEY[selected]!, e.target.value);
+                          setColorMenu(false);
+                        }}
+                      />
+                    </label>
+                  </span>
                 )}
               </span>
             )}

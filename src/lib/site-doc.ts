@@ -49,6 +49,9 @@ export const SITE_DOC_KEYS = [
   "spread_tag_dy",
   "spread_tag_w",
   "site_accent",
+  "splash_headline_color",
+  "splash_tagline_color",
+  "service_area_color",
   "site_font",
   "brand_font",
   "site_density",
@@ -92,6 +95,9 @@ export interface SiteDoc {
   spread_tag_dy: number;
   spread_tag_w: number;
   site_accent: string;
+  splash_headline_color: string;
+  splash_tagline_color: string;
+  service_area_color: string;
   site_font: "default" | "serif" | "grotesk" | "soft" | "condensed";
   brand_font: "default" | "serif" | "grotesk" | "soft" | "condensed";
   site_density: "default" | "compact" | "airy";
@@ -157,6 +163,18 @@ const headlineText = (v: string): string =>
 export const flattenHeadline = (v: string): string => v.replace(/\s*\n+\s*/g, ", ").replace(/,\s*,/g, ",");
 
 const s = (v: unknown, max: number) => String(v ?? "").slice(0, max);
+/** A text color: a #rrggbb hex or "" (the theme's own color). Total over hostile jsonb. */
+const hexOr = (v: unknown): string => {
+  const a = typeof v === "string" ? v.trim() : "";
+  return HEX6.test(a) ? a.toLowerCase() : "";
+};
+/** Coerce shape for a color: absent/garbage keeps base, "" clears deliberately, hex lands. */
+const hexKeep = (v: unknown, base: string): string => {
+  if (v === undefined) return base;
+  if (v === "") return "";
+  const a = typeof v === "string" ? v.trim() : "";
+  return HEX6.test(a) ? a.toLowerCase() : base;
+};
 
 /**
  * Reviews are WIRING, carried VERBATIM (review finding, high): the first cut clamped them to
@@ -208,6 +226,9 @@ export function extractSiteDoc(rawSettings: unknown): SiteDoc {
       const a = typeof st.site_accent === "string" ? st.site_accent.trim() : "";
       return HEX6.test(a) ? a.toLowerCase() : "";
     })(),
+    splash_headline_color: hexOr(st.splash_headline_color),
+    splash_tagline_color: hexOr(st.splash_tagline_color),
+    service_area_color: hexOr(st.service_area_color),
     site_font:
       st.site_font === "serif" || st.site_font === "grotesk" || st.site_font === "soft" || st.site_font === "condensed"
         ? st.site_font
@@ -387,6 +408,9 @@ export function coerceSiteDoc(raw: unknown, base: SiteDoc): { doc: SiteDoc; drop
       spread_tag_dx: r.spread_tag_dx === undefined ? base.spread_tag_dx : nudge(r.spread_tag_dx, base.spread_tag_dx),
       spread_tag_dy: r.spread_tag_dy === undefined ? base.spread_tag_dy : nudge(r.spread_tag_dy, base.spread_tag_dy),
       spread_tag_w: r.spread_tag_w === undefined ? base.spread_tag_w : boxW(r.spread_tag_w, base.spread_tag_w),
+      splash_headline_color: hexKeep(r.splash_headline_color, base.splash_headline_color),
+      splash_tagline_color: hexKeep(r.splash_tagline_color, base.splash_tagline_color),
+      service_area_color: hexKeep(r.service_area_color, base.service_area_color),
       site_accent:
         r.site_accent === undefined
           ? base.site_accent
@@ -450,6 +474,9 @@ export function diffSiteDoc(a: SiteDoc, b: SiteDoc): string[] {
     spread_tag_dy: "Tagline piece nudge (down)",
     spread_tag_w: "Tagline piece width",
     site_accent: "Accent color",
+    splash_headline_color: "Headline color",
+    splash_tagline_color: "Tagline color",
+    service_area_color: "Service-area color",
     site_font: "Heading typeface",
     brand_font: "Business-name typeface",
     site_density: "Page density",

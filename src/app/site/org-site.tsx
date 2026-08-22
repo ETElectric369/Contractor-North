@@ -71,6 +71,9 @@ function Hero({
   heroW = 0,
   heroS = 0,
   spreadOff = { areaDx: 0, areaDy: 0, areaS: 0, headDx: 0, headDy: 0, headW: 0, headS: 0, tagDx: 0, tagDy: 0, tagW: 0, tagS: 0 },
+  headlineColor = "",
+  taglineColor = "",
+  areaColor = "",
 }: {
   theme: OrgSettings["site_theme"];
   headline: string;
@@ -90,7 +93,12 @@ function Hero({
   heroW?: number;
   heroS?: number;
   spreadOff?: { areaDx: number; areaDy: number; areaS: number; headDx: number; headDy: number; headW: number; headS: number; tagDx: number; tagDy: number; tagW: number; tagS: number };
+  headlineColor?: string;
+  taglineColor?: string;
+  areaColor?: string;
 }) {
+  // Palette overrides: a style attr exists ONLY when a color is set (byte-identical defaults).
+  const tColor = (c: string) => (c ? { color: c } : undefined);
   // A lever'd unit carries CSS custom properties + the cn-lever classes; the actual transform/
   // max-width live in ONE desktop-scoped rule (site-fonts.tsx) so phones keep the untouched
   // re-stack (a nudge tuned on a 1200px hero is nonsense at 375px). transform-origin pins the
@@ -119,9 +127,9 @@ function Hero({
       <section id="top" className="relative isolate overflow-hidden text-white" style={{ background: `linear-gradient(135deg, ${brand} 0%, #0f172a 100%)` }}>
         <div className="mx-auto grid max-w-6xl items-center gap-10 px-4 py-20 sm:py-24 lg:grid-cols-2">
           <div>
-              {area && <p data-e="service_area" className="mb-4 inline-block rounded-full bg-white/15 px-3 py-1 text-xs font-bold uppercase tracking-[0.2em]">{area}</p>}
-            {headline && <h1 data-e="splash_headline" className={`${hSize} whitespace-pre-line font-black leading-[1.05] tracking-tight`}>{headline}</h1>}
-            {tagline && <p data-e="splash_tagline" className="mt-5 max-w-xl text-lg text-white/85">{tagline}</p>}
+              {area && <p data-e="service_area" style={tColor(areaColor)} className="mb-4 inline-block rounded-full bg-white/15 px-3 py-1 text-xs font-bold uppercase tracking-[0.2em]">{area}</p>}
+            {headline && <h1 data-e="splash_headline" style={tColor(headlineColor)} className={`${hSize} whitespace-pre-line font-black leading-[1.05] tracking-tight`}>{headline}</h1>}
+            {tagline && <p data-e="splash_tagline" style={tColor(taglineColor)} className="mt-5 max-w-xl whitespace-pre-line text-lg text-white/85">{tagline}</p>}
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Link href={estimateHref} className="inline-flex items-center gap-2 rounded-lg bg-white px-6 py-3.5 text-base font-bold shadow-lg" style={{ color: brand }}>
                 <span data-e="estimate_cta_label">{ctaLabel}</span> <ArrowRight className="h-5 w-5" />
@@ -154,9 +162,9 @@ function Hero({
       <section id="top" className="border-b border-slate-100" style={{ background: `linear-gradient(180deg, ${brand}0a, #ffffff 65%)` }}>
         <div className="mx-auto grid max-w-6xl items-center gap-12 px-4 py-20 sm:py-28 lg:grid-cols-2">
           <div>
-              {area && <p data-e="service_area" className="mb-4 text-sm font-semibold uppercase tracking-[0.25em]" style={{ color: brand }}>{area}</p>}
-            {headline && <h1 data-e="splash_headline" className={`${hSize} whitespace-pre-line font-semibold leading-[1.1] tracking-tight text-slate-900`}>{headline}</h1>}
-            {tagline && <p data-e="splash_tagline" className="mt-5 max-w-xl text-lg text-slate-600">{tagline}</p>}
+              {area && <p data-e="service_area" className="mb-4 text-sm font-semibold uppercase tracking-[0.25em]" style={{ color: areaColor || brand }}>{area}</p>}
+            {headline && <h1 data-e="splash_headline" style={tColor(headlineColor)} className={`${hSize} whitespace-pre-line font-semibold leading-[1.1] tracking-tight text-slate-900`}>{headline}</h1>}
+            {tagline && <p data-e="splash_tagline" style={tColor(taglineColor)} className="mt-5 max-w-xl whitespace-pre-line text-lg text-slate-600">{tagline}</p>}
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Link href={estimateHref} className="inline-flex items-center gap-2 rounded-full px-6 py-3.5 text-base font-semibold text-white shadow-sm" style={{ backgroundColor: brand }}>
                 <span data-e="estimate_cta_label">{ctaLabel}</span> <ArrowRight className="h-5 w-5" />
@@ -196,9 +204,9 @@ function Hero({
   const boxVars = leverVars(heroDx, heroDy, heroW, heroS, `${heroAlign} top`);
   const textBlock = (
     <div data-hero-text style={boxVars} className={["max-w-2xl", leverCls(boxVars, heroW), alignInner, heroStyle === "panel" ? "rounded-2xl bg-slate-950/55 p-8 backdrop-blur-sm sm:p-10" : ""].filter(Boolean).join(" ")}>
-      {area && <p data-e="service_area" className="mb-3 text-sm font-semibold uppercase tracking-[0.2em] text-white/80">{area}</p>}
-      {headline && <h1 data-e="splash_headline" className={`${hSize} whitespace-pre-line font-extrabold leading-tight tracking-tight text-white drop-shadow`}>{headline}</h1>}
-      {tagline && <p data-e="splash_tagline" className="mt-4 max-w-xl text-lg text-slate-100">{tagline}</p>}
+      {area && <p data-e="service_area" style={tColor(areaColor)} className="mb-3 text-sm font-semibold uppercase tracking-[0.2em] text-white/80">{area}</p>}
+      {headline && <h1 data-e="splash_headline" style={tColor(headlineColor)} className={`${hSize} whitespace-pre-line font-extrabold leading-tight tracking-tight text-white drop-shadow`}>{headline}</h1>}
+      {tagline && <p data-e="splash_tagline" style={tColor(taglineColor)} className="mt-4 max-w-xl whitespace-pre-line text-lg text-slate-100">{tagline}</p>}
       <div className="mt-8 flex flex-wrap items-center gap-3">
         {cta}
         {hasPhotos && (
@@ -251,16 +259,16 @@ function Hero({
             const v = leverVars(spreadOff.areaDx, spreadOff.areaDy, 0, spreadOff.areaS, "left top");
             return (
           <div data-spread-piece="area" style={v} className={["w-fit", leverCls(v, 0)].filter(Boolean).join(" ")}>
-            {area && <p data-e="service_area" className="text-sm font-semibold uppercase tracking-[0.2em] text-white/80">{area}</p>}
+            {area && <p data-e="service_area" style={tColor(areaColor)} className="text-sm font-semibold uppercase tracking-[0.2em] text-white/80">{area}</p>}
           </div>
             );
           })()}
           <div className="flex flex-col gap-8 sm:flex-row sm:items-end sm:justify-between">
             <div className={["max-w-xl", leverCls(leverVars(spreadOff.headDx, spreadOff.headDy, spreadOff.headW, spreadOff.headS, "left bottom"), spreadOff.headW)].filter(Boolean).join(" ")} data-spread-piece="headline" style={leverVars(spreadOff.headDx, spreadOff.headDy, spreadOff.headW, spreadOff.headS, "left bottom")}>
-              {headline && <h1 data-e="splash_headline" className={`${hSize} whitespace-pre-line font-extrabold leading-tight tracking-tight text-white drop-shadow`}>{headline}</h1>}
+              {headline && <h1 data-e="splash_headline" style={tColor(headlineColor)} className={`${hSize} whitespace-pre-line font-extrabold leading-tight tracking-tight text-white drop-shadow`}>{headline}</h1>}
             </div>
             <div className={["max-w-md sm:text-right", leverCls(leverVars(spreadOff.tagDx, spreadOff.tagDy, spreadOff.tagW, spreadOff.tagS, "right bottom"), spreadOff.tagW)].filter(Boolean).join(" ")} data-spread-piece="tagline" style={leverVars(spreadOff.tagDx, spreadOff.tagDy, spreadOff.tagW, spreadOff.tagS, "right bottom")}>
-              {tagline && <p data-e="splash_tagline" className="text-lg text-slate-100">{tagline}</p>}
+              {tagline && <p data-e="splash_tagline" style={tColor(taglineColor)} className="whitespace-pre-line text-lg text-slate-100">{tagline}</p>}
               <div className="mt-6 flex flex-wrap items-center gap-3 sm:justify-end">
                 {cta}
                 {hasPhotos && (
@@ -399,6 +407,9 @@ export function OrgSite({ org, articlesHref, pageLinks = [] }: { org: PublicOrg;
               tagW: s.spread_tag_w,
               tagS: s.spread_tag_scale,
             }}
+            headlineColor={s.splash_headline_color}
+            taglineColor={s.splash_tagline_color}
+            areaColor={s.service_area_color}
           />
 
           {/* Trust band */}

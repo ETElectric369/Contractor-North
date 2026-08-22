@@ -209,6 +209,16 @@ describe("the main-build blocks — split obeys the image law, density is enum-o
     expect(coerceSiteDoc({}, d).doc.spread_head_dx).toBe(-400);
   });
 
+  it("text colors: hex lands lowercased, garbage keeps base, empty clears", () => {
+    const d = extractSiteDoc({ splash_headline_color: "#FFAA00", splash_tagline_color: "red" });
+    expect(d.splash_headline_color).toBe("#ffaa00");
+    expect(d.splash_tagline_color).toBe("");
+    const c = coerceSiteDoc({ splash_headline_color: "nope" }, d).doc;
+    expect(c.splash_headline_color).toBe("#ffaa00"); // garbage keeps base
+    expect(coerceSiteDoc({}, d).doc.splash_headline_color).toBe("#ffaa00");
+    expect(coerceSiteDoc({ splash_headline_color: "" }, d).doc.splash_headline_color).toBe("");
+  });
+
   it("text zoom clamps 50-200 with 0 = default", () => {
     const d = extractSiteDoc({ hero_scale: 340, spread_head_scale: 5, spread_tag_scale: 125 });
     expect(d.hero_scale).toBe(200);

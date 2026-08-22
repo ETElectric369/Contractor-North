@@ -175,6 +175,10 @@ export interface OrgSettings {
    *  Empty = derived from glass_tint (accentHex), the pre-studio behavior. A separate key so a
    *  site redesign can restyle the SITE without recoloring the office's app skin. */
   site_accent: string;
+  /** Per-text color overrides from the on-page editor's palette; "" = the theme's color. */
+  splash_headline_color: string;
+  splash_tagline_color: string;
+  service_area_color: string;
   /** The public site's HEADING typeface preset (site-fonts.tsx) — headings only, body stays the
    *  system stack. "default" = the app's Geist, i.e. render nothing extra. */
   site_font: "default" | "serif" | "grotesk" | "soft" | "condensed";
@@ -314,6 +318,9 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   site_density: "default",
   hero_align: "left",
   hero_style: "open",
+  splash_headline_color: "",
+  splash_tagline_color: "",
+  service_area_color: "",
   hero_dx: 0,
   hero_dy: 0,
   hero_w: 0,
@@ -450,6 +457,10 @@ export function getOrgSettings(raw: unknown): OrgSettings {
   for (const k of ["hero_w", "spread_head_w", "spread_tag_w"] as const) merged[k] = lever(merged[k], 30, 100);
   for (const k of ["hero_scale", "spread_area_scale", "spread_head_scale", "spread_tag_scale"] as const) {
     merged[k] = lever(merged[k], 50, 200);
+  }
+  for (const k of ["splash_headline_color", "splash_tagline_color", "service_area_color"] as const) {
+    const v = typeof merged[k] === "string" ? merged[k].trim() : "";
+    merged[k] = /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : "";
   }
   return merged;
 }
