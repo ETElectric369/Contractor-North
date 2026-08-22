@@ -123,6 +123,17 @@ describe("AN ABSENT KEY KEEPS THE BASE — a partial proposal must not erase the
   });
 });
 
+describe("site_accent — the mood lever, hex or nothing", () => {
+  it("a valid hex lands lowercased; garbage keeps the base; '' clears; absent keeps", () => {
+    const withAccent = extractSiteDoc({ site_accent: "#1B3A5C" });
+    expect(withAccent.site_accent).toBe("#1b3a5c");
+    expect(coerceSiteDoc({ site_accent: "#A2C3D4" }, base).doc.site_accent).toBe("#a2c3d4");
+    expect(coerceSiteDoc({ site_accent: "midnight blue" }, withAccent).doc.site_accent).toBe("#1b3a5c");
+    expect(coerceSiteDoc({ site_accent: "" }, withAccent).doc.site_accent).toBe("");
+    expect(coerceSiteDoc({}, withAccent).doc.site_accent).toBe("#1b3a5c");
+  });
+});
+
 describe("materialize + diff", () => {
   it("applySiteDoc touches only the doc's keys", () => {
     const raw = { public_handle: "et-electric", estimating_mode: "research", splash_headline: "Old" };

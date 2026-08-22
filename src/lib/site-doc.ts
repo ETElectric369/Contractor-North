@@ -31,6 +31,7 @@ export const SITE_DOC_KEYS = [
   "specialty_blurb",
   "service_area",
   "site_theme",
+  "site_accent",
   "social_instagram",
   "google_business_url",
   "calendly_url",
@@ -52,6 +53,7 @@ export interface SiteDoc {
   specialty_blurb: string;
   service_area: string;
   site_theme: "classic" | "bold" | "minimal";
+  site_accent: string;
   social_instagram: string;
   google_business_url: string;
   calendly_url: string;
@@ -75,6 +77,8 @@ const LIMITS = {
   // Parity with update_site_content's 200-element array cap (0118) — a bound, not a target.
   portfolioItems: 200,
 } as const;
+
+const HEX6 = /^#[0-9a-f]{6}$/i;
 
 const s = (v: unknown, max: number) => String(v ?? "").slice(0, max);
 
@@ -107,6 +111,7 @@ export function extractSiteDoc(rawSettings: unknown): SiteDoc {
     specialty_blurb: s(st.specialty_blurb, LIMITS.specialtyBlurb),
     service_area: s(st.service_area, LIMITS.serviceArea),
     site_theme: st.site_theme === "bold" || st.site_theme === "minimal" ? st.site_theme : "classic",
+    site_accent: HEX6.test(st.site_accent?.trim() ?? "") ? st.site_accent.trim().toLowerCase() : "",
     social_instagram: s(st.social_instagram, LIMITS.handle),
     google_business_url: s(st.google_business_url, LIMITS.url),
     calendly_url: s(st.calendly_url, LIMITS.url),
@@ -248,6 +253,12 @@ export function coerceSiteDoc(raw: unknown, base: SiteDoc): { doc: SiteDoc; drop
       specialty_blurb: sOr(r.specialty_blurb, base.specialty_blurb, LIMITS.specialtyBlurb),
       service_area: sOr(r.service_area, base.service_area, LIMITS.serviceArea),
       site_theme: theme === "classic" || theme === "bold" || theme === "minimal" ? theme : base.site_theme,
+      site_accent:
+        r.site_accent === undefined
+          ? base.site_accent
+          : r.site_accent === "" || HEX6.test(String(r.site_accent).trim())
+            ? String(r.site_accent).trim().toLowerCase()
+            : base.site_accent,
       social_instagram: sOr(r.social_instagram, base.social_instagram, LIMITS.handle),
       google_business_url: base.google_business_url, // a design never rewrites the GBP link
       calendly_url: base.calendly_url, // nor the booking link — both are wiring, not styling
@@ -274,6 +285,7 @@ export function diffSiteDoc(a: SiteDoc, b: SiteDoc): string[] {
     specialty_blurb: "Specialty blurb",
     service_area: "Service area",
     site_theme: "Theme",
+    site_accent: "Accent color",
     social_instagram: "Instagram",
     google_business_url: "Google Business link",
     calendly_url: "Booking link",

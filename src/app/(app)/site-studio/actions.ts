@@ -20,7 +20,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  */
 
 export type StudioResult =
-  | { ok: true; id?: string; changes?: string[]; dropped?: string[]; note?: string }
+  | { ok: true; id?: string; changes?: string[]; dropped?: string[]; cannot?: string[]; note?: string }
   | { ok: false; error: string };
 
 type VersionRow = { id: string; v: number; doc: unknown; status: string };
@@ -121,7 +121,7 @@ export async function designSitePass(instruction: string, baseVersionId: string 
     const client = getAnthropic();
     const msg = await client.messages.create({
       model: DEFAULT_MODEL,
-      max_tokens: 8192,
+      max_tokens: 12288,
       system:
         `You are the design lead for a ${settings.trade_label?.trim() || "contractor"}'s public website, working INSIDE a fixed design system. You edit a SITE DOCUMENT (JSON) that a trusted renderer draws — you never write HTML pages.\n` +
         "THE LAWS:\n" +
@@ -130,11 +130,17 @@ export async function designSitePass(instruction: string, baseVersionId: string 
         "· LINKS in buttons/banners must be on-site: '#contact-form' (the lead form anchor) or a path starting '/'. Never external.\n" +
         "· reviews, google_business_url and calendly_url are wiring — return them EXACTLY as given.\n" +
         "· Never remove the customer's ability to make contact: if you compose home_blocks, include a {type:'section',props:{key:'contact'}} block (and 'estimate' where it fits).\n" +
-        "DOCUMENT FIELDS: splash_headline (the H1 + Google title — keep it keyword-real: trade + place), splash_tagline (the meta-description-ish line, ≤160 chars ideally), splash_bg_url (hero image url from library or \"\"), splash_bullets (the services list, ONE service per line, plain text), splash_credentials (license/insurance line), splash_headline_size ('s'|'m'|'l'), show_name_with_logo (bool), specialty_headline + specialty_blurb (the signature-work section), service_area (towns, ' · ' separated), site_theme ('classic'|'bold'|'minimal' — hero framing), social_instagram (handle only), portfolio (ordered [{url, caption}] from the library — order matters: when splash_bg_url is empty the FIRST portfolio photo IS the hero and the link-preview image), home_blocks (the page body below the hero; [] means the standard template: specialty, services grid, photos, reviews, estimate, contact).\n" +
+        "WHAT EACH FIELD ACTUALLY RENDERS (never guess these semantics — a wrong-lever change reads as 'it didn't understand me'):\n" +
+        "· site_theme is THE HERO FRAMING and nothing else. 'classic' = the hero IMAGE full-bleed BEHIND the headline with a dark overlay (the photo-backdrop look). 'bold' = dark accent-gradient background, two columns, photo as a framed card on the right. 'minimal' = light airy background, two columns, photo right. The page below the hero is identical across themes.\n" +
+        "· splash_bg_url = the hero image; when it is \"\", the FIRST portfolio photo is the hero AND the link-preview image — so portfolio order matters.\n" +
+        "· site_accent = '#rrggbb': the ONE color every band, button and gradient leans on ('' = the default derivation). The single biggest mood lever you have.\n" +
+        "· home_blocks = ONLY the page body BELOW the hero. [] = the standard template (specialty, services grid, photos, reviews, estimate, contact). Non-empty replaces those bands with your blocks.\n" +
+        "· splash_headline (the H1 + Google title — keyword-real: trade + place), splash_tagline (meta-description-ish, ≤160 chars ideally), splash_bullets (services, ONE per line), splash_credentials (license line), splash_headline_size ('s'|'m'|'l'), show_name_with_logo (bool), specialty_headline/specialty_blurb (signature-work section), service_area (towns, ' · ' separated), social_instagram (handle only), portfolio (ordered [{url, caption}] from the library).\n" +
+        "WHAT NO FIELD CONTROLS (be honest, never fake the nearest thing): fonts, letter-spacing, per-section spacing/padding, page backgrounds outside the hero, animations, nav layout, footer layout, the trust band, page URLs. When the owner asks for one of these, name it in \"cannot\" in plain words and change only what they ALSO asked for.\n" +
         "HOME_BLOCKS PALETTE: {type:'heading',props:{text,align?}}, {type:'text',props:{html}} (simple p/strong/em/ul/li html only), {type:'image',props:{url,alt,caption}}, {type:'button',props:{label,href,align?}}, {type:'gallery',props:{images:[{url,alt}]}}, {type:'banner',props:{bgUrl,heading,text?,buttonLabel?,buttonHref?}}, {type:'section',props:{key:'" +
         SECTION_KEYS.join("'|'") +
         "'}} (live org sections). Optional style per block: {align,size:'s'|'m'|'l'|'xl',font:'sans'|'serif'|'mono',color:'#rrggbb'}.\n" +
-        'Respond with ONLY a JSON object: {"doc": {<the COMPLETE document, every field>}, "changes": ["what changed and why, one plain sentence each — the owner reads these"], "note": "≤12 words naming this version"}. No prose outside the JSON.',
+        'Respond with ONLY a JSON object: {"doc": {<ONLY the fields you are CHANGING — an omitted field keeps its current value; include a field only to change it>}, "changes": ["what changed and why, one plain sentence each — the owner reads these"], "cannot": ["anything asked for that no field controls — plain words; empty array when nothing"], "note": "≤12 words naming this version"}. No prose outside the JSON.',
       messages: [
         {
           role: "user",
@@ -159,18 +165,25 @@ export async function designSitePass(instruction: string, baseVersionId: string 
     const parsed = (await parseAiJson(client, text, ctx.orgId)) as {
       doc?: unknown;
       changes?: unknown;
+      cannot?: unknown;
       note?: unknown;
     };
     const { doc, dropped } = coerceSiteDoc(parsed.doc, base);
     const changes = Array.isArray(parsed.changes)
       ? parsed.changes.map((c) => String(c).trim()).filter(Boolean).slice(0, 20)
       : [];
+    // What the instruction asked for that NO field controls — the honesty channel. Erik's read
+    // of the timid first passes was "it doesnt seem to understand the command"; it understood,
+    // it just had no lever and no way to say so.
+    const cannot = Array.isArray(parsed.cannot)
+      ? parsed.cannot.map((c) => String(c).trim()).filter(Boolean).slice(0, 10)
+      : [];
     const note = String(parsed.note ?? "Design pass").replace(/\s+/g, " ").trim().slice(0, 120) || "Design pass";
 
     const ins = await insertVersion(ctx.supabase, { doc, note, created_by: ctx.userId });
     if ("error" in ins) return { ok: false, error: ins.error };
     revalidatePath("/site-studio");
-    return { ok: true, id: ins.id, changes, dropped, note };
+    return { ok: true, id: ins.id, changes, dropped, cannot, note };
   } catch (e) {
     const message = e instanceof Error ? e.message : "The design pass failed.";
     return {

@@ -48,7 +48,8 @@ export type SiteChrome = ReturnType<typeof deriveSiteChrome>;
 
 export function deriveSiteChrome(org: PublicOrg, { base = "", onHomepage = false }: { base?: string; onHomepage?: boolean }) {
   const s = org.settings;
-  const brand = accentHex(s.glass_tint);
+  // The studio's accent wins when set (validated hex); otherwise the pre-studio derivation.
+  const brand = /^#[0-9a-f]{6}$/i.test(s.site_accent?.trim() ?? "") ? s.site_accent.trim() : accentHex(s.glass_tint);
   const home = base || "/";
   const anchorBase = onHomepage ? "" : home;
   // Show the business NAME as text (not just the logo image) when the org opts in — so the name is

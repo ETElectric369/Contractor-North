@@ -38,6 +38,7 @@ export function SiteStudio({
   );
   const [lastChanges, setLastChanges] = useState<string[]>([]);
   const [lastDropped, setLastDropped] = useState<string[]>([]);
+  const [lastCannot, setLastCannot] = useState<string[]>([]);
 
   const selected = versions.find((r) => r.id === selectedId) ?? null;
   const published = versions.find((r) => r.status === "published") ?? null;
@@ -74,6 +75,7 @@ export function SiteStudio({
       setInstruction("");
       setLastChanges(r.changes ?? []);
       setLastDropped(r.dropped ?? []);
+      setLastCannot(r.cannot ?? []);
       if (r.id) setSelectedId(r.id);
       toast(`New version ready — ${r.note ?? "design pass"}.`, "success");
       router.refresh();
@@ -158,6 +160,13 @@ export function SiteStudio({
             )}
             {lastDropped.length > 0 && (
               <p className="text-xs text-amber-700">Refused: {lastDropped.join("; ")}.</p>
+            )}
+            {/* The honesty channel — what the instruction asked for that no design field
+                controls. A timid pass with no explanation reads as "it didn't understand me". */}
+            {lastCannot.length > 0 && (
+              <p className="text-xs text-slate-500">
+                <span className="font-semibold">Not possible yet:</span> {lastCannot.join("; ")}
+              </p>
             )}
           </CardContent>
         </Card>

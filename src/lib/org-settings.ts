@@ -171,6 +171,10 @@ export interface OrgSettings {
    *  "bold" = saturated brand color-block hero with the photo as a framed card (contractor punch);
    *  "minimal" = light, airy, editorial hero (upscale remodel/design feel). Default "classic". */
   site_theme: "classic" | "bold" | "minimal";
+  /** The public SITE's accent color (#rrggbb) — the one hue every band and button leans on.
+   *  Empty = derived from glass_tint (accentHex), the pre-studio behavior. A separate key so a
+   *  site redesign can restyle the SITE without recoloring the office's app skin. */
+  site_accent: string;
   /** Instagram handle (no @) for the public site footer. Empty = no Instagram link. */
   social_instagram: string;
   /** A custom domain the org has pointed at North for its public site (e.g. "tahoedeck.com",
@@ -258,6 +262,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   public_state: "",
   public_zip: "",
   site_theme: "classic",
+  site_accent: "",
   social_instagram: "",
   custom_domain: "",
   google_business_url: "",
