@@ -212,8 +212,8 @@ export function InquiryRow({
                 // A CONVERTED lead is an estimate's provenance (audit 7): deleting it severs
                 // the estimate's only link back to the person. Say so before the click.
                 if (!confirm(inquiry.converted_at
-                  ? `Delete "${inquiry.name}" completely? An estimate came from this lead — deleting cuts that estimate's link to the person and cancels any un-confirmed booking links. Mark it Lost instead unless it was junk.`
-                  : `Delete "${inquiry.name}" completely? A lead that said no should be marked Lost instead — delete keeps nothing.`)) return;
+                  ? `Delete "${inquiry.name}" completely? An estimate came from this lead — deleting cuts that estimate's link to the person, cancels any un-confirmed booking links, and removes the lead's uploaded files and any walk-through that has no field notes or photos. Mark it Lost instead unless it was junk.`
+                  : `Delete "${inquiry.name}" completely? A lead that said no should be marked Lost instead — delete keeps nothing: its uploaded files and any walk-through without field notes or photos go with it.`)) return;
                 start(async () => {
                   const r = await deleteInquiry(inquiry.id);
                   if (!r.ok) toast(r.error ?? "Couldn't delete that.", "error");

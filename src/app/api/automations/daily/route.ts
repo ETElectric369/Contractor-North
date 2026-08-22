@@ -3,6 +3,7 @@ import { requireCron } from "@/lib/cron-guard";
 import { generateDueTemplates } from "@/lib/recurring-engine";
 import { sendDayAheadDigests } from "@/lib/action-items/digest";
 import { generateNortReviewsForAllOrgs } from "@/lib/nort/review";
+import { sweepOrphanedUploads } from "@/lib/storage-sweep";
 import { reportError } from "@/lib/observe";
 
 export const runtime = "nodejs";
@@ -60,6 +61,16 @@ export async function GET(request: Request) {
   } catch (e: any) {
     result.rate_limit_gc_error = e?.message ?? "failed";
     reportError("cron-rate-limit-gc", e);
+  }
+
+  try {
+    // Storage janitor (Erik: "we shouldnt hold onto old orphaned data") — orphaned intake
+    // uploads, dead capture-photo folders, leaked estimator stashes. 48h age guard; SQL can't
+    // touch storage, so this is the one place the Storage API reaps what deletions left behind.
+    result.storage_sweep = await sweepOrphanedUploads();
+  } catch (e: any) {
+    result.storage_sweep_error = e?.message ?? "failed";
+    reportError("cron-storage-sweep", e);
   }
 
   return NextResponse.json(result);

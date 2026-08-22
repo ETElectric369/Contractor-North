@@ -12,10 +12,11 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { PROJECT_TYPES, estimateLinesFromIntake } from "@/lib/lead-triage";
 import { tzDateTimeUtc, todayStrInTz } from "@/lib/tz";
 import { createProposalCore, cleanSlots, type ProposalSlot } from "@/lib/appointments/proposal";
-import { INQUIRY_STATUSES } from "@/lib/statuses";
+import { INQUIRY_STATUSES, INSPECTION_TYPES } from "@/lib/statuses";
 import { saveQuote } from "../quotes/actions";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { INTAKE_BUCKET, isOwnIntakePath } from "@/lib/playbook/uploads";
+import { INTAKE_BUCKET, intakePaths, isOwnIntakePath } from "@/lib/playbook/uploads";
+import { hasCaptureData } from "@/lib/inspections";
 import { playbookForForm } from "@/lib/playbook/parse";
 import { briefNote, carriedNote, carryForInquiry } from "@/lib/inquiries/carry-intake-answers";
 import { runPlanBrief } from "@/lib/plan-brief-run";
@@ -202,6 +203,10 @@ export async function deleteInquiry(id: string): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  // Read the lead FIRST (RLS-scoped — proves it's this caller's own): its file paths and org id
+  // are needed for the cleanup below, and they're unreadable after the row goes.
+  const { data: inq } = await supabase.from("inquiries").select("id, org_id, intake").eq("id", id).maybeSingle();
+  if (!inq) return { ok: false, error: "Lead not found." };
   // "Delete keeps nothing" has to include the lead's OUTSTANDING BOOKING LINKS (audit 7): a
   // deleted spam lead's /pick/<token> stayed live, and the recipient could still confirm a
   // "Site inspection" onto the org's real calendar. Cancel this lead's un-scheduled proposals
@@ -212,10 +217,47 @@ export async function deleteInquiry(id: string): Promise<Result> {
     .eq("inquiry_id", id)
     .eq("status", "proposed");
   if (aErr) return { ok: false, error: dbError(aErr) };
+  // AND ITS EMPTY WALK-THROUGHS (Erik: "we shouldnt hold onto old orphaned data anyway").
+  // Andrew's first test lead left a blank "Site inspection: andrew cohen" behind — inquiry_id
+  // nulled by the FK, no answers, no capture — a duplicate that later read as "the inspector
+  // is empty". An inspection with FIELD DATA (photos, notes, measurements — hasCaptureData) or
+  // already completed is real work and survives, link severed, exactly as before; one that was
+  // only ever the lead's container dies with the lead. Answers alone don't save it: they were
+  // carried FROM this lead, and the delete confirm says so.
+  const { data: linkedInsp } = await supabase
+    .from("appointments")
+    .select("id, status, capture")
+    .eq("inquiry_id", id)
+    .in("type", [...INSPECTION_TYPES]);
+  const emptyIds = (linkedInsp ?? [])
+    .filter((a) => a.status !== "completed" && !hasCaptureData(a.capture))
+    .map((a) => a.id);
+  if (emptyIds.length) {
+    const { error: eErr } = await supabase.from("appointments").delete().in("id", emptyIds);
+    if (eErr) return { ok: false, error: dbError(eErr) };
+  }
+  // AND ITS UPLOADED FILES. The intake bucket only ever grew — a deleted lead's plan set sat in
+  // storage forever with nothing pointing at it. Paths are minted per-upload (epoch+uuid), so no
+  // other lead can reference them; the service client does the remove because the bucket is
+  // private (no member delete policy), gated by the same own-org path check as every other
+  // intake-file door. Best-effort AFTER validation: a storage hiccup shouldn't block the delete,
+  // and once the row is gone there is no second chance to learn the paths.
+  const orgId = String((inq as { org_id?: string }).org_id ?? "");
+  const filePaths = intakePaths((inq as { intake?: unknown }).intake).filter((p) => isOwnIntakePath(orgId, p));
+  if (filePaths.length) {
+    await createServiceClient()
+      .storage.from(INTAKE_BUCKET)
+      .remove(filePaths)
+      .then(
+        () => undefined,
+        () => undefined,
+      );
+  }
   const { error } = await supabase.from("inquiries").delete().eq("id", id);
   if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/leads");
   revalidatePath("/schedule");
+  revalidatePath("/inspections");
   return { ok: true };
 }
 
