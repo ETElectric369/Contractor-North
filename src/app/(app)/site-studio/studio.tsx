@@ -2,7 +2,8 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Rocket, Sparkles, Camera, Trash2, ExternalLink } from "lucide-react";
+import { Loader2, Rocket, Sparkles, Camera, Trash2, ExternalLink, Mic, Square } from "lucide-react";
+import { useDictation } from "@/lib/use-dictation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/input";
@@ -39,6 +40,13 @@ export function SiteStudio({
   const [lastChanges, setLastChanges] = useState<string[]>([]);
   const [lastDropped, setLastDropped] = useState<string[]>([]);
   const [lastCannot, setLastCannot] = useState<string[]>([]);
+  // SAY THE DESIGN (Erik: "can we put a talk button in there to have Nort design it verbally?").
+  // Same press-to-talk → /api/transcribe turn as the inspector and /organize. The words land IN
+  // THE BOX for review — dictation hands back text, never an action; he reads it, fixes a
+  // misheard word, then presses Design. Appends, so a spoken addendum extends a typed start.
+  const dictation = useDictation((text) =>
+    setInstruction((cur) => (cur.trim() ? `${cur.trimEnd()} ${text}` : text)),
+  );
 
   const selected = versions.find((r) => r.id === selectedId) ?? null;
   const published = versions.find((r) => r.status === "published") ?? null;
@@ -152,10 +160,36 @@ export function SiteStudio({
                   </>
                 )}
               </Button>
+              <button
+                type="button"
+                onClick={() => (dictation.recording ? dictation.stop() : void dictation.start())}
+                disabled={designing || dictation.transcribing}
+                aria-label={dictation.recording ? "Stop talking" : "Say the design out loud"}
+                className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border ${
+                  dictation.recording
+                    ? "animate-pulse border-rose-300 bg-rose-50 text-rose-600"
+                    : "border-slate-200 text-slate-500 hover:bg-slate-50"
+                } disabled:opacity-50`}
+              >
+                {dictation.transcribing ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : dictation.recording ? (
+                  <Square className="h-3.5 w-3.5" />
+                ) : (
+                  <Mic className="h-4 w-4" />
+                )}
+              </button>
               <span className="text-xs text-slate-400">
-                {selected ? `builds on v${selected.v}` : "builds on the live site"}
+                {dictation.recording
+                  ? "listening — tap to stop"
+                  : dictation.transcribing
+                    ? "writing it down…"
+                    : selected
+                      ? `builds on v${selected.v}`
+                      : "builds on the live site"}
               </span>
             </div>
+            {dictation.error && <p className="text-xs text-rose-600">{dictation.error}</p>}
             {lastChanges.length > 0 && (
               <ul className="list-disc space-y-0.5 pl-4 pt-1 text-xs text-slate-600">
                 {lastChanges.map((c, i) => (
