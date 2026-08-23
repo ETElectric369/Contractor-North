@@ -321,11 +321,18 @@ export async function updateQuoteItem(
   if (Object.keys(clean).length === 0) return { ok: false, error: "Nothing to update." };
   const editable = await requireEditableQuote(supabase, quoteId);
   if (!editable.ok) return editable;
-  const { error } = await supabase
+  // SCOPE THE WRITE TO THE DOCUMENT WE AUTHORIZED (audit v800). The editable check ran against
+  // quoteId, but the update matched on itemId ALONE — so a caller (Nort included) could pass a
+  // draft's id to pass the lock and an itemId belonging to a DIFFERENT quote, and rewrite a line
+  // on an accepted, already-billed document. Zero rows is now an error, not a quiet success.
+  const { data: touched, error } = await supabase
     .from("quote_line_items")
     .update(clean)
-    .eq("id", itemId);
+    .eq("id", itemId)
+    .eq("quote_id", quoteId)
+    .select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!touched?.length) return { ok: false, error: "That line isn't on this estimate." };
   await recalcQuote(supabase, quoteId);
   revalidatePath(`/quotes/${quoteId}`);
   revalidatePath("/quotes");
@@ -341,8 +348,16 @@ export async function deleteQuoteItem(
   const supabase = ctx.supabase;
   const editable = await requireEditableQuote(supabase, quoteId);
   if (!editable.ok) return editable;
-  const { error } = await supabase.from("quote_line_items").delete().eq("id", itemId);
+  // Same scoping law as updateQuoteItem (audit v800): the delete must belong to the document
+  // the editable check authorized, and a zero-row delete is a failure, not a success.
+  const { data: gone, error } = await supabase
+    .from("quote_line_items")
+    .delete()
+    .eq("id", itemId)
+    .eq("quote_id", quoteId)
+    .select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!gone?.length) return { ok: false, error: "That line isn't on this estimate." };
   await recalcQuote(supabase, quoteId);
   revalidatePath(`/quotes/${quoteId}`);
   revalidatePath("/quotes");

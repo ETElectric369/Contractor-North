@@ -1279,12 +1279,14 @@ export async function updateInvoiceItem(
   if (item.unit !== undefined) clean.unit = String(item.unit).trim().slice(0, 12) || "ea";
   if (item.unit_price !== undefined) clean.unit_price = item.unit_price || 0;
   if (Object.keys(clean).length === 0) return { ok: false, error: "Nothing to update." };
-  const { error } = await supabase
+  const { data: touched, error } = await supabase
     .from("invoice_items")
     .update(clean)
     .eq("id", itemId)
-    .eq("invoice_id", invoiceId); // L3: the item must belong to THIS invoice
+    .eq("invoice_id", invoiceId) // L3: the item must belong to THIS invoice
+    .select("id"); // audit v800: a zero-row write is a failure, not a quiet success
   if (error) return { ok: false, error: dbError(error) };
+  if (!touched?.length) return { ok: false, error: "That line isn't on this invoice." };
   await recalcInvoice(supabase, invoiceId);
   revalidateMoney(invoiceId);
   return { ok: true };
@@ -1300,12 +1302,14 @@ export async function deleteInvoiceItem(
   const block = await requireDraftInvoice(supabase, invoiceId);
   if (block) return block; // M1: draft-only edits
   if (await isProtectedCreditLine(supabase, itemId)) return CREDIT_LINE_LOCKED;
-  const { error } = await supabase
+  const { data: gone, error } = await supabase
     .from("invoice_items")
     .delete()
     .eq("id", itemId)
-    .eq("invoice_id", invoiceId); // L3: the item must belong to THIS invoice
+    .eq("invoice_id", invoiceId) // L3: the item must belong to THIS invoice
+    .select("id"); // audit v800: a zero-row delete is a failure, not a quiet success
   if (error) return { ok: false, error: dbError(error) };
+  if (!gone?.length) return { ok: false, error: "That line isn't on this invoice." };
   await recalcInvoice(supabase, invoiceId);
   revalidateMoney(invoiceId);
   return { ok: true };

@@ -75,9 +75,16 @@ export const timeActions: Record<string, ActionDef> = {
       // seconds-long entry gets an explicit warning the model must surface.
       try {
         const supabase = await createClient();
+        // SCOPED TO THE CALLER (audit v800). Unscoped, a staff caller's RLS view spans the whole
+        // org, so the "most recently closed entry" could be someone ELSE's shift — and Nort would
+        // announce another person's hours as what it had just recorded for you.
+        const { data: me } = await supabase.auth.getUser();
+        const meId = me?.user?.id;
+        if (!meId) return res;
         const { data: last } = await supabase
           .from("time_entries")
           .select("clock_in, clock_out, job_id")
+          .eq("profile_id", meId)
           .not("clock_out", "is", null)
           .order("clock_out", { ascending: false })
           .limit(1)
