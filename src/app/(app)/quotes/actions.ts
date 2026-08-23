@@ -602,6 +602,13 @@ export async function saveQuote(input: SaveQuoteInput) {
         // Sent/accepted: the builder must stop and say so — never rewrite a live document.
         return { ok: false as const, code: "not_editable" as const, error: "That draft was sent — it can't be edited from the builder anymore." };
       }
+      if (msg.includes("EMPTY_REPLACE")) {
+        return {
+          ok: false as const,
+          code: "empty_replace" as const,
+          error: "Refused: this would wipe the draft's line items. Reload the estimate to pick up its saved lines, or delete the draft if you meant to start over.",
+        };
+      }
       if (msg.includes("QUOTE_GONE")) {
         // Deleted (or never ours): fall through and mint a fresh draft — a stale restored
         // quoteId must not brick the session (review: "permanent no-save black hole").

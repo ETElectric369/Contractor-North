@@ -112,6 +112,11 @@ function LineDescInput({
         onFocus={() => setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
       />
+      {open && priceItems.length === 0 && value.trim().length >= 2 && (
+        <div className="absolute z-20 mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500 shadow-lg">
+          No price book yet — upload or build one under Tools → Price List and these will autocomplete.
+        </div>
+      )}
       {open && matches.length > 0 && (
         <ul className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
           {matches.map((p) => (
@@ -144,6 +149,7 @@ export function QuoteBuilder({
   inquiryId,
   captureId,
   initialQuoteId,
+  adoptedSeed,
   draftUserId,
   initialScope,
   seededLines,
@@ -175,6 +181,18 @@ export function QuoteBuilder({
   initialQuoteId?: string | null;
   /** Signed-in user id — namespaces the sessionStorage draft slot (quoteDraftKey v3). */
   draftUserId?: string | null;
+  /** The adopted draft's CONTENT — the builder must start from what the row holds, or its
+      empty defaults would autosave over the real lines (the Q-001 wipe hazard). */
+  adoptedSeed?: {
+    customerId?: string | null;
+    docType?: string | null;
+    title?: string | null;
+    description?: string | null;
+    notes?: string | null;
+    taxRate?: number | null;
+    validUntil?: string | null;
+    items?: DraftLineItem[];
+  } | null;
   /** The linked lead's own plan PDFs (intake uploads) — one-tap take-off, no re-upload. */
   leadPlans?: { path: string; name: string }[];
   /** The inspection appointment being written up (?capture=) — saveQuote stamps the new
@@ -198,7 +216,7 @@ export function QuoteBuilder({
 }) {
   const router = useRouter();
   const defaultRate = taxRates.find((t) => t.is_default);
-  const [customerId, setCustomerId] = useState(preselected ?? "");
+  const [customerId, setCustomerId] = useState(adoptedSeed?.customerId ?? preselected ?? "");
   // Customers created inline, merged into the server-provided list. The FIRST screen of the whole
   // estimate flow had a picker and no way to create what it picks — cn-v677 fixed the SAVED-quote
   // picker and never this, its sibling one screen earlier.
@@ -206,13 +224,14 @@ export function QuoteBuilder({
   const allCustomers = [...addedCustomers, ...customers];
   // The customer-facing document word — Estimate (T&M) by default, toggle to a
   // fixed-price Quote per document. Same control as the saved-quote editor.
-  const [docType, setDocType] = useState<QuoteDocType>("estimate");
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [notes, setNotes] = useState("");
-  const [taxRate, setTaxRate] = useState(defaultRate ? Number(defaultRate.rate) / 100 : 0);
+  const [docType, setDocType] = useState<QuoteDocType>(adoptedSeed?.docType === "quote" ? "quote" : "estimate");
+  const [title, setTitle] = useState(adoptedSeed?.title ?? "");
+  const [description, setDescription] = useState(adoptedSeed?.description ?? "");
+  const [notes, setNotes] = useState(adoptedSeed?.notes ?? "");
+  const [taxRate, setTaxRate] = useState(adoptedSeed?.taxRate ?? (defaultRate ? Number(defaultRate.rate) / 100 : 0));
   const [taxChoice, setTaxChoice] = useState(defaultRate ? defaultRate.id : "");
   const [validUntil, setValidUntil] = useState(() => {
+    if (adoptedSeed?.validUntil) return String(adoptedSeed.validUntil).slice(0, 10);
     const d = new Date();
     d.setDate(d.getDate() + (quoteExpiryDays || 30));
     return d.toISOString().slice(0, 10);
@@ -222,7 +241,13 @@ export function QuoteBuilder({
   // inspection" — so by the time the office opens this, the building is done and re-typing it
   // would be the only manual step left in an otherwise automatic chain.
   const [items, setItems] = useState<DraftLineItem[]>(
-    seededLines?.length ? seededLines.map((l) => ({ ...l })) : [blankItem()],
+    // Adoption precedence: the DRAFT ROW's lines (they ARE the document) beat a walk-through
+    // seed beat the blank starter. A session draft, when one exists, restores over all three.
+    adoptedSeed?.items?.length
+      ? adoptedSeed.items.map((l) => ({ ...l }))
+      : seededLines?.length
+        ? seededLines.map((l) => ({ ...l }))
+        : [blankItem()],
   );
 
   // Resolve the markup via THE one rule (effectiveMarkupPct): the selected customer's
@@ -1121,7 +1146,9 @@ export function QuoteBuilder({
                 value={customerId}
                 onChange={(e) => setCustomerId(e.target.value)}
               >
-                <option value="">— Select customer —</option>
+                <option value="">
+                  {allCustomers.length ? "— Select customer —" : "— No customers yet — add one below, or leave blank (a lead becomes the customer when you win the job) —"}
+                </option>
                 {allCustomers.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}

@@ -32,16 +32,49 @@ export default async function NewQuotePage({
   const { data: auth } = await supabase.auth.getUser();
   const draftUserId = auth?.user?.id ?? null;
   let adoptedDraftId: string | null = null;
+  let adoptedSeed: {
+    customerId?: string | null;
+    docType?: string | null;
+    title?: string | null;
+    description?: string | null;
+    notes?: string | null;
+    taxRate?: number | null;
+    validUntil?: string | null;
+    items?: { description: string; quantity: number; unit: string; unit_price: number; group?: string }[];
+  } | null = null;
   if (inquiry) {
+    // The id alone is NOT an adoption (review of the Q-001/E-001 flap): a builder seeded with
+    // an id but default-empty state would autosave that emptiness over the draft's real lines
+    // on the first keystroke. Adopting means inheriting the CONTENT too; a session draft, when
+    // one exists, still restores over this (it may be newer).
     const { data: existing } = await supabase
       .from("quotes")
-      .select("id")
+      .select("id, customer_id, doc_type, title, description, notes, tax_rate, valid_until, quote_line_items(description, quantity, unit, unit_price, category, sort_order)")
       .eq("inquiry_id", inquiry)
       .eq("status", "draft")
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
-    adoptedDraftId = (existing as { id?: string } | null)?.id ?? null;
+    if (existing) {
+      const ex = existing as {
+        id: string; customer_id: string | null; doc_type: string | null; title: string | null;
+        description: string | null; notes: string | null; tax_rate: number | null; valid_until: string | null;
+        quote_line_items?: { description: string; quantity: number; unit: string; unit_price: number; category: string | null; sort_order: number | null }[];
+      };
+      adoptedDraftId = ex.id;
+      adoptedSeed = {
+        customerId: ex.customer_id,
+        docType: ex.doc_type,
+        title: ex.title,
+        description: ex.description,
+        notes: ex.notes,
+        taxRate: ex.tax_rate,
+        validUntil: ex.valid_until,
+        items: (ex.quote_line_items ?? [])
+          .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+          .map((li) => ({ description: li.description, quantity: li.quantity, unit: li.unit, unit_price: li.unit_price, group: li.category ?? undefined })),
+      };
+    }
   }
 
   // ?capture=<appointment id> — an inspection's field capture prefills the
@@ -239,6 +272,7 @@ export default async function NewQuotePage({
       </PageHeader>
       <QuoteBuilder
         initialQuoteId={adoptedDraftId}
+        adoptedSeed={adoptedSeed}
         draftUserId={draftUserId}
         orgId={orgId}
         measured={measured}

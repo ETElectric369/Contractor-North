@@ -16,6 +16,7 @@ security invoker
 as $$
 declare
   v_status text;
+  v_existing integer;
 begin
   select q.status into v_status from quotes q where q.id = p_id for update;
   if v_status is null then
@@ -23,6 +24,14 @@ begin
   end if;
   if v_status <> 'draft' then
     raise exception 'QUOTE_NOT_DRAFT';
+  end if;
+
+  -- WIPE GUARD: replacing a populated document with ZERO lines is almost always an unhydrated
+  -- caller autosaving its empty defaults (the Q-001 hazard), never a normal edit. Refuse loudly;
+  -- a deliberate clear-out deletes the draft instead.
+  select count(*) into v_existing from quote_line_items where quote_id = p_id;
+  if v_existing > 0 and jsonb_array_length(coalesce(p_items, '[]'::jsonb)) = 0 then
+    raise exception 'EMPTY_REPLACE';
   end if;
 
   update quotes set
