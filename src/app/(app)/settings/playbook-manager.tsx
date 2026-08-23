@@ -584,6 +584,36 @@ export function PlaybookManager({
                                   edit(i, { slot: { ...(n.slot as NeedSlot & { type: "select" }), options } });
                                 }}
                               />
+                              {/* Andrew: "I created a new entry and I realized I can't move it
+                                  around. I wanted to put it up higher." A new choice lands at the
+                                  bottom; these move it. Order is display-only — rules match
+                                  choices by STRING, so reordering can never orphan a follow-up. */}
+                              <button
+                                type="button"
+                                disabled={oi === 0}
+                                onClick={() => {
+                                  const options = [...(n.slot as { options: string[] }).options];
+                                  [options[oi - 1], options[oi]] = [options[oi], options[oi - 1]];
+                                  edit(i, { slot: { ...(n.slot as NeedSlot & { type: "select" }), options } });
+                                }}
+                                className="shrink-0 rounded-md p-2 text-slate-400 hover:bg-slate-100 disabled:opacity-30"
+                                title="Move up"
+                              >
+                                <ChevronUp className="h-4 w-4" />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={oi === (n.slot as { options: string[] }).options.length - 1}
+                                onClick={() => {
+                                  const options = [...(n.slot as { options: string[] }).options];
+                                  [options[oi], options[oi + 1]] = [options[oi + 1], options[oi]];
+                                  edit(i, { slot: { ...(n.slot as NeedSlot & { type: "select" }), options } });
+                                }}
+                                className="shrink-0 rounded-md p-2 text-slate-400 hover:bg-slate-100 disabled:opacity-30"
+                                title="Move down"
+                              >
+                                <ChevronDown className="h-4 w-4" />
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => {
