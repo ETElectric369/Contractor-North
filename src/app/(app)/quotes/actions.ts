@@ -1,4 +1,5 @@
 "use server";
+import { reportError } from "@/lib/observe";
 import { customerAddressFrom } from "@/lib/inquiries/lead-address";
 import { dbError } from "@/lib/db-error";
 import { parseAiJson } from "@/lib/ai-json";
@@ -240,23 +241,28 @@ async function requireEditableQuote(
 
 /** Recompute subtotal/tax/total from the quote's line items. */
 async function recalcQuote(supabase: any, quoteId: string) {
-  const { data: quote } = await supabase
-    .from("quotes")
-    .select("tax_rate")
-    .eq("id", quoteId)
-    .maybeSingle();
-  const { data: items } = await supabase
-    .from("quote_line_items")
-    .select("line_total")
-    .eq("quote_id", quoteId);
+  // A FAILED READ IS NOT AN EMPTY QUOTE (audit v800 — the audit-8 guard that already protects
+  // recalcInvoice, finally ported here). supabase-js returns data:null on any error, and
+  // `(items ?? [])` turned one transient timeout into subtotal/tax/total = 0 written straight
+  // over a real estimate — with the PDF busted so the customer's copy showed $0 too.
+  const [quoteRes, itemsRes] = await Promise.all([
+    supabase.from("quotes").select("tax_rate").eq("id", quoteId).maybeSingle(),
+    supabase.from("quote_line_items").select("line_total").eq("quote_id", quoteId),
+  ]);
+  if (quoteRes.error || itemsRes.error || !itemsRes.data) {
+    reportError("recalcQuote:read", quoteRes.error ?? itemsRes.error ?? new Error("no rows object"), { quoteId });
+    return; // leave the stored totals alone; a later write recalcs from a healthy read
+  }
   const { subtotal, tax, total } = subtotalTaxTotal(
-    (items ?? []).map((i: any) => Number(i.line_total ?? 0)),
-    Number(quote?.tax_rate ?? 0),
+    itemsRes.data.map((i: any) => Number(i.line_total ?? 0)),
+    Number(quoteRes.data?.tax_rate ?? 0),
   );
-  await supabase
+  const { data: upd, error: updErr } = await supabase
     .from("quotes")
     .update({ subtotal, tax, total })
-    .eq("id", quoteId);
+    .eq("id", quoteId)
+    .select("id");
+  if (updErr || !upd?.length) reportError("recalcQuote:write", updErr ?? new Error("zero rows"), { quoteId });
   // A sent quote stays editable (unlike an invoice), so every content write funnels here —
   // drop the stored PDF (0198) or the customer's Download button would hand out old numbers.
   await bustDocPdf("quote", quoteId);
@@ -488,7 +494,9 @@ export async function deleteQuote(id: string): Promise<{ ok: boolean; error?: st
         .from("inquiries")
         .update({ converted_to: null, converted_at: null, status: "open", updated_at: new Date().toISOString() })
         .eq("id", victim.inquiry_id)
-        .eq("converted_to", "quote");
+        // NOT .eq("converted_to","quote"): convertInquiry writes 'estimate' or 'job', so that
+        // filter silently skipped the very rows this un-stamp exists for (audit v800).
+        .not("converted_at", "is", null);
       revalidatePath("/leads");
     }
   }

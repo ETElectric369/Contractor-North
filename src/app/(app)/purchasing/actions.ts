@@ -1,4 +1,5 @@
 "use server";
+import { reportError } from "@/lib/observe";
 import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
@@ -289,18 +290,27 @@ export async function receiveItem(
 }
 
 async function recalcPoTotals(supabase: any, poId: string) {
-  const { data: items } = await supabase
+  // A FAILED READ IS NOT AN EMPTY PO (audit v800 — same class as recalcInvoice/recalcQuote).
+  // `(items ?? [])` on a transient error rewrote a real purchase order to $0, and a PO gets
+  // EMAILED to the supplier from these numbers.
+  const { data: items, error: readErr } = await supabase
     .from("purchase_order_items")
     .select("line_total")
     .eq("po_id", poId);
+  if (readErr || !items) {
+    reportError("recalcPoTotals:read", readErr ?? new Error("no rows object"), { poId });
+    return;
+  }
   // A PO carries no tax, so total == subtotal; the shared rollup still cents-rounds it
   // the same way an invoice/quote does, so PO dust can't diverge from the rest of the app.
   const { subtotal, total } = subtotalTaxTotal(
-    (items ?? []).map((i: any) => Number(i.line_total ?? 0)),
+    items.map((i: any) => Number(i.line_total ?? 0)),
     0,
   );
-  await supabase
+  const { data: upd, error: updErr } = await supabase
     .from("purchase_orders")
     .update({ subtotal, total })
-    .eq("id", poId);
+    .eq("id", poId)
+    .select("id");
+  if (updErr || !upd?.length) reportError("recalcPoTotals:write", updErr ?? new Error("zero rows"), { poId });
 }

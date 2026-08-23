@@ -16,6 +16,14 @@ export type ActionResult = {
   missingFields?: string[];
   /** Driver-friendly sentence for voice/TTS read-back. */
   speak?: string;
+  /** ANNOUNCE THE DEED, NOT THE INTENT: what the DB actually recorded, read back after the
+   *  write (e.g. "Recorded: 09:00 to 12:00 (3.00h)"). Handlers set it; the surface must relay
+   *  it. Typed here because the chat route's projection silently dropped it (audit v800). */
+  recorded?: string;
+  /** A handler's hard warning that the write did NOT do what was asked — the surface MUST
+   *  relay it and must not report success (e.g. a seconds-long clock-out standing in for
+   *  "log 3 hours yesterday"). */
+  warning?: string;
   /** Set by executeAction when a confirm/tier-2 action was invoked by the agent/voice
    *  WITHOUT explicit consent — the surface must read confirmPrompt back and re-call
    *  with `confirmed: true`. The action did NOT run. */

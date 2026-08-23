@@ -328,8 +328,29 @@ export async function deleteJob(
 
   // BEFORE the row goes (it reads google_event_id off the row). Fire-safe.
   await deleteCalendarItem("job", id);
+  // THE STAMP FOLLOWS THE DEED, IN REVERSE (audit v800 — found four of these already orphaned
+  // in production). /leads hides any inquiry with converted_at set, so a lead whose job is
+  // deleted leaves the inbox FOREVER pointing at nothing. deleteQuote learned this; deleteJob
+  // never did. Note the un-stamp must NOT filter on converted_to='quote' — convertInquiry
+  // writes 'estimate' or 'job', so that filter is exactly why the quote-side guard missed these.
+  const { data: victim } = await supabase.from("jobs").select("id, inquiry_id").eq("id", id).maybeSingle();
   const { error } = await supabase.from("jobs").delete().eq("id", id);
   if (error) return { ok: false, error: dbError(error) };
+  const sourceLead = (victim as { inquiry_id?: string | null } | null)?.inquiry_id ?? null;
+  if (sourceLead) {
+    const [{ count: quotesLeft }, { count: jobsLeft }] = await Promise.all([
+      supabase.from("quotes").select("id", { count: "exact", head: true }).eq("inquiry_id", sourceLead),
+      supabase.from("jobs").select("id", { count: "exact", head: true }).eq("inquiry_id", sourceLead),
+    ]);
+    if (!quotesLeft && !jobsLeft) {
+      await supabase
+        .from("inquiries")
+        .update({ converted_to: null, converted_at: null, status: "open", updated_at: new Date().toISOString() })
+        .eq("id", sourceLead)
+        .not("converted_at", "is", null);
+      revalidatePath("/leads");
+    }
+  }
   revalidatePath("/jobs");
   revalidatePath("/planner"); // a status/finish change moves a job on/off today's My Day
   revalidatePath("/schedule");

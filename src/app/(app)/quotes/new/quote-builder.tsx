@@ -625,20 +625,28 @@ export function QuoteBuilder({
     });
   }
 
-  const quotePayload = (cleaned: DraftLineItem[]) => ({
-    id: quoteIdRef.current || undefined,
-    customer_id: customerId || null,
-    job_id: jobId || null,
-    inquiry_id: inquiryId || null,
-    capture_appointment_id: captureId || null,
-    title,
-    description,
-    notes,
-    tax_rate: taxRate,
-    valid_until: validUntil || null,
-    doc_type: docType,
-    items: cleaned,
-  });
+  // EVERY FIELD A SAVE SENDS RIDES A REF (audit v800). A timer armed by one render used to fire
+  // with THAT render's header — so a title/customer/tax-rate typed while a save was in flight was
+  // overwritten by the pre-edit values on the coalesced re-run, under a green "autosaved".
+  const headerRef = useRef({ customerId, jobId, inquiryId, captureId, title, description, notes, taxRate, validUntil, docType });
+  headerRef.current = { customerId, jobId, inquiryId, captureId, title, description, notes, taxRate, validUntil, docType };
+  const quotePayload = (cleaned: DraftLineItem[]) => {
+    const h = headerRef.current;
+    return {
+      id: quoteIdRef.current || undefined,
+      customer_id: h.customerId || null,
+      job_id: h.jobId || null,
+      inquiry_id: h.inquiryId || null,
+      capture_appointment_id: h.captureId || null,
+      title: h.title,
+      description: h.description,
+      notes: h.notes,
+      tax_rate: h.taxRate,
+      valid_until: h.validUntil || null,
+      doc_type: h.docType,
+      items: cleaned,
+    };
+  };
 
   // AUTOSAVE: debounced, substance- AND intent-gated (a restored or link-prefilled builder
   // must not mint a row with zero user edits), single-flight through refs (a timer fires with
@@ -678,7 +686,7 @@ export function QuoteBuilder({
       if (autosaveAgain.current && !navigatedAway.current) {
         autosaveAgain.current = false;
         if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
-        autosaveTimer.current = setTimeout(() => void runAutosave(), 800);
+        autosaveTimer.current = setTimeout(() => void runAutosaveRef.current(), 800);
       }
     }
   };

@@ -47,7 +47,7 @@ export async function getMoneyPipeline(supabase: SupabaseClient): Promise<MoneyP
     // such a job can't escape the board (jobs with a real invoice are removed by the
     // invoicedJobIds filter below).
     supabase.from("jobs").select("id, name, job_number, customers(name)").in("status", ["complete", "invoiced"]).limit(500),
-    supabase.from("quotes").select("job_id, total, status").not("job_id", "is", null).limit(1000),
+    supabase.from("quotes").select("job_id, total, status, created_at").not("job_id", "is", null).limit(1000),
     // Un-drawn payment-schedule milestones. "Unbilled" = no linked invoice — the same rule
     // as scheduleStatus (deleting a mistaken draft draw nulls the FK and re-offers it).
     supabase.from("payment_milestones").select("job_id, label, percent, amount, sort_order").is("invoice_id", null).limit(1000),

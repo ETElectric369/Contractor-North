@@ -1,5 +1,6 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { INTAKE_BUCKET, intakePaths } from "@/lib/playbook/uploads";
+import { reportError } from "@/lib/observe";
 
 /**
  * THE JANITOR (Erik: "we shouldnt hold onto old orphaned data anyway right?").
@@ -20,6 +21,9 @@ import { INTAKE_BUCKET, intakePaths } from "@/lib/playbook/uploads";
  */
 
 const AGE_MS = 48 * 60 * 60 * 1000;
+/** Refuse an intake sweep that would wipe this many files against an EMPTY reference set —
+ *  that shape is a broken read, not an empty inbox (audit v800). */
+const MASS_DELETE_FLOOR = 5;
 const PAGE = 1000;
 const MAX_PAGES = 20; // 20k objects per folder per run — a bound, not a target; the cron reruns daily
 
@@ -63,18 +67,35 @@ export async function sweepOrphanedUploads(): Promise<Record<string, number>> {
     const files = (await listAll(svc, INTAKE_BUCKET, `${org.name}/intake`)).filter((e) => e.id !== null);
     if (!files.length) continue;
     // What this org's leads still point at — the whole reference set in one query.
-    const { data: inqs } = await svc
+    //
+    // A FAILED READ IS NOT AN EMPTY REFERENCE SET (audit v800). supabase-js returns data:null on
+    // ANY error — a statement timeout, a transient 5xx — and `inqs ?? []` turned that into "no
+    // lead references anything", which made every plan set in the org an orphan and deleted the
+    // lot. A janitor must fail CLOSED: when we cannot prove a file is unreferenced, it stays.
+    const { data: inqs, error: inqErr } = await svc
       .from("inquiries")
       .select("intake")
       .eq("org_id", org.name)
       .not("intake", "is", null)
       .limit(10000);
+    if (inqErr || !inqs) {
+      reportError("storage-sweep:intake-refs", inqErr ?? new Error("no rows object"), { org: org.name });
+      continue;
+    }
     const referenced = new Set<string>();
-    for (const r of inqs ?? []) for (const p of intakePaths((r as { intake?: unknown }).intake)) referenced.add(p);
-    const orphans = files
-      .filter((f) => oldEnough(f, now))
-      .map((f) => `${org.name}/intake/${f.name}`)
-      .filter((p) => !referenced.has(p));
+    for (const r of inqs) for (const p of intakePaths((r as { intake?: unknown }).intake)) referenced.add(p);
+    const aged = files.filter((f) => oldEnough(f, now));
+    const orphans = aged.map((f) => `${org.name}/intake/${f.name}`).filter((p) => !referenced.has(p));
+    // Second belt: an org whose leads reference NOTHING while holding aged files is far more
+    // likely a broken read than a genuinely empty inbox. Refuse the mass delete and say so.
+    if (referenced.size === 0 && orphans.length >= MASS_DELETE_FLOOR) {
+      reportError(
+        "storage-sweep:refused-mass-delete",
+        new Error(`intake sweep would delete ${orphans.length} files with an empty reference set`),
+        { org: org.name },
+      );
+      continue;
+    }
     result.intake_removed += await removeAll(svc, INTAKE_BUCKET, orphans);
   }
 
@@ -86,8 +107,23 @@ export async function sweepOrphanedUploads(): Promise<Record<string, number>> {
     );
     if (apptFolders.length) {
       const ids = apptFolders.map((f) => f.name);
-      const { data: alive } = await svc.from("appointments").select("id").in("id", ids);
-      const aliveSet = new Set((alive ?? []).map((a: { id: string }) => String(a.id)));
+      // CHUNKED AND FAIL-CLOSED (audit v800). PostgREST selects are GET requests, so .in() with
+      // every folder id becomes a URL ~38 bytes per uuid — a few hundred inspections and the
+      // request line blows the proxy's limit and errors. `alive ?? []` then read as "no
+      // appointment exists", and the sweep deleted the capture photos of LIVE walk-throughs.
+      const aliveSet = new Set<string>();
+      let refsOk = true;
+      for (let i = 0; i < ids.length && refsOk; i += 200) {
+        const chunk = ids.slice(i, i + 200);
+        const { data: alive, error } = await svc.from("appointments").select("id").in("id", chunk).limit(chunk.length);
+        if (error || !alive) {
+          reportError("storage-sweep:appt-refs", error ?? new Error("no rows object"), { org: org.name });
+          refsOk = false;
+          break;
+        }
+        for (const a of alive as { id: string }[]) aliveSet.add(String(a.id));
+      }
+      if (!refsOk) continue; // cannot prove liveness → delete nothing for this org
       for (const folder of apptFolders) {
         if (aliveSet.has(folder.name)) continue;
         const files = (await listAll(svc, "documents", `${org.name}/appointments/${folder.name}`)).filter(

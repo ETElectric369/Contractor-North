@@ -42,6 +42,16 @@ export function contractTotalFromQuotes(
    * inflated base (jobContractTotal shares this rule, which is why it lives here and not in
    * either caller). A revision supersedes; it never accumulates.
    */
+  // A CALLER THAT OMITS created_at MUST NOT DEGRADE SILENTLY (audit v800). Four projections
+  // shipped without it; every comparison then returned 0, the stable sort preserved PostgREST's
+  // arbitrary row order, and "newest wins" quietly became "whichever row came back first" — in
+  // practice the OLDEST. When more than one candidate is in play and the timestamps are missing,
+  // that is a bug in the caller's select list, not a tie to resolve.
+  if (all.length > 1 && all.some((q) => !q.created_at)) {
+    throw new Error(
+      "contractTotalFromQuotes: quotes are missing created_at — add it to the select list, or the newest-revision rule cannot be applied.",
+    );
+  }
   const newest = [...all].sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")))[0];
   return cents(fin(newest?.total));
 }

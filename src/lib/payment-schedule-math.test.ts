@@ -138,3 +138,37 @@ describe("contract DRIFT under a part-drawn schedule (the accepted-quote edit)",
     expect(contractTotalFromQuotes([{ total: 8000, status: "accepted" }, { total: 10000, status: "declined" }])).toBe(8000);
   });
 });
+
+describe("contractTotalFromQuotes — a caller that omits created_at must not degrade silently", () => {
+  // Audit v800: four projections shipped without created_at. Every comparison returned 0, the
+  // stable sort preserved PostgREST's arbitrary order, and "newest revision wins" quietly became
+  // "whichever row came back first" — in practice the OLDEST. A job's whole contract total, and
+  // the deposit computed from it, rode on that.
+  it("throws rather than guessing when several unaccepted quotes arrive without timestamps", () => {
+    expect(() =>
+      contractTotalFromQuotes([
+        { total: 10000, status: "sent" },
+        { total: 12000, status: "sent" },
+      ]),
+    ).toThrow(/created_at/);
+  });
+
+  it("still picks the newest revision when the timestamps are present", () => {
+    expect(
+      contractTotalFromQuotes([
+        { total: 10000, status: "sent", created_at: "2026-01-01T00:00:00Z" },
+        { total: 12000, status: "sent", created_at: "2026-02-01T00:00:00Z" },
+      ]),
+    ).toBe(12000);
+  });
+
+  it("a single quote needs no timestamp, and accepted quotes never take this path", () => {
+    expect(contractTotalFromQuotes([{ total: 9000, status: "sent" }])).toBe(9000);
+    expect(
+      contractTotalFromQuotes([
+        { total: 5000, status: "accepted" },
+        { total: 7000, status: "sent" },
+      ]),
+    ).toBe(5000);
+  });
+});

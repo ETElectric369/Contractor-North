@@ -148,7 +148,7 @@ export default async function JobDetailPage({
     { data: tasks },
     { data: permits },
   ] = await Promise.all([
-    supabase.from("quotes").select("id, quote_number, status, total, doc_type").eq("job_id", id),
+    supabase.from("quotes").select("id, quote_number, status, total, doc_type, created_at").eq("job_id", id),
     supabase.from("work_orders").select("id, wo_number, title, status").eq("job_id", id),
     supabase.from("change_orders").select("*").eq("job_id", id).order("created_at", { ascending: false }),
     supabase.from("invoices").select("id, invoice_number, status, total, amount_paid, invoice_kind").eq("job_id", id),

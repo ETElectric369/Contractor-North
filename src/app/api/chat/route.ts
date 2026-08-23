@@ -831,6 +831,14 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
                     ok: res.ok,
                     error: res.error ?? null,
                     ...(res.missingFields?.length ? { missingFields: res.missingFields } : {}),
+                    // THE PROJECTION LAW, in the agent's own write path (audit v800): this object
+                    // IS everything the model learns about what it just did. `warning` and
+                    // `recorded` are the announce-the-deed read-backs — dropping them made the
+                    // safety mechanism inert, so Nort announced "3 hours logged" for a 3-second
+                    // entry with the correction sitting unread in a stripped field.
+                    ...(res.warning ? { warning: res.warning } : {}),
+                    ...(res.recorded ? { recorded: res.recorded } : {}),
+                    ...(res.speak ? { speak: res.speak } : {}),
                     ...(res.data ? { data: res.data } : {}),
                   });
                   // The estimate is now SAVED (or became a job) — tell the client to WIPE the

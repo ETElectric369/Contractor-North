@@ -196,7 +196,7 @@ export async function createProgressInvoice(
   // the job's SENT invoices (non-void, non-draft — a draft draw isn't a real bill; matches
   // the job page + modal so the "% of remaining" base can't diverge by an outstanding draft).
   const [{ data: quotes }, { data: invoices }] = await Promise.all([
-    supabase.from("quotes").select("total, status").eq("job_id", jobId),
+    supabase.from("quotes").select("total, status, created_at").eq("job_id", jobId),
     supabase.from("invoices").select("total, status").eq("job_id", jobId),
   ]);
   const estimate = contractTotalFromQuotes((quotes ?? []) as any);

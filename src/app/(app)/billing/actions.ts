@@ -301,12 +301,18 @@ export async function createInvoiceFromQuote(quoteId: string): Promise<Result> {
 
   const { data: items } = await supabase
     .from("quote_line_items")
-    .select("description, quantity, unit, unit_price, sort_order")
+    .select("id, description, quantity, unit, unit_price, sort_order")
     .eq("quote_id", quoteId)
     .order("sort_order");
 
   if (items?.length) {
-    await supabase.from("invoice_items").insert(
+    // STAMP THE COPIES WITH THE IMPORTER'S OWN IDENTITY (audit v800). These rows used to land
+    // with import_source NULL — indistinguishable from hand-typed lines — so a later tap of
+    // "From Estimate" matched nothing, inserted the whole estimate a SECOND time, and doubled
+    // the invoice total with no warning (the confirm counts rows by import_source, so it read
+    // "0 replacing" and never fired). Keyed identically to importQuoteItemsIntoInvoice, a
+    // re-import now refreshes these rows in place.
+    const { error: itemsErr } = await supabase.from("invoice_items").insert(
       items.map((it: any) => ({
         invoice_id: invoice.id,
         description: it.description,
@@ -314,8 +320,11 @@ export async function createInvoiceFromQuote(quoteId: string): Promise<Result> {
         unit: it.unit,
         unit_price: it.unit_price,
         sort_order: it.sort_order,
+        import_source: "quote",
+        import_key: `quote:${it.id}`,
       })),
     );
+    if (itemsErr) return { ok: false, error: dbError(itemsErr) };
   }
 
   revalidateMoney();
@@ -786,7 +795,12 @@ export async function importLaborIntoInvoice(invoiceId: string): Promise<ImportR
 /** Import materials from the job's costs: purchase orders + supplier bills,
  *  marked up by `markupPercent` (so they bill at sell price, not cost — the
  *  contractor doesn't do the math by hand). Each line stays editable after. */
-export async function importCostsIntoInvoice(invoiceId: string, markupPercent = 0): Promise<ImportResult> {
+/** `markupPercent` is OPTIONAL, not defaulted to zero (audit v800). The old `= 0` default meant
+ *  a caller that forgot it billed the customer at raw COST — and `reimportFromScratch`, the
+ *  amber "Start it over" button that is the ONLY way forward on any invoice built before 0175,
+ *  forgot it. When it is absent we resolve the customer's real markup here, so the mistake is
+ *  no longer reachable from any call site, present or future. */
+export async function importCostsIntoInvoice(invoiceId: string, markupPercent?: number): Promise<ImportResult> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -796,6 +810,17 @@ export async function importCostsIntoInvoice(invoiceId: string, markupPercent = 
     .eq("id", invoiceId)
     .maybeSingle();
   if (!inv?.job_id) return { ok: false, error: "This invoice isn't linked to a job." };
+  // Resolve the markup when the caller did not state one — same resolver the manual import box
+  // and the progress-draw path use, so every door prices a level customer's materials alike.
+  let markup = markupPercent;
+  if (markup === undefined) {
+    const { data: orgRow } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+    markup = await customerMaterialMarkupForJob(
+      supabase,
+      inv.job_id,
+      getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).material_markup_percent,
+    );
+  }
   const conflict = await standardInvoiceOnDrawJob(supabase, inv, invoiceId);
   if (conflict) return conflict;
   const draftBlock = await requireDraftInvoice(supabase, invoiceId);
@@ -829,7 +854,7 @@ export async function importCostsIntoInvoice(invoiceId: string, markupPercent = 
 
   // Mark up cost → sell price. Markup is NOT shown on the line (customers don't
   // see your margin); only the price reflects it.
-  const mark = (cost: number) => Math.round(cost * (1 + (Number(markupPercent) || 0) / 100) * 100) / 100;
+  const mark = (cost: number) => Math.round(cost * (1 + (Number(markup) || 0) / 100) * 100) / 100;
   const rows: ImportRow[] = [];
   // Bill only LIVE purchase orders (the one shared rule): a draft/cancelled order was
   // never a real cost, and a PO whose supplier bill has arrived is superseded by that
@@ -864,7 +889,7 @@ export async function importCostsIntoInvoice(invoiceId: string, markupPercent = 
           ? Number(l.amount)
           : (Number(l.unit_price) || 0) * (qty || 1);
       if (!rawAmt) continue; // unpriced line → its cost stays in the remainder row
-      const sell = Math.round(rawAmt * (1 + (Number(markupPercent) || 0) / 100) * 100) / 100;
+      const sell = Math.round(rawAmt * (1 + (Number(markup) || 0) / 100) * 100) / 100;
       if (!sell) continue;
       const desc = String(l.description || "Materials").slice(0, 300);
       const unitExact = qty > 0 ? Math.round((sell / qty) * 100) / 100 : sell;

@@ -49,13 +49,17 @@ export default function RootLayout({
             that for a long time" — a lockout, since nothing on that page is usable). The probe
             asks whether the app CSS actually WORKS (does the `hidden` utility hide?) — counting
             document.styleSheets misses a wrong-but-present sheet. Two escalating attempts:
-            reload once; if still broken, unregister service workers and empty their caches
-            (the usual pin: an old SW serving a vanished deploy's assets) and reload again.
-            The counter stops loops; any healthy paint resets it. */}
+            reload once; if still broken, unregister service workers and drop the VERSIONED
+            STATIC cache (the usual pin: an old SW serving a vanished deploy's assets), then
+            reload. Two hard rules from audit v800: escalate ONLY when a real fetch succeeds —
+            navigator.onLine is true on a radio camped with no data path, which is the
+            dead-zone case where a broken paint is the offline net working, not corruption —
+            and NEVER delete the "pages" cache, because that cache IS the net a tech in a
+            dead zone depends on. The counter stops loops; any healthy paint resets it. */}
         <script
           dangerouslySetInnerHTML={{
             __html:
-              'window.addEventListener("load",function(){try{var d=document.createElement("div");d.className="hidden";document.body.appendChild(d);var broken=getComputedStyle(d).display!=="none";d.remove();var n=Number(sessionStorage.getItem("cn-css-heal")||"0");if(!broken){sessionStorage.removeItem("cn-css-heal");return;}if(n>=2)return;if(navigator.onLine===false)return;sessionStorage.setItem("cn-css-heal",String(n+1));var go=function(){location.reload();};if(n===1&&"serviceWorker"in navigator){Promise.all([navigator.serviceWorker.getRegistrations().then(function(rs){return Promise.all(rs.map(function(r){return r.unregister();}));}),typeof caches!=="undefined"?caches.keys().then(function(ks){return Promise.all(ks.filter(function(k){return k==="pages"||k.indexOf("static")===0;}).map(function(k){return caches.delete(k);}));}):Promise.resolve()]).then(go,go);}else{go();}}catch(e){}});',
+              'window.addEventListener("load",function(){try{var d=document.createElement("div");d.className="hidden";document.body.appendChild(d);var broken=getComputedStyle(d).display!=="none";d.remove();var n=Number(sessionStorage.getItem("cn-css-heal")||"0");if(!broken){sessionStorage.removeItem("cn-css-heal");return;}if(n>=2)return;fetch("/icon-192.png",{cache:"no-store"}).then(function(r){if(!r||!r.ok)return;sessionStorage.setItem("cn-css-heal",String(n+1));var go=function(){location.reload();};if(n===1&&"serviceWorker"in navigator){Promise.all([navigator.serviceWorker.getRegistrations().then(function(rs){return Promise.all(rs.map(function(r){return r.unregister();}));}),typeof caches!=="undefined"?caches.keys().then(function(ks){return Promise.all(ks.filter(function(k){return k.indexOf("static")===0;}).map(function(k){return caches.delete(k);}));}):Promise.resolve()]).then(go,go);}else{go();}},function(){});}catch(e){}});',
           }}
         />
         
