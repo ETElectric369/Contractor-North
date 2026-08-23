@@ -1985,7 +1985,7 @@ export async function runDataTool(
         const endIso = tzDayStartUtc(period.end, settings.timezone).toISOString();
         const { data: entries, error } = await supabase
           .from("time_entries")
-          .select("profile_id, clock_in, clock_out, lunch_minutes, miles, paid_at, mileage_paid_at, rate_override, profiles(full_name, hourly_rate, commute_baseline_miles)")
+          .select("profile_id, clock_in, clock_out, lunch_minutes, miles, paid_at, mileage_paid_at, rate_override, profiles(full_name)")
           .eq("status", "closed")
           .not("clock_out", "is", null)
           .gte("clock_in", startIso)

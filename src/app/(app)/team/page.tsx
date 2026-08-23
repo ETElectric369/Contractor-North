@@ -1,3 +1,4 @@
+import { payById, PROFILE_PAY_COLS, PROFILE_SAFE_COLS, type ProfilePayRow } from "@/lib/profile-columns";
 import { redirect } from "next/navigation";
 import { isStaffRole } from "@/lib/actions/perms";
 import { createClient } from "@/lib/supabase/server";
@@ -38,7 +39,7 @@ export default async function TeamPage() {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  const { data: me } = await supabase.from("profiles").select("*").eq("id", user?.id ?? "").single();
+  const { data: me } = await supabase.from("profiles").select(PROFILE_SAFE_COLS).eq("id", user?.id ?? "").single();
   const profile = me as Profile | null;
 
   // Office-only surface. Techs land here from no nav link; guard direct URLs too.
@@ -47,14 +48,20 @@ export default async function TeamPage() {
   }
   const isAdmin = profile.role === "owner" || profile.role === "admin";
 
-  const [{ data: team }, { data: invites }] = await Promise.all([
-    supabase.from("profiles").select("*").order("full_name"),
+  // The pay/address spine no longer rides on `profiles` (0215/0216): it comes from the
+  // staff-scoped `profile_pay` view, which returns the whole org only to office staff. This
+  // page is already office-only (the redirect above), so the merge is a shape detail — but a
+  // tech who reached the REST API directly now gets nothing instead of everyone's pay.
+  const [{ data: team }, { data: pay }, { data: invites }] = await Promise.all([
+    supabase.from("profiles").select(PROFILE_SAFE_COLS).order("full_name"),
+    supabase.from("profile_pay").select(PROFILE_PAY_COLS),
     isAdmin
       ? supabase.from("invitations").select("*").order("created_at", { ascending: false })
       : Promise.resolve({ data: [] }),
   ]);
 
-  const members = (team ?? []) as Profile[];
+  const payRows = payById(pay as ProfilePayRow[] | null);
+  const members = ((team ?? []) as Profile[]).map((m) => ({ ...m, ...(payRows.get(String(m.id)) ?? {}) })) as Profile[];
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "";
 
   return (
@@ -99,7 +106,7 @@ export default async function TeamPage() {
                     <div className="truncate text-sm font-medium text-slate-900">{m.full_name ?? "—"}</div>
                     <div className="truncate text-xs text-slate-400">{m.email}</div>
                   </div>
-                  {isAdmin && <MemberRate id={m.id} rate={m.hourly_rate} billRate={(m as any).bill_rate ?? null} />}
+                  {isAdmin && <MemberRate id={m.id} rate={m.hourly_rate ?? null} billRate={m.bill_rate ?? null} />}
                   {!m.active && <Badge tone="red">inactive</Badge>}
                   {!!(m as any).crew_lead && <Badge tone="green">crew lead</Badge>}
                   <Badge tone={roleTone[m.role]}>{m.role}</Badge>

@@ -62,7 +62,7 @@ export async function markPeriodPaid(input: {
   const openErr = await openEntryError(supabase, input.profileId, startIso, endIso);
   if (openErr) return { ok: false, error: openErr };
 
-  const { data: prof } = await supabase.from("profiles").select("hourly_rate").eq("id", input.profileId).maybeSingle();
+  const { data: prof } = await supabase.from("profile_pay").select("hourly_rate").eq("id", input.profileId).maybeSingle();
   const rate = Number(prof?.hourly_rate ?? 0);
 
   const { data: entries } = await supabase
@@ -187,7 +187,7 @@ export async function settleMileage(input: {
   const openErr = await openEntryError(supabase, input.profileId, startIso, endIso);
   if (openErr) return { ok: false, error: openErr };
 
-  const { data: prof } = await supabase.from("profiles").select("commute_baseline_miles").eq("id", input.profileId).maybeSingle();
+  const { data: prof } = await supabase.from("profile_pay").select("commute_baseline_miles").eq("id", input.profileId).maybeSingle();
   const baseline = Math.max(0, Number(prof?.commute_baseline_miles ?? 0));
 
   const { data: entries } = await supabase

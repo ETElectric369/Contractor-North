@@ -17,7 +17,7 @@ export async function MapPanel() {
       .in("status", ACTIVE_JOB_STATUSES)
       .order("scheduled_start", { ascending: true, nullsFirst: false })
       .limit(60),
-    supabase.from("profiles").select("home_address").eq("id", user?.id ?? "").maybeSingle(),
+    supabase.from("profile_pay").select("home_address").eq("id", user?.id ?? "").maybeSingle(),
   ]);
 
   const mapJobs = (jobs ?? []).map((j: any) => ({

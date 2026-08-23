@@ -1,3 +1,4 @@
+import { attachRates, payRateMap } from "@/lib/profile-columns";
 import { laborCostForJob } from "@/lib/labor-billing";
 import { jobProgressFinancials } from "@/lib/job-financials";
 import { livePurchaseOrders } from "@/lib/job-progress-math";
@@ -116,7 +117,7 @@ async function fetchProfitInputs(supabase: any, jobId?: string): Promise<ProfitI
       supabase.from("customer_credits").select("amount, invoices(job_id)").eq("disposition", "refund").limit(50000),
       supabase
         .from("time_entries")
-        .select("job_id, clock_in, clock_out, lunch_minutes, status, rate_override, profiles(hourly_rate), time_allocations(job_id, hours)")
+        .select("job_id, clock_in, clock_out, lunch_minutes, status, rate_override, profiles(id), time_allocations(job_id, hours)")
         .eq("status", "closed")
         // Explicit high limit + a stable order (audit 8): no .limit() means PostgREST's silent
         // 1000-row default, which truncated LABOR while revenue came back whole — every job
@@ -128,6 +129,12 @@ async function fetchProfitInputs(supabase: any, jobId?: string): Promise<ProfitI
         // same job showed two different labor numbers. laborCostForJob already ignores
         // entries that don't touch the job.
     ]);
+  // Labor rates: merged from the staff-scoped `profile_pay` view onto the embedded profile by
+  // its id. 0215/0216 revoke those columns from the `authenticated` role — RLS cannot restrict
+  // columns — so a PostgREST embed can no longer carry them for anyone. Office staff get the
+  // real numbers; anyone else costs labor at zero rather than reading the crew's pay.
+  attachRates((entries ?? []) as any[], await payRateMap(supabase), (e: any) => ({ id: e.profiles?.id, holder: e }));
+
   return {
     jobs: jobs ?? [],
     // payments + refunds embed all-time; filter to this job when scoped (embedded filter isn't reliable).

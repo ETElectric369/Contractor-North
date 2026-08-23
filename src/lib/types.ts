@@ -24,11 +24,18 @@ export interface Profile {
   email: string | null;
   phone: string | null;
   role: UserRole;
-  hourly_rate: number | null;
+  /** PAY SPINE — OPTIONAL ON PURPOSE (v800 audit, migrations 0215/0216). These columns are
+   *  revoked from the `authenticated` role because RLS cannot restrict columns, so a plain
+   *  `profiles` read does NOT carry them: they arrive only from the staff-scoped `profile_pay`
+   *  view, merged in by the few surfaces entitled to them. If the compiler says one of these
+   *  might be undefined, that is the boundary telling you where you are reading from. */
+  hourly_rate?: number | null;
   avatar_url: string | null;
   active: boolean;
   language: string;
-  home_address: string | null;
+  home_address?: string | null;
+  bill_rate?: number | null;
+  commute_baseline_miles?: number | null;
   /** Crew lead (any role) — owes the Nort end-of-day debrief at clock-out (migration 0128). */
   crew_lead?: boolean;
   created_at: string;

@@ -1,3 +1,4 @@
+import { PROFILE_SAFE_COLS } from "@/lib/profile-columns";
 import { redirect } from "next/navigation";
 import { isStaffRole } from "@/lib/actions/perms";
 import { createClient } from "@/lib/supabase/server";
@@ -49,7 +50,7 @@ export default async function AppLayout({
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("*")
+    .select(PROFILE_SAFE_COLS)
     .eq("id", user.id)
     .single();
 

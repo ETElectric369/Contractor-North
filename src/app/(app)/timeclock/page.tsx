@@ -34,7 +34,7 @@ export default async function TimeclockPage() {
   // "My pay period" summary below — no one else's rate ever loads here.
   const { data: prof } = await supabase
     .from("profiles")
-    .select("language, role, home_address, hourly_rate")
+    .select("language, role")
     .eq("id", user?.id ?? "")
     .maybeSingle();
   const lang = prof?.language ?? "en";
@@ -43,10 +43,11 @@ export default async function TimeclockPage() {
 
   const { data: members } = isStaff
     ? await supabase
-        .from("profiles")
-        // hourly_rate + bill_rate feed the add/edit modals' pay-rate anchor and
-        // bill-rate tripwire — selected ONLY inside this staff branch, so the crew's
-        // rates never serialize into a tech's page props.
+        // profile_pay, not profiles: those columns are revoked from the authenticated role
+        // (0215/0216) because RLS cannot restrict columns. The view hands the whole org to
+        // office staff and only your own row to anyone else, so this staff branch is now
+        // enforced by the database rather than by the branch itself.
+        .from("profile_pay")
         .select("id, full_name, hourly_rate, bill_rate")
         .eq("active", true)
         .order("full_name")

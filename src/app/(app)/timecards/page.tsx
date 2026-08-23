@@ -86,7 +86,7 @@ export default async function TimecardsPage({
     // hourly_rate + bill_rate feed the edit/add modals' pay-rate anchor + the
     // bill-rate tripwire. Safe to select flat here — the page redirects non-staff
     // above, so the rates never serialize into a tech's props.
-    supabase.from("profiles").select("id, full_name, hourly_rate, bill_rate").eq("active", true).order("full_name"),
+    supabase.from("profile_pay").select("id, full_name, hourly_rate, bill_rate").eq("active", true).order("full_name"),
     supabase.from("job_codes").select("*").eq("active", true).order("code"),
     supabase
       .from("jobs")
@@ -295,7 +295,7 @@ export default async function TimecardsPage({
   const period = payPeriodBounds(orgSettings.pay_schedule, orgSettings.pay_anchor, weekDayStrs[0]);
   const { data: periodEntries } = await supabase
     .from("time_entries")
-    .select("profile_id, clock_in, clock_out, lunch_minutes, miles, paid_at, mileage_paid_at, rate_override, profiles(full_name, hourly_rate, commute_baseline_miles)")
+    .select("profile_id, clock_in, clock_out, lunch_minutes, miles, paid_at, mileage_paid_at, rate_override, profiles(full_name)")
     .eq("status", "closed")
     .not("clock_out", "is", null)
     .gte("clock_in", tzDayStartUtc(period.start, tz).toISOString())

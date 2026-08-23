@@ -159,7 +159,7 @@ export default async function JobDetailPage({
     supabase.from("purchase_orders").select("id, po_number, vendor, status, total").eq("job_id", id),
     supabase
       .from("time_entries")
-      .select("id, profile_id, clock_in, clock_out, lunch_minutes, miles, status, job_id, job_code, notes, rate_override, paid_at, mileage_paid_at, profiles(full_name, hourly_rate, bill_rate), job:job_id(job_number, name), time_allocations(id, job_id, hours, job_code, description)")
+      .select("id, profile_id, clock_in, clock_out, lunch_minutes, miles, status, job_id, job_code, notes, rate_override, paid_at, mileage_paid_at, profiles(full_name), job:job_id(job_number, name), time_allocations(id, job_id, hours, job_code, description)")
       .eq("job_id", id)
       .order("clock_in", { ascending: false }),
     // Time allocated INTO this job from shifts clocked on OTHER jobs (or no job). Without this
@@ -168,7 +168,7 @@ export default async function JobDetailPage({
     // parent entry comes embedded with ALL its allocations so the per-job share math works.
     supabase
       .from("time_allocations")
-      .select("id, time_entries!inner(id, profile_id, clock_in, clock_out, lunch_minutes, miles, status, job_id, job_code, notes, rate_override, paid_at, mileage_paid_at, profiles(full_name, hourly_rate, bill_rate), job:job_id(job_number, name), time_allocations(id, job_id, hours, job_code, description))")
+      .select("id, time_entries!inner(id, profile_id, clock_in, clock_out, lunch_minutes, miles, status, job_id, job_code, notes, rate_override, paid_at, mileage_paid_at, profiles(full_name), job:job_id(job_number, name), time_allocations(id, job_id, hours, job_code, description))")
       .eq("job_id", id),
     supabase
       .from("documents")
@@ -266,8 +266,8 @@ export default async function JobDetailPage({
     // would hand every tech the whole crew's pay + bill rates — "the modal returns
     // null for non-staff" is not a serialization defense.
     viewerIsStaff
-      ? supabase.from("profiles").select("id, full_name, home_address, hourly_rate, bill_rate").order("full_name")
-      : supabase.from("profiles").select("id, full_name, home_address").order("full_name"),
+      ? supabase.from("profile_pay").select("id, full_name, home_address, hourly_rate, bill_rate").order("full_name")
+      : supabase.from("profile_pay").select("id, full_name, home_address").order("full_name"),
     supabase.from("job_codes").select("*").order("code"),
     supabase.from("material_lists").select("id, name").order("created_at", { ascending: false }).limit(100),
     supabase.from("organizations").select("address_line1, city, state, zip, settings").limit(1).maybeSingle(),

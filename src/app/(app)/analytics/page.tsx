@@ -1,3 +1,4 @@
+import { attachRates, payRateMap } from "@/lib/profile-columns";
 import { redirect } from "next/navigation";
 import { isStaffRole } from "@/lib/actions/perms";
 import Link from "next/link";
@@ -56,7 +57,7 @@ export default async function AnalyticsPage() {
       supabase.from("jobs").select("id, job_number, name, status").order("created_at", { ascending: false }).limit(50000),
       supabase
         .from("time_entries")
-        .select("job_id, clock_in, clock_out, lunch_minutes, status, rate_override, profiles(hourly_rate), time_allocations(job_id, hours)")
+        .select("job_id, clock_in, clock_out, lunch_minutes, status, rate_override, profiles(id), time_allocations(job_id, hours)")
         .eq("status", "closed")
         // NO job_id FILTER (audit 9): a clock-in with no job whose hours were SPLIT onto jobs via
         // allocations is real labor — the job page and Nort both cost it, and dropping it here
@@ -92,6 +93,12 @@ export default async function AnalyticsPage() {
   // The ONE allocation-aware computation (revenue = collected − refunds; cost = split-aware
   // labor + materials), now shared with the job hub AND Nort's get_job_financials /
   // list_job_profitability tools so a job can't show two different profits anywhere.
+  // Labor rates: merged from the staff-scoped `profile_pay` view onto the embedded profile by
+  // its id. 0215/0216 revoke those columns from the `authenticated` role — RLS cannot restrict
+  // columns — so a PostgREST embed can no longer carry them for anyone. Office staff get the
+  // real numbers; anyone else costs labor at zero rather than reading the crew's pay.
+  attachRates((entries ?? []) as any[], await payRateMap(supabase), (e: any) => ({ id: e.profiles?.id, holder: e }));
+
   const jobRows = computeJobProfitRows({
     jobs: jobs ?? [],
     payments: jobPayments ?? [],

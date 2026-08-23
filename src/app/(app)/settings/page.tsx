@@ -1,3 +1,4 @@
+import { PROFILE_SAFE_COLS } from "@/lib/profile-columns";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
@@ -107,7 +108,7 @@ export default async function SettingsPage({
     data: { user },
   } = await supabase.auth.getUser();
 
-  const { data: me } = await supabase.from("profiles").select("*").eq("id", user?.id ?? "").single();
+  const { data: me } = await supabase.from("profiles").select(PROFILE_SAFE_COLS).eq("id", user?.id ?? "").single();
   const profile = me as Profile | null;
   const isAdmin = profile?.role === "owner" || profile?.role === "admin";
   // Office (Alexa's control plane: Numbering, Scheduling & timesheets, Automation)

@@ -175,7 +175,7 @@ export async function fetchJobLaborRows(
   supabase: any,
   jobId: string,
 ): Promise<{ jobEntries: any[]; jobAllocs: any[]; nonBillableCodes: Set<string> }> {
-  const [{ data: jobEntries }, { data: jobAllocs }, { data: codes }] = await Promise.all([
+  const [{ data: jobEntries }, { data: jobAllocs }, { data: codes }, { data: payRows }] = await Promise.all([
     supabase
       .from("time_entries")
       // allocation CONTENTS, not just ids: computeJobLaborBilling has to bill the
@@ -183,19 +183,34 @@ export async function fetchJobLaborRows(
       // charges to the job — selecting only ids is what hid a whole unbilled week.
       // job_code on the ENTRY, not only on its allocations: an un-split punch carries its code
       // here and nowhere else. Not selecting it is why path (3) could not see one.
-      .select("clock_in, clock_out, lunch_minutes, job_code, profiles(id, full_name, hourly_rate, bill_rate), time_allocations(id, job_id, job_code, hours)")
+      .select("clock_in, clock_out, lunch_minutes, job_code, profiles(id, full_name), time_allocations(id, job_id, job_code, hours)")
       .eq("job_id", jobId)
       .eq("status", "closed"),
     supabase
       .from("time_allocations")
-      .select("id, hours, job_code, time_entries!inner(status, profiles(id, full_name, hourly_rate, bill_rate))")
+      .select("id, hours, job_code, time_entries!inner(status, profiles(id, full_name))")
       .eq("job_id", jobId)
       .eq("time_entries.status", "closed"),
     // The org's own answer to "which of these hours does a customer pay for". Fetched HERE so all
     // three consumers — the job hub, the invoice import and the progress draw — cannot disagree
     // about it, which is the same reason the two queries above live in this function.
     supabase.from("job_codes").select("code").eq("billable", false),
+    // BILL RATES COME FROM THE STAFF-SCOPED VIEW (0215/0216), not from an embed on profiles:
+    // those columns are revoked from the authenticated role, because RLS cannot restrict
+    // columns and every signed-in person is the same role. The view returns the whole org to
+    // office staff and nothing but your own row to a tech — so a tech who reached this code
+    // path gets no rates rather than the crew's pay.
+    supabase.from("profile_pay").select("id, hourly_rate, bill_rate"),
   ]);
+  const rateById = new Map<string, { hourly_rate: number | null; bill_rate: number | null }>();
+  for (const r of (payRows ?? []) as any[]) if (r?.id) rateById.set(String(r.id), r);
+  const withRate = (prof: any) => (prof?.id ? { ...prof, ...(rateById.get(String(prof.id)) ?? {}) } : prof);
+  for (const e of (jobEntries ?? []) as any[]) {
+    e.profiles = withRate(e.profiles);
+  }
+  for (const a of (jobAllocs ?? []) as any[]) {
+    if (a?.time_entries) a.time_entries.profiles = withRate(a.time_entries.profiles);
+  }
   return {
     jobEntries: jobEntries ?? [],
     jobAllocs: jobAllocs ?? [],
