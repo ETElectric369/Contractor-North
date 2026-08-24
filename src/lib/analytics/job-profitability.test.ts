@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeJobProfitRows, computeProfitByType, mergeBudgetActual, type JobProfitRow } from "@/lib/analytics/job-profitability";
+import { computeJobProfitRows, computeProfitByType, isLaborBudgetLine, mergeBudgetActual, type JobProfitRow } from "@/lib/analytics/job-profitability";
 
 describe("mergeBudgetActual — per-scope budget vs actual", () => {
   it("joins budget + actual by scope and flags over/under (the masked-overrun catch)", () => {
@@ -42,7 +42,7 @@ const laborEntry = (jobId: string, hours: number, rate: number) => ({
 });
 // a payment of `amount` on `jobId`'s invoice (THE cash definition — not invoices.amount_paid)
 const pay = (jobId: string, amount: number, status = "paid") => ({ amount, invoices: { job_id: jobId, status } });
-const empty = { jobs: [], payments: [], pos: [], bills: [], jobRefunds: [], entries: [] };
+const empty = { jobs: [], payments: [], pos: [], bills: [], jobRefunds: [], entries: [], pettyCash: [] };
 
 describe("computeJobProfitRows — job profit SSOT (reconciles /analytics + Nort)", () => {
   it("profit = revenue collected − (labor at pay rate + materials)", () => {
@@ -192,5 +192,129 @@ describe("computeProfitByType — margin by work type", () => {
   it("jobs with no type fall under 'Uncategorized'; null margin when zero revenue", () => {
     const out = computeProfitByType([row("x", 0, 200)], new Map());
     expect(out).toEqual([{ type: "Uncategorized", jobs: 1, revenue: 0, cost: 200, profit: -200, marginPct: null }]);
+  });
+});
+
+/**
+ * BUDGET-VS-ACTUAL WAS COMPARING TWO DIFFERENT THINGS (audit v800 wave B).
+ *
+ * The budget summed every estimate line — labour included. The actual summed only bills and
+ * purchase orders. So every scope read wildly under budget, and on a service job (mostly labour)
+ * a job 90% through its hours reported as barely started. Production carried $141k of hourly
+ * estimate lines against $0 of labour actual.
+ */
+describe("isLaborBudgetLine — which estimate lines are labour", () => {
+  it("an hourly unit is labour — the signal that was 41-for-41 in production", () => {
+    expect(isLaborBudgetLine({ unit: "hr", description: "Rough-in: home-run branch circuits" })).toBe(true);
+    expect(isLaborBudgetLine({ unit: "hrs", description: "Back Steps (in ground Pressure Treated)" })).toBe(true);
+    expect(isLaborBudgetLine({ unit: "Hours", description: "anything" })).toBe(true);
+  });
+
+  it("a flat-rate line that SAYS labour is labour — what the unit alone misses", () => {
+    // Real row: "Labor - 2 guys for one full day", unit ea, $2,000.
+    expect(isLaborBudgetLine({ unit: "ea", description: "Labor - 2 guys for one full day" })).toBe(true);
+    expect(isLaborBudgetLine({ unit: "ea", description: "Labour and materials" })).toBe(true);
+  });
+
+  it("materials are not labour", () => {
+    expect(isLaborBudgetLine({ unit: "ea", description: "200A panel, flush mount" })).toBe(false);
+    expect(isLaborBudgetLine({ unit: "LF", description: "Composite decking" })).toBe(false);
+    expect(isLaborBudgetLine({ unit: "", description: "Permit fee" })).toBe(false);
+  });
+
+  it("does not fire on a word that merely contains 'labor'", () => {
+    // Word-boundary matched, so a product name can't drag a materials line into the labour row.
+    expect(isLaborBudgetLine({ unit: "ea", description: "Elaborate trim package" })).toBe(false);
+    expect(isLaborBudgetLine({ unit: "ea", description: "Collaborative design fee" })).toBe(false);
+  });
+
+  it("survives nulls without throwing on a half-filled line", () => {
+    expect(isLaborBudgetLine({})).toBe(false);
+    expect(isLaborBudgetLine({ unit: null, description: null })).toBe(false);
+  });
+});
+
+describe("mergeBudgetActual — labour compares against labour", () => {
+  it("labour now has a counterpart instead of reading 0% spent", () => {
+    const rows = mergeBudgetActual(
+      [{ category: "Labor", budget: 10000 }, { category: "Decks", budget: 4000 }],
+      [{ category: "Labor", actual: 9200 }, { category: "Decks", actual: 3100 }],
+    );
+    const labor = rows.find((r) => r.category === "Labor")!;
+    expect(labor).toMatchObject({ budget: 10000, actual: 9200, remaining: 800, burnPct: 92, overBudget: false });
+  });
+
+  it("catches labour running hot — the case that used to be invisible", () => {
+    const rows = mergeBudgetActual([{ category: "Labor", budget: 5000 }], [{ category: "Labor", actual: 7400 }]);
+    expect(rows[0]).toMatchObject({ burnPct: 148, overBudget: true, remaining: -2400 });
+  });
+
+  it("a misfiled line moves a row but NEVER the totals — the safe failure mode", () => {
+    // An hourly equipment rental booked as labour is the heuristic's known blind spot. It shifts
+    // $800 between two rows that are both on screen; the job's totals are identical either way.
+    const asLabor = mergeBudgetActual(
+      [{ category: "Labor", budget: 5800 }, { category: "Decks", budget: 4000 }], [],
+    );
+    const asMaterials = mergeBudgetActual(
+      [{ category: "Labor", budget: 5000 }, { category: "Decks", budget: 4800 }], [],
+    );
+    const total = (rs: { budget: number }[]) => rs.reduce((s, r) => s + r.budget, 0);
+    expect(total(asLabor)).toBe(total(asMaterials));
+    expect(total(asLabor)).toBe(9800);
+  });
+});
+
+/**
+ * PETTY CASH IS COST (audit v800 wave B). A tech buys 35 ft of 10/3 Romex out of the tin and tags
+ * it to the job — a real production row — and every profit reader in the app ignored it. The job
+ * read more profitable by exactly the amount that had left the business.
+ */
+describe("computeJobProfitRows — petty cash finally counts", () => {
+  it("a job-linked petty-cash expense is job cost", () => {
+    const rows = computeJobProfitRows({
+      ...empty,
+      jobs: [job("A")],
+      payments: [pay("A", 1000)],
+      pettyCash: [{ job_id: "A", amount: 90, kind: "expense" }],
+    });
+    expect(rows[0].cost).toBe(90);
+    expect(rows[0].profit).toBe(910);
+  });
+
+  it("a REPLENISH is a transfer, not a cost — counting it would double-count the same dollars", () => {
+    // Refilling the tin is money moving between two of your own pockets. Booking it as job cost
+    // charges the job once when the tin is filled and again when the tech spends it.
+    const rows = computeJobProfitRows({
+      ...empty,
+      jobs: [job("A")],
+      payments: [pay("A", 1000)],
+      pettyCash: [
+        { job_id: "A", amount: 90, kind: "expense" },
+        { job_id: "A", amount: 500, kind: "replenish" },
+      ],
+    });
+    expect(rows[0].cost).toBe(90);
+  });
+
+  it("adds on top of materials and labour rather than replacing them", () => {
+    const rows = computeJobProfitRows({
+      ...empty,
+      jobs: [job("A")],
+      payments: [pay("A", 2000)],
+      bills: [{ job_id: "A", amount: 200 }],
+      entries: [laborEntry("A", 8, 50)], // $400
+      pettyCash: [{ job_id: "A", amount: 90, kind: "expense" }],
+    });
+    expect(rows[0].cost).toBe(690);
+  });
+
+  it("petty cash with no job is overhead and never lands on a job", () => {
+    const rows = computeJobProfitRows({
+      ...empty,
+      jobs: [job("A")],
+      payments: [pay("A", 1000)],
+      pettyCash: [{ job_id: null, amount: 379.35, kind: "expense" }],
+    });
+    expect(rows[0].cost).toBe(0);
   });
 });

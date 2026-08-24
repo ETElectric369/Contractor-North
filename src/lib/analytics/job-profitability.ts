@@ -43,6 +43,9 @@ export type ProfitInputs = {
   bills: any[];
   jobRefunds: any[];
   entries: any[];
+  /** Job-linked petty-cash EXPENSES. Real money out of the tin, spent on a job, and until now
+   *  counted by nothing — see addMat below. */
+  pettyCash: any[];
 };
 
 /** Pure — the exact per-job rows /analytics renders, sorted most-profitable first. Callers slice. */
@@ -58,6 +61,13 @@ export function computeJobProfitRows(inp: ProfitInputs): JobProfitRow[] {
   for (const p of livePurchaseOrders((inp.pos ?? []) as any[], (inp.bills ?? []) as any[]))
     addMat((p as any).job_id, Number((p as any).total));
   for (const b of inp.bills ?? []) addMat(b.job_id, Number(b.amount));
+  // PETTY CASH IS COST (audit v800 wave B). A tech buys 35 ft of 10/3 Romex out of the tin,
+  // tags it to the job, and every profit reader in the app ignored it — the job looked more
+  // profitable by exactly the amount that left the business. Only `expense` counts: a
+  // `replenish` row is the tin being refilled, which is a transfer, not a cost, and adding it
+  // would double-count the same dollars as they move.
+  for (const pc of inp.pettyCash ?? [])
+    if ((pc as any).kind !== "replenish") addMat((pc as any).job_id, Number((pc as any).amount) || 0);
 
   const refundByJob = new Map<string, number>();
   for (const r of inp.jobRefunds ?? []) {
@@ -107,13 +117,18 @@ async function fetchProfitInputs(supabase: any, jobId?: string): Promise<ProfitI
   const billsQ = jobId
     ? supabase.from("bills").select("job_id, amount, po_id").eq("job_id", jobId)
     : supabase.from("bills").select("job_id, amount, po_id").limit(50000);
+  // Job-linked only: petty cash with no job is overhead, not a job's cost.
+  const pettyQ = jobId
+    ? supabase.from("petty_cash").select("job_id, amount, kind").eq("job_id", jobId)
+    : supabase.from("petty_cash").select("job_id, amount, kind").not("job_id", "is", null).limit(50000);
 
-  const [{ data: jobs }, { data: payments }, { data: pos }, { data: bills }, { data: jobRefunds }, { data: entries }] =
+  const [{ data: jobs }, { data: payments }, { data: pos }, { data: bills }, { data: petty }, { data: jobRefunds }, { data: entries }] =
     await Promise.all([
       jobsQ,
       paymentsQ,
       posQ,
       billsQ,
+      pettyQ,
       supabase.from("customer_credits").select("amount, invoices(job_id)").eq("disposition", "refund").limit(50000),
       supabase
         .from("time_entries")
@@ -141,6 +156,7 @@ async function fetchProfitInputs(supabase: any, jobId?: string): Promise<ProfitI
     payments: jobId ? ((payments ?? []) as any[]).filter((p) => p.invoices?.job_id === jobId) : (payments ?? []),
     pos: pos ?? [],
     bills: bills ?? [],
+    pettyCash: petty ?? [],
     jobRefunds: jobId ? ((jobRefunds ?? []) as any[]).filter((r) => r.invoices?.job_id === jobId) : (jobRefunds ?? []),
     entries: entries ?? [],
   };
@@ -181,6 +197,45 @@ export async function getJobFinancials(supabase: any, jobId: string): Promise<Jo
 export type BudgetCategory = { category: string; budget: number };
 
 /**
+ * THE CATEGORY LABOUR IS BOOKED UNDER on both sides of budget-vs-actual.
+ *
+ * Not a scope the office types — a reserved bucket, which is why it filters out of listJobScopes
+ * alongside "Uncategorized": a receipt is never labour.
+ */
+export const LABOR_CATEGORY = "Labor";
+
+const HOUR_UNITS = new Set(["hr", "hrs", "hour", "hours", "man-hr", "manhr"]);
+
+/**
+ * IS THIS ESTIMATE LINE LABOUR?
+ *
+ * budget-vs-actual was comparing a budget that INCLUDED labour against an actual that counted
+ * only bills and purchase orders. Every scope therefore read wildly under budget, and on a
+ * service job — which is mostly labour — a job 90% through its hours reported as barely started.
+ * Nort's tool description tells it to warn when a total "looks fine only because big scopes
+ * haven't started", so it would have said exactly that, confidently, about a job running hot.
+ * Production carried $141k of hourly estimate lines against $0 of labour actual.
+ *
+ * TWO SIGNALS, checked against every estimate line in production (180 lines, 3 orgs):
+ *   · an HOURLY unit — 41 lines, and all 41 are labour. Chris prices deck steps at "80 hrs @
+ *     $125"; Erik prices "Lead electrician (CA C-10) — 52 hr @ $150". Zero false positives.
+ *   · the word LABOUR in the description — catches the flat-rate ones the unit misses, e.g.
+ *     "Labor - 2 guys for one full day, ea, $2,000" and a fixed-price panel swap.
+ *
+ * WHERE THIS CAN BE WRONG, and why that is survivable. An hourly EQUIPMENT rental ("excavator, 8
+ * hr") would be booked as labour. That is the determinism boundary doing its usual thing, so the
+ * failure mode is chosen deliberately: this split decides only which ROW a budget lands in, never
+ * the total. Misfiling moves a number between two rows that are both on screen; it cannot make
+ * the job's total budget or total cost wrong. A heuristic that can only ever be locally wrong is
+ * worth having; one that could move the bottom line would not be.
+ */
+export function isLaborBudgetLine(line: { unit?: string | null; description?: string | null }): boolean {
+  const unit = String(line.unit ?? "").trim().toLowerCase();
+  if (HOUR_UNITS.has(unit)) return true;
+  return /\blabou?rs?\b/i.test(String(line.description ?? ""));
+}
+
+/**
  * The estimate's budget broken out by SCOPE category (Framing, Decking, Electrical…) from the
  * job's quote line items' `category` (cn-v420) — summed across ALL the job's quotes, so an
  * original estimate + change-order quotes roll up to the current budget (matching the Tahoe
@@ -195,11 +250,17 @@ export async function getJobBudgetByCategory(supabase: any, jobId: string): Prom
   if (quoteIds.length === 0) return [];
   const { data: lines } = await supabase
     .from("quote_line_items")
-    .select("category, line_total, quantity, unit_price")
+    .select("category, line_total, quantity, unit_price, unit, description")
     .in("quote_id", quoteIds);
   const map = new Map<string, number>();
   for (const l of (lines ?? []) as any[]) {
-    const cat = String(l.category ?? "").trim() || "Uncategorized";
+    // Labour leaves its scope and goes to the labour bucket, because the ACTUAL side can only
+    // ever know labour job-wide — a time entry carries no scope. Comparing a scope's
+    // labour-inclusive budget against its materials-only actual is what made every scope read
+    // under budget. See isLaborBudgetLine.
+    const cat = isLaborBudgetLine(l)
+      ? LABOR_CATEGORY
+      : String(l.category ?? "").trim() || "Uncategorized";
     const amt = Number(l.line_total ?? (Number(l.quantity) || 0) * (Number(l.unit_price) || 0)) || 0;
     map.set(cat, (map.get(cat) ?? 0) + amt);
   }
@@ -214,9 +275,14 @@ export type ActualCategory = { category: string; actual: number };
  *  orders folded into "Uncategorized" (POs carry no scope). Highest first. The scope strings
  *  match the estimate's (quote_line_items.category), so this joins to getJobBudgetByCategory. */
 export async function getJobActualByCategory(supabase: any, jobId: string): Promise<ActualCategory[]> {
-  const [{ data: bills }, { data: pos }] = await Promise.all([
+  const [{ data: bills }, { data: pos }, { data: entries }, { data: petty }] = await Promise.all([
     supabase.from("bills").select("amount, scope_category, po_id").eq("job_id", jobId),
     supabase.from("purchase_orders").select("id, total, status").eq("job_id", jobId),
+    // THE HALF THAT WAS NEVER COUNTED. Through laborCostForJob — the same split-aware, pay-rate
+    // helper computeJobProfitRows uses — so budget-vs-actual and job profitability can never
+    // report two different labour numbers for one job.
+    supabase.from("time_entries").select("*").eq("job_id", jobId).eq("status", "closed"),
+    supabase.from("petty_cash").select("amount, kind").eq("job_id", jobId),
   ]);
   const map = new Map<string, number>();
   for (const b of (bills ?? []) as any[]) {
@@ -230,6 +296,15 @@ export async function getJobActualByCategory(supabase: any, jobId: string): Prom
     0,
   );
   if (poTotal) map.set("Uncategorized", (map.get("Uncategorized") ?? 0) + poTotal);
+  // Petty cash carries its OWN category vocabulary ("Receipt", "Materials") which is not the
+  // estimate's scope vocabulary, so it lands in Uncategorized alongside POs rather than being
+  // force-joined to a scope it was never tagged with.
+  const pettyTotal = ((petty ?? []) as any[])
+    .filter((x) => x.kind !== "replenish")
+    .reduce((t, x) => t + (Number(x.amount) || 0), 0);
+  if (pettyTotal) map.set("Uncategorized", (map.get("Uncategorized") ?? 0) + pettyTotal);
+  const laborCost = laborCostForJob((entries ?? []) as any[], jobId).cost;
+  if (laborCost) map.set(LABOR_CATEGORY, (map.get(LABOR_CATEGORY) ?? 0) + laborCost);
   return [...map.entries()]
     .map(([category, actual]) => ({ category, actual: Math.round(actual * 100) / 100 }))
     .sort((a, b) => b.actual - a.actual);
@@ -280,7 +355,8 @@ export async function getJobBudgetVsActual(supabase: any, jobId: string): Promis
  *  scoped estimate (then costs stay Uncategorized). */
 export async function listJobScopes(supabase: any, jobId: string): Promise<string[]> {
   const budget = await getJobBudgetByCategory(supabase, jobId);
-  return budget.map((b) => b.category).filter((c) => c && c !== "Uncategorized");
+  // LABOR_CATEGORY is reserved, not a scope the office typed — and a receipt is never labour.
+  return budget.map((b) => b.category).filter((c) => c && c !== "Uncategorized" && c !== LABOR_CATEGORY);
 }
 
 /** Ranked job profitability across the org. sort "profit" = most profitable first (default);

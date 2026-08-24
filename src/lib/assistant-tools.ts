@@ -1780,7 +1780,7 @@ export async function runDataTool(
           // fine because a big scope (decking, railing) hasn't started while another (framing)
           // is way over. Empty when the estimate has no scope categories.
           budget_vs_actual: budgetVsActual,
-          note: "Revenue = cash collected net of refunds. Cost = labor (pay rate, split-aware) + materials. A cost entered as BOTH a PO and a bill is counted twice (per scope too). budget_vs_actual splits BOTH estimate and actual by scope — call out any scope that's overBudget, and any scope with budget but ~0 actual (not started yet) that's hiding the burn. CAVEAT: purchase orders have no scope and fall under 'Uncategorized' actual, so a PO-billed job may show real scopes at 0% spent — disclose that.",
+          note: "Revenue = cash collected net of refunds. Cost = labor (pay rate, split-aware) + materials. A cost entered as BOTH a PO and a bill is counted twice (per scope too). budget_vs_actual splits BOTH estimate and actual by scope — call out any scope that's overBudget, and any scope with budget but ~0 actual (not started yet) that's hiding the burn. LABOR IS ITS OWN ROW on both sides: estimate lines priced hourly (or saying 'labor') are budgeted there, and actual labor is the crew's logged time at pay rate — job-wide, because a time entry carries no scope, so labor can never be attributed to Framing vs Decking. Say 'labor overall' rather than implying a scope. CAVEAT: purchase orders have no scope and fall under 'Uncategorized' actual, so a PO-billed job may show real scopes at 0% spent — disclose that.",
         });
       }
 

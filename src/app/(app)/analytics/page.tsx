@@ -37,7 +37,7 @@ export default async function AnalyticsPage() {
   const todayYmd = todayStrInTz(tz);
   const windowStart = tzDayStartUtc(`${trailing12Months(todayYmd)[0]}-01`, tz).toISOString();
 
-  const [{ data: payments }, { data: invoices }, { data: quotes }, { data: jobs }, { data: entries }, { data: pos }, { data: bills }, { data: refunds }, { data: jobRefunds }, { data: jobPayments }] =
+  const [{ data: payments }, { data: invoices }, { data: quotes }, { data: jobs }, { data: entries }, { data: pos }, { data: bills }, { data: refunds }, { data: jobRefunds }, { data: jobPayments }, { data: pettyCash }] =
     await Promise.all([
       supabase.from("payments").select("amount, paid_at, invoices(status)").gte("paid_at", windowStart).order("paid_at", { ascending: false }).limit(50000),
       // A/R aging reads the WHOLE book or it isn't aging (audit 9) — unbounded meant the 1000
@@ -81,6 +81,11 @@ export default async function AnalyticsPage() {
       // computeCollected definition — not invoices.amount_paid (which folds non-cash credits
       // in and so overstated a job's "collected"). .limit past PostgREST's 1000-row cap.
       supabase.from("payments").select("amount, invoices(job_id, status)").limit(50000),
+      // PETTY CASH IS COST. This page builds its own ProfitInputs rather than going through
+      // fetchProfitInputs, so it needs its own copy — which is exactly why `pettyCash` is a
+      // REQUIRED field on the type: the compiler is what caught that this second caller existed.
+      // Job-linked only; petty cash with no job is overhead, not a job's cost.
+      supabase.from("petty_cash").select("job_id, amount, kind").not("job_id", "is", null).limit(50000),
     ]);
 
   // ── Money metrics — the SAME computations Nort's revenue_trend / ar_aging / quote_win_rate
@@ -102,6 +107,7 @@ export default async function AnalyticsPage() {
   const jobRows = computeJobProfitRows({
     jobs: jobs ?? [],
     payments: jobPayments ?? [],
+    pettyCash: pettyCash ?? [],
     pos: pos ?? [],
     bills: bills ?? [],
     jobRefunds: jobRefunds ?? [],
