@@ -712,6 +712,11 @@ async function billedOnAnotherStandardInvoice(
 export async function reimportFromScratch(
   invoiceId: string,
   source: "labor" | "costs" | "quote",
+  /** The % showing in the card's markup box. "Start it over" sits directly under "Materials
+   *  From Costs" and must price identically (audit v800 verification): without this the two
+   *  buttons in one card produced different money — the box's number for one, the customer's
+   *  resolved default for the other — and neither the confirm nor the toast names a percent. */
+  markupPercent?: number,
 ): Promise<ImportResult> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -722,7 +727,7 @@ export async function reimportFromScratch(
     source === "labor"
       ? importLaborIntoInvoice(invoiceId)
       : source === "costs"
-        ? importCostsIntoInvoice(invoiceId)
+        ? importCostsIntoInvoice(invoiceId, markupPercent)
         : importQuoteItemsIntoInvoice(invoiceId);
   return run;
 }

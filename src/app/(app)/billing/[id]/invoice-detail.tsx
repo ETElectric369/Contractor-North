@@ -636,7 +636,12 @@ export function InvoiceDetail({
                     )
                       return;
                     const src = stuckSource;
-                    runImport((id) => reimportFromScratch(id, src), src === "labor" ? "Labor" : src === "costs" ? "Materials" : "Estimate items", 0, src);
+                    runImport(
+                      (id) => reimportFromScratch(id, src, src === "costs" ? markup : undefined),
+                      src === "labor" ? "Labor" : src === "costs" ? "Materials" : "Estimate items",
+                      0,
+                      src,
+                    );
                   }}
                   className="rounded-md border border-amber-300 bg-white px-2 py-1 font-medium text-amber-800 hover:bg-amber-50 disabled:opacity-50"
                 >
