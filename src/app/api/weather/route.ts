@@ -30,6 +30,26 @@ const WEATHER_CALLS_PER_DAY = 2000;
 const cache = new Map<string, { at: number; body: unknown }>();
 const TTL_MS = 10 * 60 * 1000; // 10 min
 
+/**
+ * TWO CACHES, AND THE SECOND ONE IS THE CHEAP ONE.
+ *
+ * The Map above is L1: instant, free, and PER INSTANCE — which on serverless is its whole
+ * problem. Every cold start begins with an empty one, and two instances never share a hit, so
+ * the real Google call rate is far closer to "one per page view" than the 10-minute TTL implies.
+ * Weather is the app's highest-volume billed call (the widget fires on every /planner load), so
+ * that miss rate is the single biggest lever on the Google bill there is.
+ *
+ * L2 is Next's data cache: shared across every instance AND across deploys. Thirty minutes,
+ * because the temperature in Chilcoot does not move in thirty minutes and nobody reading "today's
+ * weather" before a service call is served worse by a half-hour-old reading. Comfortably inside
+ * Google's caching terms.
+ *
+ * For L2 to hit at all, the URL has to be the CACHE KEY — Next keys on the full request. The
+ * coordinates are therefore rounded in the URL itself, not just in the local key, or every
+ * browser's slightly different lat/lng would be its own cache entry and its own bill.
+ */
+const SHARED_TTL_SECONDS = 30 * 60;
+
 export async function GET(req: NextRequest) {
   if (!GOOGLE_KEY) return NextResponse.json({ error: "not configured" }, { status: 503 });
   if (memRateLimited(`weather:${proxyClientIp(req.headers)}`, 60, 60_000)) {
@@ -49,10 +69,15 @@ export async function GET(req: NextRequest) {
   if (hit && Date.now() - hit.at < TTL_MS) return NextResponse.json(hit.body);
   if (cache.size > 2000) cache.clear();
 
+  // Rounded into the URL — see SHARED_TTL_SECONDS. ~1km, which is the same bucket the local
+  // key already used, so this changes nothing a person can see.
   const url =
     `https://weather.googleapis.com/v1/currentConditions:lookup?key=${GOOGLE_KEY}` +
-    `&location.latitude=${lat}&location.longitude=${lng}&unitsSystem=IMPERIAL`;
-  const res = await fetch(url, { headers: googleUrlHeaders() });
+    `&location.latitude=${lat.toFixed(2)}&location.longitude=${lng.toFixed(2)}&unitsSystem=IMPERIAL`;
+  const res = await fetch(url, {
+    headers: googleUrlHeaders(),
+    next: { revalidate: SHARED_TTL_SECONDS },
+  });
   const data = await res.json().catch(() => ({}));
   if (res.ok) cache.set(ck, { at: Date.now(), body: data });
   return NextResponse.json(data, { status: res.ok ? 200 : res.status });

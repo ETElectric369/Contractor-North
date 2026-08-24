@@ -70,6 +70,11 @@ export async function GET(req: NextRequest) {
   if (!placeId) return NextResponse.json({}, { status: 400 });
   const sessionToken = req.nextUrl.searchParams.get("sessionToken") || "";
 
+  // DELIBERATELY NOT CACHED, unlike /geocode and /weather, and for a reason that inverts the
+  // usual one: the session token is what makes the whole autocomplete session FREE, and a session
+  // is only closed by its Details call actually reaching Google. Serving a cached Details
+  // response would leave every session open, and Google would bill those autocomplete keystrokes
+  // per request instead of per session — a cache here would COST money, not save it.
   const url = new URL(`https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}`);
   if (sessionToken) url.searchParams.set("sessionToken", sessionToken);
   const res = await fetch(url, {

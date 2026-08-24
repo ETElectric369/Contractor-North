@@ -30,6 +30,13 @@ const GEOCODE_CALLS_PER_DAY = 2000;
 const cache = new Map<string, { at: number; body: unknown }>();
 const TTL_MS = 24 * 60 * 60 * 1000; // 1 day
 
+/** L2, shared across instances and deploys — see the long note in api/weather, which has the
+ *  same per-instance miss problem for the same reason. A WEEK here rather than thirty minutes,
+ *  because an address's coordinates are not a reading that goes stale: 1000 Reno Ave is where it
+ *  was last Tuesday. Google's terms permit caching geocoded lat/lng for up to 30 days, so seven
+ *  is well inside them. */
+const SHARED_TTL_SECONDS = 7 * 24 * 60 * 60;
+
 export async function GET(req: NextRequest) {
   if (!GOOGLE_KEY) return NextResponse.json({ error: "not configured" }, { status: 503 });
   if (memRateLimited(`geocode:${proxyClientIp(req.headers)}`, 60, 60_000)) {
@@ -49,7 +56,7 @@ export async function GET(req: NextRequest) {
 
   const res = await fetch(
     `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${GOOGLE_KEY}`,
-    { headers: googleUrlHeaders() },
+    { headers: googleUrlHeaders(), next: { revalidate: SHARED_TTL_SECONDS } },
   );
   const data = await res.json().catch(() => ({}) as Record<string, unknown>);
   const loc = (data as any)?.results?.[0]?.geometry?.location;
