@@ -1,3 +1,4 @@
+import { payRateMap } from "@/lib/profile-columns";
 import Link from "next/link";
 import { Calculator } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
@@ -61,16 +62,25 @@ export default async function TaxReportPage({
     supabase.from("tax_rates").select("name, rate").order("rate"),
     supabase
       .from("time_entries")
-      .select("clock_in, miles, profile_id, profiles:profile_id(commute_baseline_miles)")
+      .select("clock_in, miles, profile_id")
       .gte("clock_in", start.toISOString())
       .lt("clock_in", end.toISOString()),
   ]);
 
   // Business (deductible) mileage = logged miles net of each person's daily commute
   // baseline (subtracted once per day). Grouped per person so baselines apply right.
+  // The commute baseline comes from the staff-scoped profile_pay view: 0216 revoked
+  // commute_baseline_miles from the authenticated role, and this page read it through an
+  // ALIASED embed (profiles:profile_id(...)) that the first sweep's pattern did not match —
+  // so the whole tax report was erroring until this merge landed. A missing baseline means a
+  // person's commute is not netted out, which OVERSTATES deductible business mileage.
+  const baselines = await payRateMap(supabase);
   const byPerson = new Map<string, { baseline: number; entries: any[] }>();
   for (const e of entries ?? []) {
-    const rec = byPerson.get(e.profile_id) ?? { baseline: Number((e as any).profiles?.commute_baseline_miles ?? 0), entries: [] as any[] };
+    const rec = byPerson.get(e.profile_id) ?? {
+      baseline: Number(baselines.get(String(e.profile_id))?.commute_baseline_miles ?? 0),
+      entries: [] as any[],
+    };
     rec.entries.push(e);
     byPerson.set(e.profile_id, rec);
   }

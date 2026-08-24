@@ -32,11 +32,14 @@ export default async function TimeclockPage() {
 
   // hourly_rate = the caller's OWN pay rate (self-row read), feeding the tech's
   // "My pay period" summary below — no one else's rate ever loads here.
-  const { data: prof } = await supabase
-    .from("profiles")
-    .select("language, role")
-    .eq("id", user?.id ?? "")
-    .maybeSingle();
+  // The caller's own row. home_address is the MILEAGE ORIGIN, and it lives behind the
+  // profile_pay view now (0216 revoked it from the authenticated role) — narrowing this select
+  // without a second read silently blanked it, so the tech's drive started from nowhere.
+  // profile_pay is staff-or-SELF, so a tech reading their own address is exactly what it allows.
+  const [{ data: prof }, { data: selfPay }] = await Promise.all([
+    supabase.from("profiles").select("language, role").eq("id", user?.id ?? "").maybeSingle(),
+    supabase.from("profile_pay").select("home_address").eq("id", user?.id ?? "").maybeSingle(),
+  ]);
   const lang = prof?.language ?? "en";
   const t = translator(lang);
   const isStaff = !!prof && isStaffRole(prof.role);
@@ -429,7 +432,7 @@ export default async function TimeclockPage() {
             jobCodes={(codesRes.data ?? []) as JobCode[]}
             jobs={jobOptions}
             lang={lang}
-            homeAddress={(prof as any)?.home_address ?? ""}
+            homeAddress={(selfPay as { home_address?: string | null } | null)?.home_address ?? ""}
             isStaff={isStaff}
             crewLead={crewLead}
             jobCodesEnabled={jobCodesOn}

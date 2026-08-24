@@ -1,3 +1,4 @@
+import { attachRates, payRateMap } from "@/lib/profile-columns";
 import Link from "next/link";
 import { isStaffRole } from "@/lib/actions/perms";
 import { notFound } from "next/navigation";
@@ -196,6 +197,20 @@ export default async function JobDetailPage({
       .eq("job_id", id)
       .order("created_at", { ascending: false }),
   ]);
+
+  // RATES MERGED FROM THE STAFF-SCOPED VIEW (0215/0216 revoked them from the authenticated
+  // role, so these embeds cannot carry them). Without this the job hub's Labor line and every
+  // profit figure on the page read ZERO — the exact bug the pay-boundary work was meant to
+  // avoid, reintroduced by narrowing the embeds without merging. Both shapes: the entry rows,
+  // and the allocation rows whose entry is nested one level down.
+  {
+    const rates = await payRateMap(supabase);
+    attachRates((ownEntries ?? []) as any[], rates, (e: any) => ({ id: e.profile_id, holder: e }));
+    attachRates((inboundAllocRows ?? []) as any[], rates, (a: any) => ({
+      id: a.time_entries?.profile_id,
+      holder: a.time_entries,
+    }));
+  }
 
   const { data: pendingProposal } = await supabase
     .from("schedule_proposals")

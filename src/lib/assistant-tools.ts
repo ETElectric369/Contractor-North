@@ -1,3 +1,4 @@
+import { attachRates, payRateMap } from "@/lib/profile-columns";
 import "server-only";
 import type Anthropic from "@anthropic-ai/sdk";
 import { tzDayStartUtc, todayStrInTz, payPeriodForOffset } from "@/lib/tz";
@@ -1991,6 +1992,7 @@ export async function runDataTool(
           .gte("clock_in", startIso)
           .lt("clock_in", endIso);
         if (error) throw error;
+        attachRates((entries ?? []) as any[], await payRateMap(supabase), (e: any) => ({ id: e.profile_id, holder: e }));
         // TWO BUCKETS, never summed: BASE pay locks on paid_at (aggregatePayrollEntries),
         // MILEAGE locks on mileage_paid_at (split below). Mileage dollars exist ONLY as the
         // human-typed amounts recorded in kind='mileage' payroll_runs rows, summed per profile

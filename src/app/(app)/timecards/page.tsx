@@ -1,3 +1,4 @@
+import { attachRates, payRateMap } from "@/lib/profile-columns";
 import Link from "next/link";
 import { isStaffRole } from "@/lib/actions/perms";
 import { redirect } from "next/navigation";
@@ -133,11 +134,22 @@ export default async function TimecardsPage({
   const { data: entries } = await supabase
     .from("time_entries")
     .select(
-      "id, profile_id, clock_in, clock_out, lunch_minutes, miles, rate_override, paid_at, mileage_paid_at, job_id, job_code, status, notes, source, profiles:profile_id(full_name, commute_baseline_miles), job:job_id(job_number, name), time_allocations(job_id, job_code, hours, description)",
+      "id, profile_id, clock_in, clock_out, lunch_minutes, miles, rate_override, paid_at, mileage_paid_at, job_id, job_code, status, notes, source, profiles:profile_id(full_name), job:job_id(job_number, name), time_allocations(job_id, job_code, hours, description)",
     )
     .gte("clock_in", start.toISOString())
     .lt("clock_in", end.toISOString())
     .order("clock_in", { ascending: true });
+  // The pay spine (rate + commute baseline) rides the staff-scoped profile_pay view, not this
+  // embed: 0216 revoked those columns from the authenticated role. This grid read them through
+  // an ALIASED embed — profiles:profile_id(...) — which two earlier sweeps' patterns missed,
+  // so the whole page 42501'd until this merge landed.
+  {
+    const pay = await payRateMap(supabase);
+    for (const e of (entries ?? []) as any[]) {
+      if (!e?.profile_id || !e.profiles) continue;
+      e.profiles = { ...e.profiles, ...(pay.get(String(e.profile_id)) ?? {}) };
+    }
+  }
 
   // "Needs attention" pull — open entries that should have been closed: anything
   // still open from a PAST day (a forgotten clock-out) or open more than 12 hours
@@ -300,6 +312,9 @@ export default async function TimecardsPage({
     .not("clock_out", "is", null)
     .gte("clock_in", tzDayStartUtc(period.start, tz).toISOString())
     .lt("clock_in", tzDayStartUtc(period.end, tz).toISOString());
+  // Rates merged from the staff-scoped profile_pay view (0215/0216 revoked them from the
+  // authenticated role, so the embed cannot carry them). Without this every rate reads 0.
+  attachRates((periodEntries ?? []) as any[], await payRateMap(supabase), (e: any) => ({ id: e.profile_id, holder: e }));
   const periodRows = aggregatePayrollEntries((periodEntries ?? []) as any[], tz);
   // The $48.50 lesson (mirrors /payroll's open-entries banner): still-open entries are
   // EXCLUDED by the closed-only filter above — name the gap or the period card silently
