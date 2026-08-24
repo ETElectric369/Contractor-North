@@ -32,6 +32,7 @@ import {
   importLaborIntoInvoice,
   reimportFromScratch,
   importCostsIntoInvoice,
+  importChangeOrdersIntoInvoice,
   updatePayment,
   deletePayment,
 } from "../actions";
@@ -181,7 +182,7 @@ export function InvoiceDetail({
   const [importMsg, setImportMsg] = useState<string | null>(null);
   /** An import that could not touch ANYTHING — every line edited, or the deleted ones tombstoned.
    *  Naming the source arms the "start over" button beside the message (0204). */
-  const [stuckSource, setStuckSource] = useState<"labor" | "costs" | "quote" | null>(null);
+  const [stuckSource, setStuckSource] = useState<"labor" | "costs" | "quote" | "change_orders" | null>(null);
   /** A draft deliberately waiting — leaves Needs action until this date (0206). */
   const [hold, setHold] = useState<string>((invoice as { hold_until?: string | null }).hold_until ?? "");
   const [markup, setMarkup] = useState(materialMarkup); // material markup % for the costs import
@@ -204,7 +205,7 @@ export function InvoiceDetail({
     fn: (id: string) => Promise<{ ok: boolean; error?: string }>,
     label: string,
     replacing = 0,
-    sourceKey: "labor" | "costs" | "quote" | null = null,
+    sourceKey: "labor" | "costs" | "quote" | "change_orders" | null = null,
   ) {
     if (replacing > 0) {
       const ok = confirm(
@@ -619,6 +620,13 @@ export function InvoiceDetail({
                   <NumberInput value={markup} onValueChange={(v) => setMarkup(v)} className="h-8 w-14 text-center text-sm" aria-label="Material markup percent" />
                   <span className="text-xs text-slate-400">% markup</span>
                 </div>
+                {/* APPROVED EXTRAS. Until now a change order's amount was read by nothing in the
+                    app — you could raise one, get it signed, mark it approved, and the money
+                    never appeared on any invoice. Same importer contract as the two above:
+                    idempotent, draft-only, and it never overwrites a line the office edited. */}
+                <Button size="sm" variant="outline" onClick={() => runImport(importChangeOrdersIntoInvoice, "Change orders", items.filter((i) => i.import_source === "change_orders").length, "change_orders")} disabled={pending}>
+                  Approved Change Orders
+                </Button>
               </>
             )}
             {importMsg && <span className="text-xs text-slate-500">{importMsg}</span>}

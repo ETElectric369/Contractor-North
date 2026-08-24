@@ -1,5 +1,6 @@
 "use server";
 import { dbError } from "@/lib/db-error";
+import { changeOrderLines, noChangeOrdersReason, type ChangeOrderRow } from "@/lib/change-order-billing";
 
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
@@ -680,7 +681,7 @@ async function billedOnAnotherStandardInvoice(
   supabase: any,
   jobId: string,
   thisInvoiceId: string,
-  source: "labor" | "costs",
+  source: "labor" | "costs" | "change_orders",
 ): Promise<string | null> {
   const { data } = await supabase
     .from("invoices")
@@ -711,7 +712,7 @@ async function billedOnAnotherStandardInvoice(
  */
 export async function reimportFromScratch(
   invoiceId: string,
-  source: "labor" | "costs" | "quote",
+  source: "labor" | "costs" | "quote" | "change_orders",
   /** The % showing in the card's markup box. "Start it over" sits directly under "Materials
    *  From Costs" and must price identically (audit v800 verification): without this the two
    *  buttons in one card produced different money — the box's number for one, the customer's
@@ -728,7 +729,9 @@ export async function reimportFromScratch(
       ? importLaborIntoInvoice(invoiceId)
       : source === "costs"
         ? importCostsIntoInvoice(invoiceId, markupPercent)
-        : importQuoteItemsIntoInvoice(invoiceId);
+        : source === "change_orders"
+          ? importChangeOrdersIntoInvoice(invoiceId)
+          : importQuoteItemsIntoInvoice(invoiceId);
   return run;
 }
 
@@ -794,6 +797,80 @@ export async function importLaborIntoInvoice(invoiceId: string): Promise<ImportR
   // Report what actually happened. "3 added, 2 updated, 5 of your edited lines left alone" is a
   // different sentence from "Materials imported", and it is the one that tells the office whether
   // their negotiated prices survived.
+  return { ok: true, stats: rep.stats };
+}
+
+/**
+ * AN APPROVED CHANGE ORDER BECOMES MONEY (audit v800 wave B).
+ *
+ * `change_orders` has a `co_number`, a `description`, an `amount` and an approve/reject control.
+ * The amount was read by NOTHING. Not by any invoice, not by the contract total, not by job
+ * profitability, not by analytics — verified by grepping every reader in the codebase. You could
+ * raise a change order, print it, walk it to the customer, have them approve it, mark it
+ * approved, and the money simply never existed anywhere in the app. On a deck build that is not
+ * an edge case; change orders are how the job actually gets priced.
+ *
+ * THROUGH THE ONE BILLING PATH, not beside it. This is an importer with the same shape as labour
+ * and costs — same draft lock, same draw-job conflict check, same idempotent upsert, same
+ * `edited` protection — because a second way to put a line on an invoice is how Tao Zhu got
+ * charged twice. Nothing here writes an invoice total; recalcInvoice does, as it does for
+ * everything else.
+ *
+ * ONE LINE PER CHANGE ORDER, keyed `co:<id>`. Re-importing after the office revises an amount
+ * updates that line rather than appending a second one, and a change order approved later
+ * appends without disturbing what is already there. A line the office has since negotiated by
+ * hand is `edited` and the importer leaves it alone — same contract as every other import.
+ *
+ * APPROVED ONLY. A pending change order is a proposal and a rejected one is a decision; billing
+ * either would be inventing an agreement. This is also why nothing needs a "billed" flag on the
+ * change order itself: the invoice line IS the record, and the double-bill guard below is what
+ * stops the same approval landing on two standard invoices.
+ */
+export async function importChangeOrdersIntoInvoice(invoiceId: string): Promise<ImportResult> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const { data: inv } = await supabase
+    .from("invoices")
+    .select("id, job_id, invoice_kind")
+    .eq("id", invoiceId)
+    .maybeSingle();
+  if (!inv?.job_id) return { ok: false, error: "This invoice isn't linked to a job." };
+  const conflict = await standardInvoiceOnDrawJob(supabase, inv, invoiceId);
+  if (conflict) return conflict;
+  const draftBlock = await requireDraftInvoice(supabase, invoiceId);
+  if (draftBlock) return draftBlock;
+  if (!isDrawKind((inv as { invoice_kind?: string }).invoice_kind)) {
+    const clash = await billedOnAnotherStandardInvoice(supabase, inv.job_id, invoiceId, "change_orders");
+    if (clash)
+      return {
+        ok: false,
+        error: `This job's change orders are already billed on ${clash}. Edit that invoice, or bill new work as a progress payment.`,
+      };
+  }
+
+  const { data: cos, error: readErr } = await supabase
+    .from("change_orders")
+    .select("id, co_number, description, amount")
+    .eq("job_id", inv.job_id)
+    .eq("status", "approved")
+    .order("created_at", { ascending: true });
+  // A FAILED READ IS NOT AN EMPTY LIST (the recalcQuote lesson). supabase-js returns data:null on
+  // error, and treating that as "no change orders" would tell the office there is nothing to bill
+  // on a job that has thousands of dollars of approved extras.
+  if (readErr) return { ok: false, error: dbError(readErr) };
+  // The two decisions worth pinning — which ones count as money, and what the customer reads —
+  // live in lib/change-order-billing where they are unit-tested. A credit (negative amount) is a
+  // real change order and passes straight through; only $0 is dropped.
+  const rows = (cos ?? []) as ChangeOrderRow[];
+  const lines = changeOrderLines(rows);
+  if (!lines.length) return { ok: false, error: noChangeOrdersReason(rows), empty: true };
+
+  const rep = await upsertImportedItems(supabase, invoiceId, "change_orders", lines);
+  if (rep.error) return { ok: false, error: rep.error };
+  await recalcInvoice(supabase, invoiceId);
+  revalidateMoney(invoiceId);
+  revalidatePath("/change-orders");
   return { ok: true, stats: rep.stats };
 }
 
