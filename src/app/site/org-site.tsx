@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 import { SiteFonts } from "./site-fonts";
 import Link from "next/link";
 import { MapPin, ArrowRight, Check, ShieldCheck, Clock, Zap, Star } from "lucide-react";
-import { orgPublicBaseUrl, parseGeoFromMapUrl, type OrgSettings } from "@/lib/org-settings";
+import { areaServedValue, orgPublicBaseUrl, parseGeoFromMapUrl, type OrgSettings } from "@/lib/org-settings";
 import { pageSlugFromHref } from "@/lib/site-nav";
 import type { PublicOrg } from "@/lib/public-org";
 import { imageSrcSet, sizedImage, socialImage } from "@/lib/site-image";
@@ -352,7 +352,13 @@ export function OrgSite({ org, articlesHref, pageLinks = [], appHost = false }: 
     ...(org.email ? { email: org.email } : {}),
     ...(org.logo_url ? { logo: org.logo_url } : {}),
     ...(hero ? { image: socialImage(hero) } : {}),
-    ...(area ? { areaServed: area } : {}),
+    // areaServed is a LIST of the places served, not the hero's display line — the two are
+    // allowed to differ (the eyebrow is tuned for length; Google wants every town). See
+    // areaServedValue: it prefers service_area_seo and falls back to the displayed line.
+    ...((() => {
+      const served = areaServedValue(s);
+      return served ? { areaServed: served } : {};
+    })()),
     priceRange: "$$",
     // THE ADDRESS RULE, and it is not "never publish one". Whether a business publishes a street
     // address is the BUSINESS'S call: a contractor with a shop or a yard wants a full address on

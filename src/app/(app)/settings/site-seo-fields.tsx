@@ -17,6 +17,7 @@ export function SiteSeoFields({ settings, orgId }: { settings: OrgSettings; orgI
   const [gbp, setGbp] = useState(settings.google_business_url ?? "");
   const [reviewUrl, setReviewUrl] = useState(settings.google_review_url ?? "");
   const [sab, setSab] = useState(settings.service_area_business === true);
+  const [areaSeo, setAreaSeo] = useState(settings.service_area_seo ?? "");
   const gbpVerdict = classifyMapUrl(gbp);
   const [area, setArea] = useState(settings.service_area ?? "");
   const [pubAddr, setPubAddr] = useState(settings.public_address ?? "");
@@ -37,6 +38,7 @@ export function SiteSeoFields({ settings, orgId }: { settings: OrgSettings; orgI
     gbp: settings.google_business_url ?? "",
     reviewUrl: settings.google_review_url ?? "",
     sab: settings.service_area_business === true,
+    areaSeo: settings.service_area_seo ?? "",
     area: settings.service_area ?? "",
     pubAddr: settings.public_address ?? "",
     pubCity: settings.public_city ?? "",
@@ -56,6 +58,7 @@ export function SiteSeoFields({ settings, orgId }: { settings: OrgSettings; orgI
         gbp: gbp.trim(),
         reviewUrl: reviewUrl.trim(),
         sab,
+        areaSeo: areaSeo.trim(),
         area: area.trim(),
         pubAddr: pubAddr.trim(),
         pubCity: pubCity.trim(),
@@ -70,6 +73,7 @@ export function SiteSeoFields({ settings, orgId }: { settings: OrgSettings; orgI
       if (next.gbp !== saved.gbp) patch.google_business_url = next.gbp;
       if (next.reviewUrl !== saved.reviewUrl) patch.google_review_url = next.reviewUrl;
       if (next.sab !== saved.sab) patch.service_area_business = next.sab;
+      if (next.areaSeo !== saved.areaSeo) patch.service_area_seo = next.areaSeo;
       if (next.area !== saved.area) patch.service_area = next.area;
       if (next.pubCity !== saved.pubCity) patch.public_city = next.pubCity;
       if (next.pubState !== saved.pubState) patch.public_state = next.pubState;
@@ -158,6 +162,21 @@ export function SiteSeoFields({ settings, orgId }: { settings: OrgSettings; orgI
           </span>
         </span>
       </label>
+
+      <div>
+        <Label htmlFor="seo-area">Towns you serve, for Google (optional)</Label>
+        <Input
+          id="seo-area"
+          value={areaSeo}
+          onChange={(e) => setAreaSeo(e.target.value)}
+          placeholder="Truckee, Tahoe City, Sierraville, Graeagle, Chilcoot, Quincy"
+        />
+        <p className="mt-1 text-xs text-slate-500">
+          Separate with commas. This is what Google reads — it should match the service area on your Business Profile.
+          The line across your hero is a DESIGN choice with a length you picked, so the two don&apos;t have to be the
+          same sentence. Leave this empty and Google just reads the hero line.
+        </p>
+      </div>
 
       <div>
         <Label htmlFor="seo-review">Google review link (optional)</Label>

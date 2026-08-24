@@ -248,6 +248,11 @@ export interface OrgSettings {
    *  their own listing — and usually publishes wherever the pin USED to be, which for a one-truck
    *  operator is their house. With this on we publish areaServed and no coordinates. */
   service_area_business: boolean;
+  /** THE TOWNS GOOGLE READS, when they differ from the line on the hero. `service_area` is
+   *  DESIGN — a tuned eyebrow with a length someone chose. Structured data wants the real list,
+   *  and a service-area business's site should name the same places its Google listing does.
+   *  Empty = use the display line, which is what shipped before this existed. */
+  service_area_seo: string;
   /** Customer testimonials shown on the public site. Real quotes the org enters themselves —
    *  never seeded/fabricated. Empty hides the section. */
   reviews: { name: string; text: string; rating?: number }[];
@@ -354,6 +359,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   google_business_url: "",
   google_review_url: "",
   service_area_business: false,
+  service_area_seo: "",
   reviews: [],
   sms_from_number: "",
   calendly_url: "",
@@ -362,6 +368,24 @@ export const DEFAULT_SETTINGS: OrgSettings = {
 /** Pull a { lat, lng } from a pasted Google Maps URL if one is present. Prefers the place
  *  marker (`!3d<lat>!4d<lng>`) over the viewport center (`@<lat>,<lng>`) — the marker is the
  *  actual business pin. Returns null when the URL carries no coordinates (e.g. a bare ?cid= link). */
+/** areaServed for structured data: a real LIST of place names, not one display string.
+ *  Prefers the SEO field, falls back to the hero line; splits on the separators people actually
+ *  type (·, |, comma, semicolon, slash) and drops the empties. One name returns a plain string,
+ *  which is what schema.org expects for a single area. */
+export function areaServedValue(settings: {
+  service_area?: string | null;
+  service_area_seo?: string | null;
+}): string | string[] | null {
+  const raw = (settings.service_area_seo || "").trim() || (settings.service_area || "").trim();
+  if (!raw) return null;
+  const parts = raw
+    .split(/[·|,;/]+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (parts.length <= 1) return raw;
+  return parts;
+}
+
 export function parseGeoFromMapUrl(url: string | null | undefined): { lat: number; lng: number } | null {
   const u = String(url || "");
   const m = u.match(/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/) || u.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);

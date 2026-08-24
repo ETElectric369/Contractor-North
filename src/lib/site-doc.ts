@@ -60,6 +60,7 @@ export const SITE_DOC_KEYS = [
   "google_business_url",
   "google_review_url",
   "service_area_business",
+  "service_area_seo",
   "calendly_url",
   "reviews",
   "portfolio",
@@ -108,6 +109,7 @@ export interface SiteDoc {
   google_business_url: string;
   google_review_url: string;
   service_area_business: boolean;
+  service_area_seo: string;
   calendly_url: string;
   reviews: { name: string; text: string; rating?: number }[];
   /** Extra keys ride verbatim — PortfolioManager stores `path` (the storage key it deletes by),
@@ -248,6 +250,7 @@ export function extractSiteDoc(rawSettings: unknown): SiteDoc {
     google_business_url: s(st.google_business_url, LIMITS.url),
     google_review_url: s(st.google_review_url, LIMITS.url),
     service_area_business: st.service_area_business === true,
+    service_area_seo: s(st.service_area_seo, LIMITS.serviceArea),
     calendly_url: s(st.calendly_url, LIMITS.url),
     reviews: normalizeReviews(st.reviews),
     // SPREAD THE ORIGINAL ENTRY FIRST: the first cut projected {url,src,caption} and the live
@@ -442,6 +445,8 @@ export function coerceSiteDoc(raw: unknown, base: SiteDoc): { doc: SiteDoc; drop
       google_review_url: base.google_review_url, // ...nor the review link: both are wiring
       service_area_business:
         typeof r.service_area_business === "boolean" ? r.service_area_business : base.service_area_business,
+      // Wiring, like the links: a design pass never rewrites which towns Google is told about.
+      service_area_seo: base.service_area_seo,
       calendly_url: base.calendly_url, // nor the booking link — both are wiring, not styling
       reviews: base.reviews,
       portfolio: r.portfolio === undefined ? base.portfolio : portfolio,
@@ -495,6 +500,7 @@ export function diffSiteDoc(a: SiteDoc, b: SiteDoc): string[] {
     google_business_url: "Google Business link",
     google_review_url: "Google review link",
     service_area_business: "Service-area business (no map pin)",
+    service_area_seo: "Towns Google reads",
     calendly_url: "Booking link",
     reviews: "Reviews",
     portfolio: "Photo order/captions",
