@@ -144,6 +144,15 @@ export async function setBugReportStatus(id: string, status: string): Promise<{ 
   // The status column is unconstrained text; whitelist here so a stray value can't write a
   // status the /bugs tabs don't know how to surface.
   if (!BUG_STATUSES.has(status)) return { ok: false, error: "Unknown status." };
-  await ctx.supabase.from("bug_reports").update({ status }).eq("id", id);
+  // THE SILENT-WRITE LAW (v800 audit): an RLS-refused UPDATE returns zero rows, not an error —
+  // so the tracker reported "marked fixed" over a write that never happened, and Nort announced
+  // it too. A zero-row update is a failure.
+  const { data: upd, error } = await ctx.supabase
+    .from("bug_reports")
+    .update({ status })
+    .eq("id", id)
+    .select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!upd?.length) return { ok: false, error: "That report couldn't be updated — it may have been removed." };
   return { ok: true };
 }

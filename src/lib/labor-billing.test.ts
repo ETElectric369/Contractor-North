@@ -5,21 +5,21 @@ describe("laborCostForJob — allocation-aware pay cost (job hub == analytics)",
   const prof = (hourly: number) => ({ hourly_rate: hourly });
   it("un-split closed entry on the job: gross hours × pay rate", () => {
     const e = { job_id: "J", status: "closed", clock_in: "2026-06-01T08:00:00Z", clock_out: "2026-06-01T16:00:00Z", lunch_minutes: 0, profiles: prof(40) };
-    expect(laborCostForJob([e], "J")).toEqual({ hours: 8, cost: 320 });
+    expect(laborCostForJob([e], "J")).toEqual({ hours: 8, cost: 320 , unratedHours: 0 });
   });
   it("honors rate_override (supervisor rate) over the base", () => {
     const e = { job_id: "J", status: "closed", clock_in: "2026-06-01T08:00:00Z", clock_out: "2026-06-01T16:00:00Z", lunch_minutes: 0, rate_override: 60, profiles: prof(40) };
-    expect(laborCostForJob([e], "J")).toEqual({ hours: 8, cost: 480 });
+    expect(laborCostForJob([e], "J")).toEqual({ hours: 8, cost: 480 , unratedHours: 0 });
   });
   it("a split shift costs ONLY this job's allocated hours, not the whole day", () => {
     const e = { job_id: "J", status: "closed", clock_in: "2026-06-01T08:00:00Z", clock_out: "2026-06-01T16:00:00Z", lunch_minutes: 0, profiles: prof(40),
       time_allocations: [{ job_id: "J", hours: 1 }, { job_id: "OTHER", hours: 7 }] };
-    expect(laborCostForJob([e], "J")).toEqual({ hours: 1, cost: 40 });
-    expect(laborCostForJob([e], "OTHER")).toEqual({ hours: 7, cost: 280 });
+    expect(laborCostForJob([e], "J")).toEqual({ hours: 1, cost: 40 , unratedHours: 0 });
+    expect(laborCostForJob([e], "OTHER")).toEqual({ hours: 7, cost: 280 , unratedHours: 0 });
   });
   it("unlabeled allocation rows count toward the entry's own job", () => {
     const e = { job_id: "J", status: "closed", profiles: prof(50), time_allocations: [{ job_id: null, hours: 2 }] };
-    expect(laborCostForJob([e], "J")).toEqual({ hours: 2, cost: 100 });
+    expect(laborCostForJob([e], "J")).toEqual({ hours: 2, cost: 100 , unratedHours: 0 });
   });
 });
 
@@ -277,5 +277,34 @@ describe("…and EVERY ordinary coded hour still bills — the regression the ob
 
   it("the code test is exact — 'shop' lowercase is a different code and still bills", () => {
     expect(computeJobLaborBilling([punch(8, "shop")], [], 0, null, NON_BILLABLE).total).toBe(8 * 95);
+  });
+});
+
+describe("laborCostForJob — unrated hours are reported, never swallowed (v800 audit)", () => {
+  // A worker with no hourly_rate and no fallback used to cost $0/hr, so their labor vanished
+  // from job profit entirely and a labor-only job read as PURE PROFIT. The cost still cannot be
+  // invented — that is the office's number — but the hours it could not price come back too.
+  it("counts the hours and flags them as unpriced when the person has no rate", () => {
+    const e = {
+      job_id: "J",
+      status: "closed",
+      clock_in: "2026-05-01T15:00:00Z",
+      clock_out: "2026-05-01T23:00:00Z",
+      lunch_minutes: 0,
+      profiles: { id: "p1", full_name: "New Hire", hourly_rate: null },
+    };
+    expect(laborCostForJob([e], "J")).toEqual({ hours: 8, cost: 0, unratedHours: 8 });
+  });
+
+  it("an explicit fallback rate prices them, and nothing is left unrated", () => {
+    const e = {
+      job_id: "J",
+      status: "closed",
+      clock_in: "2026-05-01T15:00:00Z",
+      clock_out: "2026-05-01T23:00:00Z",
+      lunch_minutes: 0,
+      profiles: { id: "p1", full_name: "New Hire", hourly_rate: null },
+    };
+    expect(laborCostForJob([e], "J", 40)).toEqual({ hours: 8, cost: 320, unratedHours: 0 });
   });
 });

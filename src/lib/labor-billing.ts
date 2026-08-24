@@ -15,9 +15,15 @@ export function laborCostForJob(
   entries: any[],
   jobId: string,
   fallbackRate = 0,
-): { hours: number; cost: number } {
+): { hours: number; cost: number; unratedHours: number } {
+  // UNRATED HOURS ARE REPORTED, NEVER SWALLOWED (v800 audit). A worker with no hourly_rate and
+  // no fallback costs $0/hr, so their labor vanished from job profit entirely — a labor-only
+  // job with an unrated crew member read as PURE PROFIT. The cost still cannot be invented
+  // (that is the office's number), but the hours it could not price now come back with it, so
+  // a caller can say "3 of these hours have no rate" instead of quietly reporting a lie.
   let hours = 0;
   let cost = 0;
+  let unratedHours = 0;
   for (const e of entries ?? []) {
     const rate = payRateForEntry(e, fallbackRate);
     const allocs = e.time_allocations ?? [];
@@ -28,6 +34,7 @@ export function laborCostForJob(
         if (!belongs) continue;
         const h = Number(a.hours ?? 0);
         hours += h;
+        if (!(rate > 0)) unratedHours += h;
         cost += h * rate;
       }
       continue;
@@ -35,10 +42,15 @@ export function laborCostForJob(
     if (e.job_id === jobId && e.status === "closed" && e.clock_out) {
       const h = hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes);
       hours += h;
+      if (!(rate > 0)) unratedHours += h;
       cost += h * rate;
     }
   }
-  return { hours: Math.round(hours * 100) / 100, cost: Math.round(cost * 100) / 100 };
+  return {
+    hours: Math.round(hours * 100) / 100,
+    cost: Math.round(cost * 100) / 100,
+    unratedHours: Math.round(unratedHours * 100) / 100,
+  };
 }
 
 /** Compute per-person billable labor for a job from its CLOSED time — the single
