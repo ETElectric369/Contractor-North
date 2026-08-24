@@ -109,7 +109,9 @@ export function JobDocuments({
             if (billed.ok && !billed.already) {
               setBillMsg((m) => ({
                 ...m,
-                [docId]: `Recorded${billed.amount != null ? ` $${billed.amount.toFixed(2)}` : ""} as a job cost.`,
+                [docId]:
+                  `Recorded${billed.amount != null ? ` $${billed.amount.toFixed(2)}` : ""} as a job cost.` +
+                  (billed.warning ? ` ${billed.warning}` : ""),
               }));
             } else if (!billed.ok) {
               setBillMsg((m) => ({ ...m, [docId]: billed.error ?? "Saved — add the cost manually." }));
@@ -140,7 +142,9 @@ export function JobDocuments({
       } else {
         setBillMsg((m) => ({
           ...m,
-          [d.id]: `Recorded${res.amount != null ? ` $${res.amount.toFixed(2)}` : ""} as a job cost.`,
+          [d.id]:
+            `Recorded${res.amount != null ? ` $${res.amount.toFixed(2)}` : ""} as a job cost.` +
+            (res.warning ? ` ${res.warning}` : ""),
         }));
         router.refresh();
       }

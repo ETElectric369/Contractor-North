@@ -9,6 +9,7 @@ import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { modelFor, recordAiUsage } from "@/lib/ai-cost";
 import { parseAiJson } from "@/lib/ai-json";
 import { listJobScopes } from "@/lib/analytics/job-profitability";
+import { reconcileReceipt } from "@/lib/receipt-reconcile";
 import { OVERHEAD_CATEGORIES } from "./constants";
 
 export type Result = { ok: boolean; error?: string };
@@ -401,6 +402,9 @@ export async function billJobReceipt(
   amount?: number | null;
   vendor?: string | null;
   lineCount?: number;
+  /** Set when the transcribed lines don't add up to the total the bill recorded — the caller
+   *  should show it. Nothing silent: a number a person hasn't checked must say so. */
+  warning?: string;
 }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -501,6 +505,14 @@ In every "description", write inches as the word in (e.g. "6 in EMT", not 6") an
     };
   }
 
+  // DOES IT ADD UP? The reader asks the model for a grand total AND every line, then used the
+  // total and never compared the two. A misread total — a subtotal, a prior balance, a
+  // transposed digit — became the bill's amount with the model's own transcription underneath
+  // saying otherwise. That number is job cost, it is the actual side of budget-vs-actual, and
+  // importCostsIntoInvoice marks it up and bills it to the homeowner. See receipt-reconcile for
+  // why this flags rather than corrects.
+  const check = reconcileReceipt(amount, lines);
+
   const billId = await insertItemizedBill(
     supabase,
     {
@@ -510,7 +522,9 @@ In every "description", write inches as the word in (e.g. "6 in EMT", not 6") an
       bill_date: stated?.billDate || itemDate,
       category: stated?.category || "Receipt",
       scope_category: scopeCategory, // job scope for budget-vs-actual (null → Uncategorized)
-      notes: `Receipt recorded as cost: ${doc.name}`,
+      notes: check.mismatch
+        ? `Receipt recorded as cost: ${doc.name}\n\n${check.note}`
+        : `Receipt recorded as cost: ${doc.name}`,
       created_by: ctx.userId,
     },
     lines,
@@ -546,7 +560,7 @@ In every "description", write inches as the word in (e.g. "6 in EMT", not 6") an
   revalidatePath("/bills");
   revalidatePath("/analytics");
   revalidatePath(`/jobs/${doc.job_id}`);
-  return { ok: true, amount, vendor, lineCount: lines.length };
+  return { ok: true, amount, vendor, lineCount: lines.length, warning: check.mismatch ? check.note : undefined };
 }
 
 export type FileDestination =

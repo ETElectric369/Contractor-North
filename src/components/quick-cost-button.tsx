@@ -205,6 +205,17 @@ export function QuickCostButton({
           setCostSaved(true);
           return;
         }
+        // THE READER COULDN'T MAKE ITS OWN NUMBERS AGREE. The cost IS saved and the warning is
+        // on the bill's notes permanently — but a person standing at the truck should hear it
+        // now, not discover it in an argument three months later. finishOk() resets state, so
+        // the sheet stays open to say so. Clearing the receipt first makes the costSaved branch
+        // above fall straight to finishOk() on the next tap: no path can re-attach or re-bill.
+        if (res.warning) {
+          setReceipt(null);
+          setWarn(res.warning);
+          setCostSaved(true);
+          return;
+        }
         finishOk();
       });
       return;
