@@ -58,6 +58,8 @@ export const SITE_DOC_KEYS = [
   "estimate_cta_label",
   "social_instagram",
   "google_business_url",
+  "google_review_url",
+  "service_area_business",
   "calendly_url",
   "reviews",
   "portfolio",
@@ -104,6 +106,8 @@ export interface SiteDoc {
   estimate_cta_label: string;
   social_instagram: string;
   google_business_url: string;
+  google_review_url: string;
+  service_area_business: boolean;
   calendly_url: string;
   reviews: { name: string; text: string; rating?: number }[];
   /** Extra keys ride verbatim — PortfolioManager stores `path` (the storage key it deletes by),
@@ -242,6 +246,8 @@ export function extractSiteDoc(rawSettings: unknown): SiteDoc {
     estimate_cta_label: s(st.estimate_cta_label, LIMITS.ctaLabel),
     social_instagram: s(st.social_instagram, LIMITS.handle),
     google_business_url: s(st.google_business_url, LIMITS.url),
+    google_review_url: s(st.google_review_url, LIMITS.url),
+    service_area_business: st.service_area_business === true,
     calendly_url: s(st.calendly_url, LIMITS.url),
     reviews: normalizeReviews(st.reviews),
     // SPREAD THE ORIGINAL ENTRY FIRST: the first cut projected {url,src,caption} and the live
@@ -433,6 +439,9 @@ export function coerceSiteDoc(raw: unknown, base: SiteDoc): { doc: SiteDoc; drop
       estimate_cta_label: sOr(r.estimate_cta_label, base.estimate_cta_label, LIMITS.ctaLabel),
       social_instagram: sOr(r.social_instagram, base.social_instagram, LIMITS.handle),
       google_business_url: base.google_business_url, // a design never rewrites the GBP link
+      google_review_url: base.google_review_url, // ...nor the review link: both are wiring
+      service_area_business:
+        typeof r.service_area_business === "boolean" ? r.service_area_business : base.service_area_business,
       calendly_url: base.calendly_url, // nor the booking link — both are wiring, not styling
       reviews: base.reviews,
       portfolio: r.portfolio === undefined ? base.portfolio : portfolio,
@@ -484,6 +493,8 @@ export function diffSiteDoc(a: SiteDoc, b: SiteDoc): string[] {
     estimate_cta_label: "Estimate button label",
     social_instagram: "Instagram",
     google_business_url: "Google Business link",
+    google_review_url: "Google review link",
+    service_area_business: "Service-area business (no map pin)",
     calendly_url: "Booking link",
     reviews: "Reviews",
     portfolio: "Photo order/captions",

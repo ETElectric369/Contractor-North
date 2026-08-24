@@ -236,6 +236,18 @@ export interface OrgSettings {
    *  public site — the signal that binds this website to that map listing so Google treats them
    *  as one business — and any lat/lng in the URL becomes the site's `geo`. Empty = no binding. */
   google_business_url: string;
+  /** WHERE "Review us on Google" ACTUALLY SENDS PEOPLE. The Business Profile link above is a
+   *  PLACE link — it opens the listing, and the customer still has to hunt for the review box.
+   *  Google gives owners a direct review form link (Business Profile → Ask for reviews), which
+   *  looks like https://g.page/r/<code>/review. Empty = fall back to the profile link, which is
+   *  what shipped before this existed. */
+  google_review_url: string;
+  /** A SERVICE-AREA BUSINESS has no storefront: it serves a region and deliberately does not
+   *  publish a pin. Google supports this directly (the listing hides the address), and when an
+   *  owner has chosen it, asserting precise `geo` coordinates in our structured data contradicts
+   *  their own listing — and usually publishes wherever the pin USED to be, which for a one-truck
+   *  operator is their house. With this on we publish areaServed and no coordinates. */
+  service_area_business: boolean;
   /** Customer testimonials shown on the public site. Real quotes the org enters themselves —
    *  never seeded/fabricated. Empty hides the section. */
   reviews: { name: string; text: string; rating?: number }[];
@@ -340,6 +352,8 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   social_instagram: "",
   custom_domain: "",
   google_business_url: "",
+  google_review_url: "",
+  service_area_business: false,
   reviews: [],
   sms_from_number: "",
   calendly_url: "",
@@ -457,6 +471,12 @@ export function getOrgSettings(raw: unknown): OrgSettings {
   for (const k of ["hero_w", "spread_head_w", "spread_tag_w"] as const) merged[k] = lever(merged[k], 30, 100);
   for (const k of ["hero_scale", "spread_area_scale", "spread_head_scale", "spread_tag_scale"] as const) {
     merged[k] = lever(merged[k], 50, 200);
+  }
+  {
+    // Only a Google-owned URL belongs on a "Review us on Google" button — anything else is
+    // either a mistake or a way to point a trust CTA somewhere else entirely.
+    const rv = typeof merged.google_review_url === "string" ? merged.google_review_url.trim() : "";
+    merged.google_review_url = /^https:\/\/([a-z0-9-]+\.)*(google\.com|g\.page|goo\.gl)\//i.test(rv) ? rv : "";
   }
   for (const k of ["site_accent", "splash_headline_color", "splash_tagline_color", "service_area_color"] as const) {
     const v = typeof merged[k] === "string" ? merged[k].trim() : "";

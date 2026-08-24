@@ -15,6 +15,8 @@ import { updateOrgSettings } from "./actions";
  */
 export function SiteSeoFields({ settings, orgId }: { settings: OrgSettings; orgId?: string }) {
   const [gbp, setGbp] = useState(settings.google_business_url ?? "");
+  const [reviewUrl, setReviewUrl] = useState(settings.google_review_url ?? "");
+  const [sab, setSab] = useState(settings.service_area_business === true);
   const gbpVerdict = classifyMapUrl(gbp);
   const [area, setArea] = useState(settings.service_area ?? "");
   const [pubAddr, setPubAddr] = useState(settings.public_address ?? "");
@@ -33,6 +35,8 @@ export function SiteSeoFields({ settings, orgId }: { settings: OrgSettings; orgI
   // panel's saves with this form's stale copies.
   const [saved, setSaved] = useState({
     gbp: settings.google_business_url ?? "",
+    reviewUrl: settings.google_review_url ?? "",
+    sab: settings.service_area_business === true,
     area: settings.service_area ?? "",
     pubAddr: settings.public_address ?? "",
     pubCity: settings.public_city ?? "",
@@ -50,6 +54,8 @@ export function SiteSeoFields({ settings, orgId }: { settings: OrgSettings; orgI
     start(async () => {
       const next = {
         gbp: gbp.trim(),
+        reviewUrl: reviewUrl.trim(),
+        sab,
         area: area.trim(),
         pubAddr: pubAddr.trim(),
         pubCity: pubCity.trim(),
@@ -62,6 +68,8 @@ export function SiteSeoFields({ settings, orgId }: { settings: OrgSettings; orgI
       };
       const patch: Record<string, unknown> = {};
       if (next.gbp !== saved.gbp) patch.google_business_url = next.gbp;
+      if (next.reviewUrl !== saved.reviewUrl) patch.google_review_url = next.reviewUrl;
+      if (next.sab !== saved.sab) patch.service_area_business = next.sab;
       if (next.area !== saved.area) patch.service_area = next.area;
       if (next.pubCity !== saved.pubCity) patch.public_city = next.pubCity;
       if (next.pubState !== saved.pubState) patch.public_state = next.pubState;
@@ -117,6 +125,40 @@ export function SiteSeoFields({ settings, orgId }: { settings: OrgSettings; orgI
         {gbpVerdict === "empty" && (
           <p className="mt-1 text-xs text-slate-400">The local-SEO anchor — it ties this site to your Google listing so they rank as one business.</p>
         )}
+      </div>
+
+      <label className="flex cursor-pointer items-start gap-2">
+        <input
+          type="checkbox"
+          className="mt-0.5 h-4 w-4"
+          checked={sab}
+          onChange={(e) => setSab(e.target.checked)}
+        />
+        <span className="text-sm">
+          <span className="font-medium text-slate-800">We serve an area, not a storefront</span>
+          <span className="mt-0.5 block text-xs text-slate-500">
+            Tick this if your Google listing is set up as a service-area business — the kind that hides your address
+            because customers don&apos;t come to you. We&apos;ll publish your service area to Google and stop
+            publishing map coordinates, which otherwise pin you to wherever your listing used to sit (often the
+            house). Your listing link still binds this site to your profile either way.
+          </span>
+        </span>
+      </label>
+
+      <div>
+        <Label htmlFor="seo-review">Google review link (optional)</Label>
+        <Input
+          id="seo-review"
+          value={reviewUrl}
+          onChange={(e) => setReviewUrl(e.target.value)}
+          placeholder="https://g.page/r/…/review"
+        />
+        <p className="mt-1 text-xs text-slate-500">
+          Where your &ldquo;Review us on Google&rdquo; button sends people. The Business Profile link above opens your
+          LISTING — the customer still has to find the review box. Google gives you a direct one: Business Profile
+          &rarr; <span className="font-medium">Ask for reviews</span> &rarr; copy the link (it looks like
+          g.page/r/…/review). Leave this empty and the button keeps using the profile link.
+        </p>
       </div>
       <div>
         <Label htmlFor="seo-area">Service area</Label>

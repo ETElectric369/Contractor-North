@@ -65,6 +65,10 @@ export function deriveSiteChrome(org: PublicOrg, { base = "", onHomepage = false
   const area = s.service_area || [s.public_city, s.public_state].filter(Boolean).join(", ");
   const ig = (s.social_instagram || "").replace(/^@/, "").trim();
   const gbpUrl = (s.google_business_url || "").trim();
+  // The review CTA prefers the direct review form; the profile link is the fallback, which is
+  // exactly what shipped before. A place link opens the LISTING and leaves the customer hunting
+  // for the review box — the commonest reason a "leave us a review" button converts badly.
+  const reviewUrl = (s.google_review_url || "").trim() || gbpUrl;
   const homeBlocks = renderReadyBlocks(s.home_blocks);
   const hasBlocks = homeBlocks.length > 0;
   // Which wired sections the custom layout actually renders — nav links and anchors key off this
@@ -88,7 +92,7 @@ export function deriveSiteChrome(org: PublicOrg, { base = "", onHomepage = false
   const shortCta = ownCta || "Get an estimate";
   return {
     org, onHomepage, brand, home, anchorBase, showName, telHref, shortCta,
-    portfolio, services, creds, reviews, area, ig, gbpUrl,
+    portfolio, services, creds, reviews, area, ig, gbpUrl, reviewUrl,
     homeBlocks, hasBlocks, blockSections,
     showWorkLink, showServicesLink, showReviewsLink,
     hasConfigurator, estimateHref, ctaLabel,
@@ -253,7 +257,7 @@ export function seaGlassVars(hex: string): React.CSSProperties {
 }
 
 export function SiteFooter({ chrome, extInPlace = false }: { chrome: SiteChrome; extInPlace?: boolean }) {
-  const { org, brand, showName, telHref, area, ig, gbpUrl, creds, estimateHref } = chrome;
+  const { org, brand, showName, telHref, area, ig, gbpUrl, reviewUrl, creds, estimateHref } = chrome;
   // On the APP-HOST view (what the North shell shows) external links navigate IN PLACE —
   // the shell eats new-tab links (Erik: "the review us on google link doesnt link"). The
   // public domains keep the standard new-tab behavior.
@@ -280,7 +284,7 @@ export function SiteFooter({ chrome, extInPlace = false }: { chrome: SiteChrome;
           {area && <p className="flex items-center gap-2"><MapPin className="h-4 w-4" style={{ color: brand }} /> {area}</p>}
           {ig && <a href={`https://www.instagram.com/${ig}`} className="flex items-center gap-2 hover:text-white"><Instagram className="h-4 w-4" style={{ color: brand }} /> @{ig}</a>}
           {gbpUrl && (
-            <a href={gbpUrl} {...ext} className="flex items-center gap-2 hover:text-white">
+            <a href={reviewUrl} {...ext} className="flex items-center gap-2 hover:text-white">
               <Star className="h-4 w-4" style={{ color: brand }} /> Review us on Google
             </a>
           )}

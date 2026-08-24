@@ -315,7 +315,7 @@ export function OrgSite({ org, articlesHref, pageLinks = [], appHost = false }: 
   // ONE derivation of the shared header/footer inputs (brand, nav visibility, estimate CTA) —
   // the same call builder pages and articles make, so the chrome can't drift per-surface.
   const chrome = deriveSiteChrome(org, { onHomepage: true });
-  const { brand, showName, portfolio, services, creds, reviews, area, gbpUrl, ig, homeBlocks, hasBlocks, showWorkLink, hasConfigurator, estimateHref, ctaLabel } = chrome;
+  const { brand, showName, portfolio, services, creds, reviews, area, gbpUrl, reviewUrl, ig, homeBlocks, hasBlocks, showWorkLink, hasConfigurator, estimateHref, ctaLabel } = chrome;
   const hero = s.splash_bg_url || portfolio[0]?.url || "";
   // The banner (hero + trust band) always tops the page — template AND block homepages. Natural
   // opt-out: no hero image (none set, no portfolio fallback) and no headline → no banner at all.
@@ -333,7 +333,14 @@ export function OrgSite({ org, articlesHref, pageLinks = [], appHost = false }: 
   // GBP link when it carries coordinates. NAP (name/phone/address) mirrors the org record, which
   // must match the GBP verbatim for the binding to hold.
   const siteUrl = orgPublicBaseUrl(s);
-  const geo = parseGeoFromMapUrl(gbpUrl);
+  // A SERVICE-AREA BUSINESS PUBLISHES NO PIN. Erik: "i wanted it to be a broad service area and
+  // not a location which is how it was set". We parse coordinates out of the Google Business
+  // link to bind the site to the listing — but when the owner has told Google they serve a
+  // REGION rather than a storefront, a precise `geo` block contradicts their own listing, and
+  // the coordinates it carries are whatever the pin was BEFORE they made that change (ET
+  // Electric's stored link still pointed 21km from Google's current pin). areaServed already
+  // says the true thing; hasMap and sameAs keep the site→listing binding either way.
+  const geo = s.service_area_business ? null : parseGeoFromMapUrl(gbpUrl);
   const sameAs = [gbpUrl, ig ? `https://www.instagram.com/${ig}` : ""].filter(Boolean);
   const jsonLd = {
     "@context": "https://schema.org",
@@ -486,7 +493,7 @@ export function OrgSite({ org, articlesHref, pageLinks = [], appHost = false }: 
           <ServicesBand services={services} brand={brand} />
 
           <PortfolioBand portfolio={portfolio} brand={brand} orgName={org.name} moreHref={portfolioPageHref} />
-          <ReviewsBand reviews={reviews} brand={brand} gbpUrl={gbpUrl} appHostExt={appHost} />
+          <ReviewsBand reviews={reviews} brand={brand} gbpUrl={reviewUrl} appHostExt={appHost} />
           <EstimateBand hasConfigurator={hasConfigurator} estimateHref={estimateHref} ctaLabel={ctaLabel} brand={brand} />
           <ContactBand orgId={org.id} brand={brand} hasConfigurator={hasConfigurator} pageHref={contactPageHref} />
         </>
