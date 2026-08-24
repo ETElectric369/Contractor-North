@@ -5,6 +5,7 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { measurementsFromAnswers, tolerateMissingColumns } from "@/lib/inspection/schema";
 import { factsForEstimatorByProvenance } from "@/lib/playbook/answers";
 import { briefProvenanceKeys, parsePlanBrief } from "@/lib/plan-brief";
+import { intakeProvenanceKeys } from "@/lib/inquiries/carry-intake-answers";
 import { extOf, intakePaths, uploadDisplayName } from "@/lib/playbook/uploads";
 import { coerceScopes, ownScopes, scopeLines, type ScopePick } from "@/lib/playbook/scopes";
 import type { DraftLineItem } from "@/lib/estimate/line-map";
@@ -134,6 +135,21 @@ export default async function NewQuotePage({
         leadBrief?.status === "ready" && leadBrief.answers
           ? briefProvenanceKeys(pb, leadBrief.answers, answers)
           : new Set<string>();
+      // THE CUSTOMER'S OWN FORM IS NOT THE CONTRACTOR'S WORD EITHER (v800 audit). A carried
+      // intake answer arrived in the "his words — take them as given" bucket, even though a
+      // stranger typed it and the intake and walk-through playbooks can drift until the same
+      // key means different things on each side. Still-untouched carried values join the
+      // verify bucket; the moment he edits one on site it stops matching and becomes his.
+      const leadIntake = (Array.isArray(inqRel) ? inqRel[0] : inqRel)?.intake as
+        | { intake_answers?: unknown }
+        | null
+        | undefined;
+      const customerAnswers = (leadIntake?.intake_answers ?? null) as Record<string, unknown> | null;
+      if (customerAnswers && typeof customerAnswers === "object") {
+        for (const k of intakeProvenanceKeys(Object.keys(customerAnswers), customerAnswers, answers)) {
+          machineKeys.add(k);
+        }
+      }
       const { hand: measuredText, machine: machineText } = factsForEstimatorByProvenance(pb, answers, machineKeys);
       // Kit sizing still reads the sheet shape; every measured need is a number slot, so the
       // projection back down loses nothing that sizes anything.
@@ -156,7 +172,7 @@ export default async function NewQuotePage({
         // The machine's answers cross under their own flag, never as his words: a model's
         // unverified count from a stranger's PDF must be a claim to confirm, not a given.
         machineText
-          ? `READ FROM THE CUSTOMER'S PLANS BY MACHINE (unverified — treat as claims to check against the drawings, and the walk-through notes above override them):\n${machineText}`
+          ? `NOT CONFIRMED ON SITE (unverified — the customer typed these into your web form, or a machine read them off their plans; treat as claims to check, and the walk-through notes above override them):\n${machineText}`
           : "",
         cap?.notes?.trim() ? `Notes:\n${cap.notes.trim()}` : "",
         cap?.measurements?.trim() ? `Measurements:\n${cap.measurements.trim()}` : "",

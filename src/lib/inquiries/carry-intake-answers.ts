@@ -130,6 +130,32 @@ export async function carryForInquiry(
   return { inspectionTemplateId: (form as { id: string }).id, inspectionAnswers: answers, carried, briefCarried };
 }
 
+/** WHICH ANSWERS ON A WALK-THROUGH CAME FROM THE CUSTOMER'S OWN FORM (v800 audit).
+ *
+ *  The estimator splits facts into "his words — take them as given" and "read by machine —
+ *  verify". A carried intake answer is NEITHER: a stranger typed it into a web form, and the
+ *  two playbooks can drift so far that the same key means different things on each side (ET
+ *  Electric's `gotcha` is "Anything that'll bite us" on intake and "Man hours" on the
+ *  walk-through). It reached the estimator wearing the contractor's own voice.
+ *
+ *  Provenance test mirrors briefProvenanceKeys: a key is still the CUSTOMER's only while the
+ *  walk-through value is untouched — the moment the contractor edits it on site it becomes his.
+ */
+export function intakeProvenanceKeys(
+  carried: string[],
+  intakeAnswers: Record<string, unknown> | null | undefined,
+  current: Answers,
+): Set<string> {
+  const keys = new Set<string>();
+  for (const k of carried ?? []) {
+    const was = intakeAnswers?.[k];
+    const now = current?.[k];
+    if (was === undefined || now === undefined) continue;
+    if (JSON.stringify(was) === JSON.stringify(now)) keys.add(k);
+  }
+  return keys;
+}
+
 /** One line for the appointment's notes. A pre-filled answer that looks like the contractor's own
  *  is worse than no pre-fill: he has to know which of these came from a stranger. */
 export const carriedNote = (carried: string[]): string | null =>
