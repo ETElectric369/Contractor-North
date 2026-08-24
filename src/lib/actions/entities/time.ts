@@ -83,15 +83,25 @@ export const timeActions: Record<string, ActionDef> = {
         if (!meId) return res;
         const { data: last } = await supabase
           .from("time_entries")
-          .select("clock_in, clock_out, job_id")
+          .select("clock_in, clock_out, job_id, lunch_minutes")
           .eq("profile_id", meId)
           .not("clock_out", "is", null)
           .order("clock_out", { ascending: false })
           .limit(1)
           .maybeSingle();
         if (last?.clock_in && last?.clock_out) {
-          const hrs = hoursBetween(new Date(last.clock_in), new Date(last.clock_out));
-          const recorded = `Recorded: ${last.clock_in} → ${last.clock_out} (${hrs.toFixed(2)}h${last.job_id ? "" : ", NO job attached"}).`;
+          // ANNOUNCE WHAT PAYROLL WILL SEE, IN THE COMPANY'S OWN CLOCK (v800 wave B). The first
+          // cut read back GROSS hours and raw UTC timestamps — a number the DB did not record
+          // (lunch is deducted) at a time nobody in Truckee recognises. That is the same
+          // announce-the-intent failure this read-back exists to prevent.
+          const gross = hoursBetween(new Date(last.clock_in), new Date(last.clock_out));
+          const lunch = Number(last.lunch_minutes ?? 0) / 60;
+          const hrs = Math.max(0, gross - lunch);
+          const { data: orgRow } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+          const tz = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone || "America/Los_Angeles";
+          const fmt = (iso: string) =>
+            new Date(iso).toLocaleString("en-US", { timeZone: tz, month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+          const recorded = `Recorded: ${fmt(last.clock_in)} → ${fmt(last.clock_out)} (${hrs.toFixed(2)}h${lunch ? `, ${Math.round(lunch * 60)}m lunch deducted` : ""}${last.job_id ? "" : ", NO job attached"}).`;
           if (hrs < 0.05) {
             return {
               ...res,

@@ -500,11 +500,14 @@ export async function deleteQuote(id: string): Promise<{ ok: boolean; error?: st
   const { error } = await supabase.from("quotes").delete().eq("id", id);
   if (error) return { ok: false, error: dbError(error) };
   if (victim?.inquiry_id) {
-    const { count } = await supabase
-      .from("quotes")
-      .select("id", { count: "exact", head: true })
-      .eq("inquiry_id", victim.inquiry_id);
-    if (!count) {
+    // BOTH deeds, not just this one (v800 wave B caught my own v801 regression): widening the
+    // un-stamp to every converted_to value meant deleting a lead's QUOTE reopened it even when
+    // the JOB born from that lead was alive and well — stamp-follows-deed, inverted.
+    const [{ count }, { count: jobsLeft }] = await Promise.all([
+      supabase.from("quotes").select("id", { count: "exact", head: true }).eq("inquiry_id", victim.inquiry_id),
+      supabase.from("jobs").select("id", { count: "exact", head: true }).eq("inquiry_id", victim.inquiry_id),
+    ]);
+    if (!count && !jobsLeft) {
       await supabase
         .from("inquiries")
         .update({ converted_to: null, converted_at: null, status: "open", updated_at: new Date().toISOString() })
