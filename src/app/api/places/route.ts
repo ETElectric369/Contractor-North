@@ -1,7 +1,27 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { rateLimited } from "@/lib/rate-limit";
 import { GOOGLE_KEY, googleKeyHeaders, memRateLimited, proxyClientIp } from "@/lib/google-server";
 
 export const runtime = "nodejs";
+
+/**
+ * A HARD DAILY CEILING ON BILLED GOOGLE CALLS (Erik, after attaching a card to Google Cloud:
+ * "i cant figure out what its going to charge me").
+ *
+ * This proxy is deliberately PUBLIC — the marketing site's contact form and the estimate
+ * configurator need address autocomplete before anyone signs in. Its only guard was
+ * memRateLimited, which is per-IP AND in-process: on serverless it resets every cold start and
+ * two instances never see each other's counts. That is a politeness guard, not a cost ceiling.
+ *
+ * The DB-backed limiter is shared across instances and survives restarts, so a per-day cap is a
+ * real number. failClosed: if the limiter itself breaks we STOP calling Google — an outage of
+ * our own rate limiter must never become an unbounded bill.
+ *
+ * Session tokens already fold a whole autocomplete session + its details fetch into ONE billed
+ * unit, so this ceiling is in sessions, not keystrokes. Far above real use, far below anything
+ * that matters on a bill: a fuse, not a quota.
+ */
+const PLACES_CALLS_PER_DAY = 5000;
 
 // Same-origin proxy for Google Places (New). The browser calls THIS route; we call Google with
 // the unrestricted SERVER key (see google-server.ts) — so address autocomplete works on EVERY
@@ -14,6 +34,10 @@ export const runtime = "nodejs";
 export async function POST(req: NextRequest) {
   if (!GOOGLE_KEY) return NextResponse.json({ suggestions: [] });
   if (memRateLimited(`places:${proxyClientIp(req.headers)}`, 100, 60_000)) {
+    return NextResponse.json({ suggestions: [] }, { status: 429 });
+  }
+  // The real fuse: shared across instances, survives restarts, fails CLOSED.
+  if (await rateLimited("google-places:day", PLACES_CALLS_PER_DAY, 86400, { failClosed: true })) {
     return NextResponse.json({ suggestions: [] }, { status: 429 });
   }
   const body = await req.json().catch(() => ({}));
@@ -37,6 +61,9 @@ export async function GET(req: NextRequest) {
   // restriction, so an unguarded GET is a billable open relay. A real autocomplete
   // session makes ~1 details call per selection.
   if (memRateLimited(`places:${proxyClientIp(req.headers)}`, 100, 60_000)) {
+    return NextResponse.json({}, { status: 429 });
+  }
+  if (await rateLimited("google-places:day", PLACES_CALLS_PER_DAY, 86400, { failClosed: true })) {
     return NextResponse.json({}, { status: 429 });
   }
   const placeId = req.nextUrl.searchParams.get("placeId");
