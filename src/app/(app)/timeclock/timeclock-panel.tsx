@@ -77,9 +77,13 @@ interface JobOption {
 // now and warn that the punch isn't location-stamped. Clock-out caps too (3s) — the button used to sit
 // disabled and silent for the full 8s fix.
 async function getGps(capMs?: number): Promise<GeoPoint | null> {
-  const fix = getPosition({ enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }).then((r) =>
-    r.status === "ok" ? { lat: r.coords.lat, lng: r.coords.lng, accuracy: r.accuracy } : null,
-  );
+  // NEVER REJECTS (v800). Every caller awaits this OUTSIDE its try — so a rejected geolocation
+  // promise (permission revoked mid-shift, a browser that throws instead of resolving) escaped
+  // the transition and tore the whole timeclock down to the error boundary. No GPS is a warning;
+  // it is never a reason to lose the punch.
+  const fix = getPosition({ enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 })
+    .then((r) => (r.status === "ok" ? { lat: r.coords.lat, lng: r.coords.lng, accuracy: r.accuracy } : null))
+    .catch(() => null);
   if (!capMs) return fix;
   // Race the real fix against a short cap; whichever resolves first wins (null = punch now, no GPS).
   return Promise.race([fix, new Promise<GeoPoint | null>((res) => setTimeout(() => res(null), capMs))]);

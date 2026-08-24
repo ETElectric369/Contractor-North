@@ -345,7 +345,10 @@ export async function deleteJob(
     if (!quotesLeft && !jobsLeft) {
       await supabase
         .from("inquiries")
-        .update({ converted_to: null, converted_at: null, status: "open", updated_at: new Date().toISOString() })
+        // "new", not "open": INQUIRY_STATUSES is new/contacted/quoted/won/lost, and a lead
+        // released back to the inbox is a fresh one again. "open" is not in that vocabulary and
+        // rendered as an unknown chip (v800 verification).
+        .update({ converted_to: null, converted_at: null, status: "new", updated_at: new Date().toISOString() })
         .eq("id", sourceLead)
         .not("converted_at", "is", null);
       revalidatePath("/leads");

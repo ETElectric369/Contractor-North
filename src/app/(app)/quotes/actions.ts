@@ -251,7 +251,12 @@ async function recalcQuote(supabase: any, quoteId: string) {
   ]);
   if (quoteRes.error || itemsRes.error || !itemsRes.data) {
     reportError("recalcQuote:read", quoteRes.error ?? itemsRes.error ?? new Error("no rows object"), { quoteId });
-    return; // leave the stored totals alone; a later write recalcs from a healthy read
+    // Leave the stored TOTALS alone — a failed read is not an empty quote. But the caller only
+    // reaches recalc after CHANGING a line, so the stored PDF is stale no matter what happened
+    // here: bust it anyway, or the customer's Download button keeps handing out a document that
+    // shows neither the new line nor the old total (v800 verification).
+    await bustDocPdf("quote", quoteId);
+    return;
   }
   const { subtotal, tax, total } = subtotalTaxTotal(
     itemsRes.data.map((i: any) => Number(i.line_total ?? 0)),
@@ -510,7 +515,10 @@ export async function deleteQuote(id: string): Promise<{ ok: boolean; error?: st
     if (!count && !jobsLeft) {
       await supabase
         .from("inquiries")
-        .update({ converted_to: null, converted_at: null, status: "open", updated_at: new Date().toISOString() })
+        // "new", not "open": INQUIRY_STATUSES is new/contacted/quoted/won/lost, and a lead
+        // released back to the inbox is a fresh one again. "open" is not in that vocabulary and
+        // rendered as an unknown chip (v800 verification).
+        .update({ converted_to: null, converted_at: null, status: "new", updated_at: new Date().toISOString() })
         .eq("id", victim.inquiry_id)
         // NOT .eq("converted_to","quote"): convertInquiry writes 'estimate' or 'job', so that
         // filter silently skipped the very rows this un-stamp exists for (audit v800).

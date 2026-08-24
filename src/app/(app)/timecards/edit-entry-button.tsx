@@ -184,7 +184,12 @@ export function EditEntryButton({
         };
       });
     start(async () => {
-      const res = await updateTimeEntry({
+      // A REJECTED action must not tear the page down (v800). The office edits timecards on a
+      // laptop in a truck as often as at a desk; an unhandled throw inside a transition drops
+      // them on the error boundary and the edit is gone.
+      let res: { ok: boolean; error?: string };
+      try {
+        res = await updateTimeEntry({
         id: entry.id,
         clock_in: ci.toISOString(),
         clock_out: co.toISOString(),
@@ -197,9 +202,12 @@ export function EditEntryButton({
         // the stored value so an unrelated edit can't wipe a supervisor rate. (Number-cast the
         // seed — a numeric column can arrive as a string and must round-trip as the same value.)
         rate_override: rateDirty ? (rate > 0 ? rate : null) : entry.rate_override == null ? null : Number(entry.rate_override),
-        profile_id: profileId || undefined,
-        allocations,
-      });
+          profile_id: profileId || undefined,
+          allocations,
+        });
+      } catch {
+        return setError("No connection — that didn't go through. Try again in a moment.");
+      }
       if (!res.ok) return setError(res.error ?? "Could not save.");
       close();
       router.refresh();
@@ -209,7 +217,13 @@ export function EditEntryButton({
   function remove() {
     if (!confirm("Delete this time entry? This can't be undone.")) return;
     start(async () => {
-      const res = await deleteTimeEntry(entry.id);
+      let res: { ok: boolean; error?: string };
+      try {
+        res = await deleteTimeEntry(entry.id);
+      } catch {
+        setError("No connection — that didn't go through. Try again in a moment.");
+        return;
+      }
       if (!res.ok) return setError(res.error ?? "Could not delete.");
       close();
       router.refresh();
