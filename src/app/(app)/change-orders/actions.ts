@@ -3,16 +3,16 @@ import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
-import { createClient } from "@/lib/supabase/server";
+import { requireStaff } from "@/lib/staff-guard";
 
 export type Result = { ok: boolean; error?: string; id?: string };
 
 export async function createChangeOrder(formData: FormData): Promise<Result> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
+  // change_orders is staff-only at the RLS boundary (is_org_staff on both read and write).
+  // Guarding here too is the house pattern: the tech gets a sentence instead of a policy error.
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { supabase, userId } = ctx;
 
   const description = String(formData.get("description") ?? "").trim();
   if (!description) return { ok: false, error: "Description is required." };
@@ -24,7 +24,7 @@ export async function createChangeOrder(formData: FormData): Promise<Result> {
       amount: Number(formData.get("amount")) || 0,
       job_id: emptyToNull(formData.get("job_id")),
       status: "pending",
-      created_by: user.id,
+      created_by: userId,
     })
     .select("id")
     .single();
@@ -38,7 +38,9 @@ export async function createChangeOrder(formData: FormData): Promise<Result> {
 // never touches its column (it used to zero the AMOUNT and unlink the job when a caller
 // didn't repeat them). The edit form submits every field, so the UI is unchanged.
 export async function updateChangeOrder(id: string, formData: FormData): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const clean: Record<string, unknown> = {};
   if (formData.has("description")) {
     const description = String(formData.get("description") ?? "").trim();
@@ -56,7 +58,9 @@ export async function updateChangeOrder(id: string, formData: FormData): Promise
 }
 
 export async function deleteChangeOrder(id: string): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { error } = await supabase.from("change_orders").delete().eq("id", id);
   if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/change-orders");
@@ -67,7 +71,9 @@ export async function setChangeOrderStatus(
   id: string,
   status: string,
 ): Promise<Result> {
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
   const { error } = await supabase
     .from("change_orders")
     .update({ status })

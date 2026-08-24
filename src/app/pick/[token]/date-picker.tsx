@@ -65,6 +65,22 @@ export function DatePicker({
     return <p className="text-center text-sm text-slate-400">This scheduling link was withdrawn — give us a call.</p>;
   }
 
+  // A LINK THAT AGED OUT SAYS SO (0222). Before, an old link still rendered its buttons and
+  // every one of them offered a day in the past — the RPC now refuses them, but a page whose
+  // buttons all fail is worse than one that explains itself. The phone number is already
+  // underneath, so this is a fork rather than a dead end.
+  if (status === "expired") {
+    return (
+      <div className="rounded-xl bg-amber-50 px-4 py-6 text-center">
+        <div className="font-semibold text-amber-900">These dates have passed</div>
+        <p className="mt-1 text-sm text-amber-800">
+          This link is a few weeks old, so the days it offered are gone. Give us a call and
+          we&rsquo;ll find you a new time.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-2">
       {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}

@@ -221,6 +221,41 @@ async function requireEditableQuote(
   const jobId = (quote as any).job_id as string | null;
   if (!jobId) return { ok: true }; // accepted but no job yet → no schedule to shift
 
+  const label0 = docLabel(quote as { doc_type?: string | null });
+
+  /**
+   * A SIGNATURE IS A LOCK, AND THIS GUARD DIDN'T KNOW CONTRACTS EXISTED (audit v800 wave B).
+   *
+   * The only thing that froze an accepted estimate was a BILLED DRAW. But the ordinary sequence
+   * is: quote accepted → contract generated from it → customer signs → work starts → the first
+   * draw is billed weeks later. In that whole gap the estimate was fully editable, and editing a
+   * line runs recalcQuote, which rewrites the total.
+   *
+   * That total is not decoration. contractTotalFromQuotes derives the CONTRACT total from the
+   * job's quotes, and the payment schedule is percentages of it — so changing a line after the
+   * customer signs silently re-prices every remaining draw. Meanwhile the contract's signed_body
+   * is frozen by 0068's trigger, so the paper the customer actually signed still shows the old
+   * figure. The document and the arithmetic quietly stop agreeing, and nothing says so.
+   *
+   * Void doesn't count: a voided contract is the org saying the agreement doesn't stand, which
+   * is precisely when re-pricing is legitimate. Same exit as the draw lock — duplicate it as a
+   * revision, which is what a change order or a revised contract is for anyway.
+   */
+  const { data: signed } = await supabase
+    .from("contracts")
+    .select("contract_number, signed_at")
+    .eq("job_id", jobId)
+    .eq("status", "signed")
+    .limit(1)
+    .maybeSingle();
+  if (signed) {
+    const num = (signed as { contract_number?: string | null }).contract_number;
+    return {
+      ok: false,
+      error: `${(quote as any).quote_number || `This ${label0.toLowerCase()}`} priced ${num ? `contract ${num}` : "a contract"}, which the customer has already signed — changing it now would re-price the draws against a total they never agreed to. Duplicate it as a revision (or void the contract) instead.`,
+    };
+  }
+
   // "Drawn" = a milestone linked to an invoice that still stands. A deleted/void draw
   // releases the lock (deleting a draft draw nulls the FK, the same signal the schedule
   // itself uses for billed-vs-pending), so a mistaken draw doesn't wedge the quote.
@@ -232,10 +267,9 @@ async function requireEditableQuote(
   const live = ((drawn ?? []) as any[]).filter((m) => (m.invoices?.status ?? "") !== "void");
   if (!live.length) return { ok: true };
 
-  const label = docLabel(quote as { doc_type?: string | null });
   return {
     ok: false,
-    error: `${(quote as any).quote_number || `This ${label.toLowerCase()}`} is accepted and ${live.length} scheduled payment${live.length === 1 ? " has" : "s have"} already been billed against it — changing it now would re-price the remaining draws. Duplicate it as a revision (or void the draw) instead.`,
+    error: `${(quote as any).quote_number || `This ${label0.toLowerCase()}`} is accepted and ${live.length} scheduled payment${live.length === 1 ? " has" : "s have"} already been billed against it — changing it now would re-price the remaining draws. Duplicate it as a revision (or void the draw) instead.`,
   };
 }
 

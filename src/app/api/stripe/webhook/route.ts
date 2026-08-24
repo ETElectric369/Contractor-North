@@ -45,6 +45,7 @@ export async function POST(req: Request) {
     orgId: string | undefined,
     amount: number,
     eventId: string,
+    paymentIntent: string | null,
   ) {
     if (!invoiceId || !orgId || amount <= 0) return;
     // org_id is set explicitly (the set_org_id trigger has no auth context here).
@@ -57,6 +58,9 @@ export async function POST(req: Request) {
       method: "card",
       note: "Online payment",
       stripe_event_id: eventId,
+      // The ONE id a later charge.refunded / charge.dispute.created can be matched on. The
+      // event id can't be: Stripe sends a different event for the refund. See migration 0220.
+      stripe_payment_intent: paymentIntent,
     });
     if (insErr) {
       if ((insErr as { code?: string }).code === "23505") {
@@ -221,6 +225,9 @@ export async function POST(req: Request) {
             session.metadata.org_id,
             (session.amount_total ?? 0) / 100,
             event.id,
+            typeof session.payment_intent === "string"
+              ? session.payment_intent
+              : (session.payment_intent?.id ?? null),
           );
         }
       } else if (session.subscription && !fromConnectedAccount) {
@@ -243,14 +250,42 @@ export async function POST(req: Request) {
     case "charge.dispute.created": {
       const charge = event.data.object as Stripe.Charge & { payment_intent?: string | null };
       try {
-        const { data: pay } = await supabase
-          .from("payments")
-          .select("invoice_id, org_id, amount")
-          .eq("stripe_event_id", (charge as { payment_intent?: string | null }).payment_intent ?? "")
-          .maybeSingle();
-        // The payment row is keyed by the checkout event, not the charge, so a direct match is
-        // best-effort — the alert still has to go out even when we can't name the invoice.
-        const orgId = (pay as { org_id?: string } | null)?.org_id ?? null;
+        /**
+         * THIS ALERT HAD NEVER FIRED, AND COULD NOT (audit v800 wave B).
+         *
+         * The lookup was `.eq("stripe_event_id", charge.payment_intent)`. stripe_event_id holds
+         * an `evt_…`; payment_intent is a `pi_…`. Two id namespaces that can never collide, so
+         * the match returned null every time, orgId was always null, and the `if (orgId)` below
+         * meant the notification was unreachable code wearing a comment that called it
+         * "best-effort". Migration 0220 gives the payments row somewhere to keep the pi_.
+         *
+         * TWO INDEPENDENT PATHS, because they fail differently and this alert must not be
+         * silently droppable — money left the business and the invoice still says it didn't:
+         *
+         *   the PAYMENT tells us which invoice, so the notification can deep-link it;
+         *   the ORG comes from event.account (Connect direct charges land on the tenant's own
+         *   account), so the alert still goes out when the payment row is missing entirely —
+         *   a refund of a payment recorded by hand, or of anything taken before 0220.
+         */
+        const pi = charge.payment_intent ?? "";
+        const { data: pay } = pi
+          ? await supabase
+              .from("payments")
+              .select("invoice_id, org_id, amount")
+              .eq("stripe_payment_intent", pi)
+              .maybeSingle()
+          : { data: null };
+
+        let orgId = (pay as { org_id?: string } | null)?.org_id ?? null;
+        const connectedAccount = (event as { account?: string }).account ?? null;
+        if (!orgId && connectedAccount) {
+          const { data: org } = await supabase
+            .from("organizations")
+            .select("id")
+            .eq("stripe_account_id", connectedAccount)
+            .maybeSingle();
+          orgId = (org as { id?: string } | null)?.id ?? null;
+        }
         if (orgId) {
           const disputed = event.type === "charge.dispute.created";
           await sendPushToProfiles(await orgStaffIds(orgId), "invoice_paid", {
