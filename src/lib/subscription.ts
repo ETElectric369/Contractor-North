@@ -1,7 +1,6 @@
-import type { Organization } from "./types";
 
 /** Days left in the free trial (0 if expired/unknown). */
-export function trialDaysLeft(org: Pick<Organization, "trial_ends_at">): number {
+export function trialDaysLeft(org: { trial_ends_at?: string | null }): number {
   if (!org.trial_ends_at) return 0;
   const ms = new Date(org.trial_ends_at).getTime() - Date.now();
   return Math.max(0, Math.ceil(ms / 86_400_000));
@@ -22,9 +21,7 @@ export const PAST_DUE_GRACE_DAYS = Number(process.env.PAST_DUE_GRACE_DAYS || 10)
 const GRACE_STATUSES = new Set(["past_due", "unpaid", "incomplete"]);
 
 /** When the grace window closes — measured from the end of the period they paid for. */
-export function graceEndsAt(
-  org: Pick<Organization, "current_period_end">,
-): Date | null {
+export function graceEndsAt(org: { current_period_end?: string | null }): Date | null {
   if (!org.current_period_end) return null;
   const end = new Date(org.current_period_end);
   if (isNaN(end.getTime())) return null;
@@ -32,9 +29,10 @@ export function graceEndsAt(
 }
 
 /** Days left before a past-due org actually loses access (0 = out of grace). */
-export function graceDaysLeft(
-  org: Pick<Organization, "subscription_status" | "current_period_end">,
-): number {
+export function graceDaysLeft(org: {
+  subscription_status?: string | null;
+  current_period_end?: string | null;
+}): number {
   if (!GRACE_STATUSES.has(String(org.subscription_status))) return 0;
   const ends = graceEndsAt(org);
   if (!ends) return PAST_DUE_GRACE_DAYS; // no period end recorded → don't lock them out
@@ -47,9 +45,11 @@ export function graceDaysLeft(
  *  - still inside the built-in free trial window, OR
  *  - past due but still inside the grace window (see above).
  */
-export function hasActiveAccess(
-  org: Pick<Organization, "subscription_status" | "trial_ends_at" | "current_period_end">,
-): boolean {
+export function hasActiveAccess(org: {
+  subscription_status?: string | null;
+  trial_ends_at?: string | null;
+  current_period_end?: string | null;
+}): boolean {
   if (org.subscription_status === "active") return true;
   if (org.subscription_status === "trialing") {
     return !org.trial_ends_at || new Date(org.trial_ends_at) > new Date();

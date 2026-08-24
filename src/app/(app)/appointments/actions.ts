@@ -15,7 +15,7 @@ import { createProposalCore, cleanSlots } from "@/lib/appointments/proposal";
 import { endAfterStart } from "@/lib/appointments/times";
 import { APPOINTMENT_STATUSES, APPOINTMENT_TYPES, INSPECTION_TYPES } from "@/lib/statuses";
 import { briefNote, carriedNote, carryForInquiry } from "@/lib/inquiries/carry-intake-answers";
-import { coerceByPlaybook, retiredAnswers, retiredOptions } from "@/lib/playbook/answers";
+import { coerceByPlaybook, orphanedAnswers, retiredAnswers, retiredOptions } from "@/lib/playbook/answers";
 import { playbookForForm } from "@/lib/playbook/parse";
 import { clearInapplicable } from "@/lib/playbook/resolve";
 import { runOnce } from "@/lib/offline/run-once";
@@ -711,6 +711,15 @@ async function saveInspectionAnswersInner(
     const keptOpts = retiredOptions(pb, storedAnswers);
     for (const [k, v] of Object.entries(keptOpts)) {
       const slot = `${k}__was`;
+      if (clean[slot] === undefined) clean[slot] = v;
+    }
+    // AND THE CHILDREN OF A RENAMED CHIP — the third rescue, and the one that loses the most.
+    // Renaming "Deck" doesn't only drop the chip; it turns off every question gated behind it, and
+    // clearInapplicable above nulls that whole branch. orphanedAnswers tells a playbook edit apart
+    // from a real deselect by asking whether yesterday's row still makes the need apply today.
+    const orphans = orphanedAnswers(pb, storedAnswers);
+    for (const [k, v] of Object.entries(orphans)) {
+      const slot = `${k}__kept`;
       if (clean[slot] === undefined) clean[slot] = v;
     }
   }

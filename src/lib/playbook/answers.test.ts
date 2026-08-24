@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { answerText, coerceByPlaybook, coerceNeed, factsForEstimator, retiredAnswers, retiredLabel, retiredOptions } from "./answers";
+import { answerText, coerceByPlaybook, coerceNeed, factsForEstimator, orphanedAnswers, retiredAnswers, retiredLabel, retiredOptions } from "./answers";
 import { playbookFromSheet } from "./from-sheet";
 import { looseNumber } from "@/lib/inspection/capture";
 import { ET_ELECTRIC } from "./starters/et-electric";
@@ -361,5 +361,77 @@ describe("the two slots whose STORED shape isn't the shape a person says out lou
 
   it("an empty pick list is silent, not an empty bullet", () => {
     expect(factsForEstimator(pb, { remodel: [], photos: [] } as never)).toBe("");
+  });
+});
+
+/**
+ * RENAMING A CHIP TAKES THE WHOLE BRANCH BEHIND IT (audit v800 wave B, HIGH).
+ *
+ * retiredOptions rescues the chip. Nothing rescued its CHILDREN: rename "Deck" to "Decking" and
+ * every question gated on `scope = Deck` stops applying, so clearInapplicable nulls the square
+ * footage, the joist spacing, the railing count — an entire walk-through branch — on the next
+ * autosave of every finished visit. That is the biggest of the three losses and was the last one
+ * uncovered.
+ *
+ * The whole difficulty is that clearing is USUALLY right, so these tests are mostly about the
+ * cases that must still clear.
+ */
+describe("orphanedAnswers — the children of a question that stopped asking itself", () => {
+  const pb = (chip: string): Playbook => ({
+    needs: [
+      { key: "scope", label: "Scope", ask: "What's in it?", slot: { type: "select", options: [chip, "Service"], multi: true } },
+      { key: "deck_sqft", label: "Deck sq ft", ask: "How big?", slot: { type: "number", unit: "sq ft" }, when: [{ key: "scope", in: [chip] }] },
+      { key: "joists", label: "Joist spacing", ask: "Spacing?", when: [{ key: "scope", in: [chip] }] },
+    ],
+  });
+  const finished = { scope: ["Deck"], deck_sqft: 480, joists: "16 in. on center" };
+
+  it("parks the whole branch when the chip it hung on was renamed in Settings", () => {
+    // Andrew renames Deck → Decking. Nobody deselected anything; the row simply stopped matching.
+    expect(orphanedAnswers(pb("Decking"), finished)).toEqual({
+      deck_sqft: "480",
+      joists: "16 in. on center",
+    });
+  });
+
+  it("says nothing while the playbook still matches the row", () => {
+    expect(orphanedAnswers(pb("Deck"), finished)).toEqual({});
+  });
+
+  it("A REAL DESELECT STILL CLEARS — this is the case that must NOT be rescued", () => {
+    // He changed his mind on site: scope is now Service. The deck measurements are stale by
+    // definition and handing them to the estimator as given facts is the failure clearInapplicable
+    // exists to prevent. The stored row is what's asked, so switching the answer in the PAYLOAD
+    // never reaches here — and the stored row still says Deck, so nothing is parked.
+    expect(orphanedAnswers(pb("Deck"), { ...finished, scope: ["Deck"] })).toEqual({});
+    // And once that deselect is stored, there is nothing left to park either.
+    expect(orphanedAnswers(pb("Deck"), { scope: ["Service"] })).toEqual({});
+  });
+
+  it("a need with no rule is never orphaned, however the playbook changes", () => {
+    const open: Playbook = { needs: [{ key: "why", label: "Why", ask: "?" }] };
+    expect(orphanedAnswers(open, { why: "Converting storage to living space" })).toEqual({});
+  });
+
+  it("reads the STORED row only — it cannot be used to introduce a value", () => {
+    expect(orphanedAnswers(pb("Decking"), {})).toEqual({});
+    expect(orphanedAnswers(pb("Decking"), null)).toEqual({});
+    expect(orphanedAnswers(pb("Decking"), "not an object")).toEqual({});
+  });
+
+  it("skips empty answers — an unanswered orphan is not a loss", () => {
+    expect(orphanedAnswers(pb("Decking"), { scope: ["Deck"], deck_sqft: null, joists: "  " })).toEqual({});
+  });
+
+  it("does not re-park what is already parked", () => {
+    // `deck_sqft__kept` is not a declared need, so the loop never sees it — the rescue converges
+    // instead of growing a __kept__kept chain on every autosave.
+    const out = orphanedAnswers(pb("Decking"), { ...finished, deck_sqft__kept: "480" });
+    expect(Object.keys(out).sort()).toEqual(["deck_sqft", "joists"]);
+  });
+
+  it("labels the parked answer as a question that CHANGED, not a choice that changed", () => {
+    expect(retiredLabel("deck_sqft__kept")).toBe("Deck sqft — answered before you changed this question");
+    expect(retiredLabel("scope__was")).toBe("Scope — choices you've since changed");
   });
 });

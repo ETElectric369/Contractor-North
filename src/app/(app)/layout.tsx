@@ -67,18 +67,26 @@ export default async function AppLayout({
   // Reversible: an owner/admin flipping active back lets them in again.
   if (profile.active === false) redirect("/account-deactivated");
 
+  // THE PROJECTION LAW, on the paywall itself. graceDaysLeft counts forward from
+  // current_period_end and treats a MISSING one as "no period recorded → don't lock them out",
+  // which is the right call for an org Stripe never billed. But this select never asked for the
+  // column, so every past_due org looked like that org: graceDaysLeft returned the full 10 days
+  // forever, hasActiveAccess stayed true forever, and the grace window could never close. A
+  // declined card was permanent free access. The `as any` at the call site below is what let a
+  // missing column through the type checker — so the shape is named here and the cast is gone.
   type OrgLite = {
     name: string | null;
     logo_url: string | null;
     subscription_status: string | null;
     trial_ends_at: string | null;
+    current_period_end: string | null;
     settings: unknown;
   };
   let org: OrgLite | null = null;
   try {
     const { data } = await supabase
       .from("organizations")
-      .select("name, logo_url, subscription_status, trial_ends_at, settings")
+      .select("name, logo_url, subscription_status, trial_ends_at, current_period_end, settings")
       .eq("id", profile.org_id)
       .maybeSingle();
     org = (data as OrgLite | null) ?? null;
@@ -123,7 +131,7 @@ export default async function AppLayout({
 
   // Billing gate (only when Stripe is configured): trial expired & not subscribed.
   // The operator's own house org (COMPED_ORG_IDS) is never paywalled.
-  if (billingEnabled && org && !hasActiveAccess(org as any) && !isCompedOrg(profile.org_id)) {
+  if (billingEnabled && org && !hasActiveAccess(org) && !isCompedOrg(profile.org_id)) {
     redirect("/subscribe");
   }
 
@@ -131,7 +139,7 @@ export default async function AppLayout({
   // owner must SEE it — a silent countdown that ends in a locked-out morning is the
   // worst possible version of this. Escalates as the days run down.
   const graceLeft =
-    billingEnabled && org && !isCompedOrg(profile.org_id) ? graceDaysLeft(org as any) : 0;
+    billingEnabled && org && !isCompedOrg(profile.org_id) ? graceDaysLeft(org) : 0;
 
   const branding = { name: org?.name ?? null, logo: org?.logo_url ?? null };
   // WHAT THE COMPANY STILL HASN'T SAID ABOUT ITSELF, in the setup playbook's own keys — read off

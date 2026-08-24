@@ -184,6 +184,52 @@ export function retiredOptions(pb: Playbook, stored: unknown): Record<string, st
   return out;
 }
 
+/**
+ * WHAT HE MEASURED UNDER A QUESTION THAT NO LONGER ASKS ITSELF — the third and last way editing a
+ * playbook eats a finished site visit.
+ *
+ * retiredAnswers covers a KEY leaving. retiredOptions covers a VALUE leaving. Neither covers the
+ * one that loses the most: rename the chip "Deck" to "Decking" and every question GATED behind
+ * "Deck" — the square footage, the joist spacing, the railing count, an entire branch of the
+ * walk-through — stops applying, and clearInapplicable nulls all of it on the next autosave. The
+ * parent chip gets rescued into `scope__was`; its children were not rescued by anything.
+ *
+ * THE HARD PART IS THAT CLEARING IS USUALLY RIGHT. When Andrew changes his answer from Deck to
+ * Fence, the deck measurements SHOULD go — a stale measurement handed to the estimator as a given
+ * fact is the exact failure clearInapplicable exists to prevent. So the test cannot be "did this
+ * become inapplicable", it has to separate the two causes:
+ *
+ *   · the PERSON changed a gating answer  → under the STORED answers the need still applied, and
+ *     only the incoming payload turns it off. That is a real deselect. Let it clear.
+ *   · the PLAYBOOK changed underneath him → the need does not apply even to the untouched stored
+ *     answers, because the rule now names a chip that no longer exists. Nobody deselected
+ *     anything. Park it.
+ *
+ * So this asks exactly one question: with today's playbook, does yesterday's row still make this
+ * need apply? A "no" can only have come from an edit in Settings.
+ *
+ * Same closed-set discipline as its twins — read from the STORED row, never the payload, so a
+ * client can fail to delete a parked answer but can never introduce or change one.
+ */
+export function orphanedAnswers(pb: Playbook, stored: unknown): Record<string, string> {
+  const src = (stored && typeof stored === "object" ? stored : {}) as Record<string, unknown>;
+  if (!Object.keys(src).length) return {};
+  // Coerce first: this is what makes a renamed chip visible as the cause. The stored parent value
+  // "Deck" no longer matches any option, so it coerces away, so the rule that named it stops
+  // matching — which is precisely the state we are detecting.
+  const asStored = coerceByPlaybook(pb, src);
+  const stillApplies = new Set(applicableNeeds(pb, asStored).map((n) => n.key));
+  const out: Record<string, string> = {};
+  for (const n of pb.needs) {
+    if (stillApplies.has(n.key)) continue;
+    const t = answerText(coerceNeed(n, src[n.key])).trim();
+    if (!t) continue;
+    out[n.key] = t.slice(0, 8000);
+    if (Object.keys(out).length >= 40) break;
+  }
+  return out;
+}
+
 /** "materials_known" → "Materials known". The need that carried a real label is gone. */
 export const retiredLabel = (key: string): string => {
   // `scope__was` is the parking slot retiredOptions writes a renamed chip into. Say what it is,
@@ -191,6 +237,12 @@ export const retiredLabel = (key: string): string => {
   if (key.endsWith("__was")) {
     const base = retiredLabel(key.slice(0, -"__was".length));
     return `${base} — choices you've since changed`;
+  }
+  // `<key>__kept` is where orphanedAnswers parks an answer whose question stopped applying because
+  // the playbook changed, not because anyone deselected anything. Say which of those it was.
+  if (key.endsWith("__kept")) {
+    const base = retiredLabel(key.slice(0, -"__kept".length));
+    return `${base} — answered before you changed this question`;
   }
   const words = key.replace(/[_-]+/g, " ").trim();
   return words.charAt(0).toUpperCase() + words.slice(1);
