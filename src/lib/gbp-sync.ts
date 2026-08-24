@@ -20,10 +20,10 @@
  * rewritten. So this produces a described change set and lets the app ask; it never edits copy.
  */
 
-/** The fields we watch. Deliberately small: everything here is publicly visible on the listing
- *  and each one has an obvious consequence for the website. */
 import { GOOGLE_KEY, googleKeyHeaders } from "@/lib/google-server";
 
+/** The fields we watch. Deliberately small: everything here is publicly visible on the listing
+ *  and each one has an obvious consequence for the website. */
 export type GbpSnapshot = {
   /** places/ChIJ… — Google's stable id for the listing. */
   placeId: string;
