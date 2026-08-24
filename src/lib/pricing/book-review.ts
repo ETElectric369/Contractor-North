@@ -51,6 +51,14 @@ export type BookUpdate = {
   oldBuy: number;
   newBuy: number;
   matchedBy: "code" | "description";
+  /** The unit each side of the price is quoted in. A supplier prints the COIL net for a part
+   *  the book prices per FOOT — "$0.75 → $187.50" is then a 250x corruption of the book, and
+   *  the review card showed neither unit (v800 audit). Carried so the human can see it. */
+  oldUnit: string | null;
+  newUnit: string | null;
+  /** True when the two units disagree — the caller must NOT pre-tick this row, and should say
+   *  why. We do not convert: nobody can safely infer that a "coil" is 250 feet. */
+  unitMismatch: boolean;
 };
 
 export type BookAddition = { description: string; unit: string; newBuy: number };
@@ -113,7 +121,13 @@ export function reviewAgainstBook(book: BookRowLite[], lines: SupplierLine[]): B
       claimed.add(hit.id);
       const oldBuy = Math.round((Number(hit.buy_price) || 0) * 100) / 100;
       const newBuy = Math.round(l.net * 100) / 100;
-      if (Math.abs(oldBuy - newBuy) < 0.005) unchanged++;
+      const oldUnit = (hit.unit ?? "").trim() || null;
+      const newUnit = (l.unit ?? "").trim() || null;
+      // UNIT-BLIND WAS THE BUG (v800 audit): both sides carried a unit and neither was read, so
+      // a per-coil net could silently overwrite a per-foot book price and every later estimate
+      // using that item was wrong by the coil length. We compare, we surface, we never convert.
+      const unitMismatch = !!oldUnit && !!newUnit && norm(oldUnit) !== norm(newUnit);
+      if (Math.abs(oldBuy - newBuy) < 0.005 && !unitMismatch) unchanged++;
       else
         updates.push({
           itemId: hit.id,
@@ -122,6 +136,9 @@ export function reviewAgainstBook(book: BookRowLite[], lines: SupplierLine[]): B
           oldBuy,
           newBuy,
           matchedBy,
+          oldUnit,
+          newUnit,
+          unitMismatch,
         });
     } else if (!hit) {
       additions.push({ description: l.description.trim(), unit: l.unit || "ea", newBuy: Math.round(l.net * 100) / 100 });

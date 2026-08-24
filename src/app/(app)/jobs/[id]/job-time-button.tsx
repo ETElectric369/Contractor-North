@@ -114,9 +114,20 @@ export function JobTimeButton({
   function run(fn: () => Promise<{ ok: boolean; error?: string }>, after?: () => void) {
     setErr(null);
     start(async () => {
-      const res = await fn();
-      if (!res.ok) {
-        setErr(res.error ?? "Something went wrong.");
+      // THE 60MPH LAW (v800 audit). A server action that REJECTS — no signal in a dead zone, a
+      // dropped connection mid-tap — throws, and an unhandled throw inside a transition tears
+      // the whole job page down to the error boundary. A tech standing in a Chilcoot canyon
+      // taps "Clock in", the page vanishes, and the start of his day is gone. The failure has
+      // to land in this little red line instead, with the punch still there to retry.
+      let res: { ok: boolean; error?: string };
+      try {
+        res = await fn();
+      } catch {
+        setErr("No connection — that didn't go through. Try again when you have a bar or two.");
+        return;
+      }
+      if (!res?.ok) {
+        setErr(res?.error ?? "Something went wrong.");
         return;
       }
       setOpen(false);

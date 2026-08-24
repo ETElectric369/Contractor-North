@@ -864,16 +864,31 @@ export function QuoteBuilder({
                   </div>
                   <div className="space-y-1.5">
                     {bookReview.updates.map((u, i) => (
-                      <label key={u.itemId} className="flex min-h-[36px] cursor-pointer items-center gap-2 text-sm">
+                      <div key={u.itemId}>
+                      <label className="flex min-h-[36px] cursor-pointer items-center gap-2 text-sm">
                         <input type="checkbox" className="h-4 w-4" checked={u.keep}
                                onChange={(e) => setBookReview((p) => p && { ...p, updates: p.updates.map((x, j) => (j === i ? { ...x, keep: e.target.checked } : x)) })} />
                         <span className="min-w-0 truncate">{u.description}{u.code ? <span className="ml-1 font-mono text-xs text-slate-400">[{u.code}]</span> : null}</span>
                         <span className="ml-auto whitespace-nowrap font-mono text-xs tabular-nums">
-                          <span className="text-slate-400 line-through">${u.oldBuy.toFixed(2)}</span>
+                          {/* THE UNITS, ALWAYS (v800 audit). A supplier prints the COIL net for a
+                              part the book prices per FOOT; "$0.75 → $187.50" with no units on
+                              screen is how a 250x corruption of the price book gets ticked. */}
+                          <span className="text-slate-400 line-through">
+                            ${u.oldBuy.toFixed(2)}{u.oldUnit ? `/${u.oldUnit}` : ""}
+                          </span>
                           {" → "}
-                          <span className={u.newBuy > u.oldBuy ? "text-rose-700" : "text-emerald-700"}>${u.newBuy.toFixed(2)}</span>
+                          <span className={u.newBuy > u.oldBuy ? "text-rose-700" : "text-emerald-700"}>
+                            ${u.newBuy.toFixed(2)}{u.newUnit ? `/${u.newUnit}` : ""}
+                          </span>
                         </span>
                       </label>
+                      {u.unitMismatch && (
+                        <p className="pl-6 text-xs font-medium text-amber-700">
+                          Different units — the quote is per {u.newUnit}, your book is per {u.oldUnit}. Check before you
+                          tick this, or the price is wrong by whatever a {u.newUnit} holds.
+                        </p>
+                      )}
+                      </div>
                     ))}
                     {bookReview.additions.map((a, i) => (
                       <label key={`add-${i}`} className="flex min-h-[36px] cursor-pointer items-center gap-2 text-sm">
