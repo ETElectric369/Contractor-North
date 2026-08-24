@@ -5,7 +5,7 @@
  * TWO DIFFERENT GOOGLE APIS, and it matters which one you need:
  *
  *   · PLACES API (New) — what this file uses. Any place, resolved by Place ID, authenticated
- *     with a SERVER API key. No OAuth, no application, no approval queue: enable the API and
+ *     with the app's existing Google key (GOOGLE_MAPS_SERVER_KEY, via google-server.ts). No OAuth, no application, no approval queue: enable the API and
  *     restrict a key by IP. It returns the listing as the PUBLIC sees it — name, phone, website,
  *     category, opening hours, rating, review count, and up to five reviews.
  *
@@ -22,6 +22,8 @@
 
 /** The fields we watch. Deliberately small: everything here is publicly visible on the listing
  *  and each one has an obvious consequence for the website. */
+import { GOOGLE_KEY, googleKeyHeaders } from "@/lib/google-server";
+
 export type GbpSnapshot = {
   /** places/ChIJ… — Google's stable id for the listing. */
   placeId: string;
@@ -116,8 +118,11 @@ export function studioInstructionFor(changes: GbpChange[]): string {
  *  configured, which is the normal state until someone adds a SERVER key — the nightly job
  *  must no-op quietly rather than error every org, every night. */
 export async function fetchGbpSnapshot(placeId: string): Promise<GbpSnapshot | null> {
-  const key = process.env.GOOGLE_PLACES_SERVER_KEY;
-  if (!key || !placeId) return null;
+  // ONE KEY CONVENTION, not two. google-server.ts already resolves this: GOOGLE_MAPS_SERVER_KEY
+  // when set, otherwise the browser key with a spoofed Referer (which the referrer restriction
+  // requires). Inventing GOOGLE_PLACES_SERVER_KEY alongside it would have meant a second key to
+  // provision, rotate and forget — /places, /geocode and /weather all already ride this one.
+  if (!GOOGLE_KEY || !placeId) return null;
   const id = placeId.startsWith("places/") ? placeId : `places/${placeId}`;
   const fields = [
     "id",
@@ -131,7 +136,7 @@ export async function fetchGbpSnapshot(placeId: string): Promise<GbpSnapshot | n
   ].join(",");
   try {
     const res = await fetch(`https://places.googleapis.com/v1/${id}?fields=${encodeURIComponent(fields)}`, {
-      headers: { "X-Goog-Api-Key": key },
+      headers: googleKeyHeaders(),
       cache: "no-store",
     });
     if (!res.ok) return null;
