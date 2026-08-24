@@ -94,13 +94,27 @@ export function SiteSeoFields({ settings, orgId }: { settings: OrgSettings; orgI
       <div>
         <Label htmlFor="seo-gbp">Google Business Profile link</Label>
         <Input id="seo-gbp" value={gbp} onChange={(e) => setGbp(e.target.value)} placeholder="Paste the Google Maps link to your listing" />
-        {gbpVerdict === "ok" && (
+        {gbpVerdict === "no-coords" && sab && (
+          <p className="mt-1 flex items-start gap-1 text-xs font-medium text-green-700">
+            <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            Linked. No coordinates in this link — which is right for a service-area business: your listing binds to the
+            site without pinning you to a spot.
+          </p>
+        )}
+        {gbpVerdict === "ok" && !sab && (
           <p className="mt-1 flex items-start gap-1 text-xs font-medium text-green-700">
             <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             Linked, with map coordinates — this feeds Google&apos;s structured data on every page.
           </p>
         )}
-        {gbpVerdict === "no-coords" && (
+        {gbpVerdict === "ok" && sab && (
+          <p className="mt-1 flex items-start gap-1 text-xs text-amber-700">
+            <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            Linked. This link carries coordinates, but you&apos;ve said you serve an area — so we publish your service
+            area and ignore the pin.
+          </p>
+        )}
+        {gbpVerdict === "no-coords" && !sab && (
           <p className="mt-1 flex items-start gap-1 text-xs font-medium text-green-700">
             <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             Linked. For the stronger signal, paste the full Maps link instead of the short one — it
