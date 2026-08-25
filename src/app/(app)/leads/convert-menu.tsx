@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useOrgPublicBase } from "@/components/use-org-public-base";
 import { useRouter } from "next/navigation";
-import { UserPlus, CalendarPlus, Check, Copy, FileText, MessageSquare } from "lucide-react";
+import { UserPlus, UserRound, CalendarPlus, Check, Copy, FileText, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented";
 import { Modal, ModalActions } from "@/components/ui/modal";
@@ -47,9 +47,12 @@ function defaultSlots(): { date: string; time: string }[] {
 export function ConvertMenu({
   inquiryId,
   inquiryName,
+  customerId = null,
 }: {
   inquiryId: string;
   inquiryName: string;
+  /** Set once this lead has a contact card — flips "Save as contact" to "Open contact". */
+  customerId?: string | null;
   customers?: { id: string; name: string }[];
 }) {
   const router = useRouter();
@@ -153,9 +156,25 @@ export function ConvertMenu({
         <Button size="sm" onClick={() => run("estimate")} disabled={busy !== null}>
           <FileText className="h-4 w-4" /> {busy === "estimate" ? "Opening…" : "Create estimate"}
         </Button>
-        <Button size="sm" variant="ghost" onClick={saveContact} disabled={busy !== null} title="Make a contact card now — the lead stays open either way; winning the estimate does this automatically">
-          <UserPlus className="h-4 w-4" /> {busy === "contact" ? "Saving…" : "Save as contact"}
-        </Button>
+        {/* DON'T OFFER A DEED THAT IS ALREADY DONE. Erik: "naturally if they are already saved as
+            a contact i shouldnt have this button glaring at me."
+            But NO DEAD ENDS either — the answer is not to remove the control, it is to point it
+            at the thing he now actually wants, which is the contact itself. Same slot, same
+            place his eye already goes; the verb changes because the state did. */}
+        {customerId ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => router.push(`/crm/${customerId}`)}
+            title="This lead is already saved as a contact — open it"
+          >
+            <UserRound className="h-4 w-4" /> Open contact
+          </Button>
+        ) : (
+          <Button size="sm" variant="ghost" onClick={saveContact} disabled={busy !== null} title="Make a contact card now — the lead stays open either way; winning the estimate does this automatically">
+            <UserPlus className="h-4 w-4" /> {busy === "contact" ? "Saving…" : "Save as contact"}
+          </Button>
+        )}
       </div>
       {error && !inspectOpen && <p className="mt-1 text-xs text-red-600">{error}</p>}
 

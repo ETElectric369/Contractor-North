@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Phone, Mail, Globe, UserRound } from "lucide-react";
+import { Phone, Mail, Globe, UserRound, MapPin } from "lucide-react";
 import { Input, Select } from "@/components/ui/input";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
@@ -93,6 +93,10 @@ export function InquiryRow({
     });
   }
 
+  // Street first, then the town — the two parts he actually reads. Comma-joined and trimmed so a
+  // lead carrying only a town still shows the town rather than nothing.
+  const addressLine = [inquiry.address, inquiry.city].map((x) => String(x ?? "").trim()).filter(Boolean).join(", ");
+
   return (
     <li
       ref={rowRef}
@@ -106,6 +110,25 @@ export function InquiryRow({
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <span className="font-semibold text-slate-900">{inquiry.name}</span>
         {inquiry.company_name && <span className="text-xs text-slate-400">{inquiry.company_name}</span>}
+        {/* THE ADDRESS IS THE HEADLINE. Erik, entering his real lead list: "addresses addresses and
+            more addresses that is what this business is, lets see it up on the lead top line."
+            It was rendered only inside the expanded detail, so scanning the board told him who
+            called but never WHERE — and where is how he decides what to group into a day's route.
+            A tel: link is one tap; so is this: it opens the map, which is the thing he actually
+            does next with an address. */}
+        {addressLine && (
+          <a
+            href={`https://maps.apple.com/?q=${encodeURIComponent(addressLine)}`}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="flex items-center gap-1 text-sm font-medium text-slate-600 hover:text-brand hover:underline"
+            title="Open in Maps"
+          >
+            <MapPin className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+            {addressLine}
+          </a>
+        )}
         <Badge tone={INQUIRY_STATUS_TONE[inquiry.status] ?? "slate"}>{inquiry.status}</Badge>
         {/* Staying open after an inspection is deliberate (an inspected lead can still become an
             estimate); the badge is what stops the row reading as untouched. A count, not a
@@ -169,7 +192,7 @@ export function InquiryRow({
         {inquiry.last_contacted_at && <span>contacted {formatDate(inquiry.last_contacted_at)}</span>}
         {inquiry.intake?.reason && <span className="hidden text-slate-400 md:inline">{inquiry.intake.reason}</span>}
         <span className="ml-auto flex flex-wrap items-center justify-end gap-1.5">
-          <ConvertMenu inquiryId={inquiry.id} inquiryName={inquiry.name} customers={customers} />
+          <ConvertMenu inquiryId={inquiry.id} inquiryName={inquiry.name} customerId={inquiry.customer_id} customers={customers} />
           <button
             type="button"
             onClick={() => setOpen((v) => !v)}
