@@ -48,11 +48,16 @@ export function ConvertMenu({
   inquiryId,
   inquiryName,
   customerId = null,
+  customerName = null,
 }: {
   inquiryId: string;
   inquiryName: string;
-  /** Set once this lead has a contact card — flips "Save as contact" to "Open contact". */
+  /** Set once this lead has a contact card — flips the button from a deed to a door. */
   customerId?: string | null;
+  /** The contact's name, shown ON the button. Erik: "instead of saying open contact it shows the
+   *  name and we get rid of the badge above taking up more space" — one element carrying both
+   *  facts (there IS a contact, and who) instead of a badge on line 1 plus a generic verb here. */
+  customerName?: string | null;
   customers?: { id: string; name: string }[];
 }) {
   const router = useRouter();
@@ -166,9 +171,9 @@ export function ConvertMenu({
             size="sm"
             variant="ghost"
             onClick={() => router.push(`/crm/${customerId}`)}
-            title="This lead is already saved as a contact — open it"
+            title={`Open ${customerName ?? "this lead's contact"} in Contacts`}
           >
-            <UserRound className="h-4 w-4" /> Open contact
+            <UserRound className="h-4 w-4" /> {customerName ?? "Open contact"}
           </Button>
         ) : (
           <Button size="sm" variant="ghost" onClick={saveContact} disabled={busy !== null} title="Make a contact card now — the lead stays open either way; winning the estimate does this automatically">

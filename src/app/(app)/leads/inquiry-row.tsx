@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Phone, Mail, Globe, UserRound, MapPin } from "lucide-react";
+import { Phone, Mail, Globe, MapPin } from "lucide-react";
 import { Input, Select } from "@/components/ui/input";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
@@ -133,22 +133,6 @@ export function InquiryRow({
         {/* Staying open after an inspection is deliberate (an inspected lead can still become an
             estimate); the badge is what stops the row reading as untouched. A count, not a
             status: what it says is true and stays true. */}
-        {/* IN CONTACTS — Erik, entering his real lead list: "i added a few of them to contacts right
-            from that button check its recepro isnt happn".
-            The deed WAS happening: convertInquiry("customer") mints the contact and sets
-            inquiry.customer_id, and both are linked in his data. Nothing rendered it, so the row
-            looked identical to one nobody had touched and the button appeared to do nothing.
-            That is the same class the `inspections` chip below already exists to fix — a lead that
-            is correctly still open, after real work was done on it, needs to SAY so.
-            The name costs no query: `customers` is already passed in for the convert menu. */}
-        {inquiry.customer_id && (
-          <Link href={`/crm/${inquiry.customer_id}`} onClick={(e) => e.stopPropagation()}>
-            <Badge tone="green" title="This lead is linked to a contact — open it">
-              <UserRound className="mr-1 inline h-3 w-3" />
-              {customers.find((c) => c.id === inquiry.customer_id)?.name ?? "in contacts"}
-            </Badge>
-          </Link>
-        )}
         {!!inspections?.done && (
           <Badge tone="green">{inspections.done === 1 ? "inspected" : `inspected ×${inspections.done}`}</Badge>
         )}
@@ -192,7 +176,13 @@ export function InquiryRow({
         {inquiry.last_contacted_at && <span>contacted {formatDate(inquiry.last_contacted_at)}</span>}
         {inquiry.intake?.reason && <span className="hidden text-slate-400 md:inline">{inquiry.intake.reason}</span>}
         <span className="ml-auto flex flex-wrap items-center justify-end gap-1.5">
-          <ConvertMenu inquiryId={inquiry.id} inquiryName={inquiry.name} customerId={inquiry.customer_id} customers={customers} />
+          <ConvertMenu
+            inquiryId={inquiry.id}
+            inquiryName={inquiry.name}
+            customerId={inquiry.customer_id}
+            customerName={inquiry.customer_id ? (customers.find((c) => c.id === inquiry.customer_id)?.name ?? null) : null}
+            customers={customers}
+          />
           <button
             type="button"
             onClick={() => setOpen((v) => !v)}
