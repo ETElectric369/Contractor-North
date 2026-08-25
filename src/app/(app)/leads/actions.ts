@@ -6,6 +6,7 @@ import { findMatchingCustomerId, type DupCustomer } from "@/lib/crm/duplicates";
 import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
 import { requireStaff } from "@/lib/staff-guard";
+import { spreadTimes } from "@/lib/schedule/place-by-town";
 import { carryFromCustomer, matchKnownCustomer, type KnownCustomer } from "@/lib/inquiries/known-customer";
 import { createServiceClient } from "@/lib/supabase/server";
 import { formatPhone, formatState, formatZip, titleCase } from "@/lib/utils";
@@ -329,6 +330,10 @@ export async function convertInquiry(
     slots?: ProposalSlot[];
     /** Optional arrival-window note shown on the pick page ("8–10 AM"). */
     timeNote?: string | null;
+    /** Firm booking only: the org-local time, default 09:00. Several visits placed on ONE day
+     *  need different times — a customer expects "Tuesday around 10", and four walk-throughs all
+     *  stamped 9:00 tells nobody anything. See scheduleLeadsOnDay. */
+    startTime?: string;
   } = {},
 ): Promise<Result> {
   const ctx = await requireStaff();
@@ -404,7 +409,7 @@ export async function convertInquiry(
     // `new Date(date+"T00:00:00"); setHours(9)` parsed as SERVER-local UTC,
     // landing the inspection at 2 AM Pacific).
     const startDate = opts.startDate || ymdAddDays(todayStrInTz(tz), 2);
-    const startsAtIso = tzDateTimeUtc(startDate, "09:00", tz);
+    const startsAtIso = tzDateTimeUtc(startDate, /^\d{2}:\d{2}$/.test(opts.startTime ?? "") ? opts.startTime! : "09:00", tz);
     if (!startsAtIso) return { ok: false, error: "Pick a valid inspection date." };
     const carry = await carryForInquiry(supabase, inq);
     const { error: aErr } = await supabase.from("appointments").insert({
@@ -649,4 +654,54 @@ export async function intakeFileUrl(
     .createSignedUrl(path, 600);
   if (error || !data?.signedUrl) return { ok: false, error: "Couldn't open that file." };
   return { ok: true, url: data.signedUrl };
+}
+
+
+/**
+ * PUT SEVERAL LEADS ON ONE DAY.
+ *
+ * Erik: "i want to be able to schedule them together" — after his bug report "how do I put these
+ * on the schedule is the big denny". He had 32 open leads, 27 with addresses, and ZERO future
+ * appointments, because the only route was one lead at a time and nothing ever showed him that
+ * five of them are in Truckee.
+ *
+ * ONE PATH, N TIMES. This does not write appointments itself: it calls convertInquiry's firm
+ * booking once per lead. A second way to put something on the calendar is how two surfaces start
+ * disagreeing about what a booking is — the carry-forward of intake answers, the provenance
+ * backlink, the lead being marked contacted and resurfaced on the visit date, all of it happens
+ * here for free because it is the same code.
+ *
+ * The times spread across the day in the ORDER GIVEN, so the caller's sort (town, then urgency)
+ * survives into the day itself — the rail's order is the driving order.
+ *
+ * NOTHING SILENT: every lead's outcome comes back. Booking four and having one fail while the UI
+ * says "done" is exactly the failure that makes somebody stop trusting a batch action, so the
+ * result names which ones landed and which didn't.
+ */
+export async function scheduleLeadsOnDay(
+  leadIds: string[],
+  date: string,
+  opts: { startTime?: string; stepMinutes?: number } = {},
+): Promise<{ ok: boolean; error?: string; booked: number; failures: { id: string; error: string }[] }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error, booked: 0, failures: [] };
+  const ids = [...new Set(leadIds.filter(Boolean))];
+  if (!ids.length) return { ok: false, error: "Pick at least one lead.", booked: 0, failures: [] };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { ok: false, error: "Pick a day.", booked: 0, failures: [] };
+
+  const times = spreadTimes(ids.length, opts.startTime ?? "09:00", opts.stepMinutes ?? 90);
+  const failures: { id: string; error: string }[] = [];
+  let booked = 0;
+  // Sequential on purpose: each booking reads its lead and carries its intake answers, and firing
+  // them in parallel would race the same org's numbering and revalidation for no real gain at
+  // the sizes this is used at (a day is a handful of stops, not a hundred).
+  for (let i = 0; i < ids.length; i++) {
+    const res = await convertInquiry(ids[i], "inspection", { startDate: date, startTime: times[i] });
+    if (res.ok) booked++;
+    else failures.push({ id: ids[i], error: res.error ?? "Couldn't book this one." });
+  }
+  revalidatePath("/leads");
+  revalidatePath("/schedule");
+  revalidatePath("/planner");
+  return { ok: booked > 0, booked, failures, error: booked ? undefined : failures[0]?.error };
 }
