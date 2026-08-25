@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { groupByTown, NO_TOWN, spreadTimes, townsOnDay, type Placeable } from "./place-by-town";
+import { groupByTown, nextAction, NO_TOWN, spreadTimes, townsOnDay, whatsMissing, type Placeable } from "./place-by-town";
 
 const lead = (name: string, city: string | null, over: Partial<Placeable> = {}): Placeable => ({
   id: name.toLowerCase().replace(/\s+/g, "-"),
@@ -38,11 +38,25 @@ describe("groupByTown — geography picks the day", () => {
     expect(g[1].items).toHaveLength(4);
   });
 
-  it("a lead with no town sorts LAST, however urgent — you can't route to it", () => {
-    const g = groupByTown([lead("Nowhere", null, { urgent: true }), lead("Somewhere", "Truckee")]);
-    expect(g[0].town).toBe("Truckee");
-    expect(g[g.length - 1].town).toBe(NO_TOWN);
-    expect(g[g.length - 1].unlocatable).toBe(true);
+  it("FRAGMENT-FIRST: a missing town is not a demotion", () => {
+    // Erik, correcting the first version: "just becuase it doesnt have a town doesnt mean it goes
+    // at the end of the list, wrong logic, fragment first."
+    // The townless bucket takes its place by the SAME rule as every other group — size — so a
+    // town with two leads in it outranks Truckee-with-one, whichever has an address.
+    const g = groupByTown([
+      lead("Nowhere A", null),
+      lead("Nowhere B", null),
+      lead("Somewhere", "Truckee"),
+    ]);
+    expect(g[0].town).toBe(NO_TOWN);
+    expect(g[0].items).toHaveLength(2);
+    expect(g[0].unlocatable).toBe(true); // still LABELLED, so the UI can say what it needs
+  });
+
+  it("…and a single townless lead is not shoved below a single located one either", () => {
+    const g = groupByTown([lead("Aaa Nowhere", null), lead("Zzz Truckee", "Truckee")]);
+    // Equal size → alphabetical, exactly like any other tie. No special case.
+    expect(g.map((x) => x.town)).toEqual([NO_TOWN, "Truckee"]);
   });
 
   it("treats Truckee, TRUCKEE and ' truckee ' as one place", () => {
@@ -120,5 +134,47 @@ describe("spreadTimes — several visits on one day are several appointments", (
   it("asking for none gives none", () => {
     expect(spreadTimes(0)).toEqual([]);
     expect(spreadTimes(-3)).toEqual([]);
+  });
+});
+
+
+/**
+ * WHAT A LEAD IS MISSING IS A NEXT ACTION, NOT A PENALTY.
+ *
+ * Measured on Erik's real twelve: NINE have no phone and no email (four of the five Truckee ones),
+ * and ONE — Mike Scrivano — has no address but a phone, an email, and "I have another job I'll
+ * need a quote on … 3 cans in a walkway". He is among the most actionable leads he owns, and the
+ * first version buried him for a blank field.
+ */
+describe("whatsMissing — the gap decides the next move", () => {
+  it("Mike Scrivano: no address, but you can call him right now", () => {
+    const m = whatsMissing({ city: null, address: null, phone: "(530) 606-0045", email: "n@x.com" });
+    expect(m).toBe("place");
+    expect(nextAction(m)).toBe("Call to get the address");
+  });
+
+  it("the nine with an address and no number: you cannot call, but you can go and look", () => {
+    const m = whatsMissing({ city: "Truckee", address: "14424 Swiss Lane", phone: null, email: null });
+    expect(m).toBe("contact");
+    expect(nextAction(m)).toMatch(/go and look/);
+  });
+
+  it("both present → put it on a day", () => {
+    const m = whatsMissing({ city: "Truckee", address: "1 Main", phone: "555", email: null });
+    expect(m).toBe("nothing");
+    expect(nextAction(m)).toBe("Ready to schedule");
+  });
+
+  it("a bare name needs both, and says so", () => {
+    expect(nextAction(whatsMissing({ city: null, address: null, phone: null, email: null })))
+      .toBe("Needs an address and a number");
+  });
+
+  it("a street with no town still counts as a place — you can drive to it", () => {
+    expect(whatsMissing({ city: null, address: "14424 Swiss Lane", phone: null, email: null })).toBe("contact");
+  });
+
+  it("whitespace is not an answer", () => {
+    expect(whatsMissing({ city: "  ", address: " ", phone: "  ", email: "" })).toBe("both");
   });
 });

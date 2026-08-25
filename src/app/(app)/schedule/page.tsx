@@ -8,6 +8,9 @@ import { todayStrInTz } from "@/lib/tz";
 import { CalendarPanel } from "./calendar-panel";
 import { MapPanel } from "./map-panel";
 import { CrewBoardPanel } from "./crew-board-panel";
+import { PlaceRail } from "./place-rail";
+import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
+import type { Placeable } from "@/lib/schedule/place-by-town";
 
 export const dynamic = "force-dynamic";
 
@@ -91,5 +94,66 @@ export default async function SchedulePage({
     redirect(date ? `/schedule?date=${date}` : "/schedule");
   }
 
-  return <CalendarPanel />;
+  /**
+   * THE RAIL — everything waiting for a day, beside the calendar.
+   *
+   * Erik: "how do I put these on the schedule is the big denny". Nothing put the leads and the
+   * calendar in one view; the old "To schedule" tray held only dateless JOBS and a lead had never
+   * been in it. This absorbs that tray — he doesn't think of leads and jobs as two piles.
+   *
+   * RLS scopes both reads to his org. A lead counts as "waiting" when it is open and has no
+   * inspection booked yet; a job when it is in flight with no date.
+   */
+  const [{ data: leadRows }, { data: dateless }] = await Promise.all([
+    supabase
+      .from("inquiries")
+      .select("id, name, address, city, phone, email, message, notes, next_follow_up_at")
+      .is("converted_at", null)
+      .neq("status", "lost")
+      .order("created_at", { ascending: false })
+      .limit(500),
+    supabase
+      .from("jobs")
+      .select("id, job_number, name, address, city")
+      .is("scheduled_start", null)
+      .in("status", ACTIVE_JOB_STATUSES)
+      .order("created_at", { ascending: false })
+      .limit(200),
+  ]);
+
+  const today = todayStrInTz(getOrgSettings((await supabase.from("organizations").select("settings").limit(1).maybeSingle()).data?.settings as never).timezone);
+  const waiting: Placeable[] = [
+    ...((leadRows ?? []) as Record<string, string | null>[]).map((r) => ({
+      id: String(r.id),
+      kind: "lead" as const,
+      name: String(r.name ?? "Lead"),
+      address: r.address ?? null,
+      city: r.city ?? null,
+      phone: r.phone ?? null,
+      email: r.email ?? null,
+      note: r.message ?? r.notes ?? null,
+      urgent: !!r.next_follow_up_at && String(r.next_follow_up_at) < today,
+    })),
+    ...((dateless ?? []) as Record<string, string | null>[]).map((r) => ({
+      id: String(r.id),
+      kind: "job" as const,
+      name: `${r.job_number ? `${r.job_number} · ` : ""}${r.name ?? "Job"}`,
+      address: r.address ?? null,
+      city: r.city ?? null,
+    })),
+  ];
+
+  return (
+    <div className="space-y-4 lg:grid lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] lg:items-start lg:gap-6 lg:space-y-0">
+      <aside className="lg:sticky lg:top-4">
+        <h2 className="mb-2 text-sm font-semibold text-slate-900">
+          Waiting for a day <span className="font-normal text-slate-400">({waiting.length})</span>
+        </h2>
+        <PlaceRail items={waiting} />
+      </aside>
+      <div className="min-w-0">
+        <CalendarPanel />
+      </div>
+    </div>
+  );
 }

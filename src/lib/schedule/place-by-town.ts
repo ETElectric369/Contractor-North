@@ -20,9 +20,24 @@
  *     URGENCY PICKS THE ORDER.    Within Truckee, the overdue one goes first. It does not earn a
  *                                 separate trip unless he says so.
  *
- * A lead with no town sorts LAST regardless of how urgent it is — not a demotion, a fact: you
- * cannot put it in a run when you don't know where it is. Naming that bucket honestly ("No town
- * yet") is what makes it fixable rather than invisible.
+ * ── AND WHAT A MISSING TOWN IS NOT ─────────────────────────────────────────────────────────
+ *
+ * The first version sorted a townless lead LAST. Erik: "just becuase it doesnt have a town doesnt
+ * mean it goes at the end of the list, wrong logic, fragment first."
+ *
+ * He is right and it was a real violation. Mike Scrivano has no address — and a phone, an email,
+ * and "I have another job I'll need a quote on … 3 cans in a walkway". He is one of the most
+ * actionable leads in the pile: you can call him RIGHT NOW, and the address comes out of the call.
+ * Demoting him for a blank field is the app demanding data before it will treat him seriously,
+ * which is the exact thing fragment-first exists to forbid.
+ *
+ * So position is decided by the SAME rule for everyone — cluster size — and what a lead is missing
+ * becomes a NEXT ACTION rather than a penalty. A lead is never "not plannable"; it has a next
+ * thing, and what is absent decides which:
+ *
+ *     has a place, no way to reach them  → you cannot call, but you can go and look (9 of his 12)
+ *     has contact, no place              → call them; the address arrives with the call (Mike)
+ *     has both                           → put it on a day
  */
 
 export type Placeable = {
@@ -36,6 +51,8 @@ export type Placeable = {
   /** Follow-up overdue, or the office flagged it. Moves it up WITHIN its town, never between. */
   urgent?: boolean;
   note?: string | null;
+  phone?: string | null;
+  email?: string | null;
 };
 
 export type TownGroup = {
@@ -45,8 +62,31 @@ export type TownGroup = {
   unlocatable: boolean;
 };
 
-/** The bucket for anything we can't put on a map. Named, not hidden. */
+/** The bucket for anything with no town yet. Named, not hidden, and NOT demoted. */
 export const NO_TOWN = "No town yet";
+
+/** What this item still needs before it can be put on a day — the next action, not a penalty. */
+export type Missing = "nothing" | "place" | "contact" | "both";
+
+export function whatsMissing(i: Pick<Placeable, "city" | "address" | "phone" | "email">): Missing {
+  const has = (v: unknown) => String(v ?? "").trim() !== "";
+  const place = has(i.city) || has(i.address);
+  const contact = has(i.phone) || has(i.email);
+  if (place && contact) return "nothing";
+  if (!place && !contact) return "both";
+  return place ? "contact" : "place";
+}
+
+/** The next thing a person would actually do, in their words. */
+export function nextAction(m: Missing): string {
+  return m === "nothing"
+    ? "Ready to schedule"
+    : m === "place"
+      ? "Call to get the address"
+      : m === "contact"
+        ? "No phone or email — go and look, or find a number"
+        : "Needs an address and a number";
+}
 
 const norm = (s: string | null | undefined): string => String(s ?? "").trim().replace(/\s+/g, " ");
 /** Truckee, TRUCKEE and " truckee " are one place. */
@@ -76,11 +116,10 @@ export function groupByTown(items: Placeable[]): TownGroup[] {
     ),
   }));
 
-  return groups.sort((a, z) => {
-    // The unlocatable bucket is always last — it is not a place you can drive to.
-    if (a.unlocatable !== z.unlocatable) return a.unlocatable ? 1 : -1;
-    return z.items.length - a.items.length || a.town.localeCompare(z.town);
-  });
+  // ONE RULE FOR EVERY GROUP — size, then name. The townless bucket is NOT forced anywhere: it
+  // takes its place by the same measure as Truckee, and says what it needs instead of being
+  // punished for it. (See the fragment-first note above; forcing it last was the bug.)
+  return groups.sort((a, z) => z.items.length - a.items.length || a.town.localeCompare(z.town));
 }
 
 /**
