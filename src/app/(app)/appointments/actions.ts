@@ -822,7 +822,26 @@ export async function setAppointmentOutcome(
   return { ok: true };
 }
 
-export async function setAppointmentStatus(id: string, status: string): Promise<Result> {
+/**
+ * Set an appointment's status.
+ *
+ * TWO THINGS THIS OWED THE CALLER (audit v800 wave B).
+ *
+ * THE SILENT-WRITE LAW. The update carried no `.select()`, so a row RLS declined to touch came
+ * back with no error and no rows — and this returned ok:true. Cancelling somebody else's
+ * tenant's appointment, or one deleted a moment ago, reported success while nothing moved. A
+ * zero-row UPDATE is a 204, not an error; the only way to know is to ask for the row back.
+ *
+ * SOMETHING TO UNDO WITH. Cancelling is destructive and Erik's standing rule is no save game —
+ * every deed gets an undo trail. The previous status comes back so a caller can offer to put it
+ * straight back, and `note` names the one thing undo genuinely cannot restore: withdrawing a
+ * live "pick a time" link is irreversible, because the customer may already have seen it die.
+ * Saying so beats an undo that quietly restores less than it promises.
+ */
+export async function setAppointmentStatus(
+  id: string,
+  status: string,
+): Promise<Result & { previousStatus?: string; note?: string }> {
   // Spine guard (mirrors the 0052 check constraint) so a bad value reads as a clean
   // message instead of a raw Postgres constraint error.
   if (!(APPOINTMENT_STATUSES as readonly string[]).includes(status))
@@ -830,26 +849,41 @@ export async function setAppointmentStatus(id: string, status: string): Promise<
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
-  const { error } = await supabase
+  // Read first so undo has something to go back TO. RLS scopes this, so a cross-tenant id
+  // simply doesn't resolve and we stop before writing anything.
+  const { data: before } = await supabase
+    .from("appointments")
+    .select("status")
+    .eq("id", id)
+    .maybeSingle();
+  const previousStatus = (before as { status?: string } | null)?.status;
+  const { data: wrote, error } = await supabase
     .from("appointments")
     .update({ status, updated_at: new Date().toISOString() })
-    .eq("id", id);
+    .eq("id", id)
+    .select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!wrote?.length)
+    return { ok: false, error: "That appointment didn't change — reload and check it still exists." };
   // Cancelling/completing an appointment kills any live "pick a time" link, so a
   // customer tap can't resurrect a closed appointment.
+  let note: string | undefined;
   if (status === "cancelled" || status === "completed") {
-    await supabase
+    const { data: withdrawn } = await supabase
       .from("schedule_proposals")
       .update({ status: "cancelled" })
       .eq("appointment_id", id)
-      .eq("status", "pending");
+      .eq("status", "pending")
+      .select("id");
+    // The one part undo can't put back — say so rather than implying a clean reversal.
+    if (withdrawn?.length) note = "The customer's pick-a-time link was withdrawn and can't be un-withdrawn.";
   }
   // Google reconcile (fire-safe): cancel deletes the event; other statuses re-push.
   await pushCalendarItem("appointment", id);
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too
-  return { ok: true };
+  return { ok: true, previousStatus, note };
 }
 
 /** Reschedule an appointment to a new time (partial — keeps everything else). Used by the

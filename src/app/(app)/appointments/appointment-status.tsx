@@ -1,24 +1,65 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, X } from "lucide-react";
+import { Check, Undo2, X } from "lucide-react";
 import { setAppointmentStatus } from "./actions";
+import { useToast } from "@/components/toast";
 
 /** Quick "mark done" / "cancel" controls for an appointment row. */
 export function ApptQuickActions({ id, status, title }: { id: string; status: string; title: string }) {
   const router = useRouter();
+  const toast = useToast();
   const [pending, start] = useTransition();
+  /**
+   * NO SAVE GAME (Erik's standing rule): every deed gets a way back. Cancelling a booking used
+   * to be a one-way icon tap whose result was thrown away entirely — `await setAppointmentStatus`
+   * with no check, so a write RLS declined reported nothing at all and the row just sat there.
+   * Now the deed is announced, its failure is announced, and an undo sits next to it until the
+   * page moves on.
+   */
+  const [undoTo, setUndoTo] = useState<string | null>(null);
 
-  function set(next: string) {
+  function set(next: string, opts: { undoable?: boolean } = {}) {
     start(async () => {
-      await setAppointmentStatus(id, next);
+      const res = await setAppointmentStatus(id, next);
+      if (!res.ok) {
+        // Announce the failure. This is the whole reason the action now asks for the row back:
+        // silence used to be indistinguishable from success.
+        toast(res.error ?? "That didn't save.", "error");
+        return;
+      }
+      setUndoTo(opts.undoable ? (res.previousStatus ?? null) : null);
+      // ANNOUNCE THE DEED, NOT THE INTENT — and name the part that can't be undone rather than
+      // offering an undo that quietly restores less than it promises.
+      toast(next === "cancelled" ? `Cancelled${res.note ? ` — ${res.note}` : ""}` : "Marked done", "success");
+      router.refresh();
+    });
+  }
+
+  function undo() {
+    if (!undoTo) return;
+    start(async () => {
+      const res = await setAppointmentStatus(id, undoTo);
+      toast(res.ok ? "Put back" : (res.error ?? "Couldn't put it back."), res.ok ? "success" : "error");
+      if (res.ok) setUndoTo(null);
       router.refresh();
     });
   }
 
   return (
     <div className="flex items-center gap-1">
+      {undoTo && (
+        <button
+          onClick={undo}
+          disabled={pending}
+          className="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+          title={`Put it back to ${undoTo}`}
+        >
+          <Undo2 className="h-3.5 w-3.5" />
+          Undo
+        </button>
+      )}
       {status !== "completed" && (
         <button onClick={() => set("completed")} disabled={pending} className="rounded-md p-1 text-slate-400 hover:bg-green-50 hover:text-green-600" title="Mark done">
           <Check className="h-4 w-4" />
@@ -34,7 +75,7 @@ export function ApptQuickActions({ id, status, title }: { id: string; status: st
       <button
         onClick={() => {
           if (!confirm(`Mark "${title}" as cancelled? It stays on file — use Delete to remove it.`)) return;
-          set("cancelled");
+          set("cancelled", { undoable: true });
         }}
         disabled={pending}
         className="rounded-md p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"

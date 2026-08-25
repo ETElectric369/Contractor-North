@@ -212,24 +212,58 @@ export default async function JobDetailPage({
     }));
   }
 
-  const { data: pendingProposal } = await supabase
-    .from("schedule_proposals")
-    .select("id, token, dates")
-    .eq("job_id", id)
-    .eq("status", "pending")
-    .maybeSingle();
-
-  const { data: scheduleSegments } = await supabase
-    .from("job_schedule_segments")
-    .select("start_date, end_date")
-    .eq("job_id", id)
-    .order("start_date");
-
-  const { data: jobLists } = await supabase
-    .from("material_lists")
-    .select("id, name, created_at, material_list_items(count)")
-    .eq("job_id", id)
-    .order("created_at", { ascending: false });
+  /**
+   * ONE WAVE, NOT SIX (audit v800 wave B). These six reads are independent of each other and of
+   * everything between them, and they were running strictly one after another — six full
+   * round trips to Supabase, in series, before the page could render. On a truck at the edge of
+   * coverage that is the difference between a job opening and a tech giving up on it, and the
+   * 60mph rule is the standing measure for this page.
+   *
+   * Only two reads on this page genuinely depend on another: the canonical material list's items
+   * (needs the list) and the viewer's role (needs the user). Those follow in a second wave rather
+   * than dragging four unrelated queries along behind them.
+   */
+  const [
+    { data: pendingProposal },
+    { data: scheduleSegments },
+    { data: jobLists },
+    { data: jobAppts },
+    { data: jobContactsRaw },
+    {
+      data: { user },
+    },
+  ] = await Promise.all([
+    supabase
+      .from("schedule_proposals")
+      .select("id, token, dates")
+      .eq("job_id", id)
+      .eq("status", "pending")
+      .maybeSingle(),
+    supabase
+      .from("job_schedule_segments")
+      .select("start_date, end_date")
+      .eq("job_id", id)
+      .order("start_date"),
+    supabase
+      .from("material_lists")
+      .select("id, name, created_at, material_list_items(count)")
+      .eq("job_id", id)
+      .order("created_at", { ascending: false }),
+    // Full ApptValue fields so each row can open the edit modal in place.
+    supabase
+      .from("appointments")
+      .select("id, type, title, starts_at, ends_at, location, notes, status, job_id, customer_id, assigned_to")
+      .eq("job_id", id)
+      .order("starts_at"),
+    // Subs & contacts linked to THIS job (many-to-many). Graceful: if job_contacts doesn't exist
+    // yet (migration 0087 not applied), the query errors and we just show an empty card.
+    supabase
+      .from("job_contacts")
+      .select("id, role, customer_id, customers(name, phone)")
+      .eq("job_id", j.id)
+      .order("created_at"),
+    supabase.auth.getUser(),
+  ]);
 
   // THE job's materials list — Erik's rule: the Materials tab IS the list, not a
   // list-of-lists. Newest wins, which makes the estimate's take-off (created on
@@ -237,26 +271,13 @@ export default async function JobDetailPage({
   // renders the editor; the first added item lazily creates it server-side
   // (ensureJobMaterialList), so viewing a job never writes data.
   const canonicalList = ((jobLists ?? [])[0] ?? null) as { id: string; name: string } | null;
-  const { data: canonicalItems } = canonicalList
-    ? await supabase
-        .from("material_list_items")
-        .select("*")
-        .eq("list_id", canonicalList.id)
-        .order("sort_order")
-    : { data: null };
-
-  // Full ApptValue fields so each row can open the edit modal in place.
-  const { data: jobAppts } = await supabase
-    .from("appointments")
-    .select("id, type, title, starts_at, ends_at, location, notes, status, job_id, customer_id, assigned_to")
-    .eq("job_id", id)
-    .order("starts_at");
-
-  // Extra data for the per-tab "Add" buttons.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  const { data: meRow } = await supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle();
+  // WAVE 2 — the only two reads that genuinely need a wave-1 result.
+  const [{ data: canonicalItems }, { data: meRow }] = await Promise.all([
+    canonicalList
+      ? supabase.from("material_list_items").select("*").eq("list_id", canonicalList.id).order("sort_order")
+      : Promise.resolve({ data: null }),
+    supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle(),
+  ]);
   const viewerIsStaff = isStaffRole((meRow as any)?.role ?? "");
   // Merge the two directions into ONE entries list: shifts clocked on this job, plus shifts
   // clocked elsewhere that allocated hours here (deduped; the row math shows only this job's
@@ -309,13 +330,6 @@ export default async function JobDetailPage({
         allocatedHours: (oe.time_allocations ?? []).reduce((s: number, a: any) => s + (Number(a.hours) || 0), 0),
       }
     : null;
-  // Subs & contacts linked to THIS job (many-to-many). Graceful: if job_contacts doesn't exist yet
-  // (migration 0087 not applied), the query errors and we just show an empty card — no crash.
-  const { data: jobContactsRaw } = await supabase
-    .from("job_contacts")
-    .select("id, role, customer_id, customers(name, phone)")
-    .eq("job_id", j.id)
-    .order("created_at");
   const jobContacts = (jobContactsRaw ?? []).map((r: any) => ({
     id: r.id,
     role: r.role,
