@@ -13,6 +13,7 @@ import {
   whatsMissing,
   type Placeable,
 } from "@/lib/schedule/place-by-town";
+import { durationLabel, KIND_LABEL, KIND_TONE, workKind } from "@/lib/schedule/work-shape";
 
 /**
  * EVERYTHING WAITING FOR A DAY, next to the calendar.
@@ -125,10 +126,22 @@ export function PlaceRail({ items, onPickDay }: { items: Placeable[]; onPickDay?
                       {on && <Check className="h-3 w-3" />}
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="flex flex-wrap items-center gap-x-2">
+                      <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                         <span className="text-sm font-medium text-slate-900">{i.name}</span>
-                        {i.kind === "job" && <Badge tone="slate">job</Badge>}
-                        {i.urgent && <Badge tone="red">overdue</Badge>}
+                        {/* THE TAG AND THE CLOCK — Erik: "a tag showing service call, job,
+                            inspection/walk through, or office … and how much time they are going
+                            to take". Between them a day is plannable by eye: a 6h job and a 1h
+                            visit in one town is a full day with a stop on the way. */}
+                        <Badge tone={KIND_TONE[workKind(i)]}>{KIND_LABEL[workKind(i)]}</Badge>
+                        <span
+                          className={`font-mono text-xs tabular-nums ${
+                            i.planned_minutes ? "text-slate-600" : "text-slate-300"
+                          }`}
+                          title={i.planned_minutes ? "Expected time" : "Nobody has sized this yet"}
+                        >
+                          {durationLabel(i.planned_minutes)}
+                        </span>
+                        {i.urgent && <Badge tone="amber">overdue</Badge>}
                       </span>
                       {i.address && (
                         <span className="mt-0.5 flex items-center gap-1 text-xs text-slate-500">

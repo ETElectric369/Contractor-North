@@ -53,6 +53,10 @@ export type Placeable = {
   note?: string | null;
   phone?: string | null;
   email?: string | null;
+  /** Expected effort (0229). Null = nobody has sized it, which renders "—" and never "0h". */
+  planned_minutes?: number | null;
+  /** appointments.type, when this item IS one — drives the Walk-through / Service call / Office tag. */
+  type?: string | null;
 };
 
 export type TownGroup = {

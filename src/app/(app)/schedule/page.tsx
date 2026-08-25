@@ -104,7 +104,7 @@ export default async function SchedulePage({
    * RLS scopes both reads to his org. A lead counts as "waiting" when it is open and has no
    * inspection booked yet; a job when it is in flight with no date.
    */
-  const [{ data: leadRows }, { data: dateless }] = await Promise.all([
+  const [{ data: leadRows }, { data: dateless }, { data: undated }] = await Promise.all([
     supabase
       .from("inquiries")
       .select("id, name, address, city, phone, email, message, notes, next_follow_up_at")
@@ -114,9 +114,17 @@ export default async function SchedulePage({
       .limit(500),
     supabase
       .from("jobs")
-      .select("id, job_number, name, address, city")
+      .select("id, job_number, name, address, city, planned_minutes")
       .is("scheduled_start", null)
       .in("status", ACTIVE_JOB_STATUSES)
+      .order("created_at", { ascending: false })
+      .limit(200),
+    // A booking with no time on it yet — proposed, or created without a date.
+    supabase
+      .from("appointments")
+      .select("id, title, type, location, planned_minutes")
+      .is("starts_at", null)
+      .not("status", "in", "(cancelled,completed)")
       .order("created_at", { ascending: false })
       .limit(200),
   ]);
@@ -140,6 +148,21 @@ export default async function SchedulePage({
       name: `${r.job_number ? `${r.job_number} · ` : ""}${r.name ?? "Job"}`,
       address: r.address ?? null,
       city: r.city ?? null,
+      planned_minutes: r.planned_minutes == null ? null : Number(r.planned_minutes),
+    })),
+    // ── THE BOOKED-BUT-UNPLANNED WALK-THROUGHS. Erik: "we have to roll in the 'to be scheduled'
+    //    stuff somehow for example i have a couple inspections that already link to the leads i
+    //    inputted." An appointment with NO start is a decision already taken and a day not yet
+    //    chosen — which is exactly what this rail is for. Without it they were invisible: not on
+    //    the calendar (no date) and not in the rail (not a lead, not a dateless job).
+    ...((undated ?? []) as Record<string, string | null>[]).map((r) => ({
+      id: String(r.id),
+      kind: "lead" as const, // it books like one: a walk-through that needs a day
+      name: String(r.title ?? "Site visit"),
+      address: r.location ?? null,
+      city: null,
+      type: r.type ?? null,
+      planned_minutes: r.planned_minutes == null ? null : Number(r.planned_minutes),
     })),
   ];
 
