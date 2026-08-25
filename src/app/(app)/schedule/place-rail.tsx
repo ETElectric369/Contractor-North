@@ -6,7 +6,7 @@ import { CalendarPlus, MapPin, Phone, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/toast";
-import { scheduleLeadsOnDay } from "../leads/actions";
+import { scheduleLeadsOnDay, sizeLead } from "../leads/actions";
 import {
   groupByTown,
   nextAction,
@@ -51,6 +51,14 @@ export function PlaceRail({ items, onPickDay }: { items: Placeable[]; onPickDay?
   // the job itself, which is a different write. Say so rather than silently ignoring them.
   const leads = chosen.filter((i) => i.kind === "lead");
   const jobs = chosen.filter((i) => i.kind === "job");
+
+  function size(id: string, patch: { workKind?: string; plannedMinutes?: number | null }) {
+    start(async () => {
+      const res = await sizeLead(id, patch);
+      if (!res.ok) { toast(res.error ?? "Couldn't save that.", "error"); return; }
+      router.refresh();
+    });
+  }
 
   function toggle(id: string) {
     setPicked((p) => {
@@ -146,6 +154,45 @@ export function PlaceRail({ items, onPickDay }: { items: Placeable[]; onPickDay?
                       {i.address && (
                         <span className="mt-0.5 flex items-center gap-1 text-xs text-slate-500">
                           <MapPin className="h-3 w-3 shrink-0" /> {i.address}
+                        </span>
+                      )}
+                      {/* SIZE IT RIGHT HERE. Erik: "editable on the schedule page". The moment
+                          you NEED the number is while filling a day; making him leave, find the
+                          lead, edit, and come back is the round trip he says costs the most.
+                          Only on the picked card — chrome you are not using is chrome in the way. */}
+                      {on && i.kind === "lead" && (
+                        <span
+                          className="mt-1 flex flex-wrap items-center gap-1.5"
+                          onClick={(e) => { e.stopPropagation(); e.preventDefault(); }}
+                        >
+                          <select
+                            value={i.workKind ?? ""}
+                            onChange={(e) => size(i.id, { workKind: e.target.value })}
+                            className="h-7 rounded-md border border-slate-200 bg-white px-1.5 text-xs"
+                            aria-label="What kind of work"
+                          >
+                            <option value="">Kind?</option>
+                            <option value="walkthrough">Walk-through</option>
+                            <option value="service">Service call</option>
+                            <option value="job">Job</option>
+                            <option value="quote">Quote</option>
+                            <option value="office">Office</option>
+                          </select>
+                          <select
+                            value={i.planned_minutes ? String(i.planned_minutes) : ""}
+                            onChange={(e) => size(i.id, { plannedMinutes: Number(e.target.value) || null })}
+                            className="h-7 rounded-md border border-slate-200 bg-white px-1.5 text-xs"
+                            aria-label="How long will it take"
+                          >
+                            <option value="">How long?</option>
+                            <option value="30">30m</option>
+                            <option value="60">1h</option>
+                            <option value="120">2h</option>
+                            <option value="240">Half day</option>
+                            <option value="480">Full day</option>
+                            <option value="960">2 days</option>
+                            <option value="1440">3 days</option>
+                          </select>
                         </span>
                       )}
                       {/* THE GAP, QUIET UNTIL IT IS IN THE WAY.

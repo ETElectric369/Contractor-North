@@ -35,7 +35,13 @@ const APPT_KIND: Record<string, WorkKind> = {
   other: "other",
 };
 
-export function workKind(i: { kind?: "lead" | "job"; type?: string | null }): WorkKind {
+export function workKind(i: { kind?: "lead" | "job"; type?: string | null; workKind?: string | null }): WorkKind {
+  // WHAT HE TOLD THE APP BEATS WHAT THE APP WORKED OUT. A lead's own work_kind (0230) is a person's
+  // answer given at the moment they knew; everything below it is inference.
+  const told = String(i.workKind ?? "");
+  if ((["job", "walkthrough", "service", "office", "quote", "other"] as string[]).includes(told)) {
+    return told as WorkKind;
+  }
   if (i.kind === "job") return "job";
   // A LEAD's next step is a walk-through — that is the only thing a lead can be scheduled as, and
   // it is what scheduleLeadsOnDay books.
@@ -117,4 +123,24 @@ export function dayLoad(items: { planned_minutes?: number | null }[]): {
   if (minutes > 0) parts.push(durationLabel(minutes));
   if (unsized > 0) parts.push(`${unsized} unsized`);
   return { minutes, unsized, label: parts.join(" · ") };
+}
+
+
+/**
+ * The appointment type a lead's kind books AS.
+ *
+ * THE TAG DOES NOT GET RE-DECIDED AT EACH STAGE — that is the whole of Erik's "interconnected".
+ * He picks "Service call" on the lead; the booking becomes appointments.type = 'service_call'; the
+ * calendar chip reads "Service call" because workKind maps it straight back. One choice, made once,
+ * at the moment somebody actually knew.
+ *
+ * `job` and `quote` book as a walk-through: you still have to go and look before either exists.
+ */
+export function appointmentTypeFor(kind: string | null | undefined): string {
+  switch (kind) {
+    case "service": return "service_call";
+    case "office": return "meeting";
+    case "quote": return "quote";
+    default: return "inspection";
+  }
 }

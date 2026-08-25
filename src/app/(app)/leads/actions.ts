@@ -7,6 +7,7 @@ import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
 import { requireStaff } from "@/lib/staff-guard";
 import { spreadTimes } from "@/lib/schedule/place-by-town";
+import { appointmentTypeFor } from "@/lib/schedule/work-shape";
 import { carryFromCustomer, matchKnownCustomer, type KnownCustomer } from "@/lib/inquiries/known-customer";
 import { createServiceClient } from "@/lib/supabase/server";
 import { formatPhone, formatState, formatZip, titleCase } from "@/lib/utils";
@@ -68,6 +69,9 @@ function inquiryFields(formData: FormData) {
     zip: orNull(formatZip(String(formData.get("zip") ?? ""))),
     message: emptyToNull(formData.get("message")),
     notes: emptyToNull(formData.get("notes")),
+    // Both nullable by design — "Not sure yet" is a real answer and the default (0230).
+    work_kind: emptyToNull(formData.get("work_kind")),
+    planned_minutes: Number(formData.get("planned_minutes")) || null,
   };
 }
 
@@ -413,7 +417,14 @@ export async function convertInquiry(
     if (!startsAtIso) return { ok: false, error: "Pick a valid inspection date." };
     const carry = await carryForInquiry(supabase, inq);
     const { error: aErr } = await supabase.from("appointments").insert({
-      type: "inspection",
+      // THE TAG THE OFFICE PICKED ON THE LEAD, not a hard-coded "inspection". Erik: "if we enter
+      // that data on the lead view itself and editable on the schedule page we might be getting
+      // somewhere." One choice, made once, at the moment somebody knew — and it survives to the
+      // calendar chip instead of being re-decided here. Falls back to inspection, which is what a
+      // lead's next step is when nobody has said otherwise.
+      type: appointmentTypeFor((inq as { work_kind?: string | null }).work_kind),
+      // …and how long they said it would take, so the day it lands on knows its own load.
+      planned_minutes: (inq as { planned_minutes?: number | null }).planned_minutes ?? null,
       title: `Site inspection: ${inq.name}`,
       starts_at: startsAtIso,
       location: inq.address,
@@ -704,4 +715,44 @@ export async function scheduleLeadsOnDay(
   revalidatePath("/schedule");
   revalidatePath("/planner");
   return { ok: booked > 0, booked, failures, error: booked ? undefined : failures[0]?.error };
+}
+
+/**
+ * SIZE THE WORK FROM WHEREVER YOU ARE.
+ *
+ * Erik: "if we enter that data on the lead view itself and editable on the schedule page we might
+ * be getting somewhere." The lead form is where the answer usually arrives — on the call — but the
+ * moment you actually NEED the number is while filling a day, and making him leave the schedule,
+ * find the lead, edit it, and come back is the round trip he says costs him the most.
+ *
+ * Both fields independently optional: sizing something you already tagged must not force you to
+ * re-pick the tag, and vice versa. Passing neither is a no-op rather than an error.
+ */
+export async function sizeLead(
+  id: string,
+  patch: { workKind?: string | null; plannedMinutes?: number | null },
+): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const KINDS = ["job", "walkthrough", "service", "office", "quote", "other"];
+  const clean: Record<string, unknown> = {};
+  if (patch.workKind !== undefined) {
+    const k = String(patch.workKind ?? "").trim();
+    if (k && !KINDS.includes(k)) return { ok: false, error: "That isn't a kind of work." };
+    clean.work_kind = k || null; // "" clears it back to "not sure yet"
+  }
+  if (patch.plannedMinutes !== undefined) {
+    const m = Number(patch.plannedMinutes) || 0;
+    if (m < 0 || m > 60 * 24 * 30) return { ok: false, error: "That duration isn't sensible." };
+    clean.planned_minutes = m > 0 ? m : null; // 0 means "not sure yet", never a zero-length job
+  }
+  if (!Object.keys(clean).length) return { ok: true };
+  clean.updated_at = new Date().toISOString();
+  // THE SILENT-WRITE LAW: a zero-row update is a 204, not an error.
+  const { data, error } = await ctx.supabase.from("inquiries").update(clean).eq("id", id).select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!data?.length) return { ok: false, error: "That lead isn't available." };
+  revalidatePath("/leads");
+  revalidatePath("/schedule");
+  return { ok: true };
 }

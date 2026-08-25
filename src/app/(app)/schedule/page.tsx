@@ -107,7 +107,7 @@ export default async function SchedulePage({
   const [{ data: leadRows }, { data: dateless }, { data: undated }] = await Promise.all([
     supabase
       .from("inquiries")
-      .select("id, name, address, city, phone, email, message, notes, next_follow_up_at")
+      .select("id, name, address, city, phone, email, message, notes, next_follow_up_at, work_kind, planned_minutes")
       .is("converted_at", null)
       .neq("status", "lost")
       .order("created_at", { ascending: false })
@@ -141,6 +141,10 @@ export default async function SchedulePage({
       email: r.email ?? null,
       note: r.message ?? r.notes ?? null,
       urgent: !!r.next_follow_up_at && String(r.next_follow_up_at) < today,
+      // The kind and the size the office chose ON THE LEAD (0230) — the rail shows what they
+      // said rather than deciding again.
+      workKind: r.work_kind ?? null,
+      planned_minutes: r.planned_minutes == null ? null : Number(r.planned_minutes),
     })),
     ...((dateless ?? []) as Record<string, string | null>[]).map((r) => ({
       id: String(r.id),

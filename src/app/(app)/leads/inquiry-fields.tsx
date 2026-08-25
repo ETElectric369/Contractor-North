@@ -21,6 +21,11 @@ export interface InquiryFormValue {
   zip: string;
   message: string;
   notes: string;
+  /** The app-wide WorkKind (lib/schedule/work-shape) — "" means not sure yet, which is a real
+   *  answer and the default. NOT `type`, which means residential/commercial. */
+  work_kind: string;
+  /** Expected minutes as a string (it comes off a <Select>); "" means unsized. */
+  planned_minutes: string;
 }
 
 export const inquiryFormValue = (inquiry?: Inquiry): InquiryFormValue => ({
@@ -35,6 +40,15 @@ export const inquiryFormValue = (inquiry?: Inquiry): InquiryFormValue => ({
   zip: inquiry?.zip ?? "",
   message: inquiry?.message ?? "",
   notes: inquiry?.notes ?? "",
+  // WHAT KIND, AND HOW LONG — asked where the answer already is. Erik: "i should be able to mark
+  // the lead when it shows up … and enter the estimated time its going to take". Whoever takes the
+  // call already knows it is a two-hour service call; asking later, on a calendar, asks somebody
+  // to remember what they were told.
+  work_kind: (inquiry as { work_kind?: string | null } | undefined)?.work_kind ?? "",
+  planned_minutes:
+    (inquiry as { planned_minutes?: number | null } | undefined)?.planned_minutes != null
+      ? String((inquiry as { planned_minutes?: number | null }).planned_minutes)
+      : "",
 });
 
 /** Form body shared by the New-inquiry and Edit-inquiry modals. State lives in
@@ -59,8 +73,37 @@ export function InquiryFields({
         <Label htmlFor="company_name">Company</Label>
         <Input id="company_name" name="company_name" value={value.company_name} onChange={(e) => onChange({ company_name: e.target.value })} placeholder="(optional)" />
       </div>
+      {/* WHAT IT IS and HOW LONG — side by side, because they are one thought. Durations are a
+          dropdown of the shapes a contractor actually books rather than a free number: "Half day"
+          is one tap at 60mph and typing 240 is not. "Not sure yet" is a real option and the
+          default — an honest blank beats a made-up number that later reads as a decision. */}
       <div>
-        <Label htmlFor="type">Type</Label>
+        <Label htmlFor="work_kind">What kind of work</Label>
+        <Select id="work_kind" name="work_kind" value={value.work_kind} onChange={(e) => onChange({ work_kind: e.target.value })}>
+          <option value="">Not sure yet</option>
+          <option value="walkthrough">Walk-through</option>
+          <option value="service">Service call</option>
+          <option value="job">Job</option>
+          <option value="quote">Quote</option>
+          <option value="office">Office</option>
+        </Select>
+      </div>
+      <div>
+        <Label htmlFor="planned_minutes">How long will it take</Label>
+        <Select id="planned_minutes" name="planned_minutes" value={value.planned_minutes} onChange={(e) => onChange({ planned_minutes: e.target.value })}>
+          <option value="">Not sure yet</option>
+          <option value="30">30 minutes</option>
+          <option value="60">1 hour</option>
+          <option value="120">2 hours</option>
+          <option value="240">Half day (4h)</option>
+          <option value="480">Full day</option>
+          <option value="960">2 days</option>
+          <option value="1440">3 days</option>
+          <option value="2400">A week</option>
+        </Select>
+      </div>
+      <div>
+        <Label htmlFor="type">Residential or commercial</Label>
         <Select id="type" name="type" value={value.type} onChange={(e) => onChange({ type: e.target.value })}>
           <option value="residential">Residential</option>
           <option value="commercial">Commercial</option>

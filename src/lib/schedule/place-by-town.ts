@@ -57,6 +57,9 @@ export type Placeable = {
   planned_minutes?: number | null;
   /** appointments.type, when this item IS one — drives the Walk-through / Service call / Office tag. */
   type?: string | null;
+  /** A LEAD's own work_kind (0230), chosen on the lead where the caller already knew. Preferred
+   *  over any inference: what he told the app beats what the app worked out. */
+  workKind?: string | null;
 };
 
 export type TownGroup = {
