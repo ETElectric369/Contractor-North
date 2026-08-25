@@ -95,6 +95,12 @@ export function InquiryModal({ inquiry, mode = "new" }: { inquiry?: Inquiry; mod
         setError(res.error ?? "Something went wrong.");
         return;
       }
+      // NOTHING SILENT. When the lead recognised an existing customer and pulled their phone or
+      // address across — or found two people with that name and deliberately linked NEITHER —
+      // say so. A field that fills itself without explanation is how somebody stops trusting a
+      // form, and a duplicate created in silence is exactly the friction this fixes.
+      const note = (res as { note?: string }).note;
+      if (note) toast(note, "success");
       // Saved — drop the draft and reset so reopening doesn't offer a duplicate.
       draft.clear();
       if (!editing) {

@@ -6,6 +6,7 @@ import { findMatchingCustomerId, type DupCustomer } from "@/lib/crm/duplicates";
 import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
 import { requireStaff } from "@/lib/staff-guard";
+import { carryFromCustomer, matchKnownCustomer, type KnownCustomer } from "@/lib/inquiries/known-customer";
 import { createServiceClient } from "@/lib/supabase/server";
 import { formatPhone, formatState, formatZip, titleCase } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
@@ -69,7 +70,7 @@ function inquiryFields(formData: FormData) {
   };
 }
 
-export async function createInquiry(formData: FormData): Promise<Result> {
+export async function createInquiry(formData: FormData): Promise<Result & { note?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -99,11 +100,46 @@ export async function createInquiry(formData: FormData): Promise<Result> {
   // Needs-action inbox feeds off it. So the lead carries its own date, and the calendar keeps
   // meaning "things I agreed to be somewhere for".
   const tz = await orgTimezone(supabase);
+
+  /**
+   * THE APP ALREADY KNOWS THIS PERSON (Erik, entering his real lead list: "lack of fluidity and
+   * connectivity"). Measured on what he typed in one sitting: 12 leads, 5 already customers, 2
+   * linked. For two of them the CUSTOMER row held a phone and an email and the lead came back
+   * with neither — he typed a name and got a lead he could not call.
+   *
+   * RLS scopes this read to his org, so a name can only ever match his own customers. See
+   * known-customer for why what he typed always wins, why the place carries all-or-nothing, and
+   * why two people with one name link to neither.
+   */
+  let linkedCustomerId: string | null = null;
+  let carried: Record<string, string> = {};
+  let link_note: string | undefined;
+  try {
+    const { data: known } = await supabase
+      .from("customers")
+      .select("id, name, phone, email, address, city, state, zip, company_name")
+      .limit(5000);
+    const m = matchKnownCustomer(name, (known ?? []) as KnownCustomer[]);
+    if (m.kind === "one") {
+      linkedCustomerId = m.customer.id;
+      const c = carryFromCustomer(fields as never, m.customer);
+      carried = c.patch as Record<string, string>;
+      link_note = c.note || `Linked to ${m.customer.name ?? "an existing customer"}.`;
+    } else if (m.kind === "ambiguous") {
+      // Deliberately unlinked — but say so, or he silently gets a duplicate he never notices.
+      link_note = `You have ${m.count} customers named "${name}" — this lead wasn't linked to either. Open it and pick the right one.`;
+    }
+  } catch {
+    // Never let the convenience break the capture. Fragment-first: the lead saves regardless.
+  }
+
   const { data, error } = await supabase
     .from("inquiries")
     .insert({
       name,
       ...fields,
+      ...carried,
+      customer_id: linkedCustomerId,
       source: "manual",
       status: "new",
       next_follow_up_at: ymdAddDays(todayStrInTz(tz), 1),
@@ -117,7 +153,7 @@ export async function createInquiry(formData: FormData): Promise<Result> {
   // /schedule no longer needs waking: a new lead doesn't put anything on the calendar any more.
   // My Day does — the Needs-action inbox feeds off inquiries and their follow-up date.
   revalidatePath("/planner");
-  return { ok: true, id: data.id };
+  return { ok: true, id: data.id, note: link_note };
 }
 
 export async function updateInquiry(id: string, formData: FormData): Promise<Result> {
