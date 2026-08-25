@@ -175,14 +175,7 @@ export function InquiryRow({
         )}
         {inquiry.last_contacted_at && <span>contacted {formatDate(inquiry.last_contacted_at)}</span>}
         {inquiry.intake?.reason && <span className="hidden text-slate-400 md:inline">{inquiry.intake.reason}</span>}
-        <span className="ml-auto flex flex-wrap items-center justify-end gap-1.5">
-          <ConvertMenu
-            inquiryId={inquiry.id}
-            inquiryName={inquiry.name}
-            customerId={inquiry.customer_id}
-            customerName={inquiry.customer_id ? (customers.find((c) => c.id === inquiry.customer_id)?.name ?? null) : null}
-            customers={customers}
-          />
+        <span className="ml-auto flex shrink-0 items-center gap-1.5">
           <button
             type="button"
             onClick={() => setOpen((v) => !v)}
@@ -194,6 +187,20 @@ export function InquiryRow({
           </button>
         </span>
       </div>
+
+      {/* ── LINE 3: THE THREE VERBS, on their own row and centred. Erik: "they should line up on
+          the page centered instead of all over the place now its confusing."
+          They used to sit at the END of the contact line, so their left edge moved with whatever
+          phone / email / note happened to precede them — every row put them somewhere different
+          and the eye had to re-find them on each one. On their own row they land in the same place
+          all the way down the list, which is what makes a list of 32 scannable. ── */}
+      <ConvertMenu
+        inquiryId={inquiry.id}
+        inquiryName={inquiry.name}
+        customerId={inquiry.customer_id}
+        customerName={inquiry.customer_id ? (customers.find((c) => c.id === inquiry.customer_id)?.name ?? null) : null}
+        customers={customers}
+      />
 
       {/* The message rides collapsed as ONE clamped line — the single biggest source of the old
           row's height. The full text, the customer's files and the workflow controls all live one

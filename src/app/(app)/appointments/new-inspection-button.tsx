@@ -19,6 +19,7 @@ import { createInspectionNow } from "./actions";
  *     schedule half where an existing schedule affordance already sits alongside (lead row).
  */
 export function NewInspectionButton({
+  label,
   inquiryId,
   nowOnly = false,
   schedule,
@@ -27,6 +28,10 @@ export function NewInspectionButton({
 }: {
   /** Lead context: links the inspection to this inquiry (provenance + capture → estimate threading). */
   inquiryId?: string;
+  /** Override the button's word. The lead row uses a bare "Inspect" so the three verbs read as
+   *  one set (Inspect · Schedule · Estimate); everywhere else keeps "Inspect now", where the
+   *  "now" is doing real work distinguishing it from booking one. */
+  label?: string;
   /** Render only the one-tap "Inspect now" button (the lead row already has schedule options). */
   nowOnly?: boolean;
   /** Custom schedule-mode affordance (the existing flow); defaults to the schedule page's create door. */
@@ -54,7 +59,7 @@ export function NewInspectionButton({
   return (
     <div className="flex flex-wrap items-center gap-2">
       <Button size={size} variant={variant} onClick={inspectNow} disabled={busy} className="shrink-0 whitespace-nowrap">
-        <ClipboardCheck className="h-4 w-4" /> {busy ? "Starting…" : "Inspect now"}
+        <ClipboardCheck className="h-4 w-4" /> {busy ? "Starting…" : (label ?? "Inspect now")}
       </Button>
       {!nowOnly &&
         (schedule ?? (

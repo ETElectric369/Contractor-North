@@ -238,7 +238,12 @@ export default async function CustomerDetailPage({
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold text-slate-900">{c.name}</h1>
-            <Badge tone={statusTone(c.status)}>{c.status === "lead" ? "inquiry" : c.status}</Badge>
+            {/* "Lead", not "inquiry" — the nav says Leads and the table says lead; a third word for the
+                same thing on the one page where it is most prominent was its own small confusion.
+                And it is now TRUE: 0228 promotes a customer to active the moment they get a job,
+                an accepted estimate or an invoice, so this can no longer say "lead" about somebody
+                who has paid you (Lorraine Lim, $8,706, read "Inquiry" until tonight). */}
+            <Badge tone={statusTone(c.status)}>{c.status === "lead" ? "lead" : c.status}</Badge>
           </div>
           {c.company_name && <p className="mt-1 text-sm text-slate-500">{c.company_name}</p>}
           <Badge tone="slate" className="mt-2">{c.type}</Badge>

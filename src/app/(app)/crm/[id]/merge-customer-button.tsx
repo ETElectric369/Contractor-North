@@ -58,7 +58,7 @@ export function MergeCustomerButton({
   return (
     <>
       <Button variant="outline" onClick={() => setOpen(true)}>
-        <GitMerge className="h-4 w-4" /> Merge Into…
+        <GitMerge className="h-4 w-4" /> This is a duplicate…
       </Button>
 
       <Modal

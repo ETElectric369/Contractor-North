@@ -150,11 +150,17 @@ export function ConvertMenu({
 
   return (
     <>
-      <div className="flex flex-wrap gap-2">
+      {/* THREE VERBS, ONE SET, CENTRED. Erik: "lets make the buttons simple: (Inspect - Schedule
+          - Estimate) and they should line up on the page centered instead of all over the place
+          now its confusing." They used to sit at the end of the contact line, so their left edge
+          moved with whatever phone/email/note happened to precede them — every row put them
+          somewhere different and the eye had to re-find them on each one. Centred on their own
+          row, they land in the same place down the whole list. */}
+      <div className="flex w-full flex-wrap items-center justify-center gap-2">
         {/* Already onsite? One tap creates the inspection (linked to this lead) and lands
             straight on its capture page — no booking ceremony (nowOnly: the schedule
             options live right here in the modal alongside). */}
-        <NewInspectionButton nowOnly inquiryId={inquiryId} size="sm" variant="outline" />
+        <NewInspectionButton nowOnly label="Inspect" inquiryId={inquiryId} size="sm" variant="outline" />
         {/* "Schedule", not "Schedule inspection" — Erik: "takes up way too much space on the
             screen and is distracting". The word "inspection" was doing no work on a LEAD row,
             where a site visit is the only thing there is to schedule; the modal it opens says
@@ -163,7 +169,7 @@ export function ConvertMenu({
           <CalendarPlus className="h-4 w-4" /> Schedule
         </Button>
         <Button size="sm" onClick={() => run("estimate")} disabled={busy !== null}>
-          <FileText className="h-4 w-4" /> {busy === "estimate" ? "Opening…" : "Create estimate"}
+          <FileText className="h-4 w-4" /> {busy === "estimate" ? "Opening…" : "Estimate"}
         </Button>
         {/* DON'T OFFER A DEED THAT IS ALREADY DONE. Erik: "naturally if they are already saved as
             a contact i shouldnt have this button glaring at me."

@@ -43,10 +43,10 @@ export function PortalLinkButton({
     <div className="flex flex-col items-end gap-1">
       <div className="flex gap-2">
         <Button variant="outline" size="sm" onClick={copyIt}>
-          <Copy className="h-4 w-4" /> Copy Portal Link
+          <Copy className="h-4 w-4" /> Copy their link
         </Button>
-        <Button variant="outline" size="sm" onClick={emailIt} disabled={pending || !hasEmail} title={hasEmail ? "" : "Add an email to this customer first"}>
-          <LayoutDashboard className="h-4 w-4" /> {pending ? "Sending…" : "Email Portal"}
+        <Button variant="outline" size="sm" onClick={emailIt} disabled={pending || !hasEmail} title={hasEmail ? "Email them their own page — every estimate and invoice of theirs, in one place" : "Add an email to this customer first"}>
+          <LayoutDashboard className="h-4 w-4" /> {pending ? "Sending…" : "Email them the link"}
         </Button>
       </div>
       {msg && <span className="text-xs text-slate-500">{msg}</span>}
