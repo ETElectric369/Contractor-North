@@ -435,3 +435,49 @@ describe("orphanedAnswers — the children of a question that stopped asking its
     expect(retiredLabel("scope__was")).toBe("Scope — choices you've since changed");
   });
 });
+
+/**
+ * A CHAIN, NOT A LINK (audit v824 — my own cn-v817 bug, found by an adversarial pass).
+ *
+ * orphanedAnswers decided what to park with applicableNeeds — ONE resolution pass. The save path
+ * nulls with clearInapplicable, which iterates to a FIXED POINT because `when` allows chains.
+ * Fixed-point-inapplicable is a strict superset, so every answer more than one link down a
+ * renamed branch was nulled by the save and never parked by the rescue: destroyed by the fix for
+ * exactly that destruction.
+ */
+describe("orphanedAnswers — a renamed chip takes the whole CHAIN, not just its children", () => {
+  // work -> power_source -> feed -> run_ft, three links deep. Erik's real electrical playbook
+  // has precisely this shape.
+  const chain = (chip: string): Playbook => ({
+    needs: [
+      { key: "work", label: "Work", ask: "?", slot: { type: "select", options: [chip, "Troubleshoot"], multi: true } },
+      { key: "power_source", label: "Power source", ask: "?", when: [{ key: "work", in: [chip] }] },
+      { key: "feed", label: "Feed", ask: "?", when: [{ key: "power_source", known: true }] },
+      { key: "run_ft", label: "Run ft", ask: "?", slot: { type: "number", unit: "ft" }, when: [{ key: "feed", known: true }] },
+    ],
+  });
+  const finished = {
+    work: ["Add circuits"],
+    power_source: "Meter main, two open slots",
+    feed: "Subpanel on the north wall",
+    run_ft: 45,
+  };
+
+  it("parks EVERY link, not just the one directly gated on the renamed chip", () => {
+    // Erik renames "Add circuits" to "Add circuits / receptacles" in Settings.
+    const out = orphanedAnswers(chain("Add circuits / receptacles"), finished);
+    expect(Object.keys(out).sort()).toEqual(["feed", "power_source", "run_ft"]);
+    expect(out.run_ft).toBe("45");
+    expect(out.feed).toBe("Subpanel on the north wall");
+  });
+
+  it("still says nothing when the playbook matches the row", () => {
+    expect(orphanedAnswers(chain("Add circuits"), finished)).toEqual({});
+  });
+
+  it("a real deselect deeper in the chain is still NOT rescued", () => {
+    // The stored row itself says Troubleshoot: the person changed their mind, so the downstream
+    // answers are stale by definition and clearing them is correct. Nothing to park.
+    expect(orphanedAnswers(chain("Add circuits"), { ...finished, work: ["Troubleshoot"] })).toEqual({});
+  });
+});

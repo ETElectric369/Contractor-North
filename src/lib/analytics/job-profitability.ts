@@ -279,9 +279,25 @@ export async function getJobActualByCategory(supabase: any, jobId: string): Prom
     supabase.from("bills").select("amount, scope_category, po_id").eq("job_id", jobId),
     supabase.from("purchase_orders").select("id, total, status").eq("job_id", jobId),
     // THE HALF THAT WAS NEVER COUNTED. Through laborCostForJob — the same split-aware, pay-rate
-    // helper computeJobProfitRows uses — so budget-vs-actual and job profitability can never
-    // report two different labour numbers for one job.
-    supabase.from("time_entries").select("*").eq("job_id", jobId).eq("status", "closed"),
+    // helper computeJobProfitRows uses.
+    //
+    // THE PROJECTION LAW, AND I BROKE IT SHIPPING THE FIX FOR IT (audit v824). cn-v821 wrote
+    // `.select("*")` here. In PostgREST `*` means THIS TABLE'S COLUMNS — it does not expand
+    // embeds. So the rows reached laborCostForJob with no `profiles` (no pay rate) and no
+    // `time_allocations` (no split), and every hour priced at $0. The Labor row I had just added
+    // to both sides read `actual: 0` on every job, and the commit's claim that the two readers
+    // "can never report two different labour numbers" was false in the same breath that made it.
+    // The helper was shared; the INPUT was not, and laborCostForJob is entirely input-driven.
+    //
+    // This is now the IDENTICAL projection to fetchProfitInputs above — same columns, same
+    // embeds, same explicit limit — because that is the only thing that makes the two agree.
+    supabase
+      .from("time_entries")
+      .select("job_id, clock_in, clock_out, lunch_minutes, status, rate_override, profiles(id), time_allocations(job_id, hours)")
+      .eq("status", "closed")
+      .eq("job_id", jobId)
+      .order("clock_in", { ascending: false })
+      .limit(50000),
     supabase.from("petty_cash").select("amount, kind").eq("job_id", jobId),
   ]);
   const map = new Map<string, number>();
@@ -303,6 +319,11 @@ export async function getJobActualByCategory(supabase: any, jobId: string): Prom
     .filter((x) => x.kind !== "replenish")
     .reduce((t, x) => t + (Number(x.amount) || 0), 0);
   if (pettyTotal) map.set("Uncategorized", (map.get("Uncategorized") ?? 0) + pettyTotal);
+  // AND THE RATES. 0215/0216 revoked the pay columns from `authenticated`, so no PostgREST embed
+  // can carry them for anyone — they are merged in from the staff-scoped profile_pay view,
+  // exactly as fetchProfitInputs does. Without this the embeds are present and every rate is
+  // still undefined, which looks identical to the bug above and is a second way to get $0.
+  attachRates((entries ?? []) as any[], await payRateMap(supabase), (e: any) => ({ id: e.profiles?.id, holder: e }));
   const laborCost = laborCostForJob((entries ?? []) as any[], jobId).cost;
   if (laborCost) map.set(LABOR_CATEGORY, (map.get(LABOR_CATEGORY) ?? 0) + laborCost);
   return [...map.entries()]

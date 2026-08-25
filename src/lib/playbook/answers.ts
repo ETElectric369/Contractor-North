@@ -218,7 +218,37 @@ export function orphanedAnswers(pb: Playbook, stored: unknown): Record<string, s
   // "Deck" no longer matches any option, so it coerces away, so the rule that named it stops
   // matching — which is precisely the state we are detecting.
   const asStored = coerceByPlaybook(pb, src);
-  const stillApplies = new Set(applicableNeeds(pb, asStored).map((n) => n.key));
+
+  /**
+   * THE FIXED POINT, AND WHAT ATTRIBUTES IT (audit v824 — two mistakes, one on each side).
+   *
+   * First version: applicableNeeds resolves ONE level while the save path nulls at a FIXED POINT,
+   * so anything deeper than one link down a renamed branch (work -> power_source -> feed ->
+   * run_ft) was nulled and never parked — destroyed by the fix for exactly that destruction.
+   *
+   * Matching the fixed point alone over-corrects: it also parks answers a person legitimately
+   * abandoned by changing their mind, resurrecting the stale measurements clearing exists to
+   * remove. So the fixed point says WHAT died; something else has to say WHY.
+   *
+   * WHY IS A LOSSY COERCION. A rename is visible in exactly one place: a stored value that is no
+   * longer one of its need's options, or a stored key the playbook no longer declares. Nothing
+   * else can make a value stop coercing. A person changing their mind writes a value that is
+   * still perfectly valid — "Troubleshoot" is a real option — it simply routes elsewhere.
+   *
+   *   a lossy key exists  → a Settings edit happened → attribute the newly-dead chain to it
+   *   nothing lost        → every value still coerces → the person chose; let it clear
+   *
+   * WHERE THIS IS COARSE, and why the error is deliberately on this side: a row containing BOTH a
+   * rename and a real deselect parks both chains. Parking is non-destructive — it moves an answer
+   * into a labelled "from questions you've since changed" block a person can ignore in one glance.
+   * Under-parking silently destroys a finished site visit. The asymmetry is not close.
+   */
+  const lossy = Object.keys(retiredOptions(pb, src)).length > 0 || Object.keys(retiredAnswers(pb, src)).length > 0;
+  const cleared = clearInapplicable(pb, asStored);
+  const stillApplies = new Set(
+    pb.needs.filter((nd) => cleared[nd.key] !== null || !lossy).map((nd) => nd.key),
+  );
+
   const out: Record<string, string> = {};
   for (const n of pb.needs) {
     if (stillApplies.has(n.key)) continue;

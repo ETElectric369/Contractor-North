@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { laborCostForJob } from "@/lib/labor-billing";
 import { computeJobProfitRows, computeProfitByType, isLaborBudgetLine, mergeBudgetActual, type JobProfitRow } from "@/lib/analytics/job-profitability";
 
 describe("mergeBudgetActual — per-scope budget vs actual", () => {
@@ -316,5 +318,60 @@ describe("computeJobProfitRows — petty cash finally counts", () => {
       pettyCash: [{ job_id: null, amount: 379.35, kind: "expense" }],
     });
     expect(rows[0].cost).toBe(0);
+  });
+});
+
+/**
+ * THE PROJECTION LAW, ON THE FIX FOR THE PROJECTION LAW (audit v824).
+ *
+ * cn-v821 added a Labor row to both sides of budget-vs-actual and fed the actual side with
+ * `.from("time_entries").select("*")`. In PostgREST `*` is THIS TABLE'S COLUMNS — it does not
+ * expand embeds. So the rows reached laborCostForJob carrying no `profiles` (no pay rate) and no
+ * `time_allocations` (no split), every hour priced at $0, and the Labor row read `actual: 0` on
+ * every job in every tenant. The commit claimed the two readers "can never report two different
+ * labour numbers" and was false in the same breath that made it.
+ *
+ * It was silent because laborCostForJob is entirely input-driven: hand it rows with no embeds and
+ * it returns a confident $0 rather than an error. The first test below pins that behaviour so the
+ * silence is documented; the second pins the projection itself, which is the only thing that
+ * actually prevents recurrence — a unit test on the helper can never catch a bad query.
+ */
+describe("laborCostForJob is input-driven — a thin projection returns a confident $0", () => {
+  it("prices every hour at zero when the profiles embed is missing", () => {
+    // Exactly the shape `select("*")` returns: real columns, no embeds.
+    const bare = [{ job_id: "A", clock_in: "2026-08-01T08:00:00Z", clock_out: "2026-08-01T16:00:00Z", status: "closed" }];
+    const out = laborCostForJob(bare as never[], "A");
+    expect(out.cost).toBe(0);
+    // The hours ARE counted — which is what made it look like it was working.
+    expect(out.hours).toBeGreaterThan(0);
+    // And it says so, rather than swallowing it.
+    expect(out.unratedHours).toBeGreaterThan(0);
+  });
+
+  it("prices correctly once the embed carries a rate", () => {
+    const withRate = [{
+      job_id: "A", clock_in: "2026-08-01T08:00:00Z", clock_out: "2026-08-01T16:00:00Z",
+      status: "closed", profiles: { id: "p1", hourly_rate: 50 },
+    }];
+    const out = laborCostForJob(withRate as never[], "A");
+    expect(out.cost).toBeGreaterThan(0);
+    expect(out.unratedHours).toBe(0);
+  });
+});
+
+describe("the two time_entries projections must stay identical", () => {
+  it("budget-vs-actual asks for the same embeds job profitability does", () => {
+    // A SOURCE-LEVEL invariant, deliberately. The bug was a QUERY, and no unit test on the
+    // helper could ever have caught it — the helper was correct and shared, which is exactly
+    // what made the commit's reasoning feel safe. Two readers of one number must ask the
+    // database the same question.
+    const src = readFileSync(new URL("./job-profitability.ts", import.meta.url), "utf8");
+    const selects = [...src.matchAll(/from\("time_entries"\)\s*\.?\s*\n?\s*\.select\(\s*"([^"]+)"/g)].map((m) => m[1]);
+    expect(selects.length).toBeGreaterThanOrEqual(2);
+    for (const sel of selects) {
+      expect(sel, `a time_entries projection is missing the profiles embed: ${sel}`).toContain("profiles(");
+      expect(sel, `a time_entries projection is missing time_allocations: ${sel}`).toContain("time_allocations(");
+      expect(sel, "select(\"*\") does not expand embeds in PostgREST").not.toBe("*");
+    }
   });
 });
