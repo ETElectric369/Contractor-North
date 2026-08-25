@@ -155,8 +155,12 @@ export function ConvertMenu({
             straight on its capture page — no booking ceremony (nowOnly: the schedule
             options live right here in the modal alongside). */}
         <NewInspectionButton nowOnly inquiryId={inquiryId} size="sm" variant="outline" />
-        <Button size="sm" variant="outline" onClick={openInspect} disabled={busy !== null}>
-          <CalendarPlus className="h-4 w-4" /> Schedule inspection
+        {/* "Schedule", not "Schedule inspection" — Erik: "takes up way too much space on the
+            screen and is distracting". The word "inspection" was doing no work on a LEAD row,
+            where a site visit is the only thing there is to schedule; the modal it opens says
+            "Book a site inspection" in its title, which is where that word belongs. */}
+        <Button size="sm" variant="outline" onClick={openInspect} disabled={busy !== null} title="Book a site visit — the lead stays open">
+          <CalendarPlus className="h-4 w-4" /> Schedule
         </Button>
         <Button size="sm" onClick={() => run("estimate")} disabled={busy !== null}>
           <FileText className="h-4 w-4" /> {busy === "estimate" ? "Opening…" : "Create estimate"}
