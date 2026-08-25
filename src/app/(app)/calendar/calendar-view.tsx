@@ -140,7 +140,21 @@ export interface SchedulePicker {
   staff: PickerOpt[];
 }
 
-type View = "month" | "week" | "day";
+/**
+ * "2 weeks" is the DEFAULT, and that is the point of it.
+ *
+ * Erik: "i saw the other day was having two week view stacked and that worked for me visually and
+ * i bet that will help big time here … two weeks stacked and scrollable."
+ *
+ * A week is too short to plan a route in — booking a Truckee run means asking "when am I next near
+ * Truckee", and that answer is almost never inside the current seven days, so you page forward and
+ * lose the week you were looking at. A month is the wrong shape: thirty cells are too small to
+ * hold a stop, so it degrades to a density map that shows THAT a day is busy but never WHERE, and
+ * where is the whole question. Two weeks is the horizon a walk-through actually gets booked in,
+ * and his Sept 12 trip sits eighteen days out — invisible in a week view, which is how you book
+ * work into a week you are in Sunnyvale.
+ */
+type View = "month" | "2weeks" | "week" | "day";
 
 // PURE calendar-day math only: dayKey round-trips a local-midnight Date built
 // from a "YYYY-MM-DD" back to the same string in ANY runtime zone. It must
@@ -244,7 +258,8 @@ export function CalendarView({
   // browser back button walks the day-drill history; nav() below writes the
   // URL shallowly and Next syncs useSearchParams without an RSC fetch.
   const rawView = searchParams.get("view");
-  const view: View = rawView === "day" || rawView === "month" ? rawView : "week";
+  const view: View =
+    rawView === "day" || rawView === "month" || rawView === "week" ? rawView : "2weeks";
   const dateParam = searchParams.get("date");
   const anchor = useMemo(
     () => new Date(`${isYmd(dateParam) ? dateParam : todayK}T00:00:00`),
@@ -263,6 +278,7 @@ export function CalendarView({
   function shiftAnchor(dir: -1 | 1) {
     const d = new Date(anchor);
     if (view === "month") d.setMonth(d.getMonth() + dir);
+    else if (view === "2weeks") d.setDate(d.getDate() + 14 * dir);
     else if (view === "week") d.setDate(d.getDate() + 7 * dir);
     else d.setDate(d.getDate() + dir);
     nav(view, dayKey(d));
@@ -539,6 +555,12 @@ export function CalendarView({
     return { events, allDay: tray };
   }
 
+  /** The NEXT seven days, for the stacked second row. Same shape, same grid, one week on. */
+  const nextWeekDays = useMemo(
+    () => weekDays.map((d) => { const x = new Date(d); x.setDate(x.getDate() + 7); return x; }),
+    [weekDays],
+  );
+
   const weekGridDays = weekDays.map((d) => {
     const k = dayKey(d);
     return { dayStr: k, label: d.toLocaleDateString(undefined, { weekday: "short", day: "numeric" }), isToday: k === todayK };
@@ -546,13 +568,43 @@ export function CalendarView({
   // Server-computed now in the ORG tz, so SSR and hydration agree on the now
   // line; TimeGrid's own minute ticker (also org-tz via the tz prop) takes over.
   const gridNow = { dayStr: todayStrInTz(tz, new Date(now)), min: tzMinutesOfDay(new Date(now), tz) };
+  const nextWeekGridDays = nextWeekDays.map((d) => {
+    const k = dayKey(d);
+    return { dayStr: k, label: d.toLocaleDateString(undefined, { weekday: "short", day: "numeric" }), isToday: k === todayK };
+  });
+
+  /** WHERE the day's committed work is. Jobs carry a town; a walk-through's `location` is a bare
+   *  street with no city, and inventing one would be worse than saying nothing. Jobs are the right
+   *  anchor anyway — his ride-along case is "a walk through near a JOB that day". */
+  const townFor = (dayStr: string): string | undefined => {
+    const towns = new Set<string>();
+    for (const j of jobs ?? []) {
+      const city = String((j as { city?: string | null }).city ?? "").trim();
+      if (!city) continue;
+      const from = (j.scheduled_start ?? "").slice(0, 10);
+      const to = (j.scheduled_end ?? j.scheduled_start ?? "").slice(0, 10);
+      if (from && dayStr >= from && dayStr <= (to || from)) towns.add(city);
+    }
+    return towns.size ? [...towns].sort().join(" · ") : undefined;
+  };
+  const withTowns = (ds: typeof weekGridDays) => ds.map((d) => ({ ...d, sublabel: townFor(d.dayStr) }));
+
   const weekGridEvents: TimeGridEvent[] = [];
   const weekGridTray: TimeGridAllDay[] = [];
-  if (view === "week") {
+  const week2Events: TimeGridEvent[] = [];
+  const week2Tray: TimeGridAllDay[] = [];
+  if (view === "week" || view === "2weeks") {
     for (const d of weekGridDays) {
       const g = gridDataFor(d.dayStr);
       weekGridEvents.push(...g.events);
       weekGridTray.push(...g.allDay);
+    }
+  }
+  if (view === "2weeks") {
+    for (const d of nextWeekGridDays) {
+      const g = gridDataFor(d.dayStr);
+      week2Events.push(...g.events);
+      week2Tray.push(...g.allDay);
     }
   }
   const dayGrid = view === "day" ? gridDataFor(anchorK, { openApptRecords: true }) : { events: [], allDay: [] };
@@ -560,6 +612,8 @@ export function CalendarView({
   const title =
     view === "month"
       ? anchor.toLocaleDateString(undefined, { month: "long", year: "numeric" })
+      : view === "2weeks"
+        ? `${weekDays[0].toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${nextWeekDays[6].toLocaleDateString(undefined, { month: "short", day: "numeric" })}`
       : view === "week"
         ? `${weekDays[0].toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${weekDays[6].toLocaleDateString(undefined, { month: "short", day: "numeric" })}`
         : anchor.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
@@ -620,6 +674,7 @@ export function CalendarView({
         items={[
           { id: "day", label: "Day" },
           { id: "week", label: "Week" },
+          { id: "2weeks", label: "2 weeks" },
           { id: "month", label: "Month" },
         ]}
       />
@@ -708,6 +763,40 @@ export function CalendarView({
         ))}
 
       {view === "month" && <MonthGrid anchor={anchor} byDay={byDay} todayK={todayK} tz={tz} onPick={handleDayTap} />}
+      {view === "2weeks" && (
+        /* TWO WEEKS, STACKED AND SCROLLABLE. Two of the SAME TimeGrid rather than a new grid —
+           every behaviour (day-tap drills in, the now line, the all-day tray, the work-day
+           shading) is inherited rather than reimplemented and left to drift.
+           Scrolling, not paging: paging is a decision — you commit to leaving what you are
+           looking at. Scrolling is a glance, which is what you want when the rail says
+           "Truckee (5)" and you are hunting for a home for them. */
+        <div className="max-h-[calc(100dvh-14rem)] space-y-3 overflow-y-auto overscroll-contain">
+          <Card className="overflow-hidden">
+            <TimeGrid
+              days={withTowns(weekGridDays)}
+              events={weekGridEvents}
+              allDay={weekGridTray}
+              workStartMin={wdStartMin}
+              workEndMin={wdEndMin}
+              tz={tz}
+              initialNow={gridNow}
+              onDayClick={(ds) => nav("day", ds, { push: true })}
+            />
+          </Card>
+          <Card className="overflow-hidden">
+            <TimeGrid
+              days={withTowns(nextWeekGridDays)}
+              events={week2Events}
+              allDay={week2Tray}
+              workStartMin={wdStartMin}
+              workEndMin={wdEndMin}
+              tz={tz}
+              initialNow={gridNow}
+              onDayClick={(ds) => nav("day", ds, { push: true })}
+            />
+          </Card>
+        </div>
+      )}
       {view === "week" && (
         /* THE week view: blocks in their time allotment, and ONLY that (Erik
            7/15: "get rid of list view below, redundant" — the old WeekAgenda
@@ -717,7 +806,7 @@ export function CalendarView({
            empty week so the headers stay tappable. */
         <Card className="overflow-hidden">
           <TimeGrid
-            days={weekGridDays}
+            days={withTowns(weekGridDays)}
             events={weekGridEvents}
             allDay={weekGridTray}
             workStartMin={wdStartMin}

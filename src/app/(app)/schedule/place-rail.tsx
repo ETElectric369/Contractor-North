@@ -105,7 +105,7 @@ export function PlaceRail({ items, onPickDay }: { items: Placeable[]; onPickDay?
           </div>
           <ul className="space-y-1">
             {g.items.map((i) => {
-              const miss = whatsMissing(i);
+              const miss = whatsMissing(i); // `i` carries kind — a job is never asked for a phone
               const on = picked.has(i.id);
               return (
                 <li key={i.id}>

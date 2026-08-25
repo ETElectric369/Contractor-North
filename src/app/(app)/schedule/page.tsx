@@ -20,7 +20,7 @@ export const dynamic = "force-dynamic";
 // (chips + the day drill's edit/quick actions). Map survives as a header icon
 // (a where-map with zero time interactions), not a lit tab row.
 
-const CAL_VIEWS = ["day", "week", "month"] as const;
+const CAL_VIEWS = ["day", "week", "2weeks", "month"] as const;
 
 export default async function SchedulePage({
   searchParams,

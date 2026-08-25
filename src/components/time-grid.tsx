@@ -26,6 +26,12 @@ export interface TimeGridDay {
   dayStr: string; // "YYYY-MM-DD"
   label: string; // "Mon 14"
   isToday?: boolean;
+  /** WHERE the day's committed work is — "Truckee", or "Truckee · Tahoe City".
+   *  Erik's ride-along rule: "if a walk through makes more sense to wait until thursday and do
+   *  that job nearby that day then that one gets filtered". Seeing the town on the day, next to a
+   *  rail that says "Truckee (5)", answers that without the app pretending to know how long
+   *  anything takes. A LABEL, not a capacity model. */
+  sublabel?: string;
   /** Heavier left divider on this column — /timecards marks pay-period
    *  boundary days so the payroll week reads against the pay cycle. */
   heavyStart?: boolean;
@@ -216,6 +222,11 @@ export function TimeGrid({
                 {d.label}
                 {d.isToday && (
                   <span className="ml-1 text-[9px] font-semibold uppercase tracking-wide">today</span>
+                )}
+                {d.sublabel && (
+                  <span className="block truncate text-[10px] font-medium text-slate-400" title={d.sublabel}>
+                    {d.sublabel}
+                  </span>
                 )}
               </span>
             );

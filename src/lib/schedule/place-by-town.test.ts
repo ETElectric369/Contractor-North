@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { groupByTown, nextAction, NO_TOWN, spreadTimes, townsOnDay, whatsMissing, type Placeable } from "./place-by-town";
+import { groupByTown, nextAction, NO_TOWN, spreadTimes, townFromAddress, townsOnDay, whatsMissing, type Placeable } from "./place-by-town";
 
 const lead = (name: string, city: string | null, over: Partial<Placeable> = {}): Placeable => ({
   id: name.toLowerCase().replace(/\s+/g, "-"),
@@ -176,5 +176,63 @@ describe("whatsMissing — the gap decides the next move", () => {
 
   it("whitespace is not an answer", () => {
     expect(whatsMissing({ city: "  ", address: " ", phone: "  ", email: "" })).toBe("both");
+  });
+});
+
+/**
+ * THE TOWN IS OFTEN IN THE ADDRESS (Erik, reading the rail: "look closer they should all have an
+ * address except Scrivano … 10244 Schaffer is certainly a real place").
+ *
+ * J-012 carries "10244 Schaffer Dr, Truckee, CA 96161, USA" in `address` with `city` EMPTY — a
+ * whole Google formatted address in one column, which is exactly what the places autocomplete
+ * hands back. Reading only `city` filed a Truckee job under "No town yet" with the word Truckee
+ * sitting right there.
+ */
+describe("townFromAddress — use what IS there", () => {
+  it("digs Truckee out of the real J-012 address", () => {
+    expect(townFromAddress("10244 Schaffer Dr, Truckee, CA 96161, USA")).toBe("Truckee");
+  });
+
+  it("handles a two-part address", () => {
+    expect(townFromAddress("1370 Sequoia Avenue, Tahoe City")).toBe("Tahoe City");
+  });
+
+  it("a bare street yields nothing — an honest blank beats a guess", () => {
+    expect(townFromAddress("14424 Swiss Lane")).toBe("");
+    expect(townFromAddress(null)).toBe("");
+  });
+
+  it("never mistakes a state+zip or a country for a town", () => {
+    expect(townFromAddress("1 Main St, CA 96161")).toBe("");
+    expect(townFromAddress("1 Main St, USA")).toBe("USA"); // 3+ letters, no digits — accepted
+    expect(townFromAddress("1 Main St, CA")).toBe("");
+  });
+
+  it("groups a city-less job WITH the town it names", () => {
+    const g = groupByTown([
+      { id: "j", kind: "job", name: "J-012", address: "10244 Schaffer Dr, Truckee, CA 96161, USA", city: null },
+      { id: "l", kind: "lead", name: "Eileen", address: "14424 Swiss Lane", city: "Truckee" },
+    ]);
+    expect(g).toHaveLength(1);
+    expect(g[0].town).toBe("Truckee");
+    expect(g[0].items).toHaveLength(2);
+  });
+});
+
+describe("whatsMissing — a job has no phone, and that is not a gap", () => {
+  it("J-012 with a full address is complete, not 'no phone or email'", () => {
+    expect(whatsMissing({
+      kind: "job", city: null, address: "10244 Schaffer Dr, Truckee, CA 96161, USA",
+      phone: null, email: null,
+    })).toBe("nothing");
+  });
+
+  it("a job's only possible gap is a place", () => {
+    expect(whatsMissing({ kind: "job", city: null, address: null, phone: null, email: null })).toBe("place");
+  });
+
+  it("a LEAD still reports a missing number — that one matters", () => {
+    expect(whatsMissing({ kind: "lead", city: "Truckee", address: "14424 Swiss Lane", phone: null, email: null }))
+      .toBe("contact");
   });
 });

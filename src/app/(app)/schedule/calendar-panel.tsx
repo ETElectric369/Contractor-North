@@ -32,7 +32,7 @@ export async function CalendarPanel() {
       // far out / long job started a while ago" disappearance.
       supabase
         .from("jobs")
-        .select("id, job_number, name, status, scheduled_start, scheduled_end, assigned_to, customers(name)")
+        .select("id, job_number, name, status, scheduled_start, scheduled_end, assigned_to, city, customers(name)")
         .lte("scheduled_start", jobTo)
         .or(`scheduled_end.gte.${jobFrom},and(scheduled_end.is.null,scheduled_start.gte.${jobFrom})`)
         .order("scheduled_start"),

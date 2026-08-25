@@ -68,9 +68,15 @@ export const NO_TOWN = "No town yet";
 /** What this item still needs before it can be put on a day — the next action, not a penalty. */
 export type Missing = "nothing" | "place" | "contact" | "both";
 
-export function whatsMissing(i: Pick<Placeable, "city" | "address" | "phone" | "email">): Missing {
+export function whatsMissing(
+  i: Pick<Placeable, "city" | "address" | "phone" | "email"> & { kind?: Placeable["kind"] },
+): Missing {
   const has = (v: unknown) => String(v ?? "").trim() !== "";
   const place = has(i.city) || has(i.address);
+  // A JOB HAS NO PHONE, AND THAT IS NOT A GAP. Work already sold is waiting for a DATE; telling
+  // the office a job has "no phone or email" is answering a question nobody asked, and it was
+  // firing on J-012 — a job with a complete address. Its only gap can be a place.
+  if (i.kind === "job") return place ? "nothing" : "place";
   const contact = has(i.phone) || has(i.email);
   if (place && contact) return "nothing";
   if (!place && !contact) return "both";
@@ -89,6 +95,33 @@ export function nextAction(m: Missing): string {
 }
 
 const norm = (s: string | null | undefined): string => String(s ?? "").trim().replace(/\s+/g, " ");
+
+/**
+ * THE TOWN IS OFTEN IN THE ADDRESS, and refusing to look there is the app demanding a tidy field.
+ *
+ * Erik, reading the rail: "look closer they should all have an address except Scrivano … 10244
+ * Schaffer is certainly a real place." He was right. J-012 carries
+ * "10244 Schaffer Dr, Truckee, CA 96161, USA" in `address` with `city` EMPTY — a whole Google
+ * formatted address in one column, which is exactly what the places autocomplete returns. Reading
+ * only `city` put a Truckee job in "No town yet" while the word Truckee sat right there.
+ *
+ * Fragment-first again: use what IS there rather than insisting on the shape you wanted. The
+ * standard formatted address is "street, city, ST zip, country", so the second comma-part is the
+ * town. A one-part address yields nothing and that is correct — a bare street genuinely has no
+ * town in it, and guessing would be worse than an honest blank.
+ */
+export function townFromAddress(address: string | null | undefined): string {
+  const parts = String(address ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+  if (parts.length < 2) return "";
+  const candidate = parts[1];
+  // "CA 96161" or "USA" is not a town — a town has no digits and isn't a bare 2-letter code.
+  if (/\d/.test(candidate) || /^[A-Z]{2}$/.test(candidate)) return "";
+  return candidate;
+}
+
+/** The town for grouping: the structured column when it exists, otherwise dug out of the address. */
+export const townOf = (i: { city?: string | null; address?: string | null }): string =>
+  norm(i.city) || townFromAddress(i.address);
 /** Truckee, TRUCKEE and " truckee " are one place. */
 const key = (s: string | null | undefined): string => norm(s).toLowerCase();
 
@@ -101,8 +134,9 @@ const key = (s: string | null | undefined): string => norm(s).toLowerCase();
 export function groupByTown(items: Placeable[]): TownGroup[] {
   const buckets = new Map<string, { town: string; items: Placeable[] }>();
   for (const it of items) {
-    const k = key(it.city) || NO_TOWN.toLowerCase();
-    const town = key(it.city) ? norm(it.city) : NO_TOWN;
+    const found = townOf(it);
+    const k = key(found) || NO_TOWN.toLowerCase();
+    const town = found || NO_TOWN;
     const b = buckets.get(k) ?? { town, items: [] };
     b.items.push(it);
     buckets.set(k, b);
@@ -131,11 +165,12 @@ export function groupByTown(items: Placeable[]): TownGroup[] {
  * "Tahoe City (4)" answers that question without the app needing to know how long anything takes
  * — which is knowledge it does not have and would have to invent.
  */
-export function townsOnDay(dayItems: { city: string | null }[]): string[] {
+export function townsOnDay(dayItems: { city: string | null; address?: string | null }[]): string[] {
   const seen = new Map<string, string>();
   for (const d of dayItems) {
-    const k = key(d.city);
-    if (k && !seen.has(k)) seen.set(k, norm(d.city));
+    const t = townOf(d);
+    const k = key(t);
+    if (k && !seen.has(k)) seen.set(k, t);
   }
   return [...seen.values()].sort((a, z) => a.localeCompare(z));
 }
