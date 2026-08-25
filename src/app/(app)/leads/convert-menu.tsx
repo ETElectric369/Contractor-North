@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useOrgPublicBase } from "@/components/use-org-public-base";
 import { useRouter } from "next/navigation";
-import { UserPlus, UserRound, CalendarPlus, Check, Copy, FileText, MessageSquare } from "lucide-react";
+import { CalendarPlus, Check, Copy, FileText, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented";
 import { Modal, ModalActions } from "@/components/ui/modal";
@@ -47,17 +47,9 @@ function defaultSlots(): { date: string; time: string }[] {
 export function ConvertMenu({
   inquiryId,
   inquiryName,
-  customerId = null,
-  customerName = null,
 }: {
   inquiryId: string;
   inquiryName: string;
-  /** Set once this lead has a contact card — flips the button from a deed to a door. */
-  customerId?: string | null;
-  /** The contact's name, shown ON the button. Erik: "instead of saying open contact it shows the
-   *  name and we get rid of the badge above taking up more space" — one element carrying both
-   *  facts (there IS a contact, and who) instead of a badge on line 1 plus a generic verb here. */
-  customerName?: string | null;
   customers?: { id: string; name: string }[];
 }) {
   const router = useRouter();
@@ -70,25 +62,6 @@ export function ConvertMenu({
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState<null | "estimate" | "inspection" | "contact">(null);
   const [error, setError] = useState<string | null>(null);
-
-  /**
-   * SAVE AS CONTACT — a card, not a verdict. Erik: "a lead can convert to a contact anytime if
-   * the person wants to create one … it shouldnt be required and should auto convert when the
-   * lead gets accepted. i just dont want a wall up anywhere unnecessarily."
-   * The server's "customer" target no longer closes the lead: it mints (or opens) the contact
-   * and the lead stays in the pipeline with its follow-ups intact.
-   */
-  async function saveContact() {
-    setBusy("contact");
-    setError(null);
-    const res = await convertInquiry(inquiryId, "customer", {});
-    if (res.ok && res.redirect) {
-      router.push(res.redirect);
-      return;
-    }
-    setError(res.error ?? "Something went wrong.");
-    setBusy(null);
-  }
 
   async function run(target: "estimate" | "inspection") {
     setBusy(target);
@@ -177,27 +150,11 @@ export function ConvertMenu({
         <Button size="sm" onClick={() => run("estimate")} disabled={busy !== null}>
           <FileText className="h-4 w-4" /> {busy === "estimate" ? "Opening…" : "Estimate"}
         </Button>
-        {/* DON'T OFFER A DEED THAT IS ALREADY DONE. Erik: "naturally if they are already saved as
-            a contact i shouldnt have this button glaring at me."
-            But NO DEAD ENDS either — the answer is not to remove the control, it is to point it
-            at the thing he now actually wants, which is the contact itself. Same slot, same
-            place his eye already goes; the verb changes because the state did. */}
-        <div className="sm:absolute sm:right-0 sm:top-1/2 sm:-translate-y-1/2">
-        {customerId ? (
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => router.push(`/crm/${customerId}`)}
-            title={`Open ${customerName ?? "this lead's contact"} in Contacts`}
-          >
-            <UserRound className="h-4 w-4" /> {customerName ?? "Open contact"}
-          </Button>
-        ) : (
-          <Button size="sm" variant="ghost" onClick={saveContact} disabled={busy !== null} title="Make a contact card now — the lead stays open either way; winning the estimate does this automatically">
-            <UserPlus className="h-4 w-4" /> {busy === "contact" ? "Saving…" : "Save as contact"}
-          </Button>
-        )}
-        </div>
+        {/* THE CONTACT BUTTON IS GONE — the NAME is that control now (see inquiry-row).
+            Erik: "have the name be the contact button or create contact option to clear up all
+            that much more space … lets unify and simplfy in all we do." Two things saying the
+            same thing is one thing too many, and it was also what made the three verbs fail to
+            line up: its width changed with the name, so the centred group moved per row. */}
       </div>
       {error && !inspectOpen && <p className="mt-1 text-xs text-red-600">{error}</p>}
 

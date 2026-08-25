@@ -8,7 +8,7 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { InquiryModal } from "./inquiry-modal";
 import { ConvertMenu } from "./convert-menu";
-import { deleteInquiry, markInquiryContacted, setInquiryStatus } from "./actions";
+import { convertInquiry, deleteInquiry, markInquiryContacted, setInquiryStatus } from "./actions";
 import { useToast } from "@/components/toast";
 import { formatDateTime, formatDate } from "@/lib/utils";
 import type { Inquiry, LeadBucket } from "@/lib/types";
@@ -72,8 +72,28 @@ export function InquiryRow({
     return () => clearTimeout(t);
   }, [focused]);
 
+  /**
+   * OVERDUE WAS COMPARING TWO DIFFERENT MIDNIGHTS.
+   *
+   * Erik: "all the red letters everywhere take all the clarity out of the whole page … the follow
+   * up overdue button needs a different existence." It was not merely noisy — it was WRONG, and
+   * that is why it appeared on every row.
+   *
+   *   new Date("2026-08-25")             → UTC midnight
+   *   new Date(new Date().toDateString()) → LOCAL midnight
+   *
+   * West of UTC the first is always earlier, so `<` is true for a lead due TODAY. In Pacific,
+   * 00:00Z < 07:00Z — every lead due today read as overdue, every day, for everyone.
+   *
+   * Comparing the two as YMD STRINGS has no parsing mode to get wrong. This project already has a
+   * tz layer for exactly this class; the leads row predated it.
+   */
+  const todayYmd = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  })();
   const overdue =
-    inquiry.next_follow_up_at && new Date(inquiry.next_follow_up_at) < new Date(new Date().toDateString());
+    !!inquiry.next_follow_up_at && String(inquiry.next_follow_up_at).slice(0, 10) < todayYmd;
 
   // The Status dropdown is the ONE lead-state control (the old standalone "Contacted"
   // button was redundant with it and crowded the row). Picking "Contacted" still does the
@@ -93,6 +113,22 @@ export function InquiryRow({
     });
   }
 
+  /** The NAME is the contact control now. Linked → a link (above); not linked → this makes one,
+   *  then routes straight to it, because "create a contact" and "open it" are one intention. */
+  const [savingContact, setSavingContact] = useState(false);
+  function saveAsContact() {
+    setSavingContact(true);
+    start(async () => {
+      const res = await convertInquiry(inquiry.id, "customer", {});
+      if (res.ok && res.redirect) {
+        router.push(res.redirect);
+        return;
+      }
+      setSavingContact(false);
+      toast(res.error ?? "Couldn't make a contact from this lead.", "error");
+    });
+  }
+
   // Street first, then the town — the two parts he actually reads. Comma-joined and trimmed so a
   // lead carrying only a town still shows the town rather than nothing.
   const addressLine = [inquiry.address, inquiry.city].map((x) => String(x ?? "").trim()).filter(Boolean).join(", ");
@@ -105,30 +141,49 @@ export function InquiryRow({
         flash ? "bg-brand/5 ring-2 ring-inset ring-brand" : ""
       }`}
     >
-      {/* ── LINE 1: who, what state, when. The time sits hard right — fresh leads are triaged by
-          recency, and it reads as a column down the board. ── */}
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <span className="font-semibold text-slate-900">{inquiry.name}</span>
+      {/* ── LINE 1: WHO, and how to reach them. Erik: "lets do the phone number and email to the
+          right of the name, have the name be the contact button or create contact option to clear
+          up all that much more space … lets unify and simplfy in all we do."
+          The name IS the contact control now — a separate button for it was a second thing saying
+          what the name already says. Linked → opens the contact; not linked → makes one. ── */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        {inquiry.customer_id ? (
+          <Link
+            href={`/crm/${inquiry.customer_id}`}
+            onClick={(e) => e.stopPropagation()}
+            className="font-semibold text-slate-900 hover:text-brand hover:underline"
+            title="Open this contact"
+          >
+            {inquiry.name}
+          </Link>
+        ) : (
+          <button
+            type="button"
+            onClick={() => saveAsContact()}
+            disabled={savingContact}
+            className="font-semibold text-slate-900 decoration-dotted underline-offset-4 hover:text-brand hover:underline"
+            title="Not a contact yet — tap to make one"
+          >
+            {savingContact ? "Saving…" : inquiry.name}
+          </button>
+        )}
         {inquiry.company_name && <span className="text-xs text-slate-400">{inquiry.company_name}</span>}
+        {inquiry.phone && (
+          <a href={`tel:${inquiry.phone}`} onClick={(e) => e.stopPropagation()} className="flex items-center gap-1 text-xs font-medium text-brand hover:underline">
+            <Phone className="h-3 w-3 shrink-0" /> {inquiry.phone}
+          </a>
+        )}
+        {inquiry.email && (
+          <a href={`mailto:${inquiry.email}`} onClick={(e) => e.stopPropagation()} className="hidden items-center gap-1 text-xs text-slate-500 hover:text-brand hover:underline sm:flex">
+            <Mail className="h-3 w-3 shrink-0" /> {inquiry.email}
+          </a>
+        )}
         {/* THE ADDRESS IS THE HEADLINE. Erik, entering his real lead list: "addresses addresses and
             more addresses that is what this business is, lets see it up on the lead top line."
             It was rendered only inside the expanded detail, so scanning the board told him who
             called but never WHERE — and where is how he decides what to group into a day's route.
             A tel: link is one tap; so is this: it opens the map, which is the thing he actually
             does next with an address. */}
-        {addressLine && (
-          <a
-            href={`https://maps.apple.com/?q=${encodeURIComponent(addressLine)}`}
-            target="_blank"
-            rel="noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            className="flex items-center gap-1 text-sm font-medium text-slate-600 hover:text-brand hover:underline"
-            title="Open in Maps"
-          >
-            <MapPin className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-            {addressLine}
-          </a>
-        )}
         <Badge tone={INQUIRY_STATUS_TONE[inquiry.status] ?? "slate"}>{inquiry.status}</Badge>
         {/* Staying open after an inspection is deliberate (an inspected lead can still become an
             estimate); the badge is what stops the row reading as untouched. A count, not a
@@ -156,22 +211,33 @@ export function InquiryRow({
         {(inquiry as any).referrer?.full_name && (
           <Badge tone="green">referred by {(inquiry as any).referrer.full_name}</Badge>
         )}
-        {overdue && <Badge tone="red">follow-up overdue</Badge>}
+        {/* Now that the date maths is right this is genuinely rare, so it can stay red — a badge
+            earns its colour by being uncommon. Before the fix it fired on every row and read as
+            decoration. Amber, not red: a follow-up slipping a day is a nudge, not an alarm. */}
+        {overdue && <Badge tone="amber">follow-up overdue</Badge>}
         <span className="ml-auto whitespace-nowrap font-mono text-xs tabular-nums text-slate-400" title={`Added ${formatDateTime(inquiry.created_at)}`}>
           {formatDateTime(inquiry.created_at)}
         </span>
       </div>
 
-      {/* ── LINE 2: how to reach them, and the verbs. Call is one tap (tel:), the pipeline verbs
-          are the ConvertMenu's own buttons, and ⋯ opens everything else. ── */}
+      {/* ── LINE 2: THE ADDRESS, left-justified under the name, on its own line.
+          "addresses addresses and more addresses that is what this business is" — on its own line
+          it starts at the same x on every row, so the column reads down the page. Sharing line 1
+          with the name meant it started wherever the name ended. One tap opens Maps, which is
+          what he actually does next with an address. ── */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-slate-500">
-        {inquiry.phone && (
-          <a href={`tel:${inquiry.phone}`} className="flex items-center gap-1 font-medium text-brand hover:underline">
-            <Phone className="h-3 w-3" /> {inquiry.phone}
+        {addressLine && (
+          <a
+            href={`https://maps.apple.com/?q=${encodeURIComponent(addressLine)}`}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="flex items-center gap-1 text-sm font-medium text-slate-600 hover:text-brand hover:underline"
+            title="Open in Maps"
+          >
+            <MapPin className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+            {addressLine}
           </a>
-        )}
-        {inquiry.email && (
-          <span className="hidden items-center gap-1 sm:flex"><Mail className="h-3 w-3" /> {inquiry.email}</span>
         )}
         {inquiry.last_contacted_at && <span>contacted {formatDate(inquiry.last_contacted_at)}</span>}
         {inquiry.intake?.reason && <span className="hidden text-slate-400 md:inline">{inquiry.intake.reason}</span>}
@@ -194,13 +260,7 @@ export function InquiryRow({
           phone / email / note happened to precede them — every row put them somewhere different
           and the eye had to re-find them on each one. On their own row they land in the same place
           all the way down the list, which is what makes a list of 32 scannable. ── */}
-      <ConvertMenu
-        inquiryId={inquiry.id}
-        inquiryName={inquiry.name}
-        customerId={inquiry.customer_id}
-        customerName={inquiry.customer_id ? (customers.find((c) => c.id === inquiry.customer_id)?.name ?? null) : null}
-        customers={customers}
-      />
+      <ConvertMenu inquiryId={inquiry.id} inquiryName={inquiry.name} customers={customers} />
 
       {/* The message rides collapsed as ONE clamped line — the single biggest source of the old
           row's height. The full text, the customer's files and the workflow controls all live one

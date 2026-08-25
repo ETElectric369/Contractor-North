@@ -135,11 +135,24 @@ export function PlaceRail({ items, onPickDay }: { items: Placeable[]; onPickDay?
                           <MapPin className="h-3 w-3 shrink-0" /> {i.address}
                         </span>
                       )}
-                      {/* THE GAP AS A NEXT ACTION, not a penalty. */}
+                      {/* THE GAP, QUIET UNTIL IT IS IN THE WAY.
+                          Erik: "all the red letters everywhere take all the clarity out of the
+                          whole page … maybe we dont need what we dont need until we need it."
+                          Nine of his twelve leads have no phone — so on his data the amber
+                          sentence fired on nearly every card, and a warning on almost everything
+                          is wallpaper, not a signal. It also had it backwards: the COMMON state
+                          was loud and the rare one was quiet.
+                          Now the gap is a small grey note, and it only speaks up in full when the
+                          card is PICKED — the moment you are about to act, which is the moment
+                          the missing piece actually stands in your way. */}
                       {miss !== "nothing" && (
-                        <span className="mt-0.5 flex items-center gap-1 text-xs font-medium text-amber-700">
+                        <span
+                          className={`mt-0.5 flex items-center gap-1 text-xs ${
+                            on ? "font-medium text-amber-700" : "text-slate-400"
+                          }`}
+                        >
                           {miss === "place" && <Phone className="h-3 w-3 shrink-0" />}
-                          {nextAction(miss)}
+                          {on ? nextAction(miss) : miss === "place" ? "no address yet" : "no phone or email"}
                         </span>
                       )}
                     </span>
