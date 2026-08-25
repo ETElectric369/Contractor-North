@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { Button } from "./button";
 import { lockBodyForModal, unlockBodyForModal } from "./modal-lock";
+import { shouldGuardBack, shouldRemoveEntry } from "./overlay-history";
 
 export function Modal({
   open,
@@ -15,6 +16,7 @@ export function Modal({
   size = "lg",
   dirty = false,
   portal = false,
+  historyClose = true,
 }: {
   open: boolean;
   onClose: () => void;
@@ -40,6 +42,20 @@ export function Modal({
    *  When portaled, a form INSIDE the modal must submit via ModalActions `formId` (the `form=` attr),
    *  not DOM nesting. */
   portal?: boolean;
+  /**
+   * BACK CLOSES THE OVERLAY, not the page. ON by default — every Modal in the app inherits it.
+   *
+   * Erik: "this leaving page and back page is really frustrating … integrating interactive overlay
+   * anywhere possible". Overlays are the right answer, but an overlay with no history entry makes
+   * the problem WORSE on an installed PWA: there is no browser chrome, so a swipe-back or the
+   * Android back button leaves the whole screen instead of closing the sheet. The more we build,
+   * the more that hurts — so it gets fixed once, here, before the scheduler is built on top of it.
+   *
+   * `<Tabs urlSync>` already set this precedent in this codebase; this is the same idea for
+   * overlays. Turn it OFF only for an overlay that is genuinely not a "place" — a transient toast
+   * or an inline confirm that back should ignore.
+   */
+  historyClose?: boolean;
 }) {
   // Two-tap discard guard state. Auto-disarms after a beat so a stray first
   // tap doesn't leave the modal permanently one tap away from discarding.
@@ -76,6 +92,60 @@ export function Modal({
   // (the desktop "shuts the window" report). Track where the pointer went down and
   // only treat a click as a backdrop tap when it both started AND landed there.
   const downOnBackdrop = useRef(false);
+
+  /**
+   * A HISTORY ENTRY, SO THE SYSTEM BACK GESTURE CLOSES THIS AND NOT THE PAGE.
+   *
+   * Three cases have to stay separate or this eats navigation:
+   *
+   *  · CLOSED BY BACK — popstate fires. We must NOT then call history.back() again in cleanup,
+   *    or we go back twice and leave the page anyway. `poppedRef` is that flag.
+   *  · CLOSED BY A BUTTON (Cancel / X / Escape / backdrop) — our entry is still on the stack, so
+   *    cleanup removes it. Otherwise the user's next back would "close" an already-closed modal
+   *    and appear to do nothing.
+   *  · CLOSED BY NAVIGATING AWAY (a link inside the modal) — cleanup runs too, and calling
+   *    history.back() here would UNDO the navigation the user just asked for. Guarded by checking
+   *    that our marker is still the CURRENT history state; once another page pushes its own, it
+   *    isn't, and we leave the stack alone.
+   *
+   * DIRTY FORMS GET THE SAME TWO-TAP GUARD as every other dismissal: the first back re-pushes the
+   * entry and arms "Tap again to discard", so a second back is what actually discards. Back
+   * behaves exactly like tapping the backdrop twice, which is the point — one rule, not two.
+   */
+  const poppedRef = useRef(false);
+  const pushedRef = useRef(false);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const guardRef = useRef({ dirty, confirmDiscard });
+  guardRef.current = { dirty, confirmDiscard };
+
+  useEffect(() => {
+    if (!open || !historyClose || typeof window === "undefined") return;
+    poppedRef.current = false;
+    const mark = () => window.history.pushState({ ...window.history.state, cnOverlay: true }, "");
+    mark();
+    pushedRef.current = true;
+
+    const onPop = () => {
+      if (shouldGuardBack(guardRef.current)) {
+        // Put the entry back so the user is still "inside" the overlay, and arm the notice.
+        mark();
+        requestCloseRef.current();
+        return;
+      }
+      poppedRef.current = true;
+      onCloseRef.current();
+    };
+    window.addEventListener("popstate", onPop);
+    return () => {
+      window.removeEventListener("popstate", onPop);
+      const stillOurs = !!(window.history.state && (window.history.state as { cnOverlay?: boolean }).cnOverlay);
+      if (shouldRemoveEntry({ pushed: pushedRef.current, popped: poppedRef.current, stillOurs })) {
+        window.history.back();
+      }
+      pushedRef.current = false;
+    };
+  }, [open, historyClose]);
 
   // Disarm whenever the modal opens or closes — a fresh open starts clean.
   useEffect(() => {
