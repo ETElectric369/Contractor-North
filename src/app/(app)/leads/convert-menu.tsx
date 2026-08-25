@@ -156,7 +156,13 @@ export function ConvertMenu({
           moved with whatever phone/email/note happened to precede them — every row put them
           somewhere different and the eye had to re-find them on each one. Centred on their own
           row, they land in the same place down the whole list. */}
-      <div className="flex w-full flex-wrap items-center justify-center gap-2">
+      {/* THE THREE VERBS ARE THE CENTRED THING — the contact sits OUTSIDE the centring.
+          First attempt centred the whole group with the contact button inside it, so a long name
+          ("Steph McCafee") shoved all three verbs left and a short one ("Eileen") let them drift
+          right: the rows still didn't line up, which was the entire complaint. Absolutely
+          positioning the contact takes it out of the flow, so the three verbs centre on the row
+          itself and land at the same x all the way down the list however long the name is. */}
+      <div className="relative flex w-full flex-wrap items-center justify-center gap-2 sm:flex-nowrap">
         {/* Already onsite? One tap creates the inspection (linked to this lead) and lands
             straight on its capture page — no booking ceremony (nowOnly: the schedule
             options live right here in the modal alongside). */}
@@ -176,6 +182,7 @@ export function ConvertMenu({
             But NO DEAD ENDS either — the answer is not to remove the control, it is to point it
             at the thing he now actually wants, which is the contact itself. Same slot, same
             place his eye already goes; the verb changes because the state did. */}
+        <div className="sm:absolute sm:right-0 sm:top-1/2 sm:-translate-y-1/2">
         {customerId ? (
           <Button
             size="sm"
@@ -190,6 +197,7 @@ export function ConvertMenu({
             <UserPlus className="h-4 w-4" /> {busy === "contact" ? "Saving…" : "Save as contact"}
           </Button>
         )}
+        </div>
       </div>
       {error && !inspectOpen && <p className="mt-1 text-xs text-red-600">{error}</p>}
 
