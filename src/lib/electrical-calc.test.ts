@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { voltageDrop, wireSizeForLoad, conduitFill, boxFill } from "./electrical-calc";
+import { voltageDrop, wireSizeForLoad, conduitFill, boxFill, ampacityAt } from "./electrical-calc";
 
 describe("electrical-calc", () => {
   it("voltage drop: 20A, 100ft, #12 Cu, 240V 1φ ≈ 3.3% (fails 3%)", () => {
@@ -162,5 +162,57 @@ describe("electrical-calc", () => {
     const r = boxFill({ wire_size_awg: "12", conductors: 6, devices: 1, has_grounds: true }) as any;
     expect(r.required_volume_in3).toBeCloseTo(20.25, 2);
     expect(r.recommended_box).toContain("4×4×1½");
+  });
+});
+
+/**
+ * THE DERATING CLAMP, PINNED (audit v824).
+ *
+ * /tools' Derating calculator hard-coded the 75°C column with no wiring-method input, so for NM-B
+ * — the most common residential method, and the default in its own sibling calculator — it
+ * overstated the answer by a FULL COLUMN. #8 copper at 86°F printed "50.0 A usable" when NEC
+ * 334.80 puts the ceiling at 40 A. That is enough to put #8 Romex on a 50 A range circuit.
+ *
+ * The rule already existed in this file, documented and tested, for wireSizeForLoad. These pin the
+ * TABLE VALUES the calculator clamps to, so the next person who reaches for a column literal has
+ * something that fails.
+ */
+describe("ampacity columns — the values the derating clamp depends on", () => {
+  it("NM-B / UF clamp to the 60°C column, whatever the panel is marked", () => {
+    // NEC 334.80 / 340.80. These are the numbers the calculator must land on for cable.
+    expect(ampacityAt("cu", "60", "14")).toBe(15);
+    expect(ampacityAt("cu", "60", "12")).toBe(20);
+    expect(ampacityAt("cu", "60", "10")).toBe(30);
+    expect(ampacityAt("cu", "60", "8")).toBe(40);
+    expect(ampacityAt("cu", "60", "6")).toBe(55);
+  });
+
+  it("the 75°C column is genuinely higher — this is the size of the old error", () => {
+    // Every one of these gaps was a real overstatement on a Romex run.
+    expect(ampacityAt("cu", "75", "10")).toBe(35); // vs 30 → +17%
+    expect(ampacityAt("cu", "75", "8")).toBe(50);  // vs 40 → +25%
+    expect(ampacityAt("cu", "75", "6")).toBe(65);  // vs 55 → +18%
+  });
+
+  it("90°C is a derating START, never a termination column", () => {
+    expect(ampacityAt("cu", "90", "8")).toBe(55);
+    // …and it always exceeds both termination columns, which is why an unclamped result is unsafe.
+    expect(ampacityAt("cu", "90", "8")).toBeGreaterThan(ampacityAt("cu", "75", "8"));
+    expect(ampacityAt("cu", "75", "8")).toBeGreaterThan(ampacityAt("cu", "60", "8"));
+  });
+
+  it("aluminium 10 AWG at 75°C is 30, not 35 — the old single-table bug", () => {
+    // Recorded in this file's own note; pinned so it cannot come back.
+    expect(ampacityAt("al", "75", "10")).toBe(30);
+  });
+
+  it("wireSizeForLoad already applies the cable rule — the calculator now matches it", () => {
+    // The same 45 A load needs a BIGGER conductor on Romex than in conduit, purely because the
+    // column changed. That difference is exactly what the derating calculator was blind to.
+    const nm = wireSizeForLoad({ amps: 45, metal: "cu", method: "nm" }) as Record<string, unknown>;
+    const conduit = wireSizeForLoad({ amps: 45, metal: "cu", method: "raceway" }) as Record<string, unknown>;
+    expect(nm.ampacity_column).toBe("60°C");
+    expect(conduit.ampacity_column).toBe("75°C");
+    expect(nm.size_awg).not.toBe(conduit.size_awg);
   });
 });

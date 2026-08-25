@@ -580,10 +580,26 @@ function Derating() {
   const [metal, setMetal] = useState<"cu" | "al">("cu");
   const [ambF, setAmbF] = useState(86);
   const [count, setCount] = useState(3);
-  // Derating starts from the conductor's own insulation rating (THHN/THWN-2 = 90°C), which is what
-  // NEC 310.15 adjusts; the 75°C figure is the TERMINATION limit the result gets clamped to.
+  /**
+   * THE METHOD DECIDES THE CLAMP, AND THIS CALCULATOR USED TO ASSUME (audit v824).
+   *
+   * It hard-coded the 75°C column with no wiring-method input at all. NM-B and UF are 60°C
+   * conductors by NEC 334.80 / 340.80 no matter what the panel or breaker is marked — no equipment
+   * listing can raise them. So for Romex, the single most common residential method, this
+   * overstated the answer by a FULL COLUMN: #8 copper at 86°F printed "50.0 A usable" when the
+   * code answer is 40 A. That is enough to put #8 NM on a 50 A range circuit and have it pass a
+   * calculator Erik trusts at 60mph.
+   *
+   * The sibling Wire-size picker in this same file already has this selector and already defaults
+   * to NM-B, and lib/electrical-calc.ts already documents the rule and is tested on it. The rule
+   * existed; this one calculator just never asked the question. Defaulting to NM-B matches the
+   * sibling and errs toward the SAFER answer when somebody doesn't touch the control.
+   */
+  const [method, setMethod] = useState<WiringMethod>("nm");
+  const isCable = method === "nm" || method === "uf";
+  // 90°C is never a termination column — it exists only as the starting point 310.15 adjusts.
   const base = ampacityAt(metal, "90", size);
-  const termLimit = ampacityAt(metal, "75", size);
+  const termLimit = ampacityAt(metal, isCable ? "60" : "75", size);
   const tf = ambientFactor(ambF);
   const bf = bundleFactor(count);
   // Adjust the 90°C insulation rating, then CLAMP to the 75°C termination limit — the adjusted
@@ -594,15 +610,23 @@ function Derating() {
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Field label="Wire size"><Select value={size} onChange={(e) => setSize(e.target.value)}>{SIZES.map((s) => <option key={s} value={s}>{s}</option>)}</Select></Field>
+        <Field label="Wiring method"><Select value={method} onChange={(e) => setMethod(e.target.value as WiringMethod)}><option value="nm">NM-B (Romex)</option><option value="uf">UF (direct burial)</option><option value="raceway">Conduit (THHN)</option></Select></Field>
         <Field label="Metal"><Select value={metal} onChange={(e) => setMetal(e.target.value as "cu" | "al")}><option value="cu">Copper</option><option value="al">Aluminum</option></Select></Field>
         <Field label="Ambient °F"><NumberInput value={ambF} onValueChange={setAmbF} /></Field>
         <Field label="# current-carrying"><NumberInput value={count} onValueChange={setCount} /></Field>
       </div>
       <Result tone={derated < base ? "amber" : "green"}>
         Base {base} A (90°C) × temp {tf} × bundling {bf} = {adjusted.toFixed(1)} A → <strong>{derated.toFixed(1)} A</strong> usable
-        {derated < adjusted && <> (capped at the {termLimit} A 75°C termination limit)</>}
+        {derated < adjusted && (
+          <> (capped at {termLimit} A — {isCable ? `${method === "nm" ? "NM-B" : "UF"} is a 60°C conductor, NEC ${method === "nm" ? "334.80" : "340.80"}` : "the 75°C termination limit, 110.14(C)"})</>
+        )}
       </Result>
-      <p className="text-xs text-slate-400">Adjust from the 90°C column, then clamp to the termination rating — NEC 310.15(B)(1) ambient (86°F = 1.0), 310.15(C)(1) bundling for 4+ current-carrying conductors, 110.14(C) terminations.</p>
+      <p className="text-xs text-slate-400">
+        Adjust from the 90°C column, then clamp — NEC 310.15(B)(1) ambient (86°F = 1.0), 310.15(C)(1) bundling for 4+ current-carrying conductors.
+        {isCable
+          ? " NM-B and UF clamp to the 60°C column no matter what the panel is marked (334.80 / 340.80)."
+          : " Conduit clamps to the termination rating — 75°C assumes your gear is listed and marked for it (110.14(C)); use 60°C if it isn't."}
+      </p>
     </div>
   );
 }
