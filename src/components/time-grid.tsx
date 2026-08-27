@@ -126,6 +126,7 @@ export function TimeGrid({
   tz,
   initialNow,
   onDayClick,
+  placement,
 }: {
   days: TimeGridDay[];
   events: TimeGridEvent[];
@@ -142,6 +143,15 @@ export function TimeGrid({
   initialNow?: Now;
   /** Tap a day header → drill (never a move). */
   onDayClick?: (dayStr: string) => void;
+  /**
+   * ARMED: the calendar is being used as a day picker right now.
+   *
+   * Erik: "being able to click the day on the calendar to pick it once the jobs are checked."
+   * When this is set, a tap on a day PLACES the picked work instead of drilling into that day —
+   * the same tap, a different meaning. That is a trap unless the mode is impossible to miss, so
+   * armed days wear a target ring and say what tapping them will do. See lib/schedule/placement-plan.
+   */
+  placement?: { label: string; onPlace: (dayStr: string) => void };
 }) {
   const [now, setNow] = useState<Now | null>(initialNow ?? null);
   useEffect(() => {
@@ -230,6 +240,23 @@ export function TimeGrid({
                 )}
               </span>
             );
+            /* ARMED — the header is the drop zone and says so. Not a hover-only affordance:
+               on a phone there is no hover, and this is a phone-in-a-truck screen. */
+            if (placement) {
+              return (
+                <button
+                  key={d.dayStr}
+                  onClick={() => placement.onPlace(d.dayStr)}
+                  title={`${placement.label} — ${d.label}`}
+                  className={`group min-w-0 flex-1 truncate border-t-2 border-t-brand/60 bg-brand-light/30 px-1 py-1.5 text-center text-xs font-medium text-slate-600 hover:bg-brand-light ${colBorder(d)}`}
+                >
+                  {head}
+                  <span className="mt-0.5 block truncate text-[10px] font-semibold text-brand">
+                    {placement.label}
+                  </span>
+                </button>
+              );
+            }
             return onDayClick ? (
               <button
                 key={d.dayStr}
@@ -305,6 +332,19 @@ export function TimeGrid({
                 className={`relative min-w-0 flex-1 ${colBorder(d)} ${d.isToday ? "bg-brand-light/15" : ""}`}
                 style={{ height: gridH }}
               >
+                {/* THE WHOLE COLUMN IS THE TARGET while armed — a 12px header strip is a hard
+                    thing to hit with a thumb, and the column is the shape he is aiming at anyway.
+                    Rendered BEFORE the pills so it sits underneath them: empty space places, and a
+                    tap on an existing job still opens that job rather than being swallowed. */}
+                {placement && (
+                  <button
+                    type="button"
+                    onClick={() => placement.onPlace(d.dayStr)}
+                    aria-label={`${placement.label} on ${d.label}`}
+                    className="absolute inset-0 bg-brand-light/20 transition-colors hover:bg-brand-light/60"
+                  />
+                )}
+
                 {/* hour rules */}
                 {hours.slice(1, -1).map((h) => (
                   <div

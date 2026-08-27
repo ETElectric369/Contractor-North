@@ -9,8 +9,11 @@ import { CalendarPanel } from "./calendar-panel";
 import { MapPanel } from "./map-panel";
 import { CrewBoardPanel } from "./crew-board-panel";
 import { PlaceRail } from "./place-rail";
+import { PlacementProvider } from "./placement-context";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
+import { INSPECTION_TYPES } from "@/lib/statuses";
 import type { Placeable } from "@/lib/schedule/place-by-town";
+import { KIND_FROM_APPT_TYPE } from "@/lib/schedule/work-shape";
 
 export const dynamic = "force-dynamic";
 
@@ -134,9 +137,41 @@ export default async function SchedulePage({
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),
   ]);
 
+  /* ── A LEAD WITH A DAY ON IT IS NOT WAITING FOR A DAY ─────────────────────────────────────
+     The comment above claims this list is leads with "no inspection booked yet". The query said
+     no such thing — only converted_at IS NULL and status <> 'lost' — and booking from this very
+     rail leaves converted_at NULL BY DESIGN (an inspected lead can still go on to be an estimate,
+     leads/actions.ts). So a lead he had just placed reappeared here looking untouched.
+
+     That is worse than cosmetic now that the tick IS the booking. He taps Thursday, the lead comes
+     straight back on the board, and the natural read is either "it didn't take" or "I'll move it to
+     Friday" — either way he ticks it again, and convertInquiry's inspection branch has no existence
+     check, so that is a SECOND walk-through inserted, a second Google push, and two calendar chips
+     with nobody able to say which one the customer was told about.
+
+     /leads already carries exactly this cross-check — added when Erik reported the same thing
+     ("the sarah cain lead was already converted to an inspection but still shows up as a new
+     lead"). THE PROJECTION LAW: the bug was never a missing column, it was a select list. The
+     booked ones are on the calendar four inches to the right, so this is a move, not a dead end. */
+  const leadIds = ((leadRows ?? []) as { id: string }[]).map((r) => String(r.id));
+  const { data: bookedRows } = leadIds.length
+    ? await supabase
+        .from("appointments")
+        .select("inquiry_id")
+        .in("inquiry_id", leadIds)
+        .in("type", [...INSPECTION_TYPES])
+        .neq("status", "cancelled")
+        .limit(500)
+    : { data: [] as { inquiry_id: string | null }[] };
+  const alreadyBooked = new Set(
+    ((bookedRows ?? []) as { inquiry_id: string | null }[]).map((r) => String(r.inquiry_id)),
+  );
+
   const today = todayStrInTz(getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone);
   const waiting: Placeable[] = [
-    ...((leadRows ?? []) as Record<string, string | null>[]).map((r) => ({
+    ...((leadRows ?? []) as Record<string, string | null>[])
+      .filter((r) => !alreadyBooked.has(String(r.id)))
+      .map((r) => ({
       id: String(r.id),
       kind: "lead" as const,
       name: String(r.name ?? "Lead"),
@@ -150,7 +185,7 @@ export default async function SchedulePage({
       // said rather than deciding again.
       workKind: r.work_kind ?? null,
       planned_minutes: r.planned_minutes == null ? null : Number(r.planned_minutes),
-    })),
+      })),
     ...((dateless ?? []) as Record<string, string | null>[]).map((r) => ({
       id: String(r.id),
       kind: "job" as const,
@@ -166,26 +201,37 @@ export default async function SchedulePage({
     //    the calendar (no date) and not in the rail (not a lead, not a dateless job).
     ...((undated ?? []) as Record<string, string | null>[]).map((r) => ({
       id: String(r.id),
-      kind: "lead" as const, // it books like one: a walk-through that needs a day
+      // ITS OWN KIND, because it is its own write. Calling it a lead ran an appointment id through
+      // convertInquiry — the one thing on this board that was already agreed was the one thing that
+      // could not be placed. It is dated via rescheduleAppointment instead.
+      kind: "appointment" as const,
       name: String(r.title ?? "Site visit"),
       address: r.location ?? null,
       city: null,
       type: r.type ?? null,
+      // Its saved kind, so the rail's dropdown shows what it IS rather than an empty "Kind?" beside
+      // a badge already reading "Service call".
+      workKind: r.type ? (KIND_FROM_APPT_TYPE[String(r.type)] ?? null) : null,
       planned_minutes: r.planned_minutes == null ? null : Number(r.planned_minutes),
     })),
   ];
 
   return (
-    <div className="space-y-4 lg:grid lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] lg:items-start lg:gap-6 lg:space-y-0">
-      <aside className="lg:sticky lg:top-4">
-        <h2 className="mb-2 text-sm font-semibold text-slate-900">
-          Waiting for a day <span className="font-normal text-slate-400">({waiting.length})</span>
-        </h2>
-        <PlaceRail items={waiting} />
-      </aside>
-      <div className="min-w-0">
-        <CalendarPanel />
+    /* ONE PROVIDER OVER BOTH HALVES. Ticking work in the rail arms the calendar; tapping a day in
+       the calendar places what the rail has ticked. They can only be one gesture if they share
+       state, and this is the smallest client shell that both sit inside. */
+    <PlacementProvider items={waiting} todayISO={today}>
+      <div className="space-y-4 lg:grid lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] lg:items-start lg:gap-6 lg:space-y-0">
+        <aside className="lg:sticky lg:top-4">
+          <h2 className="mb-2 text-sm font-semibold text-slate-900">
+            Waiting for a day <span className="font-normal text-slate-400">({waiting.length})</span>
+          </h2>
+          <PlaceRail items={waiting} />
+        </aside>
+        <div className="min-w-0">
+          <CalendarPanel />
+        </div>
       </div>
-    </div>
+    </PlacementProvider>
   );
 }

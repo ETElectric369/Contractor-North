@@ -35,7 +35,19 @@ const APPT_KIND: Record<string, WorkKind> = {
   other: "other",
 };
 
-export function workKind(i: { kind?: "lead" | "job"; type?: string | null; workKind?: string | null }): WorkKind {
+/**
+ * BACK THE OTHER WAY: what kind is this appointment already?
+ *
+ * appointmentTypeFor maps a chosen kind onto appointments.type at booking. Reading it back needs
+ * the inverse, or the kind dropdown on an already-booked visit shows "Kind?" forever — the card
+ * saying "Service call" in its badge and "Kind?" in its control, about itself, at the same time.
+ *
+ * Only a TYPE it actually carries maps; a null type stays null, so an untyped visit honestly reads
+ * "Kind?" rather than being shown a guess as though somebody had answered.
+ */
+export const KIND_FROM_APPT_TYPE: Record<string, WorkKind> = APPT_KIND;
+
+export function workKind(i: { kind?: "lead" | "job" | "appointment"; type?: string | null; workKind?: string | null }): WorkKind {
   // WHAT HE TOLD THE APP BEATS WHAT THE APP WORKED OUT. A lead's own work_kind (0230) is a person's
   // answer given at the moment they knew; everything below it is inference.
   const told = String(i.workKind ?? "");
@@ -45,7 +57,10 @@ export function workKind(i: { kind?: "lead" | "job"; type?: string | null; workK
   if (i.kind === "job") return "job";
   // A LEAD's next step is a walk-through — that is the only thing a lead can be scheduled as, and
   // it is what scheduleLeadsOnDay books.
-  if (i.kind === "lead" && !i.type) return "walkthrough";
+  // An untyped item on the rail is a site visit — that is the only thing a lead can be booked as,
+  // and an appointment sitting undated is one somebody agreed to and never dated. "Other" would be
+  // an honest-looking shrug at a question that has a real answer.
+  if ((i.kind === "lead" || i.kind === "appointment") && !i.type) return "walkthrough";
   return APPT_KIND[String(i.type ?? "")] ?? "other";
 }
 

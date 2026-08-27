@@ -7,6 +7,8 @@ import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CalendarClock, Calen
 import { Button } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented";
 import { Card } from "@/components/ui/card";
+import { usePlacement } from "../schedule/placement-context";
+import { dayTargetLabel } from "@/lib/schedule/placement-plan";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/toast";
 import { MoveToDay } from "@/components/move-to-day";
@@ -200,6 +202,21 @@ const apptGridColor = (a: CalAppt) =>
   `${APPT_GRID_TONE[a.type] ?? APPT_GRID_DEFAULT}${a.status === "proposed" ? " border-dashed opacity-75" : ""}${
     a.status === "completed" ? " opacity-60" : ""
   }`;
+
+/**
+ * ARMED, OR NOT.
+ *
+ * On /schedule the rail wraps this in a PlacementProvider, so ticking work there turns every day
+ * here into a target. On /calendar there is no provider and this reads an inert default — armedCount
+ * 0, day taps keep drilling in, nothing changes. One component, two contexts, no flag to pass down
+ * six levels.
+ */
+function useDayTarget() {
+  const pl = usePlacement();
+  return pl.armedCount > 0
+    ? { armed: true as const, pl, prop: { label: dayTargetLabel(pl.armedCount), onPlace: pl.placeOn } }
+    : { armed: false as const, pl, prop: undefined };
+}
 
 export function CalendarView({
   jobs,
@@ -436,7 +453,13 @@ export function CalendarView({
   }
 
   /** A day tap only ever drills into that day — never a move. */
+  const target = useDayTarget();
+
+  /* THE SAME TAP, TWO MEANINGS — and the armed one wins. Armed, a day places the picked work;
+     otherwise it drills in as it always has. Navigating away mid-pick would also throw the picks
+     away, which is exactly the "leaving page and back page" churn Erik called frustrating. */
   function handleDayTap(d: Date) {
+    if (target.armed) { target.pl.placeOn(dayKey(d)); return; }
     nav("day", dayKey(d), { push: true });
   }
 
@@ -776,7 +799,33 @@ export function CalendarView({
           </button>
         ))}
 
-      {view === "month" && <MonthGrid anchor={anchor} byDay={byDay} todayK={todayK} tz={tz} onPick={handleDayTap} />}
+      {/* ARMED, AND SAYING SO WHERE THE TAP HAPPENS.
+          The rail's bar is pinned to the bottom of the RAIL, which on a phone sits above the
+          calendar — so by the time you have scrolled down to the day you want, the only thing
+          telling you the calendar is loaded is the calendar itself. This strip rides with it, and
+          carries the way OUT: without it, disarming from down here meant scrolling back up to find
+          Clear, which is a dead end at the exact moment somebody changes their mind. */}
+      {target.armed && (
+        <div className="sticky top-0 z-30 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-brand/40 bg-brand-light/90 px-3 py-2 text-sm backdrop-blur">
+          <span className="font-semibold text-brand">{dayTargetLabel(target.pl.armedCount)}</span>
+          <span className="text-xs font-medium uppercase tracking-wide text-brand/70">
+            {target.pl.half === "am" ? "morning" : "afternoon"}
+          </span>
+          <span className="text-xs text-slate-600">Tap any day below.</span>
+          {target.pl.pending && <span className="text-xs font-medium text-brand">Placing…</span>}
+          <button
+            type="button"
+            onClick={target.pl.clear}
+            className="ml-auto text-xs font-semibold text-slate-600 underline-offset-2 hover:underline"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {view === "month" && (
+        <MonthGrid anchor={anchor} byDay={byDay} todayK={todayK} tz={tz} onPick={handleDayTap} armedLabel={target.prop?.label} />
+      )}
       {view === "2weeks" && (
         /* Two of the SAME TimeGrid per week rather than a new grid — every behaviour (day-tap
            drills in, the now line, the all-day tray, work-day shading) is inherited rather than
@@ -803,8 +852,35 @@ export function CalendarView({
               ev.push(...g.events);
               tray.push(...g.allDay);
             }
+            /* WHICH MONTH AM I LOOKING AT. Erik, scrolling: "i dont know what month it is on the
+               schedule." Day headers read "Mon 25" — fine in a fixed week, useless once the span
+               scrolls through months. The header sticks to the top of the scroller so the answer
+               is always on screen, and it names both months when a week straddles them. */
+            const a = wk[0];
+            const z = wk[6];
+            const sameMonth = a.getMonth() === z.getMonth();
+            const spanLabel = sameMonth
+              ? `${a.toLocaleDateString(undefined, { month: "long", year: a.getFullYear() === new Date(now).getFullYear() ? undefined : "numeric" })} ${a.getDate()}–${z.getDate()}`
+              : `${a.toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${z.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+            const hasToday = days.some((d) => d.isToday);
             return (
-              <Card key={days[0].dayStr} className="overflow-hidden">
+              /* overflow-CLIP, not hidden. `hidden` makes this Card a scroll container, and a
+                 sticky child resolves against its NEAREST scrollport — so the month header stuck to
+                 a box that never scrolls, i.e. it did not stick at all, and scrolled away with its
+                 week. `clip` still trims the grid to the rounded corners without creating a
+                 scrollport, so the header pins to the real scroller and answers "what month is
+                 this" the whole way down, which was the entire point of adding it. */
+              <Card key={days[0].dayStr} className="overflow-clip">
+                <div
+                  className={`sticky top-0 z-20 border-b px-3 py-1.5 text-xs font-semibold backdrop-blur ${
+                    hasToday
+                      ? "border-brand/30 bg-brand-light/70 text-brand"
+                      : "border-slate-100 bg-white/90 text-slate-500"
+                  }`}
+                >
+                  {spanLabel}
+                  {hasToday && <span className="ml-2 text-[10px] font-bold uppercase tracking-wide">this week</span>}
+                </div>
                 <TimeGrid
                   days={days}
                   events={ev}
@@ -814,6 +890,7 @@ export function CalendarView({
                   tz={tz}
                   initialNow={gridNow}
                   onDayClick={(ds) => nav("day", ds, { push: true })}
+                  placement={target.prop}
                 />
               </Card>
             );
@@ -837,6 +914,7 @@ export function CalendarView({
             tz={tz}
             initialNow={gridNow}
             onDayClick={(ds) => nav("day", ds, { push: true })}
+            placement={target.prop}
           />
         </Card>
       )}
@@ -858,8 +936,21 @@ export function CalendarView({
                 workEndMin={wdEndMin}
                 tz={tz}
                 initialNow={gridNow}
+                placement={target.prop}
               />
             </Card>
+          )}
+          {/* AN EMPTY DAY IS STILL A DAY YOU CAN PLACE ON. The grid above only renders when there
+              is something to draw, so on a free day an armed person would have had nothing to tap —
+              a dead end at the exact moment of deciding. */}
+          {target.armed && (
+            <button
+              type="button"
+              onClick={() => target.pl.placeOn(anchorK)}
+              className="w-full rounded-xl border-2 border-dashed border-brand/50 bg-brand-light/30 px-4 py-3 text-sm font-semibold text-brand hover:bg-brand-light"
+            >
+              {dayTargetLabel(target.pl.armedCount)}
+            </button>
           )}
           {/* The drill cards below keep every create/edit/move affordance. */}
           <DayDetail dayK={anchorK} data={byDay.get(anchorK)} members={members} picker={picker} tz={tz} />
@@ -938,12 +1029,15 @@ function MonthGrid({
   todayK,
   tz,
   onPick,
+  armedLabel,
 }: {
   anchor: Date;
   byDay: Map<string, DayData>;
   todayK: string;
   tz: string;
   onPick: (d: Date) => void;
+  /** Set while work is picked in the rail — every cell becomes a target and says so. */
+  armedLabel?: string;
 }) {
   const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
   const start = startOfWeek(first);
@@ -971,8 +1065,11 @@ function MonthGrid({
             <button
               key={i}
               onClick={() => onPick(d)}
-              className={`flex min-h-[92px] flex-col items-stretch justify-start gap-1 overflow-hidden border-b border-r border-slate-100 p-1 text-left hover:bg-slate-50 ${
-                inMonth ? "" : "bg-slate-50/60"
+              title={armedLabel ? `${armedLabel} — ${d.toLocaleDateString()}` : undefined}
+              className={`flex min-h-[92px] flex-col items-stretch justify-start gap-1 overflow-hidden border-b border-r border-slate-100 p-1 text-left ${
+                armedLabel
+                  ? "bg-brand-light/25 hover:bg-brand-light"
+                  : `hover:bg-slate-50 ${inMonth ? "" : "bg-slate-50/60"}`
               }`}
             >
               <div

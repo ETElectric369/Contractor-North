@@ -10,6 +10,8 @@ import { JOB_STATUSES } from "@/lib/job-status";
 import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { todayStrInTz, tzDateTimeUtc } from "@/lib/tz";
 import { addDaySegment, shiftSegmentCovering } from "@/lib/schedule-math";
+import { rescheduleAppointment } from "../appointments/actions";
+import { appointmentTypeFor, WORK_DAY_MINUTES } from "@/lib/schedule/work-shape";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type Result = { ok: boolean; error?: string; id?: string };
@@ -448,7 +450,14 @@ export async function moveJobDay(
 /** PLACE a job on a day without touching anything already scheduled — the tray
  *  gesture. UNION, not replace: a needs-return job keeps its worked-history
  *  segments on the calendar instead of collapsing to the tapped day. */
-export async function placeJobOnDay(jobId: string, dateISO: string): Promise<Result> {
+export async function placeJobOnDay(
+  jobId: string,
+  dateISO: string,
+  /** "HH:MM" in the org's timezone. Omitted preserves whatever real time the job already carries —
+   *  the branch a plain day-move relies on. A FLOATER carries none, so without this it silently
+   *  fell back to the all-day window and landed at 8am on an afternoon he had just chosen. */
+  startHHMM?: string,
+): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -456,6 +465,130 @@ export async function placeJobOnDay(jobId: string, dateISO: string): Promise<Res
   const { segments, error: segErr } = await loadJobDaySegments(supabase, jobId);
   if (segErr) return { ok: false, error: segErr };
   // setJobScheduleRanges revalidates /schedule, /planner, /jobs, and the job page.
-  return setJobScheduleRanges(jobId, addDaySegment(segments, dateISO));
+  // undefined (not null) when no time was given, so the preserve-the-job's-own-time branch stands.
+  return setJobScheduleRanges(
+    jobId,
+    addDaySegment(segments, dateISO),
+    /^\d{2}:\d{2}$/.test(startHHMM ?? "") ? startHHMM : undefined,
+  );
 }
 
+
+/**
+ * HOW LONG WILL THIS FLOATER TAKE.
+ *
+ * Erik: "floaters are jobs with no date that i squeeze in that's right, just like all the leads on
+ * the board now ready to go on the calendar, i just need to be able to mark how much time they are
+ * going to take o the lead and schedule page."
+ *
+ * A floater is the squeeze-it-in work — and squeezing it in is precisely the decision that needs
+ * the number. A 1h floater fits after Thursday's 6h job in the same town; a full-day one does not,
+ * and no amount of map-staring answers that. 0230 put this on the lead; this is its twin for jobs,
+ * callable from the rail so the number can be set at the moment it is wanted.
+ *
+ * A job has no KIND to pick — a job is a job. Duration is the only question.
+ */
+export async function sizeJob(jobId: string, plannedMinutes: number | null): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const m = Number(plannedMinutes) || 0;
+  if (m < 0 || m > 60 * 24 * 30) return { ok: false, error: "That duration isn't sensible." };
+  // 0 means "not sure yet" and clears it — never a zero-length job. Blank is not zero.
+  const { data, error } = await ctx.supabase
+    .from("jobs")
+    .update({ planned_minutes: m > 0 ? m : null, updated_at: new Date().toISOString() })
+    .eq("id", jobId)
+    .select("id"); // THE SILENT-WRITE LAW: a zero-row update is a 204, not an error.
+  if (error) return { ok: false, error: dbError(error) };
+  if (!data?.length) return { ok: false, error: "That job isn't available." };
+  revalidatePath("/schedule");
+  revalidatePath("/jobs");
+  return { ok: true };
+}
+
+/**
+ * PUT AN ALREADY-BOOKED WALK-THROUGH ON A DAY.
+ *
+ * Found while wiring the calendar as the day picker, and it was a live dead end. The rail carries
+ * three things: leads, dateless jobs, and appointments that exist but have no start — Erik's "i
+ * have a couple inspections that already link to the leads i inputted". All three were labelled
+ * `lead` on the way in, because all three book like one. So picking one of those inspections and
+ * tapping a day ran its APPOINTMENT id through convertInquiry, which looks for an inquiry, finds
+ * nothing, and reports a failure he could do nothing about. The one item on the board that was
+ * already decided was the one item that could not be placed.
+ *
+ * Delegates to rescheduleAppointment rather than writing starts_at here — that writer also cancels
+ * any pending pick-a-time link (or the customer could tap a stale option and move it back
+ * underneath us) and pushes to Google. A second UPDATE next to it would skip both.
+ */
+export async function placeAppointmentOnDay(
+  id: string,
+  dateISO: string,
+  startHHMM: string,
+  plannedMinutes?: number | null,
+): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateISO)) return { ok: false, error: "Pick a day." };
+  const hm = /^\d{2}:\d{2}$/.test(startHHMM) ? startHHMM : "09:00";
+
+  // THE ORG'S CLOCK, NOT THE SERVER'S. `new Date("2026-08-27T08:00")` on Vercel is 8am UTC — which
+  // is midnight in Truckee. Through the same orgTimezone helper every other writer in this file
+  // uses, rather than a second copy of the settings read that could drift from it.
+  const startsAt = tzDateTimeUtc(dateISO, hm, await orgTimezone(ctx.supabase));
+  if (!startsAt) return { ok: false, error: "I couldn't read that day." };
+
+  // An END only when somebody actually sized it. Blank is not zero, and a fake 90 minutes would put
+  // a block on the calendar that no human chose.
+  //
+  // CLAMPED TO ONE WORKING DAY, because planned_minutes is a WORK-LOAD figure and this is WALL
+  // CLOCK. The rail sells 960 as "2 days"; spending it as 960 real minutes from 08:00 ends the
+  // visit at midnight, and 1440 ("3 days") ends it at 8am tomorrow. The day grid can't draw a block
+  // that crosses midnight, so it would silently shrink to an hour while every occupancy reader
+  // marked tomorrow busy. A multi-day visit is a span of days, not one very long appointment.
+  const m = Math.min(Number(plannedMinutes ?? 0), WORK_DAY_MINUTES);
+  const endsAt = m > 0 ? new Date(new Date(startsAt).getTime() + m * 60_000).toISOString() : null;
+
+  const res = await rescheduleAppointment(id, startsAt, endsAt);
+  return res.ok ? { ok: true } : res;
+}
+
+/**
+ * SIZE (and re-tag) AN ALREADY-BOOKED VISIT from the rail.
+ *
+ * The twin of sizeJob/sizeLead for the third kind. Without it the rail's duration dropdown sent an
+ * APPOINTMENT id to sizeLead, which updates `inquiries` — zero rows, and the SILENT-WRITE LAW says
+ * that is a 204 and not an error, so it would have reported "That lead isn't available" for an
+ * appointment that was sitting right there. Same shape of hole as the placement one, two rows down.
+ *
+ * The kind is writable too, through the one WorkKind→appointments.type mapping the whole app uses
+ * (appointmentTypeFor). An inspection that turns out to be a service call is a thing that happens
+ * on the phone, and making him leave the board to say so is the round trip this rail exists to kill.
+ */
+export async function sizeAppointment(
+  id: string,
+  patch: { workKind?: string; plannedMinutes?: number | null },
+): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+
+  const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  if ("plannedMinutes" in patch) {
+    const m = Number(patch.plannedMinutes ?? 0);
+    if (m < 0 || m > 60 * 24 * 30) return { ok: false, error: "That duration isn't sensible." };
+    update.planned_minutes = m > 0 ? m : null; // blank is not zero
+  }
+  if (patch.workKind) update.type = appointmentTypeFor(patch.workKind);
+  if (Object.keys(update).length === 1) return { ok: true }; // nothing but the timestamp — no-op
+
+  const { data, error } = await ctx.supabase
+    .from("appointments")
+    .update(update)
+    .eq("id", id)
+    .select("id"); // a zero-row UPDATE is a 204, not an error
+  if (error) return { ok: false, error: dbError(error) };
+  if (!data?.length) return { ok: false, error: "That visit isn't available." };
+  revalidatePath("/schedule");
+  revalidatePath("/inspections");
+  return { ok: true };
+}

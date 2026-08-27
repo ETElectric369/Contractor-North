@@ -1,12 +1,14 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarPlus, MapPin, Phone, Check } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { MapPin, Phone, Check } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/toast";
-import { scheduleLeadsOnDay, sizeLead } from "../leads/actions";
+import { sizeLead } from "../leads/actions";
+import { sizeAppointment, sizeJob } from "./actions";
+import { usePlacement } from "./placement-context";
+import { armedInstruction } from "@/lib/schedule/placement-plan";
 import {
   groupByTown,
   nextAction,
@@ -35,67 +37,43 @@ import { dayLoad, durationLabel, KIND_LABEL, KIND_TONE, workKind } from "@/lib/s
  * Mike Scrivano has no address but a phone and a real note, so his next move is a call, not the
  * bottom of the list. See lib/schedule/place-by-town.
  */
-export function PlaceRail({ items, onPickDay }: { items: Placeable[]; onPickDay?: () => void }) {
+/** The durations the dropdown offers. Anything stored that isn't one of these still renders — see
+ *  the synthetic option below. */
+const SIZE_BUCKETS = [30, 60, 120, 240, 480, 960, 1440, 2400];
+
+export function PlaceRail({ items }: { items: Placeable[] }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
-  const [picked, setPicked] = useState<Set<string>>(new Set());
-  const [day, setDay] = useState("");
-  /** AM or PM. Erik: "put them on a day am or pm then if one has 6 hours set and the other has 1
-   *  hour set i can see that the visit is on the way and choose to plan it/its for before or
-   *  after." Morning starts 8, afternoon 13:00 — the two halves a contractor's day actually has,
-   *  rather than a time picker that asks for a precision nobody has at planning time. */
-  const [half, setHalf] = useState<"am" | "pm">("am");
+  /* WHO IS PICKED IS NOT THE RAIL'S SECRET ANY MORE. The second tap now lands on the calendar next
+     door, so the picked set lives in a context both can see. AM/PM likewise: chosen here, applied
+     by whichever surface commits. Erik: "put them on a day am or pm … i can see that the visit is
+     on the way and choose to plan it/its for before or after." Morning starts 8, afternoon 1 — the
+     two halves a contractor's day actually has, not a time picker demanding a precision nobody has
+     while planning. */
+  const { picked, toggle, clear, half, setHalf, pending: placing } = usePlacement();
 
   const groups = useMemo(() => groupByTown(items), [items]);
   const chosen = useMemo(
     () => items.filter((i) => picked.has(i.id)),
     [items, picked],
   );
-  // Only LEADS can be booked as walk-throughs by this action; a dateless job needs a date set on
-  // the job itself, which is a different write. Say so rather than silently ignoring them.
-  const leads = chosen.filter((i) => i.kind === "lead");
   const load = dayLoad(chosen);
   const jobs = chosen.filter((i) => i.kind === "job");
 
-  function size(id: string, patch: { workKind?: string; plannedMinutes?: number | null }) {
+  /** ONE CONTROL, THREE TABLES. A floater's size lives on `jobs`, a lead's on `inquiries`, an
+   *  already-booked visit's on `appointments`. The card doesn't make him care which — but the
+   *  dispatch has to be exhaustive, because sending one kind's id to another kind's writer updates
+   *  zero rows and, by the silent-write law, that reads as an error about the wrong record. */
+  function size(i: Placeable, patch: { workKind?: string; plannedMinutes?: number | null }) {
     start(async () => {
-      const res = await sizeLead(id, patch);
+      const res =
+        i.kind === "job"
+          ? await sizeJob(i.id, patch.plannedMinutes ?? null)
+          : i.kind === "appointment"
+            ? await sizeAppointment(i.id, patch)
+            : await sizeLead(i.id, patch);
       if (!res.ok) { toast(res.error ?? "Couldn't save that.", "error"); return; }
-      router.refresh();
-    });
-  }
-
-  function toggle(id: string) {
-    setPicked((p) => {
-      const n = new Set(p);
-      if (n.has(id)) n.delete(id);
-      else n.add(id);
-      return n;
-    });
-  }
-
-  function place() {
-    if (!day || !leads.length) return;
-    start(async () => {
-      const res = await scheduleLeadsOnDay(leads.map((l) => l.id), day, {
-        startTime: half === "am" ? "08:00" : "13:00",
-      });
-      if (!res.ok) {
-        toast(res.error ?? "Couldn't book those.", "error");
-        return;
-      }
-      // ANNOUNCE THE DEED, and name any that didn't land — a batch that says "done" while one of
-      // four silently failed is how somebody stops trusting the button.
-      toast(
-        res.failures.length
-          ? `Booked ${res.booked}. ${res.failures.length} didn't — open them and try again.`
-          : `Booked ${res.booked} ${res.booked === 1 ? "visit" : "visits"} for ${day}.`,
-        res.failures.length ? "info" : "success",
-      );
-      setPicked(new Set());
-      setDay("");
-      onPickDay?.();
       router.refresh();
     });
   }
@@ -168,15 +146,17 @@ export function PlaceRail({ items, onPickDay }: { items: Placeable[]; onPickDay?
                           you NEED the number is while filling a day; making him leave, find the
                           lead, edit, and come back is the round trip he says costs the most.
                           Only on the picked card — chrome you are not using is chrome in the way. */}
-                      {on && i.kind === "lead" && (
+                      {on && (
                         <span
                           className="mt-1 flex flex-wrap items-center gap-1.5"
                           onClick={(e) => { e.stopPropagation(); e.preventDefault(); }}
                         >
+                          {/* A JOB IS A JOB — no kind to pick. Only a lead can be several things. */}
                           <select
                             value={i.workKind ?? ""}
-                            onChange={(e) => size(i.id, { workKind: e.target.value })}
-                            className="h-7 rounded-md border border-slate-200 bg-white px-1.5 text-xs"
+                            onChange={(e) => size(i, { workKind: e.target.value })}
+                            disabled={pending}
+                            className={`h-7 rounded-md border border-slate-200 bg-white px-1.5 text-xs ${i.kind === "job" ? "hidden" : ""}`}
                             aria-label="What kind of work"
                           >
                             <option value="">Kind?</option>
@@ -188,11 +168,22 @@ export function PlaceRail({ items, onPickDay }: { items: Placeable[]; onPickDay?
                           </select>
                           <select
                             value={i.planned_minutes ? String(i.planned_minutes) : ""}
-                            onChange={(e) => size(i.id, { plannedMinutes: Number(e.target.value) || null })}
-                            className="h-7 rounded-md border border-slate-200 bg-white px-1.5 text-xs"
+                            onChange={(e) => size(i, { plannedMinutes: Number(e.target.value) || null })}
+                            disabled={pending}
+                            className="h-7 rounded-md border border-slate-200 bg-white px-1.5 text-xs disabled:opacity-50"
                             aria-label="How long will it take"
                           >
                             <option value="">How long?</option>
+                            {/* A SIZE THAT ISN'T ON THE LIST STILL HAS TO SHOW. 0229 backfilled real
+                                spans (45, 90 minutes) that match no bucket, and a select whose value
+                                matches no option falls back to the first — so the card read "1.5h"
+                                in the badge and "How long?" in the control, about itself, and the
+                                next change silently overwrote the real number. */}
+                            {!!i.planned_minutes && !SIZE_BUCKETS.includes(i.planned_minutes) && (
+                              <option value={String(i.planned_minutes)}>
+                                {durationLabel(i.planned_minutes)}
+                              </option>
+                            )}
                             <option value="30">30m</option>
                             <option value="60">1h</option>
                             <option value="120">2h</option>
@@ -200,6 +191,7 @@ export function PlaceRail({ items, onPickDay }: { items: Placeable[]; onPickDay?
                             <option value="480">Full day</option>
                             <option value="960">2 days</option>
                             <option value="1440">3 days</option>
+                            <option value="2400">A week</option>
                           </select>
                         </span>
                       )}
@@ -232,25 +224,35 @@ export function PlaceRail({ items, onPickDay }: { items: Placeable[]; onPickDay?
         </div>
       ))}
 
-      {/* THE SECOND TAP. Appears only once something is picked, so it is never chrome in the way. */}
+      {/* THE SECOND TAP IS ON THE CALENDAR NOW.
+          Erik: "i cant see the whole calendar on the bottom to pick the day, wondering about what
+          you said before about being able to click the day on the calendar to pick it once the jobs
+          are checked."
+          The date field that used to sit here opened its native month popup downward off the bottom
+          of the window — he could see four rows of it. But the field was the wrong idea even
+          unclipped: a second, BLIND calendar with no towns and no existing work on it, asking him
+          to choose a day with everything hidden, while the calendar carrying exactly that sat four
+          inches to the right. So the real one is the picker, and this bar is now a instruction and
+          a running total rather than a form. */}
       {chosen.length > 0 && (
-        <div className="sticky bottom-0 space-y-2 rounded-xl border border-brand/30 bg-white/95 p-3 shadow-lg backdrop-blur">
-          <div className="text-sm font-medium text-slate-900">
-            {chosen.length} picked
+        <div className="sticky bottom-0 space-y-2 rounded-xl border border-brand/40 bg-white/95 p-3 shadow-lg backdrop-blur">
+          <div className="flex flex-wrap items-baseline gap-x-2">
+            <span className="text-sm font-semibold text-slate-900">
+              {chosen.length} picked
+            </span>
             {jobs.length > 0 && (
-              <span className="ml-1 font-normal text-slate-500">
-                ({jobs.length} {jobs.length === 1 ? "is a job" : "are jobs"} — set their dates on the job itself)
+              <span className="text-xs text-slate-500">
+                {jobs.length} {jobs.length === 1 ? "floater" : "floaters"}
               </span>
             )}
+            {/* WHAT THE DAY WILL HOLD, before he commits to it — the whole reason the sizes exist.
+                Unsized items are counted separately rather than assumed to take nothing. */}
+            {load.label && <span className="text-xs text-slate-500">· about {load.label}</span>}
           </div>
+
+          <p className="text-sm font-medium text-brand">{armedInstruction(chosen.length)}</p>
+
           <div className="flex flex-wrap items-center gap-2">
-            <input
-              type="date"
-              value={day}
-              onChange={(e) => setDay(e.target.value)}
-              className="h-9 rounded-lg border border-slate-200 px-2 text-sm"
-              aria-label="Day to place them on"
-            />
             <span className="inline-flex overflow-hidden rounded-lg border border-slate-200">
               {(["am", "pm"] as const).map((h) => (
                 <button
@@ -265,24 +267,18 @@ export function PlaceRail({ items, onPickDay }: { items: Placeable[]; onPickDay?
                 </button>
               ))}
             </span>
-            <Button size="sm" onClick={place} disabled={pending || !day || !leads.length}>
-              <CalendarPlus className="h-4 w-4" />
-              {pending ? "Booking…" : `Put ${leads.length} on this day`}
-            </Button>
+            <span className="text-xs text-slate-400">
+              {half === "am" ? "from 8am" : "from 1pm"}, in the order shown
+            </span>
             <button
               type="button"
-              onClick={() => setPicked(new Set())}
-              className="text-xs font-medium text-slate-500 hover:text-slate-800"
+              onClick={clear}
+              className="ml-auto text-xs font-medium text-slate-500 hover:text-slate-800"
             >
               Clear
             </button>
           </div>
-          {/* WHAT THE DAY WILL HOLD, before he commits to it — the whole reason the sizes exist.
-              Unsized items are counted separately rather than assumed to take nothing. */}
-          <p className="text-xs text-slate-400">
-            {half === "am" ? "From 8am" : "From 1pm"}, in the order shown
-            {load.label ? ` · about ${load.label}` : ""}.
-          </p>
+          {placing && <p className="text-xs font-medium text-brand">Placing…</p>}
         </div>
       )}
     </div>

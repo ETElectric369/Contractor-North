@@ -706,6 +706,27 @@ export async function scheduleLeadsOnDay(
   if (!ids.length) return { ok: false, error: "Pick at least one lead.", booked: 0, failures: [] };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { ok: false, error: "Pick a day.", booked: 0, failures: [] };
 
+  /* ── ONE VISIT PER LEAD, ON THIS PATH ──────────────────────────────────────────────────────
+     convertInquiry's inspection branch is deliberately exempt from the already-converted guard —
+     an inspected lead can still become an estimate — and it has no existence check, so calling it
+     twice mints a second walk-through. That is correct for the single "Inspect" button, where a
+     person deliberately asks for another visit. It is NOT correct here: this is the BATCH path
+     behind "put these on Thursday", where a repeat is a slip (a stale tab, a double tap, a page
+     that hadn't refreshed) and never an intention.
+     Belt to the rail's braces — the schedule page already drops booked leads from the board, but a
+     filter at one read path is a convention; refusing the write is the boundary. And it is a
+     refusal with a reason, not a silent skip: he is told the visit already exists. */
+  const { data: existing } = await ctx.supabase
+    .from("appointments")
+    .select("inquiry_id")
+    .in("inquiry_id", ids)
+    .in("type", [...INSPECTION_TYPES])
+    .neq("status", "cancelled")
+    .limit(500);
+  const alreadyBooked = new Set(
+    ((existing ?? []) as { inquiry_id: string | null }[]).map((r) => String(r.inquiry_id)),
+  );
+
   const times = spreadTimes(ids.length, opts.startTime ?? "09:00", opts.stepMinutes ?? 90);
   const failures: { id: string; error: string }[] = [];
   let booked = 0;
@@ -713,6 +734,10 @@ export async function scheduleLeadsOnDay(
   // them in parallel would race the same org's numbering and revalidation for no real gain at
   // the sizes this is used at (a day is a handful of stops, not a hundred).
   for (let i = 0; i < ids.length; i++) {
+    if (alreadyBooked.has(ids[i])) {
+      failures.push({ id: ids[i], error: "This one already has a visit booked — move that one instead." });
+      continue;
+    }
     const res = await convertInquiry(ids[i], "inspection", { startDate: date, startTime: times[i] });
     if (res.ok) booked++;
     else failures.push({ id: ids[i], error: res.error ?? "Couldn't book this one." });

@@ -42,9 +42,16 @@
 
 export type Placeable = {
   id: string;
-  /** A lead needs a walk-through; a job is work already sold and waiting for a date. Both want a
-   *  day, which is why one rail holds them — Erik doesn't think of them as two piles. */
-  kind: "lead" | "job";
+  /**
+   * A lead needs a walk-through; a job is work already sold and waiting for a date; an appointment
+   * is a visit already agreed that nobody has put on a day. All three want the same thing — a day —
+   * which is why one rail holds them: Erik doesn't think of them as three piles.
+   *
+   * They are three kinds and not one because they are three different WRITES. Calling an
+   * appointment a lead (which this did) sent its id through convertInquiry, which went looking for
+   * an inquiry that was never there.
+   */
+  kind: "lead" | "job" | "appointment";
   name: string;
   address: string | null;
   city: string | null;
@@ -82,8 +89,9 @@ export function whatsMissing(
   const place = has(i.city) || has(i.address);
   // A JOB HAS NO PHONE, AND THAT IS NOT A GAP. Work already sold is waiting for a DATE; telling
   // the office a job has "no phone or email" is answering a question nobody asked, and it was
-  // firing on J-012 — a job with a complete address. Its only gap can be a place.
-  if (i.kind === "job") return place ? "nothing" : "place";
+  // firing on J-012 — a job with a complete address. Its only gap can be a place. An appointment
+  // is the same: the conversation that created it already happened.
+  if (i.kind === "job" || i.kind === "appointment") return place ? "nothing" : "place";
   const contact = has(i.phone) || has(i.email);
   if (place && contact) return "nothing";
   if (!place && !contact) return "both";
