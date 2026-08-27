@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CalendarClock, CalendarSync, Briefcase, ClipboardList, ListTodo, MapPin, Users, Columns3 } from "lucide-react";
@@ -555,11 +555,38 @@ export function CalendarView({
     return { events, allDay: tray };
   }
 
-  /** The NEXT seven days, for the stacked second row. Same shape, same grid, one week on. */
-  const nextWeekDays = useMemo(
-    () => weekDays.map((d) => { const x = new Date(d); x.setDate(x.getDate() + 7); return x; }),
-    [weekDays],
-  );
+  /**
+   * CONTINUOUS SCROLL. Erik: "the two week scroll needs to keep scrolling forward and back so i
+   * can see everything, default to today of course."
+   *
+   * Two fixed weeks meant paging the moment he looked past them — and paging is a decision, you
+   * commit to leaving what you were reading. `back`/`fwd` grow as he reaches either end, so the
+   * span extends under him and the week he was looking at stays where it was. Starts at exactly
+   * two weeks from today, which is the planning horizon a walk-through gets booked in.
+   */
+  const [back, setBack] = useState(0);
+  const [fwd, setFwd] = useState(1); // today's week + one = the two weeks he asked for
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const stackWeeks = useMemo(() => {
+    const out: Date[][] = [];
+    for (let w = -back; w <= fwd; w++) {
+      out.push(weekDays.map((d) => { const x = new Date(d); x.setDate(x.getDate() + 7 * w); return x; }));
+    }
+    return out;
+  }, [weekDays, back, fwd]);
+
+  /** Grow the span when he reaches an edge. Capped so a long scroll can't mount 500 grids. */
+  function onStackScroll(e: React.UIEvent<HTMLDivElement>) {
+    const el = e.currentTarget;
+    if (el.scrollTop < 120 && back < 26) {
+      const prev = el.scrollHeight;
+      setBack((b) => b + 1);
+      // Hold his place: prepending a week would otherwise jump the view up by one grid.
+      requestAnimationFrame(() => { el.scrollTop += el.scrollHeight - prev; });
+    }
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 240 && fwd < 52) setFwd((f) => f + 1);
+  }
+
 
   const weekGridDays = weekDays.map((d) => {
     const k = dayKey(d);
@@ -568,10 +595,6 @@ export function CalendarView({
   // Server-computed now in the ORG tz, so SSR and hydration agree on the now
   // line; TimeGrid's own minute ticker (also org-tz via the tz prop) takes over.
   const gridNow = { dayStr: todayStrInTz(tz, new Date(now)), min: tzMinutesOfDay(new Date(now), tz) };
-  const nextWeekGridDays = nextWeekDays.map((d) => {
-    const k = dayKey(d);
-    return { dayStr: k, label: d.toLocaleDateString(undefined, { weekday: "short", day: "numeric" }), isToday: k === todayK };
-  });
 
   /** WHERE the day's committed work is. Jobs carry a town; a walk-through's `location` is a bare
    *  street with no city, and inventing one would be worse than saying nothing. Jobs are the right
@@ -591,20 +614,11 @@ export function CalendarView({
 
   const weekGridEvents: TimeGridEvent[] = [];
   const weekGridTray: TimeGridAllDay[] = [];
-  const week2Events: TimeGridEvent[] = [];
-  const week2Tray: TimeGridAllDay[] = [];
   if (view === "week" || view === "2weeks") {
     for (const d of weekGridDays) {
       const g = gridDataFor(d.dayStr);
       weekGridEvents.push(...g.events);
       weekGridTray.push(...g.allDay);
-    }
-  }
-  if (view === "2weeks") {
-    for (const d of nextWeekGridDays) {
-      const g = gridDataFor(d.dayStr);
-      week2Events.push(...g.events);
-      week2Tray.push(...g.allDay);
     }
   }
   const dayGrid = view === "day" ? gridDataFor(anchorK, { openApptRecords: true }) : { events: [], allDay: [] };
@@ -613,7 +627,7 @@ export function CalendarView({
     view === "month"
       ? anchor.toLocaleDateString(undefined, { month: "long", year: "numeric" })
       : view === "2weeks"
-        ? `${weekDays[0].toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${nextWeekDays[6].toLocaleDateString(undefined, { month: "short", day: "numeric" })}`
+        ? `${weekDays[0].toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${stackWeeks[stackWeeks.length - 1][6].toLocaleDateString(undefined, { month: "short", day: "numeric" })}`
       : view === "week"
         ? `${weekDays[0].toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${weekDays[6].toLocaleDateString(undefined, { month: "short", day: "numeric" })}`
         : anchor.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
@@ -764,37 +778,46 @@ export function CalendarView({
 
       {view === "month" && <MonthGrid anchor={anchor} byDay={byDay} todayK={todayK} tz={tz} onPick={handleDayTap} />}
       {view === "2weeks" && (
-        /* TWO WEEKS, STACKED AND SCROLLABLE. Two of the SAME TimeGrid rather than a new grid —
-           every behaviour (day-tap drills in, the now line, the all-day tray, the work-day
-           shading) is inherited rather than reimplemented and left to drift.
-           Scrolling, not paging: paging is a decision — you commit to leaving what you are
-           looking at. Scrolling is a glance, which is what you want when the rail says
-           "Truckee (5)" and you are hunting for a home for them. */
-        <div className="max-h-[calc(100dvh-14rem)] space-y-3 overflow-y-auto overscroll-contain">
-          <Card className="overflow-hidden">
-            <TimeGrid
-              days={withTowns(weekGridDays)}
-              events={weekGridEvents}
-              allDay={weekGridTray}
-              workStartMin={wdStartMin}
-              workEndMin={wdEndMin}
-              tz={tz}
-              initialNow={gridNow}
-              onDayClick={(ds) => nav("day", ds, { push: true })}
-            />
-          </Card>
-          <Card className="overflow-hidden">
-            <TimeGrid
-              days={withTowns(nextWeekGridDays)}
-              events={week2Events}
-              allDay={week2Tray}
-              workStartMin={wdStartMin}
-              workEndMin={wdEndMin}
-              tz={tz}
-              initialNow={gridNow}
-              onDayClick={(ds) => nav("day", ds, { push: true })}
-            />
-          </Card>
+        /* Two of the SAME TimeGrid per week rather than a new grid — every behaviour (day-tap
+           drills in, the now line, the all-day tray, work-day shading) is inherited rather than
+           reimplemented and left to drift. The span grows at both ends as he scrolls. */
+        <div
+          ref={scrollRef}
+          onScroll={onStackScroll}
+          className="max-h-[calc(100dvh-14rem)] space-y-3 overflow-y-auto overscroll-contain"
+        >
+          {stackWeeks.map((wk) => {
+            const days = wk.map((d) => {
+              const k = dayKey(d);
+              return {
+                dayStr: k,
+                label: d.toLocaleDateString(undefined, { weekday: "short", day: "numeric" }),
+                isToday: k === todayK,
+                sublabel: townFor(k),
+              };
+            });
+            const ev: TimeGridEvent[] = [];
+            const tray: TimeGridAllDay[] = [];
+            for (const d of days) {
+              const g = gridDataFor(d.dayStr);
+              ev.push(...g.events);
+              tray.push(...g.allDay);
+            }
+            return (
+              <Card key={days[0].dayStr} className="overflow-hidden">
+                <TimeGrid
+                  days={days}
+                  events={ev}
+                  allDay={tray}
+                  workStartMin={wdStartMin}
+                  workEndMin={wdEndMin}
+                  tz={tz}
+                  initialNow={gridNow}
+                  onDayClick={(ds) => nav("day", ds, { push: true })}
+                />
+              </Card>
+            );
+          })}
         </div>
       )}
       {view === "week" && (

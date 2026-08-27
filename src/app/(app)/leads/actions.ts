@@ -147,7 +147,13 @@ export async function createInquiry(formData: FormData): Promise<Result & { note
       customer_id: linkedCustomerId,
       source: "manual",
       status: "new",
-      next_follow_up_at: ymdAddDays(todayStrInTz(tz), 1),
+      // NO INVENTED DEADLINE. Erik: "this auto follow up one day later should default to open …
+      // have it just say follow up and leave it on a list of follow ups."
+      // Stamping tomorrow made every lead overdue the day after it was entered — twelve leads, all
+      // red, about a date nobody chose. A lead needing a follow-up is a STATE, not a missed
+      // appointment. Null means "on the follow-up list, no date promised"; the office sets a real
+      // date when there is a real reason.
+      next_follow_up_at: null,
       created_by: ctx.userId,
     })
     .select("id")

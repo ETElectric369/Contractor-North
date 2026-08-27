@@ -13,7 +13,7 @@ import {
   whatsMissing,
   type Placeable,
 } from "@/lib/schedule/place-by-town";
-import { durationLabel, KIND_LABEL, KIND_TONE, workKind } from "@/lib/schedule/work-shape";
+import { dayLoad, durationLabel, KIND_LABEL, KIND_TONE, workKind } from "@/lib/schedule/work-shape";
 
 /**
  * EVERYTHING WAITING FOR A DAY, next to the calendar.
@@ -41,6 +41,11 @@ export function PlaceRail({ items, onPickDay }: { items: Placeable[]; onPickDay?
   const [pending, start] = useTransition();
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [day, setDay] = useState("");
+  /** AM or PM. Erik: "put them on a day am or pm then if one has 6 hours set and the other has 1
+   *  hour set i can see that the visit is on the way and choose to plan it/its for before or
+   *  after." Morning starts 8, afternoon 13:00 — the two halves a contractor's day actually has,
+   *  rather than a time picker that asks for a precision nobody has at planning time. */
+  const [half, setHalf] = useState<"am" | "pm">("am");
 
   const groups = useMemo(() => groupByTown(items), [items]);
   const chosen = useMemo(
@@ -50,6 +55,7 @@ export function PlaceRail({ items, onPickDay }: { items: Placeable[]; onPickDay?
   // Only LEADS can be booked as walk-throughs by this action; a dateless job needs a date set on
   // the job itself, which is a different write. Say so rather than silently ignoring them.
   const leads = chosen.filter((i) => i.kind === "lead");
+  const load = dayLoad(chosen);
   const jobs = chosen.filter((i) => i.kind === "job");
 
   function size(id: string, patch: { workKind?: string; plannedMinutes?: number | null }) {
@@ -72,7 +78,9 @@ export function PlaceRail({ items, onPickDay }: { items: Placeable[]; onPickDay?
   function place() {
     if (!day || !leads.length) return;
     start(async () => {
-      const res = await scheduleLeadsOnDay(leads.map((l) => l.id), day);
+      const res = await scheduleLeadsOnDay(leads.map((l) => l.id), day, {
+        startTime: half === "am" ? "08:00" : "13:00",
+      });
       if (!res.ok) {
         toast(res.error ?? "Couldn't book those.", "error");
         return;
@@ -243,6 +251,20 @@ export function PlaceRail({ items, onPickDay }: { items: Placeable[]; onPickDay?
               className="h-9 rounded-lg border border-slate-200 px-2 text-sm"
               aria-label="Day to place them on"
             />
+            <span className="inline-flex overflow-hidden rounded-lg border border-slate-200">
+              {(["am", "pm"] as const).map((h) => (
+                <button
+                  key={h}
+                  type="button"
+                  onClick={() => setHalf(h)}
+                  className={`px-3 py-1.5 text-xs font-semibold uppercase ${
+                    half === h ? "bg-brand text-white" : "bg-white text-slate-500 hover:bg-slate-50"
+                  }`}
+                >
+                  {h}
+                </button>
+              ))}
+            </span>
             <Button size="sm" onClick={place} disabled={pending || !day || !leads.length}>
               <CalendarPlus className="h-4 w-4" />
               {pending ? "Booking…" : `Put ${leads.length} on this day`}
@@ -255,8 +277,11 @@ export function PlaceRail({ items, onPickDay }: { items: Placeable[]; onPickDay?
               Clear
             </button>
           </div>
+          {/* WHAT THE DAY WILL HOLD, before he commits to it — the whole reason the sizes exist.
+              Unsized items are counted separately rather than assumed to take nothing. */}
           <p className="text-xs text-slate-400">
-            Walk-throughs, 90 minutes apart from 9am, in the order shown.
+            {half === "am" ? "From 8am" : "From 1pm"}, in the order shown
+            {load.label ? ` · about ${load.label}` : ""}.
           </p>
         </div>
       )}

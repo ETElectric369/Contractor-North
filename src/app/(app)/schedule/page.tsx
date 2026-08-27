@@ -104,7 +104,7 @@ export default async function SchedulePage({
    * RLS scopes both reads to his org. A lead counts as "waiting" when it is open and has no
    * inspection booked yet; a job when it is in flight with no date.
    */
-  const [{ data: leadRows }, { data: dateless }, { data: undated }] = await Promise.all([
+  const [{ data: leadRows }, { data: dateless }, { data: undated }, { data: orgRow }] = await Promise.all([
     supabase
       .from("inquiries")
       .select("id, name, address, city, phone, email, message, notes, next_follow_up_at, work_kind, planned_minutes")
@@ -127,9 +127,14 @@ export default async function SchedulePage({
       .not("status", "in", "(cancelled,completed)")
       .order("created_at", { ascending: false })
       .limit(200),
+    // WAS A SERIAL ROUND TRIP, buried inside a template literal below — one extra sequential hop
+    // on every single schedule load, for one settings row. Erik: "the app froze for me a few
+    // times". This page is the heaviest read in the app; it does not get to wait on a fourth
+    // query it could have asked for at the same time as the other three.
+    supabase.from("organizations").select("settings").limit(1).maybeSingle(),
   ]);
 
-  const today = todayStrInTz(getOrgSettings((await supabase.from("organizations").select("settings").limit(1).maybeSingle()).data?.settings as never).timezone);
+  const today = todayStrInTz(getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone);
   const waiting: Placeable[] = [
     ...((leadRows ?? []) as Record<string, string | null>[]).map((r) => ({
       id: String(r.id),

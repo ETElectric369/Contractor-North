@@ -214,7 +214,17 @@ export function InquiryRow({
         {/* Now that the date maths is right this is genuinely rare, so it can stay red — a badge
             earns its colour by being uncommon. Before the fix it fired on every row and read as
             decoration. Amber, not red: a follow-up slipping a day is a nudge, not an alarm. */}
-        {overdue && <Badge tone="amber">follow-up overdue</Badge>}
+        {/* "Follow up" is a STATE, not a missed appointment. Erik: "have it just say follow up
+            and leave it on a list of follow ups." A lead with no visit booked and no date promised
+            is simply on the follow-up list — that is neutral, not late. A real DATE that has
+            actually passed is the only thing that earns amber. */}
+        {overdue ? (
+          <Badge tone="amber">follow up · {formatDate(inquiry.next_follow_up_at!)}</Badge>
+        ) : (
+          !inquiry.next_follow_up_at && !inspections?.done && !inspections?.upcoming && (
+            <Badge tone="slate">follow up</Badge>
+          )
+        )}
         <span className="ml-auto whitespace-nowrap font-mono text-xs tabular-nums text-slate-400" title={`Added ${formatDateTime(inquiry.created_at)}`}>
           {formatDateTime(inquiry.created_at)}
         </span>
