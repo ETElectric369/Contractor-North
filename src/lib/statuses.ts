@@ -47,6 +47,10 @@ export const APPOINTMENT_TYPES = [
   // be the walk-through's first question, where its answer was already settled — the phone knew
   // it while Alexa wrote the address down. See migration 0188.
   "service_call",
+  // THE WORK ITSELF, ON A DAY (0231). Not every booking is a visit before the work — a job he
+  // already quoted is a Monday, and folding that into "inspection" overruled the one person who
+  // knew. See lib/schedule/work-shape.
+  "job",
   "quote",
   "meeting",
   "appointment",
@@ -69,6 +73,7 @@ const APPOINTMENT_TYPE_LABELS: Record<AppointmentType, string> = {
   inspection: "Inspection",
   final_inspection: "Final inspection",
   service_call: "Service call",
+  job: "Job",
   quote: "Quote / estimate",
   meeting: "Client meeting",
   appointment: "Appointment",

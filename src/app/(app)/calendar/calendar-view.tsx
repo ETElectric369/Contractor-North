@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CalendarClock, CalendarSync, Briefcase, ClipboardList, ListTodo, MapPin, Users, Columns3 } from "lucide-react";
@@ -598,16 +598,52 @@ export function CalendarView({
     return out;
   }, [weekDays, back, fwd]);
 
-  /** Grow the span when he reaches an edge. Capped so a long scroll can't mount 500 grids. */
+  /**
+   * Grow the span when he reaches an edge — ONE WEEK PER ARRIVAL, not one per scroll event.
+   *
+   * Erik: "check the scrolling becuase i barely did anything and it cycled through the last 6
+   * months in half second."
+   *
+   * A scroll fires this handler dozens of times a second, and React batches the state it sets. So
+   * every event in a single flick saw the same `scrollTop < 120`, and every one of them ran
+   * `setBack(b => b + 1)` — a functional update, so none of them cancelled out. One gesture spent
+   * the entire 26-week budget before the browser painted once. The `back < 26` guard could not
+   * help: `back` was the stale render's value in every one of those calls.
+   *
+   * The latch is the fix and it has to be a REF, because that is the only thing that changes
+   * between two events inside the same frame. It closes on the first arrival at an edge and only
+   * reopens after the new week has been laid out and his place restored — by which point the
+   * anchor has pushed scrollTop a full grid away from the threshold, so the next event genuinely
+   * is a new arrival rather than the same one counted again.
+   */
+  const growingRef = useRef(false);
+  const anchorRef = useRef(0);
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !growingRef.current) return;
+    // HOLD HIS PLACE. Prepending a week above the viewport would otherwise shove everything he was
+    // reading down by one grid. Restored before paint, so it never flickers.
+    if (anchorRef.current) {
+      el.scrollTop += el.scrollHeight - anchorRef.current;
+      anchorRef.current = 0;
+    }
+    growingRef.current = false;
+  }, [back, fwd]);
+
   function onStackScroll(e: React.UIEvent<HTMLDivElement>) {
+    if (growingRef.current) return; // a week is already being added — this is the same arrival
     const el = e.currentTarget;
     if (el.scrollTop < 120 && back < 26) {
-      const prev = el.scrollHeight;
+      growingRef.current = true;
+      anchorRef.current = el.scrollHeight;
       setBack((b) => b + 1);
-      // Hold his place: prepending a week would otherwise jump the view up by one grid.
-      requestAnimationFrame(() => { el.scrollTop += el.scrollHeight - prev; });
+      return;
     }
-    if (el.scrollHeight - el.scrollTop - el.clientHeight < 240 && fwd < 52) setFwd((f) => f + 1);
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 240 && fwd < 52) {
+      growingRef.current = true;
+      setFwd((f) => f + 1);
+    }
   }
 
 

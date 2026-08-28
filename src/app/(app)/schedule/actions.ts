@@ -581,6 +581,23 @@ export async function sizeAppointment(
   if (patch.workKind) update.type = appointmentTypeFor(patch.workKind);
   if (Object.keys(update).length === 1) return { ok: true }; // nothing but the timestamp — no-op
 
+  /* A SIZE THE CALENDAR CANNOT DRAW IS NOT A SIZE. The grid reads ends_at, so writing
+     planned_minutes alone leaves the block at its default hour — the number is entered, saved, and
+     invisible, which is the shape of the Matt Warren bug. If this visit already has a day, its
+     drawn length moves with the number. (Clamped: planned_minutes is work load, not wall clock.) */
+  if ("plannedMinutes" in patch) {
+    const { data: cur } = await ctx.supabase
+      .from("appointments")
+      .select("starts_at") // THE PROJECTION LAW: read the column the decision below turns on
+      .eq("id", id)
+      .maybeSingle();
+    const startsAt = (cur as { starts_at?: string | null } | null)?.starts_at ?? null;
+    if (startsAt) {
+      const span = Math.min(Number(update.planned_minutes ?? 0), WORK_DAY_MINUTES);
+      update.ends_at = span > 0 ? new Date(new Date(startsAt).getTime() + span * 60_000).toISOString() : null;
+    }
+  }
+
   const { data, error } = await ctx.supabase
     .from("appointments")
     .update(update)

@@ -11,7 +11,6 @@ import { CrewBoardPanel } from "./crew-board-panel";
 import { PlaceRail } from "./place-rail";
 import { PlacementProvider } from "./placement-context";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
-import { INSPECTION_TYPES } from "@/lib/statuses";
 import type { Placeable } from "@/lib/schedule/place-by-town";
 import { KIND_FROM_APPT_TYPE } from "@/lib/schedule/work-shape";
 
@@ -159,7 +158,10 @@ export default async function SchedulePage({
         .from("appointments")
         .select("inquiry_id")
         .in("inquiry_id", leadIds)
-        .in("type", [...INSPECTION_TYPES])
+        // ANY booking, not just an inspection-typed one. 0231 lets a lead book as a JOB or a
+        // service call, and a type filter would have left exactly those still sitting on the board
+        // looking unscheduled — the same duplicate-visit hole, reopened by widening the vocabulary.
+        // What matters is whether a day was chosen, never which word was chosen with it.
         .neq("status", "cancelled")
         .limit(500)
     : { data: [] as { inquiry_id: string | null }[] };

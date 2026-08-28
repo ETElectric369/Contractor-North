@@ -7,7 +7,13 @@ import {
   placeMessage,
 } from "./placement-plan";
 import { groupByTown, spreadTimes, whatsMissing, type Placeable } from "./place-by-town";
-import { KIND_FROM_APPT_TYPE, WORK_DAY_MINUTES, workKind } from "./work-shape";
+import {
+  appointmentTypeFor,
+  bookingTitle,
+  KIND_FROM_APPT_TYPE,
+  WORK_DAY_MINUTES,
+  workKind,
+} from "./work-shape";
 
 describe("what a day tap means", () => {
   it("opens the day when nothing is picked — the old behaviour is untouched", () => {
@@ -179,5 +185,34 @@ describe("an already-booked visit shows the kind it already has", () => {
 
   it("shows nothing rather than a guess when it has no type", () => {
     expect(KIND_FROM_APPT_TYPE["" as string]).toBeUndefined();
+  });
+});
+
+describe("the tag he chose is the tag that lands", () => {
+  // Erik: "i just scheduled Matt warren for monday for a whole day as a job and it showed up as an
+  // inspection for an hour." Five of six kinds survived to the calendar; 'job' was folded into
+  // 'inspection' because appointments.type had no word for it (0231 adds one).
+  it("books a job as a job, not a walk-through", () => {
+    expect(appointmentTypeFor("job")).toBe("job");
+    expect(workKind({ kind: "appointment", type: "job" })).toBe("job");
+  });
+
+  it("round-trips every kind the dropdown offers", () => {
+    for (const k of ["job", "service", "office", "quote"] as const) {
+      expect(workKind({ kind: "appointment", type: appointmentTypeFor(k) })).toBe(k);
+    }
+    // a walk-through is the fallback and stays one
+    expect(appointmentTypeFor("walkthrough")).toBe("inspection");
+    expect(workKind({ kind: "appointment", type: "inspection" })).toBe("walkthrough");
+  });
+
+  it("stops calling a full day of work a site inspection", () => {
+    expect(bookingTitle("job", "Matt Warren")).toBe("Matt Warren");
+    expect(bookingTitle("service", "Matt Warren")).toBe("Service call: Matt Warren");
+    expect(bookingTitle("walkthrough", "Matt Warren")).toBe("Site inspection: Matt Warren");
+  });
+
+  it("never renders a nameless booking as a bare colon", () => {
+    expect(bookingTitle("walkthrough", "  ")).toBe("Site inspection: Visit");
   });
 });

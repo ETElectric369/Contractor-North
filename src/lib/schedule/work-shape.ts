@@ -26,6 +26,9 @@
 export type WorkKind = "job" | "walkthrough" | "service" | "office" | "quote" | "other";
 
 const APPT_KIND: Record<string, WorkKind> = {
+  // 0231. A day marked as the WORK is not a walk-through, and calling it one was the app
+  // overruling the only person who knew — twice, silently.
+  job: "job",
   inspection: "walkthrough",
   final_inspection: "walkthrough",
   service_call: "service",
@@ -149,13 +152,36 @@ export function dayLoad(items: { planned_minutes?: number | null }[]): {
  * calendar chip reads "Service call" because workKind maps it straight back. One choice, made once,
  * at the moment somebody actually knew.
  *
- * `job` and `quote` book as a walk-through: you still have to go and look before either exists.
+ * `quote` books as itself — you are going out to price it. `job` books as a JOB (0231): Erik
+ * marked Matt Warren a full-day job and got "Site inspection, one hour", because this function used
+ * to fold job into inspection. The assumption behind that fold — you always look before you work —
+ * is simply false for the work he already knows: a panel swap he quoted last month is a Monday, not
+ * a visit. When somebody says the word, the app's job is to write it down, not to correct it.
  */
 export function appointmentTypeFor(kind: string | null | undefined): string {
   switch (kind) {
     case "service": return "service_call";
     case "office": return "meeting";
     case "quote": return "quote";
+    case "job": return "job";
     default: return "inspection";
+  }
+}
+
+/**
+ * What to call this booking on the calendar.
+ *
+ * "Site inspection: Matt Warren" on a day he booked as a full day of work is the app telling him
+ * what he did, incorrectly, in the one place he goes to check. The label follows the kind, and a
+ * walk-through keeps the wording it always had.
+ */
+export function bookingTitle(kind: WorkKind, name: string): string {
+  const who = String(name ?? "").trim() || "Visit";
+  switch (kind) {
+    case "job": return who;
+    case "service": return `Service call: ${who}`;
+    case "office": return `Meeting: ${who}`;
+    case "quote": return `Quote: ${who}`;
+    default: return `Site inspection: ${who}`;
   }
 }

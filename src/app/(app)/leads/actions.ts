@@ -7,7 +7,7 @@ import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
 import { requireStaff } from "@/lib/staff-guard";
 import { spreadTimes } from "@/lib/schedule/place-by-town";
-import { appointmentTypeFor } from "@/lib/schedule/work-shape";
+import { appointmentTypeFor, bookingTitle, WORK_DAY_MINUTES, workKind } from "@/lib/schedule/work-shape";
 import { carryFromCustomer, matchKnownCustomer, type KnownCustomer } from "@/lib/inquiries/known-customer";
 import { createServiceClient } from "@/lib/supabase/server";
 import { formatPhone, formatState, formatZip, titleCase } from "@/lib/utils";
@@ -422,6 +422,27 @@ export async function convertInquiry(
     const startsAtIso = tzDateTimeUtc(startDate, /^\d{2}:\d{2}$/.test(opts.startTime ?? "") ? opts.startTime! : "09:00", tz);
     if (!startsAtIso) return { ok: false, error: "Pick a valid inspection date." };
     const carry = await carryForInquiry(supabase, inq);
+    const kindChosen = workKind({ kind: "lead", workKind: (inq as { work_kind?: string | null }).work_kind });
+
+    /* HOW LONG HE SAID, DRAWN AS HOW LONG HE SAID.
+       Erik: "i just scheduled Matt warren for monday for a whole day as a job and it showed up as
+       an inspection for an hour."
+
+       planned_minutes was written faithfully — and nothing draws it. The calendar sizes a block
+       from ends_at, and this insert never set one, so TimeGrid fell back to its `startMin + 60`
+       default and every booking became a one-hour pill no matter what the office entered. A full
+       day and a half-hour service call rendered identically, which makes the number he was asked
+       for pointless at the exact moment it was supposed to pay off.
+
+       Clamped to one working day: planned_minutes is a WORK-LOAD figure, and spending 960 ("2
+       days") as wall clock from 8am ends the appointment at midnight. A multi-day visit is a span
+       of days, not one very long block. */
+    const sized = Number((inq as { planned_minutes?: number | null }).planned_minutes ?? 0);
+    const spanMin = sized > 0 ? Math.min(sized, WORK_DAY_MINUTES) : 0;
+    const endsAtIso = spanMin > 0
+      ? new Date(new Date(startsAtIso).getTime() + spanMin * 60_000).toISOString()
+      : null;
+
     const { error: aErr } = await supabase.from("appointments").insert({
       // THE TAG THE OFFICE PICKED ON THE LEAD, not a hard-coded "inspection". Erik: "if we enter
       // that data on the lead view itself and editable on the schedule page we might be getting
@@ -431,8 +452,11 @@ export async function convertInquiry(
       type: appointmentTypeFor((inq as { work_kind?: string | null }).work_kind),
       // …and how long they said it would take, so the day it lands on knows its own load.
       planned_minutes: (inq as { planned_minutes?: number | null }).planned_minutes ?? null,
-      title: `Site inspection: ${inq.name}`,
+      // The name follows the kind. "Site inspection: Matt Warren" on a day booked as a full day of
+      // work is the app describing what he did back to him, wrongly, where he goes to check.
+      title: bookingTitle(kindChosen, String(inq.name ?? "")),
       starts_at: startsAtIso,
+      ends_at: endsAtIso,
       location: inq.address,
       notes:
         [inq.message ?? inq.notes ?? null, carriedNote(carry.carried), briefNote(carry.briefCarried)]
@@ -720,7 +744,8 @@ export async function scheduleLeadsOnDay(
     .from("appointments")
     .select("inquiry_id")
     .in("inquiry_id", ids)
-    .in("type", [...INSPECTION_TYPES])
+    // Any non-cancelled booking counts — a lead placed as a job (0231) is just as booked as one
+    // placed as a walk-through.
     .neq("status", "cancelled")
     .limit(500);
   const alreadyBooked = new Set(
