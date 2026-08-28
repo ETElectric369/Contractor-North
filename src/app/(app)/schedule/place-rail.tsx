@@ -138,167 +138,171 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
               const on = picked.has(i.id);
               return (
                 <li key={i.id}>
-                  <button
-                    type="button"
-                    onClick={() => toggle(i.id)}
-                    aria-pressed={on}
-                    className={`flex w-full items-start gap-2 rounded-lg border px-3 py-2 text-left transition-colors ${
+                {/* THE CARD IS NOT A BUTTON — the summary inside it is.
+                    It used to be one, with the selects nested inside it and a stopPropagation to
+                    keep them alive. That held right up until the custom sizer added an <input> and
+                    a <button>: a <button> inside a <button> is invalid HTML, and the parser closes
+                    the outer one where the inner begins, so the DOM the browser built stopped
+                    matching the tree React thought it had. Karen Wucher's "3 hrs" went nowhere —
+                    typed, apparently accepted, never saved.
+                    A control nested inside a control is a bug waiting for its second control. */}
+                  <div
+                    className={`rounded-lg border px-3 py-2 transition-colors ${
                       on ? "border-brand bg-brand-light/40" : "border-slate-200 hover:bg-slate-50"
                     }`}
                   >
-                    <span
-                      className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
-                        on ? "border-brand bg-brand text-white" : "border-slate-300"
-                      }`}
+                    <button
+                      type="button"
+                      onClick={() => toggle(i.id)}
+                      aria-pressed={on}
+                      className="flex w-full items-start gap-2 text-left"
                     >
-                      {on && <Check className="h-3 w-3" />}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                        <span className="text-sm font-medium text-slate-900">{i.name}</span>
-                        {/* THE TAG AND THE CLOCK — Erik: "a tag showing service call, job,
-                            inspection/walk through, or office … and how much time they are going
-                            to take". Between them a day is plannable by eye: a 6h job and a 1h
-                            visit in one town is a full day with a stop on the way. */}
-                        <Badge tone={KIND_TONE[workKind(i)]}>{KIND_LABEL[workKind(i)]}</Badge>
-                        <span
-                          className={`font-mono text-xs tabular-nums ${
-                            i.planned_minutes ? "text-slate-600" : "text-slate-300"
-                          }`}
-                          title={i.planned_minutes ? "Expected time" : "Nobody has sized this yet"}
-                        >
-                          {durationLabel(i.planned_minutes)}
-                        </span>
-                        {i.urgent && <Badge tone="amber">overdue</Badge>}
-                        {i.onHold && <Badge tone="slate">on hold</Badge>}
+                      <span
+                        className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                          on ? "border-brand bg-brand text-white" : "border-slate-300"
+                        }`}
+                      >
+                        {on && <Check className="h-3 w-3" />}
                       </span>
-                      {i.address && (
-                        <span className="mt-0.5 flex items-center gap-1 text-xs text-slate-500">
-                          <MapPin className="h-3 w-3 shrink-0" /> {i.address}
+                      <span className="min-w-0 flex-1">
+                        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <span className="text-sm font-medium text-slate-900">{i.name}</span>
+                          {/* THE TAG AND THE CLOCK — Erik: "a tag showing service call, job,
+                              inspection/walk through, or office … and how much time they are going
+                              to take". Between them a day is plannable by eye. */}
+                          <Badge tone={KIND_TONE[workKind(i)]}>{KIND_LABEL[workKind(i)]}</Badge>
+                          <span
+                            className={`font-mono text-xs tabular-nums ${
+                              i.planned_minutes ? "text-slate-600" : "text-slate-300"
+                            }`}
+                            title={i.planned_minutes ? "Expected time" : "Nobody has sized this yet"}
+                          >
+                            {durationLabel(i.planned_minutes)}
+                          </span>
+                          {i.urgent && <Badge tone="amber">overdue</Badge>}
+                          {i.onHold && <Badge tone="slate">on hold</Badge>}
                         </span>
-                      )}
-                      {/* SIZE IT RIGHT HERE. Erik: "editable on the schedule page". The moment
-                          you NEED the number is while filling a day; making him leave, find the
-                          lead, edit, and come back is the round trip he says costs the most.
-                          Only on the picked card — chrome you are not using is chrome in the way. */}
-                      {on && (
-                        <span
-                          className="mt-1 flex flex-wrap items-center gap-1.5"
-                          onClick={(e) => { e.stopPropagation(); e.preventDefault(); }}
-                        >
-                          {/* A JOB IS A JOB — no kind to pick. Only a lead can be several things. */}
+                        {i.address && (
+                          <span className="mt-0.5 flex items-center gap-1 text-xs text-slate-500">
+                            <MapPin className="h-3 w-3 shrink-0" /> {i.address}
+                          </span>
+                        )}
+                        {/* THE GAP, QUIET UNTIL IT IS IN THE WAY. A warning on nine of twelve cards
+                            is wallpaper; this speaks up in full only once the card is picked, which
+                            is the moment the missing piece actually stands in the way. */}
+                        {miss !== "nothing" && (
+                          <span
+                            className={`mt-0.5 flex items-center gap-1 text-xs ${
+                              on ? "font-medium text-amber-700" : "text-slate-400"
+                            }`}
+                          >
+                            {miss === "place" && <Phone className="h-3 w-3 shrink-0" />}
+                            {on ? nextAction(miss) : miss === "place" ? "no address yet" : "no phone or email"}
+                          </span>
+                        )}
+                      </span>
+                    </button>
+
+                    {/* SIZE IT RIGHT HERE. Erik: "editable on the schedule page". The moment you
+                        NEED the number is while filling a day; making him leave, find the lead,
+                        edit and come back is the round trip he says costs the most. A sibling of
+                        the tap target now, not a descendant. */}
+                    {on && (
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5 pl-6">
+                        {/* A JOB IS A JOB — no kind to pick. Only a lead or a booked visit can be
+                            several things. */}
+                        {i.kind !== "job" && (
                           <select
                             value={i.workKind ?? ""}
                             onChange={(e) => size(i, { workKind: e.target.value })}
                             disabled={pending}
-                            className={`h-7 rounded-md border border-slate-200 bg-white px-1.5 text-xs ${i.kind === "job" ? "hidden" : ""}`}
+                            className="h-7 rounded-md border border-slate-200 bg-white px-1.5 text-xs disabled:opacity-50"
                             aria-label="What kind of work"
                           >
-                            {/* From the one list — see work-shape. */}
+                            {/* From the one list — see work-shape. An option that exists is an
+                                option the validator accepts. */}
                             <option value="">Kind?</option>
                             {WORK_KINDS.map((k) => (
                               <option key={k} value={k}>{KIND_LABEL[k]}</option>
                             ))}
                           </select>
-                          <select
-                            value={i.planned_minutes ? String(i.planned_minutes) : ""}
-                            onChange={(e) => {
-                              if (e.target.value === "custom") {
-                                setCustomFor(i.id);
-                                setCustomText(i.planned_minutes ? String(i.planned_minutes) : "");
-                                return;
-                              }
-                              setCustomFor(null);
-                              size(i, { plannedMinutes: Number(e.target.value) || null });
-                            }}
-                            disabled={pending}
-                            className="h-7 rounded-md border border-slate-200 bg-white px-1.5 text-xs disabled:opacity-50"
-                            aria-label="How long will it take"
-                          >
-                            <option value="">How long?</option>
-                            {/* A SIZE THAT ISN'T ON THE LIST STILL HAS TO SHOW. 0229 backfilled real
-                                spans (45, 90 minutes) that match no bucket, and a select whose value
-                                matches no option falls back to the first — so the card read "1.5h"
-                                in the badge and "How long?" in the control, about itself, and the
-                                next change silently overwrote the real number. */}
-                            {!!i.planned_minutes && !SIZE_BUCKETS.includes(i.planned_minutes) && (
-                              <option value={String(i.planned_minutes)}>
-                                {durationLabel(i.planned_minutes)}
-                              </option>
-                            )}
-                            <option value="30">30m</option>
-                            <option value="60">1h</option>
-                            <option value="120">2h</option>
-                            <option value="240">Half day</option>
-                            <option value="480">Full day</option>
-                            <option value="960">2 days</option>
-                            <option value="1440">3 days</option>
-                            <option value="2400">A week</option>
-                            {/* NO CEILING. A service call is 45 minutes and a panel swap is 6
-                                hours; rounding either to the nearest offered bucket puts a number
-                                on the calendar nobody chose. */}
-                            <option value="custom">Custom…</option>
-                          </select>
-                          {customFor === i.id && (
-                            /* TYPE IT THE WAY YOU'D SAY IT — "45m", "1.5h", "3 hours", "2d", or a
-                               bare number of minutes. parseDuration reads all of them, and returns
-                               null rather than a guess for anything it can't, so an unreadable
-                               entry leaves the old value alone instead of storing a confident
-                               wrong answer. */
-                            <span className="flex items-center gap-1">
-                              <input
-                                autoFocus
-                                value={customText}
-                                onChange={(e) => setCustomText(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter") { e.preventDefault(); saveCustom(i); }
-                                  if (e.key === "Escape") { setCustomFor(null); setCustomText(""); }
-                                }}
-                                placeholder="45m, 1.5h, 2d"
-                                aria-label="Type how long it will take"
-                                className="h-7 w-24 rounded-md border border-brand/50 px-1.5 text-xs"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => saveCustom(i)}
-                                className="h-7 rounded-md bg-brand px-2 text-xs font-semibold text-white"
-                              >
-                                Set
-                              </button>
-                              {/* Says what it read BEFORE he commits — no silent rounding. */}
-                              <span className="text-xs text-slate-400">
-                                {customText.trim()
-                                  ? parseDuration(customText)
-                                    ? durationLabel(parseDuration(customText))
-                                    : "can't read that"
-                                  : ""}
-                              </span>
-                            </span>
-                          )}
-                        </span>
-                      )}
-                      {/* THE GAP, QUIET UNTIL IT IS IN THE WAY.
-                          Erik: "all the red letters everywhere take all the clarity out of the
-                          whole page … maybe we dont need what we dont need until we need it."
-                          Nine of his twelve leads have no phone — so on his data the amber
-                          sentence fired on nearly every card, and a warning on almost everything
-                          is wallpaper, not a signal. It also had it backwards: the COMMON state
-                          was loud and the rare one was quiet.
-                          Now the gap is a small grey note, and it only speaks up in full when the
-                          card is PICKED — the moment you are about to act, which is the moment
-                          the missing piece actually stands in your way. */}
-                      {miss !== "nothing" && (
-                        <span
-                          className={`mt-0.5 flex items-center gap-1 text-xs ${
-                            on ? "font-medium text-amber-700" : "text-slate-400"
-                          }`}
+                        )}
+                        <select
+                          value={i.planned_minutes ? String(i.planned_minutes) : ""}
+                          onChange={(e) => {
+                            if (e.target.value === "custom") {
+                              setCustomFor(i.id);
+                              setCustomText("");
+                              return;
+                            }
+                            setCustomFor(null);
+                            size(i, { plannedMinutes: Number(e.target.value) || null });
+                          }}
+                          disabled={pending}
+                          className="h-7 rounded-md border border-slate-200 bg-white px-1.5 text-xs disabled:opacity-50"
+                          aria-label="How long will it take"
                         >
-                          {miss === "place" && <Phone className="h-3 w-3 shrink-0" />}
-                          {on ? nextAction(miss) : miss === "place" ? "no address yet" : "no phone or email"}
-                        </span>
-                      )}
-                    </span>
-                  </button>
+                          <option value="">How long?</option>
+                          {/* A SIZE THAT ISN'T ON THE LIST STILL HAS TO SHOW. A select whose value
+                              matches no option falls back to the first, so the card would read
+                              "3h" in the badge and "How long?" in the control, about itself. */}
+                          {!!i.planned_minutes && !SIZE_BUCKETS.includes(i.planned_minutes) && (
+                            <option value={String(i.planned_minutes)}>
+                              {durationLabel(i.planned_minutes)}
+                            </option>
+                          )}
+                          <option value="30">30m</option>
+                          <option value="60">1h</option>
+                          <option value="120">2h</option>
+                          <option value="240">Half day</option>
+                          <option value="480">Full day</option>
+                          <option value="960">2 days</option>
+                          <option value="1440">3 days</option>
+                          <option value="2400">A week</option>
+                          {/* NO CEILING. A service call is 45 minutes and a panel swap is 6 hours;
+                              rounding either to the nearest bucket puts a number on the calendar
+                              that nobody chose. */}
+                          <option value="custom">Custom…</option>
+                        </select>
+
+                        {customFor === i.id && (
+                          <>
+                            {/* TYPE IT THE WAY YOU'D SAY IT — "45m", "1.5h", "3 hrs", "2d", or bare
+                                minutes. parseDuration reads all of those and returns null rather
+                                than a guess for anything else, so an unreadable entry leaves the
+                                old value alone and says so. */}
+                            <input
+                              autoFocus
+                              value={customText}
+                              onChange={(e) => setCustomText(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") { e.preventDefault(); saveCustom(i); }
+                                if (e.key === "Escape") { setCustomFor(null); setCustomText(""); }
+                              }}
+                              placeholder="45m, 1.5h, 2d"
+                              aria-label="Type how long it will take"
+                              className="h-7 w-24 rounded-md border border-brand/60 px-1.5 text-xs"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => saveCustom(i)}
+                              className="h-7 rounded-md bg-brand px-2 text-xs font-semibold text-white"
+                            >
+                              Set
+                            </button>
+                            {/* Says what it read BEFORE he commits — never a silent round. */}
+                            <span className="text-xs text-slate-400">
+                              {customText.trim()
+                                ? parseDuration(customText)
+                                  ? durationLabel(parseDuration(customText))
+                                  : "can't read that"
+                                : ""}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </li>
               );
             })}

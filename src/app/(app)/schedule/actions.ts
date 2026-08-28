@@ -8,9 +8,16 @@ import { notifyJobCrewAdded } from "@/lib/crew-notify";
 import { requireStaff } from "@/lib/staff-guard";
 import { JOB_STATUSES } from "@/lib/job-status";
 import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
-import { todayStrInTz, tzDateTimeUtc } from "@/lib/tz";
+import { todayStrInTz, tzDateTimeUtc, tzDayStartUtc, tzMinutesOfDay } from "@/lib/tz";
 import { addDaySegment, shiftSegmentCovering } from "@/lib/schedule-math";
 import { rescheduleAppointment } from "../appointments/actions";
+import {
+  fitIntoDay,
+  hmToMinutes,
+  minutesToHm,
+  PINNED_TO_TOP,
+  type Busy,
+} from "@/lib/schedule/fit-day";
 import { appointmentTypeFor, daysNeeded, WORK_DAY_MINUTES, workingDaysFrom } from "@/lib/schedule/work-shape";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -629,4 +636,61 @@ export async function sizeAppointment(
   revalidatePath("/schedule");
   revalidatePath("/inspections");
   return { ok: true };
+}
+
+/**
+ * WHEN DOES THE NEXT ONE ACTUALLY START.
+ *
+ * Erik: "when im filling in the next job after nora i choose morning then it should fill in the gap
+ * inbetween not put it at the same time."
+ *
+ * Placing always started at 8am (or 1pm) and spread from there as though the day were empty. It
+ * never was: Nora's service call already had Friday 8–10, so the next thing he added to Friday
+ * morning landed at 8 too — two pills stacked, two customers told the same hour, and a day drawn as
+ * half empty while being double-booked.
+ *
+ * "Morning" is a REGION, not an instant. The honest reading is "the first place in the morning this
+ * fits", which is exactly what he'd work out himself in two seconds by looking at the day — and the
+ * day is right there.
+ *
+ * ON THE SERVER ON PURPOSE. The client's copy of the calendar can be a page-load old, and a stale
+ * picture is what puts two people in one slot. This reads the day at the moment of the write.
+ */
+export async function planDayTimes(
+  dateISO: string,
+  items: { minutes: number | null; pinned?: boolean }[],
+  fromHHMM: string,
+): Promise<{ ok: boolean; times: string[]; error?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, times: [], error: ctx.error };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateISO)) return { ok: false, times: [], error: "Pick a day." };
+
+  const tz = await orgTimezone(ctx.supabase);
+  const dayStart = tzDayStartUtc(dateISO, tz);
+  const dayEnd = new Date(dayStart.getTime() + 24 * 3600_000);
+
+  // Everything already holding time on this day. A CALL is excluded — it is pinned to the top and
+  // costs the route nothing, so it must not push a real visit later.
+  const { data: appts } = await ctx.supabase
+    .from("appointments")
+    .select("starts_at, ends_at, type, status") // PROJECTION LAW: all four are read below
+    .gte("starts_at", dayStart.toISOString())
+    .lt("starts_at", dayEnd.toISOString())
+    .limit(200);
+
+  const busy: Busy[] = [];
+  for (const a of (appts ?? []) as { starts_at: string; ends_at: string | null; type: string | null; status: string | null }[]) {
+    if (a.status === "cancelled" || a.type === "call") continue;
+    const startMin = tzMinutesOfDay(a.starts_at, tz);
+    // An appointment with no end is drawn as an hour, so it occupies an hour. Reading it as a point
+    // would let the next visit land inside a block he can see on his screen.
+    const endMin = a.ends_at && new Date(a.ends_at) > new Date(a.starts_at)
+      ? Math.min(24 * 60, tzMinutesOfDay(a.ends_at, tz) || 24 * 60)
+      : startMin + 60;
+    busy.push({ startMin, endMin: Math.max(startMin + 15, endMin) });
+  }
+
+  const from = hmToMinutes(fromHHMM) ?? 8 * 60;
+  const starts = fitIntoDay(busy, items, { fromMin: from, gapMin: 0 });
+  return { ok: true, times: starts.map((m) => (m === PINNED_TO_TOP ? fromHHMM : minutesToHm(m))) };
 }

@@ -521,6 +521,22 @@ export function CalendarView({
       });
     }
     for (const a of data.appts) {
+      /* A CALL IS NOT A STOP. Erik: "lets have phone call just pin to the top of that day."
+         He is right and it is not cosmetic. A call is the one kind of work you do from wherever
+         you already are — the truck, the supply house counter, a job you are standing on. Giving it
+         a slot in the timed grid makes it compete for the day's TRAVEL, so a ten-minute call to the
+         PUD drew a block beside a service call and made a free afternoon look booked. In the tray
+         it is on the day, visible, first thing, and costs the route nothing. */
+      if (a.type === "call") {
+        tray.push({
+          id: `a-${a.id}`,
+          dayStr: k,
+          label: a.title,
+          color: apptGridColor(a),
+          href: opts?.openApptRecords ? `/appointments/${a.id}` : `/schedule?view=day&date=${k}`,
+        });
+        continue;
+      }
       // Org-tz placement: a 9 AM Pacific inspection sits at minute 540 on the
       // Pacific day — Date#getHours here answered in the server's UTC on SSR
       // (and React doesn't re-verify style attrs on hydration, so the pills
@@ -539,9 +555,12 @@ export function CalendarView({
         label: a.title,
         sub: a.customers?.name ?? a.jobs?.name ?? null,
         color: apptGridColor(a),
-        // Day view → the appointment itself; week view → the day drill
-        // (which hosts the edit pencil + quick actions).
-        href: opts?.openApptRecords ? `/appointments/${a.id}` : `/schedule?view=day&date=${k}`,
+        /* STRAIGHT TO THE THING, from every view. Erik, on a booking whose length was wrong:
+           "i now have now way to adjust the time." There WAS a way — tap the pill, land in the day
+           drill, find the edit pencil — but a control you have to already know about is not a way,
+           it is a rumour. The record page carries the full form (start, end, type, notes), so the
+           pill goes there and the fix is one tap from seeing the problem. */
+        href: `/appointments/${a.id}`,
       });
     }
     for (const t of data.tasks) {

@@ -4,8 +4,9 @@ import { createContext, useCallback, useContext, useMemo, useState, useTransitio
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/toast";
 import { scheduleLeadsOnDay } from "../leads/actions";
-import { placeAppointmentOnDay, placeJobOnDay } from "./actions";
+import { placeAppointmentOnDay, placeJobOnDay, planDayTimes } from "./actions";
 import { groupByTown, spreadTimes, type Placeable } from "@/lib/schedule/place-by-town";
+import { workKind } from "@/lib/schedule/work-shape";
 import { dayLabelFrom, placeMessage } from "@/lib/schedule/placement-plan";
 
 /**
@@ -118,18 +119,30 @@ export function PlacementProvider({
       const jobs = chosen.filter((i) => i.kind === "job");
       const appts = chosen.filter((i) => i.kind === "appointment");
 
-      /* ONE CLOCK FOR THE WHOLE DAY, not one per kind. Leads were staggered 90 minutes apart by
-         spreadTimes while every appointment got the same literal start — so two inspections and a
-         lead all landed on 08:00, drawn as three slivers in one slot, with three customers each
-         told "Thursday at 8". place-by-town says it plainly: "one blob at 9am would put every visit
-         at the same instant and tell nobody anything." Appointments take the front of the sequence
-         and the leads carry on from where they stop. */
-      const visits = appts.length + leads.length;
+      /* ONE CLOCK FOR THE WHOLE DAY, and it starts from what is ALREADY on the day.
+         Appointments take the front of the sequence and the leads carry on from where they stop, so
+         nothing doubles up with itself; planDayTimes then slides the whole run past whatever is
+         already booked. A phone call is marked pinned — it goes to the top of the day and takes no
+         room, so it never pushes a real visit later. */
+      const visits = [...appts, ...leads];
       const firstAt = /^\d{2}:\d{2}$/.test(startAt) ? startAt : half === "am" ? "08:00" : "13:00";
-      const times = spreadTimes(visits, firstAt, 90);
-      const startHHMM = times[0] ?? firstAt;
 
       start(async () => {
+        const planned = await planDayTimes(
+          dateISO,
+          visits.map((v) => ({
+            minutes: v.planned_minutes ?? null,
+            pinned: workKind(v) === "call",
+          })),
+          firstAt,
+        ).catch(() => ({ ok: false as const, times: [] as string[] }));
+
+        // FALL BACK, NEVER FAIL. If the day couldn't be read, place at the old fixed spread rather
+        // than refusing — a booking he asked for must not be lost to a lookup.
+        const times = planned.ok && planned.times.length === visits.length
+          ? planned.times
+          : spreadTimes(visits.length, firstAt, 90);
+        const startHHMM = times[0] ?? firstAt;
         // THREE KINDS, THREE WRITES, REPORTED SEPARATELY. A lead that fails to convert must not
         // take a floater's date down with it, and none of them share a table.
         //
