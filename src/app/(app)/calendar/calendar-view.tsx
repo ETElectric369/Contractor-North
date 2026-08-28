@@ -348,7 +348,22 @@ export function CalendarView({
 
     for (const a of appointments) {
       if (pf && a.assigned_to !== pf) continue;
-      get(dayOf(a.starts_at)).appts.push(a);
+      /* ON EVERY DAY IT COVERS, not just the one it starts on. Erik: "i set it for a week … but it
+         only showed up as 1 day." A booking was filed under its start day alone, so a Monday-to-
+         Friday job was drawn on Monday and Tuesday through Friday looked free — which is the
+         overbooking the sizes exist to prevent, on the days he is most likely to fill. */
+      const first = dayOf(a.starts_at);
+      const last = a.ends_at ? dayOf(a.ends_at) : first;
+      get(first).appts.push(a);
+      if (isYmd(first) && isYmd(last) && last > first) {
+        const d = new Date(`${first}T12:00:00`);
+        for (let i = 0; i < 60; i++) {
+          d.setDate(d.getDate() + 1);
+          const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+          if (k > last) break;
+          get(k).appts.push(a);
+        }
+      }
     }
     for (const t of tasks) {
       if (pf && t.assigned_to !== pf) continue;
@@ -562,14 +577,19 @@ export function CalendarView({
       // Pacific day — Date#getHours here answered in the server's UTC on SSR
       // (and React doesn't re-verify style attrs on hydration, so the pills
       // STAYED at UTC positions — the "UTC problem in the new calendars").
-      const startMin = minOf(a.starts_at);
+      /* A DAY IN THE MIDDLE OF A SPAN IS A WHOLE WORKING DAY. Only the first day starts at the
+         booked time and only the last day ends at the booked time; the days between are full. */
+      const firstDay = dayOf(a.starts_at) === k;
+      const lastDay = !a.ends_at || dayOf(a.ends_at) === k;
+      const startMin = firstDay ? minOf(a.starts_at) : wdStartMin;
       let endMin = startMin + 60;
-      if (a.ends_at) {
-        if (dayOf(a.ends_at) === k && new Date(a.ends_at).getTime() > new Date(a.starts_at).getTime())
-          endMin = Math.max(startMin + 15, minOf(a.ends_at));
+      if (a.ends_at && new Date(a.ends_at).getTime() > new Date(a.starts_at).getTime()) {
+        endMin = lastDay ? Math.max(startMin + 15, minOf(a.ends_at)) : Math.max(startMin + 15, wdEndMin);
+      } else if (!lastDay) {
+        endMin = Math.max(startMin + 15, wdEndMin);
       }
       events.push({
-        id: `a-${a.id}`,
+        id: `a-${a.id}-${k}`, // keyed per day — a span appears on several
         dayStr: k,
         startMin,
         endMin,
@@ -659,6 +679,8 @@ export function CalendarView({
    */
   const growingRef = useRef(false);
   const anchorRef = useRef(0);
+  /** Where the scroller was on the previous event — the only way to know which way he is going. */
+  const lastTopRef = useRef(0);
 
   useLayoutEffect(() => {
     const el = scrollRef.current;
@@ -668,20 +690,29 @@ export function CalendarView({
     if (anchorRef.current) {
       el.scrollTop += el.scrollHeight - anchorRef.current;
       anchorRef.current = 0;
+      lastTopRef.current = el.scrollTop; // the anchor move is not a gesture — don't read it as one
     }
     growingRef.current = false;
   }, [back, fwd]);
 
   function onStackScroll(e: React.UIEvent<HTMLDivElement>) {
-    if (growingRef.current) return; // a week is already being added — this is the same arrival
     const el = e.currentTarget;
-    if (el.scrollTop < 120 && back < 26) {
+    const goingUp = el.scrollTop < lastTopRef.current;
+    lastTopRef.current = el.scrollTop;
+    if (growingRef.current) return; // a week is already being added — this is the same arrival
+
+    /* DIRECTION, NOT JUST POSITION. Erik: "it jumps a little right when i touch it at the start
+       then its good." At rest the stack sits at scrollTop 0, which already satisfies the
+       top-sentinel test — so the very first scroll event of the session prepended a week and
+       shifted the view under his thumb, even when he was scrolling DOWN and had no interest in
+       last month. Growing backwards is only ever what somebody reaching UPWARD wants. */
+    if (goingUp && el.scrollTop < 120 && back < 26) {
       growingRef.current = true;
       anchorRef.current = el.scrollHeight;
       setBack((b) => b + 1);
       return;
     }
-    if (el.scrollHeight - el.scrollTop - el.clientHeight < 240 && fwd < 52) {
+    if (!goingUp && el.scrollHeight - el.scrollTop - el.clientHeight < 240 && fwd < 52) {
       growingRef.current = true;
       setFwd((f) => f + 1);
     }

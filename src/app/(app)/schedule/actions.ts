@@ -18,7 +18,13 @@ import {
   PINNED_TO_TOP,
   type Busy,
 } from "@/lib/schedule/fit-day";
-import { appointmentTypeFor, daysNeeded, WORK_DAY_MINUTES, workingDaysFrom } from "@/lib/schedule/work-shape";
+import {
+  appointmentTypeFor,
+  daysNeeded,
+  spanEnd,
+  WORK_DAY_MINUTES,
+  workingDaysFrom,
+} from "@/lib/schedule/work-shape";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type Result = { ok: boolean; error?: string; id?: string };
@@ -563,7 +569,8 @@ export async function placeAppointmentOnDay(
   // THE ORG'S CLOCK, NOT THE SERVER'S. `new Date("2026-08-27T08:00")` on Vercel is 8am UTC — which
   // is midnight in Truckee. Through the same orgTimezone helper every other writer in this file
   // uses, rather than a second copy of the settings read that could drift from it.
-  const startsAt = tzDateTimeUtc(dateISO, hm, await orgTimezone(ctx.supabase));
+  const tz = await orgTimezone(ctx.supabase);
+  const startsAt = tzDateTimeUtc(dateISO, hm, tz);
   if (!startsAt) return { ok: false, error: "I couldn't read that day." };
 
   // An END only when somebody actually sized it. Blank is not zero, and a fake 90 minutes would put
@@ -574,8 +581,10 @@ export async function placeAppointmentOnDay(
   // visit at midnight, and 1440 ("3 days") ends it at 8am tomorrow. The day grid can't draw a block
   // that crosses midnight, so it would silently shrink to an hour while every occupancy reader
   // marked tomorrow busy. A multi-day visit is a span of days, not one very long appointment.
-  const m = Math.min(Number(plannedMinutes ?? 0), WORK_DAY_MINUTES);
-  const endsAt = m > 0 ? new Date(new Date(startsAt).getTime() + m * 60_000).toISOString() : null;
+  // Multi-day sizes run to the same hour on the last WORKING day (spanEnd) rather than being
+  // clamped to one day or spent as wall clock across midnight.
+  const span = spanEnd(dateISO, hm, plannedMinutes);
+  const endsAt = span ? tzDateTimeUtc(span.lastYmd, span.endHHMM, tz) : null;
 
   const res = await rescheduleAppointment(id, startsAt, endsAt);
   return res.ok ? { ok: true } : res;
@@ -665,7 +674,7 @@ export async function planDayTimes(
   if ("error" in ctx) return { ok: false, times: [], error: ctx.error };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateISO)) return { ok: false, times: [], error: "Pick a day." };
 
-  const tz = await orgTimezone(ctx.supabase);
+  const { tz, dayStartHm, dayEndHm } = await orgSchedulePrefs(ctx.supabase);
   const dayStart = tzDayStartUtc(dateISO, tz);
   const dayEnd = new Date(dayStart.getTime() + 24 * 3600_000);
 
@@ -690,7 +699,13 @@ export async function planDayTimes(
     busy.push({ startMin, endMin: Math.max(startMin + 15, endMin) });
   }
 
-  const from = hmToMinutes(fromHHMM) ?? 8 * 60;
-  const starts = fitIntoDay(busy, items, { fromMin: from, gapMin: 0 });
+  // Bounded by HIS working day. Past the end it still lands (never silently refused) — just after
+  // everything else, where he can see it ran long.
+  const from = hmToMinutes(fromHHMM) ?? hmToMinutes(dayStartHm) ?? 8 * 60;
+  const starts = fitIntoDay(busy, items, {
+    fromMin: from,
+    endOfDayMin: hmToMinutes(dayEndHm) ?? 17 * 60,
+    gapMin: 0,
+  });
   return { ok: true, times: starts.map((m) => (m === PINNED_TO_TOP ? fromHHMM : minutesToHm(m))) };
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { daysNeeded, parseDuration, workingDaysFrom, durationLabel } from "./work-shape";
+import { daysNeeded, parseDuration, spanEnd, workingDaysFrom, durationLabel } from "./work-shape";
 
 describe("type how long it takes, the way you'd say it", () => {
   it("reads the shapes a person actually writes", () => {
@@ -176,5 +176,38 @@ describe("a job's block is as long as somebody said, not as long as the shop is 
     expect(jobBlockEnd(19 * 60, { plannedMinutes: null, workDayEndMin: wd })).toBe(20 * 60);
     expect(jobBlockEnd(onePm, { scheduledEndMin: 9 * 60, plannedMinutes: null, workDayEndMin: wd }))
       .toBe(wd);
+  });
+});
+
+describe("a week of work ends on Friday", () => {
+  // Erik: "i set it for a week (lets make that the 5 working days by default) but it only showed
+  // up as 1 day."
+  it("runs five working days from a Monday", () => {
+    // Mon 2026-08-31 → Fri 2026-09-04, same hour
+    expect(spanEnd("2026-08-31", "08:00", 2400)).toEqual({ lastYmd: "2026-09-04", endHHMM: "16:00" });
+  });
+
+  it("skips the weekend in the middle", () => {
+    // Thu + 3 days of work → Thu, Fri, Mon
+    expect(spanEnd("2026-09-03", "08:00", 1440)?.lastYmd).toBe("2026-09-07");
+  });
+
+  it("finishes at lunchtime when the last day is a half day", () => {
+    // 1.5 days from 8am → day two ends at noon
+    expect(spanEnd("2026-09-02", "08:00", 720)).toEqual({ lastYmd: "2026-09-03", endHHMM: "12:00" });
+  });
+
+  it("keeps a single day on its own day", () => {
+    expect(spanEnd("2026-09-02", "13:00", 180)).toEqual({ lastYmd: "2026-09-02", endHHMM: "16:00" });
+  });
+
+  it("has nothing to say about an unsized booking", () => {
+    expect(spanEnd("2026-09-02", "08:00", null)).toBeNull();
+    expect(spanEnd("2026-09-02", "08:00", 0)).toBeNull();
+    expect(spanEnd("nope", "08:00", 480)).toBeNull();
+  });
+
+  it("never rolls a finish past midnight", () => {
+    expect(spanEnd("2026-09-02", "23:00", 480)?.endHHMM).toBe("23:59");
   });
 });

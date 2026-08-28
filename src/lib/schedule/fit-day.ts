@@ -112,3 +112,25 @@ export function minutesToHm(minutes: number): string {
   const m = Math.max(0, Math.min(23 * 60 + 59, Math.round(minutes)));
   return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 }
+
+/**
+ * WHEN THE AFTERNOON STARTS, ACCORDING TO THIS COMPANY.
+ *
+ * Erik: "so my company settings are 9-5 not 8-4."
+ *
+ * He set his working day in Settings → Crew & time, and the placement code was carrying "08:00" and
+ * "13:00" as literals — so "morning" meant an hour before he opens, and every job placed from the
+ * rail landed at 8. A setting the app asks for and then ignores is worse than one it never asked
+ * for: he told it, twice over, and watched it do something else.
+ *
+ * The afternoon is the midpoint of HIS day, rounded down to the hour so it reads as a time a person
+ * would say. For 9–5 that is 1pm, which is the number that was hardcoded — right for him by luck,
+ * wrong the moment the shop opens at 7 or runs to 6, and wrong for every other org on the app.
+ */
+export function halves(workStartHm: string, workEndHm: string): { am: string; pm: string } {
+  const start = hmToMinutes(workStartHm) ?? 8 * 60;
+  const end = hmToMinutes(workEndHm) ?? 17 * 60;
+  if (end <= start) return { am: minutesToHm(start), pm: minutesToHm(start) };
+  const mid = Math.floor((start + (end - start) / 2) / 60) * 60;
+  return { am: minutesToHm(start), pm: minutesToHm(Math.max(start, mid)) };
+}

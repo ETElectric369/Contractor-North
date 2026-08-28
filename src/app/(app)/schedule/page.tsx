@@ -3,7 +3,7 @@ import { isStaffRole } from "@/lib/actions/perms";
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { getOrgSettings } from "@/lib/org-settings";
+import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { todayStrInTz } from "@/lib/tz";
 import { CalendarPanel } from "./calendar-panel";
 import { MapPanel } from "./map-panel";
@@ -176,6 +176,10 @@ export default async function SchedulePage({
     ((bookedRows ?? []) as { inquiry_id: string | null }[]).map((r) => String(r.inquiry_id)),
   );
 
+  // HIS WORKING DAY, not a literal. Settings → Crew & time is the answer; the rail was carrying
+  // 08:00/13:00 in code and quietly overruling it.
+  const workDay = workDayWindowHm((orgRow as { settings?: unknown } | null)?.settings);
+
   const today = todayStrInTz(getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone);
   const waiting: Placeable[] = [
     ...((leadRows ?? []) as Record<string, string | null>[])
@@ -232,7 +236,7 @@ export default async function SchedulePage({
     /* ONE PROVIDER OVER BOTH HALVES. Ticking work in the rail arms the calendar; tapping a day in
        the calendar places what the rail has ticked. They can only be one gesture if they share
        state, and this is the smallest client shell that both sit inside. */
-    <PlacementProvider items={waiting} todayISO={today}>
+    <PlacementProvider items={waiting} todayISO={today} workDay={workDay}>
       <div className="space-y-4 lg:grid lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] lg:items-start lg:gap-6 lg:space-y-0">
         <aside className="lg:sticky lg:top-4">
           <h2 className="mb-2 text-sm font-semibold text-slate-900">

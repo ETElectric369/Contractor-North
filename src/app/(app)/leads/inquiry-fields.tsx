@@ -101,7 +101,7 @@ export function InquiryFields({
           <option value="480">Full day</option>
           <option value="960">2 days</option>
           <option value="1440">3 days</option>
-          <option value="2400">A week</option>
+          <option value="2400">A week (5 days)</option>
         </Select>
       </div>
       <div>

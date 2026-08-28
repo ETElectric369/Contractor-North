@@ -344,3 +344,44 @@ export function jobBlockEnd(
 
   return opts.workDayEndMin > startMin ? opts.workDayEndMin : startMin + 60;
 }
+
+/**
+ * A WEEK OF WORK ENDS ON FRIDAY, NOT AT MIDNIGHT ON MONDAY.
+ *
+ * Erik: "look at the Jason Waldow job i set it for a week (lets make that the 5 working days by
+ * default) but it only showed up as 1 day."
+ *
+ * A lead booked as work becomes an appointment, and an appointment is one starts_at/ends_at pair —
+ * so a five-day booking had to be squeezed into a single finish time. Spending 2400 minutes as wall
+ * clock ends it at 2am on Wednesday, so the code clamped it to one working day instead, which is
+ * how a week showed up as a Monday.
+ *
+ * Both readings were wrong because both treated a work-load figure as a stopwatch. Five days of
+ * work is Monday through Friday, each day the working part of it — so the span ends at the same
+ * hour on the LAST working day, and the days in between are full.
+ */
+export function spanEnd(
+  startYmd: string,
+  startHHMM: string,
+  plannedMinutes: number | null | undefined,
+): { lastYmd: string; endHHMM: string } | null {
+  const sized = Number(plannedMinutes ?? 0);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startYmd) || sized <= 0) return null;
+
+  const days = daysNeeded(sized);
+  const run = workingDaysFrom(startYmd, days);
+  if (!run.length) return null;
+
+  // What is left over for the final day — a full day when it divides evenly, the remainder when it
+  // doesn't. A day and a half finishes at lunchtime on day two, which is what he'd tell a customer.
+  const remainder = sized - (days - 1) * WORK_DAY_MINUTES;
+  const startMin = (() => {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(startHHMM);
+    return m ? Number(m[1]) * 60 + Number(m[2]) : 8 * 60;
+  })();
+  const endMin = Math.min(23 * 60 + 59, startMin + Math.min(Math.max(remainder, 15), WORK_DAY_MINUTES));
+  return {
+    lastYmd: run[run.length - 1],
+    endHHMM: `${String(Math.floor(endMin / 60)).padStart(2, "0")}:${String(endMin % 60).padStart(2, "0")}`,
+  };
+}

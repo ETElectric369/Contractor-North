@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { fitIntoDay, hmToMinutes, mergeBusy, minutesToHm, PINNED_TO_TOP } from "./fit-day";
+import { fitIntoDay, halves, hmToMinutes, mergeBusy, minutesToHm, PINNED_TO_TOP } from "./fit-day";
 
 const at = (hm: string) => hmToMinutes(hm)!;
 const block = (a: string, z: string) => ({ startMin: at(a), endMin: at(z) });
@@ -100,5 +100,69 @@ describe("time strings survive the round trip", () => {
 
   it("never rolls into tomorrow", () => {
     expect(minutesToHm(24 * 60 + 30)).toBe("23:59");
+  });
+});
+
+describe("morning and afternoon belong to the company, not the code", () => {
+  // Erik: "so my company settings are 9-5 not 8-4." A setting the app asks for and then ignores is
+  // worse than one it never asked for.
+  it("takes the morning straight from his working day", () => {
+    expect(halves("09:00", "17:00").am).toBe("09:00");
+    expect(halves("07:00", "15:30").am).toBe("07:00");
+  });
+
+  it("puts the afternoon at the midpoint of HIS day", () => {
+    expect(halves("09:00", "17:00").pm).toBe("13:00"); // the hardcoded value — right for him by luck
+    expect(halves("07:00", "15:00").pm).toBe("11:00"); // and wrong for an early shop
+    expect(halves("08:00", "18:00").pm).toBe("13:00");
+  });
+
+  it("rounds to an hour a person would say", () => {
+    expect(halves("09:00", "16:30").pm).toBe("12:00"); // not 12:45
+  });
+
+  it("doesn't fall over on a nonsense window", () => {
+    expect(halves("17:00", "09:00")).toEqual({ am: "17:00", pm: "17:00" });
+    expect(halves("", "").am).toBe("08:00");
+  });
+});
+
+describe("the day ends when the shop does", () => {
+  it("lands an overflowing item after everything rather than dropping it", () => {
+    const day = [block("09:00", "16:00")];
+    const [start] = fitIntoDay(day, [{ minutes: 120 }], {
+      fromMin: at("09:00"),
+      endOfDayMin: at("17:00"),
+    });
+    expect(start).toBeGreaterThanOrEqual(at("16:00"));
+  });
+});
+
+import { DEFAULT_SETTINGS, workDayWindowHm } from "@/lib/org-settings";
+
+describe("one setting has one default", () => {
+  /* The Settings screen renders getOrgSettings (DEFAULT_SETTINGS) while every schedule writer reads
+     workDayWindowHm. When those disagreed, an org that never touched its hours saw 5pm on screen
+     and got 4pm from the scheduler — the app contradicting itself about a number the user was
+     invited to set. */
+  it("the scheduler's fallback IS the one the settings screen shows", () => {
+    const w = workDayWindowHm({});
+    expect(w.start).toBe(DEFAULT_SETTINGS.work_day_start);
+    expect(w.end).toBe(DEFAULT_SETTINGS.work_day_end);
+  });
+
+  it("a stored window still wins over both", () => {
+    expect(workDayWindowHm({ work_day_start: "09:00", work_day_end: "17:00" }))
+      .toEqual({ start: "09:00", end: "17:00" });
+  });
+
+  it("ignores junk rather than half-applying it", () => {
+    expect(workDayWindowHm({ work_day_start: "9am", work_day_end: "17:00" }))
+      .toEqual({ start: DEFAULT_SETTINGS.work_day_start, end: "17:00" });
+  });
+
+  it("gives ET Electric's 9-5 the halves he expects", () => {
+    const w = workDayWindowHm({ work_day_start: "09:00", work_day_end: "17:00" });
+    expect(halves(w.start, w.end)).toEqual({ am: "09:00", pm: "13:00" });
   });
 });

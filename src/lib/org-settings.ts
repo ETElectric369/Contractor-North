@@ -441,7 +441,16 @@ export function classifyMapUrl(url: string | null | undefined): MapUrlVerdict {
 export function workDayWindowHm(raw: unknown): { start: string; end: string } {
   const stored = (raw && typeof raw === "object" ? raw : {}) as Partial<OrgSettings>;
   const hm = (v: unknown): string | null => (typeof v === "string" && /^\d{2}:\d{2}$/.test(v) ? v : null);
-  return { start: hm(stored.work_day_start) ?? "08:00", end: hm(stored.work_day_end) ?? "16:00" };
+  /* FROM DEFAULTS, NOT FROM LITERALS.
+     These were hardcoded "08:00"/"16:00" while DEFAULT_SETTINGS says 08:00/17:00 — so an org that never
+     touched the setting read 5pm on its own Settings screen and got 4pm from the scheduler. One
+     question, two answers, and the screen was the one telling the truth about intent.
+     Found while chasing Erik's "my company settings are 9-5 not 8-4": his org HAS the setting, and
+     the mismatch was waiting for every org that doesn't. */
+  return {
+    start: hm(stored.work_day_start) ?? DEFAULT_SETTINGS.work_day_start,
+    end: hm(stored.work_day_end) ?? DEFAULT_SETTINGS.work_day_end,
+  };
 }
 
 /** Merge stored settings over defaults so every key is always present. */

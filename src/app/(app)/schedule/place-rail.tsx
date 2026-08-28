@@ -70,7 +70,7 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
      on the way and choose to plan it/its for before or after." Morning starts 8, afternoon 1 — the
      two halves a contractor's day actually has, not a time picker demanding a precision nobody has
      while planning. */
-  const { picked, toggle, clear, half, setHalf, startAt, setStartAt, pending: placing } = usePlacement();
+  const { picked, toggle, clear, half, setHalf, startAt, setStartAt, halfTimes, pending: placing } = usePlacement();
   /** Which card is typing its own duration. Erik: "we definitly need a custom option." */
   const [customFor, setCustomFor] = useState<string | null>(null);
   const [customText, setCustomText] = useState("");
@@ -258,7 +258,9 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
                           <option value="480">Full day</option>
                           <option value="960">2 days</option>
                           <option value="1440">3 days</option>
-                          <option value="2400">A week</option>
+                          {/* A WEEK IS FIVE WORKING DAYS — Erik: "lets make that the 5 working days by default".
+                              Said out loud on the option so it never has to be inferred. */}
+                          <option value="2400">A week (5 days)</option>
                           {/* NO CEILING. A service call is 45 minutes and a panel swap is 6 hours;
                               rounding either to the nearest bucket puts a number on the calendar
                               that nobody chose. */}
@@ -381,7 +383,9 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
               </button>
             )}
             <span className="w-full text-xs text-slate-400">
-              Starting {startAt ? prettyTime(startAt) : half === "am" ? "8am" : "1pm"}, in the order shown.
+              {/* HIS working day (Settings → Crew & time), never a literal — the rail used to
+                  promise 8am to a shop that opens at 9. */}
+              Starting {prettyTime(startAt || (half === "am" ? halfTimes.am : halfTimes.pm))}, in the order shown.
             </span>
             <button
               type="button"

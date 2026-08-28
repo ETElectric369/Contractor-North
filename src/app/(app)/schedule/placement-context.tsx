@@ -8,6 +8,7 @@ import { placeAppointmentOnDay, placeJobOnDay, planDayTimes } from "./actions";
 import { groupByTown, spreadTimes, type Placeable } from "@/lib/schedule/place-by-town";
 import { workKind } from "@/lib/schedule/work-shape";
 import { dayLabelFrom, placeMessage } from "@/lib/schedule/placement-plan";
+import { halves } from "@/lib/schedule/fit-day";
 
 /**
  * WHAT IS PICKED, SHARED BY THE RAIL AND THE CALENDAR.
@@ -39,9 +40,11 @@ type PlacementValue = {
   /** Morning or afternoon — chosen in the rail, applied by whichever surface commits. */
   half: "am" | "pm";
   setHalf: (h: "am" | "pm") => void;
-  /** An exact "HH:MM" when he wants one. Empty = the half decides (8am / 1pm). */
+  /** An exact "HH:MM" when he wants one. Empty = the half decides, from the org's working day. */
   startAt: string;
   setStartAt: (hm: string) => void;
+  /** The org's own morning and afternoon starts — never hardcoded clock times. */
+  halfTimes: { am: string; pm: string };
   /** The second tap. Books every picked lead and dates every picked floater onto this day. */
   placeOn: (dateISO: string) => void;
   pending: boolean;
@@ -56,6 +59,7 @@ const INERT: PlacementValue = {
   setHalf: () => {},
   startAt: "",
   setStartAt: () => {},
+  halfTimes: { am: "08:00", pm: "13:00" },
   placeOn: () => {},
   pending: false,
 };
@@ -67,9 +71,12 @@ export const usePlacement = (): PlacementValue => useContext(Ctx);
 export function PlacementProvider({
   items,
   todayISO,
+  workDay,
   children,
 }: {
   items: Placeable[];
+  /** Settings → Crew & time, resolved on the server. */
+  workDay: { start: string; end: string };
   /** The org's today, computed on the server in the org's timezone — never from the browser. */
   todayISO: string;
   children: React.ReactNode;
@@ -84,6 +91,7 @@ export function PlacementProvider({
      supply house opens, or a 10:30 the customer asked for, is a real thing he already knows and
      had nowhere to put. Empty means the half still decides. */
   const [startAt, setStartAt] = useState("");
+  const halfTimes = useMemo(() => halves(workDay.start, workDay.end), [workDay.start, workDay.end]);
 
   const toggle = useCallback((id: string) => {
     setPicked((p) => {
@@ -125,7 +133,7 @@ export function PlacementProvider({
          already booked. A phone call is marked pinned — it goes to the top of the day and takes no
          room, so it never pushes a real visit later. */
       const visits = [...appts, ...leads];
-      const firstAt = /^\d{2}:\d{2}$/.test(startAt) ? startAt : half === "am" ? "08:00" : "13:00";
+      const firstAt = /^\d{2}:\d{2}$/.test(startAt) ? startAt : half === "am" ? halfTimes.am : halfTimes.pm;
 
       start(async () => {
         const planned = await planDayTimes(
@@ -214,12 +222,12 @@ export function PlacementProvider({
         router.refresh();
       });
     },
-    [chosen, half, startAt, pending, router, toast, todayISO],
+    [chosen, half, startAt, halfTimes, pending, router, toast, todayISO],
   );
 
   const value = useMemo<PlacementValue>(
-    () => ({ picked, toggle, clear, armedCount: chosen.length, half, setHalf, startAt, setStartAt, placeOn, pending }),
-    [picked, toggle, clear, chosen.length, half, startAt, placeOn, pending],
+    () => ({ picked, toggle, clear, armedCount: chosen.length, half, setHalf, startAt, setStartAt, halfTimes, placeOn, pending }),
+    [picked, toggle, clear, chosen.length, half, startAt, halfTimes, placeOn, pending],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

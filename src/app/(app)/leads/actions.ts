@@ -11,7 +11,7 @@ import {
   appointmentTypeFor,
   bookingTitle,
   isWorkKind,
-  WORK_DAY_MINUTES,
+  spanEnd,
   workKind,
 } from "@/lib/schedule/work-shape";
 import { carryFromCustomer, matchKnownCustomer, type KnownCustomer } from "@/lib/inquiries/known-customer";
@@ -444,9 +444,13 @@ export async function convertInquiry(
        days") as wall clock from 8am ends the appointment at midnight. A multi-day visit is a span
        of days, not one very long block. */
     const sized = Number((inq as { planned_minutes?: number | null }).planned_minutes ?? 0);
-    const spanMin = sized > 0 ? Math.min(sized, WORK_DAY_MINUTES) : 0;
-    const endsAtIso = spanMin > 0
-      ? new Date(new Date(startsAtIso).getTime() + spanMin * 60_000).toISOString()
+    const startHm = /^\d{2}:\d{2}$/.test(opts.startTime ?? "") ? opts.startTime! : "09:00";
+    /* A WEEK ENDS ON FRIDAY. Clamping a multi-day size to one working day is how "a week" showed up
+       as a Monday; spending it as wall clock would end it at 2am. spanEnd walks the working days
+       and finishes at the same hour on the last one. */
+    const span = spanEnd(startDate, startHm, sized);
+    const endsAtIso = span
+      ? tzDateTimeUtc(span.lastYmd, span.endHHMM, tz)
       : null;
 
     const { error: aErr } = await supabase.from("appointments").insert({
