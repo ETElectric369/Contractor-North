@@ -23,12 +23,15 @@
  */
 
 /** The tags Erik named, in his words. A job is a kind; the rest come off appointments.type. */
-export type WorkKind = "job" | "walkthrough" | "service" | "office" | "quote" | "other";
+export type WorkKind = "job" | "walkthrough" | "service" | "office" | "quote" | "call" | "other";
 
 const APPT_KIND: Record<string, WorkKind> = {
   // 0231. A day marked as the WORK is not a walk-through, and calling it one was the app
   // overruling the only person who knew — twice, silently.
   job: "job",
+  // 0232. The rail has been telling him to call people for weeks — "Call to get the address" is
+  // Mike Scrivano's next action — and a call was the one kind of work it could name but not book.
+  call: "call",
   inspection: "walkthrough",
   final_inspection: "walkthrough",
   service_call: "service",
@@ -54,7 +57,7 @@ export function workKind(i: { kind?: "lead" | "job" | "appointment"; type?: stri
   // WHAT HE TOLD THE APP BEATS WHAT THE APP WORKED OUT. A lead's own work_kind (0230) is a person's
   // answer given at the moment they knew; everything below it is inference.
   const told = String(i.workKind ?? "");
-  if ((["job", "walkthrough", "service", "office", "quote", "other"] as string[]).includes(told)) {
+  if ((["job", "walkthrough", "service", "office", "quote", "call", "other"] as string[]).includes(told)) {
     return told as WorkKind;
   }
   if (i.kind === "job") return "job";
@@ -74,6 +77,7 @@ export const KIND_LABEL: Record<WorkKind, string> = {
   service: "Service call",
   office: "Office",
   quote: "Quote",
+  call: "Phone call",
   other: "Other",
 };
 
@@ -84,6 +88,9 @@ export const KIND_TONE: Record<WorkKind, "blue" | "green" | "amber" | "slate" | 
   service: "amber",
   office: "slate",
   quote: "indigo",
+  // Its own tone: a call is the only kind you do from anywhere, so it never competes for the day's
+  // travel and shouldn't read as another stop.
+  call: "green",
   other: "slate",
 };
 
@@ -164,6 +171,7 @@ export function appointmentTypeFor(kind: string | null | undefined): string {
     case "office": return "meeting";
     case "quote": return "quote";
     case "job": return "job";
+    case "call": return "call";
     default: return "inspection";
   }
 }
@@ -182,6 +190,103 @@ export function bookingTitle(kind: WorkKind, name: string): string {
     case "service": return `Service call: ${who}`;
     case "office": return `Meeting: ${who}`;
     case "quote": return `Quote: ${who}`;
+    case "call": return `Call ${who}`;
     default: return `Site inspection: ${who}`;
   }
+}
+
+/**
+ * HOW LONG, IN HIS WORDS.
+ *
+ * Erik: "on the dropdown timeslot we definitly need a custom option."
+ *
+ * The buckets (30m, 1h, 2h, half day, full day, 2–3 days) cover most of it and are two taps, which
+ * is why they stay. But a fixed list is a CEILING, and every ceiling in this app has eventually been
+ * the thing standing between him and writing down what he actually knows. A service call is
+ * forty-five minutes. A panel swap is six hours. Rounding a real number up to the nearest offered
+ * one puts a figure on the calendar that nobody chose — which is the same failure as the app
+ * inventing 90 minutes for an unsized visit, only quieter, because it looks deliberate.
+ *
+ * So: type it the way you'd say it. "45m", "1.5h", "3 hours", "2d", "1h30", or a bare number of
+ * minutes. Fragment-first — the app meets the way a person writes, not the other way round.
+ *
+ * Returns null for anything it cannot read, and null NEVER means zero: the caller leaves the old
+ * value alone rather than storing a confident wrong answer.
+ */
+export function parseDuration(text: string | null | undefined): number | null {
+  const raw = String(text ?? "").trim().toLowerCase();
+  if (!raw) return null;
+
+  // A bare number is minutes — that is what the column holds, and "90" is the commonest thing to
+  // type. (An hours-guess here would turn a 90-minute visit into a two-day one.)
+  if (/^\d+(\.\d+)?$/.test(raw)) return round(Number(raw));
+
+  // "1h30", "1h 30m", "2 hours 15" — an hours part with an optional trailing minutes part.
+  const both = /^(\d+(?:\.\d+)?)\s*(?:h|hr|hrs|hour|hours)\s*(\d+)\s*(?:m|min|mins|minute|minutes)?$/.exec(raw);
+  if (both) return round(Number(both[1]) * 60 + Number(both[2]));
+
+  const one = /^(\d+(?:\.\d+)?)\s*(m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days|w|wk|week|weeks)$/.exec(raw);
+  if (!one) return null;
+  const n = Number(one[1]);
+  const unit = one[2];
+  if (unit.startsWith("m")) return round(n);
+  if (unit.startsWith("h")) return round(n * 60);
+  if (unit.startsWith("d")) return round(n * WORK_DAY_MINUTES); // a DAY is a working day, not 24h
+  return round(n * WORK_DAY_MINUTES * 5); // a week is five working days
+}
+
+/** Inside the range the column will accept (0229/0230: > 0, ≤ 30 days). Out of range is null —
+ *  a refusal the caller can explain, never a silent clamp to something he didn't type. */
+function round(minutes: number): number | null {
+  const m = Math.round(minutes);
+  if (!Number.isFinite(m) || m <= 0 || m > 60 * 24 * 30) return null;
+  return m;
+}
+
+/**
+ * THREE DAYS MEANS THREE DAYS ON THE CALENDAR.
+ *
+ * Erik: "check 10244 Schaffer i just set it for 3 days and it only showed up on the schedule for 1
+ * day."
+ *
+ * Placing a job added exactly one day segment, whatever it was sized at — so the size was written,
+ * shown on the card, and then contradicted by the only picture that matters. Worse than useless: a
+ * three-day job drawn on Monday leaves Tuesday and Wednesday looking free, which is exactly the
+ * mistake the sizes exist to prevent. He'd have booked over his own work.
+ *
+ * Jobs already model this properly — job_schedule_segments is a list of day ranges — so nothing
+ * needed inventing. The size just had to be allowed to reach it.
+ */
+export function daysNeeded(plannedMinutes: number | null | undefined): number {
+  const m = Number(plannedMinutes ?? 0);
+  if (!Number.isFinite(m) || m <= 0) return 1; // unsized is one day, never zero days
+  return Math.max(1, Math.ceil(m / WORK_DAY_MINUTES));
+}
+
+/**
+ * `count` working days starting at `startISO`.
+ *
+ * THE DAY HE TAPPED IS ALWAYS DAY ONE — if he picks a Saturday, he means Saturday, and second-
+ * guessing the one day he explicitly chose would be the app knowing better. Days after it skip the
+ * weekend, because a three-day rough-in that eats Saturday and Sunday is wrong far more often than
+ * right, and a span is easy to drag afterwards while a lost weekend is a phone call.
+ *
+ * Pure string math on YYYY-MM-DD via LOCAL Dates. `new Date("2026-08-29")` is UTC midnight and
+ * lands on the 28th west of Greenwich — the bug that once flagged every lead due today as overdue,
+ * and it would silently shift a whole multi-day job by one.
+ */
+export function workingDaysFrom(startISO: string, count: number): string[] {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(startISO ?? ""));
+  if (!m) return [];
+  const out: string[] = [];
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const p = (n: number) => String(n).padStart(2, "0");
+  for (let i = 0; out.length < Math.max(1, count) && i < 400; i++) {
+    const dow = d.getDay();
+    if (out.length === 0 || (dow !== 0 && dow !== 6)) {
+      out.push(`${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`);
+    }
+    d.setDate(d.getDate() + 1);
+  }
+  return out;
 }

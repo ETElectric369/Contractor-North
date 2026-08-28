@@ -116,9 +116,16 @@ export default async function SchedulePage({
       .limit(500),
     supabase
       .from("jobs")
-      .select("id, job_number, name, address, city, planned_minutes")
-      .is("scheduled_start", null)
+      // `status` is read below to badge a parked job — THE PROJECTION LAW: the column the
+      // decision turns on has to be in the select list.
+      .select("id, job_number, name, address, city, planned_minutes, status")
       .in("status", ACTIVE_JOB_STATUSES)
+      /* EVERYTHING ON HOLD, DATED OR NOT. Erik: "we need everything on hold to pop up on that
+         list." A parked job that still carries a date is the worst of both — the calendar draws it
+         as happening while the status says it isn't, and neither surface admits the other exists.
+         Two of his four were in exactly that state. An on-hold job's date is not a plan, it is a
+         leftover, so it belongs on the board with the rest of the work waiting for a real day. */
+      .or("scheduled_start.is.null,status.eq.on_hold")
       .order("created_at", { ascending: false })
       .limit(200),
     // A booking with no time on it yet — proposed, or created without a date.
@@ -195,6 +202,9 @@ export default async function SchedulePage({
       address: r.address ?? null,
       city: r.city ?? null,
       planned_minutes: r.planned_minutes == null ? null : Number(r.planned_minutes),
+      // Why it's here when it may already have a date — said out loud on the card rather than left
+      // as a thing he has to work out.
+      onHold: r.status === "on_hold",
     })),
     // ── THE BOOKED-BUT-UNPLANNED WALK-THROUGHS. Erik: "we have to roll in the 'to be scheduled'
     //    stuff somehow for example i have a couple inspections that already link to the leads i

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { MapPin, Phone, Check } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -15,7 +15,7 @@ import {
   whatsMissing,
   type Placeable,
 } from "@/lib/schedule/place-by-town";
-import { dayLoad, durationLabel, KIND_LABEL, KIND_TONE, workKind } from "@/lib/schedule/work-shape";
+import { dayLoad, durationLabel, KIND_LABEL, KIND_TONE, parseDuration, workKind } from "@/lib/schedule/work-shape";
 
 /**
  * EVERYTHING WAITING FOR A DAY, next to the calendar.
@@ -51,7 +51,10 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
      on the way and choose to plan it/its for before or after." Morning starts 8, afternoon 1 — the
      two halves a contractor's day actually has, not a time picker demanding a precision nobody has
      while planning. */
-  const { picked, toggle, clear, half, setHalf, pending: placing } = usePlacement();
+  const { picked, toggle, clear, half, setHalf, startAt, setStartAt, pending: placing } = usePlacement();
+  /** Which card is typing its own duration. Erik: "we definitly need a custom option." */
+  const [customFor, setCustomFor] = useState<string | null>(null);
+  const [customText, setCustomText] = useState("");
 
   const groups = useMemo(() => groupByTown(items), [items]);
   const chosen = useMemo(
@@ -65,6 +68,18 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
    *  already-booked visit's on `appointments`. The card doesn't make him care which — but the
    *  dispatch has to be exhaustive, because sending one kind's id to another kind's writer updates
    *  zero rows and, by the silent-write law, that reads as an error about the wrong record. */
+  /** Read what he typed, or say plainly that it couldn't be read. Never a silent round. */
+  function saveCustom(i: Placeable) {
+    const minutes = parseDuration(customText);
+    if (!minutes) {
+      toast(`I couldn't read "${customText.trim()}" — try 45m, 1.5h, or 2d.`, "error");
+      return;
+    }
+    setCustomFor(null);
+    setCustomText("");
+    size(i, { plannedMinutes: minutes });
+  }
+
   function size(i: Placeable, patch: { workKind?: string; plannedMinutes?: number | null }) {
     start(async () => {
       const res =
@@ -136,6 +151,7 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
                           {durationLabel(i.planned_minutes)}
                         </span>
                         {i.urgent && <Badge tone="amber">overdue</Badge>}
+                        {i.onHold && <Badge tone="slate">on hold</Badge>}
                       </span>
                       {i.address && (
                         <span className="mt-0.5 flex items-center gap-1 text-xs text-slate-500">
@@ -164,11 +180,20 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
                             <option value="service">Service call</option>
                             <option value="job">Job</option>
                             <option value="quote">Quote</option>
+            <option value="call">Phone call</option>
                             <option value="office">Office</option>
                           </select>
                           <select
                             value={i.planned_minutes ? String(i.planned_minutes) : ""}
-                            onChange={(e) => size(i, { plannedMinutes: Number(e.target.value) || null })}
+                            onChange={(e) => {
+                              if (e.target.value === "custom") {
+                                setCustomFor(i.id);
+                                setCustomText(i.planned_minutes ? String(i.planned_minutes) : "");
+                                return;
+                              }
+                              setCustomFor(null);
+                              size(i, { plannedMinutes: Number(e.target.value) || null });
+                            }}
                             disabled={pending}
                             className="h-7 rounded-md border border-slate-200 bg-white px-1.5 text-xs disabled:opacity-50"
                             aria-label="How long will it take"
@@ -192,7 +217,47 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
                             <option value="960">2 days</option>
                             <option value="1440">3 days</option>
                             <option value="2400">A week</option>
+                            {/* NO CEILING. A service call is 45 minutes and a panel swap is 6
+                                hours; rounding either to the nearest offered bucket puts a number
+                                on the calendar nobody chose. */}
+                            <option value="custom">Custom…</option>
                           </select>
+                          {customFor === i.id && (
+                            /* TYPE IT THE WAY YOU'D SAY IT — "45m", "1.5h", "3 hours", "2d", or a
+                               bare number of minutes. parseDuration reads all of them, and returns
+                               null rather than a guess for anything it can't, so an unreadable
+                               entry leaves the old value alone instead of storing a confident
+                               wrong answer. */
+                            <span className="flex items-center gap-1">
+                              <input
+                                autoFocus
+                                value={customText}
+                                onChange={(e) => setCustomText(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") { e.preventDefault(); saveCustom(i); }
+                                  if (e.key === "Escape") { setCustomFor(null); setCustomText(""); }
+                                }}
+                                placeholder="45m, 1.5h, 2d"
+                                aria-label="Type how long it will take"
+                                className="h-7 w-24 rounded-md border border-brand/50 px-1.5 text-xs"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => saveCustom(i)}
+                                className="h-7 rounded-md bg-brand px-2 text-xs font-semibold text-white"
+                              >
+                                Set
+                              </button>
+                              {/* Says what it read BEFORE he commits — no silent rounding. */}
+                              <span className="text-xs text-slate-400">
+                                {customText.trim()
+                                  ? parseDuration(customText)
+                                    ? durationLabel(parseDuration(customText))
+                                    : "can't read that"
+                                  : ""}
+                              </span>
+                            </span>
+                          )}
                         </span>
                       )}
                       {/* THE GAP, QUIET UNTIL IT IS IN THE WAY.
@@ -267,8 +332,28 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
                 </button>
               ))}
             </span>
-            <span className="text-xs text-slate-400">
-              {half === "am" ? "from 8am" : "from 1pm"}, in the order shown
+            {/* OR AN EXACT TIME. The halves stay the two-tap default; this is the escape hatch for
+                the times he already knows — 7am before the supply house, the 10:30 she asked for. */}
+            <input
+              type="time"
+              value={startAt}
+              onChange={(e) => setStartAt(e.target.value)}
+              aria-label="Start at an exact time instead"
+              className={`h-8 rounded-lg border px-1.5 text-xs ${
+                startAt ? "border-brand text-brand" : "border-slate-200 text-slate-400"
+              }`}
+            />
+            {startAt && (
+              <button
+                type="button"
+                onClick={() => setStartAt("")}
+                className="text-xs font-medium text-slate-400 hover:text-slate-700"
+              >
+                clear time
+              </button>
+            )}
+            <span className="w-full text-xs text-slate-400">
+              {startAt ? `from ${startAt}` : half === "am" ? "from 8am" : "from 1pm"}, in the order shown
             </span>
             <button
               type="button"

@@ -85,6 +85,7 @@ export function InquiryFields({
           <option value="service">Service call</option>
           <option value="job">Job</option>
           <option value="quote">Quote</option>
+            <option value="call">Phone call</option>
           <option value="office">Office</option>
         </Select>
       </div>

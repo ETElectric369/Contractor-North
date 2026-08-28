@@ -62,6 +62,9 @@ export type Placeable = {
   email?: string | null;
   /** Expected effort (0229). Null = nobody has sized it, which renders "—" and never "0h". */
   planned_minutes?: number | null;
+  /** Parked (jobs.status = 'on_hold'). It may still carry a stale date; placing it takes it off
+   *  hold, because giving something a day is the opposite of parking it. */
+  onHold?: boolean;
   /** appointments.type, when this item IS one — drives the Walk-through / Service call / Office tag. */
   type?: string | null;
   /** A LEAD's own work_kind (0230), chosen on the lead where the caller already knew. Preferred

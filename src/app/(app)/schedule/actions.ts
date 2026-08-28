@@ -11,7 +11,7 @@ import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { todayStrInTz, tzDateTimeUtc } from "@/lib/tz";
 import { addDaySegment, shiftSegmentCovering } from "@/lib/schedule-math";
 import { rescheduleAppointment } from "../appointments/actions";
-import { appointmentTypeFor, WORK_DAY_MINUTES } from "@/lib/schedule/work-shape";
+import { appointmentTypeFor, daysNeeded, WORK_DAY_MINUTES, workingDaysFrom } from "@/lib/schedule/work-shape";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type Result = { ok: boolean; error?: string; id?: string };
@@ -464,11 +464,32 @@ export async function placeJobOnDay(
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateISO)) return { ok: false, error: "Pick a day." };
   const { segments, error: segErr } = await loadJobDaySegments(supabase, jobId);
   if (segErr) return { ok: false, error: segErr };
+
+  /* AS MANY DAYS AS IT TAKES. A job sized at three days used to land on one, leaving the next two
+     looking free — the exact overbooking the sizes exist to prevent. The day he tapped is always
+     day one; the rest skip the weekend (see workingDaysFrom). */
+  const { data: sizeRow } = await supabase
+    .from("jobs")
+    .select("planned_minutes, status") // PROJECTION LAW: both columns are read below
+    .eq("id", jobId)
+    .maybeSingle();
+  const row = sizeRow as { planned_minutes?: number | null; status?: string | null } | null;
+  const days = workingDaysFrom(dateISO, daysNeeded(row?.planned_minutes));
+  const withDays = days.reduce((acc, d) => addDaySegment(acc, d), segments);
+
+  /* GIVING SOMETHING A DAY IS THE OPPOSITE OF PARKING IT. An on-hold job now appears on the rail
+     even when it carries a stale date (Erik: "we need everything on hold to pop up on that list"),
+     so placing one has to take it off hold — otherwise it lands on the calendar AND stays on the
+     board forever, which is a loop rather than a decision. advanceToScheduled deliberately only
+     promotes to_be_scheduled/estimate, so this is its own explicit write. */
+  if (row?.status === "on_hold") {
+    await supabase.from("jobs").update({ status: "scheduled" }).eq("id", jobId).eq("status", "on_hold");
+  }
   // setJobScheduleRanges revalidates /schedule, /planner, /jobs, and the job page.
   // undefined (not null) when no time was given, so the preserve-the-job's-own-time branch stands.
   return setJobScheduleRanges(
     jobId,
-    addDaySegment(segments, dateISO),
+    withDays,
     /^\d{2}:\d{2}$/.test(startHHMM ?? "") ? startHHMM : undefined,
   );
 }

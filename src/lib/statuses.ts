@@ -51,6 +51,9 @@ export const APPOINTMENT_TYPES = [
   // already quoted is a Monday, and folding that into "inspection" overruled the one person who
   // knew. See lib/schedule/work-shape.
   "job",
+  // A phone call somebody has to sit down and make (0232) — unbillable, unavoidable, and until now
+  // the only kind of work the app could describe but not put on a day.
+  "call",
   "quote",
   "meeting",
   "appointment",
@@ -74,6 +77,7 @@ const APPOINTMENT_TYPE_LABELS: Record<AppointmentType, string> = {
   final_inspection: "Final inspection",
   service_call: "Service call",
   job: "Job",
+  call: "Phone call",
   quote: "Quote / estimate",
   meeting: "Client meeting",
   appointment: "Appointment",

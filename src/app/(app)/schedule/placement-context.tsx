@@ -38,6 +38,9 @@ type PlacementValue = {
   /** Morning or afternoon — chosen in the rail, applied by whichever surface commits. */
   half: "am" | "pm";
   setHalf: (h: "am" | "pm") => void;
+  /** An exact "HH:MM" when he wants one. Empty = the half decides (8am / 1pm). */
+  startAt: string;
+  setStartAt: (hm: string) => void;
   /** The second tap. Books every picked lead and dates every picked floater onto this day. */
   placeOn: (dateISO: string) => void;
   pending: boolean;
@@ -50,6 +53,8 @@ const INERT: PlacementValue = {
   armedCount: 0,
   half: "am",
   setHalf: () => {},
+  startAt: "",
+  setStartAt: () => {},
   placeOn: () => {},
   pending: false,
 };
@@ -73,6 +78,11 @@ export function PlacementProvider({
   const [pending, start] = useTransition();
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [half, setHalf] = useState<"am" | "pm">("am");
+  /* AM/PM is the right DEFAULT — nobody planning a week knows the minute, and asking for one is
+     asking for precision that doesn't exist yet. But it can't be a ceiling: a 7am start before the
+     supply house opens, or a 10:30 the customer asked for, is a real thing he already knows and
+     had nowhere to put. Empty means the half still decides. */
+  const [startAt, setStartAt] = useState("");
 
   const toggle = useCallback((id: string) => {
     setPicked((p) => {
@@ -115,8 +125,9 @@ export function PlacementProvider({
          at the same instant and tell nobody anything." Appointments take the front of the sequence
          and the leads carry on from where they stop. */
       const visits = appts.length + leads.length;
-      const times = spreadTimes(visits, half === "am" ? "08:00" : "13:00", 90);
-      const startHHMM = times[0] ?? (half === "am" ? "08:00" : "13:00");
+      const firstAt = /^\d{2}:\d{2}$/.test(startAt) ? startAt : half === "am" ? "08:00" : "13:00";
+      const times = spreadTimes(visits, firstAt, 90);
+      const startHHMM = times[0] ?? firstAt;
 
       start(async () => {
         // THREE KINDS, THREE WRITES, REPORTED SEPARATELY. A lead that fails to convert must not
@@ -190,12 +201,12 @@ export function PlacementProvider({
         router.refresh();
       });
     },
-    [chosen, half, pending, router, toast, todayISO],
+    [chosen, half, startAt, pending, router, toast, todayISO],
   );
 
   const value = useMemo<PlacementValue>(
-    () => ({ picked, toggle, clear, armedCount: chosen.length, half, setHalf, placeOn, pending }),
-    [picked, toggle, clear, chosen.length, half, placeOn, pending],
+    () => ({ picked, toggle, clear, armedCount: chosen.length, half, setHalf, startAt, setStartAt, placeOn, pending }),
+    [picked, toggle, clear, chosen.length, half, startAt, placeOn, pending],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
