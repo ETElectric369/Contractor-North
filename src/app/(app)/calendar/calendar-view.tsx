@@ -10,6 +10,7 @@ import { Card } from "@/components/ui/card";
 import { usePlacement } from "../schedule/placement-context";
 import { dayTargetLabel } from "@/lib/schedule/placement-plan";
 import { dayLabel, spanLabel } from "@/lib/schedule/span-label";
+import { jobBlockEnd } from "@/lib/schedule/work-shape";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/toast";
 import { MoveToDay } from "@/components/move-to-day";
@@ -51,6 +52,9 @@ export interface CalJob {
   status: string;
   scheduled_start: string | null;
   scheduled_end: string | null;
+  /** How long it was sized for (0229). The grid falls back to the org work-day end without it,
+   *  which is where "5 hours" came from on a job nobody had sized. */
+  planned_minutes?: number | null;
   assigned_to?: string[] | null;
   customers?: { name: string } | null;
 }
@@ -502,10 +506,13 @@ export function CalendarView({
         const explicit = sMin !== wdStartMin; // ≠ the all-day sentinel
         if (explicit && dayOf(job.scheduled_start) === k) {
           startMin = sMin;
-          endMin = wdEndMin;
-          if (job.scheduled_end && dayOf(job.scheduled_end) === k) {
-            endMin = minOf(job.scheduled_end);
-          }
+          // What was scheduled, then what he sized it at, then the shop's hours — see jobBlockEnd.
+          endMin = jobBlockEnd(startMin, {
+            scheduledEndMin:
+              job.scheduled_end && dayOf(job.scheduled_end) === k ? minOf(job.scheduled_end) : null,
+            plannedMinutes: job.planned_minutes,
+            workDayEndMin: wdEndMin,
+          });
           if (endMin <= startMin) endMin = startMin + 60;
         }
       }
@@ -520,7 +527,21 @@ export function CalendarView({
         href: `/jobs/${job.id}`,
       });
     }
+    /* Jobs drawn on THIS day, so an appointment that became one isn't drawn beside itself. */
+    const jobsHere = new Set(data.jobs.map((x) => x.job.id));
+
     for (const a of data.appts) {
+      /* ONE PIECE OF WORK, ONE PILL. Erik: "look at the karen wucher job vs appt, i converted it
+         once i opened it then it put them side to side."
+         Converting an appointment into a job sets appointments.job_id — the link was already
+         there, and the calendar simply wasn't reading it, so it drew the visit and the job it
+         became as two separate blocks on the same afternoon, at different lengths, for one piece
+         of work. The JOB wins where they overlap: it is the durable record that carries costs,
+         crew and invoices.
+         Only on the SAME DAY. A walk-through in August that spawned a job for September is two
+         real events on two real days, and hiding the visit would erase history he needs. */
+      if (a.job_id && jobsHere.has(a.job_id)) continue;
+
       /* A CALL IS NOT A STOP. Erik: "lets have phone call just pin to the top of that day."
          He is right and it is not cosmetic. A call is the one kind of work you do from wherever
          you already are — the truck, the supply house counter, a job you are standing on. Giving it

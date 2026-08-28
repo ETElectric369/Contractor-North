@@ -315,3 +315,32 @@ export function workingDaysFrom(startISO: string, count: number): string[] {
   }
   return out;
 }
+
+/**
+ * WHEN DOES A JOB'S BLOCK END.
+ *
+ * Erik, on a job converted from a 3-hour visit: "im not sure why it says 5 hours."
+ *
+ * Nobody said five. The grid ran any timed job to the org's work-day end whenever it had no
+ * explicit finish, so a 1pm job drew until the shop shuts. That default is right for a job with no
+ * size — you have no better answer, and pretending to one would be worse. It is exactly wrong for a
+ * job that HAS been sized, because then the app has a real number from a real person and is
+ * quietly overriding it with a shop-hours assumption.
+ *
+ * The order is: what was actually scheduled, then what somebody sized it at, then the shop's hours.
+ * Stated here rather than inline so the calendar and anything else that draws a job agree.
+ */
+export function jobBlockEnd(
+  startMin: number,
+  opts: { scheduledEndMin?: number | null; plannedMinutes?: number | null; workDayEndMin: number },
+): number {
+  const explicit = Number(opts.scheduledEndMin ?? 0);
+  if (explicit > startMin) return explicit;
+
+  const sized = Number(opts.plannedMinutes ?? 0);
+  // Clamped to a working day: planned_minutes is work LOAD, and a three-day job is three day
+  // segments, not one block running past midnight.
+  if (sized > 0) return startMin + Math.min(sized, WORK_DAY_MINUTES);
+
+  return opts.workDayEndMin > startMin ? opts.workDayEndMin : startMin + 60;
+}

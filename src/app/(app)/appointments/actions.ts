@@ -11,6 +11,7 @@ import { requireStaff } from "@/lib/staff-guard";
 import { sendPushToProfiles } from "@/lib/push";
 import { getOrgSettings } from "@/lib/org-settings";
 import { tzDateTimeUtc, todayStrInTz } from "@/lib/tz";
+import { WORK_DAY_MINUTES } from "@/lib/schedule/work-shape";
 import { createProposalCore, cleanSlots } from "@/lib/appointments/proposal";
 import { endAfterStart } from "@/lib/appointments/times";
 import { APPOINTMENT_STATUSES, APPOINTMENT_TYPES, INSPECTION_TYPES } from "@/lib/statuses";
@@ -943,19 +944,43 @@ export async function createJobFromAppointment(appointmentId: string): Promise<R
 
   const { data: appt } = await supabase
     .from("appointments")
-    .select("id, title, customer_id, location, city, state, zip, job_id, starts_at")
+    // PROJECTION LAW: everything the job inherits has to be in the select list. planned_minutes,
+    // ends_at and inquiry_id were all missing, which is why none of them survived the conversion.
+    .select("id, title, customer_id, location, city, state, zip, job_id, starts_at, ends_at, planned_minutes, inquiry_id")
     .eq("id", appointmentId)
     .maybeSingle();
   if (!appt) return { ok: false, error: "Appointment not found." };
   if (appt.job_id) return { ok: true, id: appt.job_id };
+
+  /* WHAT THE VISIT ALREADY KNEW TRAVELS WITH IT.
+     Erik: "im not sure why it says 5 hours but i already marked it as a job … we need more
+     continuity between the leads page info jobs, appts and the interconnection of all these little
+     tags and such so theyre all talking to each other."
+
+     He is describing the actual defect. The conversion carried a name, a customer and an address
+     and dropped everything else on the floor — so a visit sized at three hours became a job sized
+     at nothing, which the calendar then drew to the end of the working day. Five hours nobody
+     chose, on a record he had already told the app about twice.
+
+     A number is only worth asking for once. The size comes across, the finish is computed from it
+     rather than defaulted, and inquiry_id comes too so the chain from the lead survives the step
+     instead of ending here. */
+  const sized = Number((appt as { planned_minutes?: number | null }).planned_minutes ?? 0);
+  const apptEnd = (appt as { ends_at?: string | null }).ends_at ?? null;
+  const scheduledEnd = sized > 0 && appt.starts_at
+    ? new Date(new Date(appt.starts_at).getTime() + Math.min(sized, WORK_DAY_MINUTES) * 60_000).toISOString()
+    : apptEnd;
 
   const { data: job, error } = await supabase
     .from("jobs")
     .insert({
       name: appt.title || "Job from appointment",
       customer_id: appt.customer_id,
+      inquiry_id: (appt as { inquiry_id?: string | null }).inquiry_id ?? null,
       status: "scheduled",
+      planned_minutes: sized > 0 ? sized : null, // blank stays blank — never a made-up number
       scheduled_start: appt.starts_at,
+      scheduled_end: scheduledEnd,
       address: appt.location,
       // THE PARTS TRAVEL WITH THE LINE. This selected `location` alone and pushed that one string
       // into jobs.address with city/state/zip null — the exact Waldow/Cohen blob shape, minted
@@ -972,6 +997,9 @@ export async function createJobFromAppointment(appointmentId: string): Promise<R
   if (error) return { ok: false, error: dbError(error) };
 
   await supabase.from("appointments").update({ job_id: job.id }).eq("id", appointmentId);
+  // The visit is now represented by the job on the calendar (they draw as one — see gridDataFor),
+  // so nothing is lost by leaving the appointment in place: it keeps its capture, its answers and
+  // its provenance, and stops competing with the job for the same afternoon.
   await pushCalendarItem("job", job.id); // the new job is scheduled — push it (fire-safe)
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
