@@ -9,6 +9,7 @@ import { SegmentedControl } from "@/components/ui/segmented";
 import { Card } from "@/components/ui/card";
 import { usePlacement } from "../schedule/placement-context";
 import { dayTargetLabel } from "@/lib/schedule/placement-plan";
+import { dayLabel, spanLabel } from "@/lib/schedule/span-label";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/toast";
 import { MoveToDay } from "@/components/move-to-day";
@@ -682,14 +683,18 @@ export function CalendarView({
   }
   const dayGrid = view === "day" ? gridDataFor(anchorK, { openApptRecords: true }) : { events: [], allDay: [] };
 
+  /* THE YEAR, ALWAYS. Erik: "we have to put the year on there no way around it." Every one of
+     these except the month view used to name a span with no year in it — fine when the calendar
+     could only show the fortnight you had just arrived at, wrong the moment it scrolls a year in
+     each direction. See lib/schedule/span-label for why it isn't hidden when it matches today. */
   const title =
     view === "month"
       ? anchor.toLocaleDateString(undefined, { month: "long", year: "numeric" })
       : view === "2weeks"
-        ? `${weekDays[0].toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${stackWeeks[stackWeeks.length - 1][6].toLocaleDateString(undefined, { month: "short", day: "numeric" })}`
+        ? spanLabel(weekDays[0], stackWeeks[stackWeeks.length - 1][6])
       : view === "week"
-        ? `${weekDays[0].toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${weekDays[6].toLocaleDateString(undefined, { month: "short", day: "numeric" })}`
-        : anchor.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
+        ? spanLabel(weekDays[0], weekDays[6])
+        : dayLabel(anchor);
 
   const iconBtn = "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg";
 
@@ -892,12 +897,11 @@ export function CalendarView({
                schedule." Day headers read "Mon 25" — fine in a fixed week, useless once the span
                scrolls through months. The header sticks to the top of the scroller so the answer
                is always on screen, and it names both months when a week straddles them. */
-            const a = wk[0];
-            const z = wk[6];
-            const sameMonth = a.getMonth() === z.getMonth();
-            const spanLabel = sameMonth
-              ? `${a.toLocaleDateString(undefined, { month: "long", year: a.getFullYear() === new Date(now).getFullYear() ? undefined : "numeric" })} ${a.getDate()}–${z.getDate()}`
-              : `${a.toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${z.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+            /* The year was CONDITIONAL here — shown only when it differed from today's. That is
+               the overdue-badge mistake again: a fact you can only read if you remember the rule
+               that governs its absence. Now it is simply always there, and a week that crosses a
+               year names both. */
+            const label = spanLabel(wk[0], wk[6], { month: "long" });
             const hasToday = days.some((d) => d.isToday);
             return (
               /* overflow-CLIP, not hidden. `hidden` makes this Card a scroll container, and a
@@ -914,7 +918,7 @@ export function CalendarView({
                       : "border-slate-100 bg-white/90 text-slate-500"
                   }`}
                 >
-                  {spanLabel}
+                  {label}
                   {hasToday && <span className="ml-2 text-[10px] font-bold uppercase tracking-wide">this week</span>}
                 </div>
                 <TimeGrid
@@ -962,7 +966,7 @@ export function CalendarView({
                 days={[
                   {
                     dayStr: anchorK,
-                    label: anchor.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }),
+                    label: anchor.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" }),
                     isToday: anchorK === todayK,
                   },
                 ]}
