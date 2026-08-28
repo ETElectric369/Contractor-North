@@ -15,7 +15,15 @@ import {
   whatsMissing,
   type Placeable,
 } from "@/lib/schedule/place-by-town";
-import { dayLoad, durationLabel, KIND_LABEL, KIND_TONE, parseDuration, workKind } from "@/lib/schedule/work-shape";
+import {
+  dayLoad,
+  durationLabel,
+  KIND_LABEL,
+  KIND_TONE,
+  parseDuration,
+  WORK_KINDS,
+  workKind,
+} from "@/lib/schedule/work-shape";
 
 /**
  * EVERYTHING WAITING FOR A DAY, next to the calendar.
@@ -40,6 +48,17 @@ import { dayLoad, durationLabel, KIND_LABEL, KIND_TONE, parseDuration, workKind 
 /** The durations the dropdown offers. Anything stored that isn't one of these still renders — see
  *  the synthetic option below. */
 const SIZE_BUCKETS = [30, 60, 120, 240, 480, 960, 1440, 2400];
+
+/** "13:30" is a database. "1:30pm" is a person. The footer reads back what will happen, so it
+ *  speaks the second one. */
+function prettyTime(hm: string): string {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hm);
+  if (!m) return hm;
+  const h = Number(m[1]);
+  const suffix = h < 12 ? "am" : "pm";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return m[2] === "00" ? `${h12}${suffix}` : `${h12}:${m[2]}${suffix}`;
+}
 
 export function PlaceRail({ items }: { items: Placeable[] }) {
   const router = useRouter();
@@ -175,13 +194,11 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
                             className={`h-7 rounded-md border border-slate-200 bg-white px-1.5 text-xs ${i.kind === "job" ? "hidden" : ""}`}
                             aria-label="What kind of work"
                           >
+                            {/* From the one list — see work-shape. */}
                             <option value="">Kind?</option>
-                            <option value="walkthrough">Walk-through</option>
-                            <option value="service">Service call</option>
-                            <option value="job">Job</option>
-                            <option value="quote">Quote</option>
-            <option value="call">Phone call</option>
-                            <option value="office">Office</option>
+                            {WORK_KINDS.map((k) => (
+                              <option key={k} value={k}>{KIND_LABEL[k]}</option>
+                            ))}
                           </select>
                           <select
                             value={i.planned_minutes ? String(i.planned_minutes) : ""}
@@ -318,14 +335,21 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
           <p className="text-sm font-medium text-brand">{armedInstruction(chosen.length)}</p>
 
           <div className="flex flex-wrap items-center gap-2">
+            {/* A HALF OR A TIME — never both lit at once.
+                They answer the same question, so a screen showing AM selected AND 12:30 PM entered
+                is a screen telling him two things and letting him guess which one the app will
+                use. Picking a half clears the exact time; entering a time dims the halves, so
+                whichever he touched last is visibly the one that counts. */}
             <span className="inline-flex overflow-hidden rounded-lg border border-slate-200">
               {(["am", "pm"] as const).map((h) => (
                 <button
                   key={h}
                   type="button"
-                  onClick={() => setHalf(h)}
+                  onClick={() => { setHalf(h); setStartAt(""); }}
                   className={`px-3 py-1.5 text-xs font-semibold uppercase ${
-                    half === h ? "bg-brand text-white" : "bg-white text-slate-500 hover:bg-slate-50"
+                    half === h && !startAt
+                      ? "bg-brand text-white"
+                      : "bg-white text-slate-500 hover:bg-slate-50"
                   }`}
                 >
                   {h}
@@ -353,7 +377,7 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
               </button>
             )}
             <span className="w-full text-xs text-slate-400">
-              {startAt ? `from ${startAt}` : half === "am" ? "from 8am" : "from 1pm"}, in the order shown
+              Starting {startAt ? prettyTime(startAt) : half === "am" ? "8am" : "1pm"}, in the order shown.
             </span>
             <button
               type="button"

@@ -78,3 +78,72 @@ describe("three days means three days on the calendar", () => {
     expect(workingDaysFrom("nope", 3)).toEqual([]);
   });
 });
+
+import {
+  appointmentTypeFor,
+  bookingTitle,
+  isWorkKind,
+  KIND_FROM_APPT_TYPE,
+  KIND_LABEL,
+  KIND_TONE,
+  WORK_KINDS,
+  workKind,
+} from "./work-shape";
+import { APPOINTMENT_TYPES, appointmentTypeLabel } from "@/lib/statuses";
+
+/**
+ * THE TEST THAT WOULD HAVE CAUGHT IT.
+ *
+ * Erik picked "Phone call" and got "That isn't a kind of work." The dropdown offered a kind the
+ * validator rejected, because the vocabulary was hand-copied into five places and 'call' reached
+ * four of them. Nothing was broken in isolation — every piece was individually fine and the SET
+ * disagreed with itself.
+ *
+ * So the assertion is over the whole set: every kind the app offers must survive the entire round
+ * trip — validate, book, come back, render. Adding a seventh kind and forgetting one leg fails
+ * here rather than in his hands.
+ */
+describe("every kind the app offers survives the round trip", () => {
+  it("passes the gate every writer uses", () => {
+    for (const k of WORK_KINDS) expect(isWorkKind(k)).toBe(true);
+    expect(isWorkKind("nonsense")).toBe(false);
+    expect(isWorkKind("")).toBe(false);
+  });
+
+  it("books as a type the appointments table actually allows", () => {
+    for (const k of WORK_KINDS) {
+      expect(APPOINTMENT_TYPES as readonly string[]).toContain(appointmentTypeFor(k));
+    }
+  });
+
+  it("reads back as the same kind it was booked as", () => {
+    for (const k of WORK_KINDS) {
+      expect(workKind({ kind: "appointment", type: appointmentTypeFor(k) })).toBe(k);
+    }
+  });
+
+  it("has a label and a tone — no blank badges", () => {
+    for (const k of WORK_KINDS) {
+      expect(KIND_LABEL[k]).toBeTruthy();
+      expect(KIND_TONE[k]).toBeTruthy();
+      expect(bookingTitle(k, "Braden Lang")).toContain("Braden Lang");
+    }
+  });
+
+  it("names every appointment type it can produce, in both directions", () => {
+    for (const t of APPOINTMENT_TYPES) {
+      expect(appointmentTypeLabel(t)).toBeTruthy();
+      expect(appointmentTypeLabel(t)).not.toBe(t); // a raw enum value is not a label
+    }
+    for (const k of WORK_KINDS) {
+      expect(KIND_FROM_APPT_TYPE[appointmentTypeFor(k)]).toBe(k);
+    }
+  });
+
+  it("includes the phone call that started this", () => {
+    expect(WORK_KINDS).toContain("call");
+    expect(appointmentTypeFor("call")).toBe("call");
+    expect(KIND_LABEL.call).toBe("Phone call");
+    expect(bookingTitle("call", "Mike Scrivano")).toBe("Call Mike Scrivano");
+  });
+});

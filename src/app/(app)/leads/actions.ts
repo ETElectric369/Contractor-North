@@ -7,7 +7,13 @@ import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
 import { requireStaff } from "@/lib/staff-guard";
 import { spreadTimes } from "@/lib/schedule/place-by-town";
-import { appointmentTypeFor, bookingTitle, WORK_DAY_MINUTES, workKind } from "@/lib/schedule/work-shape";
+import {
+  appointmentTypeFor,
+  bookingTitle,
+  isWorkKind,
+  WORK_DAY_MINUTES,
+  workKind,
+} from "@/lib/schedule/work-shape";
 import { carryFromCustomer, matchKnownCustomer, type KnownCustomer } from "@/lib/inquiries/known-customer";
 import { createServiceClient } from "@/lib/supabase/server";
 import { formatPhone, formatState, formatZip, titleCase } from "@/lib/utils";
@@ -790,11 +796,12 @@ export async function sizeLead(
 ): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
-  const KINDS = ["job", "walkthrough", "service", "office", "quote", "other"];
   const clean: Record<string, unknown> = {};
   if (patch.workKind !== undefined) {
     const k = String(patch.workKind ?? "").trim();
-    if (k && !KINDS.includes(k)) return { ok: false, error: "That isn't a kind of work." };
+    // Against the ONE list (lib/schedule/work-shape), not a copy of it. The copy that used to live
+    // here is what refused "Phone call" the hour it was added.
+    if (k && !isWorkKind(k) && k !== "other") return { ok: false, error: "That isn't a kind of work." };
     clean.work_kind = k || null; // "" clears it back to "not sure yet"
   }
   if (patch.plannedMinutes !== undefined) {

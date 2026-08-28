@@ -1,6 +1,7 @@
 "use client";
 
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { KIND_LABEL, WORK_KINDS } from "@/lib/schedule/work-shape";
 import { PhoneInput } from "@/components/ui/phone-input";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { StateSelect } from "@/components/ui/state-select";
@@ -80,13 +81,13 @@ export function InquiryFields({
       <div>
         <Label htmlFor="work_kind">What kind of work</Label>
         <Select id="work_kind" name="work_kind" value={value.work_kind} onChange={(e) => onChange({ work_kind: e.target.value })}>
+          {/* BUILT FROM THE ONE LIST, never hand-listed. An option that exists is an option the
+              validator accepts — the hand-written copies are how "Phone call" came to be offered
+              and then refused. */}
           <option value="">Not sure yet</option>
-          <option value="walkthrough">Walk-through</option>
-          <option value="service">Service call</option>
-          <option value="job">Job</option>
-          <option value="quote">Quote</option>
-            <option value="call">Phone call</option>
-          <option value="office">Office</option>
+          {WORK_KINDS.map((k) => (
+            <option key={k} value={k}>{KIND_LABEL[k]}</option>
+          ))}
         </Select>
       </div>
       <div>

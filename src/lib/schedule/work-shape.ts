@@ -25,6 +25,33 @@
 /** The tags Erik named, in his words. A job is a kind; the rest come off appointments.type. */
 export type WorkKind = "job" | "walkthrough" | "service" | "office" | "quote" | "call" | "other";
 
+/**
+ * THE LIST, ONCE.
+ *
+ * Erik picked "Phone call" and got "That isn't a kind of work." — from sizeLead, which carried its
+ * own hardcoded copy of this vocabulary. Adding a kind meant editing FIVE places (the type, the
+ * inference below, two dropdowns, this validator, and the DB constraint) and I edited four. The
+ * validator that rejected him was the one I missed, so the app cheerfully offered him an option it
+ * would then refuse to save.
+ *
+ * A list duplicated by hand is a promise to keep it in step, and this one had already been broken
+ * within an hour of being extended. So it lives here, every validator imports it, and both
+ * dropdowns are BUILT from it — adding a kind is now this line plus a migration, and a kind that
+ * exists is necessarily a kind that saves and a kind that renders.
+ */
+export const WORK_KINDS: readonly WorkKind[] = [
+  "walkthrough",
+  "service",
+  "job",
+  "quote",
+  "call",
+  "office",
+] as const;
+
+/** True for a value that is genuinely one of ours — the one gate every writer should use. */
+export const isWorkKind = (v: unknown): v is WorkKind =>
+  (WORK_KINDS as readonly string[]).includes(String(v ?? ""));
+
 const APPT_KIND: Record<string, WorkKind> = {
   // 0231. A day marked as the WORK is not a walk-through, and calling it one was the app
   // overruling the only person who knew — twice, silently.
@@ -57,9 +84,7 @@ export function workKind(i: { kind?: "lead" | "job" | "appointment"; type?: stri
   // WHAT HE TOLD THE APP BEATS WHAT THE APP WORKED OUT. A lead's own work_kind (0230) is a person's
   // answer given at the moment they knew; everything below it is inference.
   const told = String(i.workKind ?? "");
-  if ((["job", "walkthrough", "service", "office", "quote", "call", "other"] as string[]).includes(told)) {
-    return told as WorkKind;
-  }
+  if (isWorkKind(told) || told === "other") return told as WorkKind;
   if (i.kind === "job") return "job";
   // A LEAD's next step is a walk-through — that is the only thing a lead can be scheduled as, and
   // it is what scheduleLeadsOnDay books.
