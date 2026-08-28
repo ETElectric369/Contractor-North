@@ -22,7 +22,7 @@ import { summarizeMileage } from "@/lib/mileage-math";
 import { aggregatePayrollEntries } from "@/lib/payroll-math";
 import { getCrewStatus } from "@/lib/crew-status";
 import { firstNameOf, pillColorForPerson } from "@/lib/employee-color";
-import { TimeGrid } from "@/components/time-grid";
+import { TimecardStack } from "./timecard-stack";
 import { hmToMin } from "@/lib/tz";
 import { AddEntryButton } from "../timeclock/add-entry-button";
 import { EditEntryButton } from "./edit-entry-button";
@@ -258,31 +258,42 @@ export default async function TimecardsPage({
   // PAY PERIOD starts, so the payroll week reads against the pay cycle.
   const todayStr = todayStrInTz(tz);
   const workWin = workDayWindowHm((org as any)?.settings);
-  const gridDays = weekDayStrs.map((ds) => ({
-    dayStr: ds,
-    label: new Date(`${ds}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "short", day: "numeric", timeZone: "UTC" }),
-    isToday: ds === todayStr,
-    heavyStart: payPeriodBounds(orgSettings.pay_schedule, orgSettings.pay_anchor, ds).start === ds,
-  }));
-  const gridEvents = (entries ?? []).map((e: any) => {
-    // ONE org-tz mapping (lib/tz timeEntryGridSpan, unit-tested): day column +
-    // minutes both derive from the ORG day — a 7 PM Pacific clock-in can never
-    // bucket onto the UTC next-day column.
+  // The single-week grid arrays died with the single-week grid: each week in the stack
+  // builds its own events from the wide read below.
+  /* ── THE SCROLLING RECORD ────────────────────────────────────────────────────────────────
+     Erik: "continuous scroll which should also be on timecards with pay period break lines."
+     A separate, LIGHT read: only what a pill needs, over a wide span, so the stack has weeks to
+     scroll through without dragging the edit modal's whole projection (rate_override, allocations,
+     payroll locks) across six months of rows. The single-week `entries` above still feeds the
+     per-person lists and the editor, unchanged. */
+  const stackFrom = new Date(start.getTime() - 26 * 7 * 86_400_000).toISOString();
+  const stackTo = new Date(end.getTime() + 8 * 7 * 86_400_000).toISOString();
+  const { data: stackRows } = await supabase
+    .from("time_entries")
+    .select("id, profile_id, clock_in, clock_out, lunch_minutes, job_id, profiles:profile_id(full_name), job:job_id(job_number, name)")
+    .gte("clock_in", stackFrom)
+    .lt("clock_in", stackTo)
+    .order("clock_in", { ascending: true })
+    .limit(4000);
+  const stackEntries = ((stackRows ?? []) as any[]).map((e) => {
     const { dayStr, startMin, endMin } = timeEntryGridSpan(e.clock_in, e.clock_out, tz);
+    // The paid hours, lunch already deducted by the same rule the rest of the app uses — a total
+    // on a pay-period line that disagreed with payroll would be worse than no total at all.
+    const gross = (new Date(e.clock_out ?? Date.now()).getTime() - new Date(e.clock_in).getTime()) / 3_600_000;
+    const lunch = Number(e.lunch_minutes ?? 0) / 60;
     return {
       id: e.id as string,
       dayStr,
       startMin,
       endMin,
+      hours: Math.max(0, Math.round((gross - lunch) * 100) / 100),
       label: `${firstNameOf(e.profiles?.full_name)}${e.job ? ` · ${jobLabel(e.job)}` : ""}`,
       sub: `${formatTime(e.clock_in, tz)}–${e.clock_out ? formatTime(e.clock_out, tz) : "now"}`,
       color: pillColorForPerson(e.profile_id).pill,
-      // A pill tap opens THAT entry's editor (?entry= auto-opens the modal
-      // below) — Erik: the grid is where a wrong time gets spotted, so the
-      // fix should be one tap away, not a hunt through the per-person lists.
       href: `/timecards?week=${offset}&entry=${e.id}`,
     };
   });
+
   const gridLegend = [...byTech.entries()].map(([pid, rec]) => ({
     id: pid,
     name: rec.name,
@@ -405,28 +416,31 @@ export default async function TimecardsPage({
           entry a pill in its time allotment, one color per person (legend above),
           the heavier divider = a pay-period boundary day. The editable per-person
           table stays below — this grid is display; edits keep their tools. */}
-      <Card className="mb-4 overflow-hidden">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-slate-100 px-4 py-2.5">
-          <span className="text-sm font-semibold text-slate-900">Week grid</span>
+      <div className="mb-4">
+        <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="text-sm font-semibold text-slate-900">Hours</span>
           {gridLegend.map((p) => (
             <span key={p.id} className="flex items-center gap-1 text-xs text-slate-600">
               <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${p.dot}`} aria-hidden /> {p.name}
             </span>
           ))}
         </div>
-        {gridEvents.length === 0 ? (
-          <p className="px-5 py-6 text-center text-sm text-slate-400">No time entries this week.</p>
-        ) : (
-          <TimeGrid
-            days={gridDays}
-            events={gridEvents}
-            workStartMin={hmToMin(workWin.start)}
-            workEndMin={hmToMin(workWin.end)}
-            tz={tz}
-            initialNow={gridNow}
-          />
-        )}
-      </Card>
+        {/* THE WEEKS RUN, AND THE PAY PERIODS ARE MARKED ACROSS THEM. The single week behind two
+            arrows is gone: reading "what did we pay him last period" used to mean clicking back,
+            reading, clicking back, reading, and holding both halves in your head — for the one
+            number this page exists to produce. Same grid and same scroll hook as the schedule. */}
+        <TimecardStack
+          entries={stackEntries}
+          anchorWeek={weekDayStrs}
+          todayStr={todayStr}
+          workStartMin={hmToMin(workWin.start)}
+          workEndMin={hmToMin(workWin.end)}
+          tz={tz}
+          nowMin={gridNow.min}
+          paySchedule={orgSettings.pay_schedule}
+          payAnchor={orgSettings.pay_anchor}
+        />
+      </div>
 
       {/* A grid pill tap lands here: mount THAT entry's editor already open.
           Keyed by id so tapping a different pill remounts fresh state. */}
