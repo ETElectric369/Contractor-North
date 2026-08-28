@@ -22,6 +22,10 @@ export const dynamic = "force-dynamic";
 // (chips + the day drill's edit/quick actions). Map survives as a header icon
 // (a where-map with zero time interactions), not a lit tab row.
 
+// The scrolling stack IS the week view now (Erik: "keep the scroll as week view and get rid of the
+// fixed week view"), so "2weeks" is gone as a name. It stays ACCEPTED here rather than bounced,
+// because a bookmark or a shared link carrying it should land on the thing it meant, not on a
+// redirect to today — the client resolves any unknown view to week.
 const CAL_VIEWS = ["day", "week", "2weeks", "month"] as const;
 
 export default async function SchedulePage({

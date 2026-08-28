@@ -161,7 +161,80 @@ export interface SchedulePicker {
  * and his Sept 12 trip sits eighteen days out — invisible in a week view, which is how you book
  * work into a week you are in Sunnyvale.
  */
-type View = "month" | "2weeks" | "week" | "day";
+type View = "month" | "week" | "day";
+
+const endOfMonth = (d: Date): Date => new Date(d.getFullYear(), d.getMonth() + 1, 0);
+
+/**
+ * AN ENDLESS STACK, ONE IMPLEMENTATION.
+ *
+ * Erik: "lets keep the scroll as week view and get rid of the fixed week view … and lets make the
+ * month view apply all the same new rules."
+ *
+ * The scrolling stack turned out to be the week view he actually wanted, so the fixed one is gone
+ * rather than left beside it as a second answer to the same question. The month wants the same
+ * behaviour — which is exactly why this is a hook and not a second copy. Two copies of a scroll
+ * latch is how the month ends up cycling six months on a flick a week after the week view stopped
+ * doing it, and a hand-copied list has already bitten this app once this week.
+ *
+ * Every subtlety in here was learned the hard way:
+ *   · DIRECTION, not just position — at rest the scroller sits at 0, which already satisfies the
+ *     top sentinel, so a position-only test grew backwards on the very first touch, going down.
+ *   · A LATCH, and it must be a REF — scroll fires dozens of times per frame and React batches, so
+ *     `back < max` reads a stale value in every one of those calls and the functional updates all
+ *     land. That is the "six months in half a second" bug.
+ *   · HOLD HIS PLACE — prepending shoves what he was reading down by a whole grid. Restored before
+ *     paint, and the restore must not itself be read as a gesture.
+ *   · RESET ON A JUMP — pressing Today with forty weeks unrolled should land on today, not on
+ *     today plus everything he had opened up.
+ */
+function useEndlessStack(anchorKey: string, maxBack = 26, maxFwd = 52) {
+  const [back, setBack] = useState(0);
+  const [fwd, setFwd] = useState(1);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const growingRef = useRef(false);
+  const anchorRef = useRef(0);
+  const lastTopRef = useRef(0);
+
+  useEffect(() => {
+    setBack(0);
+    setFwd(1);
+    growingRef.current = false;
+    anchorRef.current = 0;
+    lastTopRef.current = 0;
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+  }, [anchorKey]);
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !growingRef.current) return;
+    if (anchorRef.current) {
+      el.scrollTop += el.scrollHeight - anchorRef.current;
+      anchorRef.current = 0;
+      lastTopRef.current = el.scrollTop;
+    }
+    growingRef.current = false;
+  }, [back, fwd]);
+
+  function onScroll(e: React.UIEvent<HTMLDivElement>) {
+    const el = e.currentTarget;
+    const goingUp = el.scrollTop < lastTopRef.current;
+    lastTopRef.current = el.scrollTop;
+    if (growingRef.current) return;
+    if (goingUp && el.scrollTop < 120 && back < maxBack) {
+      growingRef.current = true;
+      anchorRef.current = el.scrollHeight;
+      setBack((b) => b + 1);
+      return;
+    }
+    if (!goingUp && el.scrollHeight - el.scrollTop - el.clientHeight < 240 && fwd < maxFwd) {
+      growingRef.current = true;
+      setFwd((f) => f + 1);
+    }
+  }
+
+  return { back, fwd, scrollRef, onScroll };
+}
 
 // PURE calendar-day math only: dayKey round-trips a local-midnight Date built
 // from a "YYYY-MM-DD" back to the same string in ANY runtime zone. It must
@@ -281,7 +354,8 @@ export function CalendarView({
   // URL shallowly and Next syncs useSearchParams without an RSC fetch.
   const rawView = searchParams.get("view");
   const view: View =
-    rawView === "day" || rawView === "month" || rawView === "week" ? rawView : "2weeks";
+    // 2weeks folded INTO week — it IS the week view now, so an old link still lands somewhere real.
+    rawView === "day" || rawView === "month" ? rawView : "week";
   const dateParam = searchParams.get("date");
   const anchor = useMemo(
     () => new Date(`${isYmd(dateParam) ? dateParam : todayK}T00:00:00`),
@@ -300,7 +374,6 @@ export function CalendarView({
   function shiftAnchor(dir: -1 | 1) {
     const d = new Date(anchor);
     if (view === "month") d.setMonth(d.getMonth() + dir);
-    else if (view === "2weeks") d.setDate(d.getDate() + 14 * dir);
     else if (view === "week") d.setDate(d.getDate() + 7 * dir);
     else d.setDate(d.getDate() + dir);
     nav(view, dayKey(d));
@@ -648,75 +721,29 @@ export function CalendarView({
    * span extends under him and the week he was looking at stays where it was. Starts at exactly
    * two weeks from today, which is the planning horizon a walk-through gets booked in.
    */
-  const [back, setBack] = useState(0);
-  const [fwd, setFwd] = useState(1); // today's week + one = the two weeks he asked for
-  const scrollRef = useRef<HTMLDivElement | null>(null);
+  /* ONE HOOK, TWO STACKS — the week's and the month's — so a fix to the scroll can only be made
+     once. Keyed on the anchor, so pressing Today collapses the span back to where he is. */
+  const weekStack = useEndlessStack(anchorK);
+  const monthStack = useEndlessStack(anchorK, 24, 24);
+
   const stackWeeks = useMemo(() => {
     const out: Date[][] = [];
-    for (let w = -back; w <= fwd; w++) {
+    for (let w = -weekStack.back; w <= weekStack.fwd; w++) {
       out.push(weekDays.map((d) => { const x = new Date(d); x.setDate(x.getDate() + 7 * w); return x; }));
     }
     return out;
-  }, [weekDays, back, fwd]);
+  }, [weekDays, weekStack.back, weekStack.fwd]);
 
-  /**
-   * Grow the span when he reaches an edge — ONE WEEK PER ARRIVAL, not one per scroll event.
-   *
-   * Erik: "check the scrolling becuase i barely did anything and it cycled through the last 6
-   * months in half second."
-   *
-   * A scroll fires this handler dozens of times a second, and React batches the state it sets. So
-   * every event in a single flick saw the same `scrollTop < 120`, and every one of them ran
-   * `setBack(b => b + 1)` — a functional update, so none of them cancelled out. One gesture spent
-   * the entire 26-week budget before the browser painted once. The `back < 26` guard could not
-   * help: `back` was the stale render's value in every one of those calls.
-   *
-   * The latch is the fix and it has to be a REF, because that is the only thing that changes
-   * between two events inside the same frame. It closes on the first arrival at an edge and only
-   * reopens after the new week has been laid out and his place restored — by which point the
-   * anchor has pushed scrollTop a full grid away from the threshold, so the next event genuinely
-   * is a new arrival rather than the same one counted again.
-   */
-  const growingRef = useRef(false);
-  const anchorRef = useRef(0);
-  /** Where the scroller was on the previous event — the only way to know which way he is going. */
-  const lastTopRef = useRef(0);
-
-  useLayoutEffect(() => {
-    const el = scrollRef.current;
-    if (!el || !growingRef.current) return;
-    // HOLD HIS PLACE. Prepending a week above the viewport would otherwise shove everything he was
-    // reading down by one grid. Restored before paint, so it never flickers.
-    if (anchorRef.current) {
-      el.scrollTop += el.scrollHeight - anchorRef.current;
-      anchorRef.current = 0;
-      lastTopRef.current = el.scrollTop; // the anchor move is not a gesture — don't read it as one
+  /* THE MONTH SCROLLS TOO. Erik: "lets make the month view apply all the same new rules." A month
+     that pages is the dead end the fixed week was — you had to commit to leaving what you were
+     reading just to see whether the job you are about to book runs into next month. */
+  const stackMonths = useMemo(() => {
+    const out: Date[] = [];
+    for (let i = -monthStack.back; i <= monthStack.fwd; i++) {
+      out.push(new Date(anchor.getFullYear(), anchor.getMonth() + i, 1));
     }
-    growingRef.current = false;
-  }, [back, fwd]);
-
-  function onStackScroll(e: React.UIEvent<HTMLDivElement>) {
-    const el = e.currentTarget;
-    const goingUp = el.scrollTop < lastTopRef.current;
-    lastTopRef.current = el.scrollTop;
-    if (growingRef.current) return; // a week is already being added — this is the same arrival
-
-    /* DIRECTION, NOT JUST POSITION. Erik: "it jumps a little right when i touch it at the start
-       then its good." At rest the stack sits at scrollTop 0, which already satisfies the
-       top-sentinel test — so the very first scroll event of the session prepended a week and
-       shifted the view under his thumb, even when he was scrolling DOWN and had no interest in
-       last month. Growing backwards is only ever what somebody reaching UPWARD wants. */
-    if (goingUp && el.scrollTop < 120 && back < 26) {
-      growingRef.current = true;
-      anchorRef.current = el.scrollHeight;
-      setBack((b) => b + 1);
-      return;
-    }
-    if (!goingUp && el.scrollHeight - el.scrollTop - el.clientHeight < 240 && fwd < 52) {
-      growingRef.current = true;
-      setFwd((f) => f + 1);
-    }
-  }
+    return out;
+  }, [anchor, monthStack.back, monthStack.fwd]);
 
 
   const weekGridDays = weekDays.map((d) => {
@@ -743,15 +770,6 @@ export function CalendarView({
   };
   const withTowns = (ds: typeof weekGridDays) => ds.map((d) => ({ ...d, sublabel: townFor(d.dayStr) }));
 
-  const weekGridEvents: TimeGridEvent[] = [];
-  const weekGridTray: TimeGridAllDay[] = [];
-  if (view === "week" || view === "2weeks") {
-    for (const d of weekGridDays) {
-      const g = gridDataFor(d.dayStr);
-      weekGridEvents.push(...g.events);
-      weekGridTray.push(...g.allDay);
-    }
-  }
   const dayGrid = view === "day" ? gridDataFor(anchorK, { openApptRecords: true }) : { events: [], allDay: [] };
 
   /* THE YEAR, ALWAYS. Erik: "we have to put the year on there no way around it." Every one of
@@ -760,11 +778,9 @@ export function CalendarView({
      each direction. See lib/schedule/span-label for why it isn't hidden when it matches today. */
   const title =
     view === "month"
-      ? anchor.toLocaleDateString(undefined, { month: "long", year: "numeric" })
-      : view === "2weeks"
-        ? spanLabel(weekDays[0], stackWeeks[stackWeeks.length - 1][6])
+      ? spanLabel(stackMonths[0], endOfMonth(stackMonths[stackMonths.length - 1]), { month: "long" })
       : view === "week"
-        ? spanLabel(weekDays[0], weekDays[6])
+        ? spanLabel(stackWeeks[0][0], stackWeeks[stackWeeks.length - 1][6])
         : dayLabel(anchor);
 
   const iconBtn = "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg";
@@ -823,7 +839,6 @@ export function CalendarView({
         items={[
           { id: "day", label: "Day" },
           { id: "week", label: "Week" },
-          { id: "2weeks", label: "2 weeks" },
           { id: "month", label: "Month" },
         ]}
       />
@@ -936,15 +951,47 @@ export function CalendarView({
       )}
 
       {view === "month" && (
-        <MonthGrid anchor={anchor} byDay={byDay} todayK={todayK} tz={tz} onPick={handleDayTap} armedLabel={target.prop?.label} />
-      )}
-      {view === "2weeks" && (
-        /* Two of the SAME TimeGrid per week rather than a new grid — every behaviour (day-tap
-           drills in, the now line, the all-day tray, work-day shading) is inherited rather than
-           reimplemented and left to drift. The span grows at both ends as he scrolls. */
+        /* THE SAME RULES AS THE WEEK. Scrolls both ways without paging, each month names itself
+           with its year, and a picked rail turns every cell into a target. One MonthGrid per month
+           rather than a new grid, so nothing about a month cell can drift from the single one. */
         <div
-          ref={scrollRef}
-          onScroll={onStackScroll}
+          ref={monthStack.scrollRef}
+          onScroll={monthStack.onScroll}
+          className="max-h-[calc(100dvh-14rem)] space-y-3 overflow-y-auto overscroll-contain"
+        >
+          {stackMonths.map((m) => {
+            const isNow = m.getFullYear() === anchor.getFullYear() && m.getMonth() === anchor.getMonth();
+            return (
+              <Card key={`${m.getFullYear()}-${m.getMonth()}`} className="overflow-clip">
+                <div
+                  className={`sticky top-0 z-20 border-b px-3 py-1.5 text-xs font-semibold backdrop-blur ${
+                    isNow ? "border-brand/30 bg-brand-light/70 text-brand" : "border-slate-100 bg-white/90 text-slate-500"
+                  }`}
+                >
+                  {m.toLocaleDateString(undefined, { month: "long", year: "numeric" })}
+                </div>
+                <MonthGrid
+                  anchor={m}
+                  byDay={byDay}
+                  todayK={todayK}
+                  tz={tz}
+                  onPick={handleDayTap}
+                  armedLabel={target.prop?.label}
+                />
+              </Card>
+            );
+          })}
+        </div>
+      )}
+      {view === "week" && (
+        /* THE WEEK VIEW *IS* THE STACK. Erik: "lets keep the scroll as week view and get rid of the
+           fixed week view." The fixed one was a second answer to the same question and the one
+           nobody reached for — a week you cannot scroll out of is a week you have to page away
+           from, and paging is a decision. Same TimeGrid per week, so every behaviour (the now line,
+           the all-day tray, work-day shading, tap-to-place) is inherited, never reimplemented. */
+        <div
+          ref={weekStack.scrollRef}
+          onScroll={weekStack.onScroll}
           className="max-h-[calc(100dvh-14rem)] space-y-3 overflow-y-auto overscroll-contain"
         >
           {stackWeeks.map((wk) => {
@@ -1007,27 +1054,6 @@ export function CalendarView({
             );
           })}
         </div>
-      )}
-      {view === "week" && (
-        /* THE week view: blocks in their time allotment, and ONLY that (Erik
-           7/15: "get rid of list view below, redundant" — the old WeekAgenda
-           list under the grid is gone). A day-header tap drills into the day
-           view, which keeps the full detail list with every edit/move handle;
-           a pill tap opens its record — never a move. Rendered even on an
-           empty week so the headers stay tappable. */
-        <Card className="overflow-hidden">
-          <TimeGrid
-            days={withTowns(weekGridDays)}
-            events={weekGridEvents}
-            allDay={weekGridTray}
-            workStartMin={wdStartMin}
-            workEndMin={wdEndMin}
-            tz={tz}
-            initialNow={gridNow}
-            onDayClick={(ds) => nav("day", ds, { push: true })}
-            placement={target.prop}
-          />
-        </Card>
       )}
       {view === "day" && (
         <>
@@ -1112,14 +1138,30 @@ const PILL_TONE: Record<"job" | "appt" | "apptProposed" | "task" | "external", s
 function monthPills(data: DayData | undefined, tz: string): { label: string; tone: keyof typeof PILL_TONE; sort: number }[] {
   if (!data) return [];
   const out: { label: string; tone: keyof typeof PILL_TONE; sort: number }[] = [];
-  for (const { job } of data.jobs) {
+  for (const { job, pos } of data.jobs) {
     const t = job.scheduled_start ? new Date(job.scheduled_start).getTime() : Number.MAX_SAFE_INTEGER;
     const cust = job.customers?.name;
-    out.push({ label: cust ? `${job.name} · ${cust}` : job.name, tone: "job", sort: t });
+    // WHICH DAY OF IT THIS IS — the week view says "d2/3" and the month said nothing, so a
+    // three-day job read as three unrelated jobs.
+    const base = cust ? `${job.name} · ${cust}` : job.name;
+    out.push({ label: pos ? `${base} · ${pos}` : base, tone: "job", sort: t });
   }
   for (const a of data.appts) {
+    // A JOB THAT BECAME ONE IS DRAWN ONCE. Same rule as the grid: where a booking and the job it
+    // spawned land on one day, the job is the record that carries costs, crew and invoices.
+    if (a.job_id && data.jobs.some((x) => x.job.id === a.job_id)) continue;
+
     const who = a.customers?.name || a.jobs?.name || a.title;
-    out.push({ label: `${pillTime(a.starts_at, tz)} ${who}`, tone: a.status === "proposed" ? "apptProposed" : "appt", sort: new Date(a.starts_at).getTime() });
+    /* A CALL HAS NO TIME WORTH PRINTING. It is pinned to the top of the day in the week view
+       because it is made from wherever you already are; stamping "9:00" on it in the month would
+       re-assert exactly the slot the week view stopped pretending it occupies. */
+    const isCall = a.type === "call";
+    out.push({
+      label: isCall ? `☎ ${who}` : `${pillTime(a.starts_at, tz)} ${who}`,
+      tone: a.status === "proposed" ? "apptProposed" : "appt",
+      // Calls sort to the top of the cell, which is where the week view puts them too.
+      sort: isCall ? -1 : new Date(a.starts_at).getTime(),
+    });
   }
   for (const t of data.tasks) out.push({ label: t.title, tone: "task", sort: Number.MAX_SAFE_INTEGER });
   for (const x of data.externals) {
