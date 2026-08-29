@@ -1022,6 +1022,23 @@ export async function createJobFromAppointment(appointmentId: string): Promise<R
   }
 
   await supabase.from("appointments").update({ job_id: job.id }).eq("id", appointmentId);
+  /* STAMP FOLLOWS DEED — the lead too. This path minted jobs without ever telling the lead, so
+     Karen sat on /leads as "contacted" while her job was already on the calendar ("the leads
+     converted to jobs put back as leads are still there"). A lead whose work became a job is won,
+     and not a lead anymore. */
+  if ((appt as { inquiry_id?: string | null }).inquiry_id) {
+    await supabase
+      .from("inquiries")
+      .update({
+        status: "won",
+        converted_at: new Date().toISOString(),
+        ...(appt.customer_id ? { customer_id: appt.customer_id } : {}),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", (appt as { inquiry_id?: string | null }).inquiry_id!)
+      .is("converted_at", null); // idempotent — an already-stamped lead keeps its original stamp
+    revalidatePath("/leads");
+  }
   // The visit is now represented by the job on the calendar (they draw as one — see gridDataFor),
   // so nothing is lost by leaving the appointment in place: it keeps its capture, its answers and
   // its provenance, and stops competing with the job for the same afternoon.

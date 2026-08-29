@@ -556,15 +556,15 @@ export function CalendarView({
     const jobsHere = new Set(data.jobs.map((x) => x.job.id));
 
     for (const a of data.appts) {
-      /* ONE PIECE OF WORK, ONE PILL. Erik: "look at the karen wucher job vs appt, i converted it
-         once i opened it then it put them side to side."
-         Converting an appointment into a job sets appointments.job_id — the link was already
-         there, and the calendar simply wasn't reading it, so it drew the visit and the job it
-         became as two separate blocks on the same afternoon, at different lengths, for one piece
-         of work. The JOB wins where they overlap: it is the durable record that carries costs,
-         crew and invoices.
-         Only on the SAME DAY. A walk-through in August that spawned a job for September is two
-         real events on two real days, and hiding the visit would erase history he needs. */
+      /* ONE PIECE OF WORK, ONE PILL. Converting an appointment into a job sets job_id, and the
+         job is the durable record — it wins.
+         TWO RULES BY TYPE. A JOB/SERVICE-CALL appointment IS the work, so once its job exists it
+         is superseded on EVERY day — Erik moved Karen's job to Monday and the Friday booking
+         reappeared as a ghost of where the work used to be ("karen wucher has an appointment back
+         on the screen and the job"). An INSPECTION is a real visit distinct from the job it
+         spawned, so it hides only when the job draws on its own day — a walk-through in August
+         that produced a September job is two events, and hiding it would erase history. */
+      if (a.job_id && (a.type === "job" || a.type === "service_call")) continue;
       if (a.job_id && jobsHere.has(a.job_id)) continue;
 
       /* A CALL IS NOT A STOP. Erik: "lets have phone call just pin to the top of that day."
@@ -1098,8 +1098,9 @@ function monthPills(data: DayData | undefined, tz: string, dayK?: string): { lab
     out.push({ label: pos ? `${base} · ${pos}` : base, tone: "job", sort: t });
   }
   for (const a of data.appts) {
-    // A JOB THAT BECAME ONE IS DRAWN ONCE. Same rule as the grid: where a booking and the job it
-    // spawned land on one day, the job is the record that carries costs, crew and invoices.
+    // A JOB THAT BECAME ONE IS DRAWN ONCE — same two rules as the grid: work-type bookings are
+    // superseded everywhere, inspections only where their job draws the same day.
+    if (a.job_id && (a.type === "job" || a.type === "service_call")) continue;
     if (a.job_id && data.jobs.some((x) => x.job.id === a.job_id)) continue;
 
     const who = a.customers?.name || a.jobs?.name || a.title;

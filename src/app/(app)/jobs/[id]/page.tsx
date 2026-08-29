@@ -506,34 +506,6 @@ export default async function JobDetailPage({
       label: "Overview",
       content: (
         <div className="space-y-4">
-          {/* THE STORY — Erik's activity log. Every chapter this work has lived, assembled from
-              the rows themselves (lib/story): came in, tagged, booked, became this job, billed,
-              paid. The "from lead" arrow lands here now instead of resurrecting the lead on the
-              leads page — a lead that isn't a lead anymore doesn't go back. */}
-          {story.length > 0 && (
-            <Card id="activity" className="scroll-mt-24">
-              <CardContent className="py-5">
-                <h3 className="mb-3 text-sm font-semibold text-slate-900">The story so far</h3>
-                <ol className="space-y-2">
-                  {story.map((ev, i) => (
-                    <li key={i} className="flex items-baseline gap-2 text-sm">
-                      <span className="w-20 shrink-0 font-mono text-xs tabular-nums text-slate-400">
-                        {formatDateTz(ev.at, tz)}
-                      </span>
-                      <span className="h-1.5 w-1.5 shrink-0 translate-y-[-2px] rounded-full bg-brand/50" aria-hidden />
-                      {ev.href ? (
-                        <Link href={ev.href} className="min-w-0 text-slate-700 hover:text-brand">
-                          {ev.text}
-                        </Link>
-                      ) : (
-                        <span className="min-w-0 text-slate-700">{ev.text}</span>
-                      )}
-                    </li>
-                  ))}
-                </ol>
-              </CardContent>
-            </Card>
-          )}
           <Card>
             <CardContent className="space-y-4 py-5">
               <div className="grid gap-4 sm:grid-cols-2">
@@ -607,6 +579,34 @@ export default async function JobDetailPage({
           </Card>
 
           <JobContacts jobId={j.id} contacts={jobContacts} options={contactOptions} />
+          {/* ACTIVITY LOG — Erik's name for it, at the bottom where a history belongs: the page
+              leads with what the job needs NOW, and how it got here reads back from the end.
+              Every chapter is assembled from the rows themselves (lib/story); the "from lead"
+              arrow lands here instead of resurrecting the lead on the leads page. */}
+          {story.length > 0 && (
+            <Card id="activity" className="scroll-mt-24">
+              <CardContent className="py-5">
+                <h3 className="mb-3 text-sm font-semibold text-slate-900">Activity log</h3>
+                <ol className="space-y-2">
+                  {story.map((ev, i) => (
+                    <li key={i} className="flex items-baseline gap-2 text-sm">
+                      <span className="w-20 shrink-0 font-mono text-xs tabular-nums text-slate-400">
+                        {formatDateTz(ev.at, tz)}
+                      </span>
+                      <span className="h-1.5 w-1.5 shrink-0 translate-y-[-2px] rounded-full bg-brand/50" aria-hidden />
+                      {ev.href ? (
+                        <Link href={ev.href} className="min-w-0 text-slate-700 hover:text-brand">
+                          {ev.text}
+                        </Link>
+                      ) : (
+                        <span className="min-w-0 text-slate-700">{ev.text}</span>
+                      )}
+                    </li>
+                  ))}
+                </ol>
+              </CardContent>
+            </Card>
+          )}
         </div>
       ),
     },
