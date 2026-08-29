@@ -27,7 +27,10 @@ export function UnscheduleButton({ id }: { id: string }) {
         })
       }
     >
-      <CalendarOff className="h-4 w-4" /> {pending ? "Clearing…" : "No date yet"}
+      {/* A VERB, not a state. "No date yet" sat beside a header reading "Sep 1, 9:00 AM" — the
+          page asserting a date and the button denying one, on the same screen (Erik: "a clear
+          incongruency"). The button DOES something; its label says what. */}
+      <CalendarOff className="h-4 w-4" /> {pending ? "Clearing…" : "Clear the date"}
     </Button>
   );
 }

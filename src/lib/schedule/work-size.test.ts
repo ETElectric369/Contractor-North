@@ -211,3 +211,29 @@ describe("a week of work ends on Friday", () => {
     expect(spanEnd("2026-09-02", "23:00", 480)?.endHHMM).toBe("23:59");
   });
 });
+
+describe("a timed job that starts when the shop opens is still timed", () => {
+  // Nora's service call is 9-11, and the shop opens at 9 — a start-only sentinel test read her
+  // real 9:00 as "all-day" and stretched a two-hour visit across the whole day.
+  const wdStart = 9 * 60;
+  const wdEnd = 17 * 60;
+  const explicit = (sMin: number, eMin: number | null) =>
+    sMin !== wdStart || (eMin != null && eMin !== wdEnd && eMin > sMin);
+
+  it("reads 9-11 as a real block, not the sentinel", () => {
+    expect(explicit(9 * 60, 11 * 60)).toBe(true);
+  });
+
+  it("still reads 9-5 (and 9 with no end) as all-day", () => {
+    expect(explicit(9 * 60, 17 * 60)).toBe(false);
+    expect(explicit(9 * 60, null)).toBe(false);
+  });
+
+  it("a start off the window is timed regardless of end", () => {
+    expect(explicit(13 * 60, null)).toBe(true);
+  });
+
+  it("garbage ends don't fake a timed block", () => {
+    expect(explicit(9 * 60, 8 * 60)).toBe(false); // end before start = not a real end
+  });
+});

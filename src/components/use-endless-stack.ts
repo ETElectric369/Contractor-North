@@ -39,7 +39,15 @@ export function useEndlessStack(anchorKey: string, maxBack = 26, maxFwd = 52) {
     growingRef.current = false;
     anchorRef.current = 0;
     lastTopRef.current = 0;
-    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = 0;
+      /* THE BROWSER ANCHORS TOO. Chrome's native scroll anchoring compensates for content
+         inserted above the viewport — and so does the manual restore below, so a prepend was
+         corrected TWICE and the view lurched by a week's height, compounding on every growth
+         until a backwards scroll "skips me back to the beginning of july" (Erik). One anchor
+         only: ours, because Safari has none and the restore must work everywhere. */
+      scrollRef.current.style.overflowAnchor = "none";
+    }
   }, [anchorKey]);
 
   useLayoutEffect(() => {

@@ -518,17 +518,23 @@ export function CalendarView({
     for (const { job, pos } of data.jobs) {
       let startMin = wdStartMin;
       let endMin = wdEndMin;
-      if (job.scheduled_start) {
+      if (job.scheduled_start && dayOf(job.scheduled_start) === k) {
         // Org-tz minutes: the all-day sentinel is STORED as the org's local
         // work-day start (tzLocalHourUtc), so only an org-tz read can spot it.
         const sMin = minOf(job.scheduled_start);
-        const explicit = sMin !== wdStartMin; // ≠ the all-day sentinel
-        if (explicit && dayOf(job.scheduled_start) === k) {
+        const eMin =
+          job.scheduled_end && dayOf(job.scheduled_end) === k ? minOf(job.scheduled_end) : null;
+        /* THE SENTINEL NEEDS BOTH ENDS. Erik: "the service calls arent matching the timeframes
+           assigned." Nora's call is 9–11 — and the shop opens at 9, so a start-only test read her
+           real 9:00 as the all-day sentinel and stretched a two-hour visit across the whole day.
+           A job is all-day only when START and END both sit on the work-day window; a real end
+           that differs makes it timed, wherever it starts. */
+        const explicit = sMin !== wdStartMin || (eMin != null && eMin !== wdEndMin && eMin > sMin);
+        if (explicit) {
           startMin = sMin;
           // What was scheduled, then what he sized it at, then the shop's hours — see jobBlockEnd.
           endMin = jobBlockEnd(startMin, {
-            scheduledEndMin:
-              job.scheduled_end && dayOf(job.scheduled_end) === k ? minOf(job.scheduled_end) : null,
+            scheduledEndMin: eMin,
             plannedMinutes: job.planned_minutes,
             workDayEndMin: wdEndMin,
           });
