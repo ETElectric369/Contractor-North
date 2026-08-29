@@ -86,6 +86,12 @@ export function bucketInspections<T extends InspectionBucketRow>(
       (!!r.job_id && estimateJobIds.has(r.job_id)) ||
       (!!capQuote && estimateQuoteIds.has(capQuote)) ||
       (!!r.job_id && billedJobIds.has(r.job_id)) ||
+      /* A LINKED JOB IS ITSELF SETTLEMENT. The write-up nag asks "did the visit become an
+         estimate?" — but a visit whose work went straight to a JOB was answered better than any
+         estimate could: the work is sold (Erik's Karen: job on the calendar, and this bucket
+         still demanding "Create estimate"). Billing-only was too narrow — it kept nagging
+         through the whole gap between winning the work and invoicing it. */
+      !!r.job_id ||
       !!r.outcome;
     const writtenUp = settled;
     const past = !!r.starts_at && new Date(r.starts_at).getTime() < now.getTime();
