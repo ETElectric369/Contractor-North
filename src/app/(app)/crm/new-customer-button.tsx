@@ -10,6 +10,8 @@ import { PhoneInput } from "@/components/ui/phone-input";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { StateSelect } from "@/components/ui/state-select";
 import { parseVCards, type VCardContact } from "@/lib/vcard";
+import { MyContactsPicker } from "@/components/my-contacts-picker";
+import { cardDavStatus } from "../settings/carddav-actions";
 import { createCustomer } from "./actions";
 
 const EMPTY = { name: "", company_name: "", email: "", phone: "", address: "" };
@@ -27,11 +29,17 @@ export function NewCustomerButton() {
   const [formKey, setFormKey] = useState(0);
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const [coach, setCoach] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [myBook, setMyBook] = useState(false);
   const [hasPicker, setHasPicker] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
   const searchParams = useSearchParams();
   const pathname = usePathname();
+
+  useEffect(() => {
+    cardDavStatus().then((st) => setMyBook(st.connected && (st.count ?? 0) > 0)).catch(() => {});
+  }, []);
 
   // The native Contact Picker (Android/Chrome mobile) lets you tap one contact; iOS Safari
   // doesn't support it, so there we fall back to a shared .vcf card. Detect client-side.
@@ -188,6 +196,10 @@ export function NewCustomerButton() {
                   variant="outline"
                   onClick={() => {
                     setImportMsg(null);
+                    /* NORTH'S OWN PICKER FIRST — once iCloud is connected it is the same sheet on
+                       every screen and Safari's chrome never enters the picture. The platform
+                       doors stay as fallbacks for the unconnected. */
+                    if (myBook) { setPickerOpen(true); return; }
                     if (hasPicker) { importContact(); return; }
                     document.getElementById("name")?.focus();
                     setCoach(
@@ -222,6 +234,25 @@ export function NewCustomerButton() {
               className="hidden"
               onChange={onVcfFile}
             />
+            {pickerOpen && (
+              <MyContactsPicker
+                onClose={() => setPickerOpen(false)}
+                onPick={(c) => {
+                  applyContact({
+                    name: c.name,
+                    company_name: c.company ?? "",
+                    phone: c.phone ?? "",
+                    email: c.email ?? "",
+                    address: c.address ?? "",
+                    city: c.city ?? "",
+                    state: c.state ?? "",
+                    zip: c.zip ?? "",
+                  });
+                  setPickerOpen(false);
+                  setImportMsg(`Filled from your contacts — review and save.`);
+                }}
+              />
+            )}
 
             {error && (
               <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
