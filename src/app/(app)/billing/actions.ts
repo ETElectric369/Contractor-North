@@ -1,5 +1,7 @@
 "use server";
 import { dbError } from "@/lib/db-error";
+import QRCode from "qrcode";
+import { canAcceptPayments, connectStateFromOrg } from "@/lib/stripe-connect";
 import { customerForInquiry } from "@/lib/actions/win-customer";
 import { changeOrderLines, noChangeOrdersReason, type ChangeOrderRow } from "@/lib/change-order-billing";
 
@@ -1810,8 +1812,13 @@ export async function settleUp(input: {
   source: "appointment" | "job";
   id: string;
   amount: number;
-  method: string; // cash | check | card | other
+  method: string; // cash | check | card | venmo | other
   note?: string;
+  /** "record" (default) books the payment here and now — cash in hand. "later" builds and sends
+   *  the invoice and completes the visit but leaves the balance open: the Venmo QR or the Stripe
+   *  checkout on the customer's phone is about to settle it, and recording it twice would be the
+   *  double-payment this action exists to prevent. */
+  collect?: "record" | "later";
 }): Promise<Result & { invoiceId?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -1929,14 +1936,17 @@ export async function settleUp(input: {
   await supabase.from("invoices").update({ status: "sent" }).eq("id", inv.id);
 
   // The one payment path — balance cap, org check, recalc-to-paid, cash-in push all inherited.
-  const paid = await recordPayment({
-    invoice_id: inv.id,
-    amount,
-    method: input.method || "cash",
-    note: input.note?.trim() || "",
-  });
-  if (!paid.ok) {
-    return { ok: false, invoiceId: inv.id, error: `The invoice was created but the payment didn't record — ${paid.error ?? "try it from the invoice."}` };
+  // "later" leaves the balance open on purpose: Venmo/Stripe settles it in the customer's hands.
+  if (input.collect !== "later") {
+    const paid = await recordPayment({
+      invoice_id: inv.id,
+      amount,
+      method: input.method || "cash",
+      note: input.note?.trim() || "",
+    });
+    if (!paid.ok) {
+      return { ok: false, invoiceId: inv.id, error: `The invoice was created but the payment didn't record — ${paid.error ?? "try it from the invoice."}` };
+    }
   }
 
   // The deed happened; the calendar should say so. Guarded to live statuses so a completed visit
@@ -1955,4 +1965,78 @@ export async function settleUp(input: {
   revalidateMoney(inv.id);
   revalidateMoney();
   return { ok: true, invoiceId: inv.id };
+}
+
+/**
+ * WHAT TO PUT IN FRONT OF THE CUSTOMER, RIGHT NOW.
+ *
+ * Erik: "a pay now button is what we are missing and that can trigger the cc processing or if i
+ * choose the others like cash then it closes, if i choose venmo then it gives me my venmo qr to
+ * show the customer on the spot."
+ *
+ * This builds the on-the-spot artifacts for one invoice:
+ *   CARD  → a QR of the invoice's own /api/pay/<token> door — the customer scans it and lands in
+ *           Stripe Checkout ON THEIR PHONE (card, Apple Pay, Google Pay), and the webhook records
+ *           the payment itself. Nothing to type, nothing to trust to memory.
+ *   VENMO → a QR of the org's Venmo pay link with the amount and invoice number filled in. Venmo
+ *           can't tell the app when it lands, so the button beside the QR records it by hand.
+ *
+ * QRs are data URLs (the same `qrcode` the share door uses) — nothing external, works offline
+ * once rendered, which matters in a driveway with one bar of LTE.
+ */
+export async function collectArtifacts(invoiceId: string): Promise<{
+  ok: boolean;
+  error?: string;
+  balance?: number;
+  invoiceNumber?: string | null;
+  /** Stripe door — present only when the org can actually accept card payments. */
+  payQr?: string;
+  payUrl?: string;
+  /** Venmo door — present only when Settings carries a handle. */
+  venmoQr?: string;
+  venmoHandle?: string;
+}> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+
+  const { data: inv } = await supabase
+    .from("invoices")
+    .select("id, invoice_number, total, amount_paid, public_token, org_id")
+    .eq("id", invoiceId)
+    .maybeSingle();
+  if (!inv) return { ok: false, error: "Invoice not found." };
+
+  const balance = invoiceBalance(inv.total, inv.amount_paid);
+  const out: Awaited<ReturnType<typeof collectArtifacts>> = {
+    ok: true,
+    balance,
+    invoiceNumber: inv.invoice_number ?? null,
+  };
+
+  const { data: org } = await supabase
+    .from("organizations")
+    .select("settings, stripe_account_id, stripe_charges_enabled, stripe_details_submitted")
+    .eq("id", inv.org_id)
+    .maybeSingle();
+
+  // CARD — only when the door actually opens. A QR to a checkout that will 503 is worse than no QR.
+  const token = (inv as { public_token?: string | null }).public_token;
+  if (token && org && canAcceptPayments(connectStateFromOrg(org as never))) {
+    const base = orgPublicBaseUrl(getOrgSettings((org as { settings?: unknown }).settings));
+    const payUrl = `${base}/api/pay/${token}`;
+    out.payUrl = payUrl;
+    out.payQr = await QRCode.toDataURL(payUrl, { margin: 1, width: 480, color: { dark: "#0f172a" } });
+  }
+
+  // VENMO — the handle comes from Settings → Payment methods.
+  const handle = getOrgSettings((org as { settings?: unknown } | null)?.settings).venmo_handle?.trim();
+  if (handle) {
+    const note = encodeURIComponent(inv.invoice_number ? `Invoice ${inv.invoice_number}` : "Work completed");
+    const venmoUrl = `https://venmo.com/u/${encodeURIComponent(handle)}?txn=pay&amount=${balance.toFixed(2)}&note=${note}`;
+    out.venmoHandle = handle;
+    out.venmoQr = await QRCode.toDataURL(venmoUrl, { margin: 1, width: 480, color: { dark: "#0f172a" } });
+  }
+
+  return out;
 }

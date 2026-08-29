@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { MapPin, Phone, Check } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -8,6 +8,7 @@ import { useToast } from "@/components/toast";
 import { sizeLead } from "../leads/actions";
 import { sizeAppointment, sizeJob } from "./actions";
 import { usePlacement } from "./placement-context";
+import { WorkShapeControls } from "@/components/work-shape-controls";
 import { armedInstruction } from "@/lib/schedule/placement-plan";
 import {
   groupByTown,
@@ -20,8 +21,6 @@ import {
   durationLabel,
   KIND_LABEL,
   KIND_TONE,
-  parseDuration,
-  WORK_KINDS,
   workKind,
 } from "@/lib/schedule/work-shape";
 
@@ -45,10 +44,6 @@ import {
  * Mike Scrivano has no address but a phone and a real note, so his next move is a call, not the
  * bottom of the list. See lib/schedule/place-by-town.
  */
-/** The durations the dropdown offers. Anything stored that isn't one of these still renders — see
- *  the synthetic option below. */
-const SIZE_BUCKETS = [30, 60, 120, 240, 480, 960, 1440, 2400];
-
 /** "13:30" is a database. "1:30pm" is a person. The footer reads back what will happen, so it
  *  speaks the second one. */
 function prettyTime(hm: string): string {
@@ -71,9 +66,6 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
      two halves a contractor's day actually has, not a time picker demanding a precision nobody has
      while planning. */
   const { picked, toggle, clear, half, setHalf, startAt, setStartAt, halfTimes, pending: placing } = usePlacement();
-  /** Which card is typing its own duration. Erik: "we definitly need a custom option." */
-  const [customFor, setCustomFor] = useState<string | null>(null);
-  const [customText, setCustomText] = useState("");
 
   const groups = useMemo(() => groupByTown(items), [items]);
   const chosen = useMemo(
@@ -87,18 +79,6 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
    *  already-booked visit's on `appointments`. The card doesn't make him care which — but the
    *  dispatch has to be exhaustive, because sending one kind's id to another kind's writer updates
    *  zero rows and, by the silent-write law, that reads as an error about the wrong record. */
-  /** Read what he typed, or say plainly that it couldn't be read. Never a silent round. */
-  function saveCustom(i: Placeable) {
-    const minutes = parseDuration(customText);
-    if (!minutes) {
-      toast(`I couldn't read "${customText.trim()}" — try 45m, 1.5h, or 2d.`, "error");
-      return;
-    }
-    setCustomFor(null);
-    setCustomText("");
-    size(i, { plannedMinutes: minutes });
-  }
-
   function size(i: Placeable, patch: { workKind?: string; plannedMinutes?: number | null }) {
     start(async () => {
       const res =
@@ -208,100 +188,15 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
                         edit and come back is the round trip he says costs the most. A sibling of
                         the tap target now, not a descendant. */}
                     {on && (
-                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5 pl-6">
-                        {/* A JOB IS A JOB — no kind to pick. Only a lead or a booked visit can be
-                            several things. */}
-                        {i.kind !== "job" && (
-                          <select
-                            value={i.workKind ?? ""}
-                            onChange={(e) => size(i, { workKind: e.target.value })}
-                            disabled={pending}
-                            className="h-7 rounded-md border border-slate-200 bg-white px-1.5 text-xs disabled:opacity-50"
-                            aria-label="What kind of work"
-                          >
-                            {/* From the one list — see work-shape. An option that exists is an
-                                option the validator accepts. */}
-                            <option value="">Kind?</option>
-                            {WORK_KINDS.map((k) => (
-                              <option key={k} value={k}>{KIND_LABEL[k]}</option>
-                            ))}
-                          </select>
-                        )}
-                        <select
-                          value={i.planned_minutes ? String(i.planned_minutes) : ""}
-                          onChange={(e) => {
-                            if (e.target.value === "custom") {
-                              setCustomFor(i.id);
-                              setCustomText("");
-                              return;
-                            }
-                            setCustomFor(null);
-                            size(i, { plannedMinutes: Number(e.target.value) || null });
-                          }}
+                      <div className="mt-1.5 pl-6">
+                        {/* THE SAME control the lead row carries — see work-shape-controls. */}
+                        <WorkShapeControls
+                          workKind={i.workKind ?? null}
+                          plannedMinutes={i.planned_minutes ?? null}
+                          showKind={i.kind !== "job"}
                           disabled={pending}
-                          className="h-7 rounded-md border border-slate-200 bg-white px-1.5 text-xs disabled:opacity-50"
-                          aria-label="How long will it take"
-                        >
-                          <option value="">How long?</option>
-                          {/* A SIZE THAT ISN'T ON THE LIST STILL HAS TO SHOW. A select whose value
-                              matches no option falls back to the first, so the card would read
-                              "3h" in the badge and "How long?" in the control, about itself. */}
-                          {!!i.planned_minutes && !SIZE_BUCKETS.includes(i.planned_minutes) && (
-                            <option value={String(i.planned_minutes)}>
-                              {durationLabel(i.planned_minutes)}
-                            </option>
-                          )}
-                          <option value="30">30m</option>
-                          <option value="60">1h</option>
-                          <option value="120">2h</option>
-                          <option value="240">Half day</option>
-                          <option value="480">Full day</option>
-                          <option value="960">2 days</option>
-                          <option value="1440">3 days</option>
-                          {/* A WEEK IS FIVE WORKING DAYS — Erik: "lets make that the 5 working days by default".
-                              Said out loud on the option so it never has to be inferred. */}
-                          <option value="2400">A week (5 days)</option>
-                          {/* NO CEILING. A service call is 45 minutes and a panel swap is 6 hours;
-                              rounding either to the nearest bucket puts a number on the calendar
-                              that nobody chose. */}
-                          <option value="custom">Custom…</option>
-                        </select>
-
-                        {customFor === i.id && (
-                          <>
-                            {/* TYPE IT THE WAY YOU'D SAY IT — "45m", "1.5h", "3 hrs", "2d", or bare
-                                minutes. parseDuration reads all of those and returns null rather
-                                than a guess for anything else, so an unreadable entry leaves the
-                                old value alone and says so. */}
-                            <input
-                              autoFocus
-                              value={customText}
-                              onChange={(e) => setCustomText(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") { e.preventDefault(); saveCustom(i); }
-                                if (e.key === "Escape") { setCustomFor(null); setCustomText(""); }
-                              }}
-                              placeholder="45m, 1.5h, 2d"
-                              aria-label="Type how long it will take"
-                              className="h-7 w-24 rounded-md border border-brand/60 px-1.5 text-xs"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => saveCustom(i)}
-                              className="h-7 rounded-md bg-brand px-2 text-xs font-semibold text-white"
-                            >
-                              Set
-                            </button>
-                            {/* Says what it read BEFORE he commits — never a silent round. */}
-                            <span className="text-xs text-slate-400">
-                              {customText.trim()
-                                ? parseDuration(customText)
-                                  ? durationLabel(parseDuration(customText))
-                                  : "can't read that"
-                                : ""}
-                            </span>
-                          </>
-                        )}
+                          onPatch={(patch) => size(i, patch)}
+                        />
                       </div>
                     )}
                   </div>

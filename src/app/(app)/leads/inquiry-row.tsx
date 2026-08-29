@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
+import { WorkShapeControls } from "@/components/work-shape-controls";
 import { useRouter } from "next/navigation";
 import { Phone, Mail, Globe, MapPin } from "lucide-react";
 import { Input, Select } from "@/components/ui/input";
@@ -8,7 +9,7 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { InquiryModal } from "./inquiry-modal";
 import { ConvertMenu } from "./convert-menu";
-import { convertInquiry, deleteInquiry, markInquiryContacted, setInquiryStatus } from "./actions";
+import { convertInquiry, deleteInquiry, markInquiryContacted, setInquiryStatus, sizeLead } from "./actions";
 import { useToast } from "@/components/toast";
 import { formatDateTime, formatDate } from "@/lib/utils";
 import type { Inquiry, LeadBucket } from "@/lib/types";
@@ -270,7 +271,7 @@ export function InquiryRow({
           phone / email / note happened to precede them — every row put them somewhere different
           and the eye had to re-find them on each one. On their own row they land in the same place
           all the way down the list, which is what makes a list of 32 scannable. ── */}
-      <ConvertMenu inquiryId={inquiry.id} inquiryName={inquiry.name} workKind={(inquiry as { work_kind?: string | null }).work_kind ?? null} customers={customers} />
+      <ConvertMenu inquiryId={inquiry.id} inquiryName={inquiry.name} customers={customers} />
 
       {/* The message rides collapsed as ONE clamped line — the single biggest source of the old
           row's height. The full text, the customer's files and the workflow controls all live one
@@ -285,6 +286,25 @@ export function InquiryRow({
           <IntakeFiles inquiryId={inquiry.id} paths={intakePaths(inquiry.intake)} />
           <PlanBriefPanel inquiryId={inquiry.id} intake={inquiry.intake} />
           <div className="flex flex-wrap items-end gap-3">
+            {/* THE CRITICAL PATH STARTS HERE. Erik: "this is what needs to be on the lead itself
+                next to the contacted drop down menu, thats the critical path." Kind + size, set at
+                the phone call, carried untouched to the schedule (the rail renders this SAME
+                component), through placement, onto the calendar, into the job. Stated once. */}
+            <div>
+              <label className="mb-0.5 block text-[10px] uppercase tracking-wide text-slate-400">The work</label>
+              <WorkShapeControls
+                workKind={(inquiry as { work_kind?: string | null }).work_kind ?? null}
+                plannedMinutes={(inquiry as { planned_minutes?: number | null }).planned_minutes ?? null}
+                disabled={pending}
+                onPatch={(patch) =>
+                  start(async () => {
+                    const r = await sizeLead(inquiry.id, patch);
+                    if (!r.ok) toast(r.error ?? "Couldn't save that.", "error");
+                    else router.refresh();
+                  })
+                }
+              />
+            </div>
             <div>
               <label className="mb-0.5 block text-[10px] uppercase tracking-wide text-slate-400">Follow up</label>
               <Input type="date" value={followUp} onChange={(e) => setFollowUp(e.target.value)} className="h-8 w-40 text-xs" />

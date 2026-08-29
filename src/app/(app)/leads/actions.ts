@@ -1,5 +1,6 @@
 "use server";
 import { dbError } from "@/lib/db-error";
+import { placeJobOnDay } from "../schedule/actions";
 
 import { customerAddressFrom } from "@/lib/inquiries/lead-address";
 import { findMatchingCustomerId, type DupCustomer } from "@/lib/crm/duplicates";
@@ -604,6 +605,9 @@ export async function convertInquiry(
         inquiry_id: id, // provenance: this estimate/job traces back to the lead
         name: `Job — ${inq.name}`,
         description: inq.message ?? null,
+        // The size he set on the lead — the flow's whole point is that a fact stated once
+        // survives every step (the appointment path already carries it; the job path dropped it).
+        planned_minutes: (inq as { planned_minutes?: number | null }).planned_minutes ?? null,
         // Lifecycle rework (2026-07): "estimate" is a QUOTE stage, not a job status — a job
         // born from a lead starts in the to_be_scheduled waiting room either way.
         status: "to_be_scheduled",
@@ -776,6 +780,31 @@ export async function scheduleLeadsOnDay(
   for (let i = 0; i < ids.length; i++) {
     if (alreadyBooked.has(ids[i])) {
       failures.push({ id: ids[i], error: "This one already has a visit booked — move that one instead." });
+      continue;
+    }
+    /* THE DESIGNATION DOES THE CONVERTING — inside the flow, not behind a button.
+       Erik killed the "Make it a job" verb on sight: "that is part of the flow as you already
+       know." A lead he marked JOB, tapped onto a day, becomes a REAL JOB on that day — customer
+       minted with dedup, lead stamped won, the job page's Done button waiting at the end — not an
+       appointment wearing a job costume that later needs a second conversion. Every other kind
+       still books as the visit it is. */
+    const { data: tag } = await ctx.supabase
+      .from("inquiries")
+      .select("work_kind")
+      .eq("id", ids[i])
+      .maybeSingle();
+    if ((tag as { work_kind?: string | null } | null)?.work_kind === "job") {
+      const conv = await convertInquiry(ids[i], "job", {});
+      // convertInquiry's `id` is the CUSTOMER (its customer-target contract); the job travels in
+      // the redirect. Parsed rather than restructuring a return shape other callers rely on.
+      const jobId = conv.ok ? /^\/jobs\/(.+)$/.exec(conv.redirect ?? "")?.[1] : undefined;
+      if (conv.ok && jobId) {
+        const placed = await placeJobOnDay(jobId, date, times[i]);
+        if (placed.ok) booked++;
+        else failures.push({ id: ids[i], error: placed.error ?? "The job was created but didn't land on the day — place it from the board." });
+      } else {
+        failures.push({ id: ids[i], error: conv.error ?? "Couldn't convert this one." });
+      }
       continue;
     }
     const res = await convertInquiry(ids[i], "inspection", { startDate: date, startTime: times[i] });

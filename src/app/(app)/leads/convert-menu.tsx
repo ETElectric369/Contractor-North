@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useOrgPublicBase } from "@/components/use-org-public-base";
 import { useRouter } from "next/navigation";
-import { CalendarPlus, Check, Copy, FileText, MessageSquare, Briefcase } from "lucide-react";
+import { CalendarPlus, Check, Copy, FileText, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented";
 import { Modal, ModalActions } from "@/components/ui/modal";
@@ -47,13 +47,10 @@ function defaultSlots(): { date: string; time: string }[] {
 export function ConvertMenu({
   inquiryId,
   inquiryName,
-  workKind,
 }: {
   inquiryId: string;
   inquiryName: string;
   customers?: { id: string; name: string }[];
-  /** The lead's own tag (0230). When it says the work is already SOLD, a fourth verb appears. */
-  workKind?: string | null;
 }) {
   const router = useRouter();
   const [inspectOpen, setInspectOpen] = useState(false);
@@ -153,17 +150,6 @@ export function ConvertMenu({
         <Button size="sm" onClick={() => run("estimate")} disabled={busy !== null}>
           <FileText className="h-4 w-4" /> {busy === "estimate" ? "Opening…" : "Estimate"}
         </Button>
-        {/* THE TAG OPENS ITS OWN DOOR. Erik: "if i mark it as a job it gets converted to a job
-            not necessarily an inspection or estimate like today." The backend branch has existed
-            for months (convertInquiry target 'job': customer minted with dedup, real job, lead
-            stamped won, straight to the job page) — and no UI ever called it, so a lead he had
-            already marked JOB could still only be inspected or priced. The verb appears only when
-            he said the work is sold; the row stays the three simple verbs everywhere else. */}
-        {workKind === "job" && (
-          <Button size="sm" onClick={() => run("job")} disabled={busy !== null} title="Work's sold — make it a job">
-            <Briefcase className="h-4 w-4" /> {busy === "job" ? "Converting…" : "Make it a job"}
-          </Button>
-        )}
         {/* THE CONTACT BUTTON IS GONE — the NAME is that control now (see inquiry-row).
             Erik: "have the name be the contact button or create contact option to clear up all
             that much more space … lets unify and simplfy in all we do." Two things saying the

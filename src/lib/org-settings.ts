@@ -90,6 +90,8 @@ export interface OrgSettings {
 
   // Payments
   payment_methods: string[];
+  /** The org's Venmo username (no @). Pay now's Venmo chip shows its QR with the amount filled. */
+  venmo_handle: string;
 
   // Notifications (reminder engine — toggles stored now, engine wires later)
   remind_quote_followup: boolean;
@@ -304,6 +306,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   pay_anchor: "2026-01-05", // a Monday; biweekly cycles cascade from here
 
   payment_methods: ["Cash", "Check", "Card", "Zelle", "Venmo", "Transfer"],
+  venmo_handle: "",
   remind_quote_followup: false,
   remind_invoice_due: false,
   remind_appointments: false,

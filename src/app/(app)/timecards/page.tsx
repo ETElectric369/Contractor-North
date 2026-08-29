@@ -351,11 +351,30 @@ export default async function TimecardsPage({
     .slice(0, 10);
   const periodLabel = `${formatDate(period.start)} – ${formatDate(periodEndIncl)}`;
 
-  // The ?entry= deep link (a week-grid pill tap) — find the entry among this
-  // week's rows or the org-wide open set, and auto-open its editor below.
-  const focusEntry = entryParam
+  // The ?entry= deep link (a grid pill tap) — find the entry and auto-open its editor below.
+  // The stack scrolls 26 weeks, but `entries` holds ONE week — so a tap on any pill outside the
+  // anchor week found nothing and silently opened nothing (Erik: "i cant get into the timecard
+  // entry by clicking on it i had to go around into the job"). Missing from the week? Fetch the
+  // row itself, same projection the editor round-trips.
+  let focusEntry = entryParam
     ? (([...(entries ?? []), ...(openNow ?? [])] as any[]).find((e) => e.id === entryParam) ?? null)
     : null;
+  if (entryParam && !focusEntry) {
+    const { data: one } = await supabase
+      .from("time_entries")
+      .select(
+        "id, profile_id, clock_in, clock_out, lunch_minutes, miles, rate_override, paid_at, mileage_paid_at, job_id, job_code, status, notes, source, profiles:profile_id(full_name), job:job_id(job_number, name), time_allocations(job_id, job_code, hours, description)",
+      )
+      .eq("id", entryParam)
+      .maybeSingle();
+    if (one) {
+      const pay = await payRateMap(supabase);
+      if ((one as any).profile_id && (one as any).profiles) {
+        (one as any).profiles = { ...(one as any).profiles, ...(pay.get(String((one as any).profile_id)) ?? {}) };
+      }
+      focusEntry = one as any;
+    }
+  }
 
   return (
     <div>

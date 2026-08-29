@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { SettleUpButton } from "@/components/settle-up-button";
 import { NewCustomerInline } from "@/components/new-customer-inline";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2, Pencil, Check, X, ChevronUp, ChevronDown, Layers } from "lucide-react";
@@ -864,7 +865,15 @@ export function InvoiceDetail({
             here (at 375px this card stacks below the whole line-items editor). */}
         <Card id="record-payment" className="scroll-mt-24">
           <CardContent className="space-y-3 py-5">
-            <h3 className="text-sm font-semibold text-slate-900">Record payment</h3>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold text-slate-900">Record payment</h3>
+              {/* PAY NOW — the on-the-spot half. "Record payment" below writes down money that
+                  already moved; this one MOVES it: card → the customer scans a QR into Stripe
+                  checkout on their phone, Venmo → the org's QR with the amount filled in. */}
+              {balance > 0.005 && (
+                <SettleUpButton source="invoice" invoiceId={invoice.id} balance={balance} compact />
+              )}
+            </div>
             {/* Payments record on DRAFTS too (Erik 7/24): deposits and Venmo prepayments
                 arrive before the invoice goes out, and blocking them here forced a fake
                 workflow. The soft note keeps the state honest; the sent invoice shows

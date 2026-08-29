@@ -385,3 +385,19 @@ export function spanEnd(
     endHHMM: `${String(Math.floor(endMin / 60)).padStart(2, "0")}:${String(endMin % 60).padStart(2, "0")}`,
   };
 }
+
+/**
+ * THE DURATION CHOICES, ONCE. Two dropdowns offering different buckets is the WORK_KINDS
+ * hand-copy bug waiting to happen again — the lead row and the schedule rail must offer the same
+ * times or "the same dropdown menu designation" (Erik's spec, verbatim) is a lie in the details.
+ */
+export const DURATION_BUCKETS: { minutes: number; label: string }[] = [
+  { minutes: 30, label: "30m" },
+  { minutes: 60, label: "1h" },
+  { minutes: 120, label: "2h" },
+  { minutes: 240, label: "Half day" },
+  { minutes: 480, label: "Full day" },
+  { minutes: 960, label: "2 days" },
+  { minutes: 1440, label: "3 days" },
+  { minutes: 2400, label: "A week (5 days)" },
+];
