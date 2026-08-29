@@ -206,16 +206,23 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
                             announced a missing phone and said NOTHING about one it had. One line,
                             both jobs: shows the value when there is one, shows a quiet dash when
                             there isn't — and picking the card turns the dashes into inputs. */}
-                        {i.kind === "lead" && (
+                        {/* Every kind shows the contact it HAS (a job's rides its customer);
+                            only a lead shows dashes for the gaps, because only a lead's contact
+                            is entered here — a job's belongs to the customer record. */}
+                        {(i.kind === "lead" || i.phone || i.email) && (
                           <span className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500">
-                            <span className="inline-flex items-center gap-1">
-                              <Phone className="h-3 w-3 shrink-0" />
-                              {i.phone || <span className="text-slate-300">—</span>}
-                            </span>
-                            <span className="inline-flex items-center gap-1">
-                              <Mail className="h-3 w-3 shrink-0" />
-                              {i.email || <span className="text-slate-300">—</span>}
-                            </span>
+                            {(i.kind === "lead" || i.phone) && (
+                              <span className="inline-flex items-center gap-1">
+                                <Phone className="h-3 w-3 shrink-0" />
+                                {i.phone || <span className="text-slate-300">—</span>}
+                              </span>
+                            )}
+                            {(i.kind === "lead" || i.email) && (
+                              <span className="inline-flex items-center gap-1">
+                                <Mail className="h-3 w-3 shrink-0" />
+                                {i.email || <span className="text-slate-300">—</span>}
+                              </span>
+                            )}
                           </span>
                         )}
                         {miss === "place" && (
@@ -283,14 +290,31 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
                             alone is a shrug and the reason is what tells you what un-parks it. */}
                         {i.kind === "job" &&
                           (i.onHold ? (
-                            <button
-                              type="button"
-                              disabled={pending}
-                              onClick={() => hold(i.id, null)}
-                              className="rounded-md border border-slate-200 px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
-                            >
-                              Take off hold
-                            </button>
+                            <span className="flex flex-wrap items-center gap-1.5">
+                              {/* THE REASON, EDITABLE WHERE IT LIVES. Erik: "the already on hold
+                                  job isnt editable in place" — a pre-0234 hold (no reason) had no
+                                  way to gain one without waking and re-parking. Type it, Enter or
+                                  blur saves; blank leaves it alone. */}
+                              <input
+                                defaultValue={i.holdReason ?? ""}
+                                onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                                onBlur={(e) => {
+                                  const v = e.target.value.trim();
+                                  if (v && v !== (i.holdReason ?? "")) hold(i.id, v);
+                                }}
+                                placeholder="Why? — waiting on the permit"
+                                aria-label="Why is this on hold"
+                                className="h-7 w-56 rounded-md border border-slate-200 px-1.5 text-xs"
+                              />
+                              <button
+                                type="button"
+                                disabled={pending}
+                                onClick={() => hold(i.id, null)}
+                                className="rounded-md border border-slate-200 px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                              >
+                                Take off hold
+                              </button>
+                            </span>
                           ) : holdFor === i.id ? (
                             <span className="flex flex-wrap items-center gap-1.5">
                               <input

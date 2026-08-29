@@ -122,7 +122,7 @@ export default async function SchedulePage({
       .from("jobs")
       // `status` is read below to badge a parked job — THE PROJECTION LAW: the column the
       // decision turns on has to be in the select list.
-      .select("id, job_number, name, address, city, planned_minutes, status, hold_reason")
+      .select("id, job_number, name, address, city, planned_minutes, status, hold_reason, customers(phone, email)")
       .in("status", ACTIVE_JOB_STATUSES)
       /* EVERYTHING ON HOLD, DATED OR NOT. Erik: "we need everything on hold to pop up on that
          list." A parked job that still carries a date is the worst of both — the calendar draws it
@@ -135,7 +135,7 @@ export default async function SchedulePage({
     // A booking with no time on it yet — proposed, or created without a date.
     supabase
       .from("appointments")
-      .select("id, title, type, location, planned_minutes")
+      .select("id, title, type, location, planned_minutes, customers(phone, email)")
       .is("starts_at", null)
       .not("status", "in", "(cancelled,completed)")
       .order("created_at", { ascending: false })
@@ -203,13 +203,18 @@ export default async function SchedulePage({
       workKind: r.work_kind ?? null,
       planned_minutes: r.planned_minutes == null ? null : Number(r.planned_minutes),
       })),
-    ...((dateless ?? []) as Record<string, string | null>[]).map((r) => ({
+    ...((dateless ?? []) as unknown as Record<string, string | null>[]).map((r) => ({
       id: String(r.id),
       kind: "job" as const,
       name: `${r.job_number ? `${r.job_number} · ` : ""}${r.name ?? "Job"}`,
       address: r.address ?? null,
       city: r.city ?? null,
       planned_minutes: r.planned_minutes == null ? null : Number(r.planned_minutes),
+      // The customer's number rides the card — Erik: the lead cards showed contact and the job
+      // cards "nor do any of the ones that already have it" showed nothing. Display-only here:
+      // a job's contact belongs to the CUSTOMER record, edited there.
+      phone: (r as unknown as { customers?: { phone?: string | null } }).customers?.phone ?? null,
+      email: (r as unknown as { customers?: { email?: string | null } }).customers?.email ?? null,
       // Why it's here when it may already have a date — said out loud on the card rather than left
       // as a thing he has to work out.
       onHold: r.status === "on_hold",
@@ -220,7 +225,7 @@ export default async function SchedulePage({
     //    inputted." An appointment with NO start is a decision already taken and a day not yet
     //    chosen — which is exactly what this rail is for. Without it they were invisible: not on
     //    the calendar (no date) and not in the rail (not a lead, not a dateless job).
-    ...((undated ?? []) as Record<string, string | null>[]).map((r) => ({
+    ...((undated ?? []) as unknown as Record<string, string | null>[]).map((r) => ({
       id: String(r.id),
       // ITS OWN KIND, because it is its own write. Calling it a lead ran an appointment id through
       // convertInquiry — the one thing on this board that was already agreed was the one thing that
@@ -229,6 +234,8 @@ export default async function SchedulePage({
       name: String(r.title ?? "Site visit"),
       address: r.location ?? null,
       city: null,
+      phone: (r as unknown as { customers?: { phone?: string | null } }).customers?.phone ?? null,
+      email: (r as unknown as { customers?: { email?: string | null } }).customers?.email ?? null,
       type: r.type ?? null,
       // Its saved kind, so the rail's dropdown shows what it IS rather than an empty "Kind?" beside
       // a badge already reading "Service call".

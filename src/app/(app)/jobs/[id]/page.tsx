@@ -533,7 +533,7 @@ export default async function JobDetailPage({
                 <div>
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Status</div>
                   <div className="mt-1">
-                    <JobStatusControl id={j.id} status={j.status} />
+                    <JobStatusControl id={j.id} status={j.status} holdReason={(j as any).hold_reason ?? null} />
                   </div>
                 </div>
                 <div>
