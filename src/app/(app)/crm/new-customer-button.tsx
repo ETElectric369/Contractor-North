@@ -193,7 +193,14 @@ export function NewCustomerButton() {
                     setCoach(
                       navigator.maxTouchPoints > 0
                         ? "Now tap “AutoFill Contact” above the keyboard → “Other Contact…” and pick them."
-                        : "Now start typing their name — matching contacts appear right under the field.",
+                        : /* THE BLUE ICON IS THE DOOR on the Mac — Erik: "the little blue contact
+                             box on the right is where it accidentally worked the first time...
+                             i think the key was in the link between the blue button on the right
+                             and the top add from my contacts button." The typed name-dropdown
+                             fills the NAME ONLY (which read as broken); the field's blue contact
+                             icon fills the whole card. We can't press Safari's button for him —
+                             but we can point at it from one inch away. */
+                          "Now click the little blue contact icon at the right end of the Name field — pick the person and their whole card fills.",
                     );
                   }}
                 >
