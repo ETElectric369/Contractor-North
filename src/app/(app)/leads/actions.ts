@@ -409,6 +409,8 @@ export async function convertInquiry(
         createdBy: ctx.userId,
         // 9 AM org-local tentative instant from the first offered slot.
         startsAtIso: tzDateTimeUtc(slots[0].date, slots[0].time, tz),
+        // The How-long tag survives this door too — Book-it carries it, so must pick-a-time.
+        plannedMinutes: (inq as { planned_minutes?: number | null }).planned_minutes ?? null,
       });
       if (!res.ok) return { ok: false, error: res.error };
       const earliest = slots.map((s) => s.date).sort()[0];
@@ -764,7 +766,7 @@ export async function intakeFileUrl(
 export async function scheduleLeadsOnDay(
   leadIds: string[],
   date: string,
-  opts: { startTime?: string; stepMinutes?: number } = {},
+  opts: { startTime?: string; stepMinutes?: number; times?: string[] } = {},
 ): Promise<{ ok: boolean; error?: string; booked: number; failures: { id: string; error: string }[] }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error, booked: 0, failures: [] };
@@ -794,7 +796,15 @@ export async function scheduleLeadsOnDay(
     ((existing ?? []) as { inquiry_id: string | null }[]).map((r) => String(r.inquiry_id)),
   );
 
-  const times = spreadTimes(ids.length, opts.startTime ?? "09:00", opts.stepMinutes ?? 90);
+  /* THE FITTED TIMES SURVIVE. planDayTimes walks each lead around what the day already holds,
+     sized durations and all — and this function used to throw that plan away and re-spread at a
+     blind fixed 90 minutes, so a 2h lead overlapped the next one and both overlapped the jobs
+     placed alongside. When the caller hands per-lead times, they are THE times; the spread is
+     only the no-plan fallback. */
+  const times =
+    opts.times && opts.times.length === ids.length
+      ? opts.times
+      : spreadTimes(ids.length, opts.startTime ?? "09:00", opts.stepMinutes ?? 90);
   const failures: { id: string; error: string }[] = [];
   let booked = 0;
   // Sequential on purpose: each booking reads its lead and carries its intake answers, and firing

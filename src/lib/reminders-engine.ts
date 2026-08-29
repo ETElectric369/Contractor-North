@@ -145,6 +145,7 @@ export async function sendDueReminders(supabase: any): Promise<Counts> {
         .select("id, title, starts_at, location, customers(name, email)")
         .eq("org_id", org.id)
         .eq("status", "scheduled")
+        .eq("absorbed", false) // a visit absorbed into its job must not remind anyone (0237)
         .gte("starts_at", nowIso)
         .lte("starts_at", horizon);
       for (const a of appts ?? []) {

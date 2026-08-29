@@ -51,7 +51,7 @@ const appBase = () =>
 const JOB_PUSH_COLS =
   "id, org_id, job_number, name, address, description, status, scheduled_start, scheduled_end, google_event_id";
 const APPT_PUSH_COLS =
-  "id, org_id, type, title, starts_at, ends_at, location, notes, status, google_event_id";
+  "id, org_id, type, title, starts_at, ends_at, location, notes, status, google_event_id, absorbed";
 
 /** Push (or reconcile away) ONE job row. `supabase` must be able to see/write
  *  the row and the connection (staff RLS client, or service client). */
@@ -83,7 +83,9 @@ async function pushJobRow(supabase: any, token: string, calendarId: string, job:
 
 /** Push (or reconcile away) ONE appointment row. */
 async function pushApptRow(supabase: any, token: string, calendarId: string, appt: any): Promise<void> {
-  const shouldHave = Boolean(appt.starts_at) && APPT_PUSH_STATUSES.includes(appt.status);
+  // An ABSORBED booking's job is the calendar presence now (0237) — Google gets the job event,
+  // and the appointment's copy reconciles away rather than double-booking his phone calendar.
+  const shouldHave = Boolean(appt.starts_at) && APPT_PUSH_STATUSES.includes(appt.status) && !appt.absorbed;
   if (!shouldHave) {
     if (appt.google_event_id) {
       await gcalDeleteEvent(token, calendarId, appt.google_event_id);

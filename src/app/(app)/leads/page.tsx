@@ -2,8 +2,7 @@ import Link from "next/link";
 import { UserPlus } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getOrgSettings } from "@/lib/org-settings";
-import { todayBoundsInTz } from "@/lib/tz";
-import { INSPECTION_TYPES } from "@/lib/statuses";
+import { todayStrInTz } from "@/lib/tz";
 import { listCustomerOptions } from "@/lib/schedule-options";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
@@ -56,7 +55,8 @@ export default async function InquiriesPage({
         .from("appointments")
         .select("inquiry_id, status")
         .in("inquiry_id", leadIds)
-        .in("type", [...INSPECTION_TYPES])
+        // EVERY kind of visit counts, not just inspections — a service-call lead with Friday
+        // booked looked untouched here while its twin with a walk-through said "1 booked".
         .neq("status", "cancelled")
         .limit(500)
     : { data: [] as { inquiry_id: string; status: string }[] };
@@ -88,21 +88,19 @@ export default async function InquiriesPage({
   // layout mock recommended and everyone agreed to). next_follow_up_at already IS the follow-up
   // list (cn-v612); this is the first surface that shows it as one.
   const dueOnly = due === "1";
-  // Same cutoff as the dueToday tile below — the lens and the number it sits on must agree.
-  // "Due" means due by the end of TODAY in the ORG's day, not the server's UTC day (audit 7:
-  // from 5 PM Pacific the old server-local cutoff counted tomorrow's follow-ups as due — a
-  // 7-hour phantom-overdue window every evening).
+  // "Due" is a CALENDAR-DATE question. next_follow_up_at is a bare `date` column, and
+  // `new Date("YYYY-MM-DD")` is UTC midnight — 5 PM Pacific the evening BEFORE — so the old
+  // instant-compare counted tomorrow's follow-ups as due every evening (this exact bug's third
+  // appearance in the codebase). Two date-words compare as strings; no clock is consulted.
   const { data: tzRow } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
-  const { dayEnd: dueCutoff } = todayBoundsInTz(getOrgSettings((tzRow as { settings?: unknown } | null)?.settings).timezone);
+  const todayYmd = todayStrInTz(getOrgSettings((tzRow as { settings?: unknown } | null)?.settings).timezone);
+  const isDue = (i: { next_follow_up_at: string | null }) =>
+    Boolean(i.next_follow_up_at && i.next_follow_up_at.slice(0, 10) <= todayYmd);
   const base = focusExtra ? [focusExtra, ...inquiries] : inquiries;
-  const rows = dueOnly
-    ? base.filter((i) => i.next_follow_up_at && new Date(i.next_follow_up_at) < dueCutoff)
-    : base;
+  const rows = dueOnly ? base.filter(isDue) : base;
 
   // The tile and the ?due=1 lens MUST share one cutoff, or the count and the list disagree.
-  const dueToday = inquiries.filter(
-    (i) => i.next_follow_up_at && new Date(i.next_follow_up_at) < dueCutoff,
-  ).length;
+  const dueToday = inquiries.filter(isDue).length;
 
   return (
     <div>

@@ -286,7 +286,20 @@ function TimeGridInner({
             {days.map((d) => (
               <div key={d.dayStr} className={`min-w-0 flex-1 space-y-0.5 p-0.5 ${colBorder(d)}`}>
                 {(allDayByDay.get(d.dayStr) ?? []).map((a) =>
-                  a.href ? (
+                  placement ? (
+                    /* ARMED: every tap means "put it HERE." A chip that kept its link would
+                       navigate away mid-placement and drop the picks — on a busy day the tray
+                       covers most of the tappable column, so the trap was the common case. */
+                    <button
+                      key={a.id}
+                      type="button"
+                      onClick={() => placement.onPlace(d.dayStr)}
+                      title={`${placement.label} — ${d.label}`}
+                      className={`block w-full truncate rounded border px-1 py-px text-left text-[10px] font-medium leading-snug hover:opacity-80 ${a.color}`}
+                    >
+                      {a.label}
+                    </button>
+                  ) : a.href ? (
                     <Link
                       key={a.id}
                       href={a.href}

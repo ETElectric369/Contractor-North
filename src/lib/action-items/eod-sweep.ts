@@ -78,6 +78,7 @@ export async function sendCloseOutNudges(supabase: any): Promise<{ orgs: number;
           .from("appointments")
           .select("job_id")
           .in("job_id", jobIds)
+          .eq("absorbed", false) // the job's own segments carry an absorbed visit's dates (0237)
           .eq("status", "scheduled")
           .gte("starts_at", today)
           .limit(200),

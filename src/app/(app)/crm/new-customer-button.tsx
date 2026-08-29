@@ -44,7 +44,9 @@ export function NewCustomerButton() {
   }, []);
 
   // Open straight from the quick-add menu's "New customer" (/crm?new=1), then strip
-  // the param so a refresh or back-button doesn't reopen the form.
+  // the param so a refresh or back-button doesn't reopen the form. Keyed to searchParams,
+  // not mount: already ON /crm, the quick-add tap only changes the query string — the
+  // mount-once version had already run, so the menu item silently did nothing.
   useEffect(() => {
     if (searchParams.get("new") !== "1") return;
     openFresh();
@@ -53,7 +55,7 @@ export function NewCustomerButton() {
     const qs = params.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [searchParams]);
 
   const hadContent = useRef(false);
   function openFresh() {

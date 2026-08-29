@@ -32,6 +32,9 @@ export function JobStatusControl({
      keeps a stale reason from ever reading as a live one). */
   const [askWhy, setAskWhy] = useState(false);
   const [why, setWhy] = useState(holdReason ?? "");
+  // NOTHING SILENT: a refused write (staff guard, vanished job) used to refresh the page and
+  // quietly snap the dropdown back — a deny that looked like a glitch. The reason shows here.
+  const [err, setErr] = useState<string | null>(null);
 
   function change(next: string) {
     if (next === "on_hold" && status !== "on_hold") {
@@ -40,21 +43,26 @@ export function JobStatusControl({
       return;
     }
     start(async () => {
+      setErr(null);
       // Off hold via THE hold writer so the reason clears with the status — setJobStatus alone
       // would leave "waiting on the permit" haunting a job that isn't waiting on anything.
+      let res: { ok: boolean; error?: string };
       if (status === "on_hold" && next !== "on_hold") {
-        await setJobHold(id, null);
-        if (next !== "scheduled" && next !== "to_be_scheduled") await setJobStatus(id, next);
+        res = await setJobHold(id, null);
+        if (res.ok && next !== "scheduled" && next !== "to_be_scheduled") res = await setJobStatus(id, next);
       } else {
-        await setJobStatus(id, next);
+        res = await setJobStatus(id, next);
       }
+      if (!res.ok) setErr(res.error ?? "That didn't save.");
       router.refresh();
     });
   }
 
   function park() {
     start(async () => {
-      await setJobHold(id, why);
+      setErr(null);
+      const res = await setJobHold(id, why);
+      if (!res.ok) { setErr(res.error ?? "That didn't save."); return; } // stay open — the reason typed isn't lost
       setAskWhy(false);
       router.refresh();
     });
@@ -97,6 +105,7 @@ export function JobStatusControl({
       {!askWhy && status === "on_hold" && holdReason && (
         <span className="text-xs text-slate-500">— {holdReason}</span>
       )}
+      {err && <span className="text-xs font-medium text-red-600">{err}</span>}
     </span>
   );
 }

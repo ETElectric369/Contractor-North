@@ -11,7 +11,7 @@ import { usePlacement } from "../schedule/placement-context";
 import { dayTargetLabel } from "@/lib/schedule/placement-plan";
 import { dayLabel, spanLabel } from "@/lib/schedule/span-label";
 import { useEndlessStack } from "@/components/use-endless-stack";
-import { jobBlockEnd } from "@/lib/schedule/work-shape";
+import { daysNeeded, jobBlockEnd, WORK_DAY_MINUTES } from "@/lib/schedule/work-shape";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/toast";
 import { MoveToDay } from "@/components/move-to-day";
@@ -352,6 +352,10 @@ export function CalendarView({
 
     for (const a of appointments) {
       if (pf && a.assigned_to !== pf) continue;
+      /* ABSORBED = converted INTO its job (0237): the job is the one calendar presence, on every
+         surface at once — filtered HERE so the grid, the month, and the day drill can never
+         disagree. A visit merely ATTACHED to a job (a return trip) is not absorbed and draws. */
+      if ((a as { absorbed?: boolean }).absorbed) continue;
       /* ON EVERY DAY IT COVERS, not just the one it starts on. Erik: "i set it for a week … but it
          only showed up as 1 day." A booking was filed under its start day alone, so a Monday-to-
          Friday job was drawn on Monday and Tuesday through Friday looked free — which is the
@@ -363,6 +367,11 @@ export function CalendarView({
         const d = new Date(`${first}T12:00:00`);
         for (let i = 0; i < 60; i++) {
           d.setDate(d.getDate() + 1);
+          // The span was SIZED in working days (spanEnd/workingDaysFrom skip weekends), so the
+          // draw skips them too — a 3-day visit booked Friday runs Fri+Mon+Tue, and Saturday
+          // stays blank instead of wearing a pill nobody scheduled. The FIRST day is exempt
+          // above: a visit explicitly booked on a Saturday is a Saturday visit.
+          if (d.getDay() === 0 || d.getDay() === 6) continue;
           const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
           if (k > last) break;
           get(k).appts.push(a);
@@ -530,6 +539,7 @@ export function CalendarView({
            A job is all-day only when START and END both sit on the work-day window; a real end
            that differs makes it timed, wherever it starts. */
         const explicit = sMin !== wdStartMin || (eMin != null && eMin !== wdEndMin && eMin > sMin);
+        const sized = Number(job.planned_minutes ?? 0);
         if (explicit) {
           startMin = sMin;
           // What was scheduled, then what he sized it at, then the shop's hours — see jobBlockEnd.
@@ -538,6 +548,15 @@ export function CalendarView({
             plannedMinutes: job.planned_minutes,
             workDayEndMin: wdEndMin,
           });
+          if (endMin <= startMin) endMin = startMin + 60;
+        } else if (sized > 0 && daysNeeded(sized) === 1) {
+          /* A SIZED JOB IS NEVER THE BARE SENTINEL. A 2h job placed at the shop's opening hour
+             reads exactly like the all-day marker on both ends (start = wdStart, mirrored end =
+             wdEnd) — and drew all day, silently ignoring the number a person entered. The size
+             breaks the tie: it draws its real span from the open. Multi-day sizes stay all-day
+             per covered day, which is what a day of a multi-day job IS. */
+          startMin = wdStartMin;
+          endMin = Math.min(wdEndMin, wdStartMin + Math.min(sized, WORK_DAY_MINUTES));
           if (endMin <= startMin) endMin = startMin + 60;
         }
       }
@@ -556,15 +575,9 @@ export function CalendarView({
     const jobsHere = new Set(data.jobs.map((x) => x.job.id));
 
     for (const a of data.appts) {
-      /* ONE PIECE OF WORK, ONE PILL. Converting an appointment into a job sets job_id, and the
-         job is the durable record — it wins.
-         TWO RULES BY TYPE. A JOB/SERVICE-CALL appointment IS the work, so once its job exists it
-         is superseded on EVERY day — Erik moved Karen's job to Monday and the Friday booking
-         reappeared as a ghost of where the work used to be ("karen wucher has an appointment back
-         on the screen and the job"). An INSPECTION is a real visit distinct from the job it
-         spawned, so it hides only when the job draws on its own day — a walk-through in August
-         that produced a September job is two events, and hiding it would erase history. */
-      if (a.job_id && (a.type === "job" || a.type === "service_call")) continue;
+      /* Absorbed rows never reach here (filtered at byDay, 0237). What remains: an INSPECTION
+         that spawned a job hides only where its job draws the same day — two real events on two
+         days stay two events. */
       if (a.job_id && jobsHere.has(a.job_id)) continue;
 
       /* A CALL IS NOT A STOP. Erik: "lets have phone call just pin to the top of that day."
@@ -1098,9 +1111,7 @@ function monthPills(data: DayData | undefined, tz: string, dayK?: string): { lab
     out.push({ label: pos ? `${base} · ${pos}` : base, tone: "job", sort: t });
   }
   for (const a of data.appts) {
-    // A JOB THAT BECAME ONE IS DRAWN ONCE — same two rules as the grid: work-type bookings are
-    // superseded everywhere, inspections only where their job draws the same day.
-    if (a.job_id && (a.type === "job" || a.type === "service_call")) continue;
+    // Absorbed rows are filtered at byDay (0237); an inspection hides only beside its own job.
     if (a.job_id && data.jobs.some((x) => x.job.id === a.job_id)) continue;
 
     const who = a.customers?.name || a.jobs?.name || a.title;

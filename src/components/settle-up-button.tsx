@@ -84,7 +84,7 @@ export function SettleUpButton(props: Mode & { compact?: boolean; label?: string
         // Build the bill, leave the balance open, and put the door in front of the customer.
         const invoiceId = await ensureInvoice(method, "later");
         if (!invoiceId) return;
-        const art = await collectArtifacts(invoiceId);
+        const art = await collectArtifacts(invoiceId, amt());
         if (!art.ok) { toast(art.error ?? "Couldn't build the payment code.", "error"); return; }
         if (method === "venmo") {
           if (!art.venmoQr) {
@@ -92,7 +92,7 @@ export function SettleUpButton(props: Mode & { compact?: boolean; label?: string
             router.push(`/billing/${invoiceId}`);
             return;
           }
-          setQr({ kind: "venmo", qr: art.venmoQr, handle: art.venmoHandle, invoiceId, amount: amt() });
+          setQr({ kind: "venmo", qr: art.venmoQr, handle: art.venmoHandle, invoiceId, amount: Math.min(amt(), art.balance ?? amt()) });
           return;
         }
         if (!art.payQr) {
@@ -103,7 +103,10 @@ export function SettleUpButton(props: Mode & { compact?: boolean; label?: string
           if (r.ok) { setOpen(false); router.refresh(); }
           return;
         }
-        setQr({ kind: "card", qr: art.payQr, url: art.payUrl, invoiceId, amount: amt() });
+        // The card QR opens Stripe Checkout for the invoice's FULL BALANCE (that is what /api/pay
+        // charges) — the header must say that number, not the typed one, or the screen promises
+        // one figure and the customer's phone asks another.
+        setQr({ kind: "card", qr: art.payQr, url: art.payUrl, invoiceId, amount: art.balance ?? amt() });
         return;
       }
       // Cash-like: money already moved, write it down, done.
@@ -158,7 +161,16 @@ export function SettleUpButton(props: Mode & { compact?: boolean; label?: string
 
   if (!open) {
     return (
-      <Button size="sm" variant={props.compact ? "outline" : "primary"} onClick={() => setOpen(true)}>
+      <Button
+        size="sm"
+        variant={props.compact ? "outline" : "primary"}
+        onClick={() => {
+          // A partial payment refreshes the server's balance — re-seed the box on every open so
+          // the prefill can't be last visit's number.
+          if (props.source === "invoice") setAmount(String(props.balance || ""));
+          setOpen(true);
+        }}
+      >
         <BadgeDollarSign className="h-4 w-4" /> {props.label ?? "Pay now"}
       </Button>
     );

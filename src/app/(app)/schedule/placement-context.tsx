@@ -186,8 +186,12 @@ export function PlacementProvider({
           ? await scheduleLeadsOnDay(
               leads.map((l) => l.id),
               dateISO,
-              // Carry on from where the appointments stopped, so nothing doubles up.
-              { startTime: times[appts.length] ?? startHHMM },
+              {
+                startTime: times[appts.length] ?? startHHMM,
+                // The fitter planned EVERY lead individually (sized gaps included) — hand the
+                // whole plan over, or the booking re-spreads blind and overlaps itself.
+                times: times.slice(appts.length, appts.length + leads.length),
+              },
             ).catch(() => ({
               ok: false as const,
               error: "That didn't reach the server — check your connection and try again.",

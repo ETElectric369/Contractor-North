@@ -46,7 +46,7 @@ export async function CalendarPanel() {
       supabase
         .from("appointments")
         .select(
-          "id, type, title, starts_at, ends_at, location, notes, status, job_id, customer_id, assigned_to, jobs(job_number, name), customers(name), profiles!appointments_assigned_to_fkey(full_name)",
+          "id, type, title, starts_at, ends_at, location, notes, status, job_id, customer_id, assigned_to, absorbed, jobs(job_number, name), customers(name), profiles!appointments_assigned_to_fkey(full_name)",
         )
         .gte("starts_at", jobFrom)
         .lte("starts_at", jobTo)

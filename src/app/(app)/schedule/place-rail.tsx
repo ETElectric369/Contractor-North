@@ -440,9 +440,11 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
           unclipped: a second, BLIND calendar with no towns and no existing work on it, asking him
           to choose a day with everything hidden, while the calendar carrying exactly that sat four
           inches to the right. So the real one is the picker, and this bar is now a instruction and
-          a running total rather than a form. */}
+          a running total rather than a form.
+          bottom-20 on phones: the glass dock floats over bottom-0, and this bar carries the only
+          "place it" instructions — pinned under the dock it was unreadable at 60mph. */}
       {chosen.length > 0 && (
-        <div className="sticky bottom-0 space-y-2 rounded-xl border border-brand/40 bg-white/95 p-3 shadow-lg backdrop-blur">
+        <div className="sticky bottom-20 space-y-2 rounded-xl border border-brand/40 bg-white/95 p-3 shadow-lg backdrop-blur lg:bottom-0">
           <div className="flex flex-wrap items-baseline gap-x-2">
             <span className="text-sm font-semibold text-slate-900">
               {chosen.length} picked

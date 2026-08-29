@@ -1021,7 +1021,11 @@ export async function createJobFromAppointment(appointmentId: string): Promise<R
     }
   }
 
-  await supabase.from("appointments").update({ job_id: job.id }).eq("id", appointmentId);
+  // ABSORBED (0237): the job inherits this visit's very slot, so the booking's calendar life is
+  // over on EVERY surface at once — grid, My Day, feeders, Google, reminder emails. One column,
+  // one meaning; the per-surface type-based skips this replaces each covered one door and left
+  // the rest showing ghosts.
+  await supabase.from("appointments").update({ job_id: job.id, absorbed: true }).eq("id", appointmentId);
   /* STAMP FOLLOWS DEED — the lead too. This path minted jobs without ever telling the lead, so
      Karen sat on /leads as "contacted" while her job was already on the calendar ("the leads
      converted to jobs put back as leads are still there"). A lead whose work became a job is won,
@@ -1043,6 +1047,9 @@ export async function createJobFromAppointment(appointmentId: string): Promise<R
   // so nothing is lost by leaving the appointment in place: it keeps its capture, its answers and
   // its provenance, and stops competing with the job for the same afternoon.
   await pushCalendarItem("job", job.id); // the new job is scheduled — push it (fire-safe)
+  // …and reconcile the absorbed booking's OWN Google event away (pushApptRow sees absorbed and
+  // deletes) — otherwise his phone calendar keeps both, the exact double this column exists to end.
+  await pushCalendarItem("appointment", appointmentId);
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too

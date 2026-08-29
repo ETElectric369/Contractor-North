@@ -1860,31 +1860,70 @@ export async function settleUp(input: {
     inquiryId = j.inquiry_id ?? null;
   }
 
-  /* TAPPED TWICE IS SETTLED ONCE. This button lives on flaky truck LTE — the exact conditions
-     where a tap looks failed and gets tapped again, and both writes land. A visit that already has
-     a live invoice hands it straight back (0233's partial unique index is the DB-level backstop
-     behind this check). A job can carry many legitimate invoices, so its guard is narrower: an
-     identical amount within the last few minutes reads as the same tap, not a second bill. */
+  /* TAPPED TWICE IS SETTLED ONCE — BUT ONLY WHEN IT ACTUALLY SETTLED.
+     The audit's worst finding lived here: this guard used to bare-return ok on ANY live anchored
+     invoice, and the button toasts "Paid — Done" on ok. So the real sequence — show the Venmo QR
+     (collect "later", invoice sent, balance open), customer never pays, hands cash days later, tap
+     Pay now → cash — announced success and recorded NOTHING: cash in the pocket, an open invoice
+     aging into overdue, and a customer who paid getting dunned. Same shape after any partial
+     failure between the insert and the payment.
+     The honest rule: an existing invoice short-circuits only when its balance is already zero.
+     Otherwise the collection lands ON that invoice — the second tap becomes the payment it is —
+     and the visit gets the completed stamp the first, interrupted call never wrote. */
+  const settleExisting = async (
+    invoiceId: string,
+    total: number,
+    amountPaid: number,
+  ): Promise<Result & { invoiceId?: string }> => {
+    const balance = invoiceBalance(total, amountPaid);
+    if (balance > 0.005 && input.collect !== "later") {
+      const paid = await recordPayment({
+        invoice_id: invoiceId,
+        // Never overpay the existing bill from a re-tap — its cap would refuse and the money
+        // would bounce; the collection is whatever is actually still owed, up to what they gave.
+        amount: Math.min(amount, balance),
+        method: input.method || "cash",
+        note: input.note?.trim() || "",
+      });
+      if (!paid.ok) return { ok: false, invoiceId, error: paid.error ?? "The payment didn't record — try it from the invoice." };
+    }
+    if (apptId) {
+      await supabase
+        .from("appointments")
+        .update({ status: "completed", updated_at: new Date().toISOString() })
+        .eq("id", apptId)
+        .in("status", ["scheduled", "proposed"]);
+      revalidatePath("/schedule");
+      revalidatePath("/planner");
+      revalidatePath(`/appointments/${apptId}`);
+    }
+    revalidateMoney(invoiceId);
+    revalidateMoney();
+    return { ok: true, invoiceId };
+  };
+
   if (apptId) {
     const { data: existing } = await supabase
       .from("invoices")
-      .select("id")
+      .select("id, total, amount_paid")
       .eq("appointment_id", apptId)
       .neq("status", "void")
       .limit(1)
       .maybeSingle();
-    if (existing) return { ok: true, invoiceId: existing.id };
+    if (existing) return settleExisting(existing.id, Number(existing.total ?? 0), Number(existing.amount_paid ?? 0));
   } else if (jobId) {
     const { data: recent } = await supabase
       .from("invoices")
-      .select("id, created_at")
+      .select("id, created_at, total, amount_paid")
       .eq("job_id", jobId)
       .eq("total", amount)
+      .is("appointment_id", null) // never trip on another visit's settle-up bill
       .neq("status", "void")
+      .neq("status", "draft") // a coincidental same-total DRAFT from another door is not this tap
       .gte("created_at", new Date(Date.now() - 5 * 60_000).toISOString())
       .limit(1)
       .maybeSingle();
-    if (recent) return { ok: true, invoiceId: recent.id };
+    if (recent) return settleExisting(recent.id, Number(recent.total ?? 0), Number(recent.amount_paid ?? 0));
   }
 
   // A job on the draw path is billed by draws — same guard as every standard-invoice creator.
@@ -1984,7 +2023,7 @@ export async function settleUp(input: {
  * QRs are data URLs (the same `qrcode` the share door uses) — nothing external, works offline
  * once rendered, which matters in a driveway with one bar of LTE.
  */
-export async function collectArtifacts(invoiceId: string): Promise<{
+export async function collectArtifacts(invoiceId: string, collectAmount?: number): Promise<{
   ok: boolean;
   error?: string;
   balance?: number;
@@ -2030,10 +2069,14 @@ export async function collectArtifacts(invoiceId: string): Promise<{
   }
 
   // VENMO — the handle comes from Settings → Payment methods.
+  // THE QR ASKS FOR WHAT WILL BE RECORDED. It used to encode the full balance while the "They
+  // paid" button recorded the TYPED amount — a $100 partial against a $250 balance sent the
+  // customer a $250 request and wrote $100 in the ledger: chased for money already sent.
+  const asking = Math.min(Math.max(Number(collectAmount ?? balance), 0.01), balance);
   const handle = getOrgSettings((org as { settings?: unknown } | null)?.settings).venmo_handle?.trim();
   if (handle) {
     const note = encodeURIComponent(inv.invoice_number ? `Invoice ${inv.invoice_number}` : "Work completed");
-    const venmoUrl = `https://venmo.com/u/${encodeURIComponent(handle)}?txn=pay&amount=${balance.toFixed(2)}&note=${note}`;
+    const venmoUrl = `https://venmo.com/u/${encodeURIComponent(handle)}?txn=pay&amount=${asking.toFixed(2)}&note=${note}`;
     out.venmoHandle = handle;
     out.venmoQr = await QRCode.toDataURL(venmoUrl, { margin: 1, width: 480, color: { dark: "#0f172a" } });
   }

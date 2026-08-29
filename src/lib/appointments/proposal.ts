@@ -57,6 +57,9 @@ export interface ProposalInput {
   /** The tentative first-slot instant, already resolved to UTC by the caller
    *  (browser ISO or tz-helper) — this module stays timezone-agnostic. */
   startsAtIso?: string | null;
+  /** How long the work is sized at — a number is only worth asking for once (the lead's
+   *  How-long tag rides every booking door; this one used to drop it). */
+  plannedMinutes?: number | null;
   /** The walk-through this inspection will be filled in on, and any answers the CUSTOMER already
    *  gave through the public intake door. Resolved by the caller (only it knows the lead); this
    *  module just carries them onto the row. Omitted by every non-inspection caller. */
@@ -133,6 +136,7 @@ export async function createProposalCore(
       location: input.location ?? null,
       notes: input.notes ?? null,
       assigned_to: input.assignedTo ?? null,
+      planned_minutes: input.plannedMinutes ?? null,
       status: "proposed",
       created_by: input.createdBy ?? null,
       inspection_template_id: input.inspectionTemplateId ?? null,

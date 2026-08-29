@@ -165,8 +165,12 @@ export const AFFORDANCES: Record<ActionKind, Affordance[]> = {
   // (which self-clears this item). A dedicated "schedule" verb comes with the funnel wave.
   quote_accepted: ["open"],
   invoice_draft: ["open"],
-  visit_unbilled: ["open", "dismiss"],
-  quote_draft: ["open", "dismiss"],
+  // Open-only: these are DERIVED rows whose ids are prefixed composites, so the dismiss verb's
+  // write (appointments.outcome / quote declined, keyed by raw id) matched ZERO rows — a silent 204
+  // dressed as "dismissed" that resurrected on the next load. The honest endings live on the
+  // surfaces: Pay now / delete the draft. A real dismiss can come back once it writes a real field.
+  visit_unbilled: ["open"],
+  quote_draft: ["open"],
   lien_deadline: ["open"],
   contract_unsigned: ["open"],
   bug_report: ["open"], // triage on the Bug watch page

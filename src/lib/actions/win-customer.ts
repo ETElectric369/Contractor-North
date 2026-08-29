@@ -23,7 +23,27 @@ export async function customerForInquiry(
 ): Promise<string | null> {
   const { data: inq } = await supabase.from("inquiries").select("*").eq("id", inquiryId).maybeSingle();
   if (!inq) return null;
-  if (inq.customer_id) return inq.customer_id as string;
+  if (inq.customer_id) {
+    /* THE STAMP LANDS EVEN WHEN THE CONTACT EXISTS. This early-return used to skip the won stamp
+       entirely, so a lead that already carried a customer (saved as a contact earlier, or matched
+       at intake) stayed "contacted" FOREVER after its money landed — open on /leads, nagging in
+       the feeders, a won deal wearing a lead costume. The win is the win whether or not a card
+       had to be minted for it. */
+    await supabase
+      .from("inquiries")
+      .update({
+        status: "won",
+        converted_at: inq.converted_at ?? new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", inquiryId)
+      .is("converted_at", null); // idempotent — an earlier stamp keeps its original date
+    // A lead already stamped (estimate path) but not yet 'won' still flips to won on real money.
+    if (inq.converted_at && inq.status !== "won") {
+      await supabase.from("inquiries").update({ status: "won", updated_at: new Date().toISOString() }).eq("id", inquiryId);
+    }
+    return inq.customer_id as string;
+  }
 
   // Crosscheck the book first — same phone / email / normalized name links the existing card
   // instead of minting a twin. The exact keys the CRM's duplicate finder uses.

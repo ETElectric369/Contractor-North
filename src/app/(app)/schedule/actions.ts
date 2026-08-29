@@ -497,7 +497,13 @@ export async function placeJobOnDay(
      board forever, which is a loop rather than a decision. advanceToScheduled deliberately only
      promotes to_be_scheduled/estimate, so this is its own explicit write. */
   if (row?.status === "on_hold") {
-    await supabase.from("jobs").update({ status: "scheduled" }).eq("id", jobId).eq("status", "on_hold");
+    // The reason leaves WITH the hold — same wake rule as setJobHold, or "waiting on the permit"
+    // keeps haunting a job that's back on the calendar.
+    await supabase
+      .from("jobs")
+      .update({ status: "scheduled", hold_reason: null })
+      .eq("id", jobId)
+      .eq("status", "on_hold");
   }
   // setJobScheduleRanges revalidates /schedule, /planner, /jobs, and the job page.
   // undefined (not null) when no time was given, so the preserve-the-job's-own-time branch stands.
@@ -631,8 +637,17 @@ export async function sizeAppointment(
       .maybeSingle();
     const startsAt = (cur as { starts_at?: string | null } | null)?.starts_at ?? null;
     if (startsAt) {
-      const span = Math.min(Number(update.planned_minutes ?? 0), WORK_DAY_MINUTES);
-      update.ends_at = span > 0 ? new Date(new Date(startsAt).getTime() + span * 60_000).toISOString() : null;
+      /* THE SAME SPAN RULE AS PLACING. This used to clamp to one day, so re-sizing a booked visit
+         to "3 days" from the rail kept a one-day ends_at while placing the identical visit walked
+         spanEnd across working days — two doors, two calendars. Start day + hour are read back in
+         the ORG's clock (a bare Date getter here would hand spanEnd the UTC day — the third
+         timezone bug's shape). */
+      const tz = await orgTimezone(ctx.supabase);
+      const sizedNow = Number(update.planned_minutes ?? 0);
+      const mins = tzMinutesOfDay(startsAt, tz);
+      const hm = `${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`;
+      const span = spanEnd(todayStrInTz(tz, new Date(startsAt)), hm, sizedNow);
+      update.ends_at = span ? tzDateTimeUtc(span.lastYmd, span.endHHMM, tz) : null;
     }
   }
 
@@ -688,14 +703,51 @@ export async function planDayTimes(
      second arm (they start within the day and occupy their drawn hour). */
   const { data: appts } = await ctx.supabase
     .from("appointments")
-    .select("starts_at, ends_at, type, status") // PROJECTION LAW: all four are read below
+    .select("starts_at, ends_at, type, status, job_id, absorbed") // PROJECTION LAW: every column read below
     .lt("starts_at", dayEnd.toISOString())
     .or(`ends_at.gte.${dayStart.toISOString()},and(ends_at.is.null,starts_at.gte.${dayStart.toISOString()})`)
     .limit(200);
 
+  /* PLACED JOBS ARE BUSY TOO. Three audit lenses independently caught the fitter reading only
+     appointments — so the day after the a-service-call-is-a-job ruling, the work it now places as
+     JOBS was invisible here, and "morning" would fit a new visit straight on top of a placed job:
+     the Nora double-booking, resurrected through the very change that fixed her page. Rules:
+       timed job (real clock)      → busy for its real span
+       untimed but sized           → busy from open for its size
+       bare all-day, unsized       → ELASTIC, not busy: an unsized all-day job is exactly the day
+                                     Erik squeezes a visit into ("the visit is on the way"), and
+                                     blocking it would fight the workflow the rail exists for.
+     A work-type appointment SUPERSEDED by its job is skipped — its job now carries the block, and
+     counting both would double-width the day. */
+  const wdStart = hmToMinutes(dayStartHm) ?? 8 * 60;
+  const wdEnd = hmToMinutes(dayEndHm) ?? 17 * 60;
+  const { data: dayJobs } = await ctx.supabase
+    .from("jobs")
+    .select("scheduled_start, scheduled_end, planned_minutes, status")
+    .lt("scheduled_start", dayEnd.toISOString())
+    .or(`scheduled_end.gte.${dayStart.toISOString()},and(scheduled_end.is.null,scheduled_start.gte.${dayStart.toISOString()})`)
+    .in("status", ["scheduled", "in_progress"])
+    .limit(100);
+
   const busy: Busy[] = [];
-  for (const a of (appts ?? []) as { starts_at: string; ends_at: string | null; type: string | null; status: string | null }[]) {
+  for (const j of (dayJobs ?? []) as { scheduled_start: string | null; scheduled_end: string | null; planned_minutes: number | null }[]) {
+    if (!j.scheduled_start) continue;
+    const startsToday = new Date(j.scheduled_start) >= dayStart;
+    const sMin = startsToday ? tzMinutesOfDay(j.scheduled_start, tz) : wdStart;
+    const endsToday = j.scheduled_end ? new Date(j.scheduled_end) < dayEnd : true;
+    const eMin = j.scheduled_end && endsToday ? tzMinutesOfDay(j.scheduled_end, tz) || wdEnd : wdEnd;
+    const sized = Number(j.planned_minutes ?? 0);
+    const timed = sMin !== wdStart || (eMin !== wdEnd && eMin > sMin);
+    if (timed) busy.push({ startMin: sMin, endMin: Math.max(sMin + 15, eMin) });
+    else if (sized > 0) busy.push({ startMin: wdStart, endMin: wdStart + Math.min(sized, WORK_DAY_MINUTES) });
+    // else: elastic all-day — deliberately open to a squeezed visit.
+  }
+
+  for (const a of (appts ?? []) as { starts_at: string; ends_at: string | null; type: string | null; status: string | null; job_id?: string | null; absorbed?: boolean }[]) {
     if (a.status === "cancelled" || a.type === "call") continue;
+    // Absorbed = its JOB owns the slot now (0237), and the jobs loop above already counted it —
+    // reading both would double-book the same block against itself.
+    if (a.absorbed) continue;
     // CLAMPED TO THIS DAY: a span that started yesterday is busy from midnight; one that runs on
     // past tonight is busy to midnight. Only the middle of a multi-day booking reads as full.
     const startsToday = new Date(a.starts_at) >= dayStart;

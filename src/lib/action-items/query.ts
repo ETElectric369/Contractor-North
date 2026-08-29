@@ -254,6 +254,7 @@ export async function getActionItems(ctx: {
       ? supabase
           .from("appointments")
           .select("id, type, title, status, starts_at, capture, inquiry_id, job_id, outcome, customers(name), inquiries(name)")
+          .eq("absorbed", false) // a booking absorbed into its job stopped being a visit (0237)
           .in("type", [...INSPECTION_TYPES])
           .gte("starts_at", daysAgoStr(todayStr, 60))
           .lte("starts_at", endOfToday)
@@ -277,14 +278,16 @@ export async function getActionItems(ctx: {
       ? supabase
           .from("appointments")
           .select("id, type, title, status, starts_at, job_id, customers(name), inquiries(name)")
-          .in("type", ["service_call", "job"])
+          .eq("absorbed", false).in("type", ["service_call", "job"])
           .eq("status", "completed")
           .gte("starts_at", daysAgoStr(todayStr, 60))
           .limit(100)
       : empty,
     // The settled signal: an invoice anchored to its visit (0233 — settleUp writes it).
+    // amount_paid rides along because ANCHORED IS NOT PAID — "collect later" anchors a bill
+    // with zero collected, and treating that as settled re-opened the Nora hole one door down.
     isStaff
-      ? supabase.from("invoices").select("appointment_id").not("appointment_id", "is", null).neq("status", "void").limit(2000)
+      ? supabase.from("invoices").select("id, appointment_id, amount_paid").not("appointment_id", "is", null).neq("status", "void").limit(2000)
       : empty,
     // ── Estimates started and never sent ─────────────────────────────────────────
     // The first autosave stamps the lead converted, so an abandoned draft takes the LEAD off
@@ -533,9 +536,16 @@ export async function getActionItems(ctx: {
   //    anchored to it and no billing on its job is money already earned and not yet asked for.
   //    NOTHING SILENT: this is the row that would have caught the $150 had it not been cash.
   {
-    const settled = new Set(
-      ((settledR.data ?? []) as { appointment_id: string | null }[]).map((r) => String(r.appointment_id)),
-    );
+    // Two different endings share the anchor: money landed (settled — the item clears) and
+    // billed-but-unpaid ("collect later" — the item stays, retitled, and opens the INVOICE,
+    // because the next move is collecting, not re-billing).
+    const settled = new Set<string>();
+    const billedUnpaid = new Map<string, string>(); // appointment id → invoice id
+    for (const r of (settledR.data ?? []) as { id: string; appointment_id: string | null; amount_paid: number | null }[]) {
+      if (!r.appointment_id) continue;
+      if (Number(r.amount_paid ?? 0) > 0) settled.add(String(r.appointment_id));
+      else billedUnpaid.set(String(r.appointment_id), r.id);
+    }
     const billedJobs = new Set(
       ((billedJobR.data ?? []) as { job_id: string }[]).map((r) => r.job_id).filter(Boolean),
     );
@@ -543,17 +553,18 @@ export async function getActionItems(ctx: {
       if (settled.has(String(a.id))) continue;
       if (a.job_id && billedJobs.has(a.job_id)) continue;
       const who = a.customers?.name ?? a.inquiries?.name ?? null;
+      const openInvoice = billedUnpaid.get(String(a.id));
       items.push({
         id: `unbilled-${a.id}`,
         kind: "visit_unbilled",
-        title: `${a.title || "Work done"} — no bill yet`,
+        title: `${a.title || "Work done"} — ${openInvoice ? "billed, no money yet" : "no bill yet"}`,
         subtitle: who,
         who: null,
         when: a.starts_at ?? null,
         urgency: 1, // earned and unasked-for ages worse than a draft
         done: false,
-        // Straight to the record that carries the Done & paid button.
-        href: `/appointments/${a.id}`,
+        // Unbilled → the visit (it carries Pay now); billed → the open invoice itself.
+        href: openInvoice ? `/billing/${openInvoice}` : `/appointments/${a.id}`,
         affordances: AFFORDANCES.visit_unbilled,
       });
     }
